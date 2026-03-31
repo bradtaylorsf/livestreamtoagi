@@ -1,0 +1,20 @@
+[project]
+name = "livestream-agi"
+version = "0.1.0"
+description = "24/7 AI reality show — 9 agents in a pixel art world"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "TCH"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "tools", "agents"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/backend"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"

@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# TypeScript / Node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+htmlcov/
+.coverage
+.pytest_cache/
+playwright-report/
+test-results/
+
+# Docker
+docker/data/
+
+# Build artifacts
+frontend/dist/
+website/.vercel/
+
+# Logs
+*.log
+logs/
+
+# Assets (large binaries — track with Git LFS or download separately)
+# frontend/public/assets/tilesets/*.png
+# frontend/public/assets/sprites/*.png

@@ -1,0 +1,2 @@
+- [Brad's profile](user_profile.md) — TS expert, less familiar with Python; tailor guidance accordingly
+- [Project overview](project_overview.md) — Monorepo: Python backend (CrewAI/FastAPI) + TS frontend (Phaser) + TS website (Next.js)
