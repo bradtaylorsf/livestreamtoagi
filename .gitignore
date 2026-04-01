@@ -55,8 +55,10 @@ logs/
 
 # Alpha-loop ephemeral data
 .alpha-loop/sessions/
-.alpha-loop/learnings/
 
 # Assets (large binaries — track with Git LFS or download separately)
 # frontend/public/assets/tilesets/*.png
 # frontend/public/assets/sprites/*.png
+# Alpha-loop ephemeral data (not shared)
+.alpha-loop/auth/
+.worktrees/
