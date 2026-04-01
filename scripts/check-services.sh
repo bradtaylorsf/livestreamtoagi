@@ -37,7 +37,8 @@ check "pg_trgm extension" bash -c 'docker compose exec -T postgres \
     "SELECT 1 FROM pg_extension WHERE extname = '"'"'pg_trgm'"'"';" | grep -q 1'
 
 # Langfuse HTTP
-check "Langfuse UI (port 3001)" curl -sf http://localhost:3001
+LANGFUSE_PORT="${LANGFUSE_PORT:-3100}"
+check "Langfuse UI (port $LANGFUSE_PORT)" curl -sf "http://localhost:$LANGFUSE_PORT"
 
 echo
 echo "Results: $PASS passed, $FAIL failed"

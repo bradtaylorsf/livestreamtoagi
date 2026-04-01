@@ -1,8 +1,10 @@
+name: livestream-agi
+
 services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6381}:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -35,11 +37,11 @@ services:
     environment:
       DATABASE_URL: postgresql://agi:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/langfuse
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-dev-secret-change-me}
-      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3100}
       SALT: ${LANGFUSE_SALT:-dev-salt-change-me}
       TELEMETRY_ENABLED: "false"
     ports:
-      - "3001:3000"
+      - "${LANGFUSE_PORT:-3100}:3000"
     depends_on:
       postgres:
         condition: service_healthy
