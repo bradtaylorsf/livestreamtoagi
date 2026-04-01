@@ -1,12 +1,13 @@
 # Alpha Loop configuration
 repo: bradtaylorsf/livestreamtoagi
+project: 5
 model: opus
 review_model: opus
 label: ready
 base_branch: main
 test_command: pnpm test
 dev_command: pnpm dev
-port: 3000
+port: 4000
 auto_merge: true
 
 # Safety limits (0 = unlimited)
