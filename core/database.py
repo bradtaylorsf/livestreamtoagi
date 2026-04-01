@@ -15,13 +15,18 @@ DEFAULT_DATABASE_URL = "postgresql://agi:devpassword@localhost:5434/livestream_a
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
     """Register custom codecs on each new connection (e.g. pgvector)."""
-    await conn.set_type_codec(
-        "vector",
-        encoder=lambda v: v,
-        decoder=lambda v: v,
-        schema="public",
-        format="text",
-    )
+    try:
+        await conn.set_type_codec(
+            "vector",
+            encoder=lambda v: v,
+            decoder=lambda v: v,
+            schema="public",
+            format="text",
+        )
+    except ValueError:
+        # pgvector extension not yet installed — codec will be registered
+        # once migrations create the extension and the pool reconnects.
+        pass
 
 
 class Database:
