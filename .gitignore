@@ -40,6 +40,7 @@ htmlcov/
 .pytest_cache/
 playwright-report/
 test-results/
+.playwright-cli/
 
 # Docker
 docker/data/
