@@ -5,10 +5,13 @@ model: opus
 review_model: opus
 label: ready
 base_branch: main
-test_command: pnpm test
-dev_command: pnpm dev
+test_command: uv run pytest
+dev_command: uv run uvicorn core.main:app --reload --port 4000
 port: 4000
 auto_merge: true
+
+# Pre-verification: run before tests to ensure services are healthy
+pre_test_command: docker compose up -d && bash scripts/check-services.sh
 
 # Safety limits (0 = unlimited)
 max_issues: 20
