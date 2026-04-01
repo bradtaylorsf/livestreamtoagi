@@ -13,7 +13,7 @@ import redis
 integration = pytest.mark.integration
 
 PG_PORT = int(os.environ.get("POSTGRES_PORT", 5434))
-REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6381))
 
 
 @integration

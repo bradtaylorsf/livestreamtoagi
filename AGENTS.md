@@ -115,3 +115,34 @@ agents/{agent-name}/
 ```
 
 See `specs/CHARACTER-SHEETS.md` for complete personality specifications.
+
+## Development Workflow
+
+### Python version
+
+Python 3.13 is required (pinned in `.python-version`). Python 3.14+ is **not supported** — native dependencies (pydantic-core, etc.) cannot build against it yet.
+
+```bash
+# Setup venv (uses .python-version automatically)
+uv venv .venv --python 3.13
+uv pip install -e ".[dev]"
+```
+
+### Pre-verification: Always check services first
+
+Before verifying any issue or running integration tests, ensure Docker services are healthy:
+
+```bash
+docker compose up -d
+bash scripts/check-services.sh
+```
+
+All 5 checks must pass (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse) before proceeding.
+
+### Default Ports (configurable via env vars)
+
+| Service    | Host Port | Env Var         |
+|------------|-----------|-----------------|
+| Redis      | 6381      | `REDIS_PORT`    |
+| PostgreSQL | 5434      | `POSTGRES_PORT` |
+| Langfuse   | 3100      | `LANGFUSE_PORT` |
