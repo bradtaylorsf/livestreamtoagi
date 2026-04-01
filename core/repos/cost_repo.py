@@ -69,7 +69,12 @@ class CostRepo:
             "SELECT * FROM cost_events WHERE agent_id = $1 ORDER BY created_at DESC",
             agent_id,
         )
-        return [CostEvent(**dict(r)) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            _parse_jsonb_field(d, "details")
+            result.append(CostEvent(**d))
+        return result
 
     # ── Revenue Events ──────────────────────────────────────
 

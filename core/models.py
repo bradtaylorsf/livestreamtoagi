@@ -334,3 +334,20 @@ class ChallengeCreate(BaseModel):
     source: str | None = None
     assigned_agents: list[str] | None = None
     cost_estimate: float | None = None
+
+
+# ── LLM Client ─────────────────────────────────────────────────
+
+class LLMResponse(BaseModel):
+    content: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    estimated_cost: Decimal
+    latency_ms: int
+    openrouter_id: str | None = None
+
+
+class StreamChunk(BaseModel):
+    delta: str
+    finish_reason: str | None = None
