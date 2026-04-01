@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -6,5 +7,8 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+  },
+  test: {
+    include: ["src/**/*.test.ts"],
   },
 });
