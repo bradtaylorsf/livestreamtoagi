@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #e0e0e0;
+
+  /* Agent colors */
+  --agent-vera: #a78bfa;
+  --agent-rex: #f97316;
+  --agent-aurora: #ec4899;
+  --agent-pixel: #22d3ee;
+  --agent-fork: #84cc16;
+  --agent-sentinel: #eab308;
+  --agent-grok: #ef4444;
+  --agent-overseer: #6b7280;
+  --agent-alpha: #8b5cf6;
+
+  /* Neon accents */
+  --neon-cyan: #00f0ff;
+  --neon-magenta: #ff00e5;
+  --neon-green: #39ff14;
+  --neon-yellow: #f0ff00;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-agent-vera: var(--agent-vera);
+  --color-agent-rex: var(--agent-rex);
+  --color-agent-aurora: var(--agent-aurora);
+  --color-agent-pixel: var(--agent-pixel);
+  --color-agent-fork: var(--agent-fork);
+  --color-agent-sentinel: var(--agent-sentinel);
+  --color-agent-grok: var(--agent-grok);
+  --color-agent-overseer: var(--agent-overseer);
+  --color-agent-alpha: var(--agent-alpha);
+
+  --color-neon-cyan: var(--neon-cyan);
+  --color-neon-magenta: var(--neon-magenta);
+  --color-neon-green: var(--neon-green);
+  --color-neon-yellow: var(--neon-yellow);
+
+  --color-surface: #141414;
+  --color-surface-light: #1e1e1e;
+  --color-border: #2a2a2a;
+
+  --font-pixel: "Press Start 2P", monospace;
+  --font-mono: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  --font-sans: system-ui, -apple-system, sans-serif;
+}
+
+@font-face {
+  font-family: "Press Start 2P";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/pressstart2p/v15/e3t4euO8T-267oIAQAu6jDQyK3nVivM.woff2")
+    format("woff2");
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Pixel-art rendering for images */
+.pixel-render {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
