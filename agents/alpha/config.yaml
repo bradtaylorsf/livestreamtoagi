@@ -1,0 +1,12 @@
+# Alpha is a special agent — a non-verbal helper wolf that runs errands.
+# All conversation weights are 0.0 because it doesn't participate in speaker selection.
+# It communicates via text symbols only (!, ?, ✓, ✗).
+id: alpha
+display_name: "Alpha — The Wolf"
+model_conversation: deepseek-v3.2
+model_building: deepseek-v3.2
+voice_id: null
+chattiness: 0.0
+initiative: 0.0
+interrupt_tendency: 0.0
+eavesdrop_tendency: 0.0
