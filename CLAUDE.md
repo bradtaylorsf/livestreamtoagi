@@ -115,3 +115,24 @@ agents/{agent-name}/
 ```
 
 See `specs/CHARACTER-SHEETS.md` for complete personality specifications.
+
+## Development Workflow
+
+### Pre-verification: Always check services first
+
+Before verifying any issue or running integration tests, ensure Docker services are healthy:
+
+```bash
+docker compose up -d
+bash scripts/check-services.sh
+```
+
+All 5 checks must pass (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse) before proceeding.
+
+### Default Ports (configurable via env vars)
+
+| Service    | Host Port | Env Var         |
+|------------|-----------|-----------------|
+| Redis      | 6381      | `REDIS_PORT`    |
+| PostgreSQL | 5434      | `POSTGRES_PORT` |
+| Langfuse   | 3100      | `LANGFUSE_PORT` |
