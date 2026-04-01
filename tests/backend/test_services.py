@@ -4,11 +4,15 @@ These tests require running services: docker compose up -d
 Run with: pytest tests/backend/test_services.py -m integration
 """
 
+import os
+
 import asyncpg
 import pytest
 import redis
 
 integration = pytest.mark.integration
+
+PG_PORT = int(os.environ.get("POSTGRES_PORT", 5434))
 
 
 @integration
@@ -24,7 +28,7 @@ async def test_postgres_connection():
     """PostgreSQL accepts connections."""
     conn = await asyncpg.connect(
         host="localhost",
-        port=5432,
+        port=PG_PORT,
         user="agi",
         password="devpassword",
         database="livestream_agi",
@@ -42,7 +46,7 @@ async def test_pgvector_extension():
     """pgvector extension is installed in livestream_agi database."""
     conn = await asyncpg.connect(
         host="localhost",
-        port=5432,
+        port=PG_PORT,
         user="agi",
         password="devpassword",
         database="livestream_agi",
@@ -60,7 +64,7 @@ async def test_pg_trgm_extension():
     """pg_trgm extension is installed in livestream_agi database."""
     conn = await asyncpg.connect(
         host="localhost",
-        port=5432,
+        port=PG_PORT,
         user="agi",
         password="devpassword",
         database="livestream_agi",
