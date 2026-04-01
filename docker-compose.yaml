@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -31,7 +31,7 @@ services:
       retries: 5
 
   langfuse:
-    image: langfuse/langfuse:latest
+    image: langfuse/langfuse:2
     environment:
       DATABASE_URL: postgresql://agi:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/langfuse
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-dev-secret-change-me}
@@ -42,6 +42,12 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
 volumes:
   redis_data:

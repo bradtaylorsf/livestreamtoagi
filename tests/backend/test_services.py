@@ -13,12 +13,13 @@ import redis
 integration = pytest.mark.integration
 
 PG_PORT = int(os.environ.get("POSTGRES_PORT", 5434))
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 
 @integration
 def test_redis_ping():
     """Redis accepts connections and responds to PING."""
-    r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=5)
+    r = redis.Redis(host="localhost", port=REDIS_PORT, socket_connect_timeout=5)
     assert r.ping() is True
 
 
