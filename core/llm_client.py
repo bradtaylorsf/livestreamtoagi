@@ -365,12 +365,11 @@ class OpenRouterClient:
                     yield StreamChunk(delta=content or "", finish_reason=finish_reason)
         finally:
             await resp.aclose()
+            latency_ms = int((time.monotonic() - start) * 1000)
+            cost = estimate_cost(model_config, input_tokens, output_tokens)
 
-        latency_ms = int((time.monotonic() - start) * 1000)
-        cost = estimate_cost(model_config, input_tokens, output_tokens)
-
-        await self._log_cost(
-            agent_id, model, input_tokens, output_tokens, cost, latency_ms,
-            stream=True, openrouter_id=openrouter_id,
-        )
-        self._trace_langfuse(model, input_tokens, output_tokens, latency_ms, cost)
+            await self._log_cost(
+                agent_id, model, input_tokens, output_tokens, cost, latency_ms,
+                stream=True, openrouter_id=openrouter_id,
+            )
+            self._trace_langfuse(model, input_tokens, output_tokens, latency_ms, cost)
