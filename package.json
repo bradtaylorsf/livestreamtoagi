@@ -1,0 +1,14 @@
+{
+  "name": "livestream-agi",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n docker,backend,website -c blue,green,magenta \"pnpm dev:docker\" \"pnpm dev:backend\" \"pnpm dev:website\"",
+    "dev:docker": "docker compose up -d --wait && bash scripts/check-services.sh && echo '✓ Services ready' && tail -f /dev/null",
+    "dev:backend": "sleep 3 && .venv/bin/uvicorn core.main:app --reload --port 8010",
+    "dev:website": "sleep 5 && BACKEND_URL=http://localhost:8010 npm --prefix website run dev -- --port 4000",
+    "stop": "docker compose down && echo '✓ Services stopped'"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
