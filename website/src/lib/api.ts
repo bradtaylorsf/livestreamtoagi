@@ -9,9 +9,6 @@ import type {
   WorldChunk,
 } from "@/types";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 class ApiRequestError extends Error {
@@ -35,7 +32,7 @@ async function request<T>(
   );
 
   try {
-    const response = await fetch(`${BASE_URL}${path}`, {
+    const response = await fetch(path, {
       ...options,
       signal: controller.signal,
       headers: {
@@ -111,4 +108,4 @@ export async function getLore(): Promise<LoreEvent[]> {
   return request<LoreEvent[]>("/api/lore");
 }
 
-export { ApiRequestError, BASE_URL };
+export { ApiRequestError };

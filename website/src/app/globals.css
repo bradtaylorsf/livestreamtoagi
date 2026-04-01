@@ -50,15 +50,6 @@
   --font-sans: system-ui, -apple-system, sans-serif;
 }
 
-@font-face {
-  font-family: "Press Start 2P";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("https://fonts.gstatic.com/s/pressstart2p/v15/e3t4euO8T-267oIAQAu6jDQyK3nVivM.woff2")
-    format("woff2");
-}
-
 body {
   background: var(--background);
   color: var(--foreground);

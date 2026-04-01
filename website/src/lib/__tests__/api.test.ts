@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiRequestError,
-  BASE_URL,
   chatWithAgent,
   getAgents,
   getAgentJournal,
@@ -31,12 +30,6 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
-describe("BASE_URL", () => {
-  it("defaults to localhost:8000", () => {
-    expect(BASE_URL).toBe("http://localhost:8000");
-  });
-});
-
 describe("getAgents", () => {
   it("sends GET request to /api/agents", async () => {
     const agents = [{ id: "vera", name: "Vera" }];
@@ -45,7 +38,7 @@ describe("getAgents", () => {
     const result = await getAgents();
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/agents",
+      "/api/agents",
       expect.objectContaining({
         headers: { "Content-Type": "application/json" },
       }),
@@ -62,7 +55,7 @@ describe("getAgentJournal", () => {
     const result = await getAgentJournal("vera");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/agents/vera/journal",
+      "/api/agents/vera/journal",
       expect.anything(),
     );
     expect(result).toEqual(entries);
@@ -77,7 +70,7 @@ describe("chatWithAgent", () => {
     const result = await chatWithAgent("rex", "Hi Rex");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/agents/rex/chat",
+      "/api/agents/rex/chat",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ message: "Hi Rex" }),
@@ -92,7 +85,7 @@ describe("getWorldChunks", () => {
     mockFetch.mockReturnValue(jsonResponse([]));
     await getWorldChunks();
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/world/chunks",
+      "/api/world/chunks",
       expect.anything(),
     );
   });
@@ -103,7 +96,7 @@ describe("getChallenges", () => {
     mockFetch.mockReturnValue(jsonResponse([]));
     await getChallenges();
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/challenges",
+      "/api/challenges",
       expect.anything(),
     );
   });
@@ -117,7 +110,7 @@ describe("submitChallenge", () => {
     await submitChallenge(challenge);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/challenges",
+      "/api/challenges",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify(challenge),
@@ -139,7 +132,7 @@ describe("getLore", () => {
     mockFetch.mockReturnValue(jsonResponse([]));
     await getLore();
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/lore",
+      "/api/lore",
       expect.anything(),
     );
   });
