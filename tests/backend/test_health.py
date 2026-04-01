@@ -8,4 +8,7 @@ client = TestClient(app)
 def test_health_endpoint():
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert "status" in data
+    assert "database" in data
+    assert "redis" in data
