@@ -39,3 +39,6 @@ include = ["core*", "tools*", "agents*"]
 testpaths = ["tests/backend"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
+markers = [
+    "integration: requires running Docker Compose services",
+]
