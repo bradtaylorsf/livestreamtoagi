@@ -52,12 +52,6 @@ class CoreMemoryHistory(BaseModel):
     change_reason: str | None = None
 
 
-class CoreMemoryUpsert(BaseModel):
-    content: str
-    token_count: int
-    change_reason: str | None = None
-
-
 # ── Recall Memory ───────────────────────────────────────────────
 
 class RecallMemory(BaseModel):
