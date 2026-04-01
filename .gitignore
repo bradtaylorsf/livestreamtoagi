@@ -53,6 +53,10 @@ website/.vercel/
 *.log
 logs/
 
+# Alpha-loop ephemeral data
+.alpha-loop/sessions/
+.alpha-loop/learnings/
+
 # Assets (large binaries — track with Git LFS or download separately)
 # frontend/public/assets/tilesets/*.png
 # frontend/public/assets/sprites/*.png
