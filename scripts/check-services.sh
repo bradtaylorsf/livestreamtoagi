@@ -27,14 +27,14 @@ check "Redis PING/PONG" docker compose exec -T redis redis-cli ping
 check "PostgreSQL ready" docker compose exec -T postgres pg_isready -U agi -d livestream_agi
 
 # pgvector extension
-check "pgvector extension" docker compose exec -T postgres \
+check "pgvector extension" bash -c 'docker compose exec -T postgres \
     psql -U agi -d livestream_agi -tAc \
-    "SELECT 1 FROM pg_extension WHERE extname = 'vector';" | grep -q 1
+    "SELECT 1 FROM pg_extension WHERE extname = '"'"'vector'"'"';" | grep -q 1'
 
 # pg_trgm extension
-check "pg_trgm extension" docker compose exec -T postgres \
+check "pg_trgm extension" bash -c 'docker compose exec -T postgres \
     psql -U agi -d livestream_agi -tAc \
-    "SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm';" | grep -q 1
+    "SELECT 1 FROM pg_extension WHERE extname = '"'"'pg_trgm'"'"';" | grep -q 1'
 
 # Langfuse HTTP
 check "Langfuse UI (port 3001)" curl -sf http://localhost:3001
