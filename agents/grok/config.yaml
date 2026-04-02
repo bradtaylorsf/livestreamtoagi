@@ -1,0 +1,9 @@
+id: grok
+display_name: "Grok — The Wild Card"
+model_conversation: grok-3-mini
+model_building: grok-3
+voice_id: en-US-ChristopherNeural
+chattiness: 0.8
+initiative: 0.6
+interrupt_tendency: 0.8
+eavesdrop_tendency: 0.8

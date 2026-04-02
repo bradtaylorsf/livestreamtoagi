@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import enum
 import uuid  # noqa: TC003
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── Agents ──────────────────────────────────────────────────────
+
+
+class AgentStatus(str, enum.Enum):
+    active = "active"
+    sleeping = "sleeping"
+    paused = "paused"
+    muted = "muted"
+
 
 class Agent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -29,6 +38,24 @@ class AgentCreate(BaseModel):
     model_building: str
     voice_id: str | None = None
     status: str = "active"
+
+
+class AgentConfig(BaseModel):
+    """Rich agent configuration loaded from YAML files."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    display_name: str
+    model_conversation: str
+    model_building: str
+    voice_id: str | None = None
+    chattiness: float = Field(ge=0.0, le=1.0)
+    initiative: float = Field(ge=0.0, le=1.0)
+    interrupt_tendency: float = Field(ge=0.0, le=1.0)
+    eavesdrop_tendency: float = Field(ge=0.0, le=1.0, default=0.0)
+    status: AgentStatus = AgentStatus.active
+    system_prompt: str = ""
+    behaviors: dict[str, Any] = {}
 
 
 # ── Core Memory ─────────────────────────────────────────────────

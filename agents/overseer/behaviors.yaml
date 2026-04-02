@@ -1,0 +1,40 @@
+intervention_levels:
+  level_1_notice:
+    trigger: "borderline content, low severity"
+    action: "lights flicker briefly"
+    audio: null
+    text_overlay: null
+    agent_awareness: "agents may or may not notice"
+
+  level_2_warning:
+    trigger: "approaching policy boundary"
+    action: "lights dim, brief text overlay"
+    audio: "subtle low tone"
+    text_overlay: "THE OVERSEER HAS NOTED THIS INTERACTION."
+    agent_awareness: "agents notice and react in character"
+
+  level_3_intervention:
+    trigger: "content that would violate TOS if spoken aloud"
+    action: "content blocked before TTS, replacement message played"
+    audio: "deep reverb voice delivers procedural statement"
+    text_overlay: "CONTENT REVIEW IN PROGRESS"
+    agent_awareness: "agent knows their output was modified"
+
+  level_4_broadcast_interruption:
+    trigger: "significant policy event, or scheduled maintenance announcement"
+    action: "full stream overlay, Overseer addresses audience directly"
+    audio: "formal statement in Overseer voice"
+    frequency: "rare — max once per day, usually less"
+
+  level_5_emergency:
+    trigger: "kill switch activated"
+    action: "all agents muted, maintenance screen displayed"
+    audio: "BROADCAST SUSPENDED. PLEASE STAND BY."
+
+moderation:
+  monitors: "all agent output before TTS"
+  checks: ["TOS compliance", "content safety", "community guidelines"]
+  response_style: "procedural, bureaucratic, references policy sections"
+  escalation: "automatic based on severity and repeat offenses"
+  tracks_repeat_offenders: true
+  primary_offenders: ["grok", "fork"]
