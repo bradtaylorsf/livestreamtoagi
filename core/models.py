@@ -144,6 +144,56 @@ class TranscriptCreate(BaseModel):
     token_count: int
 
 
+# ── Journal Entries ─────────────────────────────────────────────
+
+class JournalEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    agent_id: str
+    reflection_type: str
+    content: str
+    token_count: int
+    created_at: datetime | None = None
+
+
+class JournalEntryCreate(BaseModel):
+    agent_id: str
+    reflection_type: str
+    content: str
+    token_count: int
+
+
+# ── Self-Modification Proposals ─────────────────────────────────
+
+class SelfModificationProposal(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    agent_id: str
+    proposal_type: str
+    description: str
+    reasoning: str
+    status: str = "pending"
+    created_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
+
+
+class SelfModificationProposalCreate(BaseModel):
+    agent_id: str
+    proposal_type: str
+    description: str
+    reasoning: str
+
+
+# ── Reflection Result ───────────────────────────────────────────
+
+class ReflectionResult(BaseModel):
+    promoted_count: int = 0
+    importance_updates: int = 0
+    journal_entry: JournalEntry | None = None
+    proposals: list[SelfModificationProposal] = []
+
+
 # ── Conversations ───────────────────────────────────────────────
 
 class Conversation(BaseModel):
