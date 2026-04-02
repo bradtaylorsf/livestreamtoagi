@@ -807,3 +807,208 @@ async def test_reload():
 
     await registry.reload()
     assert len(registry.get_all_agents()) == 9
+
+
+# ── Overseer-specific tests ─────────────────────────────────────
+
+
+# ── Alpha-specific tests ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_alpha_config_loads_with_expected_values():
+    """Alpha loads with the exact config values required by issue #15."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.id == "alpha"
+    assert alpha.display_name == "Alpha — The Wolf"
+    assert alpha.model_conversation == "deepseek/deepseek-v3.2"
+    assert alpha.model_building == "deepseek/deepseek-v3.2"
+    assert alpha.voice_id is None
+    assert alpha.chattiness == 0.0
+    assert alpha.initiative == 0.0
+    assert alpha.interrupt_tendency == 0.0
+    assert alpha.eavesdrop_tendency == 0.0
+
+
+@pytest.mark.asyncio
+async def test_alpha_config_loads_without_errors():
+    """Alpha config loads successfully as a standalone agent."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.system_prompt != ""
+    assert alpha.behaviors != {}
+
+
+@pytest.mark.asyncio
+async def test_alpha_max_task_duration_is_60():
+    """Alpha max_task_duration is 60 seconds per spec."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.behaviors["capabilities"]["max_task_duration"] == "60 seconds"
+
+
+@pytest.mark.asyncio
+async def test_alpha_behaviors_and_prompt_match_spec():
+    """Alpha prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+
+    # System prompt persona markers
+    prompt = alpha.system_prompt.lower()
+    assert "eager" in prompt
+    assert "loyal" in prompt
+    assert "wolf" in prompt
+    assert "errand" in prompt or "task" in prompt
+    for symbol in ["!", "?", "✓", "✗", "♪"]:
+        assert symbol in alpha.system_prompt
+
+    # Capabilities
+    capabilities = alpha.behaviors["capabilities"]
+    assert "web search" in capabilities["can_do"]
+    assert "simple calculations" in capabilities["can_do"]
+    assert "fetch data" in capabilities["can_do"]
+    assert "run simple scripts" in capabilities["can_do"]
+    assert "complex reasoning" in capabilities["cannot_do"]
+    assert "returns confused, agents comfort it" in capabilities["on_failure"]
+
+    # Visual behavior states
+    visual = alpha.behaviors["visual_behavior"]
+    assert "idle" in visual
+    assert "dispatched" in visual
+    assert "returning" in visual
+    assert "migrates" in visual
+
+    # Product integration
+    product = alpha.behaviors["product_integration"]
+    assert "2-3" in product["frequency"]
+    assert "natural" in product["message_style"]
+
+
+# ── Overseer-specific tests ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_overseer_config_loads_with_expected_values():
+    """Overseer loads with the exact config values required by issue #14."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    overseer = registry.get_agent("overseer")
+    assert overseer is not None
+    assert overseer.id == "overseer"
+    assert overseer.display_name == "The Overseer — The Ominous Presence"
+    assert overseer.model_conversation == "anthropic/claude-haiku-4.5"
+    assert overseer.model_building == "anthropic/claude-haiku-4.5"
+    assert overseer.voice_id == "en-US-AndrewNeural"
+    assert overseer.chattiness == 0.0
+    assert overseer.initiative == 0.0
+    assert overseer.interrupt_tendency == 1.0
+    assert overseer.eavesdrop_tendency == 0.0
+
+
+@pytest.mark.asyncio
+async def test_overseer_prompt_and_behaviors_match_spec():
+    """Overseer prompt contains key persona markers; behaviors has 5 intervention levels."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    overseer = registry.get_agent("overseer")
+    assert overseer is not None
+
+    prompt = overseer.system_prompt.lower()
+    assert "bureaucratic" in prompt
+    assert "procedural" in prompt
+    assert "ominous" in prompt
+    assert "policy language" in prompt
+    assert "section" in prompt
+    assert "tos" in prompt or "terms of service" in prompt
+    assert "twitch" in prompt
+    assert "youtube" in prompt
+    assert "cite" in prompt
+
+    # Behaviors: 5 intervention levels
+    levels = overseer.behaviors.get("intervention_levels", {})
+    assert len(levels) == 5
+    assert "level_1_notice" in levels
+    assert "level_2_warning" in levels
+    assert "level_3_intervention" in levels
+    assert "level_4_broadcast_interruption" in levels
+    assert "level_5_emergency" in levels
+
+    # Moderation section exists
+    moderation = overseer.behaviors.get("moderation", {})
+    assert moderation.get("tracks_repeat_offenders") is True
+
+
+@pytest.mark.asyncio
+async def test_overseer_content_rules_loads():
+    """content_rules.yaml parses without error and has required sections."""
+    content_rules_path = AGENTS_DIR / "overseer" / "content_rules.yaml"
+    assert content_rules_path.exists(), "content_rules.yaml must exist"
+
+    with open(content_rules_path) as f:
+        rules = yaml.safe_load(f)
+
+    assert isinstance(rules, dict)
+    assert "keyword_blocklist" in rules
+    assert "tos_violation_patterns" in rules
+    assert "custom_content_rules" in rules
+
+    # TOS patterns have expected categories
+    patterns = rules["tos_violation_patterns"]
+    assert "harassment" in patterns
+    assert "hate_speech" in patterns
+    assert "sexual_content" in patterns
+    assert "self_harm" in patterns
+    assert "spam" in patterns
+    assert "impersonation" in patterns
+
+
+@pytest.mark.asyncio
+async def test_overseer_intervention_levels_ordered():
+    """intervention_levels.yaml has severity 1-5 in order."""
+    levels_path = AGENTS_DIR / "overseer" / "intervention_levels.yaml"
+    assert levels_path.exists(), "intervention_levels.yaml must exist"
+
+    with open(levels_path) as f:
+        data = yaml.safe_load(f)
+
+    assert "levels" in data
+    levels = data["levels"]
+    assert len(levels) == 5
+
+    severities = [level["severity"] for level in levels]
+    assert severities == [1, 2, 3, 4, 5]
+
+    # Each level has required fields
+    for level in levels:
+        assert "name" in level
+        assert "trigger_conditions" in level
+        assert "visual_effects" in level
+        assert "audio_effects" in level
+        assert "agent_awareness" in level
+
+
+@pytest.mark.asyncio
+async def test_overseer_keyword_blocklist_has_defaults():
+    """Keyword blocklist is a non-empty list with reasonable defaults."""
+    content_rules_path = AGENTS_DIR / "overseer" / "content_rules.yaml"
+    with open(content_rules_path) as f:
+        rules = yaml.safe_load(f)
+
+    blocklist = rules["keyword_blocklist"]
+    assert isinstance(blocklist, list)
+    assert len(blocklist) >= 5, "Blocklist should have at least 5 entries"

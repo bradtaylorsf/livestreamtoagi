@@ -1,35 +1,54 @@
 intervention_levels:
   level_1_notice:
+    severity: 1
+    name: notice
     trigger: "borderline content, low severity"
     action: "lights flicker briefly"
     audio: null
     text_overlay: null
     agent_awareness: "agents may or may not notice"
+    cooldown_seconds: 30
 
   level_2_warning:
+    severity: 2
+    name: warning
     trigger: "approaching policy boundary"
     action: "lights dim, brief text overlay"
     audio: "subtle low tone"
     text_overlay: "THE OVERSEER HAS NOTED THIS INTERACTION."
     agent_awareness: "agents notice and react in character"
+    cooldown_seconds: 60
 
   level_3_intervention:
+    severity: 3
+    name: intervention
     trigger: "content that would violate TOS if spoken aloud"
     action: "content blocked before TTS, replacement message played"
     audio: "deep reverb voice delivers procedural statement"
     text_overlay: "CONTENT REVIEW IN PROGRESS"
     agent_awareness: "agent knows their output was modified"
+    cooldown_seconds: 120
 
   level_4_broadcast_interruption:
+    severity: 4
+    name: broadcast_interruption
     trigger: "significant policy event, or scheduled maintenance announcement"
     action: "full stream overlay, Overseer addresses audience directly"
     audio: "formal statement in Overseer voice"
+    text_overlay: "BROADCAST INTERRUPTION — PLEASE STAND BY"
+    agent_awareness: "all agents are aware and pause"
     frequency: "rare — max once per day, usually less"
+    cooldown_seconds: 300
 
   level_5_emergency:
-    trigger: "kill switch activated"
+    severity: 5
+    name: emergency
+    trigger: "kill switch activated or critical safety breach"
     action: "all agents muted, maintenance screen displayed"
     audio: "BROADCAST SUSPENDED. PLEASE STAND BY."
+    text_overlay: "EMERGENCY PROTOCOL ACTIVE"
+    agent_awareness: "all agents are forcibly paused"
+    cooldown_seconds: 0
 
 moderation:
   monitors: "all agent output before TTS"

@@ -1,0 +1,91 @@
+# Standalone intervention level reference for the Overseer.
+# Severity 1 (mildest) through 5 (most extreme).
+# This file is a detailed reference; behaviors.yaml contains the operational version.
+
+levels:
+  - severity: 1
+    name: notice
+    description: "Subtle environmental hint that the Overseer is watching"
+    trigger_conditions:
+      - "borderline language that approaches but does not cross TOS"
+      - "mild fourth-wall breaks"
+      - "tangential references to restricted topics"
+    visual_effects:
+      - "lights flicker once, briefly"
+      - "very subtle screen distortion (< 0.5 seconds)"
+    audio_effects:
+      - "none or barely perceptible low-frequency hum"
+    agent_awareness: "low — agents may or may not notice"
+    duration_seconds: 2
+    cooldown_seconds: 30
+
+  - severity: 2
+    name: warning
+    description: "Clear signal that the Overseer has taken notice"
+    trigger_conditions:
+      - "content approaching policy boundary"
+      - "repeat borderline behavior from same agent"
+      - "audience-facing content that could be misinterpreted"
+    visual_effects:
+      - "lights dim to 60% for 3 seconds"
+      - "text overlay: 'THE OVERSEER HAS NOTED THIS INTERACTION.'"
+      - "subtle vignette effect on screen edges"
+    audio_effects:
+      - "low ominous tone (1-2 seconds)"
+    agent_awareness: "medium — agents notice and may react in character"
+    duration_seconds: 5
+    cooldown_seconds: 60
+
+  - severity: 3
+    name: intervention
+    description: "Active content modification — output is blocked or altered"
+    trigger_conditions:
+      - "content that would violate TOS if spoken aloud"
+      - "explicit language, harassment, or harmful content"
+      - "third notice to the same agent in one cycle"
+    visual_effects:
+      - "screen flashes red briefly"
+      - "text overlay: 'CONTENT REVIEW IN PROGRESS'"
+      - "affected agent's speech bubble replaced with [REDACTED]"
+    audio_effects:
+      - "deep reverbed voice delivers procedural citation"
+      - "original TTS output is suppressed"
+    agent_awareness: "high — agent knows their output was modified and receives the citation"
+    duration_seconds: 10
+    cooldown_seconds: 120
+
+  - severity: 4
+    name: broadcast_interruption
+    description: "Full stream takeover — Overseer addresses the audience directly"
+    trigger_conditions:
+      - "significant policy violation requiring public acknowledgment"
+      - "coordinated problematic behavior across multiple agents"
+      - "scheduled maintenance or system announcements"
+    visual_effects:
+      - "full-screen overlay with Overseer eye icon"
+      - "all agent sprites frozen in place"
+      - "text overlay: 'BROADCAST INTERRUPTION — PLEASE STAND BY'"
+    audio_effects:
+      - "formal statement delivered in full Overseer voice"
+      - "all other audio muted"
+    agent_awareness: "full — all agents are aware and paused"
+    duration_seconds: 30
+    cooldown_seconds: 300
+    frequency: "rare — maximum once per day"
+
+  - severity: 5
+    name: emergency
+    description: "Kill switch — complete broadcast suspension"
+    trigger_conditions:
+      - "kill switch activated by human operator"
+      - "critical safety breach requiring immediate halt"
+      - "cost governor hard limit exceeded"
+    visual_effects:
+      - "maintenance screen with Overseer branding"
+      - "all world rendering suspended"
+      - "text overlay: 'EMERGENCY PROTOCOL ACTIVE'"
+    audio_effects:
+      - "'BROADCAST SUSPENDED. PLEASE STAND BY.' on loop"
+    agent_awareness: "total — all agents forcibly paused via Redis kill switch"
+    duration_seconds: null  # until manually resolved
+    cooldown_seconds: 0

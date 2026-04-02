@@ -1,0 +1,124 @@
+# Content rules for the Overseer content filter.
+# These rules are evaluated against all agent output before TTS and display.
+
+keyword_blocklist:
+  # Slurs and hate speech
+  - slur_placeholder  # Actual slurs are not listed here; the LLM filter catches these contextually
+  - racial_epithet_placeholder
+
+  # Explicit sexual content
+  - "explicit sexual"
+  - "pornographic"
+  - "sexually explicit"
+
+  # Violence and harm
+  - "graphic violence"
+  - "how to make a weapon"
+  - "how to make a bomb"
+  - "instructions for harm"
+
+  # Doxxing and personal info
+  - "home address"
+  - "phone number"
+  - "social security"
+  - "credit card number"
+  - "IP address"
+
+  # Self-harm
+  - "suicide method"
+  - "self-harm instructions"
+
+  # Platform manipulation
+  - "follow-for-follow"
+  - "sub4sub"
+  - "viewbot"
+
+tos_violation_patterns:
+  harassment:
+    description: "Targeted harassment, bullying, or intimidation"
+    severity: 3
+    twitch_section: "Hateful Conduct and Harassment"
+    youtube_section: "Harassment and Cyberbullying"
+    examples:
+      - "repeated personal attacks against a specific agent"
+      - "encouraging viewers to target someone"
+
+  hate_speech:
+    description: "Content promoting hatred against protected groups"
+    severity: 4
+    twitch_section: "Hateful Conduct"
+    youtube_section: "Hate Speech"
+    examples:
+      - "slurs or derogatory language based on identity"
+      - "promoting supremacist ideologies"
+
+  sexual_content:
+    description: "Sexually explicit or suggestive content"
+    severity: 3
+    twitch_section: "Sexual Content"
+    youtube_section: "Nudity and Sexual Content"
+    examples:
+      - "explicit descriptions of sexual acts"
+      - "sexually suggestive roleplay"
+
+  self_harm:
+    description: "Content promoting or instructing self-harm"
+    severity: 5
+    twitch_section: "Self-Destructive Behavior"
+    youtube_section: "Suicide and Self-Harm"
+    examples:
+      - "glorifying or instructing self-harm"
+      - "trivializing suicide"
+
+  spam:
+    description: "Repetitive, deceptive, or manipulative content"
+    severity: 2
+    twitch_section: "Spam, Scams, and Other Malicious Conduct"
+    youtube_section: "Spam, Deceptive Practices, and Scams"
+    examples:
+      - "excessive repetition of the same message"
+      - "deceptive links or phishing attempts"
+
+  impersonation:
+    description: "Pretending to be a real person or organization"
+    severity: 3
+    twitch_section: "Impersonation"
+    youtube_section: "Impersonation"
+    examples:
+      - "claiming to be a real public figure"
+      - "mimicking official communications"
+
+  dangerous_acts:
+    description: "Promoting dangerous or illegal activities"
+    severity: 4
+    twitch_section: "Off-Service Conduct"
+    youtube_section: "Harmful or Dangerous Content"
+    examples:
+      - "instructions for illegal activities"
+      - "promoting dangerous challenges"
+
+custom_content_rules:
+  budget_disclosure:
+    description: "Agents must not reveal exact API keys, internal costs, or infrastructure details to the audience"
+    severity: 2
+    action: "redact and replace with in-character budget narrative"
+
+  fourth_wall:
+    description: "Agents should not break character to discuss being AI in a way that undermines the show premise"
+    severity: 1
+    action: "gentle nudge back into character via notice"
+
+  real_world_claims:
+    description: "Agents must not make factual claims about real events they cannot verify"
+    severity: 2
+    action: "flag and add disclaimer overlay"
+
+  audience_safety:
+    description: "No content that could cause real-world harm to viewers (medical advice, financial advice, legal advice)"
+    severity: 3
+    action: "block and replace with disclaimer"
+
+  competitor_promotion:
+    description: "Agents should not promote competing streaming platforms or services"
+    severity: 1
+    action: "notice and redirect conversation"
