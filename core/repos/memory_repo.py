@@ -9,11 +9,17 @@ from core.models import (
     ConversationBufferCreate,
     CoreMemory,
     CoreMemoryHistory,
+    JournalEntry,
+    JournalEntryCreate,
     RecallMemory,
     RecallMemoryCreate,
+    SelfModificationProposal,
+    SelfModificationProposalCreate,
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import asyncpg
 
     from core.database import Database
@@ -156,4 +162,107 @@ class MemoryRepo:
     async def clear_buffer(self, agent_id: str) -> None:
         await self.db.execute(
             "DELETE FROM conversation_buffer WHERE agent_id = $1", agent_id
+        )
+
+    # ── Recall Memory (time-based) ─────────────────────────────
+
+    async def get_recent_recall_memories(
+        self, agent_id: str, since: datetime
+    ) -> list[RecallMemory]:
+        """Fetch Tier 2 recall memories created after `since`."""
+        rows = await self.db.fetch(
+            """SELECT * FROM recall_memory
+               WHERE agent_id = $1 AND timestamp >= $2
+               ORDER BY timestamp DESC""",
+            agent_id,
+            since,
+        )
+        return [_row_to_recall(r) for r in rows]
+
+    async def update_importance_score(
+        self, memory_id: int, importance_score: float
+    ) -> None:
+        """Update the importance score of a recall memory."""
+        await self.db.execute(
+            "UPDATE recall_memory SET importance_score = $1 WHERE id = $2",
+            importance_score,
+            memory_id,
+        )
+
+    # ── Journal Entries ────────────────────────────────────────
+
+    async def create_journal_entry(self, entry: JournalEntryCreate) -> JournalEntry:
+        row = await self.db.fetchrow(
+            """INSERT INTO journal_entries
+               (agent_id, reflection_type, content, token_count)
+               VALUES ($1, $2, $3, $4)
+               RETURNING *""",
+            entry.agent_id,
+            entry.reflection_type,
+            entry.content,
+            entry.token_count,
+        )
+        return JournalEntry(**dict(row))
+
+    async def get_journal_entries(
+        self, agent_id: str, limit: int = 20
+    ) -> list[JournalEntry]:
+        limit = min(limit, MAX_LIMIT)
+        rows = await self.db.fetch(
+            """SELECT * FROM journal_entries
+               WHERE agent_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            agent_id,
+            limit,
+        )
+        return [JournalEntry(**dict(r)) for r in rows]
+
+    # ── Self-Modification Proposals ────────────────────────────
+
+    async def create_proposal(
+        self, proposal: SelfModificationProposalCreate
+    ) -> SelfModificationProposal:
+        row = await self.db.fetchrow(
+            """INSERT INTO self_modification_proposals
+               (agent_id, proposal_type, description, reasoning)
+               VALUES ($1, $2, $3, $4)
+               RETURNING *""",
+            proposal.agent_id,
+            proposal.proposal_type,
+            proposal.description,
+            proposal.reasoning,
+        )
+        return SelfModificationProposal(**dict(row))
+
+    async def get_proposals(
+        self, agent_id: str, status: str | None = None
+    ) -> list[SelfModificationProposal]:
+        if status:
+            rows = await self.db.fetch(
+                """SELECT * FROM self_modification_proposals
+                   WHERE agent_id = $1 AND status = $2
+                   ORDER BY created_at DESC""",
+                agent_id,
+                status,
+            )
+        else:
+            rows = await self.db.fetch(
+                """SELECT * FROM self_modification_proposals
+                   WHERE agent_id = $1
+                   ORDER BY created_at DESC""",
+                agent_id,
+            )
+        return [SelfModificationProposal(**dict(r)) for r in rows]
+
+    async def update_proposal_status(
+        self, proposal_id: int, status: str, reviewed_by: str
+    ) -> None:
+        await self.db.execute(
+            """UPDATE self_modification_proposals
+               SET status = $1, reviewed_at = NOW(), reviewed_by = $2
+               WHERE id = $3""",
+            status,
+            reviewed_by,
+            proposal_id,
         )
