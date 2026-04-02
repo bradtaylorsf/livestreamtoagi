@@ -130,7 +130,7 @@ class AgentRegistry:
         if agent is None:
             raise KeyError(f"Agent not found: {agent_id}")
 
-        agent.status = status
+        self._agents[agent_id] = agent.model_copy(update={"status": status})
 
         if self._redis is not None:
             try:
@@ -145,7 +145,10 @@ class AgentRegistry:
             try:
                 value = await self._redis.get(f"{REDIS_STATUS_PREFIX}{agent_id}")
                 if value is not None:
-                    return AgentStatus(value)
+                    try:
+                        return AgentStatus(value)
+                    except ValueError:
+                        logger.warning("Invalid status value in Redis for %s: %r", agent_id, value)
             except Exception:
                 logger.warning("Failed to read status from Redis for %s", agent_id)
 
@@ -163,10 +166,14 @@ class AgentRegistry:
         """On startup, sync in-memory status from Redis if available."""
         if self._redis is None:
             return
-        for agent_id, agent in self._agents.items():
+        for agent_id in list(self._agents):
             try:
                 value = await self._redis.get(f"{REDIS_STATUS_PREFIX}{agent_id}")
                 if value is not None:
-                    agent.status = AgentStatus(value)
+                    try:
+                        status = AgentStatus(value)
+                        self._agents[agent_id] = self._agents[agent_id].model_copy(update={"status": status})
+                    except ValueError:
+                        logger.warning("Invalid status in Redis for %s: %r", agent_id, value)
             except Exception:
                 logger.warning("Failed to sync Redis status for %s", agent_id)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import asyncpg
+
 from core.models import (
     ConversationBuffer,
     ConversationBufferCreate,
@@ -17,12 +19,18 @@ if TYPE_CHECKING:
     from core.database import Database
 
 
+MAX_LIMIT = 500
+
+
 def _parse_embedding(val: str) -> list[float]:
     """Parse pgvector text representation '[1,2,3]' into list[float]."""
-    return [float(x) for x in val.strip("[]").split(",")]
+    try:
+        return [float(x) for x in val.strip("[]").split(",")]
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"Malformed pgvector embedding: {val!r}") from exc
 
 
-def _row_to_recall(row) -> RecallMemory:
+def _row_to_recall(row: asyncpg.Record) -> RecallMemory:
     d = dict(row)
     if isinstance(d.get("embedding"), str):
         d["embedding"] = _parse_embedding(d["embedding"])
@@ -100,6 +108,7 @@ class MemoryRepo:
     async def search_recall(
         self, agent_id: str, embedding: list[float], limit: int = 10
     ) -> list[RecallMemory]:
+        limit = min(limit, MAX_LIMIT)
         embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
         rows = await self.db.fetch(
             """SELECT * FROM recall_memory
@@ -133,6 +142,7 @@ class MemoryRepo:
         return ConversationBuffer(**dict(row))
 
     async def get_buffer(self, agent_id: str, limit: int = 50) -> list[ConversationBuffer]:
+        limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
             """SELECT * FROM conversation_buffer
                WHERE agent_id = $1

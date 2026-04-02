@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+import asyncpg
 
 from core.models import (
     Challenge,
@@ -14,17 +16,12 @@ from core.models import (
     RevenueEvent,
     RevenueEventCreate,
 )
+from core.repos import serialize_jsonb
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from core.database import Database
-
-
-def _serialize_jsonb(val: Any) -> str | None:
-    if val is None:
-        return None
-    return json.dumps(val) if not isinstance(val, str) else val
 
 
 def _parse_jsonb_field(d: dict, key: str) -> None:
@@ -46,7 +43,7 @@ class CostRepo:
             cost.agent_id,
             cost.cost_type,
             cost.amount,
-            _serialize_jsonb(cost.details),
+            serialize_jsonb(cost.details),
         )
         d = dict(row)
         _parse_jsonb_field(d, "details")
@@ -85,7 +82,7 @@ class CostRepo:
                RETURNING *""",
             revenue.source,
             revenue.amount,
-            _serialize_jsonb(revenue.details),
+            serialize_jsonb(revenue.details),
         )
         d = dict(row)
         _parse_jsonb_field(d, "details")

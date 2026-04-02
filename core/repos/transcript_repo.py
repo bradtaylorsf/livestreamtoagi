@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import asyncpg
+
 from core.models import Transcript, TranscriptCreate
 
 if TYPE_CHECKING:
     from core.database import Database
 
+MAX_LIMIT = 500
 
-def _row_to_transcript(row) -> Transcript:
+
+def _row_to_transcript(row: asyncpg.Record) -> Transcript:
     return Transcript(**dict(row))
 
 
@@ -39,6 +43,7 @@ class TranscriptRepo:
     async def search_by_participant(
         self, agent_id: str, limit: int = 100
     ) -> list[Transcript]:
+        limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
             """SELECT * FROM transcripts
                WHERE $1 = ANY(participants)
@@ -52,6 +57,7 @@ class TranscriptRepo:
     async def search_by_event_type(
         self, event_type: str, limit: int = 100
     ) -> list[Transcript]:
+        limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
             """SELECT * FROM transcripts
                WHERE event_type = $1

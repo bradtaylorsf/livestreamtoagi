@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+import asyncpg
 
 from core.models import (
     ExpansionProposal,
@@ -13,25 +15,13 @@ from core.models import (
     WorldEvent,
     WorldEventCreate,
 )
+from core.repos import serialize_jsonb
 
 if TYPE_CHECKING:
     from core.database import Database
 
 
-def _serialize_jsonb(val: Any) -> str | None:
-    if val is None:
-        return None
-    return json.dumps(val) if not isinstance(val, str) else val
-
-
-def _parse_jsonb(val: Any) -> Any:
-    """Parse JSONB values that asyncpg may return as strings."""
-    if isinstance(val, str):
-        return json.loads(val)
-    return val
-
-
-def _row_to_chunk(row) -> WorldChunk:
+def _row_to_chunk(row: asyncpg.Record) -> WorldChunk:
     """Convert a record row, parsing any JSONB string fields."""
     d = dict(row)
     for key in ("tile_data", "objects", "proposal_votes"):
@@ -58,8 +48,8 @@ class WorldRepo:
             chunk.y_offset,
             chunk.width,
             chunk.height,
-            _serialize_jsonb(chunk.tile_data),
-            _serialize_jsonb(chunk.objects),
+            serialize_jsonb(chunk.tile_data),
+            serialize_jsonb(chunk.objects),
             chunk.built_by,
             chunk.description,
             chunk.tileset_url,

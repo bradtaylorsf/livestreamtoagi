@@ -105,9 +105,10 @@ class EventBus:
 
         message = json.dumps(event, cls=_EventEncoder)
 
-        if len(message.encode()) > MAX_MESSAGE_BYTES:
+        encoded_size = len(message.encode())
+        if encoded_size > MAX_MESSAGE_BYTES:
             logger.warning(
-                "Event %s payload exceeds 1MB (%d bytes)", event_type, len(message.encode())
+                "Event %s payload exceeds 1MB (%d bytes)", event_type, encoded_size
             )
 
         self._history.append(event)
@@ -184,37 +185,36 @@ class EventBus:
 
     async def _broadcast(self, message: str) -> None:
         """Send a message to all connected clients, removing dead ones."""
-        dead_ids: list[str] = []
-
         async with self._lock:
             clients = list(self._clients.items())
 
-        # Send to all clients concurrently
-        async def _send(client_id: str, client: _ClientInfo) -> None:
+        async def _send(client_id: str, client: _ClientInfo) -> str | None:
             try:
                 await client.ws.send_text(message)
-            except (WebSocketDisconnect, Exception):
-                dead_ids.append(client_id)
+                return None
+            except Exception:
+                return client_id
 
         if clients:
-            await asyncio.gather(*[_send(cid, c) for cid, c in clients])
+            results = await asyncio.gather(*[_send(cid, c) for cid, c in clients])
+            dead_ids = [cid for cid in results if cid is not None]
 
-        # Clean up dead clients
-        if dead_ids:
-            async with self._lock:
-                for cid in dead_ids:
-                    self._clients.pop(cid, None)
-            logger.info("Removed %d dead client(s)", len(dead_ids))
+            if dead_ids:
+                async with self._lock:
+                    for cid in dead_ids:
+                        self._clients.pop(cid, None)
+                logger.info("Removed %d dead client(s)", len(dead_ids))
 
     @staticmethod
     def _validate_event_type(event_type: str) -> None:
         """Raise ValueError if event_type is not in the EventType enum."""
-        valid = {e.value for e in EventType}
-        if event_type not in valid:
+        if event_type not in _VALID_EVENT_TYPES:
             raise ValueError(
-                f"Unknown event type: {event_type!r}. Valid types: {sorted(valid)}"
+                f"Unknown event type: {event_type!r}. Valid types: {sorted(_VALID_EVENT_TYPES)}"
             )
 
+
+_VALID_EVENT_TYPES: frozenset[str] = frozenset(e.value for e in EventType)
 
 # Module-level singleton
 event_bus = EventBus()
