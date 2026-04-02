@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -13,6 +15,13 @@ from core.agent_registry import AgentRegistry
 from core.models import AgentConfig, AgentStatus
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "agents"
+
+
+def estimate_prompt_tokens(text: str) -> int:
+    """Return a conservative prompt token estimate for plain English/Markdown text."""
+    word_like_units = len(re.findall(r"\w+|[^\w\s]", text))
+    chars_per_token_estimate = math.ceil(len(text) / 4)
+    return max(word_like_units, chars_per_token_estimate)
 
 
 # ── Config validation ────────────────────────────────────────────
@@ -205,7 +214,7 @@ async def test_rex_system_prompt_stays_under_token_budget():
     rex = registry.get_agent("rex")
     assert rex is not None
 
-    estimated_tokens = len(rex.system_prompt.split())
+    estimated_tokens = estimate_prompt_tokens(rex.system_prompt)
     assert estimated_tokens < 1200
 
 
