@@ -7,3 +7,4 @@ chattiness: 0.5
 initiative: 0.3
 interrupt_tendency: 0.6
 eavesdrop_tendency: 0.4
+closing_weight: 0.05

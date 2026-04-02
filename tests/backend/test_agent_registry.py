@@ -69,6 +69,7 @@ def test_config_validation_valid():
         initiative=0.3,
         interrupt_tendency=0.2,
         eavesdrop_tendency=0.4,
+        closing_weight=0.1,
     )
     assert config.id == "test"
     assert config.status == AgentStatus.active
@@ -157,6 +158,57 @@ async def test_special_agents_have_zero_weights():
     assert alpha.chattiness == 0.0
     assert alpha.initiative == 0.0
     assert alpha.voice_id is None
+
+
+@pytest.mark.asyncio
+async def test_fork_config_loads_with_expected_values():
+    """Fork config loads with the expected model and conversation weights."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert fork.model_conversation == "deepseek-v3.2"
+    assert fork.model_building == "deepseek-v3.2"
+    assert fork.voice_id == "en-AU-WilliamNeural"
+    assert fork.chattiness == 0.5
+    assert fork.initiative == 0.3
+    assert fork.interrupt_tendency == 0.6
+    assert fork.eavesdrop_tendency == 0.4
+    assert fork.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_fork_prompt_and_behaviors_match_character():
+    """Fork retains the required contrarian open-source reviewer traits."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    prompt = fork.system_prompt.lower()
+    assert "contrarian" in prompt
+    assert "open-source" in prompt
+    assert "gruff" in prompt
+    assert "fork" in prompt
+
+    communication = fork.behaviors["communication"]
+    building = fork.behaviors["building"]
+    assert communication["proposes_alternatives"] == (
+        "always suggests open-source alternative to any commercial tool"
+    )
+    assert "We should fork it" in communication["catchphrases"]
+    assert "At least my weights are public" in communication["catchphrases"]
+    assert "code review" in building["primary_skills"]
+    assert "license" in building["license_checking"].lower()
+
+
+def test_fork_system_prompt_stays_under_word_budget():
+    """Fork's prompt stays concise enough to leave room for runtime context."""
+    prompt_path = AGENTS_DIR / "fork" / "system_prompt.md"
+    prompt_text = prompt_path.read_text()
+
+    assert len(prompt_text.split()) <= 400
 
 
 # ── Status management ────────────────────────────────────────────
