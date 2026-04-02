@@ -143,15 +143,15 @@ async def test_behaviors_loaded():
 
 @pytest.mark.asyncio
 async def test_fork_config_loads_with_expected_values():
-    """Fork loads with the issue #7 config values and model alias normalization."""
+    """Fork loads with the exact config values required by issue #7."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
     fork = registry.get_agent("fork")
     assert fork is not None
     assert fork.display_name == "Fork — The Contrarian"
-    assert fork.model_conversation == "deepseek-v3.2"
-    assert fork.model_building == "deepseek-v3.2"
+    assert fork.model_conversation == "deepseek/deepseek-v3.2"
+    assert fork.model_building == "deepseek/deepseek-v3.2"
     assert fork.voice_id == "en-AU-WilliamNeural"
     assert fork.chattiness == 0.5
     assert fork.initiative == 0.3
@@ -195,6 +195,21 @@ async def test_fork_system_prompt_stays_under_token_budget():
 
     estimated_tokens = len(fork.system_prompt.split())
     assert estimated_tokens < 512
+
+
+def test_agent_config_defaults_closing_weight_to_zero():
+    """Existing configs without closing_weight remain valid."""
+    config = AgentConfig(
+        id="test",
+        display_name="Test Agent",
+        model_conversation="claude-haiku-4-5",
+        model_building="claude-sonnet-4-6",
+        chattiness=0.5,
+        initiative=0.3,
+        interrupt_tendency=0.2,
+    )
+
+    assert config.closing_weight == 0.0
 
 
 @pytest.mark.asyncio

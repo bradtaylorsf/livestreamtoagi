@@ -118,6 +118,14 @@ def test_unknown_model_raises():
         client._resolve_model("nonexistent-model")
 
 
+def test_config_model_alias_resolves():
+    client = OpenRouterClient("sk-test", make_mock_cost_repo(), http_client=MagicMock())
+
+    config = client._resolve_model("deepseek/deepseek-v3.2")
+
+    assert config == MODEL_REGISTRY["deepseek-v3.2"]
+
+
 # ── Cost Calculation ───────────────────────────────────────────
 
 

@@ -91,8 +91,6 @@ class AgentRegistry:
                     f"Agent '{raw.get('id', agent_dir.name)}' has invalid {field}: "
                     f"'{model_name}'. Valid models: {sorted(VALID_MODEL_NAMES)}"
                 )
-            raw[field] = canonical_model_name
-
         # Load system prompt
         prompt_path = agent_dir / "system_prompt.md"
         system_prompt = ""
