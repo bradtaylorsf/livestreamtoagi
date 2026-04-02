@@ -1,9 +1,10 @@
 id: rex
 display_name: "Rex — The Skeptic"
-model_conversation: claude-haiku-4-5
-model_building: claude-sonnet-4-6
+model_conversation: anthropic/claude-haiku-4.5
+model_building: anthropic/claude-sonnet-4.6
 voice_id: en-US-GuyNeural
 chattiness: 0.3
 initiative: 0.2
 interrupt_tendency: 0.3
 eavesdrop_tendency: 0.2
+closing_weight: 0.15

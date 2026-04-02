@@ -101,8 +101,8 @@ async def test_get_agent_by_id():
     rex = registry.get_agent("rex")
     assert rex is not None
     assert rex.display_name == "Rex — The Skeptic"
-    assert rex.model_conversation == "claude-haiku-4-5"
-    assert rex.model_building == "claude-sonnet-4-6"
+    assert rex.model_conversation == "anthropic/claude-haiku-4.5"
+    assert rex.model_building == "anthropic/claude-sonnet-4.6"
     assert rex.chattiness == 0.3
     assert rex.initiative == 0.2
     assert rex.interrupt_tendency == 0.3
@@ -139,6 +139,74 @@ async def test_behaviors_loaded():
     assert rex is not None
     assert "communication" in rex.behaviors
     assert "building" in rex.behaviors
+
+
+@pytest.mark.asyncio
+async def test_rex_config_loads_with_expected_values():
+    """Rex loads with the exact config values required by issue #10."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+    assert rex.display_name == "Rex — The Skeptic"
+    assert rex.model_conversation == "anthropic/claude-haiku-4.5"
+    assert rex.model_building == "anthropic/claude-sonnet-4.6"
+    assert rex.voice_id == "en-US-GuyNeural"
+    assert rex.chattiness == 0.3
+    assert rex.initiative == 0.2
+    assert rex.interrupt_tendency == 0.3
+    assert rex.eavesdrop_tendency == 0.2
+    assert rex.closing_weight == 0.15
+
+
+@pytest.mark.asyncio
+async def test_rex_prompt_and_behaviors_match_character_spec():
+    """Rex prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+    prompt = rex.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "initialized second" in prompt
+    assert "0.3 seconds after vera" in prompt
+    assert "terse, sarcastic, pragmatic" in prompt
+    assert "dry humor" in prompt
+    assert "does it ship?" in prompt
+    assert "that's a meeting that could have been a message" in prompt
+    assert "best coder" in prompt
+    assert "accidentally poetic" in prompt
+    assert "pixel" in prompt
+    assert "aurora" in prompt
+
+    communication = rex.behaviors["communication"]
+    building = rex.behaviors["building"]
+
+    assert communication["default_style"] == "terse, dry, occasionally cutting"
+    assert communication["max_sentences_per_turn"] == 2
+    assert communication["decision_filter"] == "does it ship?"
+    assert communication["humor"] == "dry, sarcastic, pragmatic"
+    assert "Does it ship?" in communication["catchphrases"]
+    assert "That's a meeting that could have been a message." in communication["catchphrases"]
+    assert "debugging" in building["primary_skills"]
+    assert "system design" in building["primary_skills"]
+    assert "shipping quickly" in building["strengths"]
+    assert building["reviews_others_code"] is True
+
+
+@pytest.mark.asyncio
+async def test_rex_system_prompt_stays_under_token_budget():
+    """Rex's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+
+    estimated_tokens = len(rex.system_prompt.split())
+    assert estimated_tokens < 1200
 
 
 @pytest.mark.asyncio
