@@ -9,9 +9,9 @@ The live codebase is narrower than the long-form specs and older docs suggest. T
 - a FastAPI backend with a health route and WebSocket event bus
 - async PostgreSQL and Redis clients
 - raw SQL migrations and typed repository classes
-- YAML-backed agent config loading from `agents/*`, including `config.yaml`, `behaviors.yaml`, and `system_prompt.md`
+- YAML-backed agent config loading from `agents/*`
 - a small Vite TypeScript frontend package with agent constants/tests
-- a Next.js website with static route pages, shared TS types, and an API client that targets future backend routes not yet implemented
+- a Next.js website with static pages and an API client for future backend routes
 
 Special agent rules are real and should be preserved:
 - `overseer` is an intervention-only safety agent with `chattiness: 0.0` and `initiative: 0.0`
@@ -23,15 +23,15 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 
 - Python: local development is pinned to Python `3.13` via `.python-version`; project metadata allows `>=3.12,<3.14`
 - Backend: FastAPI, asyncpg, redis.asyncio, httpx, pydantic v2, pydantic-settings
-- LLM integration: OpenRouter client in `core/llm_client.py` with a fixed `MODEL_REGISTRY`; Langfuse hooks are present; CrewAI is installed but not wired into the running app
+- LLM integration: OpenRouter client in `core/llm_client.py` with a fixed `MODEL_REGISTRY`; CrewAI is installed but not yet wired into `core/main.py`
 - Data layer: PostgreSQL 16 with `pgvector` and `pg_trgm`, plus raw SQL migrations under `db/migrations`
 - Realtime: WebSocket event bus in `core/event_bus.py`
-- Support services: Redis 7 and Langfuse via `docker-compose.yaml`
-- Frontend package: Vite 6 + TypeScript 5 + Phaser 3 in `frontend/`
+- Observability/support services: Redis 7 and Langfuse via `docker-compose.yaml`
+- Frontend package: Vite + TypeScript + Phaser 3 in `frontend/`
 - Website: Next.js 16 + React 19 + Tailwind CSS 4 in `website/`
 - Local ports that appear in code/config:
-  - backend: `8010`
-  - website: `4000` in the root dev script, `3000` when running plain `next dev`
+  - backend: `8010` in root dev scripts and root `.env.example`
+  - website: `3000` by default
   - frontend Vite: `5173`
   - Redis: `6381`
   - PostgreSQL: `5434`
@@ -40,12 +40,12 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 ## Directory Structure
 
 ```text
-agents/                 YAML agent configs, behaviors, and system prompts for all 9 agents
+agents/                 YAML agent configs, system prompts, and behaviors for all 9 agents
 core/                   FastAPI app, database/redis clients, event bus, model registry, Pydantic models
-core/repos/             Typed repository layer for agents, conversations, memory, costs, transcripts, and world data
+core/repos/             Typed repository layer for agents, memory, conversations, costs, transcripts, world
 db/                     Raw SQL migration runner, init SQL, and numbered up/down migrations
 frontend/               Small TypeScript package; currently agent constants/tests, not a full Phaser world app
-website/                Next.js app router site, navigation/components, shared TS types, and static pages
+website/                Next.js app router site, API client, shared TS types, and static pages
 scripts/                Small utility scripts; currently `check-services.sh`
 specs/                  Product and architecture reference docs; useful context, not the runtime source of truth
 tools/                  Placeholder Python package only; do not assume tool modules exist yet
@@ -53,11 +53,10 @@ tools/                  Placeholder Python package only; do not assume tool modu
 
 Important files:
 - `core/main.py` defines the current FastAPI surface: `/api/health` and `/ws`
-- `core/agent_registry.py` loads agent configs from disk, validates model names, and syncs status through Redis
-- `core/llm_client.py` defines allowed model names, aliases, and cost metadata
-- `core/models.py` is the source of backend Pydantic schemas used by repos and config loading
-- `db/migrate.py` is the raw SQL migration entry point for `python -m db`
-- `website/src/lib/api.ts` calls planned REST endpoints like `/api/agents` and `/api/world/*` that the backend does not currently expose
+- `core/agent_registry.py` loads agent configs from disk and syncs status through Redis
+- `core/llm_client.py` defines allowed model names and cost metadata
+- `db/migrate.py` is the migration entry point for `python -m db`
+- `website/src/lib/api.ts` assumes future REST routes that the backend does not currently expose
 
 ## Code Style
 
@@ -67,8 +66,7 @@ Important files:
 - Ruff is configured with `target-version = "py312"` and `line-length = 100`; keep imports grouped as stdlib, third-party, local
 - TypeScript is strict in both `frontend/` and `website/`; keep types explicit and avoid weakening configs with `any`
 - `website/` uses the Next.js app router and the `@/*` path alias; `frontend/` does not have that alias
-- Keep shared agent identity and model fields consistent across YAML configs, DB seeds, and TypeScript constants when you intentionally change them
-- When editing agent configs, remember `AgentRegistry` reads disk files directly and merges `config.yaml` with optional `behaviors.yaml` and `system_prompt.md`
+- Keep shared agent identity fields consistent across YAML configs, DB seeds, and TypeScript constants when you intentionally change them
 
 ## Non-Negotiables
 
@@ -77,6 +75,6 @@ Important files:
 - Do not describe planned systems as implemented. In the current backend, the only live FastAPI routes are `/api/health` and `/ws`
 - Do not assume the old README architecture is fully built; there is no implemented conversation loop, CrewAI task runner, or populated `tools/` module in `core/` today
 - Preserve the special handling of `overseer` and `alpha`; they are not standard conversational agents
-- When touching model names, keep them in sync with `core/llm_client.py`, the YAML configs under `agents/`, and the seed data in `db/migrations/002_seed_agents.up.sql`
-- When touching ports or env defaults, keep root `.env.example`, `website/.env.example`, `package.json`, `docker-compose.yaml`, and `website/next.config.ts` aligned around backend port `8010`
+- When touching model names, keep them in sync with `core/llm_client.py` and the YAML configs under `agents/`
+- When touching ports or env defaults, keep root `.env.example`, `package.json`, `docker-compose.yaml`, and `website/next.config.ts` aligned around backend port `8010`
 - Treat `specs/` and `README.md` as reference material. If they disagree with live code, prefer the live code and update docs rather than coding to outdated prose
