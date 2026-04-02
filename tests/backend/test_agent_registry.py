@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,9 +11,16 @@ import yaml
 from pydantic import ValidationError
 
 from core.agent_registry import AgentRegistry
+from core.llm_client import MODEL_REGISTRY
 from core.models import AgentConfig, AgentStatus
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "agents"
+PROMPT_TOKEN_BUDGET = 512
+
+
+def estimate_token_count(text: str) -> int:
+    """Estimate tokens conservatively without adding a tokenizer dependency."""
+    return math.ceil(len(text) / 4)
 
 
 # ── Config validation ────────────────────────────────────────────
@@ -170,6 +178,8 @@ async def test_fork_config_loads_with_expected_values():
     assert fork is not None
     assert fork.model_conversation == "deepseek-v3.2"
     assert fork.model_building == "deepseek-v3.2"
+    assert MODEL_REGISTRY[fork.model_conversation].openrouter_id == "deepseek/deepseek-chat-v3.2"
+    assert MODEL_REGISTRY[fork.model_building].openrouter_id == "deepseek/deepseek-chat-v3.2"
     assert fork.voice_id == "en-AU-WilliamNeural"
     assert fork.chattiness == 0.5
     assert fork.initiative == 0.3
@@ -203,12 +213,12 @@ async def test_fork_prompt_and_behaviors_match_character():
     assert "license" in building["license_checking"].lower()
 
 
-def test_fork_system_prompt_stays_under_word_budget():
-    """Fork's prompt stays concise enough to leave room for runtime context."""
+def test_fork_system_prompt_stays_under_token_budget():
+    """Fork's prompt leaves enough room for runtime context in the model input."""
     prompt_path = AGENTS_DIR / "fork" / "system_prompt.md"
     prompt_text = prompt_path.read_text()
 
-    assert len(prompt_text.split()) <= 400
+    assert estimate_token_count(prompt_text) <= PROMPT_TOKEN_BUDGET
 
 
 # ── Status management ────────────────────────────────────────────
