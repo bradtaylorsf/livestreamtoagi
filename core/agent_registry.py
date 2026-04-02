@@ -22,6 +22,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 VALID_MODEL_NAMES = set(MODEL_REGISTRY.keys())
+MODEL_NAME_ALIASES = {
+    # Support issue/spec strings while normalizing to the internal registry key.
+    "deepseek/deepseek-v3.2": "deepseek-v3.2",
+    "deepseek/deepseek-chat-v3.2": "deepseek-v3.2",
+}
 REDIS_STATUS_PREFIX = "agent:status:"
 
 
@@ -78,6 +83,10 @@ class AgentRegistry:
         config_path = agent_dir / "config.yaml"
         with open(config_path) as f:
             raw: dict[str, Any] = yaml.safe_load(f)
+
+        for field in ("model_conversation", "model_building"):
+            raw_model_name = raw.get(field, "")
+            raw[field] = MODEL_NAME_ALIASES.get(raw_model_name, raw_model_name)
 
         # Validate model names
         for field in ("model_conversation", "model_building"):

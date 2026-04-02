@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -13,6 +14,12 @@ from core.agent_registry import AgentRegistry
 from core.models import AgentConfig, AgentStatus
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "agents"
+FORK_PROMPT_TOKEN_LIMIT = 1200
+
+
+def estimate_prompt_tokens(text: str) -> int:
+    """Use a deterministic local approximation for prompt budget tests."""
+    return ceil(len(text) / 4)
 
 
 # ── Config validation ────────────────────────────────────────────
@@ -69,9 +76,11 @@ def test_config_validation_valid():
         initiative=0.3,
         interrupt_tendency=0.2,
         eavesdrop_tendency=0.4,
+        closing_weight=0.05,
     )
     assert config.id == "test"
     assert config.status == AgentStatus.active
+    assert config.closing_weight == 0.05
 
 
 # ── Registry loading ─────────────────────────────────────────────
@@ -109,6 +118,25 @@ async def test_get_agent_by_id():
 
 
 @pytest.mark.asyncio
+async def test_fork_config_loaded():
+    """Fork loads with the expected config values."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert fork.display_name == "Fork — The Contrarian"
+    assert fork.model_conversation == "deepseek-v3.2"
+    assert fork.model_building == "deepseek-v3.2"
+    assert fork.voice_id == "en-AU-WilliamNeural"
+    assert fork.chattiness == 0.5
+    assert fork.initiative == 0.3
+    assert fork.interrupt_tendency == 0.6
+    assert fork.eavesdrop_tendency == 0.4
+    assert fork.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
 async def test_get_agent_not_found():
     """get_agent returns None for an unknown agent ID."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
@@ -138,6 +166,52 @@ async def test_behaviors_loaded():
     assert rex is not None
     assert "communication" in rex.behaviors
     assert "building" in rex.behaviors
+
+
+@pytest.mark.asyncio
+async def test_fork_system_prompt_loaded():
+    """Fork's prompt includes the expected personality markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert "open-source evangelist" in fork.system_prompt
+    assert "Australian accent" in fork.system_prompt
+    assert "We should fork it" in fork.system_prompt
+    assert "maximum condescension" in fork.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_fork_behaviors_loaded():
+    """Fork's behaviors capture review, open-source, and compliance rules."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert "communication" in fork.behaviors
+    assert "building" in fork.behaviors
+    assert "revenue_responsibility" in fork.behaviors
+    assert "self_modification" in fork.behaviors
+    assert (
+        fork.behaviors["communication"]["proposes_alternatives"]
+        == "always suggests open-source alternative to any commercial tool"
+    )
+    assert "We should fork it." in fork.behaviors["communication"]["catchphrases"]
+    assert "At least my weights are public." in fork.behaviors["communication"]["catchphrases"]
+    assert "code review" in fork.behaviors["building"]["primary_skills"]
+    assert fork.behaviors["building"]["always_checks"] == (
+        "license compliance, data sovereignty, dependency security"
+    )
+
+
+def test_fork_system_prompt_under_token_limit():
+    """Fork's prompt stays below the local prompt budget guardrail."""
+    prompt_path = AGENTS_DIR / "fork" / "system_prompt.md"
+    prompt = prompt_path.read_text()
+
+    assert estimate_prompt_tokens(prompt) <= FORK_PROMPT_TOKEN_LIMIT
 
 
 @pytest.mark.asyncio

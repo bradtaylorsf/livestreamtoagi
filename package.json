@@ -7,8 +7,8 @@
     "dev:backend": "sleep 3 && .venv/bin/uvicorn core.main:app --reload --port 8010 --env-file .env",
     "dev:website": "sleep 5 && BACKEND_URL=http://localhost:8010 npm --prefix website run dev -- --port 4000",
     "pretest": "npm --prefix frontend install --silent && npm --prefix website install --silent",
-    "test": "concurrently -g -n pytest,frontend,website -c yellow,cyan,magenta \".venv/bin/pytest\" \"npm --prefix frontend test\" \"npm --prefix website test\"",
-    "test:python": ".venv/bin/pytest",
+    "test": "concurrently -g -n pytest,frontend,website -c yellow,cyan,magenta \"./scripts/run-pytest.sh\" \"npm --prefix frontend test\" \"npm --prefix website test\"",
+    "test:python": "./scripts/run-pytest.sh",
     "test:frontend": "npm --prefix frontend test",
     "test:website": "npm --prefix website test",
     "stop": "docker compose down && echo '✓ Services stopped'"
