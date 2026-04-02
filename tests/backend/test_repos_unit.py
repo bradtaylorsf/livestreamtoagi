@@ -330,7 +330,7 @@ async def test_memory_add_buffer_entry():
     }
     repo = MemoryRepo(db)
     entry = await repo.add_buffer_entry(
-        ConversationBufferCreate(agent_id="rex", role="agent", speaker="rex", content="Hmm.")
+        ConversationBufferCreate(agent_id="rex", role="assistant", speaker="rex", content="Hmm.")
     )
     assert entry.content == "Hmm."
 

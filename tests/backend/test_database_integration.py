@@ -145,9 +145,9 @@ async def test_agent_crud(db):
     assert vera.display_name == "Vera"
 
     # Update status
-    updated = await repo.update_status("vera", "idle")
+    updated = await repo.update_status("vera", "sleeping")
     assert updated is not None
-    assert updated.status == "idle"
+    assert updated.status == "sleeping"
 
     # Create a new agent
     new_agent = await repo.create(

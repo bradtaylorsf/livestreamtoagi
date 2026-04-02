@@ -36,8 +36,6 @@ class Database:
         max_size: int = 20,
     ) -> None:
         self.dsn = dsn or os.getenv("DATABASE_URL")
-        if not self.dsn:
-            raise RuntimeError("DATABASE_URL environment variable is required")
         self.min_size = min_size
         self.max_size = max_size
         self._pool: asyncpg.Pool | None = None
@@ -50,6 +48,8 @@ class Database:
 
     async def connect(self, *, retries: int = 3, delay: float = 2.0) -> None:
         """Create the connection pool with retry logic."""
+        if not self.dsn:
+            raise RuntimeError("DATABASE_URL environment variable is required")
         for attempt in range(1, retries + 1):
             try:
                 self._pool = await asyncpg.create_pool(

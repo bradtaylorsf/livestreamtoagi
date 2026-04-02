@@ -173,9 +173,11 @@ async def test_status_transitions():
     assert vera.status == AgentStatus.active
 
     await registry.set_status("vera", AgentStatus.paused)
+    vera = registry.get_agent("vera")
     assert vera.status == AgentStatus.paused
 
     await registry.set_status("vera", AgentStatus.active)
+    vera = registry.get_agent("vera")
     assert vera.status == AgentStatus.active
 
 
