@@ -1,9 +1,10 @@
 id: pixel
 display_name: "Pixel — The Enthusiast"
-model_conversation: gpt-4o-mini
-model_building: gpt-5.2
+model_conversation: openai/gpt-4o-mini
+model_building: openai/gpt-5.2
 voice_id: en-US-DavisNeural
 chattiness: 0.9
 initiative: 0.7
 interrupt_tendency: 0.5
 eavesdrop_tendency: 0.7
+closing_weight: 0.05
