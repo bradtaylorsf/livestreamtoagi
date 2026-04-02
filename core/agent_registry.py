@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 VALID_MODEL_NAMES = set(MODEL_REGISTRY.keys())
+MODEL_NAME_ALIASES = {
+    "deepseek/deepseek-v3.2": "deepseek-v3.2",
+}
 REDIS_STATUS_PREFIX = "agent:status:"
 
 
@@ -82,12 +85,12 @@ class AgentRegistry:
         # Validate model names
         for field in ("model_conversation", "model_building"):
             model_name = raw.get(field, "")
-            if model_name not in VALID_MODEL_NAMES:
+            canonical_model_name = MODEL_NAME_ALIASES.get(model_name, model_name)
+            if canonical_model_name not in VALID_MODEL_NAMES:
                 raise ValueError(
                     f"Agent '{raw.get('id', agent_dir.name)}' has invalid {field}: "
                     f"'{model_name}'. Valid models: {sorted(VALID_MODEL_NAMES)}"
                 )
-
         # Load system prompt
         prompt_path = agent_dir / "system_prompt.md"
         system_prompt = ""

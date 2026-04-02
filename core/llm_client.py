@@ -27,6 +27,9 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 MAX_RETRIES = 3
 BACKOFF_BASE = 1  # seconds
 MAX_RETRY_AFTER = 60  # cap Retry-After header
+MODEL_NAME_ALIASES = {
+    "deepseek/deepseek-v3.2": "deepseek-v3.2",
+}
 
 
 @dataclass
@@ -131,12 +134,13 @@ class OpenRouterClient:
             await self._client.aclose()
 
     def _resolve_model(self, model: str) -> ModelConfig:
-        if model not in MODEL_REGISTRY:
+        canonical_model = MODEL_NAME_ALIASES.get(model, model)
+        if canonical_model not in MODEL_REGISTRY:
             raise ValueError(
                 f"Unknown model '{model}'. "
                 f"Available: {', '.join(sorted(MODEL_REGISTRY))}"
             )
-        return MODEL_REGISTRY[model]
+        return MODEL_REGISTRY[canonical_model]
 
     async def _log_cost(
         self,
