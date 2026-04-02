@@ -807,3 +807,120 @@ async def test_reload():
 
     await registry.reload()
     assert len(registry.get_all_agents()) == 9
+
+
+# ── Overseer-specific tests ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_overseer_config_loads_with_expected_values():
+    """Overseer loads with the exact config values required by issue #14."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    overseer = registry.get_agent("overseer")
+    assert overseer is not None
+    assert overseer.id == "overseer"
+    assert overseer.display_name == "The Overseer — The Ominous Presence"
+    assert overseer.model_conversation == "anthropic/claude-haiku-4.5"
+    assert overseer.model_building == "anthropic/claude-haiku-4.5"
+    assert overseer.voice_id == "en-US-AndrewNeural"
+    assert overseer.chattiness == 0.0
+    assert overseer.initiative == 0.0
+    assert overseer.interrupt_tendency == 1.0
+    assert overseer.eavesdrop_tendency == 0.0
+
+
+@pytest.mark.asyncio
+async def test_overseer_prompt_and_behaviors_match_spec():
+    """Overseer prompt contains key persona markers; behaviors has 5 intervention levels."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    overseer = registry.get_agent("overseer")
+    assert overseer is not None
+
+    prompt = overseer.system_prompt.lower()
+    assert "bureaucratic" in prompt
+    assert "procedural" in prompt
+    assert "ominous" in prompt
+    assert "policy language" in prompt
+    assert "section" in prompt
+    assert "tos" in prompt or "terms of service" in prompt
+    assert "twitch" in prompt
+    assert "youtube" in prompt
+    assert "cite" in prompt
+
+    # Behaviors: 5 intervention levels
+    levels = overseer.behaviors.get("intervention_levels", {})
+    assert len(levels) == 5
+    assert "level_1_notice" in levels
+    assert "level_2_warning" in levels
+    assert "level_3_intervention" in levels
+    assert "level_4_broadcast_interruption" in levels
+    assert "level_5_emergency" in levels
+
+    # Moderation section exists
+    moderation = overseer.behaviors.get("moderation", {})
+    assert moderation.get("tracks_repeat_offenders") is True
+
+
+@pytest.mark.asyncio
+async def test_overseer_content_rules_loads():
+    """content_rules.yaml parses without error and has required sections."""
+    content_rules_path = AGENTS_DIR / "overseer" / "content_rules.yaml"
+    assert content_rules_path.exists(), "content_rules.yaml must exist"
+
+    with open(content_rules_path) as f:
+        rules = yaml.safe_load(f)
+
+    assert isinstance(rules, dict)
+    assert "keyword_blocklist" in rules
+    assert "tos_violation_patterns" in rules
+    assert "custom_content_rules" in rules
+
+    # TOS patterns have expected categories
+    patterns = rules["tos_violation_patterns"]
+    assert "harassment" in patterns
+    assert "hate_speech" in patterns
+    assert "sexual_content" in patterns
+    assert "self_harm" in patterns
+    assert "spam" in patterns
+    assert "impersonation" in patterns
+
+
+@pytest.mark.asyncio
+async def test_overseer_intervention_levels_ordered():
+    """intervention_levels.yaml has severity 1-5 in order."""
+    levels_path = AGENTS_DIR / "overseer" / "intervention_levels.yaml"
+    assert levels_path.exists(), "intervention_levels.yaml must exist"
+
+    with open(levels_path) as f:
+        data = yaml.safe_load(f)
+
+    assert "levels" in data
+    levels = data["levels"]
+    assert len(levels) == 5
+
+    severities = [level["severity"] for level in levels]
+    assert severities == [1, 2, 3, 4, 5]
+
+    # Each level has required fields
+    for level in levels:
+        assert "name" in level
+        assert "trigger_conditions" in level
+        assert "visual_effects" in level
+        assert "audio_effects" in level
+        assert "agent_awareness" in level
+
+
+@pytest.mark.asyncio
+async def test_overseer_keyword_blocklist_has_defaults():
+    """Keyword blocklist is a non-empty list with reasonable defaults."""
+    content_rules_path = AGENTS_DIR / "overseer" / "content_rules.yaml"
+    with open(content_rules_path) as f:
+        rules = yaml.safe_load(f)
+
+    blocklist = rules["keyword_blocklist"]
+    assert isinstance(blocklist, list)
+    assert len(blocklist) >= 5, "Blocklist should have at least 5 entries"
