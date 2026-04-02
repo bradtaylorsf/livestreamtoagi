@@ -10,9 +10,6 @@ import asyncpg
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DATABASE_URL = "postgresql://agi:devpassword@localhost:5434/livestream_agi"
-
-
 async def _init_connection(conn: asyncpg.Connection) -> None:
     """Register custom codecs on each new connection (e.g. pgvector)."""
     try:
@@ -38,7 +35,7 @@ class Database:
         min_size: int = 5,
         max_size: int = 20,
     ) -> None:
-        self.dsn = dsn or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+        self.dsn = dsn or os.getenv("DATABASE_URL")
         self.min_size = min_size
         self.max_size = max_size
         self._pool: asyncpg.Pool | None = None
@@ -51,6 +48,8 @@ class Database:
 
     async def connect(self, *, retries: int = 3, delay: float = 2.0) -> None:
         """Create the connection pool with retry logic."""
+        if not self.dsn:
+            raise RuntimeError("DATABASE_URL environment variable is required")
         for attempt in range(1, retries + 1):
             try:
                 self._pool = await asyncpg.create_pool(

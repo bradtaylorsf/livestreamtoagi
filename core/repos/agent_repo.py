@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 from core.models import Agent, AgentCreate
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from core.database import Database
 
 
-def _row_to_agent(row) -> Agent:
+def _row_to_agent(row: asyncpg.Record) -> Agent:
     return Agent(**dict(row))
 
 

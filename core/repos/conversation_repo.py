@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from core.models import (
     Conversation,
@@ -12,20 +12,17 @@ from core.models import (
     SelectionLog,
     SelectionLogCreate,
 )
+from core.repos.utils import serialize_jsonb
 
 if TYPE_CHECKING:
     import uuid
 
+    import asyncpg
+
     from core.database import Database
 
 
-def _serialize_jsonb(val: Any) -> str | None:
-    if val is None:
-        return None
-    return json.dumps(val) if not isinstance(val, str) else val
-
-
-def _row_to_conversation(row) -> Conversation:
+def _row_to_conversation(row: asyncpg.Record) -> Conversation:
     d = dict(row)
     for key in ("trigger_details", "participating_agents", "topics_discussed"):
         if isinstance(d.get(key), str):
@@ -47,9 +44,9 @@ class ConversationRepo:
                    RETURNING *""",
                 conv.id,
                 conv.trigger_type,
-                _serialize_jsonb(conv.trigger_details),
+                serialize_jsonb(conv.trigger_details),
                 conv.initial_energy,
-                _serialize_jsonb(conv.participating_agents),
+                serialize_jsonb(conv.participating_agents),
                 conv.location,
                 conv.config_hash,
             )
@@ -61,9 +58,9 @@ class ConversationRepo:
                    VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6)
                    RETURNING *""",
                 conv.trigger_type,
-                _serialize_jsonb(conv.trigger_details),
+                serialize_jsonb(conv.trigger_details),
                 conv.initial_energy,
-                _serialize_jsonb(conv.participating_agents),
+                serialize_jsonb(conv.participating_agents),
                 conv.location,
                 conv.config_hash,
             )
@@ -103,11 +100,11 @@ class ConversationRepo:
             entry.turn_number,
             entry.selected_agent_id,
             entry.was_interrupt,
-            _serialize_jsonb(entry.agent_scores),
+            serialize_jsonb(entry.agent_scores),
             entry.detected_topic,
             entry.previous_speaker_id,
             entry.conversation_energy,
-            _serialize_jsonb(entry.active_agents),
+            serialize_jsonb(entry.active_agents),
             entry.trigger_type,
             entry.config_hash,
         )

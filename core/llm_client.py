@@ -268,13 +268,17 @@ class OpenRouterClient:
         latency_ms = int((time.monotonic() - start) * 1000)
 
         if resp.status_code != 200:
+            logger.debug("OpenRouter error body: %s", resp.text)
             raise LLMError(
-                f"OpenRouter returned {resp.status_code}: {resp.text}",
+                f"OpenRouter returned {resp.status_code}",
                 status_code=resp.status_code,
             )
 
         data = resp.json()
-        content = data["choices"][0]["message"]["content"] or ""
+        choices = data.get("choices")
+        if not choices:
+            raise LLMError("OpenRouter returned no choices in response")
+        content = choices[0]["message"]["content"] or ""
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
@@ -324,8 +328,9 @@ class OpenRouterClient:
         if resp.status_code != 200:
             body = await resp.aread()
             await resp.aclose()
+            logger.debug("OpenRouter stream error body: %s", body.decode(errors="replace"))
             raise LLMError(
-                f"OpenRouter returned {resp.status_code}: {body.decode()}",
+                f"OpenRouter returned {resp.status_code}",
                 status_code=resp.status_code,
             )
 

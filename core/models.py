@@ -6,7 +6,7 @@ import enum
 import uuid  # noqa: TC003
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,7 +43,7 @@ class AgentCreate(BaseModel):
 class AgentConfig(BaseModel):
     """Rich agent configuration loaded from YAML files."""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, frozen=True)
     id: str
     display_name: str
     model_conversation: str
@@ -55,7 +55,7 @@ class AgentConfig(BaseModel):
     eavesdrop_tendency: float = Field(ge=0.0, le=1.0, default=0.0)
     status: AgentStatus = AgentStatus.active
     system_prompt: str = ""
-    behaviors: dict[str, Any] = {}
+    behaviors: dict[str, Any] = {}  # YAML-defined structure, varies per agent
 
 
 # ── Core Memory ─────────────────────────────────────────────────
@@ -119,7 +119,7 @@ class ConversationBuffer(BaseModel):
 
 class ConversationBufferCreate(BaseModel):
     agent_id: str
-    role: str
+    role: Literal["user", "assistant", "system"]
     speaker: str | None = None
     content: str
 
@@ -155,8 +155,8 @@ class Conversation(BaseModel):
     initial_energy: float
     final_energy: float | None = None
     turn_count: int = 0
-    participating_agents: Any
-    topics_discussed: Any | None = None
+    participating_agents: list[str]
+    topics_discussed: list[str] | None = None
     closed_by: str | None = None
     location: str | None = None
     audience_events_during: int = 0
@@ -168,7 +168,7 @@ class ConversationCreate(BaseModel):
     trigger_type: str
     trigger_details: dict[str, Any] | None = None
     initial_energy: float
-    participating_agents: Any
+    participating_agents: list[str]
     location: str | None = None
     config_hash: str | None = None
 
@@ -183,11 +183,11 @@ class SelectionLog(BaseModel):
     timestamp: datetime | None = None
     selected_agent_id: str
     was_interrupt: bool = False
-    agent_scores: dict[str, Any]
+    agent_scores: dict[str, float]
     detected_topic: str | None = None
     previous_speaker_id: str | None = None
     conversation_energy: float | None = None
-    active_agents: Any | None = None
+    active_agents: list[str] | None = None
     trigger_type: str | None = None
     config_hash: str | None = None
 
@@ -197,11 +197,11 @@ class SelectionLogCreate(BaseModel):
     turn_number: int
     selected_agent_id: str
     was_interrupt: bool = False
-    agent_scores: dict[str, Any]
+    agent_scores: dict[str, float]
     detected_topic: str | None = None
     previous_speaker_id: str | None = None
     conversation_energy: float | None = None
-    active_agents: Any | None = None
+    active_agents: list[str] | None = None
     trigger_type: str | None = None
     config_hash: str | None = None
 
@@ -242,11 +242,11 @@ class WorldChunk(BaseModel):
     width: int
     height: int
     tile_data: dict[str, Any]
-    objects: Any | None = None
+    objects: list[dict[str, Any]] | None = None
     built_by: list[str] | None = None
     built_date: datetime | None = None
     description: str | None = None
-    proposal_votes: Any | None = None
+    proposal_votes: dict[str, int] | None = None
     tileset_url: str | None = None
 
 
@@ -257,7 +257,7 @@ class WorldChunkCreate(BaseModel):
     width: int
     height: int
     tile_data: dict[str, Any]
-    objects: Any | None = None
+    objects: list[dict[str, Any]] | None = None
     built_by: list[str] | None = None
     description: str | None = None
     tileset_url: str | None = None

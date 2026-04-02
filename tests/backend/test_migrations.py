@@ -88,9 +88,11 @@ async def test_migration_idempotent(conn):
 @pytest.mark.integration
 async def test_rollback(conn):
     await up(conn)
+    # Roll back schema hardening
+    await down(conn)
     # Roll back seed data
     await down(conn)
-    # Roll back schema
+    # Roll back initial schema
     await down(conn)
 
     rows = await conn.fetch(
