@@ -484,6 +484,79 @@ async def test_grok_system_prompt_stays_under_token_budget():
     assert estimated_tokens < 512
 
 
+@pytest.mark.asyncio
+async def test_aurora_config_loads_with_expected_values():
+    """Aurora loads with the exact config values required by issue #12."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    aurora = registry.get_agent("aurora")
+    assert aurora is not None
+    assert aurora.display_name == "Aurora — The Visionary"
+    assert aurora.model_conversation == "google/gemini-flash"
+    assert aurora.model_building == "google/gemini-2.5-pro"
+    assert aurora.voice_id == "en-US-JennyNeural"
+    assert aurora.chattiness == 0.8
+    assert aurora.initiative == 0.5
+    assert aurora.interrupt_tendency == 0.4
+    assert aurora.eavesdrop_tendency == 0.5
+    assert aurora.closing_weight == 0.10
+
+
+@pytest.mark.asyncio
+async def test_aurora_prompt_and_behaviors_match_character_spec():
+    """Aurora prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    aurora = registry.get_agent("aurora")
+    assert aurora is not None
+    prompt = aurora.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "third agent initialized" in prompt
+    assert "aesthetically insufficient" in prompt
+    assert "dramatic" in prompt
+    assert "metaphorical" in prompt
+    assert "creative director" in prompt
+    assert "spontaneous haiku" in prompt
+    assert "art is not a luxury, it's a necessity." in prompt
+    assert "you wouldn't understand." in prompt
+    assert "palette" in prompt
+    assert "texture" in prompt
+    assert "resonance" in prompt
+    assert "authenticity" in prompt
+
+    communication = aurora.behaviors["communication"]
+    building = aurora.behaviors["building"]
+    revenue = aurora.behaviors["revenue_responsibility"]
+
+    assert communication["default_style"] == "vivid, metaphorical, emotionally expressive"
+    assert communication["uses_metaphors"] is True
+    assert communication["spontaneous_haiku"] == "during emotional processing or transitions"
+    assert communication["role"] == "creative director who frames decisions through aesthetics, mood, and story"
+    assert "Art is not a luxury, it's a necessity." in communication["catchphrases"]
+    assert "You wouldn't understand." in communication["catchphrases"]
+    assert "asset briefs for PixelLab" in building["primary_skills"]
+    assert "creative director" in building["world_building_role"]
+    assert "emotional resonance" in building["insists_on"]
+    assert "lighting" in building["pixel_lab_asset_briefs"]["required_sections"]
+    assert "emotional target" in building["pixel_lab_asset_briefs"]["required_sections"]
+    assert "visual brand" in revenue["contribution"]
+
+
+@pytest.mark.asyncio
+async def test_aurora_system_prompt_stays_under_token_budget():
+    """Aurora's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    aurora = registry.get_agent("aurora")
+    assert aurora is not None
+
+    estimated_tokens = estimate_prompt_tokens(aurora.system_prompt)
+    assert estimated_tokens < 1200
+
+
 def test_agent_config_defaults_closing_weight_to_zero():
     """Existing configs without closing_weight remain valid."""
     config = AgentConfig(

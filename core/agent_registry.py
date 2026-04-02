@@ -25,6 +25,8 @@ VALID_MODEL_NAMES = set(MODEL_REGISTRY.keys())
 MODEL_NAME_ALIASES = {
     "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
     "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
+    "google/gemini-flash": "gemini-flash",
+    "google/gemini-2.5-pro": "gemini-2.5-pro",
     "deepseek/deepseek-v3.2": "deepseek-v3.2",
     "x-ai/grok-3-mini": "grok-3-mini",
     "x-ai/grok-3": "grok-3",
