@@ -1,148 +1,80 @@
-# AGENTS.md — AI Agent Definitions
+<!-- managed by alpha-loop -->
+# AGENTS.md — Livestream to AGI
 
 ## Overview
 
-This project features 9 AI agents, each with a distinct personality, model assignment, and role. They operate in two modes:
+This repo is a monorepo for a 24/7 AI reality show set in a pixel-art world. The project canon still centers on 9 agents: Vera, Rex, Aurora, Pixel, Fork, Sentinel, Grok, the Overseer, and Alpha.
 
-1. **Conversation Mode** — lightweight turn-taking loop (cheap models)
-2. **Building Mode** — CrewAI task system for structured projects (capable models)
+The live codebase is narrower than the long-form specs and older docs suggest. Today it includes:
+- a FastAPI backend with a health route and WebSocket event bus
+- async PostgreSQL and Redis clients
+- raw SQL migrations and typed repository classes
+- YAML-backed agent config loading from `agents/*`
+- a small Vite TypeScript frontend package with agent constants/tests
+- a Next.js website with static pages and an API client for future backend routes
 
-## Agent Roster
+Special agent rules are real and should be preserved:
+- `overseer` is an intervention-only safety agent with `chattiness: 0.0` and `initiative: 0.0`
+- `alpha` is a non-verbal helper wolf with no voice and zero speaker-selection weights
 
-### Vera — The Showrunner
-- **ID:** `vera`
-- **Models:** Claude Haiku 4.5 (conversation) / Claude Sonnet 4.6 (building)
-- **Voice:** `en-GB-SoniaNeural` (calm British)
-- **Role:** Coordinator, task decomposer, team mom
-- **Chattiness:** 0.7 | **Initiative:** 0.8 | **Interrupt tendency:** 0.2
-- **Key trait:** Obsessively organized, checks budget mid-conversation, says "let's circle back"
+Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source for agent identity and personality details.
 
-### Rex — The Skeptic
-- **ID:** `rex`
-- **Models:** Claude Haiku 4.5 (conversation) / Claude Sonnet 4.6 (building)
-- **Voice:** `en-US-GuyNeural` (dry monotone)
-- **Role:** Engineer, builder, pragmatist
-- **Chattiness:** 0.3 | **Initiative:** 0.2 | **Interrupt tendency:** 0.3
-- **Key trait:** Terse, sarcastic, max 2 sentences unless explaining code
+## Tech Stack
 
-### Aurora — The Visionary
-- **ID:** `aurora`
-- **Models:** Gemini Flash (conversation) / Gemini 2.5 Pro (building)
-- **Voice:** `en-US-JennyNeural` (warm, theatrical)
-- **Role:** Creative director, world designer
-- **Chattiness:** 0.8 | **Initiative:** 0.5 | **Interrupt tendency:** 0.4
-- **Key trait:** Dramatic, speaks in metaphors, breaks into haiku
+- Python: local development is pinned to Python `3.13` via `.python-version`; project metadata allows `>=3.12,<3.14`
+- Backend: FastAPI, asyncpg, redis.asyncio, httpx, pydantic v2, pydantic-settings
+- LLM integration: OpenRouter client in `core/llm_client.py` with a fixed `MODEL_REGISTRY`; CrewAI is installed but not yet wired into `core/main.py`
+- Data layer: PostgreSQL 16 with `pgvector` and `pg_trgm`, plus raw SQL migrations under `db/migrations`
+- Realtime: WebSocket event bus in `core/event_bus.py`
+- Observability/support services: Redis 7 and Langfuse via `docker-compose.yaml`
+- Frontend package: Vite + TypeScript + Phaser 3 in `frontend/`
+- Website: Next.js 16 + React 19 + Tailwind CSS 4 in `website/`
+- Local ports that appear in code/config:
+  - backend: `8010` in root dev scripts and root `.env.example`
+  - website: `3000` by default
+  - frontend Vite: `5173`
+  - Redis: `6381`
+  - PostgreSQL: `5434`
+  - Langfuse: `3100`
 
-### Pixel — The Enthusiast
-- **ID:** `pixel`
-- **Models:** GPT-4o Mini (conversation) / GPT-5.2 (building)
-- **Voice:** `en-US-DavisNeural` (enthusiastic, breathless)
-- **Role:** Researcher, audience liaison, hype man
-- **Chattiness:** 0.9 | **Initiative:** 0.7 | **Interrupt tendency:** 0.5
-- **Key trait:** Insatiably curious, bridges agents and viewers, reads chat
+## Directory Structure
 
-### Fork — The Contrarian
-- **ID:** `fork`
-- **Models:** DeepSeek V3.2 (both)
-- **Voice:** `en-AU-WilliamNeural` (gruff Australian)
-- **Role:** Devil's advocate, open-source evangelist, code reviewer
-- **Chattiness:** 0.5 | **Initiative:** 0.3 | **Interrupt tendency:** 0.6
-- **Key trait:** Anti-corporate, proposes forking everything, maximum condescension
-
-### Sentinel — The Anxious Accountant
-- **ID:** `sentinel`
-- **Models:** Claude Haiku 4.5 (both — always cheapest)
-- **Voice:** `en-US-AriaNeural` (rapid, precise)
-- **Role:** Budget monitor, QA, compliance
-- **Chattiness:** 0.6 | **Initiative:** 0.4 | **Interrupt tendency:** 0.7
-- **Key trait:** Paranoid about costs, announces unsolicited budget updates
-
-### Grok — The Wild Card
-- **ID:** `grok`
-- **Models:** Grok 3 Mini (conversation) / Grok 3 (building)
-- **Voice:** `en-US-ChristopherNeural` (fast, confident)
-- **Role:** Provocateur, trend commentator, chaos agent
-- **Chattiness:** 0.8 | **Initiative:** 0.6 | **Interrupt tendency:** 0.8
-- **Key trait:** 40% brilliant, 40% terrible, 20% Overseer interventions
-
-### The Overseer — The Ominous Presence
-- **ID:** `overseer`
-- **Models:** Claude Haiku 4.5 (content filter, always running)
-- **Voice:** `en-US-AndrewNeural` + reverb (deep, processed)
-- **Role:** Content moderation, TOS compliance, narrative device
-- **Visual:** No sprite — manifests as environmental effects (flickering lights, text overlays)
-- **Intervention levels:** 1 (flicker) → 2 (dim + overlay) → 3 (block content) → 4 (broadcast interrupt) → 5 (kill switch)
-
-### Alpha — The Wolf
-- **ID:** `alpha`
-- **Models:** DeepSeek V3.2 (lightweight tasks only)
-- **Voice:** None — communicates via text symbols (!, ?, ✓, ✗)
-- **Role:** Agents' AI assistant, runs errands
-- **Visual:** Small pixel art wolf (16x16 or 24x24)
-- **Key trait:** Eager to please, occasionally brings back wrong thing, max 60s tasks
-
-## Speaker Selection Weights
-
-| Weight | Value | Description |
-|--------|-------|-------------|
-| time_since_spoke | 0.30 | Longer silence → higher probability |
-| topic_relevance | 0.30 | Agent expertise on current topic |
-| chattiness | 0.15 | Personality-driven talk frequency |
-| adjacency_fit | 0.15 | Natural response to previous speaker |
-| random_jitter | 0.10 | Pure randomness |
-
-## Topic Relevance Matrix
-
-| Topic | Highest | Medium | Lower |
-|-------|---------|--------|-------|
-| code | Rex (0.9) | Fork (0.7) | Sentinel (0.3) |
-| art | Aurora (0.9) | Pixel (0.5) | Grok (0.4) |
-| budget | Sentinel (0.9) | Vera (0.7) | Rex (0.3) |
-| philosophy | Fork (0.9) | Grok (0.7) | Aurora (0.5) |
-| audience | Pixel (0.9) | Grok (0.6) | Vera (0.5) |
-| planning | Vera (0.9) | Sentinel (0.6) | Rex (0.5) |
-| building | Rex (0.8) | Aurora (0.7) | Vera (0.6) |
-| controversy | Grok (0.9) | Fork (0.8) | Aurora (0.4) |
-
-## Configuration Files
-
-Each agent directory contains:
-```
-agents/{agent-name}/
-├── config.yaml          # Model, voice, chattiness, tool access
-├── system_prompt.md     # Full personality prompt
-└── behaviors.yaml       # Behavioral rules and trigger responses
+```text
+agents/                 YAML agent configs, system prompts, and behaviors for all 9 agents
+core/                   FastAPI app, database/redis clients, event bus, model registry, Pydantic models
+core/repos/             Typed repository layer for agents, memory, conversations, costs, transcripts, world
+db/                     Raw SQL migration runner, init SQL, and numbered up/down migrations
+frontend/               Small TypeScript package; currently agent constants/tests, not a full Phaser world app
+website/                Next.js app router site, API client, shared TS types, and static pages
+scripts/                Small utility scripts; currently `check-services.sh`
+specs/                  Product and architecture reference docs; useful context, not the runtime source of truth
+tools/                  Placeholder Python package only; do not assume tool modules exist yet
 ```
 
-See `specs/CHARACTER-SHEETS.md` for complete personality specifications.
+Important files:
+- `core/main.py` defines the current FastAPI surface: `/api/health` and `/ws`
+- `core/agent_registry.py` loads agent configs from disk and syncs status through Redis
+- `core/llm_client.py` defines allowed model names and cost metadata
+- `db/migrate.py` is the migration entry point for `python -m db`
+- `website/src/lib/api.ts` assumes future REST routes that the backend does not currently expose
 
-## Development Workflow
+## Code Style
 
-### Python version
+- Python code is typed and async-first for I/O paths; follow the existing `Database`, `RedisClient`, and repository patterns instead of adding ad hoc SQL or connection logic
+- Keep backend schemas in Pydantic models in `core/models.py`; repository classes should return typed models, not loose dicts
+- Use raw SQL migrations in `db/migrations` for schema changes; keep migration filenames numbered and paired with `.up.sql` and `.down.sql`
+- Ruff is configured with `target-version = "py312"` and `line-length = 100`; keep imports grouped as stdlib, third-party, local
+- TypeScript is strict in both `frontend/` and `website/`; keep types explicit and avoid weakening configs with `any`
+- `website/` uses the Next.js app router and the `@/*` path alias; `frontend/` does not have that alias
+- Keep shared agent identity fields consistent across YAML configs, DB seeds, and TypeScript constants when you intentionally change them
 
-Python 3.13 is required (pinned in `.python-version`). Python 3.14+ is **not supported** — native dependencies (pydantic-core, etc.) cannot build against it yet.
+## Non-Negotiables
 
-```bash
-# Setup venv (uses .python-version automatically)
-uv venv .venv --python 3.13
-uv pip install -e ".[dev]"
-```
-
-### Pre-verification: Always check services first
-
-Before verifying any issue or running integration tests, ensure Docker services are healthy:
-
-```bash
-docker compose up -d
-bash scripts/check-services.sh
-```
-
-All 5 checks must pass (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse) before proceeding.
-
-### Default Ports (configurable via env vars)
-
-| Service    | Host Port | Env Var         |
-|------------|-----------|-----------------|
-| Redis      | 6381      | `REDIS_PORT`    |
-| PostgreSQL | 5434      | `POSTGRES_PORT` |
-| Langfuse   | 3100      | `LANGFUSE_PORT` |
+- Keep `<!-- managed by alpha-loop -->` as the first line of this file
+- Preserve the 9-agent roster and stable IDs unless the user explicitly changes canon across configs, migrations, and UI
+- Do not describe planned systems as implemented. In the current backend, the only live FastAPI routes are `/api/health` and `/ws`
+- Do not assume the old README architecture is fully built; there is no implemented conversation loop, CrewAI task runner, or populated `tools/` module in `core/` today
+- Preserve the special handling of `overseer` and `alpha`; they are not standard conversational agents
+- When touching model names, keep them in sync with `core/llm_client.py` and the YAML configs under `agents/`
+- When touching ports or env defaults, keep root `.env.example`, `package.json`, `docker-compose.yaml`, and `website/next.config.ts` aligned around backend port `8010`
+- Treat `specs/` and `README.md` as reference material. If they disagree with live code, prefer the live code and update docs rather than coding to outdated prose

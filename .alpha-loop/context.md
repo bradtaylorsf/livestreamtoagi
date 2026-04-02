@@ -1,28 +1,22 @@
-The project is very early stage — mostly scaffolding with empty directories and `__init__.py` stubs. Here's the context file:
-
----
-
 ## Architecture
-- **Backend:** FastAPI (Python 3.12+) entry point at `core/main:app`, served via `uvicorn --port 8000`. WebSocket events connect to the frontend. Currently only `core/__init__.py` exists — no orchestrator/conversation/memory modules yet.
-- **Frontend:** Phaser.js 3 (TypeScript) in `frontend/`, built with Vite, tested with Vitest. `src/scenes/`, `src/sprites/`, `src/ui/` directories exist but are empty.
-- **Database:** PostgreSQL 16 + pgvector via Docker Compose (`docker-compose.yaml`). Redis 7 for cache. Langfuse for observability. Schema managed via Alembic (no migrations yet).
-- **Agents:** 9 agent personality directories under `agents/` (vera, rex, aurora, etc.) — currently empty, expected to contain `config.yaml`, `system_prompt.md`, `behaviors.yaml` per agent.
-- **Website:** Next.js app in `website/` (placeholder). Specs live in `specs/` as reference docs.
+- Root `pnpm dev` starts Docker services, `uvicorn core.main:app` on `:8010`, and the Next website on `:4000`; `core/main.py` owns app startup/shutdown, loads `Database`, `RedisClient`, and `AgentRegistry`, and currently exposes only `/api/health` plus `/ws`.
+- PostgreSQL 16 is the primary store, with `pgvector` and `pg_trgm` enabled by [`db/init.sql`](/Users/bradtaylor/Github/livestreamtoagi/db/init.sql); schema lives in raw SQL under [`db/migrations`](/Users/bradtaylor/Github/livestreamtoagi/db/migrations), applied by `python -m db`, and queried through `asyncpg` via [`core/database.py`](/Users/bradtaylor/Github/livestreamtoagi/core/database.py) and `core/repos/*.py`.
+- [`agents`](/Users/bradtaylor/Github/livestreamtoagi/agents) contains one folder per agent with `config.yaml`, `system_prompt.md`, and `behaviors.yaml`; [`core/agent_registry.py`](/Users/bradtaylor/Github/livestreamtoagi/core/agent_registry.py) loads those files and validates model names against [`core/llm_client.py`](/Users/bradtaylor/Github/livestreamtoagi/core/llm_client.py).
+- [`website/src/app`](/Users/bradtaylor/Github/livestreamtoagi/website/src/app) is a Next App Router site; [`website/src/lib/api.ts`](/Users/bradtaylor/Github/livestreamtoagi/website/src/lib/api.ts) calls `/api/*`, which [`website/next.config.ts`](/Users/bradtaylor/Github/livestreamtoagi/website/next.config.ts) rewrites to `BACKEND_URL`. [`frontend/src`](/Users/bradtaylor/Github/livestreamtoagi/frontend/src) currently holds agent metadata/tests, not a wired Phaser bootstrap.
 
 ## Conventions
-- **Python:** Ruff linter (line-length 100), isort with `core/tools/agents` as first-party. Pytest in `tests/backend/` with `asyncio_mode = "auto"`.
-- **TypeScript:** Vite + TypeScript strict, Vitest for tests. pnpm as package manager (`frontend/pnpm-lock.yaml`).
-- **Agent config:** Each agent gets `agents/{name}/config.yaml` + `system_prompt.md` + `behaviors.yaml`. Models defined in `CLAUDE.md` agent roster.
-- **New backend features:** Add modules to `core/`, tools to `tools/`, wire via FastAPI. Agent tools go in `tools/*.py`.
-- **Testing:** `pytest tests/backend/ -v` (Python), `cd frontend && pnpm test` (TS), integration tests via Docker Compose.
+- Backend is Python with FastAPI, Pydantic models in [`core/models.py`](/Users/bradtaylor/Github/livestreamtoagi/core/models.py), async/await for I/O, and a thin repository pattern (`core/repos/*`). Frontend/website are strict TypeScript with ESM.
+- Tests are split by layer: `tests/backend` for `pytest`, `frontend/src/**/*.test.ts` for Vitest, `website/src/**/__tests__` for website Vitest, and `website/tests/e2e` for Playwright.
+- Root `pnpm test` runs Python, frontend, and website unit tests concurrently after installing JS deps; integration tests are `pytest -m integration` and expect Docker services to be up first.
+- New backend features should be wired through schema migration if needed, a Pydantic/repo update, then explicit route registration in [`core/main.py`](/Users/bradtaylor/Github/livestreamtoagi/core/main.py); there are no separate router modules yet.
 
 ## Critical Rules
-- **`docker-compose.yaml`** defines shared infra (Redis, Postgres, Langfuse) — port/credential changes break all services.
-- **`CLAUDE.md`** is the agent roster source of truth (models, voices, personalities, speaker weights). Keep in sync with `agents/` configs and `specs/CHARACTER-SHEETS.md`.
-- **pgvector extension** required for memory system — standard Postgres images won't work; must use `pgvector/pgvector:pg16`.
-- **Cost governor** is a safety-critical system — Sentinel + kill switch must always be functional before enabling OpenRouter API calls.
-- **CrewAI + OpenRouter** is the agent orchestration layer — `crewai>=0.80.0` with OpenAI-compatible API. Don't swap to direct SDK calls without updating all tool bindings.
+- Do not casually change or delete migration files or [`db/init.sql`](/Users/bradtaylor/Github/livestreamtoagi/db/init.sql); tests and recall-memory vector search depend on that history and on `vector(1536)`.
+- Keep `agents/<id>` files, seeded rows in `002_seed_agents.up.sql`, and `MODEL_REGISTRY` in sync; mismatched IDs or model names break agent loading.
+- Update backend and website contracts together: the website already assumes `/api/agents`, `/api/world/chunks`, `/api/challenges`, `/api/stats`, and `/api/lore`, but FastAPI does not implement them yet.
+- Common mistake here is trusting README/CLAUDE as current implementation; the shipped code is much narrower than the planned architecture.
 
 ## Active State
-- **Test status:** (to be filled by loop)
-- **Recent changes:** (to be filled by loop)
+- Test status: (will be filled in by the loop)
+- Recent changes: (will be filled in by the loop)
+- Current implementation scope: health check, WebSocket event bus, DB/repos/migrations, agent config loading, and a mostly static Next site scaffold.
