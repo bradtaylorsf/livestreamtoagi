@@ -33,6 +33,8 @@ MODEL_NAME_ALIASES = {
     "google/gemini-flash": "gemini-flash",
     "google/gemini-2.5-pro": "gemini-2.5-pro",
     "deepseek/deepseek-v3.2": "deepseek-v3.2",
+    "x-ai/grok-3-mini": "grok-3-mini",
+    "x-ai/grok-3": "grok-3",
 }
 
 
