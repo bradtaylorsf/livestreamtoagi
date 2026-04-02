@@ -292,13 +292,15 @@ async def test_cost_log_failure_non_fatal():
     )
 
     client = OpenRouterClient("sk-test", cost_repo, http_client=mock_client)
-    result = await client.complete(
-        [{"role": "user", "content": "Hi"}],
-        model="claude-haiku-4-5",
-    )
+    with patch("core.llm_client.asyncio.sleep", new_callable=AsyncMock):
+        result = await client.complete(
+            [{"role": "user", "content": "Hi"}],
+            model="claude-haiku-4-5",
+        )
 
     assert result.content == "Hello!"
-    cost_repo.add_cost.assert_called_once()
+    # With retry logic, add_cost is called twice (initial + 1 retry)
+    assert cost_repo.add_cost.call_count == 2
 
 
 # ── Streaming ──────────────────────────────────────────────────
@@ -455,3 +457,98 @@ async def test_integration_real_call():
             await client.close()
     finally:
         await db.disconnect()
+
+
+# ── LLMError transient flag tests ─────────────────────────────────
+
+
+def test_llm_error_transient_for_429():
+    err = LLMError("rate limited", status_code=429)
+    assert err.transient is True
+
+
+def test_llm_error_transient_for_500():
+    err = LLMError("server error", status_code=500)
+    assert err.transient is True
+
+
+def test_llm_error_not_transient_for_401():
+    err = LLMError("unauthorized", status_code=401)
+    assert err.transient is False
+
+
+def test_llm_error_not_transient_for_none():
+    err = LLMError("unknown")
+    assert err.transient is False
+
+
+# ── API key validation tests ──────────────────────────────────────
+
+
+def test_api_key_rejects_empty_string():
+    with pytest.raises(ValueError, match="non-empty string"):
+        OpenRouterClient("", make_mock_cost_repo())
+
+
+def test_api_key_rejects_whitespace():
+    with pytest.raises(ValueError, match="non-empty string"):
+        OpenRouterClient("   ", make_mock_cost_repo())
+
+
+def test_api_key_rejects_non_string():
+    with pytest.raises(ValueError, match="non-empty string"):
+        OpenRouterClient(None, make_mock_cost_repo())  # type: ignore[arg-type]
+
+
+# ── Cost logging retry tests ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_cost_logging_retries_once_on_failure():
+    """Cost logging should retry once before giving up."""
+    cost_repo = make_mock_cost_repo()
+    cost_repo.add_cost = AsyncMock(side_effect=Exception("db error"))
+
+    client = OpenRouterClient("sk-test", cost_repo, http_client=make_mock_http_client())
+
+    with patch("core.llm_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await client._log_cost(
+            agent_id="vera", model="claude-haiku-4-5",
+            input_tokens=10, output_tokens=5,
+            cost=Decimal("0.001"), latency_ms=100,
+            stream=False, openrouter_id="gen-123",
+        )
+        mock_sleep.assert_awaited_once_with(0.5)
+
+    # Should have been called twice (initial + 1 retry)
+    assert cost_repo.add_cost.call_count == 2
+    assert client._lost_cost_events == 1
+
+
+@pytest.mark.asyncio
+async def test_cost_logging_succeeds_on_retry():
+    """Cost logging should succeed if retry works."""
+    cost_repo = make_mock_cost_repo()
+    cost_repo.add_cost = AsyncMock(
+        side_effect=[Exception("db error"), None]  # fail then succeed
+    )
+
+    client = OpenRouterClient("sk-test", cost_repo, http_client=make_mock_http_client())
+
+    with patch("core.llm_client.asyncio.sleep", new_callable=AsyncMock):
+        await client._log_cost(
+            agent_id="vera", model="claude-haiku-4-5",
+            input_tokens=10, output_tokens=5,
+            cost=Decimal("0.001"), latency_ms=100,
+            stream=False, openrouter_id="gen-123",
+        )
+
+    assert cost_repo.add_cost.call_count == 2
+    assert client._lost_cost_events == 0  # didn't lose it
+
+
+def make_mock_http_client():
+    """Create a mock httpx client for tests that don't need HTTP."""
+    client = MagicMock(spec=httpx.AsyncClient)
+    client.aclose = AsyncMock()
+    return client

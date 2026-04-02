@@ -79,8 +79,12 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         input_price_per_1m=Decimal("2.00"),
         output_price_per_1m=Decimal("8.00"),
     ),
+    # OpenRouter lists DeepSeek V3 as "deepseek/deepseek-chat-v3-0324";
+    # agent configs use alias "deepseek/deepseek-v3.2" which resolves here.
+    # Verify ID at https://openrouter.ai/models if pricing or routing changes.
+    # last_verified: 2026-04-02
     "deepseek-v3.2": ModelConfig(
-        openrouter_id="deepseek/deepseek-chat-v3.2",
+        openrouter_id="deepseek/deepseek-chat-v3-0324",
         input_price_per_1m=Decimal("0.27"),
         output_price_per_1m=Decimal("1.10"),
     ),
@@ -103,6 +107,7 @@ class LLMError(Exception):
     def __init__(self, message: str, status_code: int | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.transient = status_code in RETRYABLE_STATUS_CODES
 
 
 def estimate_cost(
@@ -122,11 +127,12 @@ class OpenRouterClient:
         langfuse_client: Any | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        if not api_key:
-            raise ValueError("OPENROUTER_API_KEY not set")
+        if not isinstance(api_key, str) or not api_key.strip():
+            raise ValueError("OPENROUTER_API_KEY must be a non-empty string")
         self._api_key = api_key
         self._cost_repo = cost_repo
         self._langfuse = langfuse_client
+        self._lost_cost_events: int = 0
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
             base_url=OPENROUTER_BASE_URL,
@@ -161,25 +167,33 @@ class OpenRouterClient:
         stream: bool,
         openrouter_id: str | None,
     ) -> None:
-        """Fire-and-forget cost logging — never let DB errors break LLM calls."""
-        try:
-            await self._cost_repo.add_cost(
-                CostEventCreate(
-                    agent_id=agent_id,
-                    cost_type="llm_call",
-                    amount=cost,
-                    details={
-                        "model": model,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "latency_ms": latency_ms,
-                        "stream": stream,
-                        "openrouter_id": openrouter_id,
-                    },
-                )
-            )
-        except Exception:
-            logger.exception("Failed to log cost event for model=%s agent=%s", model, agent_id)
+        """Log cost with single retry — never let DB errors break LLM calls."""
+        event = CostEventCreate(
+            agent_id=agent_id,
+            cost_type="llm_call",
+            amount=cost,
+            details={
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "latency_ms": latency_ms,
+                "stream": stream,
+                "openrouter_id": openrouter_id,
+            },
+        )
+        for attempt in range(2):
+            try:
+                await self._cost_repo.add_cost(event)
+                return
+            except Exception:
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+                else:
+                    self._lost_cost_events += 1
+                    logger.warning(
+                        "Cost event lost (total lost: %d) for model=%s agent=%s",
+                        self._lost_cost_events, model, agent_id,
+                    )
 
     def _trace_langfuse(
         self,

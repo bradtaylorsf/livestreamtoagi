@@ -17,8 +17,7 @@ def test_health_endpoint_degraded_without_services():
         mock_db.fetchval = AsyncMock(side_effect=Exception("no db"))
         mock_redis.connect = AsyncMock()
         mock_redis.disconnect = AsyncMock()
-        mock_redis.client = AsyncMock()
-        mock_redis.client.ping = AsyncMock(side_effect=Exception("no redis"))
+        mock_redis.ping = AsyncMock(side_effect=Exception("no redis"))
         mock_registry.load_all = AsyncMock()
 
         with TestClient(app) as client:
@@ -26,8 +25,8 @@ def test_health_endpoint_degraded_without_services():
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "degraded"
-            assert data["database"] == "error"
-            assert data["redis"] == "error"
+            assert data["database"].startswith("error")
+            assert data["redis"].startswith("error")
 
 
 def test_health_endpoint_ok_with_services():
@@ -42,8 +41,7 @@ def test_health_endpoint_ok_with_services():
         mock_db.fetchval = AsyncMock(return_value=1)
         mock_redis.connect = AsyncMock()
         mock_redis.disconnect = AsyncMock()
-        mock_redis.client = AsyncMock()
-        mock_redis.client.ping = AsyncMock(return_value=True)
+        mock_redis.ping = AsyncMock(return_value=True)
         mock_registry.load_all = AsyncMock()
 
         with TestClient(app) as client:

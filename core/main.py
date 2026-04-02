@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,8 @@ from core.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
 
+HEALTH_CHECK_TIMEOUT = 5.0  # seconds per check
+
 db = Database()
 redis_client = RedisClient()
 agent_registry = AgentRegistry(redis_client=redis_client)
@@ -17,13 +20,15 @@ agent_registry = AgentRegistry(redis_client=redis_client)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await db.connect()
-    await redis_client.connect()
-    await agent_registry.load_all()
-    yield
-    await event_bus.shutdown()
-    await redis_client.disconnect()
-    await db.disconnect()
+    try:
+        await db.connect()
+        await redis_client.connect()
+        await agent_registry.load_all()
+        yield
+    finally:
+        await event_bus.shutdown()
+        await redis_client.disconnect()
+        await db.disconnect()
 
 
 app = FastAPI(title="Livestream AGI", version="0.1.0", lifespan=lifespan)
@@ -44,16 +49,20 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
-    checks = {}
+    checks: dict[str, str] = {}
     try:
-        await db.fetchval("SELECT 1")
+        await asyncio.wait_for(db.fetchval("SELECT 1"), timeout=HEALTH_CHECK_TIMEOUT)
         checks["database"] = "ok"
-    except Exception:
-        checks["database"] = "error"
+    except TimeoutError:
+        checks["database"] = "timeout"
+    except Exception as exc:
+        checks["database"] = f"error: {type(exc).__name__}"
     try:
-        await redis_client.client.ping()
+        await asyncio.wait_for(redis_client.ping(), timeout=HEALTH_CHECK_TIMEOUT)
         checks["redis"] = "ok"
-    except Exception:
-        checks["redis"] = "error"
+    except TimeoutError:
+        checks["redis"] = "timeout"
+    except Exception as exc:
+        checks["redis"] = f"error: {type(exc).__name__}"
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return {"status": status, **checks}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from core.models import (
@@ -28,6 +29,18 @@ def _parse_embedding(val: str) -> list[float]:
         return [float(x) for x in val.strip("[]").split(",")]
     except (ValueError, AttributeError) as exc:
         raise ValueError(f"Malformed pgvector embedding: {val!r}") from exc
+
+
+def _format_embedding(values: list[float]) -> str:
+    """Validate and format a list of floats for pgvector insertion."""
+    if not values:
+        raise ValueError("Embedding must not be empty")
+    for i, v in enumerate(values):
+        if not isinstance(v, (int, float)):
+            raise ValueError(f"Embedding[{i}] is not a number: {v!r}")
+        if math.isnan(v) or math.isinf(v):
+            raise ValueError(f"Embedding[{i}] is not finite: {v}")
+    return "[" + ",".join(f"{v:.10f}" for v in values) + "]"
 
 
 def _row_to_recall(row: asyncpg.Record) -> RecallMemory:
@@ -78,17 +91,21 @@ class MemoryRepo:
             )
         return CoreMemory(**dict(row))
 
-    async def get_core_memory_history(self, agent_id: str) -> list[CoreMemoryHistory]:
+    async def get_core_memory_history(
+        self, agent_id: str, limit: int = 100
+    ) -> list[CoreMemoryHistory]:
+        limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
-            "SELECT * FROM core_memory_history WHERE agent_id = $1 ORDER BY version",
+            "SELECT * FROM core_memory_history WHERE agent_id = $1 ORDER BY version LIMIT $2",
             agent_id,
+            limit,
         )
         return [CoreMemoryHistory(**dict(r)) for r in rows]
 
     # ── Recall Memory ───────────────────────────────────────
 
     async def add_recall(self, memory: RecallMemoryCreate) -> RecallMemory:
-        embedding_str = "[" + ",".join(str(v) for v in memory.embedding) + "]"
+        embedding_str = _format_embedding(memory.embedding)
         row = await self.db.fetchrow(
             """INSERT INTO recall_memory
                (agent_id, summary, embedding, event_type, participants,
@@ -109,7 +126,7 @@ class MemoryRepo:
         self, agent_id: str, embedding: list[float], limit: int = 10
     ) -> list[RecallMemory]:
         limit = min(limit, MAX_LIMIT)
-        embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
+        embedding_str = _format_embedding(embedding)
         rows = await self.db.fetch(
             """SELECT * FROM recall_memory
                WHERE agent_id = $1

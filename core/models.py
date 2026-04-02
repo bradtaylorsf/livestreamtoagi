@@ -153,8 +153,8 @@ class Conversation(BaseModel):
     ended_at: datetime | None = None
     trigger_type: str
     trigger_details: dict[str, Any] | None = None
-    initial_energy: float
-    final_energy: float | None = None
+    initial_energy: float = Field(ge=0.0, le=1.0)
+    final_energy: float | None = Field(None, ge=0.0, le=1.0)
     turn_count: int = 0
     participating_agents: list[str]
     topics_discussed: list[str] | None = None
@@ -168,7 +168,7 @@ class ConversationCreate(BaseModel):
     id: uuid.UUID | None = None
     trigger_type: str
     trigger_details: dict[str, Any] | None = None
-    initial_energy: float
+    initial_energy: float = Field(ge=0.0, le=1.0)
     participating_agents: list[str]
     location: str | None = None
     config_hash: str | None = None

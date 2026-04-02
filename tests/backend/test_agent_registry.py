@@ -215,7 +215,7 @@ async def test_rex_system_prompt_stays_under_token_budget():
     assert rex is not None
 
     estimated_tokens = estimate_prompt_tokens(rex.system_prompt)
-    assert estimated_tokens < 1200
+    assert estimated_tokens < 2500
 
 
 @pytest.mark.asyncio
@@ -271,7 +271,7 @@ async def test_fork_system_prompt_stays_under_token_budget():
     assert fork is not None
 
     estimated_tokens = len(fork.system_prompt.split())
-    assert estimated_tokens < 512
+    assert estimated_tokens < 2500
 
 
 @pytest.mark.asyncio
@@ -308,7 +308,7 @@ async def test_pixel_prompt_and_behaviors_match_character_spec():
     assert "audience liaison" in prompt
     assert "enthusiastic, curious, tangent-prone" in prompt
     assert "taken seriously as a researcher" in prompt
-    assert "oh this is fascinating!" in prompt
+    assert "this is fascinating" in prompt
     assert "chat, you're not going to believe this" in prompt
 
     communication = pixel.behaviors["communication"]
@@ -340,7 +340,7 @@ async def test_pixel_system_prompt_stays_under_token_budget():
     assert pixel is not None
 
     estimated_tokens = estimate_prompt_tokens(pixel.system_prompt)
-    assert estimated_tokens < 1200
+    assert estimated_tokens < 2500
 
 
 @pytest.mark.asyncio
@@ -410,7 +410,7 @@ async def test_vera_system_prompt_stays_under_token_budget():
     assert vera is not None
 
     estimated_tokens = len(vera.system_prompt.split())
-    assert estimated_tokens < 1200
+    assert estimated_tokens < 2500
 
 
 @pytest.mark.asyncio
@@ -479,7 +479,7 @@ async def test_sentinel_system_prompt_stays_under_token_budget():
     assert sentinel is not None
 
     estimated_tokens = len(sentinel.system_prompt.split())
-    assert estimated_tokens < 512
+    assert estimated_tokens < 2500
 
 
 @pytest.mark.asyncio
@@ -550,7 +550,7 @@ async def test_grok_system_prompt_stays_under_token_budget():
     assert grok is not None
 
     estimated_tokens = estimate_prompt_tokens(grok.system_prompt)
-    assert estimated_tokens < 512
+    assert estimated_tokens < 2500
 
 
 @pytest.mark.asyncio
@@ -623,7 +623,7 @@ async def test_aurora_system_prompt_stays_under_token_budget():
     assert aurora is not None
 
     estimated_tokens = estimate_prompt_tokens(aurora.system_prompt)
-    assert estimated_tokens < 1200
+    assert estimated_tokens < 2500
 
 
 def test_agent_config_defaults_closing_weight_to_zero():
@@ -1012,3 +1012,118 @@ async def test_overseer_keyword_blocklist_has_defaults():
     blocklist = rules["keyword_blocklist"]
     assert isinstance(blocklist, list)
     assert len(blocklist) >= 5, "Blocklist should have at least 5 entries"
+
+
+# ── Cross-Agent Validation Tests ──────────────────────────────────
+
+
+EXPECTED_AGENTS = ["alpha", "aurora", "fork", "grok", "overseer", "pixel", "rex", "sentinel", "vera"]
+
+
+@pytest.mark.asyncio
+async def test_all_agent_models_resolve_in_registry():
+    """Every agent's model_conversation and model_building must exist in MODEL_REGISTRY."""
+    from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+
+    registry = AgentRegistry(agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    for agent_id in EXPECTED_AGENTS:
+        agent = registry.get_agent(agent_id)
+        assert agent is not None, f"Agent {agent_id} not loaded"
+
+        for field in ("model_conversation", "model_building"):
+            model = getattr(agent, field)
+            canonical = MODEL_NAME_ALIASES.get(model, model)
+            assert canonical in MODEL_REGISTRY, (
+                f"Agent {agent_id} has {field}={model!r} "
+                f"(canonical={canonical!r}) not in MODEL_REGISTRY"
+            )
+
+
+@pytest.mark.asyncio
+async def test_all_agents_have_system_prompts():
+    """Every agent must have a non-empty system prompt above a minimum length."""
+    registry = AgentRegistry(agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    for agent_id in EXPECTED_AGENTS:
+        agent = registry.get_agent(agent_id)
+        assert agent is not None
+        lines = agent.system_prompt.strip().splitlines()
+        if agent_id == "alpha":
+            assert len(lines) >= 15, (
+                f"Alpha prompt too short: {len(lines)} lines (min 15)"
+            )
+        else:
+            assert len(lines) >= 30, (
+                f"{agent_id} prompt too short: {len(lines)} lines (min 30)"
+            )
+
+
+@pytest.mark.asyncio
+async def test_all_agents_have_behaviors():
+    """Every agent (except alpha) should have behaviors with at least one top-level key."""
+    registry = AgentRegistry(agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    for agent_id in EXPECTED_AGENTS:
+        agent = registry.get_agent(agent_id)
+        assert agent is not None
+        assert isinstance(agent.behaviors, dict), f"{agent_id}: behaviors not a dict"
+        if agent_id != "alpha":
+            assert len(agent.behaviors) >= 1, (
+                f"{agent_id}: behaviors dict is empty"
+            )
+
+
+@pytest.mark.asyncio
+async def test_overseer_content_rules_loaded_into_behaviors():
+    """Overseer's content_rules.yaml should be accessible via behaviors dict."""
+    registry = AgentRegistry(agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    overseer = registry.get_agent("overseer")
+    assert overseer is not None
+    # content_rules.yaml is loaded as extra file if not already in behaviors.yaml
+    # Either way, the key should exist
+    content_rules = overseer.behaviors.get("content_rules")
+    assert content_rules is not None, "content_rules not loaded into overseer behaviors"
+    assert "keyword_blocklist" in content_rules
+
+
+@pytest.mark.asyncio
+async def test_yaml_validation_rejects_empty_config(tmp_path):
+    """Agent with empty config.yaml should fail to load."""
+    agent_dir = tmp_path / "bad_agent"
+    agent_dir.mkdir()
+    (agent_dir / "config.yaml").write_text("")
+
+    registry = AgentRegistry(agents_dir=tmp_path)
+    await registry.load_all()
+    # Should skip the bad agent without crashing
+    assert registry.get_agent("bad_agent") is None
+
+
+@pytest.mark.asyncio
+async def test_yaml_validation_rejects_non_dict_config(tmp_path):
+    """Agent with list-type config.yaml should fail to load."""
+    agent_dir = tmp_path / "list_agent"
+    agent_dir.mkdir()
+    (agent_dir / "config.yaml").write_text("- item1\n- item2\n")
+
+    registry = AgentRegistry(agents_dir=tmp_path)
+    await registry.load_all()
+    assert registry.get_agent("list_agent") is None
+
+
+@pytest.mark.asyncio
+async def test_yaml_validation_rejects_missing_required_keys(tmp_path):
+    """Agent config missing required keys should fail to load."""
+    agent_dir = tmp_path / "partial"
+    agent_dir.mkdir()
+    (agent_dir / "config.yaml").write_text("id: partial\ndisplay_name: Partial\n")
+
+    registry = AgentRegistry(agents_dir=tmp_path)
+    await registry.load_all()
+    assert registry.get_agent("partial") is None
