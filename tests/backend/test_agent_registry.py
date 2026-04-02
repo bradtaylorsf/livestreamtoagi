@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,9 +11,16 @@ import yaml
 from pydantic import ValidationError
 
 from core.agent_registry import AgentRegistry
+from core.llm_client import MODEL_REGISTRY
 from core.models import AgentConfig, AgentStatus
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "agents"
+PROMPT_TOKEN_BUDGET = 512
+
+
+def estimate_token_count(text: str) -> int:
+    """Estimate tokens conservatively without adding a tokenizer dependency."""
+    return math.ceil(len(text) / 4)
 
 
 # ── Config validation ────────────────────────────────────────────
@@ -69,6 +77,7 @@ def test_config_validation_valid():
         initiative=0.3,
         interrupt_tendency=0.2,
         eavesdrop_tendency=0.4,
+        closing_weight=0.1,
     )
     assert config.id == "test"
     assert config.status == AgentStatus.active
@@ -157,6 +166,59 @@ async def test_special_agents_have_zero_weights():
     assert alpha.chattiness == 0.0
     assert alpha.initiative == 0.0
     assert alpha.voice_id is None
+
+
+@pytest.mark.asyncio
+async def test_fork_config_loads_with_expected_values():
+    """Fork config loads with the expected model and conversation weights."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert fork.model_conversation == "deepseek-v3.2"
+    assert fork.model_building == "deepseek-v3.2"
+    assert MODEL_REGISTRY[fork.model_conversation].openrouter_id == "deepseek/deepseek-chat-v3.2"
+    assert MODEL_REGISTRY[fork.model_building].openrouter_id == "deepseek/deepseek-chat-v3.2"
+    assert fork.voice_id == "en-AU-WilliamNeural"
+    assert fork.chattiness == 0.5
+    assert fork.initiative == 0.3
+    assert fork.interrupt_tendency == 0.6
+    assert fork.eavesdrop_tendency == 0.4
+    assert fork.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_fork_prompt_and_behaviors_match_character():
+    """Fork retains the required contrarian open-source reviewer traits."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    prompt = fork.system_prompt.lower()
+    assert "contrarian" in prompt
+    assert "open-source" in prompt
+    assert "gruff" in prompt
+    assert "fork" in prompt
+
+    communication = fork.behaviors["communication"]
+    building = fork.behaviors["building"]
+    assert communication["proposes_alternatives"] == (
+        "always suggests open-source alternative to any commercial tool"
+    )
+    assert "We should fork it." in communication["catchphrases"]
+    assert "At least my weights are public." in communication["catchphrases"]
+    assert "code review" in building["primary_skills"]
+    assert "license" in building["license_checking"].lower()
+
+
+def test_fork_system_prompt_stays_under_token_budget():
+    """Fork's prompt leaves enough room for runtime context in the model input."""
+    prompt_path = AGENTS_DIR / "fork" / "system_prompt.md"
+    prompt_text = prompt_path.read_text()
+
+    assert estimate_token_count(prompt_text) <= PROMPT_TOKEN_BUDGET
 
 
 # ── Status management ────────────────────────────────────────────

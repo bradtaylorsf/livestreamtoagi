@@ -53,9 +53,10 @@ class AgentConfig(BaseModel):
     initiative: float = Field(ge=0.0, le=1.0)
     interrupt_tendency: float = Field(ge=0.0, le=1.0)
     eavesdrop_tendency: float = Field(ge=0.0, le=1.0, default=0.0)
+    closing_weight: float = Field(ge=0.0, le=1.0, default=0.0)
     status: AgentStatus = AgentStatus.active
     system_prompt: str = ""
-    behaviors: dict[str, Any] = {}  # YAML-defined structure, varies per agent
+    behaviors: dict[str, Any] = Field(default_factory=dict)  # YAML-defined structure
 
 
 # ── Core Memory ─────────────────────────────────────────────────
