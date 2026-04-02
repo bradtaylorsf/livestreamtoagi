@@ -56,6 +56,10 @@ class RedisClient:
             self._client = None
             logger.info("Redis disconnected")
 
+    async def ping(self) -> bool:
+        """Ping Redis and return True if alive."""
+        return await self.client.ping()
+
     async def get(self, key: str) -> str | None:
         return await self.client.get(key)
 

@@ -288,3 +288,95 @@ async def test_ivfflat_index_exists(conn):
     )
     assert row is not None, "IVF FLAT index idx_recall_embedding not found"
     assert "ivfflat" in row["indexdef"].lower()
+
+
+# ── Schema constraint tests ───────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_agents_table_columns(conn):
+    """Agents table has expected columns with correct types."""
+    await up(conn)
+
+    rows = await conn.fetch(
+        "SELECT column_name, data_type, is_nullable "
+        "FROM information_schema.columns "
+        "WHERE table_name = 'agents' ORDER BY ordinal_position"
+    )
+    columns = {r["column_name"]: r for r in rows}
+
+    assert "id" in columns
+    assert "display_name" in columns
+    assert "model_conversation" in columns
+    assert "model_building" in columns
+    assert "voice_id" in columns
+    assert "status" in columns
+    assert "created_at" in columns
+
+    # id and display_name should be NOT NULL
+    assert columns["id"]["is_nullable"] == "NO"
+    assert columns["display_name"]["is_nullable"] == "NO"
+
+
+@pytest.mark.integration
+async def test_foreign_key_recall_memory_to_agents(conn):
+    """recall_memory.agent_id should reference agents.id."""
+    await up(conn)
+
+    fk_rows = await conn.fetch("""
+        SELECT
+            tc.constraint_name,
+            kcu.column_name,
+            ccu.table_name AS foreign_table
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+        JOIN information_schema.constraint_column_usage ccu
+            ON tc.constraint_name = ccu.constraint_name
+        WHERE tc.table_name = 'recall_memory'
+            AND tc.constraint_type = 'FOREIGN KEY'
+    """)
+
+    fk_targets = {r["foreign_table"] for r in fk_rows}
+    assert "agents" in fk_targets, "recall_memory should have FK to agents"
+
+
+@pytest.mark.integration
+async def test_unique_constraint_on_core_memory(conn):
+    """core_memory should have a unique constraint on agent_id."""
+    await up(conn)
+
+    # Insert an agent first
+    await conn.execute(
+        "INSERT INTO agents (id, display_name, model_conversation, model_building) "
+        "VALUES ('test_uc', 'Test', 'claude-haiku-4-5', 'claude-haiku-4-5')"
+    )
+    await conn.execute(
+        "INSERT INTO core_memory (agent_id, content, token_count) "
+        "VALUES ('test_uc', 'memory1', 100)"
+    )
+
+    # Second insert with same agent_id should fail on unique constraint
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await conn.execute(
+            "INSERT INTO core_memory (agent_id, content, token_count) "
+            "VALUES ('test_uc', 'memory2', 200)"
+        )
+
+
+@pytest.mark.integration
+async def test_interrupt_log_fk_to_conversations(conn):
+    """interrupt_log should have FK to conversations."""
+    await up(conn)
+
+    fk_rows = await conn.fetch("""
+        SELECT ccu.table_name AS foreign_table
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.constraint_column_usage ccu
+            ON tc.constraint_name = ccu.constraint_name
+        WHERE tc.table_name = 'interrupt_log'
+            AND tc.constraint_type = 'FOREIGN KEY'
+    """)
+
+    fk_targets = {r["foreign_table"] for r in fk_rows}
+    assert "conversations" in fk_targets

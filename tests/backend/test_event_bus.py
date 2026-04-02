@@ -425,3 +425,69 @@ class TestWebSocketIntegration:
             # After disconnect, emitting should still work
             client.portal.call(bus.emit, "viewer_count", {"count": 0})
             # No exception means success
+
+
+# ── Resilience Tests ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bad_callback_does_not_crash_other_callbacks():
+    """An exception in one callback should not prevent others from running."""
+    bus = EventBus()
+    results = []
+
+    async def good_callback(event: dict) -> None:
+        results.append("good")
+
+    async def bad_callback(event: dict) -> None:
+        raise RuntimeError("boom")
+
+    bus.on(EventType.AGENT_SPEAK, bad_callback)
+    bus.on(EventType.AGENT_SPEAK, good_callback)
+
+    await bus.emit(EventType.AGENT_SPEAK, {"agent_id": "vera", "text": "hi"})
+
+    # good_callback should still have run despite bad_callback raising
+    assert "good" in results
+
+
+@pytest.mark.asyncio
+async def test_history_buffer_overflow():
+    """Emitting more than HISTORY_BUFFER_SIZE events should drop oldest."""
+    bus = EventBus()
+
+    for i in range(HISTORY_BUFFER_SIZE + 10):
+        await bus.emit(EventType.AGENT_SPEAK, {"agent_id": "vera", "seq": i})
+
+    # Access internal history buffer (deque with maxlen=HISTORY_BUFFER_SIZE)
+    history = list(bus._history)
+    assert len(history) == HISTORY_BUFFER_SIZE
+    # Oldest events should have been dropped
+    first_seq = history[0]["data"]["seq"]
+    assert first_seq == 10, f"Expected oldest seq=10, got {first_seq}"
+
+
+@pytest.mark.asyncio
+async def test_emit_agent_move_with_no_clients():
+    """Emitting with zero connected clients should silently succeed."""
+    bus = EventBus()
+    event = await bus.emit(EventType.AGENT_MOVE, {"agent_id": "rex", "x": 5, "y": 10})
+    assert event["event_type"] == EventType.AGENT_MOVE
+
+
+@pytest.mark.asyncio
+async def test_failed_send_removes_client():
+    """A client that fails on send_text should be removed from active clients."""
+    bus = EventBus()
+    ws = _make_mock_ws(fail_send=True)
+    ws.headers = MagicMock()
+    ws.headers.get = MagicMock(return_value=None)
+
+    client_id = await bus.connect(ws)
+    assert bus.connected_count == 1
+
+    # Emit should trigger send which fails — client should be cleaned up
+    await bus.emit(EventType.AGENT_SPEAK, {"agent_id": "vera", "text": "test"})
+
+    # After failed send, client should be disconnected
+    assert bus.connected_count == 0

@@ -7,6 +7,8 @@ from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from core.models import (
     AgentCreate,
     ChallengeCreate,
@@ -485,3 +487,114 @@ async def test_world_vote_proposal():
     proposal = await repo.vote_proposal(1, vote_for=True)
     assert proposal is not None
     assert proposal.votes_for == 1
+
+
+# ── Embedding validation tests ────────────────────────────────────
+
+import math
+
+from core.repos.memory_repo import _format_embedding
+
+
+def test_format_embedding_valid():
+    result = _format_embedding([0.1, 0.2, 0.3])
+    assert result.startswith("[0.1")
+    assert ",0.2" in result
+    assert "0.3" in result
+    # Should be valid pgvector format: [num,num,num]
+    assert result.startswith("[") and result.endswith("]")
+
+
+def test_format_embedding_rejects_empty():
+    with pytest.raises(ValueError, match="must not be empty"):
+        _format_embedding([])
+
+
+def test_format_embedding_rejects_nan():
+    with pytest.raises(ValueError, match="not finite"):
+        _format_embedding([0.1, float("nan"), 0.3])
+
+
+def test_format_embedding_rejects_inf():
+    with pytest.raises(ValueError, match="not finite"):
+        _format_embedding([0.1, float("inf"), 0.3])
+
+
+def test_format_embedding_rejects_non_numeric():
+    with pytest.raises(ValueError, match="not a number"):
+        _format_embedding([0.1, "bad", 0.3])  # type: ignore[list-item]
+
+
+def test_format_embedding_accepts_ints():
+    result = _format_embedding([1, 2, 3])
+    # Ints are formatted as fixed-point floats
+    assert "1.0" in result
+    assert "2.0" in result
+    assert "3.0" in result
+
+
+def test_format_embedding_no_scientific_notation():
+    """Small floats must not produce scientific notation (pgvector rejects it)."""
+    result = _format_embedding([1e-8, 0.5, -1e-10])
+    assert "e" not in result.lower()
+
+
+# ── MAX_LIMIT enforcement tests ──────────────────────────────────
+
+
+async def test_memory_get_core_memory_history_enforces_limit():
+    db = make_mock_db()
+    db.fetch.return_value = []
+    repo = MemoryRepo(db)
+
+    await repo.get_core_memory_history("vera", limit=9999)
+
+    # Should have been clamped to MAX_LIMIT (500)
+    call_args = db.fetch.call_args
+    # The limit parameter is the 3rd positional arg (after query and agent_id)
+    assert call_args[0][2] == 500
+
+
+async def test_memory_get_core_memory_history_default_limit():
+    db = make_mock_db()
+    db.fetch.return_value = []
+    repo = MemoryRepo(db)
+
+    await repo.get_core_memory_history("vera")
+
+    call_args = db.fetch.call_args
+    assert call_args[0][2] == 100  # default
+
+
+# ── Conversation model validation tests ──────────────────────────
+
+from pydantic import ValidationError
+
+from core.models import ConversationCreate
+
+
+def test_conversation_rejects_energy_above_one():
+    with pytest.raises(ValidationError):
+        ConversationCreate(
+            trigger_type="scheduled",
+            initial_energy=1.5,
+            participating_agents=["vera", "rex"],
+        )
+
+
+def test_conversation_rejects_negative_energy():
+    with pytest.raises(ValidationError):
+        ConversationCreate(
+            trigger_type="scheduled",
+            initial_energy=-0.1,
+            participating_agents=["vera", "rex"],
+        )
+
+
+def test_conversation_accepts_valid_energy():
+    conv = ConversationCreate(
+        trigger_type="scheduled",
+        initial_energy=0.8,
+        participating_agents=["vera", "rex"],
+    )
+    assert conv.initial_energy == 0.8

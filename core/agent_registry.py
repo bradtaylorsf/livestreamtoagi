@@ -84,11 +84,27 @@ class AgentRegistry:
         # Sync statuses from Redis (best-effort)
         await self._sync_statuses_from_redis()
 
+    # Files that are loaded into dedicated config fields (not merged into behaviors)
+    _RESERVED_FILES = {"config.yaml", "behaviors.yaml", "system_prompt.md"}
+
     def _load_agent(self, agent_dir: Path) -> AgentConfig:
         """Load and validate a single agent from its directory."""
         config_path = agent_dir / "config.yaml"
-        with open(config_path) as f:
-            raw: dict[str, Any] = yaml.safe_load(f)
+        with open(config_path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+
+        # Validate raw YAML structure
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"config.yaml in {agent_dir.name} must be a YAML mapping, "
+                f"got {type(raw).__name__}"
+            )
+        required_keys = {"id", "display_name", "model_conversation", "model_building"}
+        missing = required_keys - set(raw.keys())
+        if missing:
+            raise ValueError(
+                f"config.yaml in {agent_dir.name} missing required keys: {sorted(missing)}"
+            )
 
         # Validate model names
         for field in ("model_conversation", "model_building"):
@@ -99,20 +115,39 @@ class AgentRegistry:
                     f"Agent '{raw.get('id', agent_dir.name)}' has invalid {field}: "
                     f"'{model_name}'. Valid models: {sorted(VALID_MODEL_NAMES)}"
                 )
+
         # Load system prompt
         prompt_path = agent_dir / "system_prompt.md"
         system_prompt = ""
         if prompt_path.exists():
-            system_prompt = prompt_path.read_text()
+            system_prompt = prompt_path.read_text(encoding="utf-8")
 
         # Load behaviors
         behaviors_path = agent_dir / "behaviors.yaml"
         behaviors: dict[str, Any] = {}
         if behaviors_path.exists():
-            with open(behaviors_path) as f:
+            with open(behaviors_path, encoding="utf-8") as f:
                 loaded = yaml.safe_load(f)
                 if isinstance(loaded, dict):
                     behaviors = loaded
+
+        # Load additional YAML files (e.g. content_rules.yaml, intervention_levels.yaml)
+        # Only adds keys not already present in behaviors.yaml to avoid overwrites.
+        for extra_path in sorted(agent_dir.glob("*.yaml")):
+            if extra_path.name in self._RESERVED_FILES:
+                continue
+            key = extra_path.stem  # "content_rules.yaml" → "content_rules"
+            if key in behaviors:
+                continue  # behaviors.yaml already defines this key
+            with open(extra_path, encoding="utf-8") as f:
+                extra = yaml.safe_load(f)
+            if isinstance(extra, dict):
+                behaviors[key] = extra
+            else:
+                logger.warning(
+                    "Extra YAML %s in %s is not a dict (got %s), skipping",
+                    extra_path.name, agent_dir.name, type(extra).__name__,
+                )
 
         # Handle YAML null for voice_id
         if raw.get("voice_id") is None:
@@ -136,18 +171,19 @@ class AgentRegistry:
         return [a for a in self._agents.values() if a.status == AgentStatus.active]
 
     async def set_status(self, agent_id: str, status: AgentStatus) -> None:
-        """Update an agent's status in-memory and in Redis."""
+        """Update an agent's status in Redis (if available) then in-memory."""
         agent = self._agents.get(agent_id)
         if agent is None:
             raise KeyError(f"Agent not found: {agent_id}")
 
-        self._agents[agent_id] = agent.model_copy(update={"status": status})
-
+        # Write Redis first so persistent state leads in-memory
         if self._redis is not None:
             try:
                 await self._redis.set(f"{REDIS_STATUS_PREFIX}{agent_id}", status.value)
             except Exception:
                 logger.warning("Failed to write status to Redis for %s", agent_id)
+
+        self._agents[agent_id] = agent.model_copy(update={"status": status})
 
     async def get_status(self, agent_id: str) -> AgentStatus:
         """Read status from Redis, falling back to in-memory."""
