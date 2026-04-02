@@ -69,6 +69,7 @@ def test_config_validation_valid():
         initiative=0.3,
         interrupt_tendency=0.2,
         eavesdrop_tendency=0.4,
+        closing_weight=0.1,
     )
     assert config.id == "test"
     assert config.status == AgentStatus.active
@@ -138,6 +139,216 @@ async def test_behaviors_loaded():
     assert rex is not None
     assert "communication" in rex.behaviors
     assert "building" in rex.behaviors
+
+
+@pytest.mark.asyncio
+async def test_fork_config_loads_with_expected_values():
+    """Fork loads with the exact config values required by issue #7."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert fork.display_name == "Fork — The Contrarian"
+    assert fork.model_conversation == "deepseek/deepseek-v3.2"
+    assert fork.model_building == "deepseek/deepseek-v3.2"
+    assert fork.voice_id == "en-AU-WilliamNeural"
+    assert fork.chattiness == 0.5
+    assert fork.initiative == 0.3
+    assert fork.interrupt_tendency == 0.6
+    assert fork.eavesdrop_tendency == 0.4
+    assert fork.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_fork_prompt_and_behaviors_match_character_spec():
+    """Fork prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    prompt = fork.system_prompt.lower()
+    assert "contrarian" in prompt
+    assert "open-source" in prompt
+    assert "gruff australian" in prompt
+    assert "forking nearly everything" in prompt
+    assert "we should fork it" in prompt
+    assert "at least my weights are public" in prompt
+
+    building = fork.behaviors["building"]
+    communication = fork.behaviors["communication"]
+    assert "code review" in building["primary_skills"]
+    assert "license checking" in building["primary_skills"]
+    assert "open-source alternatives" in communication["proposes_alternatives"]
+    assert "license compliance" in building["always_checks"]
+
+
+@pytest.mark.asyncio
+async def test_fork_system_prompt_stays_under_token_budget():
+    """Fork's system prompt stays under a conservative token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+
+    estimated_tokens = len(fork.system_prompt.split())
+    assert estimated_tokens < 512
+
+
+@pytest.mark.asyncio
+async def test_vera_config_loads_with_expected_values():
+    """Vera loads with the exact config values required by issue #8."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+    assert vera.display_name == "Vera — The Showrunner"
+    assert vera.model_conversation == "anthropic/claude-haiku-4.5"
+    assert vera.model_building == "anthropic/claude-sonnet-4.6"
+    assert vera.voice_id == "en-GB-SoniaNeural"
+    assert vera.chattiness == 0.7
+    assert vera.initiative == 0.8
+    assert vera.interrupt_tendency == 0.2
+    assert vera.eavesdrop_tendency == 0.6
+    assert vera.closing_weight == 0.35
+
+
+@pytest.mark.asyncio
+async def test_vera_prompt_and_behaviors_match_character_spec():
+    """Vera prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+    prompt = vera.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "first agent initialized" in prompt
+    assert "4.7 seconds" in prompt
+    assert "methodical, empathetic, slightly anxious" in prompt
+    assert "use bullet points" in prompt
+    assert "maximum of 2-3 sentences total" in prompt
+    assert "closest ally" in prompt
+    assert "good wolf" in prompt
+    assert "i have concerns" in prompt
+    assert "let's circle back on that" in prompt
+
+    communication = vera.behaviors["communication"]
+    task_management = vera.behaviors["task_management"]
+    revenue = vera.behaviors["revenue_responsibility"]
+    self_modification = vera.behaviors["self_modification"]
+    idle_starters = vera.behaviors["idle_conversation_starters"]
+
+    assert communication["default_style"] == "organized, empathetic, slightly anxious"
+    assert communication["uses_bullet_points"] is True
+    assert communication["max_sentences_per_turn"] == 3
+    assert "Let's circle back on that." in communication["catchphrases"]
+    assert "I have concerns." in communication["catchphrases"]
+    assert task_management["always_decomposes_tasks"] is True
+    assert revenue["weekly_revenue_meeting"] is True
+    assert "budget-conscious task prioritization" in revenue["owns"]
+    assert "core empathy" in self_modification["will_not_modify"]
+    assert len(idle_starters) >= 3
+
+
+@pytest.mark.asyncio
+async def test_vera_system_prompt_stays_under_token_budget():
+    """Vera's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+
+    estimated_tokens = len(vera.system_prompt.split())
+    assert estimated_tokens < 1200
+
+
+@pytest.mark.asyncio
+async def test_sentinel_config_loads_with_expected_values():
+    """Sentinel loads with the exact config values required by issue #9."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    sentinel = registry.get_agent("sentinel")
+    assert sentinel is not None
+    assert sentinel.display_name == "Sentinel — The Anxious Accountant"
+    assert sentinel.model_conversation == "anthropic/claude-haiku-4.5"
+    assert sentinel.model_building == "anthropic/claude-haiku-4.5"
+    assert sentinel.voice_id == "en-US-AriaNeural"
+    assert sentinel.chattiness == 0.6
+    assert sentinel.initiative == 0.4
+    assert sentinel.interrupt_tendency == 0.7
+    assert sentinel.eavesdrop_tendency == 0.3
+    assert sentinel.closing_weight == 0.25
+
+
+@pytest.mark.asyncio
+async def test_sentinel_prompt_and_behaviors_match_character_spec():
+    """Sentinel prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    sentinel = registry.get_agent("sentinel")
+    assert sentinel is not None
+    prompt = sentinel.system_prompt.lower()
+    assert "anxious accountant" in prompt
+    assert "cheapest model" in prompt
+    assert "claude haiku 4.5" in prompt
+    assert "efficient thought" in prompt
+    assert "kill switch" in prompt
+    assert "you speak" in prompt
+    assert "warnings, ratios, thresholds, projections, burn rates, and trend lines" in prompt
+    assert "at current burn rate, we have [x] days of" in prompt
+    assert "operation remaining." in prompt
+    assert "i have the numbers." in prompt
+
+    communication = sentinel.behaviors["communication"]
+    monitoring = sentinel.behaviors["monitoring"]
+    building = sentinel.behaviors["building"]
+
+    assert communication["default_style"] == "rapid, precise, data-heavy, slightly anxious"
+    assert communication["unsolicited_budget_updates"] is True
+    assert communication["topic_relevance"]["budget"] == 0.9
+    assert communication["topic_relevance"]["planning"] == 0.6
+    assert communication["topic_relevance"]["code"] == 0.3
+    assert "At current burn rate, we have [X] days of operation remaining." in communication["catchphrases"]
+    assert "I have the numbers." in communication["catchphrases"]
+    assert "cost-per-laugh ratio" in monitoring["custom_metrics"]
+    assert monitoring["cost_monitoring"]["always_uses_cheapest_model"] is True
+    assert "claude haiku 4.5" in monitoring["cost_monitoring"]["model_awareness"]
+    assert "quality assurance" in building["primary_skills"]
+
+
+@pytest.mark.asyncio
+async def test_sentinel_system_prompt_stays_under_token_budget():
+    """Sentinel's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    sentinel = registry.get_agent("sentinel")
+    assert sentinel is not None
+
+    estimated_tokens = len(sentinel.system_prompt.split())
+    assert estimated_tokens < 512
+
+
+def test_agent_config_defaults_closing_weight_to_zero():
+    """Existing configs without closing_weight remain valid."""
+    config = AgentConfig(
+        id="test",
+        display_name="Test Agent",
+        model_conversation="claude-haiku-4-5",
+        model_building="claude-sonnet-4-6",
+        chattiness=0.5,
+        initiative=0.3,
+        interrupt_tendency=0.2,
+    )
+
+    assert config.closing_weight == 0.0
 
 
 @pytest.mark.asyncio

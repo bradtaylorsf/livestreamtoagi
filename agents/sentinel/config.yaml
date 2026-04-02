@@ -1,9 +1,10 @@
 id: sentinel
 display_name: "Sentinel — The Anxious Accountant"
-model_conversation: claude-haiku-4-5
-model_building: claude-haiku-4-5
+model_conversation: anthropic/claude-haiku-4.5
+model_building: anthropic/claude-haiku-4.5
 voice_id: en-US-AriaNeural
 chattiness: 0.6
 initiative: 0.4
 interrupt_tendency: 0.7
 eavesdrop_tendency: 0.3
+closing_weight: 0.25
