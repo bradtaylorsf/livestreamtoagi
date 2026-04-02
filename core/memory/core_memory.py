@@ -146,13 +146,16 @@ _SECTION_RE = re.compile(
 def _replace_section(full_content: str, section: str, new_body: str) -> str:
     """Replace the body of a markdown ### section, preserving all other sections."""
     target_heading = _SECTION_HEADINGS[section]
+    found = False
 
     def replacer(m: re.Match[str]) -> str:
+        nonlocal found
         if m.group("heading").strip() == target_heading:
+            found = True
             return m.group(1) + new_body.rstrip("\n") + "\n"
         return m.group(0)
 
     result = _SECTION_RE.sub(replacer, full_content)
-    if result == full_content:
+    if not found:
         raise ValueError(f"Section heading '### {target_heading}' not found in content")
     return result
