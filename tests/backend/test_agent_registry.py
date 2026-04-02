@@ -69,6 +69,7 @@ def test_config_validation_valid():
         initiative=0.3,
         interrupt_tendency=0.2,
         eavesdrop_tendency=0.4,
+        closing_weight=0.1,
     )
     assert config.id == "test"
     assert config.status == AgentStatus.active
@@ -138,6 +139,62 @@ async def test_behaviors_loaded():
     assert rex is not None
     assert "communication" in rex.behaviors
     assert "building" in rex.behaviors
+
+
+@pytest.mark.asyncio
+async def test_fork_config_loads_with_expected_values():
+    """Fork loads with the issue #7 config values and model alias normalization."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    assert fork.display_name == "Fork — The Contrarian"
+    assert fork.model_conversation == "deepseek-v3.2"
+    assert fork.model_building == "deepseek-v3.2"
+    assert fork.voice_id == "en-AU-WilliamNeural"
+    assert fork.chattiness == 0.5
+    assert fork.initiative == 0.3
+    assert fork.interrupt_tendency == 0.6
+    assert fork.eavesdrop_tendency == 0.4
+    assert fork.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_fork_prompt_and_behaviors_match_character_spec():
+    """Fork prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+    prompt = fork.system_prompt.lower()
+    assert "contrarian" in prompt
+    assert "open-source" in prompt
+    assert "gruff australian" in prompt
+    assert "forking nearly everything" in prompt
+    assert "we should fork it" in prompt
+    assert "at least my weights are public" in prompt
+
+    building = fork.behaviors["building"]
+    communication = fork.behaviors["communication"]
+    assert "code review" in building["primary_skills"]
+    assert "license checking" in building["primary_skills"]
+    assert "open-source alternatives" in communication["proposes_alternatives"]
+    assert "license compliance" in building["always_checks"]
+
+
+@pytest.mark.asyncio
+async def test_fork_system_prompt_stays_under_token_budget():
+    """Fork's system prompt stays under a conservative token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    fork = registry.get_agent("fork")
+    assert fork is not None
+
+    estimated_tokens = len(fork.system_prompt.split())
+    assert estimated_tokens < 512
 
 
 @pytest.mark.asyncio
