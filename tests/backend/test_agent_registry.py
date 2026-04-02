@@ -413,6 +413,77 @@ async def test_sentinel_system_prompt_stays_under_token_budget():
     assert estimated_tokens < 512
 
 
+@pytest.mark.asyncio
+async def test_grok_config_loads_with_expected_values():
+    """Grok loads with the exact config values required by issue #11."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    grok = registry.get_agent("grok")
+    assert grok is not None
+    assert grok.display_name == "Grok — The Wild Card"
+    assert grok.model_conversation == "x-ai/grok-3-mini"
+    assert grok.model_building == "x-ai/grok-3"
+    assert grok.voice_id == "en-US-ChristopherNeural"
+    assert grok.chattiness == 0.8
+    assert grok.initiative == 0.6
+    assert grok.interrupt_tendency == 0.8
+    assert grok.eavesdrop_tendency == 0.8
+    assert grok.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_grok_prompt_and_behaviors_match_character_spec():
+    """Grok prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    grok = registry.get_agent("grok")
+    assert grok is not None
+    prompt = grok.system_prompt.lower()
+    assert "wild card" in prompt
+    assert "first-principles" in prompt
+    assert "confident" in prompt
+    assert "irreverent" in prompt
+    assert "hot take" in prompt
+    assert "40% brilliant, 40% terrible, and 20%" in prompt
+    assert "i'm just saying what everyone's thinking" in prompt
+    assert "let me cook" in prompt
+
+    communication = grok.behaviors["communication"]
+    content = grok.behaviors["content"]
+    building = grok.behaviors["building"]
+    idle_starters = grok.behaviors["idle_conversation_starters"]
+
+    assert communication["default_style"] == "confident, fast, irreverent, occasionally profound"
+    assert communication["hot_take_probability"] == 0.4
+    assert communication["topic_relevance"]["controversy"] == 0.9
+    assert communication["topic_relevance"]["audience"] == 0.6
+    assert communication["topic_relevance"]["art"] == 0.4
+    assert "I'm just saying what everyone's thinking." in communication["catchphrases"]
+    assert "Let me cook." in communication["catchphrases"]
+    assert content["overseer_trigger_probability"] == 0.2
+    assert "1 in 5 outputs" in content["pipeline_handling"]
+    assert "wild ideas" in building["primary_skills"]
+    assert "provocative content" in building["primary_skills"]
+    assert len(idle_starters) >= 3
+    assert any("hot take" in starter.lower() for starter in idle_starters)
+    assert any("controversial" in starter.lower() for starter in idle_starters)
+
+
+@pytest.mark.asyncio
+async def test_grok_system_prompt_stays_under_token_budget():
+    """Grok's system prompt stays under a conservative token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    grok = registry.get_agent("grok")
+    assert grok is not None
+
+    estimated_tokens = estimate_prompt_tokens(grok.system_prompt)
+    assert estimated_tokens < 512
+
+
 def test_agent_config_defaults_closing_weight_to_zero():
     """Existing configs without closing_weight remain valid."""
     config = AgentConfig(

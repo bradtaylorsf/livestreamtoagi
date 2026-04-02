@@ -26,6 +26,8 @@ MODEL_NAME_ALIASES = {
     "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
     "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
     "deepseek/deepseek-v3.2": "deepseek-v3.2",
+    "x-ai/grok-3-mini": "grok-3-mini",
+    "x-ai/grok-3": "grok-3",
 }
 REDIS_STATUS_PREFIX = "agent:status:"
 
