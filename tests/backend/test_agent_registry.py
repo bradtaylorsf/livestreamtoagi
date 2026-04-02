@@ -207,8 +207,8 @@ async def test_fork_prompt_and_behaviors_match_character():
     assert communication["proposes_alternatives"] == (
         "always suggests open-source alternative to any commercial tool"
     )
-    assert "We should fork it" in communication["catchphrases"]
-    assert "At least my weights are public" in communication["catchphrases"]
+    assert "We should fork it." in communication["catchphrases"]
+    assert "At least my weights are public." in communication["catchphrases"]
     assert "code review" in building["primary_skills"]
     assert "license" in building["license_checking"].lower()
 
