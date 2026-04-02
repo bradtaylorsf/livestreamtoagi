@@ -812,6 +812,94 @@ async def test_reload():
 # ── Overseer-specific tests ─────────────────────────────────────
 
 
+# ── Alpha-specific tests ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_alpha_config_loads_with_expected_values():
+    """Alpha loads with the exact config values required by issue #15."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.id == "alpha"
+    assert alpha.display_name == "Alpha — The Wolf"
+    assert alpha.model_conversation == "deepseek/deepseek-v3.2"
+    assert alpha.model_building == "deepseek/deepseek-v3.2"
+    assert alpha.voice_id is None
+    assert alpha.chattiness == 0.0
+    assert alpha.initiative == 0.0
+    assert alpha.interrupt_tendency == 0.0
+    assert alpha.eavesdrop_tendency == 0.0
+
+
+@pytest.mark.asyncio
+async def test_alpha_config_loads_without_errors():
+    """Alpha config loads successfully as a standalone agent."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.system_prompt != ""
+    assert alpha.behaviors != {}
+
+
+@pytest.mark.asyncio
+async def test_alpha_max_task_duration_is_60():
+    """Alpha max_task_duration is 60 seconds per spec."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.behaviors["capabilities"]["max_task_duration"] == "60 seconds"
+
+
+@pytest.mark.asyncio
+async def test_alpha_behaviors_and_prompt_match_spec():
+    """Alpha prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+
+    # System prompt persona markers
+    prompt = alpha.system_prompt.lower()
+    assert "eager" in prompt
+    assert "loyal" in prompt
+    assert "wolf" in prompt
+    assert "errand" in prompt or "task" in prompt
+    for symbol in ["!", "?", "✓", "✗", "♪"]:
+        assert symbol in alpha.system_prompt
+
+    # Capabilities
+    capabilities = alpha.behaviors["capabilities"]
+    assert "web search" in capabilities["can_do"]
+    assert "simple calculations" in capabilities["can_do"]
+    assert "fetch data" in capabilities["can_do"]
+    assert "run simple scripts" in capabilities["can_do"]
+    assert "complex reasoning" in capabilities["cannot_do"]
+    assert "returns confused, agents comfort it" in capabilities["on_failure"]
+
+    # Visual behavior states
+    visual = alpha.behaviors["visual_behavior"]
+    assert "idle" in visual
+    assert "dispatched" in visual
+    assert "returning" in visual
+    assert "migrates" in visual
+
+    # Product integration
+    product = alpha.behaviors["product_integration"]
+    assert "2-3" in product["frequency"]
+    assert "natural" in product["message_style"]
+
+
+# ── Overseer-specific tests ─────────────────────────────────────
+
+
 @pytest.mark.asyncio
 async def test_overseer_config_loads_with_expected_values():
     """Overseer loads with the exact config values required by issue #14."""
