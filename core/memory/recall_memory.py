@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable, Awaitable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from core.models import RecallMemoryCreate
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from core.models import RecallMemory
     from core.repos.memory_repo import MemoryRepo
 
@@ -88,7 +90,7 @@ def _score_candidates(
     query_embedding: list[float],
 ) -> list[tuple[RecallMemory, float]]:
     """Compute blended score: similarity * 0.7 + recency * 0.3."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Collect timestamps for normalization
     timestamps = []
@@ -96,7 +98,7 @@ def _score_candidates(
         ts = m.timestamp
         if ts is not None:
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
             timestamps.append(ts)
 
     if timestamps:
@@ -114,11 +116,8 @@ def _score_candidates(
         ts = m.timestamp
         if ts is not None:
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if time_range > 0:
-                recency = (ts - oldest).total_seconds() / time_range
-            else:
-                recency = 1.0
+                ts = ts.replace(tzinfo=UTC)
+            recency = (ts - oldest).total_seconds() / time_range if time_range > 0 else 1.0
         else:
             recency = 0.0
 
@@ -130,7 +129,7 @@ def _score_candidates(
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     mag_a = sum(x * x for x in a) ** 0.5
     mag_b = sum(x * x for x in b) ** 0.5
     if mag_a == 0 or mag_b == 0:

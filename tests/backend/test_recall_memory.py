@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,8 +10,6 @@ import pytest
 from core.memory.embeddings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 from core.memory.recall_memory import (
     CANDIDATE_MULTIPLIER,
-    RECENCY_WEIGHT,
-    SIMILARITY_WEIGHT,
     RecallMemoryManager,
     _cosine_similarity,
     _format_memories,
@@ -19,12 +17,11 @@ from core.memory.recall_memory import (
 )
 from core.models import RecallMemory, RecallMemoryCreate
 
-
 # ── Helpers ──────────────────────────────────────────────────────
 
 
 def _make_recall_memory(
-    id: int = 1,
+    id: int = 1,  # noqa: A002
     agent_id: str = "vera",
     summary: str = "Had a conversation about building plans",
     embedding: list[float] | None = None,
@@ -38,7 +35,7 @@ def _make_recall_memory(
     if embedding is None:
         embedding = [0.0] * EMBEDDING_DIMENSION
     if timestamp is None:
-        timestamp = datetime(2026, 4, 1, 12, 0, 0, tzinfo=timezone.utc)
+        timestamp = datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
     return RecallMemory(
         id=id,
         agent_id=agent_id,
@@ -178,13 +175,13 @@ class TestRetrieveRecallMemories:
             id=1,
             summary="Highly relevant but old",
             embedding=_unit_vector(0),  # cosine_sim = 1.0
-            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),  # oldest
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),  # oldest
         )
         mem_b = _make_recall_memory(
             id=2,
             summary="Not relevant but recent",
             embedding=_unit_vector(1),  # cosine_sim = 0.0
-            timestamp=datetime(2026, 4, 1, tzinfo=timezone.utc),  # newest
+            timestamp=datetime(2026, 4, 1, tzinfo=UTC),  # newest
         )
 
         mock_repo.search_recall.return_value = [mem_a, mem_b]
@@ -197,7 +194,7 @@ class TestRetrieveRecallMemories:
         assert "Highly relevant but old" in result
         lines = result.split("\n")
         # First memory line should be A
-        memory_lines = [l for l in lines if l.startswith("- ")]
+        memory_lines = [line for line in lines if line.startswith("- ")]
         assert "Highly relevant but old" in memory_lines[0]
         assert "Not relevant but recent" in memory_lines[1]
 
@@ -236,7 +233,7 @@ class TestRetrieveRecallMemories:
         result = await manager.retrieve_recall_memories("vera", "query", limit=2)
 
         # Should only format 2 memories
-        memory_lines = [l for l in result.split("\n") if l.startswith("- ")]
+        memory_lines = [line for line in result.split("\n") if line.startswith("- ")]
         assert len(memory_lines) == 2
         assert mock_repo.increment_recalled_count.call_count == 2
 
@@ -307,8 +304,8 @@ class TestScoreCandidates:
     def test_blended_score_values(self) -> None:
         query = _unit_vector(0)
 
-        oldest = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        newest = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        oldest = datetime(2026, 1, 1, tzinfo=UTC)
+        newest = datetime(2026, 4, 1, tzinfo=UTC)
 
         candidates = [
             _make_recall_memory(id=1, embedding=_unit_vector(0), timestamp=oldest),
@@ -329,7 +326,7 @@ class TestScoreCandidates:
             _make_recall_memory(
                 id=1,
                 embedding=_unit_vector(0),
-                timestamp=datetime(2026, 3, 1, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 3, 1, tzinfo=UTC),
             ),
         ]
 
