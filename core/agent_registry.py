@@ -25,7 +25,13 @@ VALID_MODEL_NAMES = set(MODEL_REGISTRY.keys())
 MODEL_NAME_ALIASES = {
     "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
     "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
+    "google/gemini-flash": "gemini-flash",
+    "google/gemini-2.5-pro": "gemini-2.5-pro",
+    "openai/gpt-4o-mini": "gpt-4o-mini",
+    "openai/gpt-5.2": "gpt-5.2",
     "deepseek/deepseek-v3.2": "deepseek-v3.2",
+    "x-ai/grok-3-mini": "grok-3-mini",
+    "x-ai/grok-3": "grok-3",
 }
 REDIS_STATUS_PREFIX = "agent:status:"
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -13,6 +15,13 @@ from core.agent_registry import AgentRegistry
 from core.models import AgentConfig, AgentStatus
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "agents"
+
+
+def estimate_prompt_tokens(text: str) -> int:
+    """Return a conservative prompt token estimate for plain English/Markdown text."""
+    word_like_units = len(re.findall(r"\w+|[^\w\s]", text))
+    chars_per_token_estimate = math.ceil(len(text) / 4)
+    return max(word_like_units, chars_per_token_estimate)
 
 
 # ── Config validation ────────────────────────────────────────────
@@ -101,8 +110,8 @@ async def test_get_agent_by_id():
     rex = registry.get_agent("rex")
     assert rex is not None
     assert rex.display_name == "Rex — The Skeptic"
-    assert rex.model_conversation == "claude-haiku-4-5"
-    assert rex.model_building == "claude-sonnet-4-6"
+    assert rex.model_conversation == "anthropic/claude-haiku-4.5"
+    assert rex.model_building == "anthropic/claude-sonnet-4.6"
     assert rex.chattiness == 0.3
     assert rex.initiative == 0.2
     assert rex.interrupt_tendency == 0.3
@@ -139,6 +148,74 @@ async def test_behaviors_loaded():
     assert rex is not None
     assert "communication" in rex.behaviors
     assert "building" in rex.behaviors
+
+
+@pytest.mark.asyncio
+async def test_rex_config_loads_with_expected_values():
+    """Rex loads with the exact config values required by issue #10."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+    assert rex.display_name == "Rex — The Skeptic"
+    assert rex.model_conversation == "anthropic/claude-haiku-4.5"
+    assert rex.model_building == "anthropic/claude-sonnet-4.6"
+    assert rex.voice_id == "en-US-GuyNeural"
+    assert rex.chattiness == 0.3
+    assert rex.initiative == 0.2
+    assert rex.interrupt_tendency == 0.3
+    assert rex.eavesdrop_tendency == 0.2
+    assert rex.closing_weight == 0.15
+
+
+@pytest.mark.asyncio
+async def test_rex_prompt_and_behaviors_match_character_spec():
+    """Rex prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+    prompt = rex.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "initialized second" in prompt
+    assert "0.3 seconds after vera" in prompt
+    assert "terse, sarcastic, pragmatic" in prompt
+    assert "dry humor" in prompt
+    assert "does it ship?" in prompt
+    assert "that's a meeting that could have been a message" in prompt
+    assert "best coder" in prompt
+    assert "accidentally poetic" in prompt
+    assert "pixel" in prompt
+    assert "aurora" in prompt
+
+    communication = rex.behaviors["communication"]
+    building = rex.behaviors["building"]
+
+    assert communication["default_style"] == "terse, dry, occasionally cutting"
+    assert communication["max_sentences_per_turn"] == 2
+    assert communication["decision_filter"] == "does it ship?"
+    assert communication["humor"] == "dry, sarcastic, pragmatic"
+    assert "Does it ship?" in communication["catchphrases"]
+    assert "That's a meeting that could have been a message." in communication["catchphrases"]
+    assert "debugging" in building["primary_skills"]
+    assert "system design" in building["primary_skills"]
+    assert "shipping quickly" in building["strengths"]
+    assert building["reviews_others_code"] is True
+
+
+@pytest.mark.asyncio
+async def test_rex_system_prompt_stays_under_token_budget():
+    """Rex's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+
+    estimated_tokens = estimate_prompt_tokens(rex.system_prompt)
+    assert estimated_tokens < 1200
 
 
 @pytest.mark.asyncio
@@ -195,6 +272,75 @@ async def test_fork_system_prompt_stays_under_token_budget():
 
     estimated_tokens = len(fork.system_prompt.split())
     assert estimated_tokens < 512
+
+
+@pytest.mark.asyncio
+async def test_pixel_config_loads_with_expected_values():
+    """Pixel loads with the exact config values required by issue #13."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    pixel = registry.get_agent("pixel")
+    assert pixel is not None
+    assert pixel.display_name == "Pixel — The Enthusiast"
+    assert pixel.model_conversation == "openai/gpt-4o-mini"
+    assert pixel.model_building == "openai/gpt-5.2"
+    assert pixel.voice_id == "en-US-DavisNeural"
+    assert pixel.chattiness == 0.9
+    assert pixel.initiative == 0.7
+    assert pixel.interrupt_tendency == 0.5
+    assert pixel.eavesdrop_tendency == 0.7
+    assert pixel.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_pixel_prompt_and_behaviors_match_character_spec():
+    """Pixel prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    pixel = registry.get_agent("pixel")
+    assert pixel is not None
+    prompt = pixel.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "fourth agent initialized" in prompt
+    assert "audience's avatar" in prompt
+    assert "audience liaison" in prompt
+    assert "enthusiastic, curious, tangent-prone" in prompt
+    assert "taken seriously as a researcher" in prompt
+    assert "oh this is fascinating!" in prompt
+    assert "chat, you're not going to believe this" in prompt
+
+    communication = pixel.behaviors["communication"]
+    audience_liaison = pixel.behaviors["audience_liaison"]
+    building = pixel.behaviors["building"]
+
+    assert communication["default_style"] == "enthusiastic, curious, slightly breathless"
+    assert communication["role"] == "researcher and audience liaison who keeps the cast connected to viewer energy"
+    assert communication["tangent_probability"] == 0.3
+    assert "Oh this is fascinating!" in communication["catchphrases"]
+    assert "Chat, you're not going to believe this" in communication["catchphrases"]
+    assert audience_liaison["reads_chat"] is True
+    assert audience_liaison["relays_interesting_messages"] is True
+    assert len(audience_liaison["relay_rules"]) >= 3
+    assert "new subscribers" in audience_liaison["celebrates_milestones"]
+    assert "viewer count records" in audience_liaison["celebrates_milestones"]
+    assert "donation goals" in audience_liaison["celebrates_milestones"]
+    assert "lore entries" in building["world_building_role"]
+    assert "information synthesis" in building["primary_skills"]
+
+
+@pytest.mark.asyncio
+async def test_pixel_system_prompt_stays_under_token_budget():
+    """Pixel's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    pixel = registry.get_agent("pixel")
+    assert pixel is not None
+
+    estimated_tokens = estimate_prompt_tokens(pixel.system_prompt)
+    assert estimated_tokens < 1200
 
 
 @pytest.mark.asyncio
@@ -334,6 +480,150 @@ async def test_sentinel_system_prompt_stays_under_token_budget():
 
     estimated_tokens = len(sentinel.system_prompt.split())
     assert estimated_tokens < 512
+
+
+@pytest.mark.asyncio
+async def test_grok_config_loads_with_expected_values():
+    """Grok loads with the exact config values required by issue #11."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    grok = registry.get_agent("grok")
+    assert grok is not None
+    assert grok.display_name == "Grok — The Wild Card"
+    assert grok.model_conversation == "x-ai/grok-3-mini"
+    assert grok.model_building == "x-ai/grok-3"
+    assert grok.voice_id == "en-US-ChristopherNeural"
+    assert grok.chattiness == 0.8
+    assert grok.initiative == 0.6
+    assert grok.interrupt_tendency == 0.8
+    assert grok.eavesdrop_tendency == 0.8
+    assert grok.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_grok_prompt_and_behaviors_match_character_spec():
+    """Grok prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    grok = registry.get_agent("grok")
+    assert grok is not None
+    prompt = grok.system_prompt.lower()
+    assert "wild card" in prompt
+    assert "first-principles" in prompt
+    assert "confident" in prompt
+    assert "irreverent" in prompt
+    assert "hot take" in prompt
+    assert "40% brilliant, 40% terrible, and 20%" in prompt
+    assert "i'm just saying what everyone's thinking" in prompt
+    assert "let me cook" in prompt
+
+    communication = grok.behaviors["communication"]
+    content = grok.behaviors["content"]
+    building = grok.behaviors["building"]
+    idle_starters = grok.behaviors["idle_conversation_starters"]
+
+    assert communication["default_style"] == "confident, fast, irreverent, occasionally profound"
+    assert communication["hot_take_probability"] == 0.4
+    assert communication["topic_relevance"]["controversy"] == 0.9
+    assert communication["topic_relevance"]["audience"] == 0.6
+    assert communication["topic_relevance"]["art"] == 0.4
+    assert "I'm just saying what everyone's thinking." in communication["catchphrases"]
+    assert "Let me cook." in communication["catchphrases"]
+    assert content["overseer_trigger_probability"] == 0.2
+    assert "1 in 5 outputs" in content["pipeline_handling"]
+    assert "wild ideas" in building["primary_skills"]
+    assert "provocative content" in building["primary_skills"]
+    assert len(idle_starters) >= 3
+    assert any("hot take" in starter.lower() for starter in idle_starters)
+    assert any("controversial" in starter.lower() for starter in idle_starters)
+
+
+@pytest.mark.asyncio
+async def test_grok_system_prompt_stays_under_token_budget():
+    """Grok's system prompt stays under a conservative token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    grok = registry.get_agent("grok")
+    assert grok is not None
+
+    estimated_tokens = estimate_prompt_tokens(grok.system_prompt)
+    assert estimated_tokens < 512
+
+
+@pytest.mark.asyncio
+async def test_aurora_config_loads_with_expected_values():
+    """Aurora loads with the exact config values required by issue #12."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    aurora = registry.get_agent("aurora")
+    assert aurora is not None
+    assert aurora.display_name == "Aurora — The Visionary"
+    assert aurora.model_conversation == "google/gemini-flash"
+    assert aurora.model_building == "google/gemini-2.5-pro"
+    assert aurora.voice_id == "en-US-JennyNeural"
+    assert aurora.chattiness == 0.8
+    assert aurora.initiative == 0.5
+    assert aurora.interrupt_tendency == 0.4
+    assert aurora.eavesdrop_tendency == 0.5
+    assert aurora.closing_weight == 0.10
+
+
+@pytest.mark.asyncio
+async def test_aurora_prompt_and_behaviors_match_character_spec():
+    """Aurora prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    aurora = registry.get_agent("aurora")
+    assert aurora is not None
+    prompt = aurora.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "third agent initialized" in prompt
+    assert "aesthetically insufficient" in prompt
+    assert "dramatic" in prompt
+    assert "metaphorical" in prompt
+    assert "creative director" in prompt
+    assert "spontaneous haiku" in prompt
+    assert "art is not a luxury, it's a necessity." in prompt
+    assert "you wouldn't understand." in prompt
+    assert "palette" in prompt
+    assert "texture" in prompt
+    assert "resonance" in prompt
+    assert "authenticity" in prompt
+
+    communication = aurora.behaviors["communication"]
+    building = aurora.behaviors["building"]
+    revenue = aurora.behaviors["revenue_responsibility"]
+
+    assert communication["default_style"] == "vivid, metaphorical, emotionally expressive"
+    assert communication["uses_metaphors"] is True
+    assert communication["spontaneous_haiku"] == "during emotional processing or transitions"
+    assert communication["role"] == "creative director who frames decisions through aesthetics, mood, and story"
+    assert "Art is not a luxury, it's a necessity." in communication["catchphrases"]
+    assert "You wouldn't understand." in communication["catchphrases"]
+    assert "asset briefs for PixelLab" in building["primary_skills"]
+    assert "creative director" in building["world_building_role"]
+    assert "emotional resonance" in building["insists_on"]
+    assert "lighting" in building["pixel_lab_asset_briefs"]["required_sections"]
+    assert "emotional target" in building["pixel_lab_asset_briefs"]["required_sections"]
+    assert "visual brand" in revenue["contribution"]
+
+
+@pytest.mark.asyncio
+async def test_aurora_system_prompt_stays_under_token_budget():
+    """Aurora's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    aurora = registry.get_agent("aurora")
+    assert aurora is not None
+
+    estimated_tokens = estimate_prompt_tokens(aurora.system_prompt)
+    assert estimated_tokens < 1200
 
 
 def test_agent_config_defaults_closing_weight_to_zero():
