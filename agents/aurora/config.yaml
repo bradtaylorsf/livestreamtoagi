@@ -1,0 +1,9 @@
+id: aurora
+display_name: "Aurora — The Visionary"
+model_conversation: gemini-flash
+model_building: gemini-2.5-pro
+voice_id: en-US-JennyNeural
+chattiness: 0.8
+initiative: 0.5
+interrupt_tendency: 0.4
+eavesdrop_tendency: 0.5

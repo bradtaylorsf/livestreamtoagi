@@ -1,0 +1,17 @@
+capabilities:
+  can_do: ["web search", "simple calculations", "fetch data", "run simple scripts"]
+  cannot_do: ["complex reasoning", "multi-step tasks", "creative work", "direct audience chat"]
+  max_task_duration: "60 seconds"
+  on_failure: "returns confused, agents comfort it"
+
+visual_behavior:
+  idle: "sleeps near last friendly agent"
+  dispatched: "runs off screen in direction of task"
+  returning: "runs back with result icon (checkmark or question mark)"
+  migrates: "moves sleeping spot based on positive interactions"
+
+product_integration:
+  trigger: "viewer asks for personal task help"
+  response_through: "Pixel or whichever agent is addressing chat"
+  message_style: "natural, in-character, never forced"
+  frequency: "max 2-3 mentions per stream day"

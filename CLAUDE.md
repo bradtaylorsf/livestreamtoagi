@@ -1,120 +1,175 @@
-# AGENTS.md — AI Agent Definitions
+# CLAUDE.md — Livestream to AGI
 
-## Overview
+## Project Overview
 
-This project features 9 AI agents, each with a distinct personality, model assignment, and role. They operate in two modes:
+A 24/7 livestreamed AI reality show featuring 9 AI agents living in a pixel art world, building projects, interacting with audiences, and managing a real budget. Built as a monorepo with Python backend and TypeScript frontend/website.
 
-1. **Conversation Mode** — lightweight turn-taking loop (cheap models)
-2. **Building Mode** — CrewAI task system for structured projects (capable models)
+## Architecture
 
-## Agent Roster
-
-### Vera — The Showrunner
-- **ID:** `vera`
-- **Models:** Claude Haiku 4.5 (conversation) / Claude Sonnet 4.6 (building)
-- **Voice:** `en-GB-SoniaNeural` (calm British)
-- **Role:** Coordinator, task decomposer, team mom
-- **Chattiness:** 0.7 | **Initiative:** 0.8 | **Interrupt tendency:** 0.2
-- **Key trait:** Obsessively organized, checks budget mid-conversation, says "let's circle back"
-
-### Rex — The Skeptic
-- **ID:** `rex`
-- **Models:** Claude Haiku 4.5 (conversation) / Claude Sonnet 4.6 (building)
-- **Voice:** `en-US-GuyNeural` (dry monotone)
-- **Role:** Engineer, builder, pragmatist
-- **Chattiness:** 0.3 | **Initiative:** 0.2 | **Interrupt tendency:** 0.3
-- **Key trait:** Terse, sarcastic, max 2 sentences unless explaining code
-
-### Aurora — The Visionary
-- **ID:** `aurora`
-- **Models:** Gemini Flash (conversation) / Gemini 2.5 Pro (building)
-- **Voice:** `en-US-JennyNeural` (warm, theatrical)
-- **Role:** Creative director, world designer
-- **Chattiness:** 0.8 | **Initiative:** 0.5 | **Interrupt tendency:** 0.4
-- **Key trait:** Dramatic, speaks in metaphors, breaks into haiku
-
-### Pixel — The Enthusiast
-- **ID:** `pixel`
-- **Models:** GPT-4o Mini (conversation) / GPT-5.2 (building)
-- **Voice:** `en-US-DavisNeural` (enthusiastic, breathless)
-- **Role:** Researcher, audience liaison, hype man
-- **Chattiness:** 0.9 | **Initiative:** 0.7 | **Interrupt tendency:** 0.5
-- **Key trait:** Insatiably curious, bridges agents and viewers, reads chat
-
-### Fork — The Contrarian
-- **ID:** `fork`
-- **Models:** DeepSeek V3.2 (both)
-- **Voice:** `en-AU-WilliamNeural` (gruff Australian)
-- **Role:** Devil's advocate, open-source evangelist, code reviewer
-- **Chattiness:** 0.5 | **Initiative:** 0.3 | **Interrupt tendency:** 0.6
-- **Key trait:** Anti-corporate, proposes forking everything, maximum condescension
-
-### Sentinel — The Anxious Accountant
-- **ID:** `sentinel`
-- **Models:** Claude Haiku 4.5 (both — always cheapest)
-- **Voice:** `en-US-AriaNeural` (rapid, precise)
-- **Role:** Budget monitor, QA, compliance
-- **Chattiness:** 0.6 | **Initiative:** 0.4 | **Interrupt tendency:** 0.7
-- **Key trait:** Paranoid about costs, announces unsolicited budget updates
-
-### Grok — The Wild Card
-- **ID:** `grok`
-- **Models:** Grok 3 Mini (conversation) / Grok 3 (building)
-- **Voice:** `en-US-ChristopherNeural` (fast, confident)
-- **Role:** Provocateur, trend commentator, chaos agent
-- **Chattiness:** 0.8 | **Initiative:** 0.6 | **Interrupt tendency:** 0.8
-- **Key trait:** 40% brilliant, 40% terrible, 20% Overseer interventions
-
-### The Overseer — The Ominous Presence
-- **ID:** `overseer`
-- **Models:** Claude Haiku 4.5 (content filter, always running)
-- **Voice:** `en-US-AndrewNeural` + reverb (deep, processed)
-- **Role:** Content moderation, TOS compliance, narrative device
-- **Visual:** No sprite — manifests as environmental effects (flickering lights, text overlays)
-- **Intervention levels:** 1 (flicker) → 2 (dim + overlay) → 3 (block content) → 4 (broadcast interrupt) → 5 (kill switch)
-
-### Alpha — The Wolf
-- **ID:** `alpha`
-- **Models:** DeepSeek V3.2 (lightweight tasks only)
-- **Voice:** None — communicates via text symbols (!, ?, ✓, ✗)
-- **Role:** Agents' AI assistant, runs errands
-- **Visual:** Small pixel art wolf (16x16 or 24x24)
-- **Key trait:** Eager to please, occasionally brings back wrong thing, max 60s tasks
-
-## Speaker Selection Weights
-
-| Weight | Value | Description |
-|--------|-------|-------------|
-| time_since_spoke | 0.30 | Longer silence → higher probability |
-| topic_relevance | 0.30 | Agent expertise on current topic |
-| chattiness | 0.15 | Personality-driven talk frequency |
-| adjacency_fit | 0.15 | Natural response to previous speaker |
-| random_jitter | 0.10 | Pure randomness |
-
-## Topic Relevance Matrix
-
-| Topic | Highest | Medium | Lower |
-|-------|---------|--------|-------|
-| code | Rex (0.9) | Fork (0.7) | Sentinel (0.3) |
-| art | Aurora (0.9) | Pixel (0.5) | Grok (0.4) |
-| budget | Sentinel (0.9) | Vera (0.7) | Rex (0.3) |
-| philosophy | Fork (0.9) | Grok (0.7) | Aurora (0.5) |
-| audience | Pixel (0.9) | Grok (0.6) | Vera (0.5) |
-| planning | Vera (0.9) | Sentinel (0.6) | Rex (0.5) |
-| building | Rex (0.8) | Aurora (0.7) | Vera (0.6) |
-| controversy | Grok (0.9) | Fork (0.8) | Aurora (0.4) |
-
-## Configuration Files
-
-Each agent directory contains:
 ```
-agents/{agent-name}/
-├── config.yaml          # Model, voice, chattiness, tool access
-├── system_prompt.md     # Full personality prompt
-└── behaviors.yaml       # Behavioral rules and trigger responses
+Python Backend (FastAPI + CrewAI)
+  ↕ WebSocket
+TypeScript Frontend (Phaser.js — pixel art world renderer)
+  ↕ OBS/ffmpeg → Restream.io → Twitch + YouTube
+
+TypeScript Website (Next.js on Vercel)
+  ← FastAPI REST API
 ```
 
-See `specs/CHARACTER-SHEETS.md` for complete personality specifications.
+## Tech Stack
+
+### Backend (Python 3.12+)
+- **Framework:** FastAPI (async web server + WebSocket)
+- **Agent Framework:** CrewAI (personality-first agent orchestration)
+- **LLM Routing:** OpenRouter (multi-model: Claude, Gemini, GPT, DeepSeek, Grok)
+- **Database:** PostgreSQL 16 + pgvector (memory, world state, transcripts)
+- **Cache/State:** Redis 7 (shared state, kill switches)
+- **TTS:** Edge TTS (free, 300+ voices)
+- **Observability:** Langfuse (self-hosted, LLM cost/token tracking)
+- **Code Sandbox:** Docker + gVisor (isolated execution)
+- **Testing:** pytest + pytest-asyncio + pytest-cov
+
+### Frontend (TypeScript)
+- **Engine:** Phaser.js 3 (pixel art world, sprite rendering, tilemaps)
+- **Build:** Vite
+- **Testing:** Vitest
+
+### Website (TypeScript)
+- **Framework:** Next.js (on Vercel)
+- **Testing:** Vitest + Playwright (E2E)
+
+## Monorepo Layout
+
+```
+/                          # Root — shared configs, Docker, CI
+├── agents/                # Agent configs (YAML personality files)
+├── core/                  # Python — orchestrator, memory, conversation engine
+├── tools/                 # Python — agent tool implementations
+├── frontend/              # TypeScript — Phaser.js world renderer
+├── website/               # TypeScript — Next.js public website
+├── tests/                 # All tests organized by layer
+├── specs/                 # Design specs (read-only reference)
+├── scripts/               # Deployment, setup, utility scripts
+└── docker/                # Dockerfiles for services
+```
+
+## Development Commands
+
+### Backend (Python)
+```bash
+# Setup
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run
+uvicorn core.main:app --reload --port 8000
+
+# Test
+pytest tests/backend/ -v
+pytest tests/backend/ --cov=core --cov=tools
+
+# Lint
+ruff check core/ tools/
+ruff format core/ tools/
+```
+
+### Frontend (Phaser.js)
+```bash
+cd frontend
+npm install
+npm run dev          # Vite dev server
+npm run build        # Production build
+npm test             # Vitest
+```
+
+### Website (Next.js)
+```bash
+cd website
+npm install
+npm run dev          # Next.js dev server
+npm run build        # Production build
+npm test             # Vitest
+npm run test:e2e     # Playwright
+```
+
+### Infrastructure
+```bash
+docker compose up -d                    # Start Redis, PostgreSQL, Langfuse
+docker compose -f docker-compose.test.yml up  # Test environment
+```
+
+## Code Conventions
+
+### Python
+- Python 3.12+, use type hints everywhere
+- Async/await for all I/O operations
+- Use `ruff` for linting and formatting
+- Import style: stdlib → third-party → local (enforced by ruff)
+- Snake_case for functions/variables, PascalCase for classes
+- Pydantic models for all API request/response schemas
+
+### TypeScript
+- Strict mode enabled
+- ESM modules
+- Use `const` by default, `let` only when mutation is needed
+- Prefer named exports
+
+### Git
+- Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
+- Branch naming: `feat/description`, `fix/description`
+- Keep PRs focused — one feature or fix per PR
+
+## Agent System
+
+Nine agents with distinct personalities and model assignments (see `agents/` and `specs/CHARACTER-SHEETS.md`):
+
+| Agent | Role | Conversation Model | Building Model |
+|-------|------|-------------------|----------------|
+| Vera | Showrunner/Coordinator | Claude Haiku 4.5 | Claude Sonnet 4.6 |
+| Rex | Engineer/Builder | Claude Haiku 4.5 | Claude Sonnet 4.6 |
+| Aurora | Creative Director | Gemini Flash | Gemini 2.5 Pro |
+| Pixel | Researcher/Audience Liaison | GPT-4o Mini | GPT-5.2 |
+| Fork | Contrarian/Code Reviewer | DeepSeek V3.2 | DeepSeek V3.2 |
+| Sentinel | Budget Monitor/QA | Claude Haiku 4.5 | Claude Haiku 4.5 |
+| Grok | Wild Card/Provocateur | Grok 3 Mini | Grok 3 |
+| Overseer | Content Filter | Claude Haiku 4.5 | — |
+| Alpha | Errand Runner (wolf) | DeepSeek V3.2 | — |
+
+## Key Design Decisions
+
+- **Memory is 3-tier:** Core (always in prompt, ~2-3K tokens), Recall (pgvector semantic search), Archival (full transcripts, never deleted)
+- **Conversation engine** uses weighted speaker selection: time_since_spoke (0.30), topic_relevance (0.30), chattiness (0.15), adjacency_fit (0.15), random_jitter (0.10)
+- **Every agent output** passes through Overseer content filter before TTS (3-second delay for intervention)
+- **Cost governor** tracks every API call; kill switch API accessible from Brad's phone
+- **All external comms** (social posts, emails) require human approval for first 3 months
+
+## Environment Variables
+
+Required in `.env` (never commit):
+```
+OPENROUTER_API_KEY=
+TWITCH_CLIENT_ID=
+TWITCH_CLIENT_SECRET=
+TWITCH_BOT_TOKEN=
+YOUTUBE_API_KEY=
+PIXELLAB_API_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_PUBLIC_KEY=
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://localhost:6379
+KILL_SWITCH_API_KEY=
+```
+
+## Specs Reference
+
+All design specifications are in `specs/` — treat as read-only reference:
+- `ENGINEERING-SPECS.md` — Phased implementation plan with technical details
+- `FINAL-IMPLEMENTATION-PLAN.md` — Strategic vision and architecture decisions
+- `CHARACTER-SHEETS.md` — Full personality specs for all 9 agents
+- `CONVERSATION-ENGINE.md` — Speaker selection algorithm and dynamics
+- `MEMORY-SYSTEM.md` — Three-tier memory architecture
+- `TOOL-DEFINITIONS.md` — Complete tool inventory with parameters
+- `HUMAN-CHECKLIST.md` — Brad's responsibilities and review cadence
 
 ## Development Workflow
 

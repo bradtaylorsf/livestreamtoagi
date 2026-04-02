@@ -10,6 +10,7 @@ def test_health_endpoint_degraded_without_services():
     with (
         patch("core.main.db") as mock_db,
         patch("core.main.redis_client") as mock_redis,
+        patch("core.main.agent_registry") as mock_registry,
     ):
         mock_db.connect = AsyncMock()
         mock_db.disconnect = AsyncMock()
@@ -18,6 +19,7 @@ def test_health_endpoint_degraded_without_services():
         mock_redis.disconnect = AsyncMock()
         mock_redis.client = AsyncMock()
         mock_redis.client.ping = AsyncMock(side_effect=Exception("no redis"))
+        mock_registry.load_all = AsyncMock()
 
         with TestClient(app) as client:
             response = client.get("/api/health")
@@ -33,6 +35,7 @@ def test_health_endpoint_ok_with_services():
     with (
         patch("core.main.db") as mock_db,
         patch("core.main.redis_client") as mock_redis,
+        patch("core.main.agent_registry") as mock_registry,
     ):
         mock_db.connect = AsyncMock()
         mock_db.disconnect = AsyncMock()
@@ -41,6 +44,7 @@ def test_health_endpoint_ok_with_services():
         mock_redis.disconnect = AsyncMock()
         mock_redis.client = AsyncMock()
         mock_redis.client.ping = AsyncMock(return_value=True)
+        mock_registry.load_all = AsyncMock()
 
         with TestClient(app) as client:
             response = client.get("/api/health")
