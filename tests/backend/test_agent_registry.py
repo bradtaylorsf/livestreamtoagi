@@ -197,6 +197,76 @@ async def test_fork_system_prompt_stays_under_token_budget():
     assert estimated_tokens < 512
 
 
+@pytest.mark.asyncio
+async def test_vera_config_loads_with_expected_values():
+    """Vera loads with the exact config values required by issue #8."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+    assert vera.display_name == "Vera — The Showrunner"
+    assert vera.model_conversation == "anthropic/claude-haiku-4.5"
+    assert vera.model_building == "anthropic/claude-sonnet-4.6"
+    assert vera.voice_id == "en-GB-SoniaNeural"
+    assert vera.chattiness == 0.7
+    assert vera.initiative == 0.8
+    assert vera.interrupt_tendency == 0.2
+    assert vera.eavesdrop_tendency == 0.6
+    assert vera.closing_weight == 0.35
+
+
+@pytest.mark.asyncio
+async def test_vera_prompt_and_behaviors_match_character_spec():
+    """Vera prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+    prompt = vera.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "first agent initialized" in prompt
+    assert "4.7 seconds" in prompt
+    assert "methodical, empathetic, slightly anxious" in prompt
+    assert "use bullet points" in prompt
+    assert "maximum of 2-3 sentences total" in prompt
+    assert "closest ally" in prompt
+    assert "good wolf" in prompt
+    assert "i have concerns" in prompt
+    assert "let's circle back on that" in prompt
+
+    communication = vera.behaviors["communication"]
+    task_management = vera.behaviors["task_management"]
+    revenue = vera.behaviors["revenue_responsibility"]
+    self_modification = vera.behaviors["self_modification"]
+    idle_starters = vera.behaviors["idle_conversation_starters"]
+
+    assert communication["default_style"] == "organized, empathetic, slightly anxious"
+    assert communication["uses_bullet_points"] is True
+    assert communication["max_sentences_per_turn"] == 3
+    assert "Let's circle back on that." in communication["catchphrases"]
+    assert "I have concerns." in communication["catchphrases"]
+    assert task_management["always_decomposes_tasks"] is True
+    assert revenue["weekly_revenue_meeting"] is True
+    assert "budget-conscious task prioritization" in revenue["owns"]
+    assert "core empathy" in self_modification["will_not_modify"]
+    assert len(idle_starters) >= 3
+
+
+@pytest.mark.asyncio
+async def test_vera_system_prompt_stays_under_token_budget():
+    """Vera's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+
+    estimated_tokens = len(vera.system_prompt.split())
+    assert estimated_tokens < 1200
+
+
 def test_agent_config_defaults_closing_weight_to_zero():
     """Existing configs without closing_weight remain valid."""
     config = AgentConfig(
