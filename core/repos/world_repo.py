@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import asyncpg
-
 from core.models import (
     ExpansionProposal,
     ExpansionProposalCreate,
@@ -15,9 +13,11 @@ from core.models import (
     WorldEvent,
     WorldEventCreate,
 )
-from core.repos import serialize_jsonb
+from core.repos.utils import serialize_jsonb
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from core.database import Database
 
 

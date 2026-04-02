@@ -6,8 +6,6 @@ import json
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-import asyncpg
-
 from core.models import (
     Challenge,
     ChallengeCreate,
@@ -16,7 +14,7 @@ from core.models import (
     RevenueEvent,
     RevenueEventCreate,
 )
-from core.repos import serialize_jsonb
+from core.repos.utils import serialize_jsonb
 
 if TYPE_CHECKING:
     from datetime import datetime

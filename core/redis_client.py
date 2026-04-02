@@ -37,7 +37,8 @@ class RedisClient:
                 )
                 await self._client.ping()
                 parsed = urlparse(self.url)
-                safe_url = urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{parsed.port or 6379}"))
+                netloc = f"{parsed.hostname}:{parsed.port or 6379}"
+                safe_url = urlunparse(parsed._replace(netloc=netloc))
                 logger.info("Redis connected at %s", safe_url)
                 return
             except (OSError, aioredis.RedisError) as exc:

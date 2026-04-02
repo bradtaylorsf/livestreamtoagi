@@ -172,7 +172,8 @@ class AgentRegistry:
                 if value is not None:
                     try:
                         status = AgentStatus(value)
-                        self._agents[agent_id] = self._agents[agent_id].model_copy(update={"status": status})
+                        agent = self._agents[agent_id]
+                        self._agents[agent_id] = agent.model_copy(update={"status": status})
                     except ValueError:
                         logger.warning("Invalid status in Redis for %s: %r", agent_id, value)
             except Exception:

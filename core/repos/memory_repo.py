@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import asyncpg
-
 from core.models import (
     ConversationBuffer,
     ConversationBufferCreate,
@@ -16,6 +14,8 @@ from core.models import (
 )
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from core.database import Database
 
 

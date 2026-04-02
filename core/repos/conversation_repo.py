@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import asyncpg
-
 from core.models import (
     Conversation,
     ConversationCreate,
@@ -14,10 +12,12 @@ from core.models import (
     SelectionLog,
     SelectionLogCreate,
 )
-from core.repos import serialize_jsonb
+from core.repos.utils import serialize_jsonb
 
 if TYPE_CHECKING:
     import uuid
+
+    import asyncpg
 
     from core.database import Database
 

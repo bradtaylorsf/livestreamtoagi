@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import asyncpg
-
 from core.models import Agent, AgentCreate
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from core.database import Database
 
 

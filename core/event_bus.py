@@ -12,8 +12,7 @@ from collections.abc import Callable, Coroutine
 from enum import Enum
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
