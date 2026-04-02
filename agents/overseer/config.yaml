@@ -3,8 +3,8 @@
 # interrupt_tendency is 1.0 because it always interrupts when content safety triggers.
 id: overseer
 display_name: "The Overseer — The Ominous Presence"
-model_conversation: claude-haiku-4-5
-model_building: claude-haiku-4-5
+model_conversation: anthropic/claude-haiku-4.5
+model_building: anthropic/claude-haiku-4.5
 voice_id: en-US-AndrewNeural
 chattiness: 0.0
 initiative: 0.0
