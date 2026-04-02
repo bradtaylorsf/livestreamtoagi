@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 VALID_MODEL_NAMES = set(MODEL_REGISTRY.keys())
 MODEL_NAME_ALIASES = {
+    "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
+    "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
     "deepseek/deepseek-v3.2": "deepseek-v3.2",
 }
 REDIS_STATUS_PREFIX = "agent:status:"

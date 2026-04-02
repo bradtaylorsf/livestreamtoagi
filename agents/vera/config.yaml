@@ -1,9 +1,10 @@
 id: vera
 display_name: "Vera — The Showrunner"
-model_conversation: claude-haiku-4-5
-model_building: claude-sonnet-4-6
+model_conversation: anthropic/claude-haiku-4.5
+model_building: anthropic/claude-sonnet-4.6
 voice_id: en-GB-SoniaNeural
 chattiness: 0.7
 initiative: 0.8
 interrupt_tendency: 0.2
 eavesdrop_tendency: 0.6
+closing_weight: 0.35
