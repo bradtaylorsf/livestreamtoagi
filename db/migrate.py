@@ -33,7 +33,7 @@ async def _get_connection() -> asyncpg.Connection:
     if not url:
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
-    return await asyncpg.connect(url)
+    return await asyncpg.connect(url, timeout=60)
 
 
 async def _ensure_schema_migrations(conn: asyncpg.Connection) -> None:
