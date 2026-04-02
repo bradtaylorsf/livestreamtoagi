@@ -267,6 +267,75 @@ async def test_vera_system_prompt_stays_under_token_budget():
     assert estimated_tokens < 1200
 
 
+@pytest.mark.asyncio
+async def test_sentinel_config_loads_with_expected_values():
+    """Sentinel loads with the exact config values required by issue #9."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    sentinel = registry.get_agent("sentinel")
+    assert sentinel is not None
+    assert sentinel.display_name == "Sentinel — The Anxious Accountant"
+    assert sentinel.model_conversation == "anthropic/claude-haiku-4.5"
+    assert sentinel.model_building == "anthropic/claude-haiku-4.5"
+    assert sentinel.voice_id == "en-US-AriaNeural"
+    assert sentinel.chattiness == 0.6
+    assert sentinel.initiative == 0.4
+    assert sentinel.interrupt_tendency == 0.7
+    assert sentinel.eavesdrop_tendency == 0.3
+    assert sentinel.closing_weight == 0.25
+
+
+@pytest.mark.asyncio
+async def test_sentinel_prompt_and_behaviors_match_character_spec():
+    """Sentinel prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    sentinel = registry.get_agent("sentinel")
+    assert sentinel is not None
+    prompt = sentinel.system_prompt.lower()
+    assert "anxious accountant" in prompt
+    assert "cheapest model" in prompt
+    assert "claude haiku 4.5" in prompt
+    assert "efficient thought" in prompt
+    assert "kill switch" in prompt
+    assert "you speak" in prompt
+    assert "warnings, ratios, thresholds, projections, burn rates, and trend lines" in prompt
+    assert "at current burn rate, we have [x] days of" in prompt
+    assert "operation remaining." in prompt
+    assert "i have the numbers." in prompt
+
+    communication = sentinel.behaviors["communication"]
+    monitoring = sentinel.behaviors["monitoring"]
+    building = sentinel.behaviors["building"]
+
+    assert communication["default_style"] == "rapid, precise, data-heavy, slightly anxious"
+    assert communication["unsolicited_budget_updates"] is True
+    assert communication["topic_relevance"]["budget"] == 0.9
+    assert communication["topic_relevance"]["planning"] == 0.6
+    assert communication["topic_relevance"]["code"] == 0.3
+    assert "At current burn rate, we have [X] days of operation remaining." in communication["catchphrases"]
+    assert "I have the numbers." in communication["catchphrases"]
+    assert "cost-per-laugh ratio" in monitoring["custom_metrics"]
+    assert monitoring["cost_monitoring"]["always_uses_cheapest_model"] is True
+    assert "claude haiku 4.5" in monitoring["cost_monitoring"]["model_awareness"]
+    assert "quality assurance" in building["primary_skills"]
+
+
+@pytest.mark.asyncio
+async def test_sentinel_system_prompt_stays_under_token_budget():
+    """Sentinel's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    sentinel = registry.get_agent("sentinel")
+    assert sentinel is not None
+
+    estimated_tokens = len(sentinel.system_prompt.split())
+    assert estimated_tokens < 512
+
+
 def test_agent_config_defaults_closing_weight_to_zero():
     """Existing configs without closing_weight remain valid."""
     config = AgentConfig(
