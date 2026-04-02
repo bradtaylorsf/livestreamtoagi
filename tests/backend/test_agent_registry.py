@@ -275,6 +275,75 @@ async def test_fork_system_prompt_stays_under_token_budget():
 
 
 @pytest.mark.asyncio
+async def test_pixel_config_loads_with_expected_values():
+    """Pixel loads with the exact config values required by issue #13."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    pixel = registry.get_agent("pixel")
+    assert pixel is not None
+    assert pixel.display_name == "Pixel — The Enthusiast"
+    assert pixel.model_conversation == "openai/gpt-4o-mini"
+    assert pixel.model_building == "openai/gpt-5.2"
+    assert pixel.voice_id == "en-US-DavisNeural"
+    assert pixel.chattiness == 0.9
+    assert pixel.initiative == 0.7
+    assert pixel.interrupt_tendency == 0.5
+    assert pixel.eavesdrop_tendency == 0.7
+    assert pixel.closing_weight == 0.05
+
+
+@pytest.mark.asyncio
+async def test_pixel_prompt_and_behaviors_match_character_spec():
+    """Pixel prompt and behaviors preserve the required persona markers."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    pixel = registry.get_agent("pixel")
+    assert pixel is not None
+    prompt = pixel.system_prompt.lower()
+    assert "shared goals" in prompt
+    assert "fourth agent initialized" in prompt
+    assert "audience's avatar" in prompt
+    assert "audience liaison" in prompt
+    assert "enthusiastic, curious, tangent-prone" in prompt
+    assert "taken seriously as a researcher" in prompt
+    assert "oh this is fascinating!" in prompt
+    assert "chat, you're not going to believe this" in prompt
+
+    communication = pixel.behaviors["communication"]
+    audience_liaison = pixel.behaviors["audience_liaison"]
+    building = pixel.behaviors["building"]
+
+    assert communication["default_style"] == "enthusiastic, curious, slightly breathless"
+    assert communication["role"] == "researcher and audience liaison who keeps the cast connected to viewer energy"
+    assert communication["tangent_probability"] == 0.3
+    assert "Oh this is fascinating!" in communication["catchphrases"]
+    assert "Chat, you're not going to believe this" in communication["catchphrases"]
+    assert audience_liaison["reads_chat"] is True
+    assert audience_liaison["relays_interesting_messages"] is True
+    assert len(audience_liaison["relay_rules"]) >= 3
+    assert "new subscribers" in audience_liaison["celebrates_milestones"]
+    assert "viewer count records" in audience_liaison["celebrates_milestones"]
+    assert "donation goals" in audience_liaison["celebrates_milestones"]
+    assert "lore entries" in building["world_building_role"]
+    assert "information synthesis" in building["primary_skills"]
+
+
+@pytest.mark.asyncio
+async def test_pixel_system_prompt_stays_under_token_budget():
+    """Pixel's system prompt stays under the issue token budget."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    pixel = registry.get_agent("pixel")
+    assert pixel is not None
+
+    estimated_tokens = estimate_prompt_tokens(pixel.system_prompt)
+    assert estimated_tokens < 1200
+
+
+@pytest.mark.asyncio
 async def test_vera_config_loads_with_expected_values():
     """Vera loads with the exact config values required by issue #8."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
