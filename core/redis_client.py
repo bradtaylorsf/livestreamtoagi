@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import redis.asyncio as aioredis
 
@@ -35,7 +36,9 @@ class RedisClient:
                     socket_connect_timeout=5,
                 )
                 await self._client.ping()
-                logger.info("Redis connected at %s", self.url)
+                parsed = urlparse(self.url)
+                safe_url = urlunparse(parsed._replace(netloc=f"{parsed.hostname}:{parsed.port or 6379}"))
+                logger.info("Redis connected at %s", safe_url)
                 return
             except (OSError, aioredis.RedisError) as exc:
                 if attempt == retries:

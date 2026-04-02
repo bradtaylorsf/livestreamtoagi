@@ -119,12 +119,13 @@ class WorldRepo:
     async def vote_proposal(
         self, proposal_id: int, vote_for: bool
     ) -> ExpansionProposal | None:
-        col = "votes_for" if vote_for else "votes_against"
-        row = await self.db.fetchrow(
-            f"""UPDATE expansion_proposals
-                SET {col} = {col} + 1
-                WHERE id = $1
-                RETURNING *""",
-            proposal_id,
-        )
+        if vote_for:
+            sql = """UPDATE expansion_proposals
+                     SET votes_for = votes_for + 1
+                     WHERE id = $1 RETURNING *"""
+        else:
+            sql = """UPDATE expansion_proposals
+                     SET votes_against = votes_against + 1
+                     WHERE id = $1 RETURNING *"""
+        row = await self.db.fetchrow(sql, proposal_id)
         return ExpansionProposal(**dict(row)) if row else None

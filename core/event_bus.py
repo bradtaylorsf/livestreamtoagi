@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +67,14 @@ EventCallback = Callable[..., Coroutine[Any, Any, None]]
 
 HISTORY_BUFFER_SIZE = 50
 MAX_MESSAGE_BYTES = 1_048_576  # 1 MB
+MAX_CONNECTIONS = 100
 
 
 class EventBus:
     """Manages WebSocket connections, event broadcasting, and internal callbacks."""
 
-    def __init__(self) -> None:
+    def __init__(self, allowed_origins: list[str] | None = None) -> None:
+        self._allowed_origins = allowed_origins
         self._clients: dict[str, _ClientInfo] = {}
         self._callbacks: dict[str, list[EventCallback]] = {}
         self._history: deque[dict[str, Any]] = deque(maxlen=HISTORY_BUFFER_SIZE)
@@ -124,6 +127,18 @@ class EventBus:
 
     async def connect(self, ws: WebSocket) -> str:
         """Accept a WebSocket connection, send history, and start tracking."""
+        # Enforce connection limit
+        if self.connected_count >= MAX_CONNECTIONS:
+            await ws.close(code=1008, reason="Too many connections")
+            raise ConnectionError("Connection limit reached")
+
+        # Validate origin if configured
+        if self._allowed_origins is not None:
+            origin = (ws.headers.get("origin") or "").rstrip("/")
+            if origin not in self._allowed_origins:
+                await ws.close(code=1008, reason="Origin not allowed")
+                raise ConnectionError(f"Rejected origin: {origin}")
+
         await ws.accept()
         client_id = str(uuid.uuid4())
         client = _ClientInfo(ws, client_id)
