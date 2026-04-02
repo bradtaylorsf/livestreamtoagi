@@ -126,6 +126,23 @@ def test_config_model_alias_resolves():
     assert config == MODEL_REGISTRY["deepseek-v3.2"]
 
 
+@pytest.mark.parametrize(
+    ("configured_name", "canonical_name"),
+    [
+        ("google/gemini-flash", "gemini-flash"),
+        ("google/gemini-2.5-pro", "gemini-2.5-pro"),
+        ("x-ai/grok-3-mini", "grok-3-mini"),
+        ("x-ai/grok-3", "grok-3"),
+    ],
+)
+def test_provider_prefixed_model_aliases_resolve(configured_name: str, canonical_name: str):
+    client = OpenRouterClient("sk-test", make_mock_cost_repo(), http_client=MagicMock())
+
+    config = client._resolve_model(configured_name)
+
+    assert config == MODEL_REGISTRY[canonical_name]
+
+
 # ── Cost Calculation ───────────────────────────────────────────
 
 
