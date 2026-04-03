@@ -543,6 +543,7 @@ class TriggerConfig(BaseModel):
 class TopicConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     relevance_map: dict[str, dict[str, float]]
+    topic_keywords: dict[str, list[str]] = {}
     fallback_to_llm: bool
     classifier_model: str
 
