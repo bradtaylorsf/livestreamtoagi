@@ -1,0 +1,188 @@
+# config/conversation_config.yaml
+# Master configuration for the conversation engine.
+# All parameters are hot-reloadable — edit this file and the engine picks up
+# changes without a restart.
+
+# ─── Speaker selection weights ───────────────────────
+# These MUST sum to 1.0. The engine validates on load.
+selection_weights:
+  time_since_spoke: 0.30      # longer silence = more likely to speak
+  topic_relevance: 0.30       # how relevant is this agent to what was just said
+  chattiness: 0.15            # personality trait — some agents talk more
+  adjacency_fit: 0.15         # should this agent respond to the last speaker
+  random_jitter: 0.10         # pure randomness to prevent predictability
+
+# ─── Timing ──────────────────────────────────────────
+timing:
+  min_pause_seconds: 2.0       # minimum gap between turns
+  max_pause_seconds: 8.0       # maximum gap between turns
+  pause_strategy: "weighted"   # "fixed", "random", or "weighted"
+  # weighted: short pause after questions, longer after statements,
+  # shortest after interrupts. Multipliers below.
+  pause_multipliers:
+    after_question: 0.5        # quick response to questions
+    after_statement: 1.0       # normal pace
+    after_interrupt: 0.3       # interrupts are fast
+    after_joke: 1.5            # beat after a joke lands
+    after_emotional: 1.3       # slight pause after something heavy
+
+# ─── Energy model (conversation lifespan) ────────────
+energy:
+  initial_range: [8, 14]       # starting energy (random in range)
+  decay_per_turn: 1.0          # energy lost each turn
+  boost_on_topic_shift: 3.0    # new topic injects energy
+  boost_on_disagreement: 4.0   # conflict is engaging
+  boost_on_audience_event: 5.0 # chat message or vote result
+  boost_on_new_participant: 3.0 # someone new joins the conversation
+  drain_on_repetition: 2.0     # same topic rehashed = faster death
+  minimum_turns: 4             # never end before this many turns
+  maximum_turns: 30            # hard cap even if energy is high
+  # Who closes the conversation — personality-weighted
+  closer_weights:
+    vera: 0.35                 # "alright, let's get back to work"
+    sentinel: 0.25             # "we're burning tokens"
+    rex: 0.15                  # just stops talking
+    aurora: 0.10               # dramatic exit
+    pixel: 0.05                # too engaged to close
+    fork: 0.05                 # rants don't end voluntarily
+    grok: 0.05                 # never shuts up willingly
+
+# ─── Interrupt mechanics ─────────────────────────────
+interrupts:
+  enabled: true
+  relevance_threshold: 0.85    # agent must score above this to interrupt
+  max_interrupts_per_conversation: 3  # prevent interrupt spam
+  cooldown_seconds: 30         # same agent can't interrupt twice in 30s
+  # Per-agent interrupt personality (0 = never interrupts, 1 = always tries)
+  agent_interrupt_tendency:
+    vera: 0.2                  # only interrupts to course-correct
+    rex: 0.3                   # interrupts bad technical claims
+    aurora: 0.4                # interrupts for aesthetic emergencies
+    pixel: 0.5                 # interrupts to relay chat
+    fork: 0.6                  # interrupts to disagree on principle
+    sentinel: 0.7              # interrupts for budget alerts
+    grok: 0.8                  # interrupts for everything
+    overseer: 1.0              # always interrupts when triggered (content safety)
+
+# ─── Proximity groups ────────────────────────────────
+proximity:
+  enabled: true
+  # Agents in the same chunk can hear each other.
+  # "global" events (announcements, overseer warnings) reach everyone.
+  max_conversation_size: 5     # more than 5 gets chaotic
+  # How likely an agent is to "walk over" when they hear something relevant
+  # from an adjacent chunk (0 = stays put, 1 = always walks over)
+  eavesdrop_tendency:
+    vera: 0.6                  # walks over to manage
+    rex: 0.2                   # only if it's a code discussion
+    aurora: 0.5                # walks over if it sounds interesting
+    pixel: 0.7                 # nosy, plus relays chat
+    fork: 0.4                  # walks over to argue
+    sentinel: 0.3              # walks over for budget stuff
+    grok: 0.8                  # walks over to cause trouble
+
+# ─── Conversation triggers ───────────────────────────
+triggers:
+  idle_timeout_seconds: 90     # if nobody talks for this long, trigger a starter
+  # Per-agent initiative (likelihood of starting a conversation when idle)
+  agent_initiative:
+    vera: 0.8                  # she always has an agenda
+    pixel: 0.7                 # relays chat, starts polls
+    grok: 0.6                  # says something provocative
+    aurora: 0.5                # shares an observation
+    fork: 0.3                  # prefers to react, not initiate
+    rex: 0.2                   # speaks when spoken to
+    sentinel: 0.4              # brings up budget unprompted
+
+  # Trigger types and their weights (how often each type fires)
+  trigger_type_weights:
+    idle: 0.25                 # nobody's been talking
+    scheduled: 0.30            # morning standup, evening reflection, etc.
+    environmental: 0.25        # vote completed, world expansion done, new viewer milestone
+    memory: 0.10               # agent remembers something and brings it up
+    audience: 0.10             # chat message or donation triggers a response
+
+# ─── Topic detection ─────────────────────────────────
+topics:
+  # Keywords/themes mapped to agent relevance boosts
+  relevance_map:
+    code:        { rex: 0.9, fork: 0.7, sentinel: 0.3, vera: 0.4, aurora: 0.1, pixel: 0.2, grok: 0.3 }
+    art:         { aurora: 0.9, pixel: 0.5, grok: 0.4, vera: 0.3, rex: 0.1, fork: 0.2, sentinel: 0.2 }
+    budget:      { sentinel: 0.9, vera: 0.7, rex: 0.3, aurora: 0.2, pixel: 0.3, fork: 0.4, grok: 0.5 }
+    philosophy:  { fork: 0.9, grok: 0.7, aurora: 0.5, vera: 0.3, rex: 0.2, pixel: 0.4, sentinel: 0.1 }
+    audience:    { pixel: 0.9, grok: 0.6, vera: 0.5, aurora: 0.4, rex: 0.2, fork: 0.3, sentinel: 0.3 }
+    drama:       { grok: 0.9, aurora: 0.7, pixel: 0.6, fork: 0.5, vera: 0.4, rex: 0.1, sentinel: 0.2 }
+    planning:    { vera: 0.9, rex: 0.5, sentinel: 0.6, aurora: 0.3, pixel: 0.3, fork: 0.4, grok: 0.2 }
+    building:    { rex: 0.8, aurora: 0.7, vera: 0.6, fork: 0.5, sentinel: 0.4, pixel: 0.3, grok: 0.3 }
+    marketing:   { pixel: 0.7, aurora: 0.6, vera: 0.5, grok: 0.5, sentinel: 0.4, fork: 0.2, rex: 0.2 }
+    controversy: { grok: 0.9, fork: 0.8, aurora: 0.4, pixel: 0.5, vera: 0.3, rex: 0.2, sentinel: 0.3 }
+
+  # If no keyword matches, fall back to LLM-based relevance scoring
+  fallback_to_llm: true
+  # Model used for topic classification (cheap and fast)
+  classifier_model: "anthropic/claude-haiku-4.5"
+
+# ─── Adjacency pairs ─────────────────────────────────
+# Who naturally responds to whom? Based on relationship dynamics.
+# Score 0-1: how likely agent B responds after agent A speaks.
+adjacency:
+  vera:
+    rex: 0.7
+    aurora: 0.6
+    sentinel: 0.8
+    pixel: 0.5
+    fork: 0.5
+    grok: 0.6
+  rex:
+    vera: 0.5
+    fork: 0.8
+    aurora: 0.3
+    sentinel: 0.4
+    pixel: 0.4
+    grok: 0.3
+  aurora:
+    rex: 0.6
+    vera: 0.5
+    pixel: 0.7
+    grok: 0.5
+    fork: 0.4
+    sentinel: 0.4
+  pixel:
+    vera: 0.5
+    aurora: 0.7
+    grok: 0.6
+    rex: 0.4
+    fork: 0.3
+    sentinel: 0.3
+  fork:
+    rex: 0.8
+    grok: 0.6
+    vera: 0.5
+    aurora: 0.4
+    sentinel: 0.5
+    pixel: 0.3
+  sentinel:
+    vera: 0.8
+    rex: 0.5
+    grok: 0.6
+    aurora: 0.5
+    fork: 0.4
+    pixel: 0.3
+  grok:
+    fork: 0.7
+    aurora: 0.6
+    vera: 0.5
+    pixel: 0.6
+    rex: 0.4
+    sentinel: 0.5
+
+# ─── Logging ─────────────────────────────────────────
+logging:
+  log_every_selection: true         # log full weight breakdown for every turn
+  log_interrupts: true              # log interrupt attempts (even failed ones)
+  log_energy_changes: true          # log every energy boost/drain
+  log_trigger_events: true          # log what triggered each conversation
+  log_topic_classifications: true   # log detected topics per turn
+  retention_days: 30                # how long to keep selection logs
+  # Export format for analysis
+  export_format: "jsonl"            # one JSON object per line, easy to grep/analyze
