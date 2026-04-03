@@ -130,12 +130,8 @@ class TriggerSystem:
         event_type = event["event_type"]
         category = event["category"]
 
-        if category == "audience":
-            # Pixel gets first crack at audience events
-            starter = "pixel"
-        else:
-            # Environmental: pick starter by initiative weights
-            starter = self._select_by_initiative()
+        # Pixel gets first crack at audience events
+        starter = "pixel" if category == "audience" else self._select_by_initiative()
 
         return {
             "type": category,
