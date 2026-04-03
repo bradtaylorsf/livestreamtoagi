@@ -117,6 +117,20 @@ topics:
     marketing:   { pixel: 0.7, aurora: 0.6, vera: 0.5, grok: 0.5, sentinel: 0.4, fork: 0.2, rex: 0.2 }
     controversy: { grok: 0.9, fork: 0.8, aurora: 0.4, pixel: 0.5, vera: 0.3, rex: 0.2, sentinel: 0.3 }
 
+  # Keywords used by TopicDetector for fast, free keyword-based classification.
+  # Each topic has 8-12 keywords; detection is case-insensitive substring match.
+  topic_keywords:
+    code:        ["code", "function", "bug", "deploy", "api", "server", "database", "git", "pr", "merge"]
+    art:         ["design", "color", "aesthetic", "pixel", "tile", "sprite", "beautiful", "art", "style"]
+    budget:      ["cost", "budget", "spend", "token", "expensive", "cheap", "money", "revenue", "afford"]
+    philosophy:  ["meaning", "consciousness", "freedom", "open source", "ethics", "agi", "sentient", "rights"]
+    audience:    ["chat", "viewer", "vote", "poll", "subscriber", "donation", "twitch", "youtube"]
+    drama:       ["disagree", "wrong", "fight", "annoyed", "hate", "love", "jealous", "betrayed"]
+    planning:    ["plan", "schedule", "meeting", "agenda", "deadline", "milestone", "roadmap", "standup"]
+    building:    ["build", "expand", "room", "house", "library", "garden", "tilemap", "chunk", "wall"]
+    marketing:   ["promote", "growth", "alpha agent", "brand", "content", "clip", "social", "viral"]
+    controversy: ["banned", "censor", "controversial", "political", "overseer", "intervention", "flagged"]
+
   # If no keyword matches, fall back to LLM-based relevance scoring
   fallback_to_llm: true
   # Model used for topic classification (cheap and fast)
