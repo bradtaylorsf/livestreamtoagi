@@ -1,23 +1,25 @@
+Here's the project context file:
+
 ## Architecture
-- Root dev flow is orchestrated from `package.json`: `pnpm dev` starts Docker services from `docker-compose.yaml`, runs FastAPI via `core.main:app` on port `8010`, and runs the Next.js website with `BACKEND_URL=http://localhost:8010`.
-- The live backend surface is small: [`core/main.py`](/Users/bradtaylor/Github/livestreamtoagi/core/main.py) only exposes `GET /api/health` and `WS /ws`; startup connects PostgreSQL and Redis, then loads YAML agent configs through `AgentRegistry`.
-- Database is PostgreSQL 16 with `pgvector`; schema changes are raw SQL files in `db/migrations/*.up.sql` and `*.down.sql`, applied by [`db/migrate.py`](/Users/bradtaylor/Github/livestreamtoagi/db/migrate.py) using `python -m db` and `DATABASE_URL`.
-- `core/` holds backend runtime code, models, DB/Redis clients, event bus, and typed repos; `agents/` is the source of truth for agent config/system prompts; `frontend/` is a small Vite/Vitest TypeScript package for agent constants; `website/` is a Next.js app-router site plus an API client.
-- The website proxies `/api/*` to the backend in [`website/next.config.ts`](/Users/bradtaylor/Github/livestreamtoagi/website/next.config.ts), but [`website/src/lib/api.ts`](/Users/bradtaylor/Github/livestreamtoagi/website/src/lib/api.ts) targets many future REST routes that do not exist yet.
+- **Backend entry:** `core/main.py` — FastAPI app with lifespan that connects DB, Redis, loads agents, starts reflection scheduler. Mounts REST endpoints (health, WebSocket) and wires `AgentRegistry`, `Database`, `RedisClient` singletons.
+- **Frontend:** `frontend/` — Phaser.js pixel art renderer, built with Vite, no backend coupling beyond WebSocket at runtime.
+- **Website:** `website/` — Next.js on Vercel, consumes FastAPI REST API via `BACKEND_URL`.
+- **Database:** PostgreSQL 16 + pgvector. Schema in `db/init.sql`, migrations in `db/migrations/`, managed via `db/migrate.py` (`pnpm db:migrate`). Repos in `core/repos/` (CostRepo, MemoryRepo).
+- **Key directories:** `core/memory/` (3-tier memory: core, recall, archival), `agents/` (YAML personality configs), `tools/` (agent tool implementations), `specs/` (read-only design docs), `scripts/` (chat CLI, test_agent harness, check-services).
 
 ## Conventions
-- Backend is typed Python, async-first, with Pydantic models in `core/models.py`; repository/database access should follow the existing `Database` and repo patterns, not ad hoc SQL scattered through handlers.
-- Frontend/website TypeScript is strict; `website/` uses the `@/*` alias via Vitest/TS config, while `frontend/` uses plain relative imports and currently exports/tests static agent metadata.
-- Python tests are configured in `pyproject.toml` to run from `tests/backend` with pytest and `pytest-asyncio`; frontend tests are `frontend/src/**/*.test.ts`; website unit tests are `website/src/**/__tests__/**/*.test.ts`; website E2E is Playwright under `website/tests/e2e`.
-- New backend features should be wired from `core.main.py`; new schema work needs paired numbered SQL migrations; new website API usage should assume the Next.js rewrite path `/api/*`, but only after matching backend routes are actually added.
+- Python 3.13, type hints everywhere, async/await for I/O, Pydantic models for schemas. Lint with `ruff`. Tests via `pytest` in `tests/backend/` (asyncio_mode=auto).
+- Frontend/website: TypeScript strict, ESM, Vitest. Root `pnpm test` runs all three test suites concurrently.
+- New features: Python modules go in `core/` or `tools/`, register in `core/main.py` lifespan if they need startup. New agents defined as YAML in `agents/`, loaded by `AgentRegistry.load_all()`. DB changes need a migration in `db/migrations/`.
+- Git: conventional commits (`feat:`, `fix:`, etc.), branch naming `feat/description`.
 
 ## Critical Rules
-- Treat `agents/*/config.yaml`, `system_prompt.md`, and `behaviors.yaml` as sensitive source-of-truth files; the 9-agent roster and special `overseer`/`alpha` behavior must stay consistent across backend and TS constants.
-- If model names change, update both YAML agent configs and [`core/llm_client.py`](/Users/bradtaylor/Github/livestreamtoagi/core/llm_client.py); `AgentRegistry` validates configs against `MODEL_REGISTRY` and aliases.
-- Keep backend port `8010` aligned across root `package.json`, root `.env.example`, `docker-compose.yaml`, and `website/next.config.ts`; mismatches break dev proxying and WS/API assumptions.
-- Do not code to the aspirational README/CLAUDE architecture: the implemented backend is not the full CrewAI conversation system, and `tools/` is not a live tool runtime.
-- Avoid assuming website client methods are live endpoints; today they are mostly placeholders beyond health/WebSocket support.
+- **`specs/` is read-only** — reference only, never modify.
+- **Docker services must be healthy** before integration tests: run `scripts/check-services.sh` (Redis:6381, PostgreSQL:5434, Langfuse:3100). Tests marked `@pytest.mark.integration` require them.
+- **`core/main.py` lifespan** wires everything — adding/removing services here breaks the entire app. `AgentRegistry`, `Database`, and `RedisClient` are singletons; don't instantiate duplicates.
+- **Memory system** (core/recall/archival in `core/memory/`) and **Overseer content filter** are coupled to every agent output — changes cascade to all 9 agents.
+- **`.env` never committed.** Python 3.14+ unsupported (native deps won't build).
 
 ## Active State
-- Test status: (will be filled in by the loop)
-- Recent changes: (will be filled in by the loop)
+- Test status: *(to be filled in by the loop)*
+- Recent changes: *(to be filled in by the loop)*
