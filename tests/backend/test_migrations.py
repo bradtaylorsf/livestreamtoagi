@@ -39,6 +39,7 @@ ALL_TABLES = [
     "energy_change_log",
     "overseer_shadow_log",
     "artifacts",
+    "simulations",
 ]
 
 AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "overseer", "alpha"]
@@ -56,7 +57,8 @@ async def conn():
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,
             cost_events, revenue_events, challenges, world_events, world_chunks,
-            conversations, transcripts, agents, schema_migrations
+            artifacts, overseer_shadow_log,
+            simulations, conversations, transcripts, agents, schema_migrations
         CASCADE
     """)
     await c.close()
@@ -92,6 +94,8 @@ async def test_migration_idempotent(conn):
 @pytest.mark.integration
 async def test_rollback(conn):
     await up(conn)
+    # Roll back simulations table
+    await down(conn)
     # Roll back artifacts table
     await down(conn)
     # Roll back overseer shadow log
