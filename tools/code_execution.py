@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 import time
 from typing import TYPE_CHECKING, Any
@@ -79,6 +80,7 @@ class ExecuteCodeTool(BaseTool):
 
         client = self._get_docker()
         container = None
+        tmp_path: str | None = None
         start_time = time.monotonic()
 
         try:
@@ -148,6 +150,11 @@ class ExecuteCodeTool(BaseTool):
                 try:
                     container.remove(force=True)
                 except Exception:
+                    pass
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
                     pass
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
