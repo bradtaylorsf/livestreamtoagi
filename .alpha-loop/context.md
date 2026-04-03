@@ -1,25 +1,26 @@
-Here's the project context file:
+Here's the project context:
 
 ## Architecture
-- **Backend entry:** `core/main.py` — FastAPI app with lifespan that connects DB, Redis, loads agents, starts reflection scheduler. Mounts REST endpoints (health, WebSocket) and wires `AgentRegistry`, `Database`, `RedisClient` singletons.
-- **Frontend:** `frontend/` — Phaser.js pixel art renderer, built with Vite, no backend coupling beyond WebSocket at runtime.
-- **Website:** `website/` — Next.js on Vercel, consumes FastAPI REST API via `BACKEND_URL`.
-- **Database:** PostgreSQL 16 + pgvector. Schema in `db/init.sql`, migrations in `db/migrations/`, managed via `db/migrate.py` (`pnpm db:migrate`). Repos in `core/repos/` (CostRepo, MemoryRepo).
-- **Key directories:** `core/memory/` (3-tier memory: core, recall, archival), `agents/` (YAML personality configs), `tools/` (agent tool implementations), `specs/` (read-only design docs), `scripts/` (chat CLI, test_agent harness, check-services).
+- **Entry point:** `core/main.py` — FastAPI app with WebSocket support, mounts static files, initializes DB/Redis/AgentRegistry/Scheduler in lifespan handler
+- **Database:** PostgreSQL 16 + pgvector (port 5434), schema in `db/init.sql`, migrations in `db/migrations/`, run via `pnpm db:migrate` (`python -m db`)
+- **Key directories:** `core/` (orchestrator, memory, conversation engine, LLM client, TTS), `tools/` (agent tool implementations — code execution, web, messaging, world state), `agents/` (YAML personality configs), `frontend/` (Phaser.js pixel art renderer), `website/` (Next.js public site)
+- **Infrastructure:** Docker Compose runs Redis (6381), PostgreSQL (5434), Langfuse (3100); `scripts/check-services.sh` validates all 5 health checks before dev
+- **Dev startup:** `pnpm dev` launches Docker, backend (uvicorn :8010), and website (:4000) concurrently
 
 ## Conventions
-- Python 3.13, type hints everywhere, async/await for I/O, Pydantic models for schemas. Lint with `ruff`. Tests via `pytest` in `tests/backend/` (asyncio_mode=auto).
-- Frontend/website: TypeScript strict, ESM, Vitest. Root `pnpm test` runs all three test suites concurrently.
-- New features: Python modules go in `core/` or `tools/`, register in `core/main.py` lifespan if they need startup. New agents defined as YAML in `agents/`, loaded by `AgentRegistry.load_all()`. DB changes need a migration in `db/migrations/`.
-- Git: conventional commits (`feat:`, `fix:`, etc.), branch naming `feat/description`.
+- **Python 3.13** (pinned in `.python-version`), type hints everywhere, async/await for I/O, Pydantic models for schemas, `ruff` for lint/format
+- **TypeScript:** strict mode, ESM, Vite + Vitest (frontend), Next.js + Vitest + Playwright (website)
+- **Tests:** all Python tests in `tests/backend/`, run via `pytest` (asyncio_mode=auto); integration tests marked `@pytest.mark.integration`; `pnpm test` runs all three suites in parallel
+- **Git:** conventional commits (`feat:`, `fix:`, etc.), branch naming `feat/`, `fix/`; one feature per PR
+- **New features:** Python tools go in `tools/`, core logic in `core/`, agent configs in `agents/` YAML; register tools in `tools/__init__.py`, wire endpoints in `core/main.py`
 
 ## Critical Rules
-- **`specs/` is read-only** — reference only, never modify.
-- **Docker services must be healthy** before integration tests: run `scripts/check-services.sh` (Redis:6381, PostgreSQL:5434, Langfuse:3100). Tests marked `@pytest.mark.integration` require them.
-- **`core/main.py` lifespan** wires everything — adding/removing services here breaks the entire app. `AgentRegistry`, `Database`, and `RedisClient` are singletons; don't instantiate duplicates.
-- **Memory system** (core/recall/archival in `core/memory/`) and **Overseer content filter** are coupled to every agent output — changes cascade to all 9 agents.
-- **`.env` never committed.** Python 3.14+ unsupported (native deps won't build).
+- **`db/init.sql` + `db/migrations/`** — schema changes require migrations; init.sql seeds Docker fresh installs, migrations handle incremental updates — keep both in sync
+- **Docker services must be healthy** before running integration tests or backend — always run `scripts/check-services.sh` first
+- **Overseer filter** (`core/overseer.py`) gates all agent output before TTS — bypassing it breaks content safety
+- **Non-default ports:** Redis=6381, Postgres=5434, Langfuse=3100 — don't assume standard ports
+- **`.env` secrets** never committed; `OPENROUTER_API_KEY` required for any LLM calls; cost governor in `core/repos/cost_repo.py` tracks spend
 
 ## Active State
-- Test status: *(to be filled in by the loop)*
-- Recent changes: *(to be filled in by the loop)*
+- Test status: *(to be filled)*
+- Recent changes: structured dialogue/action parsing for TTS (#143), security fixes in tools milestone, session review fixes
