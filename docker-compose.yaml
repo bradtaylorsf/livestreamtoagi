@@ -53,6 +53,22 @@ services:
       retries: 10
       start_period: 30s
 
+  # Sandbox for isolated code execution (template — tool creates ephemeral containers)
+  sandbox:
+    build:
+      context: ./sandbox
+    runtime: runsc
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    read_only: true
+    tmpfs:
+      - /tmp:size=100m
+    network_mode: none
+    restart: "no"
+    profiles:
+      - sandbox
+
 volumes:
   redis_data:
   postgres_data:
