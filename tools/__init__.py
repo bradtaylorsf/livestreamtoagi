@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
+from .code_execution import ExecuteCodeTool
 from .messaging import SendMessageTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
+    import docker
+
     from core.event_bus import EventBus
     from core.overseer import Overseer
     from core.redis_client import RedisClient
@@ -18,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "ExecuteCodeTool",
     "GetAudienceStatusTool",
     "GetPollResultsTool",
     "GetWorldStateTool",
@@ -52,6 +56,7 @@ def get_core_tools(
     redis_client: RedisClient,
     agent_id: str = "unknown",
     overseer: Overseer | None = None,
+    docker_client: docker.DockerClient | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -72,6 +77,11 @@ def get_core_tools(
     # Poll creation (no Overseer needed)
     tools.append(
         CreatePollTool(redis_client=redis_client, event_bus=event_bus, agent_id=agent_id)
+    )
+
+    # Code execution sandbox
+    tools.append(
+        ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
     )
 
     return tools

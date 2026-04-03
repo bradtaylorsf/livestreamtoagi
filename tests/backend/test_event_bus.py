@@ -322,7 +322,7 @@ class TestEventTypeEnum:
             "world_expansion",
             "poll_created", "poll_result",
             "budget_update", "viewer_count",
-            "tts_play", "config_reloaded",
+            "tts_play", "tool_executed", "config_reloaded",
         }
         actual = {e.value for e in EventType}
         assert actual == expected
