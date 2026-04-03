@@ -9,24 +9,28 @@ from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageT
 from .base import BaseTool
 from .code_execution import ExecuteCodeTool
 from .messaging import SendMessageTool
+from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .tilemap_gen import GenerateTilemapTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
     import docker
-
     from core.event_bus import EventBus
     from core.overseer import Overseer
     from core.redis_client import RedisClient
+    from core.repos.cost_repo import CostRepo
     from core.repos.world_repo import WorldRepo
 
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "DraftEmailTool",
+    "DraftSocialPostTool",
     "ExecuteCodeTool",
     "GenerateTilemapTool",
     "GetAudienceStatusTool",
     "GetPollResultsTool",
+    "GetRevenueStatusTool",
     "GetWorldStateTool",
     "SendChatMessageTool",
     "SendMessageTool",
@@ -61,6 +65,7 @@ def get_core_tools(
     overseer: Overseer | None = None,
     docker_client: docker.DockerClient | None = None,
     world_repo: WorldRepo | None = None,
+    cost_repo: CostRepo | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -97,5 +102,11 @@ def get_core_tools(
                 world_repo=world_repo,
             )
         )
+
+    # Revenue and marketing tools
+    if cost_repo is not None:
+        tools.append(GetRevenueStatusTool(cost_repo=cost_repo, agent_id=agent_id))
+    tools.append(DraftSocialPostTool(redis_client=redis_client, agent_id=agent_id))
+    tools.append(DraftEmailTool(redis_client=redis_client, agent_id=agent_id))
 
     return tools
