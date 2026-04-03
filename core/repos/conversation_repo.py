@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from core.models import (
     Conversation,
     ConversationCreate,
+    EnergyLogCreate,
     InterruptLogCreate,
     SelectionLog,
     SelectionLogCreate,
@@ -123,6 +124,28 @@ class ConversationRepo:
             entry.succeeded,
             entry.reason,
         )
+
+    async def log_energy(self, entry: EnergyLogCreate) -> None:
+        await self.db.execute(
+            """INSERT INTO energy_change_log
+               (conversation_id, turn_number, changes)
+               VALUES ($1, $2, $3::jsonb)""",
+            entry.conversation_id,
+            entry.turn_number,
+            serialize_jsonb(entry.changes),
+        )
+
+    async def cleanup_old_logs(self, retention_days: int) -> None:
+        interval = f"{retention_days} days"
+        for table in (
+            "conversation_selection_log",
+            "interrupt_log",
+            "energy_change_log",
+        ):
+            await self.db.execute(
+                f"DELETE FROM {table} WHERE timestamp < NOW() - $1::interval",  # noqa: S608
+                interval,
+            )
 
     async def get_selection_log(
         self, conversation_id: uuid.UUID

@@ -36,6 +36,7 @@ ALL_TABLES = [
     "conversations",
     "conversation_selection_log",
     "interrupt_log",
+    "energy_change_log",
 ]
 
 AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "overseer", "alpha"]
@@ -49,7 +50,7 @@ async def conn():
     # Drop all tables directly (faster and avoids FK ordering issues from test data)
     await c.execute("""
         DROP TABLE IF EXISTS
-            self_modification_proposals, journal_entries,
+            energy_change_log, self_modification_proposals, journal_entries,
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,
             cost_events, revenue_events, challenges, world_events, world_chunks,
@@ -89,6 +90,8 @@ async def test_migration_idempotent(conn):
 @pytest.mark.integration
 async def test_rollback(conn):
     await up(conn)
+    # Roll back energy change log
+    await down(conn)
     # Roll back reflection tables
     await down(conn)
     # Roll back schema hardening
