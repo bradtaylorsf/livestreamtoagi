@@ -4,10 +4,19 @@
  */
 
 import type {
+  AgentArtifact,
+  AgentConversation,
+  AgentCostBreakdown,
+  AgentDetail,
+  AgentSummary,
+  CoreMemoryResponse,
   DashboardStats,
+  JournalEntry,
   PaginatedResponse,
+  RecallMemory,
   Simulation,
   SimulationCostResponse,
+  SystemPromptResponse,
   TimelineEvent,
 } from "@/types/admin";
 
@@ -119,6 +128,100 @@ export async function fetchSimulationCosts(
 ): Promise<SimulationCostResponse> {
   return request<SimulationCostResponse>(
     `/api/admin/simulations/${id}/costs`,
+  );
+}
+
+// ── Agents ──────────────────────────────────────────────────────
+
+export async function fetchAgents(): Promise<AgentSummary[]> {
+  return request<AgentSummary[]>("/api/admin/agents");
+}
+
+export async function fetchAgent(id: string): Promise<AgentDetail> {
+  return request<AgentDetail>(`/api/admin/agents/${id}`);
+}
+
+export async function fetchAgentSystemPrompt(
+  id: string,
+): Promise<SystemPromptResponse> {
+  return request<SystemPromptResponse>(`/api/admin/agents/${id}/system-prompt`);
+}
+
+export async function fetchAgentCoreMemory(
+  id: string,
+): Promise<CoreMemoryResponse> {
+  return request<CoreMemoryResponse>(`/api/admin/agents/${id}/core-memory`);
+}
+
+export async function fetchAgentRecallMemories(
+  id: string,
+  opts?: { search?: string; simulation_id?: string; offset?: number; limit?: number },
+): Promise<PaginatedResponse<RecallMemory>> {
+  const params = new URLSearchParams();
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.simulation_id) params.set("simulation_id", opts.simulation_id);
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return request<PaginatedResponse<RecallMemory>>(
+    `/api/admin/agents/${id}/recall-memories${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchAgentConversations(
+  id: string,
+  opts?: { simulation_id?: string; offset?: number; limit?: number },
+): Promise<PaginatedResponse<AgentConversation>> {
+  const params = new URLSearchParams();
+  if (opts?.simulation_id) params.set("simulation_id", opts.simulation_id);
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return request<PaginatedResponse<AgentConversation>>(
+    `/api/admin/agents/${id}/conversations${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchAgentArtifacts(
+  id: string,
+  opts?: { type?: string; simulation_id?: string; offset?: number; limit?: number },
+): Promise<PaginatedResponse<AgentArtifact>> {
+  const params = new URLSearchParams();
+  if (opts?.type) params.set("type", opts.type);
+  if (opts?.simulation_id) params.set("simulation_id", opts.simulation_id);
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return request<PaginatedResponse<AgentArtifact>>(
+    `/api/admin/agents/${id}/artifacts${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchAgentJournal(
+  id: string,
+  opts?: { simulation_id?: string; offset?: number; limit?: number },
+): Promise<PaginatedResponse<JournalEntry>> {
+  const params = new URLSearchParams();
+  if (opts?.simulation_id) params.set("simulation_id", opts.simulation_id);
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return request<PaginatedResponse<JournalEntry>>(
+    `/api/admin/agents/${id}/journal${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchAgentCosts(
+  id: string,
+  from?: string,
+  to?: string,
+): Promise<AgentCostBreakdown> {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  return request<AgentCostBreakdown>(
+    `/api/admin/agents/${id}/costs${qs ? `?${qs}` : ""}`,
   );
 }
 

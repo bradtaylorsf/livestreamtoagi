@@ -48,3 +48,119 @@ export interface DashboardStats {
   average_cost: string;
   total_conversations: number;
 }
+
+// ── Agent types ─────────────────────────────────────────────────
+
+export interface AgentSummary {
+  id: string;
+  display_name: string;
+  role: string;
+  color: string;
+  status: string;
+  conversation_model: string;
+  building_model: string;
+  total_cost: string;
+  message_count: number;
+  conversation_count: number;
+  artifact_count: number;
+  personality_traits: PersonalityTraits;
+}
+
+export interface PersonalityTraits {
+  chattiness: number;
+  initiative: number;
+  interrupt_tendency: number;
+  eavesdrop_tendency: number;
+  closing_weight: number;
+}
+
+export interface AgentDetail extends AgentSummary {
+  voice: string | null;
+  behaviors: Record<string, unknown>;
+}
+
+export interface SystemPromptLayer {
+  name: string;
+  content: string;
+  token_count: number;
+}
+
+export interface SystemPromptResponse {
+  assembled_prompt: string;
+  layers: SystemPromptLayer[];
+  total_tokens: number;
+}
+
+export interface CoreMemoryVersion {
+  version: number;
+  content: string;
+  changed_at: string;
+  change_reason: string | null;
+}
+
+export interface CoreMemoryResponse {
+  current_content: string;
+  current_version: number;
+  token_count: number;
+  last_updated: string | null;
+  version_history: CoreMemoryVersion[];
+}
+
+export interface RecallMemory {
+  id: string;
+  summary: string;
+  event_type: string;
+  importance_score: number;
+  created_at: string;
+  simulation_id: string | null;
+}
+
+export interface AgentConversation {
+  id: string;
+  simulation_id: string | null;
+  trigger_type: string;
+  topic: string | null;
+  participating_agents: string[];
+  turn_count: number;
+  agent_turn_count: number;
+  started_at: string;
+}
+
+export interface AgentArtifact {
+  id: string;
+  simulation_id: string | null;
+  artifact_type: string;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_output: string;
+  status: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  simulation_id: string | null;
+  content: string;
+  reflection_type: string;
+  created_at: string;
+}
+
+export interface CostByDay {
+  date: string;
+  cost: string;
+}
+
+export interface CostByType {
+  type: string;
+  cost: string;
+  tokens: number;
+}
+
+export interface AgentCostBreakdown {
+  by_day: CostByDay[];
+  by_type: CostByType[];
+  total: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
