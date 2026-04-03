@@ -6,6 +6,8 @@ import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from core.memory.validation import validate_agent_id
+
 if TYPE_CHECKING:
     from core.models import CoreMemory, CoreMemoryHistory
     from core.repos.memory_repo import MemoryRepo
@@ -71,6 +73,7 @@ class CoreMemoryManager:
 
     async def get_core_memory(self, agent_id: str) -> str | None:
         """Return the full core memory markdown string, or None if not found."""
+        validate_agent_id(agent_id)
         record = await self._repo.get_core_memory(agent_id)
         return record.content if record else None
 
@@ -86,6 +89,7 @@ class CoreMemoryManager:
         Raises InvalidSectionError for unknown sections.
         Raises CoreMemoryExceededError if the result exceeds TOKEN_LIMIT.
         """
+        validate_agent_id(agent_id)
         if section not in VALID_SECTIONS:
             raise InvalidSectionError(
                 f"Invalid section {section!r}. Must be one of: {sorted(VALID_SECTIONS)}"
@@ -126,6 +130,7 @@ class CoreMemoryManager:
         self, agent_id: str, identity: str
     ) -> CoreMemory:
         """Create initial core memory from template with identity filled in."""
+        validate_agent_id(agent_id)
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         content = CORE_MEMORY_TEMPLATE.format(date=date_str, identity=identity)
         token_count = self._tc.count_tokens(content)

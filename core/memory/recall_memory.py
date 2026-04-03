@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from core.memory.validation import validate_agent_id
 from core.models import RecallMemoryCreate
 
 if TYPE_CHECKING:
@@ -44,6 +45,7 @@ class RecallMemoryManager:
         importance_score: float = 0.5,
     ) -> RecallMemory:
         """Store a new recall memory with its pre-computed embedding."""
+        validate_agent_id(agent_id)
         create = RecallMemoryCreate(
             agent_id=agent_id,
             summary=summary,
@@ -65,6 +67,7 @@ class RecallMemoryManager:
 
         Returns formatted markdown block.
         """
+        validate_agent_id(agent_id)
         query_embedding = await self._embedding_fn(query_text)
 
         # Over-fetch candidates so blended scoring can re-rank

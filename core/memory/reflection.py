@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from core.memory.core_memory import TOKEN_LIMIT, VALID_SECTIONS
+from core.memory.validation import validate_agent_id
 from core.models import (
     JournalEntry,
     JournalEntryCreate,
@@ -128,6 +129,7 @@ class ReflectionManager:
 
     async def run_6hour_reflection(self, agent_id: str) -> ReflectionResult:
         """Review Tier 2 memories from last 6 hours, promote important learnings."""
+        validate_agent_id(agent_id)
         since = datetime.now(UTC) - timedelta(hours=6)
         recall_memories = await self._repo.get_recent_recall_memories(agent_id, since)
 
@@ -179,13 +181,17 @@ class ReflectionManager:
         # Apply promotions to core memory
         for promo in analysis.get("promotions", []):
             section = promo.get("section", "")
+            content = promo.get("content")
             if section not in VALID_SECTIONS:
+                continue
+            if not content:
+                logger.warning("Skipping promotion with missing content for %s", agent_id)
                 continue
             try:
                 await self._core.update_core_memory(
                     agent_id,
                     section,
-                    promo["content"],
+                    content,
                     f"6hour_reflection: {promo.get('reason', 'promoted from recall')}",
                 )
                 promoted_count += 1
@@ -208,6 +214,7 @@ class ReflectionManager:
 
     async def run_weekly_reflection(self, agent_id: str) -> ReflectionResult:
         """Full Tier 1 review, relationship refresh, pruning, and self-modification proposals."""
+        validate_agent_id(agent_id)
         core_memory = await self._core.get_core_memory(agent_id) or ""
         model = self._get_building_model(agent_id)
 
@@ -235,13 +242,17 @@ class ReflectionManager:
         # Apply section updates
         for update in analysis.get("updates", []):
             section = update.get("section", "")
+            content = update.get("content")
             if section not in VALID_SECTIONS:
+                continue
+            if not content:
+                logger.warning("Skipping update with missing content for %s", agent_id)
                 continue
             try:
                 await self._core.update_core_memory(
                     agent_id,
                     section,
-                    update["content"],
+                    content,
                     f"weekly_reflection: {update.get('reason', 'weekly refresh')}",
                 )
                 promoted_count += 1
@@ -262,13 +273,22 @@ class ReflectionManager:
 
         # Create self-modification proposals
         for mod in analysis.get("self_modifications", []):
+            proposal_type = mod.get("proposal_type")
+            description = mod.get("description")
+            reasoning = mod.get("reasoning")
+            if not all([proposal_type, description, reasoning]):
+                logger.warning(
+                    "Skipping incomplete self-modification proposal for %s: %s",
+                    agent_id, mod,
+                )
+                continue
             try:
                 proposal = await self._repo.create_proposal(
                     SelfModificationProposalCreate(
                         agent_id=agent_id,
-                        proposal_type=mod["proposal_type"],
-                        description=mod["description"],
-                        reasoning=mod["reasoning"],
+                        proposal_type=proposal_type,
+                        description=description,
+                        reasoning=reasoning,
                     )
                 )
                 proposals.append(proposal)
@@ -358,10 +378,11 @@ class ReflectionManager:
         trimmed = _parse_json_response(response.content)
         for update in trimmed.get("updates", []):
             section = update.get("section", "")
-            if section in VALID_SECTIONS:
+            content = update.get("content")
+            if section in VALID_SECTIONS and content:
                 try:
                     await self._core.update_core_memory(
-                        agent_id, section, update["content"], "weekly_reflection: token trimming"
+                        agent_id, section, content, "weekly_reflection: token trimming"
                     )
                 except Exception:
                     logger.exception("Failed to trim %s for %s", section, agent_id)
@@ -371,7 +392,11 @@ class ReflectionManager:
 
 
 def _parse_json_response(content: str) -> dict:
-    """Extract JSON from LLM response, handling markdown code fences."""
+    """Extract JSON from LLM response, handling markdown code fences.
+
+    Returns an empty dict on parse failure and logs the error at warning level
+    with enough context to diagnose the malformed response.
+    """
     text = content.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -379,7 +404,17 @@ def _parse_json_response(content: str) -> dict:
         lines = [line for line in lines if not line.strip().startswith("```")]
         text = "\n".join(lines)
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse JSON from LLM response: %.200s", content)
+        result = json.loads(text)
+        if not isinstance(result, dict):
+            logger.warning(
+                "LLM response parsed as %s instead of dict: %.200s",
+                type(result).__name__, content,
+            )
+            return {}
+        return result
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "Failed to parse JSON from LLM response (error: %s): %.200s",
+            exc, content,
+        )
         return {}

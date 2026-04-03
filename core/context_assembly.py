@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from core.memory.validation import validate_agent_id
+
 if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
     from core.memory.archival_memory import ArchivalMemoryManager
@@ -36,6 +38,12 @@ CHAT_HIGHLIGHTS_BUDGET = 200
 # Buffer limits
 BUFFER_MAX_MESSAGES = 20
 BUFFER_MIN_MESSAGES = 5
+
+# Redis key templates
+REDIS_KEY_LOCATION = "agent:location:{agent_id}"
+REDIS_KEY_TASK = "agent:task:{agent_id}"
+REDIS_KEY_NEARBY = "agent:nearby:{agent_id}"
+REDIS_KEY_CHAT_HIGHLIGHTS = "chat:highlights"
 
 # Shared mission statement (from specs/CHARACTER-SHEETS.md)
 SHARED_MISSION = """\
@@ -129,11 +137,14 @@ class ContextAssembler:
         Returns:
             List of message dicts [{role, content}] ready for LLM.
         """
+        validate_agent_id(agent_id)
         budget = MAX_BUDGET if transcript_id is not None else TYPICAL_BUDGET
         used_tokens = 0
 
         # --- 1. System prompt ---
         agent = self._agent_registry.get_agent(agent_id)
+        if agent is None:
+            logger.warning("Agent %s not found in registry, using empty system prompt", agent_id)
         system_prompt = agent.system_prompt if agent else ""
 
         # --- 2. Shared mission ---
@@ -259,8 +270,14 @@ class ContextAssembler:
             msg_tokens = self._token_counter.count_tokens(
                 msg.get("content", "")
             )
-            if running_tokens + msg_tokens > available_tokens and len(kept) >= BUFFER_MIN_MESSAGES:
-                break
+            if running_tokens + msg_tokens > available_tokens:
+                if len(kept) >= BUFFER_MIN_MESSAGES:
+                    break
+                # Log when forced to exceed budget to maintain minimum messages
+                logger.debug(
+                    "Buffer exceeds token budget to maintain minimum %d messages",
+                    BUFFER_MIN_MESSAGES,
+                )
             kept.append(msg)
             running_tokens += msg_tokens
 
@@ -272,9 +289,9 @@ class ContextAssembler:
         if not self._redis:
             return ""
         try:
-            location = await self._redis.get(f"agent:location:{agent_id}")
-            task = await self._redis.get(f"agent:task:{agent_id}")
-            nearby = await self._redis.get(f"agent:nearby:{agent_id}")
+            location = await self._redis.get(REDIS_KEY_LOCATION.format(agent_id=agent_id))
+            task = await self._redis.get(REDIS_KEY_TASK.format(agent_id=agent_id))
+            nearby = await self._redis.get(REDIS_KEY_NEARBY.format(agent_id=agent_id))
 
             parts = ["## World State"]
             if location:
@@ -298,7 +315,7 @@ class ContextAssembler:
         if not self._redis:
             return ""
         try:
-            highlights = await self._redis.get("chat:highlights")
+            highlights = await self._redis.get(REDIS_KEY_CHAT_HIGHLIGHTS)
             if not highlights:
                 return ""
             return f"## Recent Chat Messages\n{highlights}"
