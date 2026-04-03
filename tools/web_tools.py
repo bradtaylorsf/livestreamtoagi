@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -213,6 +215,9 @@ class FetchUrlTool(BaseTool):
         if not url.strip():
             return {"status": "error", "reason": "URL cannot be empty"}
 
+        if not _is_safe_url(url):
+            return {"status": "error", "reason": "URL blocked: must be public http(s)"}
+
         client = self._http or httpx.AsyncClient(timeout=15)
         close_after = self._http is None
         try:
@@ -266,6 +271,35 @@ class FetchUrlTool(BaseTool):
             "content": text,
             "truncated": truncated,
         }
+
+
+def _is_safe_url(url: str) -> bool:
+    """Block private/internal URLs to prevent SSRF."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return False
+
+    # Block obvious internal hostnames
+    if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"):
+        return False
+
+    # Block private/reserved IP ranges
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            return False
+    except ValueError:
+        pass  # hostname is a domain name, not an IP — allow
+
+    return True
 
 
 def _strip_html(html: str) -> str:

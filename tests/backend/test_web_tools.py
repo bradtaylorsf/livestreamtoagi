@@ -14,6 +14,7 @@ from tools.web_tools import (
     SEARCH_COST,
     FetchUrlTool,
     WebSearchTool,
+    _is_safe_url,
     _strip_html,
 )
 
@@ -609,6 +610,57 @@ class TestFetchUrlFunctionality:
         call_args = event_bus.emit.call_args
         assert call_args[0][0] == "tool_executed"
         assert call_args[0][1]["tool"] == "fetch_url"
+
+
+# --- SSRF protection ---
+
+
+class TestSafeUrl:
+    def test_public_https_allowed(self) -> None:
+        assert _is_safe_url("https://example.com") is True
+
+    def test_public_http_allowed(self) -> None:
+        assert _is_safe_url("http://example.com") is True
+
+    def test_localhost_blocked(self) -> None:
+        assert _is_safe_url("http://localhost:8000/secret") is False
+
+    def test_127_0_0_1_blocked(self) -> None:
+        assert _is_safe_url("http://127.0.0.1/admin") is False
+
+    def test_private_ip_blocked(self) -> None:
+        assert _is_safe_url("http://192.168.1.1") is False
+        assert _is_safe_url("http://10.0.0.1") is False
+
+    def test_link_local_blocked(self) -> None:
+        assert _is_safe_url("http://169.254.169.254/latest/meta-data") is False
+
+    def test_ftp_scheme_blocked(self) -> None:
+        assert _is_safe_url("ftp://files.example.com/data") is False
+
+    def test_file_scheme_blocked(self) -> None:
+        assert _is_safe_url("file:///etc/passwd") is False
+
+    def test_empty_url_blocked(self) -> None:
+        assert _is_safe_url("") is False
+
+
+class TestFetchUrlSsrfProtection:
+    async def test_localhost_rejected(
+        self, event_bus: AsyncMock, redis_client: AsyncMock
+    ) -> None:
+        tool = FetchUrlTool(event_bus=event_bus, redis_client=redis_client, agent_id="pixel")
+        result = await tool.execute(url="http://localhost:8000/internal")
+        assert result["status"] == "error"
+        assert "blocked" in result["reason"].lower()
+
+    async def test_metadata_endpoint_rejected(
+        self, event_bus: AsyncMock, redis_client: AsyncMock
+    ) -> None:
+        tool = FetchUrlTool(event_bus=event_bus, redis_client=redis_client, agent_id="pixel")
+        result = await tool.execute(url="http://169.254.169.254/latest/meta-data")
+        assert result["status"] == "error"
+        assert "blocked" in result["reason"].lower()
 
 
 # --- _strip_html helper ---
