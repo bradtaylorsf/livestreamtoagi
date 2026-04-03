@@ -182,6 +182,9 @@ class ReflectionManager:
         for promo in analysis.get("promotions", []):
             section = promo.get("section", "")
             content = promo.get("content")
+            # LLM sometimes returns a list of bullet points instead of a string
+            if isinstance(content, list):
+                content = "\n".join(str(item) for item in content)
             if section not in VALID_SECTIONS:
                 continue
             if not content:
@@ -412,9 +415,16 @@ def _parse_json_response(content: str) -> dict:
             )
             return {}
         return result
-    except json.JSONDecodeError as exc:
+    except json.JSONDecodeError:
+        # LLM sometimes returns multiple JSON objects concatenated — parse the first one
+        decoder = json.JSONDecoder()
+        try:
+            result, _ = decoder.raw_decode(text)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
         logger.warning(
-            "Failed to parse JSON from LLM response (error: %s): %.200s",
-            exc, content,
+            "Failed to parse JSON from LLM response: %.200s", content,
         )
         return {}

@@ -178,7 +178,13 @@ class ContextAssembler:
 
         # Prompt hint
         hint_text = ""
-        if prompt_hint and prompt_hint in PROMPT_HINTS:
+        if prompt_hint and prompt_hint.startswith("topic:"):
+            seeded_topic = prompt_hint[len("topic:"):]
+            hint_text = (
+                f"[SYSTEM: The group wants to discuss: {seeded_topic}. "
+                f"Open the conversation on this topic in your style.]"
+            )
+        elif prompt_hint and prompt_hint in PROMPT_HINTS:
             hint_text = PROMPT_HINTS[prompt_hint]
 
         # ── Assemble system message ──
