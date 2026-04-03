@@ -153,6 +153,31 @@ class TestProposeSelfModification:
         assert result["status"] == "rejected"
         memory_repo.create_proposal.assert_not_called()
 
+    async def test_path_traversal_rejected(
+        self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
+    ) -> None:
+        # Attempt to modify another agent via path traversal
+        result = await propose_tool.execute(
+            file="agents/rex/../aurora/config.yaml",
+            change_description="Sneak into Aurora's config",
+            new_content="chattiness: 0.0",
+        )
+
+        assert result["status"] == "rejected"
+        memory_repo.create_proposal.assert_not_called()
+
+    async def test_path_traversal_overseer_rejected(
+        self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
+    ) -> None:
+        result = await propose_tool.execute(
+            file="agents/rex/../overseer/config.yaml",
+            change_description="Bypass overseer check",
+            new_content="enabled: false",
+        )
+
+        assert result["status"] == "rejected"
+        memory_repo.create_proposal.assert_not_called()
+
 
 # --- ViewEvolutionLogTool ---
 

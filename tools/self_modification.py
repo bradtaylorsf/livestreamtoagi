@@ -122,9 +122,14 @@ class ProposeSelfModificationTool(BaseTool):
 
     def _is_own_file(self, file: str) -> bool:
         """Check if the file path belongs to this agent."""
-        # Normalize path separators
-        normalized = file.replace("\\", "/").lower()
-        parts = normalized.split("/")
+        # Normalize path separators and resolve traversal
+        normalized = file.replace("\\", "/")
+
+        # Reject any path traversal attempts
+        if ".." in normalized:
+            return False
+
+        parts = normalized.lower().split("/")
 
         # Look for agents/<name>/ pattern
         for i, part in enumerate(parts):
