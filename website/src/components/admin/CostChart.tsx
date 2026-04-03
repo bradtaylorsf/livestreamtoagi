@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
-  LineChart,
-  Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
@@ -38,7 +38,7 @@ export default function CostChart({ simulationId }: Props) {
   return (
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData}>
+        <BarChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
           <XAxis
             dataKey="agent"
@@ -59,14 +59,12 @@ export default function CostChart({ simulationId }: Props) {
             }}
             formatter={(value) => [`$${Number(value).toFixed(4)}`, "Cost"]}
           />
-          <Line
-            type="monotone"
+          <Bar
             dataKey="cost"
-            stroke="#00f0ff"
-            strokeWidth={2}
-            dot={{ fill: "#00f0ff", r: 3 }}
+            fill="#00f0ff"
+            radius={[4, 4, 0, 0]}
           />
-        </LineChart>
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );
