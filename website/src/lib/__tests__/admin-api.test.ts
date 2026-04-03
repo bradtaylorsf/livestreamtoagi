@@ -6,6 +6,15 @@ import {
   fetchSimulations,
   fetchSimulationTimeline,
   fetchSimulationCosts,
+  fetchAgents,
+  fetchAgent,
+  fetchAgentSystemPrompt,
+  fetchAgentCoreMemory,
+  fetchAgentRecallMemories,
+  fetchAgentConversations,
+  fetchAgentArtifacts,
+  fetchAgentJournal,
+  fetchAgentCosts,
 } from "../admin-api";
 
 const mockFetch = vi.fn();
@@ -150,6 +159,193 @@ describe("fetchDashboardStats", () => {
     expect(stats.average_cost).toBe("0.1500");
     expect(stats.total_conversations).toBe(10);
     expect(stats.last_run_date).toBe("2026-04-01T00:00:00Z");
+  });
+});
+
+// ── Agent API tests ─────────────────────────────────────────────
+
+describe("fetchAgents", () => {
+  it("sends GET to /api/admin/agents", async () => {
+    const agents = [{ id: "vera", display_name: "Vera" }];
+    mockFetch.mockReturnValue(jsonResponse(agents));
+
+    const result = await fetchAgents();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].display_name).toBe("Vera");
+  });
+});
+
+describe("fetchAgent", () => {
+  it("sends GET to /api/admin/agents/:id", async () => {
+    const agent = { id: "vera", display_name: "Vera", role: "Showrunner" };
+    mockFetch.mockReturnValue(jsonResponse(agent));
+
+    const result = await fetchAgent("vera");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/vera",
+      expect.anything(),
+    );
+    expect(result.role).toBe("Showrunner");
+  });
+});
+
+describe("fetchAgentSystemPrompt", () => {
+  it("sends GET to /api/admin/agents/:id/system-prompt", async () => {
+    const prompt = { assembled_prompt: "test", layers: [], total_tokens: 100 };
+    mockFetch.mockReturnValue(jsonResponse(prompt));
+
+    const result = await fetchAgentSystemPrompt("vera");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/vera/system-prompt",
+      expect.anything(),
+    );
+    expect(result.total_tokens).toBe(100);
+  });
+});
+
+describe("fetchAgentCoreMemory", () => {
+  it("sends GET to /api/admin/agents/:id/core-memory", async () => {
+    const memory = {
+      current_content: "test",
+      current_version: 1,
+      token_count: 50,
+      last_updated: null,
+      version_history: [],
+    };
+    mockFetch.mockReturnValue(jsonResponse(memory));
+
+    const result = await fetchAgentCoreMemory("vera");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/vera/core-memory",
+      expect.anything(),
+    );
+    expect(result.current_version).toBe(1);
+  });
+});
+
+describe("fetchAgentRecallMemories", () => {
+  it("sends GET with search and pagination params", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchAgentRecallMemories("vera", {
+      search: "hello",
+      offset: 10,
+      limit: 20,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/vera/recall-memories?search=hello&offset=10&limit=20",
+      expect.anything(),
+    );
+  });
+
+  it("sends GET without params when none provided", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchAgentRecallMemories("vera");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/vera/recall-memories",
+      expect.anything(),
+    );
+  });
+});
+
+describe("fetchAgentConversations", () => {
+  it("sends GET with simulation_id filter", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchAgentConversations("rex", { simulation_id: "sim-1" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/rex/conversations?simulation_id=sim-1",
+      expect.anything(),
+    );
+  });
+});
+
+describe("fetchAgentArtifacts", () => {
+  it("sends GET with type and simulation filters", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchAgentArtifacts("aurora", {
+      type: "code",
+      simulation_id: "sim-1",
+      offset: 0,
+      limit: 20,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/aurora/artifacts?type=code&simulation_id=sim-1&offset=0&limit=20",
+      expect.anything(),
+    );
+  });
+});
+
+describe("fetchAgentJournal", () => {
+  it("sends GET with simulation filter", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchAgentJournal("fork", { simulation_id: "sim-2" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/fork/journal?simulation_id=sim-2",
+      expect.anything(),
+    );
+  });
+});
+
+describe("fetchAgentCosts", () => {
+  it("sends GET to /api/admin/agents/:id/costs", async () => {
+    const costs = {
+      by_day: [],
+      by_type: [],
+      total: "0.50",
+      total_input_tokens: 1000,
+      total_output_tokens: 500,
+    };
+    mockFetch.mockReturnValue(jsonResponse(costs));
+
+    const result = await fetchAgentCosts("sentinel");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/sentinel/costs",
+      expect.anything(),
+    );
+    expect(result.total).toBe("0.50");
+  });
+
+  it("passes from/to date filters", async () => {
+    const costs = {
+      by_day: [],
+      by_type: [],
+      total: "0",
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+    };
+    mockFetch.mockReturnValue(jsonResponse(costs));
+
+    await fetchAgentCosts("sentinel", "2026-04-01", "2026-04-03");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/agents/sentinel/costs?from=2026-04-01&to=2026-04-03",
+      expect.anything(),
+    );
   });
 });
 

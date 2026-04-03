@@ -737,46 +737,78 @@ class PaginatedResponse(BaseModel, Generic[T]):  # noqa: UP046
     offset: int
 
 
+class PersonalityTraits(BaseModel):
+    chattiness: float = 0.0
+    initiative: float = 0.0
+    interrupt_tendency: float = 0.0
+    eavesdrop_tendency: float = 0.0
+    closing_weight: float = 0.0
+
+
 class AgentSummary(BaseModel):
     id: str
     display_name: str
+    role: str = ""
+    color: str = "#888888"
     status: str
-    location: str | None = None
+    conversation_model: str = ""
+    building_model: str = ""
     total_cost: str = "0"
     message_count: int = 0
+    conversation_count: int = 0
+    artifact_count: int = 0
+    personality_traits: PersonalityTraits = PersonalityTraits()
 
 
-class AgentDetail(BaseModel):
-    id: str
-    display_name: str
-    status: str
-    model_conversation: str
-    model_building: str
-    voice_id: str | None = None
-    chattiness: float
-    initiative: float
-    interrupt_tendency: float
-    eavesdrop_tendency: float
-    closing_weight: float
-    system_prompt: str = ""
+class AgentDetail(AgentSummary):
+    voice: str | None = None
     behaviors: dict[str, Any] = {}
 
 
+class SystemPromptLayer(BaseModel):
+    name: str
+    content: str
+    token_count: int = 0
+
+
 class SystemPromptResponse(BaseModel):
-    agent_id: str
     assembled_prompt: str
-    layers: dict[str, str]
+    layers: list[SystemPromptLayer] = []
+    total_tokens: int = 0
+
+
+class CoreMemoryVersionEntry(BaseModel):
+    version: int
+    content: str
+    changed_at: str | None = None
+    change_reason: str | None = None
 
 
 class CoreMemoryResponse(BaseModel):
-    current: CoreMemory | None = None
-    version_history: list[CoreMemoryHistory] = []
+    current_content: str = ""
+    current_version: int = 0
+    token_count: int = 0
+    last_updated: str | None = None
+    version_history: list[CoreMemoryVersionEntry] = []
+
+
+class CostByDay(BaseModel):
+    date: str
+    cost: str = "0"
+
+
+class CostByType(BaseModel):
+    type: str
+    cost: str = "0"
+    tokens: int = 0
 
 
 class CostBreakdownResponse(BaseModel):
-    by_day: list[dict[str, str]] = []
-    by_type: list[dict[str, str]] = []
+    by_day: list[CostByDay] = []
+    by_type: list[CostByType] = []
     total: str = "0"
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
 
 class TimelineEvent(BaseModel):

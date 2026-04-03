@@ -18,14 +18,19 @@ from core.models import (
     Conversation,
     ConversationDetail,
     CoreMemoryResponse,
+    CoreMemoryVersionEntry,
     CostBreakdownResponse,
+    CostByDay,
+    CostByType,
     EvalRunRequest,
     EvalRunResponse,
     JournalEntry,
     PaginatedResponse,
+    PersonalityTraits,
     SelectionLog,
     Simulation,
     SimulationCostResponse,
+    SystemPromptLayer,
     SystemPromptResponse,
     TimelineEvent,
     TurnDetail,
@@ -36,6 +41,31 @@ if TYPE_CHECKING:
     from datetime import datetime
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+# Agent metadata not stored in YAML configs — derived from character sheets.
+AGENT_ROLES: dict[str, str] = {
+    "vera": "Showrunner/Coordinator",
+    "rex": "Engineer/Builder",
+    "aurora": "Creative Director",
+    "pixel": "Researcher/Audience Liaison",
+    "fork": "Contrarian/Code Reviewer",
+    "sentinel": "Budget Monitor/QA",
+    "grok": "Wild Card/Provocateur",
+    "overseer": "Content Filter",
+    "alpha": "Errand Runner",
+}
+
+AGENT_COLORS: dict[str, str] = {
+    "vera": "#9b59b6",
+    "rex": "#e74c3c",
+    "aurora": "#f1c40f",
+    "pixel": "#3498db",
+    "fork": "#2ecc71",
+    "sentinel": "#e67e22",
+    "grok": "#1abc9c",
+    "overseer": "#95a5a6",
+    "alpha": "#8e44ad",
+}
 
 
 def _get_db():
@@ -49,12 +79,38 @@ def _get_registry():
     return agent_registry
 
 
+def _agent_summary_from_config(a, *, total_cost: float = 0, message_count: int = 0,
+                                conversation_count: int = 0, artifact_count: int = 0) -> AgentSummary:
+    """Build AgentSummary from an AgentConfig object."""
+    status = a.status.value if hasattr(a.status, "value") else str(a.status)
+    return AgentSummary(
+        id=a.id,
+        display_name=a.display_name,
+        role=AGENT_ROLES.get(a.id, ""),
+        color=AGENT_COLORS.get(a.id, "#888888"),
+        status=status,
+        conversation_model=a.model_conversation,
+        building_model=a.model_building,
+        total_cost=f"{total_cost:.6f}",
+        message_count=message_count,
+        conversation_count=conversation_count,
+        artifact_count=artifact_count,
+        personality_traits=PersonalityTraits(
+            chattiness=a.chattiness,
+            initiative=a.initiative,
+            interrupt_tendency=a.interrupt_tendency,
+            eavesdrop_tendency=a.eavesdrop_tendency,
+            closing_weight=a.closing_weight,
+        ),
+    )
+
+
 # ── Agent Endpoints ────────────────────────────────────────────
 
 
 @router.get("/agents", response_model=list[AgentSummary])
 async def list_agents() -> list[AgentSummary]:
-    """List all agents with current status, location, total cost, message count."""
+    """List all agents with current status, total cost, message count."""
     registry = _get_registry()
     db = _get_db()
 
@@ -66,12 +122,8 @@ async def list_agents() -> list[AgentSummary]:
     for a in agents:
         costs = await cost_repo.get_costs_by_agent(a.id)
         total = sum(c.amount for c in costs if c.amount) if costs else 0
-        result.append(AgentSummary(
-            id=a.id,
-            display_name=a.display_name,
-            status=a.status.value if hasattr(a.status, "value") else str(a.status),
-            total_cost=str(total),
-            message_count=len(costs),
+        result.append(_agent_summary_from_config(
+            a, total_cost=total, message_count=len(costs) if costs else 0,
         ))
     return result
 
@@ -83,19 +135,19 @@ async def get_agent(agent_id: str) -> AgentDetail:
     agent = registry.get_agent(agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    db = _get_db()
+    from core.repos.cost_repo import CostRepo
+    cost_repo = CostRepo(db)
+    costs = await cost_repo.get_costs_by_agent(agent_id)
+    total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
+
+    summary = _agent_summary_from_config(
+        agent, total_cost=total_cost, message_count=len(costs) if costs else 0,
+    )
     return AgentDetail(
-        id=agent.id,
-        display_name=agent.display_name,
-        status=agent.status.value if hasattr(agent.status, "value") else str(agent.status),
-        model_conversation=agent.model_conversation,
-        model_building=agent.model_building,
-        voice_id=agent.voice_id,
-        chattiness=agent.chattiness,
-        initiative=agent.initiative,
-        interrupt_tendency=agent.interrupt_tendency,
-        eavesdrop_tendency=agent.eavesdrop_tendency,
-        closing_weight=agent.closing_weight,
-        system_prompt=agent.system_prompt,
+        **summary.model_dump(),
+        voice=agent.voice_id,
         behaviors=agent.behaviors,
     )
 
@@ -113,17 +165,27 @@ async def get_agent_system_prompt(agent_id: str) -> SystemPromptResponse:
     memory_repo = MemoryRepo(db)
     core_mem = await memory_repo.get_core_memory(agent_id)
 
-    layers = {
-        "infrastructure": INFRASTRUCTURE_PROMPT,
-        "character": agent.system_prompt,
-        "memory": core_mem.content if core_mem else "",
+    raw_layers = {
+        "Infrastructure": INFRASTRUCTURE_PROMPT,
+        "Character": agent.system_prompt,
+        "Memory Context": core_mem.content if core_mem else "",
     }
-    assembled = "\n\n".join(v for v in layers.values() if v)
+    assembled = "\n\n".join(v for v in raw_layers.values() if v)
+
+    def _estimate_tokens(text: str) -> int:
+        return len(text) // 4 if text else 0
+
+    layers = [
+        SystemPromptLayer(name=name, content=content, token_count=_estimate_tokens(content))
+        for name, content in raw_layers.items()
+        if content
+    ]
+    total_tokens = sum(l.token_count for l in layers)
 
     return SystemPromptResponse(
-        agent_id=agent_id,
         assembled_prompt=assembled,
         layers=layers,
+        total_tokens=total_tokens,
     )
 
 
@@ -136,7 +198,24 @@ async def get_agent_core_memory(agent_id: str) -> CoreMemoryResponse:
 
     current = await memory_repo.get_core_memory(agent_id)
     history = await memory_repo.get_core_memory_history(agent_id)
-    return CoreMemoryResponse(current=current, version_history=history)
+
+    version_entries = [
+        CoreMemoryVersionEntry(
+            version=h.version,
+            content=h.content,
+            changed_at=h.changed_at.isoformat() if h.changed_at else None,
+            change_reason=h.change_reason,
+        )
+        for h in history
+    ]
+
+    return CoreMemoryResponse(
+        current_content=current.content if current else "",
+        current_version=current.version if current else 0,
+        token_count=current.token_count if current else 0,
+        last_updated=current.last_updated.isoformat() if current and current.last_updated else None,
+        version_history=version_entries,
+    )
 
 
 @router.get("/agents/{agent_id}/recall-memories")
@@ -224,7 +303,27 @@ async def get_agent_costs(
     data = await cost_repo.get_costs_by_agent_grouped(
         agent_id, from_date=from_date, to_date=to_date
     )
-    return CostBreakdownResponse(**data)
+
+    by_day = [
+        CostByDay(date=d.get("date", ""), cost=d.get("cost", "0"))
+        for d in data.get("by_day", [])
+    ]
+    by_type = [
+        CostByType(
+            type=d.get("type", ""),
+            cost=d.get("cost", "0"),
+            tokens=int(d.get("tokens", 0)),
+        )
+        for d in data.get("by_type", [])
+    ]
+
+    return CostBreakdownResponse(
+        by_day=by_day,
+        by_type=by_type,
+        total=data.get("total", "0"),
+        total_input_tokens=int(data.get("total_input_tokens", 0)),
+        total_output_tokens=int(data.get("total_output_tokens", 0)),
+    )
 
 
 @router.get("/agents/{agent_id}/journal")
@@ -232,14 +331,17 @@ async def get_agent_journal(
     agent_id: str,
     simulation_id: uuid_mod.UUID | None = Query(default=None),  # noqa: B008
     limit: int = Query(20, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ) -> PaginatedResponse[JournalEntry]:
     """Journal entries with full content."""
     db = _get_db()
     from core.repos.memory_repo import MemoryRepo
     memory_repo = MemoryRepo(db)
 
-    entries = await memory_repo.get_journal_entries(agent_id, limit=limit)
-    return PaginatedResponse(items=entries, total=len(entries), limit=limit, offset=0)
+    entries = await memory_repo.get_journal_entries(agent_id, limit=limit + offset)
+    # Apply offset manually; repo method returns most recent entries
+    paged = entries[offset:offset + limit]
+    return PaginatedResponse(items=paged, total=len(entries), limit=limit, offset=offset)
 
 
 # ── Simulation Endpoints ──────────────────────────────────────
