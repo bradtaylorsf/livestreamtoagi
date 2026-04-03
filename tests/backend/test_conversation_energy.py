@@ -9,7 +9,6 @@ import pytest
 from core.conversation.energy import ConversationEnergy
 from core.models import EnergyConfig
 
-
 # ── Fixtures ────────────────────────────────────────────────
 
 

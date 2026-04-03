@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import logging
 import random
+from typing import TYPE_CHECKING
 
-from core.models import EnergyConfig
+if TYPE_CHECKING:
+    from core.models import EnergyConfig
 
 logger = logging.getLogger(__name__)
 
