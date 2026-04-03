@@ -9,6 +9,7 @@ from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
 from .code_execution import ExecuteCodeTool
+from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .tilemap_gen import GenerateTilemapTool
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
     import docker
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
+    from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.core_memory import CoreMemoryManager
+    from core.memory.recall_memory import RecallMemoryManager
     from core.overseer import Overseer
     from core.redis_client import RedisClient
     from core.repos.cost_repo import CostRepo
@@ -37,11 +41,15 @@ __all__ = [
     "GetPollResultsTool",
     "GetRevenueStatusTool",
     "GetWorldStateTool",
+    "RecallMemoryTool",
+    "RetrieveTranscriptTool",
     "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
+    "UpdateCoreMemoryTool",
     "WebSearchTool",
     "get_core_tools",
+    "get_memory_tools",
 ]
 
 
@@ -146,3 +154,17 @@ def get_core_tools(
         )
 
     return tools
+
+
+def get_memory_tools(
+    recall_manager: RecallMemoryManager,
+    archival_manager: ArchivalMemoryManager,
+    core_manager: CoreMemoryManager,
+    agent_id: str = "unknown",
+) -> list[BaseTool]:
+    """Create instances of all memory tools for an agent."""
+    return [
+        RecallMemoryTool(recall_manager=recall_manager, agent_id=agent_id),
+        RetrieveTranscriptTool(archival_manager=archival_manager),
+        UpdateCoreMemoryTool(core_manager=core_manager, agent_id=agent_id),
+    ]

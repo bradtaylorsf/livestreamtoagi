@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from core.event_bus import EventType
 from core.models import CostEventCreate
 
 from .base import BaseTool
@@ -115,7 +116,7 @@ class WebSearchTool(BaseTool):
             )
 
         await self._event_bus.emit(
-            "tool_executed",
+            EventType.TOOL_EXECUTED,
             {
                 "tool": self.name,
                 "agent_id": self._agent_id,
@@ -255,7 +256,7 @@ class FetchUrlTool(BaseTool):
             )
 
         await self._event_bus.emit(
-            "tool_executed",
+            EventType.TOOL_EXECUTED,
             {
                 "tool": self.name,
                 "agent_id": self._agent_id,

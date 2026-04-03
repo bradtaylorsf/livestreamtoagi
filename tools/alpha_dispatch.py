@@ -8,6 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from core.event_bus import EventType
 from core.models import CostEventCreate
 
 from .base import BaseTool
@@ -91,7 +92,7 @@ class DispatchAlphaTool(BaseTool):
 
         # Emit dispatch event — wolf runs off screen
         await self._event_bus.emit(
-            "alpha_dispatch",
+            EventType.ALPHA_DISPATCH,
             {"from": self._agent_id, "task": task, "status": "running", "task_id": task_id},
         )
 
@@ -126,7 +127,7 @@ class DispatchAlphaTool(BaseTool):
 
         # Emit return event — wolf comes back
         await self._event_bus.emit(
-            "alpha_return",
+            EventType.ALPHA_RETURN,
             {"result": result, "status": status, "task_id": task_id},
         )
 
