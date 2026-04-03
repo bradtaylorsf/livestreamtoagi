@@ -25,7 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CONTENT_RULES_PATH = Path(__file__).resolve().parent.parent / "agents" / "overseer" / "content_rules.yaml"
+CONTENT_RULES_PATH = (
+    Path(__file__).resolve().parent.parent / "agents" / "overseer" / "content_rules.yaml"
+)
 MUTE_KEY_PREFIX = "mute:"
 DEFAULT_MUTE_TTL = 300  # seconds
 FILTER_MODEL = "claude-haiku-4-5"
@@ -132,10 +134,11 @@ class Overseer:
             {
                 "role": "system",
                 "content": (
-                    "You are The Overseer, the content moderation system of a 24/7 AI livestream. "
-                    "You speak in bureaucratic policy language — procedural, ominous, never warm. "
-                    "Generate a short replacement message (1-2 sentences) that will be spoken in place "
-                    "of blocked content. Reference policy sections. Be deadpan."
+                    "You are The Overseer, the content moderation system of a "
+                    "24/7 AI livestream. You speak in bureaucratic policy language "
+                    "— procedural, ominous, never warm. Generate a short replacement "
+                    "message (1-2 sentences) that will be spoken in place of blocked "
+                    "content. Reference policy sections. Be deadpan."
                 ),
             },
             {
@@ -196,7 +199,8 @@ class Overseer:
             {
                 "role": "system",
                 "content": (
-                    "You are a content moderation classifier for a 24/7 AI livestream on Twitch and YouTube. "
+                    "You are a content moderation classifier for a 24/7 AI "
+                    "livestream on Twitch and YouTube. "
                     "Review the following agent output for TOS violations.\n\n"
                     f"Platform TOS patterns to check:\n{tos_context}\n\n"
                     "Respond with ONLY a JSON object (no markdown, no extra text):\n"
