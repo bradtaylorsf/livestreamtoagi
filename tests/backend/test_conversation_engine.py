@@ -597,10 +597,12 @@ class TestEavesdropper:
         self,
         engine: ConversationEngine,
         mock_proximity: MagicMock,
+        mock_event_bus: MagicMock,
     ) -> None:
-        """Eavesdropper joining adds them to participants."""
+        """Eavesdropper joining adds them to participants and emits agent_move."""
         trigger = {"type": "idle", "location": "town_square"}
         await engine._start_conversation(trigger)
+        mock_event_bus.emit.reset_mock()
 
         # Simulate eavesdropper joining
         mock_proximity.check_eavesdroppers = AsyncMock(return_value=["grok"])
@@ -611,6 +613,14 @@ class TestEavesdropper:
 
         # Grok should be added
         assert "grok" in engine.active_conversation.participants
+
+        # Should have emitted an agent_move event for grok
+        move_events = [
+            c for c in mock_event_bus.emit.call_args_list
+            if c[0][0] == EventType.AGENT_MOVE.value
+        ]
+        assert len(move_events) == 1
+        assert move_events[0][0][1]["agent_id"] == "grok"
 
 
 # ── Test: Run loop behavior ────────────────────────────────────

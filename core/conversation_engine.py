@@ -288,6 +288,15 @@ class ConversationEngine:
             if joiner_id not in conv.participants:
                 conv.participants.append(joiner_id)
                 events.append("new_participant")
+                await self._event_bus.emit(
+                    EventType.AGENT_MOVE.value,
+                    {
+                        "agent_id": joiner_id,
+                        "target": conv.location or "town_square",
+                        "reason": "heard_interesting_conversation",
+                        "conversation_id": str(conv.id),
+                    },
+                )
 
         # Check energy before this turn
         if not conv.energy.should_continue:
@@ -535,7 +544,7 @@ class ConversationEngine:
         return agent.status == AgentStatus.muted
 
     @staticmethod
-    def _hint_for_trigger(trigger_type: str) -> str:
+    def _hint_for_trigger(trigger_type: str) -> str | None:
         """Map trigger type to a prompt hint."""
         mapping = {
             "idle": "idle",
@@ -544,7 +553,7 @@ class ConversationEngine:
             "environmental": None,
             "audience": None,
         }
-        return mapping.get(trigger_type)  # type: ignore[return-value]
+        return mapping.get(trigger_type)
 
     async def _sleep(self, seconds: float) -> None:
         """Sleep with speed multiplier applied. 0 = no sleep."""
