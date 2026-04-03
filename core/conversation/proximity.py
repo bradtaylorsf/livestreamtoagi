@@ -68,13 +68,19 @@ class ProximityManager:
 
     async def get_group(self, chunk_name: str) -> list[str]:
         """Return all agent IDs currently in the given chunk."""
-        keys = await self._redis.client.keys(f"{_LOCATION_KEY_PREFIX}*")
         group: list[str] = []
-        for key in keys:
-            location = await self._redis.get(key)
-            if location == chunk_name:
-                agent_id = key.removeprefix(_LOCATION_KEY_PREFIX)
-                group.append(agent_id)
+        cursor: int | str = 0
+        while True:
+            cursor, keys = await self._redis.client.scan(
+                cursor=cursor, match=f"{_LOCATION_KEY_PREFIX}*", count=50,
+            )
+            for key in keys:
+                location = await self._redis.get(key)
+                if location == chunk_name:
+                    agent_id = key.removeprefix(_LOCATION_KEY_PREFIX)
+                    group.append(agent_id)
+            if cursor == 0:
+                break
         return group
 
     async def get_eligible_speakers(

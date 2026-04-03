@@ -9,37 +9,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from core.conversation.triggers import (
-    DAILY_SCHEDULE,
-    MEMORY_TRIGGER_CHANCE,
+    _DEFAULT_DAILY_SCHEDULE,
     TriggerSystem,
 )
 from core.models import TriggerConfig
-
-# ── Helpers ──────────────────────────────────────────────────
-
-
-def _make_trigger_config(**overrides) -> TriggerConfig:
-    defaults = {
-        "idle_timeout_seconds": 90,
-        "agent_initiative": {
-            "vera": 0.8,
-            "pixel": 0.7,
-            "grok": 0.6,
-            "aurora": 0.5,
-            "fork": 0.3,
-            "rex": 0.2,
-            "sentinel": 0.4,
-        },
-        "trigger_type_weights": {
-            "idle": 0.25,
-            "scheduled": 0.30,
-            "environmental": 0.25,
-            "memory": 0.10,
-            "audience": 0.10,
-        },
-    }
-    defaults.update(overrides)
-    return TriggerConfig(**defaults)
+from tests.backend.conversation_helpers import make_trigger_config as _make_trigger_config
 
 
 class FakeClock:
@@ -306,7 +280,7 @@ async def test_priority_idle_over_memory():
 @pytest.mark.asyncio
 async def test_scheduled_events_check_correctly():
     """Scheduled trigger fires at the right hour with correct event name."""
-    for hour, (event_name, starter) in DAILY_SCHEDULE.items():
+    for hour, (event_name, starter) in _DEFAULT_DAILY_SCHEDULE.items():
         clock = FakeClock()
         now_fn = FakeDatetime(hour=hour)
         system = _make_system(clock=clock, now_fn=now_fn)

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.conversation.proximity import ProximityManager, _LOCATION_KEY_PREFIX
+from core.conversation.proximity import _LOCATION_KEY_PREFIX, ProximityManager
 from core.models import AgentConfig, ConversationConfig
-
+from tests.backend.conversation_helpers import make_agent_config, make_conversation_config
 
 # ── Helpers ───────────────────────────────────────────────
 
@@ -19,58 +19,11 @@ def _make_agent(
     *,
     eavesdrop_tendency: float = 0.3,
 ) -> AgentConfig:
-    return AgentConfig(
-        id=agent_id,
-        display_name=agent_id.capitalize(),
-        model_conversation="claude-haiku-4-5",
-        model_building="claude-sonnet-4-6",
-        chattiness=0.5,
-        initiative=0.5,
-        interrupt_tendency=0.3,
-        eavesdrop_tendency=eavesdrop_tendency,
-    )
+    return make_agent_config(agent_id, eavesdrop_tendency=eavesdrop_tendency)
 
 
 def _make_config(**overrides) -> ConversationConfig:
-    defaults = {
-        "selection_weights": {
-            "time_since_spoke": 0.30,
-            "topic_relevance": 0.30,
-            "chattiness": 0.15,
-            "adjacency_fit": 0.15,
-            "random_jitter": 0.10,
-        },
-        "timing": {
-            "min_pause_seconds": 2.0,
-            "max_pause_seconds": 8.0,
-            "pause_strategy": "weighted",
-            "pause_multipliers": {
-                "after_question": 0.5,
-                "after_statement": 1.0,
-                "after_interrupt": 0.3,
-                "after_joke": 1.5,
-                "after_emotional": 1.3,
-            },
-        },
-        "energy": {
-            "initial_range": [8, 14],
-            "decay_per_turn": 1.0,
-            "boost_on_topic_shift": 3.0,
-            "boost_on_disagreement": 4.0,
-            "boost_on_audience_event": 5.0,
-            "boost_on_new_participant": 3.0,
-            "drain_on_repetition": 2.0,
-            "minimum_turns": 4,
-            "maximum_turns": 30,
-            "closer_weights": {"vera": 0.5, "rex": 0.5},
-        },
-        "interrupts": {
-            "enabled": True,
-            "relevance_threshold": 0.85,
-            "max_interrupts_per_conversation": 3,
-            "cooldown_seconds": 30,
-            "agent_interrupt_tendency": {},
-        },
+    proximity_defaults = {
         "proximity": {
             "enabled": True,
             "max_conversation_size": 5,
@@ -80,35 +33,9 @@ def _make_config(**overrides) -> ConversationConfig:
                 "rex": 0.2,
             },
         },
-        "triggers": {
-            "idle_timeout_seconds": 90,
-            "agent_initiative": {},
-            "trigger_type_weights": {"idle": 1.0},
-        },
-        "topics": {
-            "relevance_map": {
-                "code": {"rex": 0.9, "fork": 0.7, "vera": 0.4},
-                "art": {"aurora": 0.9, "pixel": 0.5},
-            },
-            "fallback_to_llm": False,
-            "classifier_model": "claude-haiku-4-5",
-        },
-        "adjacency": {
-            "vera": {"rex": 0.7, "sentinel": 0.8},
-            "rex": {"fork": 0.8, "vera": 0.5},
-        },
-        "logging": {
-            "log_every_selection": True,
-            "log_interrupts": True,
-            "log_energy_changes": True,
-            "log_trigger_events": True,
-            "log_topic_classifications": True,
-            "retention_days": 30,
-            "export_format": "jsonl",
-        },
     }
-    defaults.update(overrides)
-    return ConversationConfig(**defaults)
+    proximity_defaults.update(overrides)
+    return make_conversation_config(**proximity_defaults)
 
 
 def _make_redis_mock(locations: dict[str, str] | None = None) -> MagicMock:
@@ -125,9 +52,12 @@ def _make_redis_mock(locations: dict[str, str] | None = None) -> MagicMock:
     mock = MagicMock()
     mock.client = MagicMock()
 
-    async def fake_keys(pattern: str) -> list[str]:
-        prefix = pattern.replace("*", "")
-        return [k for k in store if k.startswith(prefix)]
+    async def fake_scan(
+        cursor: int | str = 0, *, match: str = "*", count: int = 50,
+    ) -> tuple[int, list[str]]:
+        prefix = match.replace("*", "")
+        matched = [k for k in store if k.startswith(prefix)]
+        return (0, matched)  # return cursor=0 to signal done
 
     async def fake_get(key: str) -> str | None:
         return store.get(key)
@@ -136,7 +66,7 @@ def _make_redis_mock(locations: dict[str, str] | None = None) -> MagicMock:
         store[key] = value
         return True
 
-    mock.client.keys = fake_keys
+    mock.client.scan = fake_scan
     mock.get = AsyncMock(side_effect=fake_get)
     mock.set = AsyncMock(side_effect=fake_set)
 

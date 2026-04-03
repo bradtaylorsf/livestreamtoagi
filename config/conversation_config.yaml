@@ -50,7 +50,7 @@ energy:
 # ─── Interrupt mechanics ─────────────────────────────
 interrupts:
   enabled: true
-  relevance_threshold: 0.85    # agent must score above this to interrupt
+  relevance_threshold: 0.65    # agent must score above this to interrupt
   max_interrupts_per_conversation: 3  # prevent interrupt spam
   cooldown_seconds: 30         # same agent can't interrupt twice in 30s
   # Per-agent interrupt personality (0 = never interrupts, 1 = always tries)
@@ -101,6 +101,16 @@ triggers:
     environmental: 0.25        # vote completed, world expansion done, new viewer milestone
     memory: 0.10               # agent remembers something and brings it up
     audience: 0.10             # chat message or donation triggers a response
+
+  memory_trigger_chance: 0.02  # probability per tick that memory triggers conversation
+
+  # Daily schedule: hour (0-23) -> event_name + starter agent
+  daily_schedule:
+    9:  { event_name: "standup", starter_agent_id: "vera" }
+    12: { event_name: "lunch_break", starter_agent_id: "vera" }
+    17: { event_name: "challenge_hour", starter_agent_id: "vera" }
+    18: { event_name: "daily_brief", starter_agent_id: "vera" }
+    20: { event_name: "reflection", starter_agent_id: "vera" }
 
 # ─── Topic detection ─────────────────────────────────
 topics:

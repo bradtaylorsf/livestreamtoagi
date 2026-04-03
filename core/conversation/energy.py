@@ -53,9 +53,17 @@ class ConversationEnergy:
     def tick(
         self,
         topic: str,
+        events: list[str] | None = None,
+        *,
         event: str | None = None,
     ) -> dict[str, float]:
         """Advance one turn, updating energy.
+
+        Parameters
+        ----------
+        topic: Current topic being discussed.
+        events: List of event types occurring this turn (supports multiple).
+        event: Single event type (legacy convenience — merged into events).
 
         Returns a breakdown dict with individual changes and the
         resulting energy level.
@@ -79,15 +87,19 @@ class ConversationEnergy:
         self._last_topic = topic
 
         # ── event boosts ───────────────────────────────────────
-        if event == "disagreement":
+        all_events: set[str] = set(events or [])
+        if event is not None:
+            all_events.add(event)
+
+        if "disagreement" in all_events:
             disagreement = self._config.boost_on_disagreement
-        elif event == "audience":
+        if "audience" in all_events:
             audience = self._config.boost_on_audience_event
-        elif event == "new_participant":
+        if "new_participant" in all_events:
             new_participant = self._config.boost_on_new_participant
 
         net = decay + topic_shift + repetition + disagreement + audience + new_participant
-        self._energy += net
+        self._energy = max(0.0, self._energy + net)
 
         breakdown = {
             "decay": decay,

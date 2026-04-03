@@ -17,7 +17,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from core.models import (
@@ -25,6 +25,7 @@ from core.models import (
     ConversationConfig,
     InterruptAttempt,
     SelectionResult,
+    SelectionWeights,
 )
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ class SpeakerSelector:
                 detected_topic=detected_topic,
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         weights = self._config.selection_weights
         scores: dict[str, float] = {}
         breakdown: dict[str, dict[str, float]] = {}
@@ -188,7 +189,7 @@ class SpeakerSelector:
         winner_found = False
 
         # Build scored candidates (exclude the already-selected agent)
-        scored: list[tuple[AgentConfig, float]] = []
+        scored: list[tuple[AgentConfig, float, float]] = []
         for agent in eligible_agents:
             if agent.id == selected_agent_id:
                 continue
@@ -196,16 +197,15 @@ class SpeakerSelector:
             tendency = cfg.agent_interrupt_tendency.get(
                 agent.id, agent.interrupt_tendency,
             )
-            score = topic_rel * tendency
-            scored.append((agent, score))
+            # Additive weighted score: tendency drives willingness,
+            # topic relevance gates appropriateness
+            score = tendency * 0.6 + topic_rel * 0.4
+            scored.append((agent, score, tendency))
 
         # Sort by score descending so highest scorer gets first chance
         scored.sort(key=lambda t: t[1], reverse=True)
 
-        for agent, score in scored:
-            tendency = cfg.agent_interrupt_tendency.get(
-                agent.id, agent.interrupt_tendency,
-            )
+        for agent, score, _tendency in scored:
 
             # Gate 1: score >= threshold
             if score < threshold:
@@ -324,7 +324,7 @@ class SpeakerSelector:
             elapsed = _DEFAULT_SILENCE_SECONDS
         else:
             if last_ts.tzinfo is None:
-                last_ts = last_ts.replace(tzinfo=timezone.utc)
+                last_ts = last_ts.replace(tzinfo=UTC)
             elapsed = (now - last_ts).total_seconds()
 
         return min(elapsed / _MAX_SILENCE_SECONDS, 1.0)
@@ -350,7 +350,7 @@ class SpeakerSelector:
     @staticmethod
     def _weighted_sum(
         factors: dict[str, float],
-        weights: Any,  # SelectionWeights
+        weights: SelectionWeights,
     ) -> float:
         """Combine factor scores using configured weights."""
         return (
@@ -368,7 +368,7 @@ class SpeakerSelector:
         weights = [max(scores[aid], 0.0) for aid in agent_ids]
 
         # If all weights are zero, fall back to uniform random
-        if sum(weights) == 0:
+        if sum(weights) < 1e-9:
             return random.choice(agent_ids)
 
         return random.choices(agent_ids, weights=weights, k=1)[0]

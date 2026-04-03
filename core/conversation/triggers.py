@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Daily schedule: hour -> (event_name, starter_agent_id)
-DAILY_SCHEDULE: dict[int, tuple[str, str]] = {
+# Fallback daily schedule when config has no daily_schedule field
+_DEFAULT_DAILY_SCHEDULE: dict[int, tuple[str, str]] = {
     9: ("standup", "vera"),
     12: ("lunch_break", "vera"),
     17: ("challenge_hour", "vera"),
@@ -47,8 +47,6 @@ AUDIENCE_EVENTS = frozenset({
     "donation",
     "chat_highlight",
 })
-
-MEMORY_TRIGGER_CHANCE = 0.02  # 2% per tick
 
 
 class TriggerSystem:
@@ -133,13 +131,27 @@ class TriggerSystem:
         # Pixel gets first crack at audience events
         starter = "pixel" if category == "audience" else self._select_by_initiative()
 
+        # Sanitize event data for prompt — stringify and truncate to prevent
+        # prompt injection from external sources (chat messages, donations)
+        sanitized_data = str(event["data"])[:500]
+
         return {
             "type": category,
             "starter_agent_id": starter,
-            "prompt_hint": f"Respond to {event_type}: {event['data']}",
+            "prompt_hint": f"Respond to {event_type}: {sanitized_data}",
             "event_type": event_type,
             "event_data": event["data"],
         }
+
+    @property
+    def _daily_schedule(self) -> dict[int, tuple[str, str]]:
+        """Resolve daily schedule from config, falling back to defaults."""
+        if self._config.daily_schedule:
+            return {
+                hour: (entry.event_name, entry.starter_agent_id)
+                for hour, entry in self._config.daily_schedule.items()
+            }
+        return _DEFAULT_DAILY_SCHEDULE
 
     def _check_scheduled(self) -> dict[str, Any] | None:
         """Check if current hour matches a daily schedule event."""
@@ -151,10 +163,11 @@ class TriggerSystem:
             self._fired_today.clear()
             self._last_fired_date = today
 
+        schedule = self._daily_schedule
         hour = now.hour
-        if hour in DAILY_SCHEDULE and hour not in self._fired_today:
+        if hour in schedule and hour not in self._fired_today:
             self._fired_today.add(hour)
-            event_name, starter = DAILY_SCHEDULE[hour]
+            event_name, starter = schedule[hour]
             return {
                 "type": "scheduled",
                 "starter_agent_id": starter,
@@ -179,8 +192,8 @@ class TriggerSystem:
         return None
 
     async def _check_memory(self) -> dict[str, Any] | None:
-        """2% chance per tick — random agent recalls a high-importance memory."""
-        if self._rng.random() >= MEMORY_TRIGGER_CHANCE:
+        """Configurable chance per tick — random agent recalls a high-importance memory."""
+        if self._rng.random() >= self._config.memory_trigger_chance:
             return None
 
         if self._recall_memory is None:
@@ -215,5 +228,8 @@ class TriggerSystem:
     def _select_by_initiative(self) -> str:
         """Weighted random selection from agent_initiative config."""
         agents = list(self._config.agent_initiative.keys())
+        if not agents:
+            logger.warning("agent_initiative is empty, cannot select starter")
+            return "vera"  # safe fallback
         weights = list(self._config.agent_initiative.values())
         return self._rng.choices(agents, weights=weights, k=1)[0]

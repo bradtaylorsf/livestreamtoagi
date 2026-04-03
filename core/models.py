@@ -525,11 +525,19 @@ class ProximityConfig(BaseModel):
     eavesdrop_tendency: dict[str, float]
 
 
+class ScheduledEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    event_name: str
+    starter_agent_id: str
+
+
 class TriggerConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     idle_timeout_seconds: int = Field(ge=1)
     agent_initiative: dict[str, float]
     trigger_type_weights: dict[str, float]
+    memory_trigger_chance: float = Field(ge=0.0, le=1.0, default=0.02)
+    daily_schedule: dict[int, ScheduledEvent] = {}
 
 
 class TopicConfig(BaseModel):
