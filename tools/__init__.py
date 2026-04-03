@@ -6,20 +6,28 @@ from typing import TYPE_CHECKING
 
 from .audience import GetAudienceStatusTool
 from .base import BaseTool
+from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
+    from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.core_memory import CoreMemoryManager
+    from core.memory.recall_memory import RecallMemoryManager
     from core.redis_client import RedisClient
 
 __all__ = [
     "BaseTool",
     "GetAudienceStatusTool",
     "GetWorldStateTool",
+    "RecallMemoryTool",
+    "RetrieveTranscriptTool",
     "SendMessageTool",
     "ToolRegistry",
+    "UpdateCoreMemoryTool",
     "get_core_tools",
+    "get_memory_tools",
 ]
 
 
@@ -52,4 +60,18 @@ def get_core_tools(
         SendMessageTool(event_bus=event_bus, agent_id=agent_id),
         GetWorldStateTool(redis_client=redis_client),
         GetAudienceStatusTool(redis_client=redis_client),
+    ]
+
+
+def get_memory_tools(
+    recall_manager: RecallMemoryManager,
+    archival_manager: ArchivalMemoryManager,
+    core_manager: CoreMemoryManager,
+    agent_id: str = "unknown",
+) -> list[BaseTool]:
+    """Create instances of all memory tools for an agent."""
+    return [
+        RecallMemoryTool(recall_manager=recall_manager, agent_id=agent_id),
+        RetrieveTranscriptTool(archival_manager=archival_manager),
+        UpdateCoreMemoryTool(core_manager=core_manager, agent_id=agent_id),
     ]
