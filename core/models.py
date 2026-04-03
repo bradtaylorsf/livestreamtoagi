@@ -234,7 +234,7 @@ class SelectionLog(BaseModel):
     timestamp: datetime | None = None
     selected_agent_id: str
     was_interrupt: bool = False
-    agent_scores: dict[str, float]
+    agent_scores: dict[str, Any]
     detected_topic: str | None = None
     previous_speaker_id: str | None = None
     conversation_energy: float | None = None
@@ -248,7 +248,7 @@ class SelectionLogCreate(BaseModel):
     turn_number: int
     selected_agent_id: str
     was_interrupt: bool = False
-    agent_scores: dict[str, float]
+    agent_scores: dict[str, Any]
     detected_topic: str | None = None
     previous_speaker_id: str | None = None
     conversation_energy: float | None = None
@@ -280,6 +280,24 @@ class InterruptLogCreate(BaseModel):
     threshold_at_time: float
     succeeded: bool
     reason: str | None = None
+
+
+# ── Energy Change Log ──────────────────────────────────────────
+
+
+class EnergyLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    conversation_id: uuid.UUID
+    turn_number: int
+    timestamp: datetime | None = None
+    changes: dict[str, Any]
+
+
+class EnergyLogCreate(BaseModel):
+    conversation_id: uuid.UUID
+    turn_number: int
+    changes: dict[str, Any]
 
 
 # ── World Chunks ────────────────────────────────────────────────
