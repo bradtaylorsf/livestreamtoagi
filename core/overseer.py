@@ -19,6 +19,9 @@ from core.event_bus import EventType
 from core.models import ContentReviewResult
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
+    from core.database import Database
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.redis_client import RedisClient
@@ -43,10 +46,14 @@ class Overseer:
         event_bus: EventBus,
         *,
         rules_path: Path | None = None,
+        shadow_mode: bool = False,
+        db: Database | None = None,
     ) -> None:
         self._redis = redis_client
         self._llm = llm_client
         self._event_bus = event_bus
+        self._shadow_mode = shadow_mode
+        self._db = db
 
         rules_file = rules_path or CONTENT_RULES_PATH
         with open(rules_file) as f:
@@ -60,8 +67,30 @@ class Overseer:
 
     # ── Public API ─────────────────────────────────────────────
 
-    async def review(self, agent_id: str, content: str) -> ContentReviewResult:
-        """Review agent output through the three-layer filter."""
+    async def review(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        conversation_id: UUID | None = None,
+        simulation_id: UUID | None = None,
+    ) -> ContentReviewResult:
+        """Review agent output through the three-layer filter.
+
+        In shadow mode, all filters run but content is never blocked.
+        Would-be actions are logged to overseer_shadow_log instead.
+        """
+        if not self._shadow_mode:
+            return await self._review_normal(agent_id, content)
+
+        return await self._review_shadow(
+            agent_id, content,
+            conversation_id=conversation_id,
+            simulation_id=simulation_id,
+        )
+
+    async def _review_normal(self, agent_id: str, content: str) -> ContentReviewResult:
+        """Standard review — blocks content when filters trigger."""
         # Pre-check: muted agents are always blocked
         if await self.is_muted(agent_id):
             return ContentReviewResult(
@@ -81,6 +110,52 @@ class Overseer:
 
         # Layer 2: LLM review
         return await self._llm_review(agent_id, content)
+
+    async def _review_shadow(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        conversation_id: UUID | None = None,
+        simulation_id: UUID | None = None,
+    ) -> ContentReviewResult:
+        """Shadow review — runs all filters but never blocks. Logs would-be actions."""
+        # Layer 1: keyword blocklist
+        blocked_keyword = self._check_keyword_blocklist(content)
+        if blocked_keyword is not None:
+            await self._log_shadow(
+                conversation_id=conversation_id,
+                simulation_id=simulation_id,
+                agent_id=agent_id,
+                content=content,
+                filter_layer=1,
+                severity=3,
+                action="intervention",
+                reason=f"Blocked keyword detected: {blocked_keyword}",
+                keywords=[blocked_keyword],
+            )
+
+        # Layer 2: LLM review (always run in shadow mode)
+        llm_result = await self._llm_review(agent_id, content)
+        if not llm_result.approved:
+            action = self._severity_to_action(llm_result.severity)
+            await self._log_shadow(
+                conversation_id=conversation_id,
+                simulation_id=simulation_id,
+                agent_id=agent_id,
+                content=content,
+                filter_layer=2,
+                severity=llm_result.severity,
+                action=action,
+                reason=llm_result.reason,
+            )
+
+        # Shadow mode: always approve
+        return ContentReviewResult(
+            approved=True,
+            reason="shadow mode — no intervention",
+            severity=1,
+        )
 
     async def intervene(self, severity: int, agent_id: str, reason: str) -> None:
         """Trigger severity-based intervention with environmental effects."""
@@ -164,6 +239,74 @@ class Overseer:
                 f"This interaction has been flagged for review under Section 4.2(b) "
                 f"of the Community Guidelines. Agent {agent_id}, please stand by."
             )
+
+    # ── Shadow logging ─────────────────────────────────────────
+
+    async def _log_shadow(
+        self,
+        *,
+        conversation_id: UUID | None,
+        simulation_id: UUID | None,
+        agent_id: str,
+        content: str,
+        filter_layer: int,
+        severity: int,
+        action: str,
+        reason: str,
+        keywords: list[str] | None = None,
+    ) -> None:
+        """Record a would-be Overseer action to the shadow log table and event bus."""
+        shadow_data = {
+            "agent_id": agent_id,
+            "filter_layer": filter_layer,
+            "severity": severity,
+            "action_would_take": action,
+            "reason": reason,
+            "flagged_keywords": keywords,
+        }
+
+        # Persist to database if available
+        if self._db is not None and conversation_id is not None:
+            try:
+                await self._db.execute(
+                    """
+                    INSERT INTO overseer_shadow_log
+                        (simulation_id, conversation_id, agent_id, original_content,
+                         filter_layer, severity, action_would_take, reason, flagged_keywords)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    """,
+                    simulation_id,
+                    conversation_id,
+                    agent_id,
+                    content,
+                    filter_layer,
+                    severity,
+                    action,
+                    reason,
+                    keywords,
+                )
+            except Exception:
+                logger.exception("Failed to write overseer shadow log")
+
+        # Emit event for admin dashboard / watch_conversations
+        await self._event_bus.emit(EventType.OVERSEER_SHADOW.value, shadow_data)
+        logger.info(
+            "Shadow: would %s agent %s (layer=%d, severity=%d): %s",
+            action, agent_id, filter_layer, severity, reason,
+        )
+
+    @staticmethod
+    def _severity_to_action(severity: int) -> str:
+        """Map severity level to the action the Overseer would take."""
+        if severity <= 1:
+            return "notice"
+        if severity == 2:
+            return "warning"
+        if severity == 3:
+            return "intervention"
+        if severity == 4:
+            return "broadcast"
+        return "kill"
 
     # ── Mute system ────────────────────────────────────────────
 

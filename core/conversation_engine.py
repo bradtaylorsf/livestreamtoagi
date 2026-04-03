@@ -535,7 +535,10 @@ class ConversationEngine:
                 # Overseer review (can be disabled for testing)
                 if not self._overseer_enabled:
                     return content
-                review = await self._overseer.review(agent.id, content)
+                conv_id = self._active.id if self._active else None
+                review = await self._overseer.review(
+                    agent.id, content, conversation_id=conv_id,
+                )
                 if review.approved:
                     return content
 

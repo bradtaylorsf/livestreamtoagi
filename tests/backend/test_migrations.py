@@ -37,6 +37,7 @@ ALL_TABLES = [
     "conversation_selection_log",
     "interrupt_log",
     "energy_change_log",
+    "overseer_shadow_log",
 ]
 
 AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "overseer", "alpha"]
@@ -90,6 +91,8 @@ async def test_migration_idempotent(conn):
 @pytest.mark.integration
 async def test_rollback(conn):
     await up(conn)
+    # Roll back overseer shadow log
+    await down(conn)
     # Roll back self-modification fields
     await down(conn)
     # Roll back energy change log
