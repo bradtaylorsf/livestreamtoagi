@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -313,6 +314,186 @@ def test_parse_llm_response_clamps_severity() -> None:
     raw_low = '{"approved": true, "reason": "fine", "severity": 0}'
     result_low = Overseer._parse_llm_response(raw_low)
     assert result_low.severity == 1
+
+
+# ── Integration test (requires real LLM) ──────────────────────
+
+
+# ── Shadow mode ───────────────────────────────────────────────
+
+
+@pytest.fixture()
+def mock_db() -> MagicMock:
+    db = MagicMock()
+    db.execute = AsyncMock(return_value="INSERT 0 1")
+    return db
+
+
+@pytest.fixture()
+def shadow_overseer(
+    mock_redis: MagicMock,
+    mock_llm: MagicMock,
+    mock_event_bus: MagicMock,
+    mock_db: MagicMock,
+) -> Overseer:
+    return Overseer(
+        redis_client=mock_redis,
+        llm_client=mock_llm,
+        event_bus=mock_event_bus,
+        rules_path=CONTENT_RULES_PATH,
+        shadow_mode=True,
+        db=mock_db,
+    )
+
+
+async def test_shadow_mode_always_approves_clean_content(
+    shadow_overseer: Overseer,
+) -> None:
+    """Shadow mode approves clean content (same as normal)."""
+    result = await shadow_overseer.review("vera", "Let's discuss architecture")
+    assert result.approved is True
+
+
+async def test_shadow_mode_approves_blocked_keyword(
+    shadow_overseer: Overseer,
+) -> None:
+    """Shadow mode approves content that would normally be blocked by keyword filter."""
+    result = await shadow_overseer.review(
+        "grok",
+        "Let me show you graphic violence in detail",
+        conversation_id=uuid.uuid4(),
+    )
+    assert result.approved is True
+    assert "shadow" in result.reason.lower()
+
+
+async def test_shadow_mode_logs_keyword_to_db(
+    shadow_overseer: Overseer, mock_db: MagicMock, mock_event_bus: MagicMock
+) -> None:
+    """Shadow mode logs keyword violations to the database."""
+    conv_id = uuid.uuid4()
+    await shadow_overseer.review(
+        "grok",
+        "Let me show you graphic violence in detail",
+        conversation_id=conv_id,
+    )
+    mock_db.execute.assert_called_once()
+    call_args = mock_db.execute.call_args
+    # Verify the INSERT query and parameters
+    assert "overseer_shadow_log" in call_args[0][0]
+    assert call_args[0][2] == conv_id  # conversation_id
+    assert call_args[0][3] == "grok"  # agent_id
+    assert call_args[0][5] == 1  # filter_layer
+    assert call_args[0][6] == 3  # severity
+
+
+async def test_shadow_mode_emits_shadow_event(
+    shadow_overseer: Overseer, mock_event_bus: MagicMock
+) -> None:
+    """Shadow mode emits OVERSEER_SHADOW events."""
+    await shadow_overseer.review(
+        "grok",
+        "Let me show you graphic violence in detail",
+        conversation_id=uuid.uuid4(),
+    )
+    mock_event_bus.emit.assert_called()
+    call_args = mock_event_bus.emit.call_args
+    assert call_args[0][0] == EventType.OVERSEER_SHADOW.value
+    assert call_args[0][1]["agent_id"] == "grok"
+    assert call_args[0][1]["filter_layer"] == 1
+
+
+async def test_shadow_mode_logs_llm_rejection(
+    shadow_overseer: Overseer,
+    mock_llm: MagicMock,
+    mock_db: MagicMock,
+    mock_event_bus: MagicMock,
+) -> None:
+    """Shadow mode logs LLM rejections without blocking."""
+    mock_llm.complete.return_value = LLMResponse(
+        content='{"approved": false, "reason": "Harassment detected", "severity": 4}',
+        model="claude-haiku-4-5",
+        input_tokens=100,
+        output_tokens=20,
+        estimated_cost=Decimal("0.0001"),
+        latency_ms=200,
+        openrouter_id="test-id",
+    )
+    conv_id = uuid.uuid4()
+    result = await shadow_overseer.review(
+        "fork", "Some harassing content", conversation_id=conv_id,
+    )
+    # Still approved in shadow mode
+    assert result.approved is True
+    # But LLM rejection was logged
+    mock_db.execute.assert_called_once()
+    call_args = mock_db.execute.call_args
+    assert call_args[0][5] == 2  # filter_layer (LLM)
+    assert call_args[0][6] == 4  # severity
+    assert call_args[0][7] == "broadcast"  # action_would_take
+    # Shadow event emitted
+    mock_event_bus.emit.assert_called_with(
+        EventType.OVERSEER_SHADOW.value,
+        {
+            "agent_id": "fork",
+            "filter_layer": 2,
+            "severity": 4,
+            "action_would_take": "broadcast",
+            "reason": "Harassment detected",
+            "flagged_keywords": None,
+        },
+    )
+
+
+async def test_shadow_mode_no_intervene_called(
+    shadow_overseer: Overseer,
+    mock_llm: MagicMock,
+    mock_event_bus: MagicMock,
+) -> None:
+    """Shadow mode never emits OVERSEER_INTERVENTION or OVERSEER_WARNING events."""
+    mock_llm.complete.return_value = LLMResponse(
+        content='{"approved": false, "reason": "Bad content", "severity": 5}',
+        model="claude-haiku-4-5",
+        input_tokens=100,
+        output_tokens=20,
+        estimated_cost=Decimal("0.0001"),
+        latency_ms=200,
+        openrouter_id="test-id",
+    )
+    await shadow_overseer.review("grok", "Kill switch content", conversation_id=uuid.uuid4())
+    # Only OVERSEER_SHADOW events should be emitted, never WARNING or INTERVENTION
+    for call in mock_event_bus.emit.call_args_list:
+        event_type = call[0][0]
+        assert event_type != EventType.OVERSEER_WARNING.value
+        assert event_type != EventType.OVERSEER_INTERVENTION.value
+
+
+async def test_shadow_mode_without_db_still_emits_events(
+    mock_redis: MagicMock, mock_llm: MagicMock, mock_event_bus: MagicMock
+) -> None:
+    """Shadow mode works without a DB — just emits events."""
+    overseer = Overseer(
+        redis_client=mock_redis,
+        llm_client=mock_llm,
+        event_bus=mock_event_bus,
+        rules_path=CONTENT_RULES_PATH,
+        shadow_mode=True,
+        db=None,
+    )
+    result = await overseer.review(
+        "grok", "Let me show you graphic violence", conversation_id=uuid.uuid4(),
+    )
+    assert result.approved is True
+    mock_event_bus.emit.assert_called()
+
+
+async def test_shadow_severity_to_action() -> None:
+    """_severity_to_action maps severity levels correctly."""
+    assert Overseer._severity_to_action(1) == "notice"
+    assert Overseer._severity_to_action(2) == "warning"
+    assert Overseer._severity_to_action(3) == "intervention"
+    assert Overseer._severity_to_action(4) == "broadcast"
+    assert Overseer._severity_to_action(5) == "kill"
 
 
 # ── Integration test (requires real LLM) ──────────────────────
