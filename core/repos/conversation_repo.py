@@ -164,3 +164,83 @@ class ConversationRepo:
                     d[key] = json.loads(d[key])
             result.append(SelectionLog(**d))
         return result
+
+    async def get_conversations_by_agent(
+        self,
+        agent_id: str,
+        *,
+        simulation_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Conversation], int]:
+        """Return paginated conversations where agent participated."""
+        clauses = ["participating_agents::text LIKE '%' || $1 || '%'"]
+        params: list[object] = [agent_id]
+        idx = 2
+
+        if simulation_id is not None:
+            sub = f"id IN (SELECT conversation_id FROM artifacts WHERE simulation_id = ${idx})"
+            clauses.append(sub)
+            params.append(simulation_id)
+            idx += 1
+
+        where = " AND ".join(clauses)
+        count = await self.db.fetchval(
+            f"SELECT COUNT(*) FROM conversations WHERE {where}",  # noqa: S608
+            *params,
+        )
+        query = (
+            f"SELECT * FROM conversations WHERE {where}"  # noqa: S608
+            f" ORDER BY started_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
+        )
+        rows = await self.db.fetch(
+            query,
+            *params,
+            limit,
+            offset,
+        )
+        return [_row_to_conversation(r) for r in rows], count or 0
+
+    async def get_conversations_by_simulation(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Conversation], int]:
+        """Return paginated conversations linked to a simulation via artifacts."""
+        count = await self.db.fetchval(
+            """SELECT COUNT(DISTINCT c.id) FROM conversations c
+               JOIN artifacts a ON a.conversation_id = c.id
+               WHERE a.simulation_id = $1""",
+            simulation_id,
+        )
+        rows = await self.db.fetch(
+            """SELECT DISTINCT ON (c.id) c.* FROM conversations c
+               JOIN artifacts a ON a.conversation_id = c.id
+               WHERE a.simulation_id = $1
+               ORDER BY c.id, c.started_at DESC
+               LIMIT $2 OFFSET $3""",
+            simulation_id,
+            limit,
+            offset,
+        )
+        return [_row_to_conversation(r) for r in rows], count or 0
+
+    async def get_energy_log(
+        self, conversation_id: uuid.UUID
+    ) -> list[dict[str, object]]:
+        """Return energy change log entries for a conversation."""
+        rows = await self.db.fetch(
+            """SELECT * FROM energy_change_log
+               WHERE conversation_id = $1
+               ORDER BY turn_number""",
+            conversation_id,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("changes"), str):
+                d["changes"] = json.loads(d["changes"])
+            result.append(d)
+        return result

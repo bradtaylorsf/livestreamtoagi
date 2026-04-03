@@ -71,6 +71,76 @@ class CostRepo:
             result.append(CostEvent(**d))
         return result
 
+    async def get_costs_by_agent_grouped(
+        self,
+        agent_id: str,
+        *,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+    ) -> dict[str, object]:
+        """Return cost breakdown by day and by type for an agent."""
+        clauses = ["agent_id = $1"]
+        params: list[object] = [agent_id]
+        idx = 2
+
+        if from_date is not None:
+            clauses.append(f"created_at >= ${idx}")
+            params.append(from_date)
+            idx += 1
+        if to_date is not None:
+            clauses.append(f"created_at <= ${idx}")
+            params.append(to_date)
+            idx += 1
+
+        where = " AND ".join(clauses)
+
+        by_day_rows = await self.db.fetch(
+            f"""SELECT DATE(created_at) as day, SUM(amount) as total
+                FROM cost_events WHERE {where}
+                GROUP BY DATE(created_at) ORDER BY day""",  # noqa: S608
+            *params,
+        )
+        by_type_rows = await self.db.fetch(
+            f"""SELECT cost_type, SUM(amount) as total
+                FROM cost_events WHERE {where}
+                GROUP BY cost_type ORDER BY total DESC""",  # noqa: S608
+            *params,
+        )
+        total = await self.db.fetchval(
+            f"SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE {where}",  # noqa: S608
+            *params,
+        )
+
+        return {
+            "by_day": [{"day": str(r["day"]), "total": str(r["total"])} for r in by_day_rows],
+            "by_type": [{"type": r["cost_type"], "total": str(r["total"])} for r in by_type_rows],
+            "total": str(total),
+        }
+
+    async def get_costs_by_simulation(
+        self,
+        simulation_id: str,
+    ) -> dict[str, object]:
+        """Return cost breakdown by agent for a simulation's time window."""
+        by_agent_rows = await self.db.fetch(
+            """SELECT ce.agent_id, SUM(ce.amount) as total
+               FROM cost_events ce
+               JOIN simulations s ON ce.created_at
+                   BETWEEN s.started_at AND COALESCE(s.completed_at, NOW())
+               WHERE s.id = $1
+               GROUP BY ce.agent_id ORDER BY total DESC""",
+            simulation_id,
+        )
+        total = sum(r["total"] for r in by_agent_rows) if by_agent_rows else Decimal("0")
+
+        return {
+            "by_agent": [
+                {"agent_id": r["agent_id"], "total": str(r["total"])}
+                for r in by_agent_rows
+            ],
+            "total": str(total),
+        }
+
     # ── Revenue Events ──────────────────────────────────────
 
     async def add_revenue(self, revenue: RevenueEventCreate) -> RevenueEvent:
