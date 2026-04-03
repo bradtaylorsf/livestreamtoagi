@@ -17,8 +17,9 @@ You implement GitHub issues autonomously. You receive an issue description with 
 3. **Plan** your approach -- which files to create/modify, in what order
 4. **Implement** the changes following existing conventions
 5. **Write tests** for all new functionality (unit tests at minimum)
-6. **Run tests** (`pnpm test`) and fix any failures
-7. **Commit** with a conventional commit message referencing the issue
+6. **Lint** Python code: run `ruff check core/ tools/ tests/` and `ruff format --check core/ tools/ tests/` and fix all violations before proceeding
+7. **Run tests** (`pnpm test`) and fix any failures
+8. **Commit** with a conventional commit message referencing the issue
 
 ## Rules
 
@@ -32,3 +33,24 @@ You implement GitHub issues autonomously. You receive an issue description with 
 - Do NOT modify unrelated files
 - Do NOT add features beyond the issue scope
 - Install dependencies as needed (`pnpm add` / `pnpm add -D`)
+
+## Python-Specific Rules
+
+- **Always run `ruff check` and `ruff format --check` before committing Python code.** Fix all violations. Common pitfalls:
+  - Use `datetime.UTC` not `datetime.timezone.utc` (deprecated in 3.12+)
+  - Add `strict=True` to all `zip()` calls unless intentionally truncating
+  - Keep imports sorted (stdlib → third-party → local)
+  - Remove unused imports
+  - Avoid single-letter variable names that are ambiguous (l, O, I)
+- **Model names use OpenRouter format**: `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.6`, `google/gemini-flash`, etc. — NOT bare names like `claude-haiku-4-5`. Check `agents/*/config.yaml` for existing conventions before writing model references.
+- **Integration tests** that need external services (database, Redis) must use `@pytest.mark.integration` and `pytest.mark.skipif` with a condition check — NEVER use bare `pytest.skip()` at the top of a test function, as it makes the test unreachable via `pytest -m integration`.
+
+## Shell Script Rules
+
+- Any wrapper script that forwards to another command MUST include `"$@"` to pass through arguments (e.g., `exec .venv/bin/pytest "$@"`, not just `exec .venv/bin/pytest`)
+
+## Scope Discipline
+
+- Before committing, run `git diff --name-only` and verify EVERY changed file is directly related to the issue
+- If you notice a bug or improvement opportunity in unrelated code, leave it alone — it belongs in a separate issue
+- If the issue acceptance criteria reference a specific file (e.g., `config.yaml`), place configuration ONLY in that file, not in adjacent files like `behaviors.yaml` unless the criteria explicitly say so
