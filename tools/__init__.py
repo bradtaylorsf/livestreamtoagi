@@ -5,18 +5,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .audience import GetAudienceStatusTool
+from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
 from .messaging import SendMessageTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
+    from core.overseer import Overseer
     from core.redis_client import RedisClient
 
 __all__ = [
     "BaseTool",
+    "CreatePollTool",
     "GetAudienceStatusTool",
+    "GetPollResultsTool",
     "GetWorldStateTool",
+    "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
     "get_core_tools",
@@ -46,10 +51,27 @@ def get_core_tools(
     event_bus: EventBus,
     redis_client: RedisClient,
     agent_id: str = "unknown",
+    overseer: Overseer | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
-    return [
+    tools: list[BaseTool] = [
         SendMessageTool(event_bus=event_bus, agent_id=agent_id),
         GetWorldStateTool(redis_client=redis_client),
         GetAudienceStatusTool(redis_client=redis_client),
+        GetPollResultsTool(redis_client=redis_client, event_bus=event_bus),
     ]
+
+    # Audience tools that require Overseer
+    if overseer is not None:
+        tools.append(
+            SendChatMessageTool(
+                overseer=overseer, event_bus=event_bus, redis_client=redis_client, agent_id=agent_id
+            )
+        )
+
+    # Poll creation (no Overseer needed)
+    tools.append(
+        CreatePollTool(redis_client=redis_client, event_bus=event_bus, agent_id=agent_id)
+    )
+
+    return tools
