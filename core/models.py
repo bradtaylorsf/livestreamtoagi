@@ -432,6 +432,18 @@ class ChallengeCreate(BaseModel):
     cost_estimate: float | None = None
 
 
+# ── Overseer / Content Filter ──────────────────────────────────
+
+
+class ContentReviewResult(BaseModel):
+    """Result of Overseer content review."""
+
+    approved: bool
+    reason: str
+    severity: int = Field(ge=1, le=5)
+    replacement: str | None = None
+
+
 # ── LLM Client ─────────────────────────────────────────────────
 
 class LLMResponse(BaseModel):
