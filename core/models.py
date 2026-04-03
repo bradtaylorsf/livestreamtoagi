@@ -8,7 +8,7 @@ from datetime import datetime  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Agents ──────────────────────────────────────────────────────
 
@@ -429,3 +429,120 @@ class LLMResponse(BaseModel):
 class StreamChunk(BaseModel):
     delta: str
     finish_reason: str | None = None
+
+
+# ── Conversation Config ────────────────────────────────
+
+
+class SelectionWeights(BaseModel):
+    """Speaker selection weights — must sum to 1.0."""
+
+    model_config = ConfigDict(frozen=True)
+    time_since_spoke: float = Field(ge=0.0, le=1.0)
+    topic_relevance: float = Field(ge=0.0, le=1.0)
+    chattiness: float = Field(ge=0.0, le=1.0)
+    adjacency_fit: float = Field(ge=0.0, le=1.0)
+    random_jitter: float = Field(ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self) -> SelectionWeights:
+        total = (
+            self.time_since_spoke
+            + self.topic_relevance
+            + self.chattiness
+            + self.adjacency_fit
+            + self.random_jitter
+        )
+        if abs(total - 1.0) > 0.001:
+            raise ValueError(
+                f"selection_weights must sum to 1.0 (got {total:.4f})"
+            )
+        return self
+
+
+class PauseMultipliers(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    after_question: float = Field(ge=0.0)
+    after_statement: float = Field(ge=0.0)
+    after_interrupt: float = Field(ge=0.0)
+    after_joke: float = Field(ge=0.0)
+    after_emotional: float = Field(ge=0.0)
+
+
+class TimingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    min_pause_seconds: float = Field(ge=0.0)
+    max_pause_seconds: float = Field(ge=0.0)
+    pause_strategy: Literal["fixed", "random", "weighted"]
+    pause_multipliers: PauseMultipliers
+
+
+class EnergyConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    initial_range: tuple[int, int]
+    decay_per_turn: float = Field(ge=0.0)
+    boost_on_topic_shift: float = Field(ge=0.0)
+    boost_on_disagreement: float = Field(ge=0.0)
+    boost_on_audience_event: float = Field(ge=0.0)
+    boost_on_new_participant: float = Field(ge=0.0)
+    drain_on_repetition: float = Field(ge=0.0)
+    minimum_turns: int = Field(ge=1)
+    maximum_turns: int = Field(ge=1)
+    closer_weights: dict[str, float]
+
+
+class InterruptConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    enabled: bool
+    relevance_threshold: float = Field(ge=0.0, le=1.0)
+    max_interrupts_per_conversation: int = Field(ge=0)
+    cooldown_seconds: int = Field(ge=0)
+    agent_interrupt_tendency: dict[str, float]
+
+
+class ProximityConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    enabled: bool
+    max_conversation_size: int = Field(ge=1)
+    eavesdrop_tendency: dict[str, float]
+
+
+class TriggerConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    idle_timeout_seconds: int = Field(ge=1)
+    agent_initiative: dict[str, float]
+    trigger_type_weights: dict[str, float]
+
+
+class TopicConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    relevance_map: dict[str, dict[str, float]]
+    topic_keywords: dict[str, list[str]] = {}
+    fallback_to_llm: bool
+    classifier_model: str
+
+
+class LoggingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    log_every_selection: bool = True
+    log_interrupts: bool = True
+    log_energy_changes: bool = True
+    log_trigger_events: bool = True
+    log_topic_classifications: bool = True
+    retention_days: int = Field(ge=1, default=30)
+    export_format: str = "jsonl"
+
+
+class ConversationConfig(BaseModel):
+    """Top-level conversation engine configuration — loaded from YAML."""
+
+    model_config = ConfigDict(frozen=True)
+    selection_weights: SelectionWeights
+    timing: TimingConfig
+    energy: EnergyConfig
+    interrupts: InterruptConfig
+    proximity: ProximityConfig
+    triggers: TriggerConfig
+    topics: TopicConfig
+    adjacency: dict[str, dict[str, float]]
+    logging: LoggingConfig

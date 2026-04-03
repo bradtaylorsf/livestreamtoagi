@@ -28,6 +28,9 @@ tiktoken>=0.7.0
 # Scheduling
 apscheduler>=3.10.0,<4.0.0
 
+# File watching
+watchfiles>=0.21.0
+
 # Utilities
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
