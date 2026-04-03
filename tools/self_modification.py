@@ -29,7 +29,10 @@ class ProposeSelfModificationTool(BaseTool):
     parameters = {
         "file": {
             "type": "string",
-            "description": "Path to the configuration file to modify (must be your own agent config)",
+            "description": (
+                "Path to the configuration file to modify "
+                "(must be your own agent config)"
+            ),
         },
         "change_description": {
             "type": "string",
@@ -93,7 +96,10 @@ class ProposeSelfModificationTool(BaseTool):
             )
             return {
                 "status": "rejected",
-                "reason": f"Cannot modify files belonging to other agents. You can only modify your own files under agents/{self.agent_id}/",
+                "reason": (
+                    f"Cannot modify files belonging to other agents. "
+                    f"You can only modify your own files under agents/{self.agent_id}/"
+                ),
             }
 
         # --- Create proposal ---
@@ -129,16 +135,18 @@ class ProposeSelfModificationTool(BaseTool):
         if ".." in normalized:
             return False
 
+        # Reject absolute paths — all agent config paths must be relative
+        if normalized.startswith("/"):
+            return False
+
         parts = normalized.lower().split("/")
 
-        # Look for agents/<name>/ pattern
-        for i, part in enumerate(parts):
-            if part == "agents" and i + 1 < len(parts):
-                target_agent = parts[i + 1]
-                return target_agent == self.agent_id.lower()
+        # Must start with "agents/<agent_id>/..." to be a valid agent config path
+        if len(parts) < 3 or parts[0] != "agents":
+            return False
 
-        # If path doesn't follow agents/<name>/ convention, reject
-        return False
+        target_agent = parts[1]
+        return target_agent == self.agent_id.lower()
 
 
 class ViewEvolutionLogTool(BaseTool):

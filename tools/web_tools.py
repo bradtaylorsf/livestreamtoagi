@@ -235,12 +235,19 @@ class FetchUrlTool(BaseTool):
             resp.raise_for_status()
 
             # Validate final URL after redirects to prevent SSRF via open redirects
-            try:
-                final_url = str(resp.url)
-                if final_url != url and final_url.startswith(("http://", "https://")) and not _is_safe_url(final_url):
-                    return {"status": "error", "reason": "URL blocked: redirect target is not public"}
-            except Exception:
-                pass  # If resp.url is unavailable, skip redirect check
+            final_url = str(resp.url)
+            if final_url != url and final_url.startswith(("http://", "https://")):
+                if not _is_safe_url(final_url):
+                    return {
+                        "status": "error",
+                        "reason": "URL blocked: redirect target is not public",
+                    }
+                final_host = urlparse(final_url).hostname or ""
+                if final_host and _dns_resolves_to_private(final_host):
+                    return {
+                        "status": "error",
+                        "reason": "URL blocked: redirect target resolves to private address",
+                    }
         except httpx.HTTPError as exc:
             logger.error("URL fetch failed for %s: %s", url, exc)
             return {"status": "error", "reason": f"Fetch failed: {exc}"}

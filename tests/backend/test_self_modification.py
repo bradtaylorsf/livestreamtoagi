@@ -178,6 +178,32 @@ class TestProposeSelfModification:
         assert result["status"] == "rejected"
         memory_repo.create_proposal.assert_not_called()
 
+    async def test_absolute_path_rejected(
+        self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
+    ) -> None:
+        """Absolute paths must be rejected even if they contain agents/<id>/."""
+        result = await propose_tool.execute(
+            file="/etc/agents/rex/config.yaml",
+            change_description="Sneak via absolute path",
+            new_content="evil: true",
+        )
+
+        assert result["status"] == "rejected"
+        memory_repo.create_proposal.assert_not_called()
+
+    async def test_short_path_rejected(
+        self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
+    ) -> None:
+        """Path must be agents/<id>/<file>, not just agents/<id>."""
+        result = await propose_tool.execute(
+            file="agents/rex",
+            change_description="Too short",
+            new_content="content",
+        )
+
+        assert result["status"] == "rejected"
+        memory_repo.create_proposal.assert_not_called()
+
 
 # --- ViewEvolutionLogTool ---
 
