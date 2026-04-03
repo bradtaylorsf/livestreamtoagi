@@ -535,6 +535,17 @@ class LoggingConfig(BaseModel):
 # ── Speaker Selection Result ───────────────────────────
 
 
+class InterruptAttempt(BaseModel):
+    """Record of a single interrupt attempt (successful or failed)."""
+
+    attempting_agent_id: str
+    would_have_spoken_id: str
+    interrupt_score: float
+    threshold: float
+    succeeded: bool
+    reason: str | None = None
+
+
 class SelectionResult(BaseModel):
     """Result of the 5-factor speaker selection algorithm."""
 
@@ -544,6 +555,9 @@ class SelectionResult(BaseModel):
     eligible_agents: list[str]
     previous_speaker_id: str | None = None
     detected_topic: str | None = None
+    was_interrupt: bool = False
+    interrupted_agent_id: str | None = None
+    interrupt_attempts: list[InterruptAttempt] = []
 
 
 class ConversationConfig(BaseModel):
