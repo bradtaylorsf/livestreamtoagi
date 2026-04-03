@@ -15,10 +15,17 @@ from __future__ import annotations
 
 import logging
 import random
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from core.models import AgentConfig, ConversationConfig, SelectionResult
+from core.models import (
+    AgentConfig,
+    ConversationConfig,
+    InterruptAttempt,
+    SelectionResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +33,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SILENCE_SECONDS = 120.0
 # time_since_spoke is capped at 300s (5 minutes).
 _MAX_SILENCE_SECONDS = 300.0
+
+
+@dataclass
+class InterruptState:
+    """Mutable per-conversation interrupt tracking state."""
+
+    interrupt_count: int = 0
+    last_interrupt_time: dict[str, float] = field(default_factory=dict)
 
 
 class SpeakerSelector:
@@ -48,6 +63,7 @@ class SpeakerSelector:
         eligible_agents: list[AgentConfig],
         energy: float,
         detected_topic: str | None = None,
+        interrupt_state: InterruptState | None = None,
     ) -> SelectionResult:
         """Pick the next speaker from *eligible_agents*.
 
@@ -63,6 +79,10 @@ class SpeakerSelector:
             through for context).
         detected_topic:
             The topic detected for the current turn, or None.
+        interrupt_state:
+            Mutable per-conversation interrupt tracking. If provided and
+            interrupts are enabled, interrupt checking runs after normal
+            selection.
 
         Returns
         -------
@@ -114,6 +134,26 @@ class SpeakerSelector:
 
         selected_id = self._weighted_random_select(scores)
 
+        # ── Interrupt check ────────────────────────────────────
+        was_interrupt = False
+        interrupted_agent_id: str | None = None
+        interrupt_attempts: list[InterruptAttempt] = []
+
+        if (
+            interrupt_state is not None
+            and self._config.interrupts.enabled
+        ):
+            interrupt_attempts = self._check_interrupts(
+                eligible_agents, selected_id, detected_topic, interrupt_state,
+            )
+            # Find successful interrupt (highest score wins)
+            for attempt in interrupt_attempts:
+                if attempt.succeeded:
+                    was_interrupt = True
+                    interrupted_agent_id = selected_id
+                    selected_id = attempt.attempting_agent_id
+                    break  # Only one winner
+
         return SelectionResult(
             selected_agent_id=selected_id,
             scores=scores,
@@ -121,7 +161,113 @@ class SpeakerSelector:
             eligible_agents=[a.id for a in eligible_agents],
             previous_speaker_id=previous_speaker_id,
             detected_topic=detected_topic,
+            was_interrupt=was_interrupt,
+            interrupted_agent_id=interrupted_agent_id,
+            interrupt_attempts=interrupt_attempts,
         )
+
+    # ── interrupt logic ─────────────────────────────────────────
+
+    def _check_interrupts(
+        self,
+        eligible_agents: list[AgentConfig],
+        selected_agent_id: str,
+        detected_topic: str | None,
+        state: InterruptState,
+    ) -> list[InterruptAttempt]:
+        """Evaluate all agents for interrupt eligibility.
+
+        Returns a list of InterruptAttempt records (successful + failed)
+        sorted by interrupt_score descending. At most one attempt will
+        have ``succeeded=True``. The caller logs all attempts.
+        """
+        cfg = self._config.interrupts
+        threshold = cfg.relevance_threshold
+        now = time.monotonic()
+        attempts: list[InterruptAttempt] = []
+        winner_found = False
+
+        # Build scored candidates (exclude the already-selected agent)
+        scored: list[tuple[AgentConfig, float]] = []
+        for agent in eligible_agents:
+            if agent.id == selected_agent_id:
+                continue
+            topic_rel = self._calc_topic_relevance(agent.id, detected_topic)
+            tendency = cfg.agent_interrupt_tendency.get(
+                agent.id, agent.interrupt_tendency,
+            )
+            score = topic_rel * tendency
+            scored.append((agent, score))
+
+        # Sort by score descending so highest scorer gets first chance
+        scored.sort(key=lambda t: t[1], reverse=True)
+
+        for agent, score in scored:
+            tendency = cfg.agent_interrupt_tendency.get(
+                agent.id, agent.interrupt_tendency,
+            )
+
+            # Gate 1: score >= threshold
+            if score < threshold:
+                attempts.append(InterruptAttempt(
+                    attempting_agent_id=agent.id,
+                    would_have_spoken_id=selected_agent_id,
+                    interrupt_score=score,
+                    threshold=threshold,
+                    succeeded=False,
+                    reason="below_threshold",
+                ))
+                continue
+
+            # Gate 2: conversation cap
+            if state.interrupt_count >= cfg.max_interrupts_per_conversation:
+                attempts.append(InterruptAttempt(
+                    attempting_agent_id=agent.id,
+                    would_have_spoken_id=selected_agent_id,
+                    interrupt_score=score,
+                    threshold=threshold,
+                    succeeded=False,
+                    reason="conversation_cap_reached",
+                ))
+                continue
+
+            # Gate 3: per-agent cooldown
+            last = state.last_interrupt_time.get(agent.id)
+            if last is not None and (now - last) < cfg.cooldown_seconds:
+                attempts.append(InterruptAttempt(
+                    attempting_agent_id=agent.id,
+                    would_have_spoken_id=selected_agent_id,
+                    interrupt_score=score,
+                    threshold=threshold,
+                    succeeded=False,
+                    reason="cooldown",
+                ))
+                continue
+
+            # All gates passed — first qualifying agent wins
+            if not winner_found:
+                winner_found = True
+                state.interrupt_count += 1
+                state.last_interrupt_time[agent.id] = now
+                attempts.append(InterruptAttempt(
+                    attempting_agent_id=agent.id,
+                    would_have_spoken_id=selected_agent_id,
+                    interrupt_score=score,
+                    threshold=threshold,
+                    succeeded=True,
+                ))
+            else:
+                # Another agent already won this turn
+                attempts.append(InterruptAttempt(
+                    attempting_agent_id=agent.id,
+                    would_have_spoken_id=selected_agent_id,
+                    interrupt_score=score,
+                    threshold=threshold,
+                    succeeded=False,
+                    reason="another_agent_interrupted",
+                ))
+
+        return attempts
 
     # ── internal helpers ────────────────────────────────────────
 
