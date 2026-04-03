@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 import uuid  # noqa: TC003
-from datetime import datetime  # noqa: TC003
+from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from typing import Any, Literal
 
@@ -664,6 +664,48 @@ class ArtifactCreate(BaseModel):
     artifact_type: str
     status: str = "executed"
     metadata: dict[str, Any] | None = None
+
+
+# ── Simulations ──────────────────────────────────────────────────
+
+
+class SimulationStatus(enum.StrEnum):
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class SimulationCreate(BaseModel):
+    name: str
+    description: str | None = None
+    config: dict[str, Any]
+    status: str = "running"
+    simulated_duration: timedelta | None = None
+    agents_participated: list[str] = Field(default_factory=list)
+    error_log: dict[str, Any] | list[Any] | None = None
+
+
+class Simulation(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    config: dict[str, Any]
+    status: str = "running"
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    simulated_duration: timedelta | None = None
+    real_duration: timedelta | None = None
+    total_conversations: int = 0
+    total_turns: int = 0
+    total_tokens: int = 0
+    total_cost: Decimal = Decimal("0")
+    total_artifacts: int = 0
+    total_overseer_flags: int = 0
+    agents_participated: list[str] = Field(default_factory=list)
+    error_log: dict[str, Any] | list[Any] | None = None
+    created_at: datetime | None = None
 
 
 class ConversationConfig(BaseModel):
