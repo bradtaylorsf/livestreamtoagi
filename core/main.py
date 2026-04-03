@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from core.agent_registry import AgentRegistry
+from core.config_loader import ConfigLoader
 from core.database import Database
 from core.event_bus import event_bus
 from core.redis_client import RedisClient
@@ -17,6 +18,7 @@ HEALTH_CHECK_TIMEOUT = 5.0  # seconds per check
 db = Database()
 redis_client = RedisClient()
 agent_registry = AgentRegistry(redis_client=redis_client)
+config_loader = ConfigLoader()
 
 
 @asynccontextmanager
@@ -38,6 +40,8 @@ async def lifespan(app: FastAPI):
         await db.connect()
         await redis_client.connect()
         await agent_registry.load_all()
+        config_loader.load()
+        await config_loader.start_watching()
 
         cost_repo = CostRepo(db)
         memory_repo = MemoryRepo(db)
@@ -58,6 +62,7 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
+        await config_loader.stop_watching()
         stop_scheduler()
         if api_key and llm_client:
             await llm_client.close()
