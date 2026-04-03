@@ -305,13 +305,13 @@ async def get_agent_costs(
     )
 
     by_day = [
-        CostByDay(date=d.get("date", ""), cost=d.get("cost", "0"))
+        CostByDay(date=d.get("day", ""), cost=d.get("total", "0"))
         for d in data.get("by_day", [])
     ]
     by_type = [
         CostByType(
             type=d.get("type", ""),
-            cost=d.get("cost", "0"),
+            cost=d.get("total", "0"),
             tokens=int(d.get("tokens", 0)),
         )
         for d in data.get("by_type", [])
@@ -321,8 +321,8 @@ async def get_agent_costs(
         by_day=by_day,
         by_type=by_type,
         total=data.get("total", "0"),
-        total_input_tokens=int(data.get("total_input_tokens", 0)),
-        total_output_tokens=int(data.get("total_output_tokens", 0)),
+        total_input_tokens=0,
+        total_output_tokens=0,
     )
 
 
@@ -446,7 +446,7 @@ async def get_simulation_costs(sim_id: uuid_mod.UUID) -> SimulationCostResponse:
     from core.repos.cost_repo import CostRepo
     cost_repo = CostRepo(db)
 
-    data = await cost_repo.get_costs_by_simulation(str(sim_id))
+    data = await cost_repo.get_costs_by_simulation(sim_id)
     return SimulationCostResponse(**data)
 
 

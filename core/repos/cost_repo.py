@@ -17,6 +17,7 @@ from core.models import (
 from core.repos.utils import serialize_jsonb
 
 if TYPE_CHECKING:
+    import uuid
     from datetime import datetime
 
     from core.database import Database
@@ -119,7 +120,7 @@ class CostRepo:
 
     async def get_costs_by_simulation(
         self,
-        simulation_id: str,
+        simulation_id: uuid.UUID,
     ) -> dict[str, object]:
         """Return cost breakdown by agent for a simulation's time window."""
         by_agent_rows = await self.db.fetch(
