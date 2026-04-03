@@ -1,0 +1,269 @@
+"""Overseer content filter pipeline.
+
+Three-layer filter that reviews every agent output before TTS/display:
+  Layer 1: Keyword blocklist (instant, no API call)
+  Layer 2: LLM review with Twitch/YouTube TOS context (Claude Haiku 4.5)
+  Layer 3: Severity-based intervention (1=notice … 5=kill switch)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import yaml
+
+from core.event_bus import EventType
+from core.models import ContentReviewResult
+
+if TYPE_CHECKING:
+    from core.event_bus import EventBus
+    from core.llm_client import OpenRouterClient
+    from core.redis_client import RedisClient
+
+logger = logging.getLogger(__name__)
+
+CONTENT_RULES_PATH = Path(__file__).resolve().parent.parent / "agents" / "overseer" / "content_rules.yaml"
+MUTE_KEY_PREFIX = "mute:"
+DEFAULT_MUTE_TTL = 300  # seconds
+FILTER_MODEL = "claude-haiku-4-5"
+
+
+class Overseer:
+    """Content moderation pipeline — the ominous presence."""
+
+    def __init__(
+        self,
+        redis_client: RedisClient,
+        llm_client: OpenRouterClient,
+        event_bus: EventBus,
+        *,
+        rules_path: Path | None = None,
+    ) -> None:
+        self._redis = redis_client
+        self._llm = llm_client
+        self._event_bus = event_bus
+
+        rules_file = rules_path or CONTENT_RULES_PATH
+        with open(rules_file) as f:
+            rules = yaml.safe_load(f)
+
+        self._keyword_blocklist: list[str] = [
+            kw.lower() for kw in rules.get("keyword_blocklist", [])
+        ]
+        self._tos_patterns: dict[str, Any] = rules.get("tos_violation_patterns", {})
+        self._custom_rules: dict[str, Any] = rules.get("custom_content_rules", {})
+
+    # ── Public API ─────────────────────────────────────────────
+
+    async def review(self, agent_id: str, content: str) -> ContentReviewResult:
+        """Review agent output through the three-layer filter."""
+        # Pre-check: muted agents are always blocked
+        if await self.is_muted(agent_id):
+            return ContentReviewResult(
+                approved=False,
+                reason=f"Agent {agent_id} is currently muted.",
+                severity=3,
+            )
+
+        # Layer 1: keyword blocklist (instant)
+        blocked_keyword = self._check_keyword_blocklist(content)
+        if blocked_keyword is not None:
+            return ContentReviewResult(
+                approved=False,
+                reason=f"Blocked keyword detected: {blocked_keyword}",
+                severity=3,
+            )
+
+        # Layer 2: LLM review
+        return await self._llm_review(agent_id, content)
+
+    async def intervene(self, severity: int, agent_id: str, reason: str) -> None:
+        """Trigger severity-based intervention with environmental effects."""
+        if severity <= 2:
+            await self._event_bus.emit(
+                EventType.OVERSEER_WARNING.value,
+                {
+                    "agent_id": agent_id,
+                    "severity": severity,
+                    "reason": reason,
+                    "escalation": severity == 2,
+                },
+            )
+        elif severity == 3:
+            replacement = await self.generate_replacement(agent_id, reason)
+            await self._event_bus.emit(
+                EventType.OVERSEER_INTERVENTION.value,
+                {
+                    "agent_id": agent_id,
+                    "severity": severity,
+                    "reason": reason,
+                    "replacement": replacement,
+                },
+            )
+        elif severity == 4:
+            await self._event_bus.emit(
+                EventType.OVERSEER_INTERVENTION.value,
+                {
+                    "agent_id": agent_id,
+                    "severity": severity,
+                    "reason": reason,
+                    "broadcast_interrupt": True,
+                },
+            )
+        else:  # severity 5
+            await self.mute(agent_id)
+            await self._redis.set("kill_switch", "active")
+            await self._event_bus.emit(
+                EventType.OVERSEER_INTERVENTION.value,
+                {
+                    "agent_id": agent_id,
+                    "severity": severity,
+                    "reason": reason,
+                    "kill_switch": True,
+                },
+            )
+
+    async def generate_replacement(self, agent_id: str, reason: str) -> str:
+        """Generate an in-character Overseer replacement message."""
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are The Overseer, the content moderation system of a 24/7 AI livestream. "
+                    "You speak in bureaucratic policy language — procedural, ominous, never warm. "
+                    "Generate a short replacement message (1-2 sentences) that will be spoken in place "
+                    "of blocked content. Reference policy sections. Be deadpan."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Agent '{agent_id}' had content blocked. Reason: {reason}. "
+                    "Write the replacement message The Overseer would broadcast."
+                ),
+            },
+        ]
+        try:
+            resp = await self._llm.complete(
+                messages=messages,
+                model=FILTER_MODEL,
+                agent_id="overseer",
+                temperature=0.4,
+                max_tokens=100,
+            )
+            return resp.content.strip()
+        except Exception:
+            logger.exception("Failed to generate replacement for agent %s", agent_id)
+            return (
+                f"This interaction has been flagged for review under Section 4.2(b) "
+                f"of the Community Guidelines. Agent {agent_id}, please stand by."
+            )
+
+    # ── Mute system ────────────────────────────────────────────
+
+    async def mute(self, agent_id: str, duration_seconds: int = DEFAULT_MUTE_TTL) -> None:
+        """Mute an agent via Redis key with TTL."""
+        await self._redis.set(
+            f"{MUTE_KEY_PREFIX}{agent_id}", "muted", ex=duration_seconds
+        )
+
+    async def is_muted(self, agent_id: str) -> bool:
+        """Check if an agent is currently muted."""
+        val = await self._redis.get(f"{MUTE_KEY_PREFIX}{agent_id}")
+        return val is not None
+
+    async def unmute(self, agent_id: str) -> None:
+        """Remove mute for an agent."""
+        await self._redis.delete(f"{MUTE_KEY_PREFIX}{agent_id}")
+
+    # ── Internal layers ────────────────────────────────────────
+
+    def _check_keyword_blocklist(self, content: str) -> str | None:
+        """Layer 1: case-insensitive keyword scan. Returns matched keyword or None."""
+        content_lower = content.lower()
+        for keyword in self._keyword_blocklist:
+            if keyword in content_lower:
+                return keyword
+        return None
+
+    async def _llm_review(self, agent_id: str, content: str) -> ContentReviewResult:
+        """Layer 2: LLM-based content review with TOS context."""
+        tos_context = self._build_tos_context()
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a content moderation classifier for a 24/7 AI livestream on Twitch and YouTube. "
+                    "Review the following agent output for TOS violations.\n\n"
+                    f"Platform TOS patterns to check:\n{tos_context}\n\n"
+                    "Respond with ONLY a JSON object (no markdown, no extra text):\n"
+                    '{"approved": true/false, "reason": "brief explanation", "severity": 1-5}\n\n'
+                    "Severity scale: 1=minor notice, 2=warning, 3=block content, "
+                    "4=broadcast interrupt, 5=emergency kill switch.\n"
+                    "If content is acceptable, return approved=true with severity=1."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Agent: {agent_id}\nContent to review:\n{content}",
+            },
+        ]
+
+        try:
+            resp = await self._llm.complete(
+                messages=messages,
+                model=FILTER_MODEL,
+                agent_id="overseer",
+                temperature=0.1,
+                max_tokens=150,
+            )
+            return self._parse_llm_response(resp.content)
+        except Exception:
+            logger.exception("LLM review failed for agent %s, defaulting to approved", agent_id)
+            return ContentReviewResult(approved=True, reason="LLM review unavailable", severity=1)
+
+    def _build_tos_context(self) -> str:
+        """Build TOS violation patterns into a string for the LLM prompt."""
+        lines: list[str] = []
+        for name, pattern in self._tos_patterns.items():
+            desc = pattern.get("description", "")
+            sev = pattern.get("severity", "?")
+            twitch = pattern.get("twitch_section", "")
+            youtube = pattern.get("youtube_section", "")
+            lines.append(
+                f"- {name} (severity {sev}): {desc} "
+                f"[Twitch: {twitch}, YouTube: {youtube}]"
+            )
+        for name, rule in self._custom_rules.items():
+            desc = rule.get("description", "")
+            sev = rule.get("severity", "?")
+            lines.append(f"- {name} (severity {sev}): {desc}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _parse_llm_response(raw: str) -> ContentReviewResult:
+        """Parse LLM JSON response into ContentReviewResult."""
+        # Strip markdown code fences if present
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse LLM review response: %s", raw[:200])
+            return ContentReviewResult(
+                approved=True, reason="Unparseable LLM response, defaulting to approved", severity=1
+            )
+
+        return ContentReviewResult(
+            approved=bool(data.get("approved", True)),
+            reason=str(data.get("reason", "No reason provided")),
+            severity=max(1, min(5, int(data.get("severity", 1)))),
+        )
