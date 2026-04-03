@@ -128,10 +128,23 @@ class UpdateCoreMemoryTool(BaseTool):
         self._core_manager = core_manager
         self._agent_id = agent_id
 
+    # Only these agents are allowed to update other agents' core memory
+    CROSS_AGENT_WRITERS = frozenset({"vera", "overseer"})
+
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         section: str = kwargs["section"]
         content: str = kwargs["content"]
         agent_target: str = kwargs.get("agent_target", self._agent_id)
+
+        # Authorization: agents can only update their own memory unless privileged
+        if agent_target != self._agent_id and self._agent_id not in self.CROSS_AGENT_WRITERS:
+            return {
+                "status": "error",
+                "error": (
+                    f"Agent {self._agent_id!r} is not authorized to update "
+                    f"core memory for {agent_target!r}"
+                ),
+            }
 
         try:
             record = await self._core_manager.update_core_memory(

@@ -33,6 +33,7 @@ class EventType(str, Enum):
     BUDGET_UPDATE = "budget_update"
     VIEWER_COUNT = "viewer_count"
     TTS_PLAY = "tts_play"
+    TOOL_EXECUTED = "tool_executed"
     CONFIG_RELOADED = "config_reloaded"
 
 

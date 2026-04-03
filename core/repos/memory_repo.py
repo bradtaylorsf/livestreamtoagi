@@ -242,13 +242,17 @@ class MemoryRepo:
     ) -> SelfModificationProposal:
         row = await self.db.fetchrow(
             """INSERT INTO self_modification_proposals
-               (agent_id, proposal_type, description, reasoning)
-               VALUES ($1, $2, $3, $4)
+               (agent_id, proposal_type, description, reasoning,
+                file, new_content, impact_notes, status)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued_for_review')
                RETURNING *""",
             proposal.agent_id,
             proposal.proposal_type,
             proposal.description,
             proposal.reasoning,
+            proposal.file,
+            proposal.new_content,
+            proposal.impact_notes,
         )
         return SelfModificationProposal(**dict(row))
 
@@ -283,3 +287,41 @@ class MemoryRepo:
             reviewed_by,
             proposal_id,
         )
+
+    async def get_evolution_log(
+        self, agent_id: str, limit: int = 10
+    ) -> list[SelfModificationProposal]:
+        """Fetch proposals for a specific agent, ordered by most recent first."""
+        limit = min(limit, MAX_LIMIT)
+        rows = await self.db.fetch(
+            """SELECT * FROM self_modification_proposals
+               WHERE agent_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            agent_id,
+            limit,
+        )
+        return [SelfModificationProposal(**dict(r)) for r in rows]
+
+    async def check_and_auto_approve(
+        self, auto_approval_enabled: bool = False
+    ) -> int:
+        """Auto-approve proposals older than 4 hours when enabled.
+
+        Returns the number of proposals auto-approved.
+        """
+        if not auto_approval_enabled:
+            return 0
+        result = await self.db.execute(
+            """UPDATE self_modification_proposals
+               SET status = 'auto_approved',
+                   reviewed_at = NOW(),
+                   reviewed_by = 'system:auto_approve'
+               WHERE status = 'queued_for_review'
+                 AND created_at < NOW() - INTERVAL '4 hours'""",
+        )
+        # asyncpg execute returns status string like "UPDATE N"
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError, AttributeError):
+            return 0

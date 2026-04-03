@@ -259,26 +259,41 @@ class TestUpdateCoreMemory:
             reason="tool_update by rex",
         )
 
-    async def test_allows_targeting_another_agent(
+    async def test_unprivileged_agent_cannot_target_another_agent(
         self, core_tool: UpdateCoreMemoryTool, core_manager: AsyncMock
     ) -> None:
+        """Non-privileged agents (e.g. rex) cannot update another agent's memory."""
+        result = await core_tool.execute(
+            section="relationships", content="- Rex: good collaborator", agent_target="vera"
+        )
+
+        assert result["status"] == "error"
+        assert "not authorized" in result["error"]
+        core_manager.update_core_memory.assert_not_called()
+
+    async def test_privileged_agent_can_target_another_agent(
+        self, core_manager: AsyncMock
+    ) -> None:
+        """Privileged agents (vera, overseer) can update other agents' memory."""
         core_manager.update_core_memory.return_value = CoreMemory(
-            agent_id="vera",
+            agent_id="rex",
             content="content",
             token_count=100,
             version=1,
             last_updated=datetime(2026, 4, 1),
         )
 
-        await core_tool.execute(
-            section="relationships", content="- Rex: good collaborator", agent_target="vera"
+        vera_tool = UpdateCoreMemoryTool(core_manager=core_manager, agent_id="vera")
+        result = await vera_tool.execute(
+            section="relationships", content="- Rex: good collaborator", agent_target="rex"
         )
 
+        assert result["status"] == "updated"
         core_manager.update_core_memory.assert_called_once_with(
-            agent_id="vera",
+            agent_id="rex",
             section="relationships",
             content="- Rex: good collaborator",
-            reason="tool_update by rex",
+            reason="tool_update by vera",
         )
 
 

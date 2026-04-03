@@ -90,6 +90,8 @@ async def test_migration_idempotent(conn):
 @pytest.mark.integration
 async def test_rollback(conn):
     await up(conn)
+    # Roll back self-modification fields
+    await down(conn)
     # Roll back energy change log
     await down(conn)
     # Roll back reflection tables
