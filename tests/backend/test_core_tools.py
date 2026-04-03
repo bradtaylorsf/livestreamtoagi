@@ -271,6 +271,8 @@ class TestToolRegistry:
         names = registry.names()
         assert sorted(names) == [
             "create_poll",
+            "draft_email",
+            "draft_social_post",
             "execute_code",
             "get_audience_status",
             "get_poll_results",
@@ -282,7 +284,7 @@ class TestToolRegistry:
         self, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
         tools = get_core_tools(event_bus, redis_client, agent_id="vera")
-        assert len(tools) == 6
+        assert len(tools) == 8
 
         tool_names = {t.name for t in tools}
         assert tool_names == {
@@ -292,6 +294,8 @@ class TestToolRegistry:
             "get_poll_results",
             "create_poll",
             "execute_code",
+            "draft_social_post",
+            "draft_email",
         }
 
         for tool in tools:
