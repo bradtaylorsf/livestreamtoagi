@@ -11,6 +11,7 @@ from .code_execution import ExecuteCodeTool
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .tilemap_gen import GenerateTilemapTool
+from .web_tools import FetchUrlTool, WebSearchTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ __all__ = [
     "DraftEmailTool",
     "DraftSocialPostTool",
     "ExecuteCodeTool",
+    "FetchUrlTool",
     "GenerateTilemapTool",
     "GetAudienceStatusTool",
     "GetPollResultsTool",
@@ -35,6 +37,7 @@ __all__ = [
     "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
+    "WebSearchTool",
     "get_core_tools",
 ]
 
@@ -108,5 +111,23 @@ def get_core_tools(
         tools.append(GetRevenueStatusTool(cost_repo=cost_repo, agent_id=agent_id))
     tools.append(DraftSocialPostTool(redis_client=redis_client, agent_id=agent_id))
     tools.append(DraftEmailTool(redis_client=redis_client, agent_id=agent_id))
+
+    # Web search and URL fetch tools
+    tools.append(
+        WebSearchTool(
+            event_bus=event_bus,
+            redis_client=redis_client,
+            agent_id=agent_id,
+            cost_repo=cost_repo,
+        )
+    )
+    tools.append(
+        FetchUrlTool(
+            event_bus=event_bus,
+            redis_client=redis_client,
+            agent_id=agent_id,
+            cost_repo=cost_repo,
+        )
+    )
 
     return tools

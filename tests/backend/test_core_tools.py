@@ -274,17 +274,19 @@ class TestToolRegistry:
             "draft_email",
             "draft_social_post",
             "execute_code",
+            "fetch_url",
             "get_audience_status",
             "get_poll_results",
             "get_world_state",
             "send_message",
+            "web_search",
         ]
 
     def test_get_core_tools_returns_all_three(
         self, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
         tools = get_core_tools(event_bus, redis_client, agent_id="vera")
-        assert len(tools) == 8
+        assert len(tools) == 10
 
         tool_names = {t.name for t in tools}
         assert tool_names == {
@@ -296,6 +298,8 @@ class TestToolRegistry:
             "execute_code",
             "draft_social_post",
             "draft_email",
+            "web_search",
+            "fetch_url",
         }
 
         for tool in tools:
