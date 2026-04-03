@@ -219,6 +219,11 @@ class FetchUrlTool(BaseTool):
         if not _is_safe_url(url):
             return {"status": "error", "reason": "URL blocked: must be public http(s)"}
 
+        # DNS resolution check — block domains resolving to private IPs
+        parsed_host = urlparse(url).hostname or ""
+        if parsed_host and _dns_resolves_to_private(parsed_host):
+            return {"status": "error", "reason": "URL blocked: resolves to private address"}
+
         client = self._http or httpx.AsyncClient(timeout=15)
         close_after = self._http is None
         try:
@@ -228,6 +233,14 @@ class FetchUrlTool(BaseTool):
                 headers={"User-Agent": "LivestreamToAGI-Bot/1.0"},
             )
             resp.raise_for_status()
+
+            # Validate final URL after redirects to prevent SSRF via open redirects
+            try:
+                final_url = str(resp.url)
+                if final_url != url and final_url.startswith(("http://", "https://")) and not _is_safe_url(final_url):
+                    return {"status": "error", "reason": "URL blocked: redirect target is not public"}
+            except Exception:
+                pass  # If resp.url is unavailable, skip redirect check
         except httpx.HTTPError as exc:
             logger.error("URL fetch failed for %s: %s", url, exc)
             return {"status": "error", "reason": f"Fetch failed: {exc}"}
@@ -301,6 +314,21 @@ def _is_safe_url(url: str) -> bool:
         pass  # hostname is a domain name, not an IP — allow
 
     return True
+
+
+def _dns_resolves_to_private(hostname: str) -> bool:
+    """Resolve hostname and check if any resolved IP is private/internal."""
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _family, _type, _proto, _canonname, sockaddr in infos:
+            addr = ipaddress.ip_address(sockaddr[0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                return True
+    except (socket.gaierror, ValueError):
+        return False  # Unresolvable hostname — let HTTP layer handle it
+    return False
 
 
 def _strip_html(html: str) -> str:
