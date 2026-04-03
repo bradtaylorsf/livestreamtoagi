@@ -57,6 +57,7 @@ logs/
 .alpha-loop/sessions/
 .alpha-loop/learnings/
 !.alpha-loop/learnings/proposed-updates/
+.alpha-loop/traces/
 
 # Assets (large binaries — track with Git LFS or download separately)
 # frontend/public/assets/tilesets/*.png
