@@ -9,6 +9,7 @@ from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageT
 from .base import BaseTool
 from .code_execution import ExecuteCodeTool
 from .messaging import SendMessageTool
+from .tilemap_gen import GenerateTilemapTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
@@ -17,11 +18,13 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.overseer import Overseer
     from core.redis_client import RedisClient
+    from core.repos.world_repo import WorldRepo
 
 __all__ = [
     "BaseTool",
     "CreatePollTool",
     "ExecuteCodeTool",
+    "GenerateTilemapTool",
     "GetAudienceStatusTool",
     "GetPollResultsTool",
     "GetWorldStateTool",
@@ -57,6 +60,7 @@ def get_core_tools(
     agent_id: str = "unknown",
     overseer: Overseer | None = None,
     docker_client: docker.DockerClient | None = None,
+    world_repo: WorldRepo | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -80,8 +84,18 @@ def get_core_tools(
     )
 
     # Code execution sandbox
-    tools.append(
-        ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
-    )
+    exec_tool = ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
+    tools.append(exec_tool)
+
+    # Tilemap generation (requires world_repo for chunk storage)
+    if world_repo is not None:
+        tools.append(
+            GenerateTilemapTool(
+                event_bus=event_bus,
+                agent_id=agent_id,
+                execute_code_tool=exec_tool,
+                world_repo=world_repo,
+            )
+        )
 
     return tools
