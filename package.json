@@ -11,6 +11,12 @@
     "test:python": ".venv/bin/pytest",
     "test:frontend": "npm --prefix frontend test",
     "test:website": "npm --prefix website test",
+    "chat": ".venv/bin/python scripts/chat.py",
+    "reflect": ".venv/bin/python scripts/test_agent.py --reflect --all",
+    "reflect:agent": ".venv/bin/python scripts/test_agent.py --reflect --agent",
+    "db:migrate": ".venv/bin/python -m db up",
+    "db:status": ".venv/bin/python -m db status",
+    "db:rollback": ".venv/bin/python -m db down",
     "stop": "docker compose down && echo '✓ Services stopped'"
   },
   "devDependencies": {

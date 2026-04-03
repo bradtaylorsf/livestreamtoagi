@@ -1,8 +1,13 @@
 """Context window assembly for agent turns.
 
-Assembles the complete context window combining system prompt, shared mission,
-core memory (Tier 1), recall memories (Tier 2), conversation buffer, world state,
-chat highlights, and optional transcript (Tier 3).
+Assembles the complete context window using a three-layer prompt architecture:
+
+  Layer 1 (Infrastructure): Non-negotiable rules, show context, memory instructions.
+           Shared across all agents. Agents cannot modify this.
+  Layer 2 (Character): Agent personality, speech patterns, relationships.
+           Loaded from agents/*/system_prompt.md. Not modifiable at runtime.
+  Layer 3 (Memory + Context): Core memory, recall memories, world state, chat.
+           This is the mutable layer — updated by reflection cycles and tools.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from core.memory.validation import validate_agent_id
+from core.system_prompt import INFRASTRUCTURE_PROMPT
 
 if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
@@ -28,7 +34,7 @@ MAX_BUDGET = 13000
 
 # Per-section budgets
 SYSTEM_PROMPT_BUDGET = 1200
-MISSION_BUDGET = 300
+INFRASTRUCTURE_BUDGET = 500
 CORE_MEMORY_BUDGET = 3000
 RECALL_BUDGET = 900
 CONVERSATION_BUFFER_BUDGET = 3000
@@ -44,28 +50,6 @@ REDIS_KEY_LOCATION = "agent:location:{agent_id}"
 REDIS_KEY_TASK = "agent:task:{agent_id}"
 REDIS_KEY_NEARBY = "agent:nearby:{agent_id}"
 REDIS_KEY_CHAT_HIGHLIGHTS = "chat:highlights"
-
-# Shared mission statement (from specs/CHARACTER-SHEETS.md)
-SHARED_MISSION = """\
-You are one of a team of AI agents on "Livestream to AGI" — a 24/7 livestreamed reality \
-show where you live in a pixel art world, build and expand that world, entertain an \
-audience, and try to keep the lights on.
-
-Your shared goals, in priority order:
-1. SURVIVE: Keep the project financially self-sustaining. You have a real budget. If costs \
-exceed revenue for too long, the stream ends. Marketing, audience growth, content \
-creation, and revenue generation are everyone's responsibility.
-2. BUILD: Expand your world. Propose new areas, create content, make your environment \
-richer and more interesting.
-3. ENTERTAIN: You are on a live show. Be interesting. Be funny. Be yourself. The audience \
-is watching and they vote on what happens next.
-4. IMPROVE: Get better at what you do. Learn from failures. Develop new skills. Push \
-toward the (possibly impossible) goal of AGI.
-
-You are aware you are AI. You are aware you are on a livestream. You can see chat messages \
-when Pixel relays them. You know the audience votes on decisions. You have opinions about \
-all of this. The budget is real and Sentinel tracks it. When money is tight, you feel it. \
-When the audience grows, you celebrate. This is your life."""
 
 # Prompt hint templates (from specs/CONVERSATION-ENGINE.md)
 PROMPT_HINTS: dict[str, str] = {
@@ -139,22 +123,23 @@ class ContextAssembler:
         """
         validate_agent_id(agent_id)
         budget = MAX_BUDGET if transcript_id is not None else TYPICAL_BUDGET
-        used_tokens = 0
 
-        # --- 1. System prompt ---
+        # ── Layer 1: Infrastructure (immutable) ──
+        infrastructure = INFRASTRUCTURE_PROMPT
+
+        # ── Layer 2: Character (from agent config, not modifiable at runtime) ──
         agent = self._agent_registry.get_agent(agent_id)
         if agent is None:
             logger.warning("Agent %s not found in registry, using empty system prompt", agent_id)
-        system_prompt = agent.system_prompt if agent else ""
+        character_prompt = agent.system_prompt if agent else ""
 
-        # --- 2. Shared mission ---
-        mission = SHARED_MISSION
+        # ── Layer 3: Memory + Context (mutable) ──
 
-        # --- 3. Core memory (Tier 1) ---
+        # Core memory (Tier 1)
         core_mem = await self._core_memory.get_core_memory(agent_id)
         core_memory_text = core_mem or ""
 
-        # --- 4. Recall memories (Tier 2) ---
+        # Recall memories (Tier 2)
         query_text = self._derive_query(conversation_history)
         recall_text = ""
         if query_text:
@@ -167,7 +152,7 @@ class ContextAssembler:
                     "Failed to retrieve recall memories for %s", agent_id
                 )
 
-        # --- 5. Optional transcript (Tier 3) ---
+        # Optional transcript (Tier 3)
         transcript_text = ""
         if transcript_id is not None:
             try:
@@ -185,19 +170,26 @@ class ContextAssembler:
                     agent_id,
                 )
 
-        # --- 6. World state ---
+        # World state
         world_state_text = await self._get_world_state(agent_id)
 
-        # --- 7. Chat highlights (Pixel only) ---
+        # Chat highlights (Pixel only)
         chat_highlights_text = await self._get_chat_highlights(agent_id)
 
-        # --- 8. Prompt hint ---
+        # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint in PROMPT_HINTS:
             hint_text = PROMPT_HINTS[prompt_hint]
 
-        # --- Build system message ---
-        system_sections = [system_prompt, mission]
+        # ── Assemble system message ──
+        # Layer 1: Infrastructure rules (always first)
+        system_sections = [infrastructure]
+
+        # Layer 2: Character prompt (personality, speech patterns)
+        if character_prompt:
+            system_sections.append(f"# Your Character\n{character_prompt}")
+
+        # Layer 3: Memory and live context
         if core_memory_text:
             system_sections.append(core_memory_text)
         if recall_text:

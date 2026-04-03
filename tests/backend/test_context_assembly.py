@@ -12,10 +12,10 @@ from core.context_assembly import (
     MAX_BUDGET,
     PIXEL_AGENT_ID,
     PROMPT_HINTS,
-    SHARED_MISSION,
     TYPICAL_BUDGET,
     ContextAssembler,
 )
+from core.system_prompt import INFRASTRUCTURE_PROMPT
 from core.models import AgentConfig, Transcript
 
 
@@ -150,18 +150,20 @@ class TestAssemblyOrder:
         assert system["role"] == "system"
         content = system["content"]
 
-        # Sections should appear in this order
-        idx_prompt = content.find("You are Rex.")
-        idx_mission = content.find("Livestream to AGI")
-        idx_core = content.find("My Core Memory")
-        idx_recall = content.find("Relevant memories")
-        idx_world = content.find("World State")
+        # Sections should appear in this order:
+        # Layer 1 (infrastructure) → Layer 2 (character) → Layer 3 (memory)
+        idx_infra = content.find("System Rules")
+        idx_prompt = content.find("# Your Character")
+        idx_core = content.find("## My Core Memory")
+        # Use the actual recall section header (not the infrastructure mention)
+        idx_recall = content.find("## Relevant memories")
+        idx_world = content.find("## World State")
 
-        assert idx_prompt < idx_mission < idx_core < idx_recall < idx_world
+        assert idx_infra < idx_prompt < idx_core < idx_recall < idx_world
         # All must be present
         assert all(
             i >= 0
-            for i in [idx_prompt, idx_mission, idx_core, idx_recall, idx_world]
+            for i in [idx_infra, idx_prompt, idx_core, idx_recall, idx_world]
         )
 
     @pytest.mark.asyncio
@@ -178,13 +180,17 @@ class TestAssemblyOrder:
             assert "Message" in msg["content"]
 
     @pytest.mark.asyncio
-    async def test_shared_mission_is_included(
+    async def test_infrastructure_prompt_is_included(
         self, assembler: ContextAssembler
     ) -> None:
         messages = await assembler.assemble_context("rex", [])
-        assert "SURVIVE" in messages[0]["content"]
-        assert "BUILD" in messages[0]["content"]
-        assert "ENTERTAIN" in messages[0]["content"]
+        content = messages[0]["content"]
+        assert "SURVIVE" in content
+        assert "BUILD" in content
+        assert "ENTERTAIN" in content
+        # Memory instructions from infrastructure layer
+        assert "How Your Memory Works" in content
+        assert "Behavioral Guardrails" in content
 
 
 # ── Token budget tests ───────────────────────────────────────────
@@ -563,7 +569,8 @@ class TestRecallMemory:
         )
         messages = await assembler.assemble_context("rex", _make_history(3))
         system = messages[0]["content"]
-        assert "Relevant memories" not in system
+        # The recall section header should not appear (infrastructure mention is OK)
+        assert "## Relevant memories" not in system
 
 
 # ── Edge case tests ──────────────────────────────────────────────
