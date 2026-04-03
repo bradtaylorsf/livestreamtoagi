@@ -135,7 +135,8 @@ async def test_system_prompt_loaded():
     vera = registry.get_agent("vera")
     assert vera is not None
     assert "Showrunner" in vera.system_prompt
-    assert "shared goals" in vera.system_prompt.lower()
+    # Character-specific content (shared mission moved to infrastructure layer)
+    assert "coordinator" in vera.system_prompt.lower()
 
 
 @pytest.mark.asyncio
@@ -178,7 +179,8 @@ async def test_rex_prompt_and_behaviors_match_character_spec():
     rex = registry.get_agent("rex")
     assert rex is not None
     prompt = rex.system_prompt.lower()
-    assert "shared goals" in prompt
+    # Shared goals moved to infrastructure layer; check character-specific content
+    assert len(prompt) > 100
     assert "initialized second" in prompt
     assert "0.3 seconds after vera" in prompt
     assert "terse, sarcastic, pragmatic" in prompt
@@ -302,7 +304,8 @@ async def test_pixel_prompt_and_behaviors_match_character_spec():
     pixel = registry.get_agent("pixel")
     assert pixel is not None
     prompt = pixel.system_prompt.lower()
-    assert "shared goals" in prompt
+    # Shared goals moved to infrastructure layer; check character-specific content
+    assert len(prompt) > 100
     assert "fourth agent initialized" in prompt
     assert "audience's avatar" in prompt
     assert "audience liaison" in prompt
@@ -371,7 +374,8 @@ async def test_vera_prompt_and_behaviors_match_character_spec():
     vera = registry.get_agent("vera")
     assert vera is not None
     prompt = vera.system_prompt.lower()
-    assert "shared goals" in prompt
+    # Shared goals moved to infrastructure layer; check character-specific content
+    assert len(prompt) > 100
     assert "first agent initialized" in prompt
     assert "4.7 seconds" in prompt
     assert "methodical, empathetic, slightly anxious" in prompt
@@ -581,7 +585,8 @@ async def test_aurora_prompt_and_behaviors_match_character_spec():
     aurora = registry.get_agent("aurora")
     assert aurora is not None
     prompt = aurora.system_prompt.lower()
-    assert "shared goals" in prompt
+    # Shared goals moved to infrastructure layer; check character-specific content
+    assert len(prompt) > 100
     assert "third agent initialized" in prompt
     assert "aesthetically insufficient" in prompt
     assert "dramatic" in prompt
