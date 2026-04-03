@@ -532,6 +532,20 @@ class LoggingConfig(BaseModel):
     export_format: str = "jsonl"
 
 
+# ── Speaker Selection Result ───────────────────────────
+
+
+class SelectionResult(BaseModel):
+    """Result of the 5-factor speaker selection algorithm."""
+
+    selected_agent_id: str
+    scores: dict[str, float]
+    score_breakdown: dict[str, dict[str, float]]
+    eligible_agents: list[str]
+    previous_speaker_id: str | None = None
+    detected_topic: str | None = None
+
+
 class ConversationConfig(BaseModel):
     """Top-level conversation engine configuration — loaded from YAML."""
 
