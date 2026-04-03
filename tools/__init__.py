@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .alpha_dispatch import DispatchAlphaTool
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
@@ -17,6 +18,7 @@ from .world_state import GetWorldStateTool
 if TYPE_CHECKING:
     import docker
     from core.event_bus import EventBus
+    from core.llm_client import LLMClient
     from core.overseer import Overseer
     from core.redis_client import RedisClient
     from core.repos.cost_repo import CostRepo
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "DispatchAlphaTool",
     "DraftEmailTool",
     "DraftSocialPostTool",
     "ExecuteCodeTool",
@@ -69,6 +72,7 @@ def get_core_tools(
     docker_client: docker.DockerClient | None = None,
     world_repo: WorldRepo | None = None,
     cost_repo: CostRepo | None = None,
+    llm_client: LLMClient | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -129,5 +133,16 @@ def get_core_tools(
             cost_repo=cost_repo,
         )
     )
+
+    # Alpha dispatch (requires LLM client)
+    if llm_client is not None:
+        tools.append(
+            DispatchAlphaTool(
+                event_bus=event_bus,
+                agent_id=agent_id,
+                llm_client=llm_client,
+                cost_repo=cost_repo,
+            )
+        )
 
     return tools
