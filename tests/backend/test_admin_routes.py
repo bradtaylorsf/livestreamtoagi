@@ -156,9 +156,10 @@ class TestAgentEndpoints:
         data = resp.json()
         assert data["id"] == "vera"
         assert data["display_name"] == "Vera"
-        assert data["model_conversation"] == "claude-haiku-4-5"
-        assert data["chattiness"] == 0.7
+        assert data["conversation_model"] == "claude-haiku-4-5"
+        assert data["personality_traits"]["chattiness"] == 0.7
         assert data["behaviors"] == {"tone": "professional"}
+        assert data["voice"] is not None
 
     def test_get_agent_not_found(self, mock_app):
         client, _, _ = mock_app
@@ -179,12 +180,15 @@ class TestAgentEndpoints:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["agent_id"] == "vera"
-        assert "infrastructure" in data["layers"]
-        assert "character" in data["layers"]
-        assert "memory" in data["layers"]
-        assert data["layers"]["character"] == "You are Vera, the showrunner."
-        assert data["layers"]["memory"] == "I am Vera's core memory."
+        assert isinstance(data["layers"], list)
+        layer_names = [l["name"] for l in data["layers"]]
+        assert "Infrastructure" in layer_names
+        assert "Character" in layer_names
+        assert "Memory Context" in layer_names
+        char_layer = next(l for l in data["layers"] if l["name"] == "Character")
+        assert char_layer["content"] == "You are Vera, the showrunner."
+        assert char_layer["token_count"] > 0
+        assert data["total_tokens"] > 0
         # Assembled prompt should contain all non-empty layers
         assert "You are Vera" in data["assembled_prompt"]
 
@@ -205,7 +209,9 @@ class TestAgentEndpoints:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["current"]["content"] == "core content"
+        assert data["current_content"] == "core content"
+        assert data["current_version"] == 2
+        assert data["token_count"] == 5
         assert len(data["version_history"]) == 2
 
     def test_get_agent_recall_memories_paginated(self, mock_app):
