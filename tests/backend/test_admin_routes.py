@@ -24,9 +24,8 @@ from core.models import (
     Simulation,
 )
 
-# Set required env vars before any imports that need them
-os.environ.setdefault("OPENROUTER_API_KEY", "test-key-for-testing")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5434/test")
+# Env vars needed by core.main import are set inside the mock_app fixture
+# via patch.dict to avoid polluting other test modules.
 
 
 # ── Fixtures ───────────────────────────────────────────────────
@@ -116,7 +115,12 @@ def mock_app():
     mock_redis.disconnect = AsyncMock()
     mock_redis.ping = AsyncMock(return_value=True)
 
+    env_overrides = {
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key-for-unit-tests",
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
+    }
     with (
+        patch.dict(os.environ, env_overrides),
         patch("core.main.db", mock_db),
         patch("core.main.redis_client", mock_redis),
         patch("core.main.agent_registry", mock_registry),
