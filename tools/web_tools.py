@@ -81,9 +81,9 @@ class WebSearchTool(BaseTool):
 
         # Rate limiting via Redis INCR + EXPIRE
         rate_key = f"web_search:rate:{self._agent_id}"
-        count = await self._redis.client.incr(rate_key)
+        count = await self._redis.incr(rate_key)
         if count == 1:
-            await self._redis.client.expire(rate_key, RATE_LIMIT_TTL)
+            await self._redis.expire(rate_key, RATE_LIMIT_TTL)
         if count > RATE_LIMIT_MAX:
             return {
                 "status": "rate_limited",

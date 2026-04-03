@@ -12,6 +12,7 @@ from .code_execution import ExecuteCodeTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
+from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
 from .tilemap_gen import GenerateTilemapTool
 from .web_tools import FetchUrlTool, WebSearchTool
 from .world_state import GetWorldStateTool
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from core.overseer import Overseer
     from core.redis_client import RedisClient
     from core.repos.cost_repo import CostRepo
+    from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
 
 __all__ = [
@@ -41,12 +43,14 @@ __all__ = [
     "GetPollResultsTool",
     "GetRevenueStatusTool",
     "GetWorldStateTool",
+    "ProposeSelfModificationTool",
     "RecallMemoryTool",
     "RetrieveTranscriptTool",
     "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
     "UpdateCoreMemoryTool",
+    "ViewEvolutionLogTool",
     "WebSearchTool",
     "get_core_tools",
     "get_memory_tools",
@@ -81,6 +85,7 @@ def get_core_tools(
     world_repo: WorldRepo | None = None,
     cost_repo: CostRepo | None = None,
     llm_client: LLMClient | None = None,
+    memory_repo: MemoryRepo | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -151,6 +156,15 @@ def get_core_tools(
                 llm_client=llm_client,
                 cost_repo=cost_repo,
             )
+        )
+
+    # Self-modification tools (available to all agents)
+    if memory_repo is not None:
+        tools.append(
+            ProposeSelfModificationTool(agent_id=agent_id, memory_repo=memory_repo)
+        )
+        tools.append(
+            ViewEvolutionLogTool(agent_id=agent_id, memory_repo=memory_repo)
         )
 
     return tools

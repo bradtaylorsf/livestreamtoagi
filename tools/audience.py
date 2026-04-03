@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import TYPE_CHECKING, Any
 
-from .base import BaseTool
+from .base import BaseTool, parse_json
 
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
-
-logger = logging.getLogger(__name__)
 
 
 class GetAudienceStatusTool(BaseTool):
@@ -31,8 +27,8 @@ class GetAudienceStatusTool(BaseTool):
 
         return {
             "viewer_count": _parse_int(viewer_count_raw, 0),
-            "recent_chat_messages": _parse_json(chat_raw, []),
-            "active_polls": _parse_json(polls_raw, []),
+            "recent_chat_messages": parse_json(chat_raw, []),
+            "active_polls": parse_json(polls_raw, []),
         }
 
 
@@ -42,14 +38,4 @@ def _parse_int(raw: str | None, default: int) -> int:
     try:
         return int(raw)
     except (ValueError, TypeError):
-        return default
-
-
-def _parse_json(raw: str | None, default: Any) -> Any:
-    if raw is None:
-        return default
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("Failed to parse Redis value as JSON: %s", raw[:100] if raw else raw)
         return default

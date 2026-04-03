@@ -172,7 +172,10 @@ class SelfModificationProposal(BaseModel):
     proposal_type: str
     description: str
     reasoning: str
-    status: str = "pending"
+    file: str | None = None
+    new_content: str | None = None
+    impact_notes: str | None = None
+    status: str = "queued_for_review"
     created_at: datetime | None = None
     reviewed_at: datetime | None = None
     reviewed_by: str | None = None
@@ -183,6 +186,9 @@ class SelfModificationProposalCreate(BaseModel):
     proposal_type: str
     description: str
     reasoning: str
+    file: str | None = None
+    new_content: str | None = None
+    impact_notes: str | None = None
 
 
 # ── Reflection Result ───────────────────────────────────────────

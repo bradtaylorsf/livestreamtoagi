@@ -31,11 +31,8 @@ def event_bus() -> AsyncMock:
 @pytest.fixture
 def redis_client() -> AsyncMock:
     client = AsyncMock()
-    # The underlying redis client (accessed via .client property)
-    inner = AsyncMock()
-    inner.incr = AsyncMock(return_value=1)
-    inner.expire = AsyncMock()
-    client.client = inner
+    client.incr = AsyncMock(return_value=1)
+    client.expire = AsyncMock()
     return client
 
 
@@ -258,7 +255,7 @@ class TestWebSearchRateLimiting:
         redis_client: AsyncMock,
         mock_http_client: AsyncMock,
     ) -> None:
-        redis_client.client.incr = AsyncMock(return_value=5)
+        redis_client.incr = AsyncMock(return_value=5)
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"web": {"results": []}}
@@ -280,7 +277,7 @@ class TestWebSearchRateLimiting:
         redis_client: AsyncMock,
         mock_http_client: AsyncMock,
     ) -> None:
-        redis_client.client.incr = AsyncMock(return_value=RATE_LIMIT_MAX)
+        redis_client.incr = AsyncMock(return_value=RATE_LIMIT_MAX)
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"web": {"results": []}}
@@ -299,7 +296,7 @@ class TestWebSearchRateLimiting:
     async def test_over_limit_rejected(
         self, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
-        redis_client.client.incr = AsyncMock(return_value=RATE_LIMIT_MAX + 1)
+        redis_client.incr = AsyncMock(return_value=RATE_LIMIT_MAX + 1)
 
         tool = WebSearchTool(event_bus=event_bus, redis_client=redis_client, agent_id="pixel")
         with patch.dict("os.environ", {"SEARCH_API_KEY": "key"}):
@@ -310,7 +307,7 @@ class TestWebSearchRateLimiting:
     async def test_first_request_sets_ttl(
         self, event_bus: AsyncMock, redis_client: AsyncMock, mock_http_client: AsyncMock
     ) -> None:
-        redis_client.client.incr = AsyncMock(return_value=1)
+        redis_client.incr = AsyncMock(return_value=1)
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"web": {"results": []}}
@@ -325,14 +322,14 @@ class TestWebSearchRateLimiting:
         with patch.dict("os.environ", {"SEARCH_API_KEY": "key"}):
             await tool.execute(query="test")
 
-        redis_client.client.expire.assert_called_once_with(
+        redis_client.expire.assert_called_once_with(
             "web_search:rate:pixel", 3600
         )
 
     async def test_subsequent_request_no_ttl_reset(
         self, event_bus: AsyncMock, redis_client: AsyncMock, mock_http_client: AsyncMock
     ) -> None:
-        redis_client.client.incr = AsyncMock(return_value=3)
+        redis_client.incr = AsyncMock(return_value=3)
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"web": {"results": []}}
@@ -347,7 +344,7 @@ class TestWebSearchRateLimiting:
         with patch.dict("os.environ", {"SEARCH_API_KEY": "key"}):
             await tool.execute(query="test")
 
-        redis_client.client.expire.assert_not_called()
+        redis_client.expire.assert_not_called()
 
 
 # --- FetchUrlTool interface ---
