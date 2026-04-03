@@ -27,6 +27,7 @@ class EventType(str, Enum):
     ALPHA_RETURN = "alpha_return"
     OVERSEER_WARNING = "overseer_warning"
     OVERSEER_INTERVENTION = "overseer_intervention"
+    OVERSEER_SHADOW = "overseer_shadow"
     WORLD_EXPANSION = "world_expansion"
     POLL_CREATED = "poll_created"
     POLL_RESULT = "poll_result"

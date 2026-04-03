@@ -318,7 +318,7 @@ class TestEventTypeEnum:
         expected = {
             "agent_speak", "agent_move", "agent_action",
             "alpha_dispatch", "alpha_return",
-            "overseer_warning", "overseer_intervention",
+            "overseer_warning", "overseer_intervention", "overseer_shadow",
             "world_expansion",
             "poll_created", "poll_result",
             "budget_update", "viewer_count",

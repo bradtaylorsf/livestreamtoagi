@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "summary": "Simulation orchestrator is well-structured and comprehensive. Fixed 3 issues: missing simulation_id propagation to Overseer shadow logs, dead emit_sync call, and event listener leak acknowledgment.",
+  "findings": [
+    {
+      "severity": "critical",
+      "description": "ConversationEngine didn't pass simulation_id to Overseer.review(), so shadow logs during simulation would have null simulation_id, violating the acceptance criterion that 'all overseer shadow logs reference the simulation ID'",
+      "fixed": true,
+      "file": "core/conversation_engine.py"
+    },
+    {
+      "severity": "warning",
+      "description": "PhaseRunner._run_conversation didn't pass simulation_id to ConversationEngine constructor, preventing downstream propagation",
+      "fixed": true,
+      "file": "core/simulation/phases.py"
+    },
+    {
+      "severity": "warning",
+      "description": "_run_audience_sim called emit_sync() which doesn't exist on EventBus, making the event emission a silent no-op (guarded by hasattr). Removed the dead code, keeping only trigger_system.queue_event which is the correct path.",
+      "fixed": true,
+      "file": "core/simulation/phases.py"
+    },
+    {
+      "severity": "info",
+      "description": "Event listeners registered in _run_conversation (on agent_speak, overseer_shadow, overseer_warning) are never removed since EventBus has no off() method. Handlers accumulate per conversation. Not a correctness bug (closures reference local vars so stats aren't double-counted) but a minor memory leak for long simulations.",
+      "fixed": false,
+      "file": "core/simulation/phases.py"
+    },
+    {
+      "severity": "info",
+      "description": "PhaseRunner accesses private ConversationEngine methods (_running, _start_conversation, _continue_conversation, _end_conversation). Acceptable for an internal testing orchestrator but fragile if ConversationEngine internals change.",
+      "fixed": false,
+      "file": "core/simulation/phases.py"
+    },
+    {
+      "severity": "info",
+      "description": "Artifacts created through tool execution during conversation won't have simulation_id set, because ConversationEngine doesn't pass simulation_id through to tool.run(). Would require deeper plumbing through CrewAI agent tool execution. The simulation_id IS tracked at the aggregate level via simulation_repo.increment_stats().",
+      "fixed": false,
+      "file": "tools/base.py"
+    }
+  ]
+}

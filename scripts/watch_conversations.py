@@ -185,6 +185,14 @@ def print_overseer_action(agent_id: str, severity: int, reason: str) -> None:
     )
 
 
+def print_overseer_shadow(agent_id: str, severity: int, action: str, reason: str) -> None:
+    console.print(
+        f"  [dim][bright_white]OVERSEER[/bright_white] "
+        f"SHADOW would-{action} (sev={severity}) "
+        f"Agent {agent_id}: {reason}[/dim]"
+    )
+
+
 def print_summary(stats: SessionStats) -> None:
     elapsed = time.monotonic() - stats.start_time
     console.print()
@@ -256,10 +264,21 @@ def make_event_handlers(
             data.get("reason", ""),
         )
 
+    async def on_overseer_shadow(event: dict) -> None:
+        data = event.get("data", event)
+        stats.overseer_actions += 1
+        print_overseer_shadow(
+            data.get("agent_id", "unknown"),
+            data.get("severity", 1),
+            data.get("action_would_take", "flag"),
+            data.get("reason", ""),
+        )
+
     return {
         "agent_speak": on_agent_speak,
         "overseer_warning": on_overseer_warning,
         "overseer_intervention": on_overseer_intervention,
+        "overseer_shadow": on_overseer_shadow,
     }
 
 
@@ -379,10 +398,13 @@ async def run_watch(args: argparse.Namespace) -> None:
     )
 
     conversation_repo = ConversationRepo(db)
+    overseer_shadow = getattr(args, "overseer_shadow", False)
     overseer = Overseer(
         redis_client=redis_client,
         llm_client=llm_client,
         event_bus=event_bus,
+        shadow_mode=overseer_shadow,
+        db=db if overseer_shadow else None,
     )
 
     proximity = ProximityManager(redis_client, cfg, event_bus)
@@ -392,7 +414,11 @@ async def run_watch(args: argparse.Namespace) -> None:
     speed = float(args.speed) if hasattr(args, "speed") and args.speed is not None else 1.0
 
     overseer_enabled = not getattr(args, "no_overseer", False)
-    if not overseer_enabled:
+    if overseer_shadow:
+        # Shadow mode: keep overseer enabled but in log-only mode
+        overseer_enabled = True
+        console.print("[dim]Overseer in shadow/log-only mode[/dim]")
+    elif not overseer_enabled:
         console.print("[yellow]Overseer disabled for testing[/yellow]")
 
     engine = ConversationEngine(
@@ -588,7 +614,12 @@ def main() -> None:
     parser.add_argument(
         "--no-overseer",
         action="store_true",
-        help="Disable Overseer content filter (for testing)",
+        help="Disable Overseer content filter entirely (for testing)",
+    )
+    parser.add_argument(
+        "--overseer-shadow",
+        action="store_true",
+        help="Run Overseer in shadow/log-only mode (filters run but never block)",
     )
 
     args = parser.parse_args()

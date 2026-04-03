@@ -23,6 +23,10 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -434,6 +438,9 @@ async def execute_tool_calls(
     tools: dict,
     agent_id: str,
     verbose: bool = False,
+    *,
+    simulation_id: UUID | None = None,
+    conversation_id: UUID | None = None,
 ) -> list[dict]:
     """Execute tool calls and return tool result messages for the LLM."""
     results = []
@@ -445,7 +452,12 @@ async def execute_tool_calls(
             try:
                 if verbose:
                     console.print(f"    [dim]→ {tc.name}({json.dumps(tc.arguments, default=str)[:200]})[/dim]")
-                result = await tool.execute(**tc.arguments)
+                result = await tool.run(
+                    agent_id=agent_id,
+                    simulation_id=simulation_id,
+                    conversation_id=conversation_id,
+                    **tc.arguments,
+                )
                 result_content = json.dumps(result, default=str)
             except Exception as exc:
                 result_content = json.dumps({"status": "error", "reason": str(exc)})

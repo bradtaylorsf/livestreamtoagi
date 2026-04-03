@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 import uuid  # noqa: TC003
-from datetime import datetime  # noqa: TC003
+from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from typing import Any, Literal
 
@@ -612,6 +612,100 @@ class SelectionResult(BaseModel):
     was_interrupt: bool = False
     interrupted_agent_id: str | None = None
     interrupt_attempts: list[InterruptAttempt] = []
+
+
+# ── Artifacts ──────────────────────────────────────────────────
+
+
+# Maps tool names to artifact_type values
+ARTIFACT_TYPE_MAP: dict[str, str] = {
+    "draft_social_post": "social_post",
+    "draft_email": "email",
+    "execute_code": "code_execution",
+    "web_search": "web_search",
+    "fetch_url": "web_search",
+    "generate_tilemap": "tilemap",
+    "create_poll": "poll",
+    "recall_memory": "memory_operation",
+    "update_core_memory": "memory_operation",
+    "retrieve_transcript": "memory_operation",
+    "dispatch_alpha": "alpha_dispatch",
+    "propose_self_modification": "self_modification",
+    "view_evolution_log": "self_modification",
+    "send_message": "message",
+}
+
+# Tools whose artifacts should default to pending_approval status
+PENDING_APPROVAL_TOOLS: set[str] = {"draft_social_post", "draft_email"}
+
+
+class Artifact(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    simulation_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
+    agent_id: str
+    tool_name: str
+    tool_input: dict[str, Any] | None = None
+    tool_output: dict[str, Any] | None = None
+    artifact_type: str
+    status: str = "executed"
+    metadata: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
+class ArtifactCreate(BaseModel):
+    simulation_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
+    agent_id: str
+    tool_name: str
+    tool_input: dict[str, Any] | None = None
+    tool_output: dict[str, Any] | None = None
+    artifact_type: str
+    status: str = "executed"
+    metadata: dict[str, Any] | None = None
+
+
+# ── Simulations ──────────────────────────────────────────────────
+
+
+class SimulationStatus(enum.StrEnum):
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class SimulationCreate(BaseModel):
+    name: str
+    description: str | None = None
+    config: dict[str, Any]
+    status: str = "running"
+    simulated_duration: timedelta | None = None
+    agents_participated: list[str] = Field(default_factory=list)
+    error_log: dict[str, Any] | list[Any] | None = None
+
+
+class Simulation(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    config: dict[str, Any]
+    status: str = "running"
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    simulated_duration: timedelta | None = None
+    real_duration: timedelta | None = None
+    total_conversations: int = 0
+    total_turns: int = 0
+    total_tokens: int = 0
+    total_cost: Decimal = Decimal("0")
+    total_artifacts: int = 0
+    total_overseer_flags: int = 0
+    agents_participated: list[str] = Field(default_factory=list)
+    error_log: dict[str, Any] | list[Any] | None = None
+    created_at: datetime | None = None
 
 
 class ConversationConfig(BaseModel):
