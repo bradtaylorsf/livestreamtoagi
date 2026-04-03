@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from starlette.staticfiles import StaticFiles
 
 from core.agent_registry import AgentRegistry
 from core.config_loader import ConfigLoader
@@ -32,9 +33,11 @@ async def lifespan(app: FastAPI):
     from core.memory.token_counter import TokenCounter
     from core.repos.cost_repo import CostRepo
     from core.repos.memory_repo import MemoryRepo
+    from core.tts import TTSPipeline
 
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     llm_client = None
+    tts_pipeline = TTSPipeline()
 
     try:
         await db.connect()
@@ -60,8 +63,12 @@ async def lifespan(app: FastAPI):
         if api_key:
             start_scheduler(reflection_mgr, agent_registry)
 
+        app.mount("/audio", StaticFiles(directory=str(tts_pipeline.audio_dir)), name="audio")
+        app.state.tts_pipeline = tts_pipeline
+
         yield
     finally:
+        await tts_pipeline.shutdown()
         await config_loader.stop_watching()
         stop_scheduler()
         if api_key and llm_client:
