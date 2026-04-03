@@ -128,6 +128,47 @@ class TestSpeakUnit:
         assert len(uuid_part) == 36
 
 
+class TestActionTagStripping:
+    """Verify that [action] tags are stripped before passing text to Edge TTS."""
+
+    async def test_speak_strips_action_tags(self, tmp_path: "Path") -> None:
+        pipeline = TTSPipeline(audio_dir=tmp_path)
+
+        mock_comm = MagicMock()
+        mock_comm.save = AsyncMock()
+
+        with (
+            patch("core.tts.edge_tts.Communicate", return_value=mock_comm) as mock_ctor,
+            patch("core.tts._get_duration", new_callable=AsyncMock, return_value=1.0),
+            patch("core.tts.event_bus.emit", new_callable=AsyncMock),
+        ):
+            await pipeline.speak(
+                "rex", "[action]cracks knuckles[/action] Let me fix that."
+            )
+
+        mock_ctor.assert_called_once_with("Let me fix that.", "en-US-GuyNeural")
+
+    async def test_speak_falls_back_to_raw_when_dialogue_empty(
+        self, tmp_path: "Path"
+    ) -> None:
+        pipeline = TTSPipeline(audio_dir=tmp_path)
+
+        mock_comm = MagicMock()
+        mock_comm.save = AsyncMock()
+
+        with (
+            patch("core.tts.edge_tts.Communicate", return_value=mock_comm) as mock_ctor,
+            patch("core.tts._get_duration", new_callable=AsyncMock, return_value=1.0),
+            patch("core.tts.event_bus.emit", new_callable=AsyncMock),
+        ):
+            await pipeline.speak("rex", "[action]waves silently[/action]")
+
+        # Falls back to raw text since dialogue is empty
+        mock_ctor.assert_called_once_with(
+            "[action]waves silently[/action]", "en-US-GuyNeural"
+        )
+
+
 class TestOverseerPostProcessing:
     """Overseer audio gets ffmpeg post-processing."""
 

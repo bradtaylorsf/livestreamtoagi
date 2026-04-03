@@ -44,6 +44,7 @@ AGENTS = [
 SINGLE_MODES = [
     ("chat", "Interactive chat (REPL)", "--interactive"),
     ("auto", "Automated test sequence (5 prompts)", "--auto"),
+    ("diagnostic", "Diagnostic — test all tools through agent pipeline", "--diagnostic"),
     ("reflect", "Run reflection cycle (updates core memory)", "--reflect"),
     ("dry-run", "Dry-run — show context assembly, no LLM calls", "--dry-run"),
 ]
@@ -299,7 +300,12 @@ def run_convo(
         console.print("\n[dim]Conversation ended.[/dim]")
 
 
-def run_single(agent_id: str, mode: str, verbose: bool = False) -> None:
+def run_single(
+    agent_id: str,
+    mode: str,
+    verbose: bool = False,
+    tts: bool = False,
+) -> None:
     """Delegate to test_agent.py with the right flags."""
     from scripts.test_agent import async_main, parse_args
     import asyncio
@@ -308,6 +314,8 @@ def run_single(agent_id: str, mode: str, verbose: bool = False) -> None:
     argv = ["--agent", agent_id, flag_map.get(mode, "--interactive")]
     if verbose:
         argv.append("--verbose")
+    if tts:
+        argv.append("--tts")
 
     args = parse_args(argv)
     try:
@@ -401,13 +409,16 @@ def main() -> None:
 
         mode = "chat"
         verbose = False
+        tts = False
         for arg in args[1:]:
-            if arg.lower() in ("auto", "dry-run", "chat", "reflect"):
+            if arg.lower() in ("auto", "dry-run", "chat", "reflect", "diagnostic"):
                 mode = arg.lower()
             elif arg in ("-v", "--verbose"):
                 verbose = True
+            elif arg == "--tts":
+                tts = True
 
-        run_single(agent_id, mode, verbose)
+        run_single(agent_id, mode, verbose, tts=tts)
         return
 
     # ── Interactive menu ──
@@ -423,11 +434,14 @@ def main() -> None:
     console.print("  [bold bright_cyan]Options:[/bold bright_cyan]")
     verbose = False
     no_overseer = False
+    tts = False
     try:
         opts = console.input(
-            "[bold]Options (v=verbose, n=no-overseer, vn=both, Enter=skip): [/bold]"
+            "[bold]Options (v=verbose, t=TTS voice, "
+            "n=no-overseer, Enter=skip): [/bold]"
         ).strip().lower()
         verbose = "v" in opts
+        tts = "t" in opts
         no_overseer = "n" in opts
     except (EOFError, KeyboardInterrupt):
         pass
@@ -449,7 +463,7 @@ def main() -> None:
         console.print("[dim]Goodbye.[/dim]")
         return
 
-    run_single(agent_id, mode, verbose=verbose)
+    run_single(agent_id, mode, verbose=verbose, tts=tts)
 
 
 if __name__ == "__main__":

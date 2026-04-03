@@ -18,6 +18,7 @@ from core.conversation.speaker_selector import InterruptState, SpeakerSelector
 from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
 from core.models import ConversationCreate
+from core.speech_parser import parse_speech
 
 if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
@@ -181,9 +182,7 @@ class ConversationEngine:
 
         # Get eligible agents (in the area, active, not muted)
         all_agents = self._agents.get_all_agents()
-        eligible = await self._proximity.get_eligible_speakers(
-            location, all_agents
-        )
+        eligible = await self._proximity.get_eligible_speakers(location, all_agents)
         eligible = [a for a in eligible if not self._is_muted(a)]
 
         if not eligible:
@@ -244,11 +243,14 @@ class ConversationEngine:
             {"role": "assistant", "speaker": opening_agent.id, "content": content}
         )
 
+        _parsed = parse_speech(content)
         await self._event_bus.emit(
             EventType.AGENT_SPEAK.value,
             {
                 "agent_id": opening_agent.id,
                 "content": content,
+                "dialogue": _parsed.dialogue,
+                "actions": _parsed.actions,
                 "conversation_id": str(self._active.id),
                 "turn": 1,
                 "trigger_type": trigger_type,
@@ -311,17 +313,15 @@ class ConversationEngine:
         if not conv.energy.should_continue:
             logger.info(
                 "Energy check: ending (energy=%.1f, turns=%d, min=%d, max=%d)",
-                conv.energy.energy, conv.energy.turn_count,
-                cfg.energy.minimum_turns, cfg.energy.maximum_turns,
+                conv.energy.energy,
+                conv.energy.turn_count,
+                cfg.energy.minimum_turns,
+                cfg.energy.maximum_turns,
             )
             return False
 
         # Get eligible agents for this turn
-        eligible = [
-            a
-            for a in all_agents
-            if a.id in conv.participants and not self._is_muted(a)
-        ]
+        eligible = [a for a in all_agents if a.id in conv.participants and not self._is_muted(a)]
         if not eligible:
             logger.warning("No eligible agents for turn %d", conv.turn_number + 1)
             return False
@@ -341,9 +341,7 @@ class ConversationEngine:
             result.was_interrupt,
         )
 
-        selected_agent = next(
-            (a for a in eligible if a.id == result.selected_agent_id), None
-        )
+        selected_agent = next((a for a in eligible if a.id == result.selected_agent_id), None)
         if selected_agent is None:
             logger.warning("Selected agent %s not in eligible list", result.selected_agent_id)
             return False
@@ -357,23 +355,22 @@ class ConversationEngine:
 
         # Generate turn
         conv.turn_number += 1
-        content = await self._generate_turn(
-            selected_agent, prompt_hint=hint, history=conv.history
-        )
+        content = await self._generate_turn(selected_agent, prompt_hint=hint, history=conv.history)
         if content is None:
             conv.turn_number -= 1
             return True  # Skip this turn but keep going
 
-        conv.history.append(
-            {"role": "assistant", "speaker": selected_agent.id, "content": content}
-        )
+        conv.history.append({"role": "assistant", "speaker": selected_agent.id, "content": content})
 
         # Emit speak event
+        _parsed = parse_speech(content)
         await self._event_bus.emit(
             EventType.AGENT_SPEAK.value,
             {
                 "agent_id": selected_agent.id,
                 "content": content,
+                "dialogue": _parsed.dialogue,
+                "actions": _parsed.actions,
                 "conversation_id": str(conv.id),
                 "turn": conv.turn_number,
                 "topic": topic,
@@ -388,7 +385,10 @@ class ConversationEngine:
         energy_changes = conv.energy.tick(topic, events=events)
         logger.debug(
             "Energy after tick: %.1f (turn_count=%d, changes=%s, should_continue=%s)",
-            conv.energy.energy, conv.energy.turn_count, energy_changes, conv.energy.should_continue,
+            conv.energy.energy,
+            conv.energy.turn_count,
+            energy_changes,
+            conv.energy.should_continue,
         )
 
         # Log selection, energy, interrupts
@@ -409,9 +409,7 @@ class ConversationEngine:
         )
 
         # Variable pacing
-        pause = calculate_pause(
-            content, cfg.timing, is_interrupt=result.was_interrupt
-        )
+        pause = calculate_pause(content, cfg.timing, is_interrupt=result.was_interrupt)
         await self._sleep(pause)
 
         return conv.energy.should_continue
@@ -432,19 +430,18 @@ class ConversationEngine:
         closer = next((a for a in all_agents if a.id == closer_id), None)
 
         if closer is not None:
-            content = await self._generate_turn(
-                closer, prompt_hint="closing", history=conv.history
-            )
+            content = await self._generate_turn(closer, prompt_hint="closing", history=conv.history)
             if content:
                 conv.turn_number += 1
-                conv.history.append(
-                    {"role": "assistant", "speaker": closer.id, "content": content}
-                )
+                conv.history.append({"role": "assistant", "speaker": closer.id, "content": content})
+                _parsed = parse_speech(content)
                 await self._event_bus.emit(
                     EventType.AGENT_SPEAK.value,
                     {
                         "agent_id": closer.id,
                         "content": content,
+                        "dialogue": _parsed.dialogue,
+                        "actions": _parsed.actions,
                         "conversation_id": str(conv.id),
                         "turn": conv.turn_number,
                         "is_closing": True,
@@ -463,8 +460,7 @@ class ConversationEngine:
 
         # Store transcript to archival memory
         transcript_content = "\n".join(
-            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
-            for msg in conv.history
+            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}" for msg in conv.history
         )
         await self._archival.store_transcript(
             event_type=conv.trigger.get("type", "idle"),

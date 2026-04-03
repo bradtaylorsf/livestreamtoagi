@@ -71,8 +71,20 @@ class RedisClient:
     async def delete(self, *keys: str) -> int:
         return await self.client.delete(*keys)
 
+    async def incr(self, key: str) -> int:
+        return await self.client.incr(key)
+
     async def expire(self, key: str, seconds: int) -> bool:
         return await self.client.expire(key, seconds)
+
+    async def rpush(self, key: str, *values: str) -> int:
+        return await self.client.rpush(key, *values)
+
+    async def ltrim(self, key: str, start: int, stop: int) -> bool:
+        return await self.client.ltrim(key, start, stop)
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        return await self.client.lrange(key, start, stop)
 
     async def publish(self, channel: str, message: str) -> int:
         return await self.client.publish(channel, message)

@@ -204,10 +204,10 @@ class TestGetAudienceStatus:
         redis_client.get = AsyncMock(
             side_effect=lambda key: {
                 "audience:viewer_count": "142",
-                "audience:recent_chat": json.dumps(chat),
                 "audience:active_polls": json.dumps(polls),
             }.get(key)
         )
+        redis_client.lrange = AsyncMock(return_value=[json.dumps(chat[0])])
 
         result = await get_audience_status.execute()
 
@@ -219,6 +219,7 @@ class TestGetAudienceStatus:
         self, get_audience_status: GetAudienceStatusTool, redis_client: AsyncMock
     ) -> None:
         redis_client.get = AsyncMock(return_value=None)
+        redis_client.lrange = AsyncMock(return_value=[])
 
         result = await get_audience_status.execute()
 
@@ -232,10 +233,10 @@ class TestGetAudienceStatus:
         redis_client.get = AsyncMock(
             side_effect=lambda key: {
                 "audience:viewer_count": "not-a-number",
-                "audience:recent_chat": None,
                 "audience:active_polls": None,
             }.get(key)
         )
+        redis_client.lrange = AsyncMock(return_value=[])
 
         result = await get_audience_status.execute()
         assert result["viewer_count"] == 0
@@ -269,16 +270,38 @@ class TestToolRegistry:
             registry.register(tool)
 
         names = registry.names()
-        assert sorted(names) == ["get_audience_status", "get_world_state", "send_message"]
+        assert sorted(names) == [
+            "create_poll",
+            "draft_email",
+            "draft_social_post",
+            "execute_code",
+            "fetch_url",
+            "get_audience_status",
+            "get_poll_results",
+            "get_world_state",
+            "send_message",
+            "web_search",
+        ]
 
     def test_get_core_tools_returns_all_three(
         self, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
         tools = get_core_tools(event_bus, redis_client, agent_id="vera")
-        assert len(tools) == 3
+        assert len(tools) == 10
 
         tool_names = {t.name for t in tools}
-        assert tool_names == {"send_message", "get_world_state", "get_audience_status"}
+        assert tool_names == {
+            "send_message",
+            "get_world_state",
+            "get_audience_status",
+            "get_poll_results",
+            "create_poll",
+            "execute_code",
+            "draft_social_post",
+            "draft_email",
+            "web_search",
+            "fetch_url",
+        }
 
         for tool in tools:
             assert isinstance(tool, BaseTool)

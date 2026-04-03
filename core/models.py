@@ -172,7 +172,10 @@ class SelfModificationProposal(BaseModel):
     proposal_type: str
     description: str
     reasoning: str
-    status: str = "pending"
+    file: str | None = None
+    new_content: str | None = None
+    impact_notes: str | None = None
+    status: str = "queued_for_review"
     created_at: datetime | None = None
     reviewed_at: datetime | None = None
     reviewed_by: str | None = None
@@ -183,6 +186,9 @@ class SelfModificationProposalCreate(BaseModel):
     proposal_type: str
     description: str
     reasoning: str
+    file: str | None = None
+    new_content: str | None = None
+    impact_notes: str | None = None
 
 
 # ── Reflection Result ───────────────────────────────────────────
@@ -446,6 +452,14 @@ class ContentReviewResult(BaseModel):
 
 # ── LLM Client ─────────────────────────────────────────────────
 
+class ToolCall(BaseModel):
+    """A single tool/function call requested by the LLM."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class LLMResponse(BaseModel):
     content: str
     model: str
@@ -454,6 +468,7 @@ class LLMResponse(BaseModel):
     estimated_cost: Decimal
     latency_ms: int
     openrouter_id: str | None = None
+    tool_calls: list[ToolCall] = Field(default_factory=list)
 
 
 class StreamChunk(BaseModel):

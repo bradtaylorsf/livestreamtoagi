@@ -344,6 +344,10 @@ class TestTriggerStartsConversation:
         mock_event_bus.emit.assert_awaited()
         call_args = mock_event_bus.emit.call_args
         assert call_args[0][0] == EventType.AGENT_SPEAK.value
+        payload = call_args[0][1]
+        assert "dialogue" in payload
+        assert "actions" in payload
+        assert isinstance(payload["actions"], list)
 
     async def test_trigger_notifies_speech(
         self, engine: ConversationEngine, mock_trigger_system: MagicMock
@@ -390,6 +394,10 @@ class TestConversationFlow:
         mock_event_bus.emit.assert_awaited()
         call_args = mock_event_bus.emit.call_args
         assert call_args[0][0] == EventType.AGENT_SPEAK.value
+        payload = call_args[0][1]
+        assert "dialogue" in payload
+        assert "actions" in payload
+        assert isinstance(payload["actions"], list)
 
         # Logged selection and energy
         mock_selection_logger.log_selection.assert_awaited()
@@ -462,6 +470,9 @@ class TestEnergyDepletion:
         # The closing event should have is_closing=True
         last_speak_data = speak_events[-1][0][1]
         assert last_speak_data.get("is_closing") is True
+        assert "dialogue" in last_speak_data
+        assert "actions" in last_speak_data
+        assert isinstance(last_speak_data["actions"], list)
 
     async def test_end_conversation_resets_triggers(
         self,
