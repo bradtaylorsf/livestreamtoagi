@@ -1,0 +1,568 @@
+"""Tests for admin API endpoints (core/admin_routes.py)."""
+
+from __future__ import annotations
+
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from core.models import (
+    AgentConfig,
+    AgentStatus,
+    Conversation,
+    CoreMemory,
+    CoreMemoryHistory,
+    CostEvent,
+    JournalEntry,
+    RecallMemory,
+    SelectionLog,
+    Simulation,
+)
+
+# Env vars needed by core.main import are set inside the mock_app fixture
+# via patch.dict to avoid polluting other test modules.
+
+
+# ── Fixtures ───────────────────────────────────────────────────
+
+
+def _make_agent_config(**overrides) -> AgentConfig:
+    defaults = {
+        "id": "vera",
+        "display_name": "Vera",
+        "model_conversation": "claude-haiku-4-5",
+        "model_building": "claude-sonnet-4-6",
+        "voice_id": "en-US-AriaNeural",
+        "chattiness": 0.7,
+        "initiative": 0.8,
+        "interrupt_tendency": 0.2,
+        "eavesdrop_tendency": 0.1,
+        "closing_weight": 0.3,
+        "status": AgentStatus.active,
+        "system_prompt": "You are Vera, the showrunner.",
+        "behaviors": {"tone": "professional"},
+    }
+    defaults.update(overrides)
+    return AgentConfig(**defaults)
+
+
+def _make_conversation(**overrides) -> Conversation:
+    defaults = {
+        "id": uuid.uuid4(),
+        "started_at": datetime(2026, 4, 1, 12, 0, 0, tzinfo=timezone.utc),
+        "ended_at": None,
+        "trigger_type": "idle",
+        "trigger_details": None,
+        "initial_energy": 0.8,
+        "final_energy": None,
+        "turn_count": 5,
+        "participating_agents": ["vera", "rex"],
+        "topics_discussed": ["architecture"],
+        "closed_by": None,
+        "location": "main_hall",
+    }
+    defaults.update(overrides)
+    return Conversation(**defaults)
+
+
+def _make_simulation(**overrides) -> Simulation:
+    defaults = {
+        "id": uuid.uuid4(),
+        "name": "test-sim",
+        "config": {"seed": 42},
+        "status": "completed",
+        "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+        "total_conversations": 10,
+        "total_turns": 50,
+        "total_tokens": 5000,
+        "total_cost": Decimal("1.50"),
+        "total_artifacts": 3,
+        "total_overseer_flags": 0,
+        "agents_participated": ["vera", "rex"],
+    }
+    defaults.update(overrides)
+    return Simulation(**defaults)
+
+
+@pytest.fixture
+def mock_app():
+    """Create a TestClient with fully mocked dependencies."""
+    vera = _make_agent_config()
+    rex = _make_agent_config(
+        id="rex", display_name="Rex", chattiness=0.5,
+        initiative=0.6, interrupt_tendency=0.4,
+    )
+
+    mock_registry = MagicMock()
+    mock_registry.get_all_agents.return_value = [vera, rex]
+    mock_registry.get_agent.side_effect = lambda aid: {"vera": vera, "rex": rex}.get(aid)
+    mock_registry.load_all = AsyncMock()
+
+    mock_db = MagicMock()
+    mock_db.connect = AsyncMock()
+    mock_db.disconnect = AsyncMock()
+    mock_db.fetchval = AsyncMock(return_value=1)
+    mock_db.fetch = AsyncMock(return_value=[])
+    mock_db.fetchrow = AsyncMock(return_value=None)
+
+    mock_redis = MagicMock()
+    mock_redis.connect = AsyncMock()
+    mock_redis.disconnect = AsyncMock()
+    mock_redis.ping = AsyncMock(return_value=True)
+
+    env_overrides = {
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key-for-unit-tests",
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
+    }
+    with (
+        patch.dict(os.environ, env_overrides),
+        patch("core.main.db", mock_db),
+        patch("core.main.redis_client", mock_redis),
+        patch("core.main.agent_registry", mock_registry),
+        patch("core.admin_routes._get_db", return_value=mock_db),
+        patch("core.admin_routes._get_registry", return_value=mock_registry),
+    ):
+        from core.main import app
+        with TestClient(app) as client:
+            yield client, mock_db, mock_registry
+
+
+# ── Agent Endpoint Tests ───────────────────────────────────────
+
+
+class TestAgentEndpoints:
+    def test_list_agents(self, mock_app):
+        client, mock_db, _ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+
+        with patch("core.repos.cost_repo.CostRepo.get_costs_by_agent", new_callable=AsyncMock, return_value=[]):
+            resp = client.get("/api/admin/agents")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["id"] == "vera"
+        assert data[1]["id"] == "rex"
+
+    def test_get_agent_detail(self, mock_app):
+        client, _, _ = mock_app
+        resp = client.get("/api/admin/agents/vera")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == "vera"
+        assert data["display_name"] == "Vera"
+        assert data["model_conversation"] == "claude-haiku-4-5"
+        assert data["chattiness"] == 0.7
+        assert data["behaviors"] == {"tone": "professional"}
+
+    def test_get_agent_not_found(self, mock_app):
+        client, _, _ = mock_app
+        resp = client.get("/api/admin/agents/nonexistent")
+        assert resp.status_code == 404
+
+    def test_get_agent_system_prompt(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.memory_repo.MemoryRepo.get_core_memory",
+            new_callable=AsyncMock,
+            return_value=CoreMemory(
+                agent_id="vera", content="I am Vera's core memory.", token_count=10
+            ),
+        ):
+            resp = client.get("/api/admin/agents/vera/system-prompt")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_id"] == "vera"
+        assert "infrastructure" in data["layers"]
+        assert "character" in data["layers"]
+        assert "memory" in data["layers"]
+        assert data["layers"]["character"] == "You are Vera, the showrunner."
+        assert data["layers"]["memory"] == "I am Vera's core memory."
+        # Assembled prompt should contain all non-empty layers
+        assert "You are Vera" in data["assembled_prompt"]
+
+    def test_get_agent_core_memory(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        core_mem = CoreMemory(agent_id="vera", content="core content", token_count=5, version=2)
+        history = [
+            CoreMemoryHistory(id=1, agent_id="vera", content="v1", version=1),
+            CoreMemoryHistory(id=2, agent_id="vera", content="core content", version=2),
+        ]
+
+        with (
+            patch("core.repos.memory_repo.MemoryRepo.get_core_memory", new_callable=AsyncMock, return_value=core_mem),
+            patch("core.repos.memory_repo.MemoryRepo.get_core_memory_history", new_callable=AsyncMock, return_value=history),
+        ):
+            resp = client.get("/api/admin/agents/vera/core-memory")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["current"]["content"] == "core content"
+        assert len(data["version_history"]) == 2
+
+    def test_get_agent_recall_memories_paginated(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        memories = [
+            RecallMemory(
+                id=1, agent_id="vera", summary="test memory",
+                embedding=[0.1, 0.2], importance_score=0.8,
+            ),
+        ]
+
+        with patch(
+            "core.repos.memory_repo.MemoryRepo.get_recall_memories_paginated",
+            new_callable=AsyncMock,
+            return_value=(memories, 1),
+        ):
+            resp = client.get("/api/admin/agents/vera/recall-memories?limit=10&offset=0")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        # Embeddings should be stripped
+        assert "embedding" not in data["items"][0]
+        assert data["items"][0]["summary"] == "test memory"
+
+    def test_get_agent_recall_memories_with_search(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.memory_repo.MemoryRepo.search_recall_memories_by_keyword",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ) as mock_search:
+            resp = client.get("/api/admin/agents/vera/recall-memories?search=budget")
+
+        assert resp.status_code == 200
+        mock_search.assert_called_once_with("vera", "budget", limit=50, offset=0)
+
+    def test_get_agent_conversations(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv = _make_conversation()
+
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get_conversations_by_agent",
+            new_callable=AsyncMock,
+            return_value=([conv], 1),
+        ):
+            resp = client.get("/api/admin/agents/vera/conversations?limit=5")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["limit"] == 5
+
+    def test_get_agent_costs(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.cost_repo.CostRepo.get_costs_by_agent_grouped",
+            new_callable=AsyncMock,
+            return_value={
+                "by_day": [{"day": "2026-04-01", "total": "0.50"}],
+                "by_type": [{"type": "conversation", "total": "0.50"}],
+                "total": "0.50",
+            },
+        ):
+            resp = client.get("/api/admin/agents/vera/costs")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == "0.50"
+        assert len(data["by_day"]) == 1
+
+    def test_get_agent_journal(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        entries = [
+            JournalEntry(
+                id=1, agent_id="vera", reflection_type="daily",
+                content="Today was productive.", token_count=10,
+            ),
+        ]
+
+        with patch(
+            "core.repos.memory_repo.MemoryRepo.get_journal_entries",
+            new_callable=AsyncMock,
+            return_value=entries,
+        ):
+            resp = client.get("/api/admin/agents/vera/journal?limit=10")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["items"]) == 1
+        assert data["items"][0]["content"] == "Today was productive."
+
+
+# ── Simulation Endpoint Tests ──────────────────────────────────
+
+
+class TestSimulationEndpoints:
+    def test_list_simulations(self, mock_app):
+        client, mock_db, _ = mock_app
+        sim = _make_simulation()
+
+        with (
+            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[sim]),
+            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=1),
+        ):
+            resp = client.get("/api/admin/simulations?limit=10")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "test-sim"
+
+    def test_list_simulations_with_status_filter(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with (
+            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[]) as mock_list,
+            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=0),
+        ):
+            resp = client.get("/api/admin/simulations?status=completed")
+
+        assert resp.status_code == 200
+        mock_list.assert_called_once_with(status="completed", limit=20, offset=0)
+
+    def test_get_simulation(self, mock_app):
+        client, mock_db, _ = mock_app
+        sim = _make_simulation()
+
+        with patch("core.repos.simulation_repo.SimulationRepo.get", new_callable=AsyncMock, return_value=sim):
+            resp = client.get(f"/api/admin/simulations/{sim.id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "test-sim"
+        assert data["total_conversations"] == 10
+
+    def test_get_simulation_not_found(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch("core.repos.simulation_repo.SimulationRepo.get", new_callable=AsyncMock, return_value=None):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
+
+    def test_get_simulation_timeline(self, mock_app):
+        client, mock_db, _ = mock_app
+        sim_id = uuid.uuid4()
+        events = [
+            {
+                "timestamp": "2026-04-01T12:00:00",
+                "event_type": "conversation_started",
+                "agent_id": None,
+                "details": {"conversation_id": str(uuid.uuid4())},
+            },
+        ]
+
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.get_timeline_events",
+            new_callable=AsyncMock,
+            return_value=events,
+        ):
+            resp = client.get(f"/api/admin/simulations/{sim_id}/timeline")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["event_type"] == "conversation_started"
+
+    def test_get_simulation_conversations(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv = _make_conversation()
+
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get_conversations_by_simulation",
+            new_callable=AsyncMock,
+            return_value=([conv], 1),
+        ):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/conversations")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+
+    def test_get_simulation_artifacts(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_artifacts_by_simulation",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/artifacts")
+
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_get_simulation_overseer_log(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.get_overseer_log",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/overseer-log?severity_min=3")
+
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_get_simulation_costs(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.cost_repo.CostRepo.get_costs_by_simulation",
+            new_callable=AsyncMock,
+            return_value={"by_agent": [], "total": "0"},
+        ):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/costs")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == "0"
+
+
+# ── Conversation Endpoint Tests ────────────────────────────────
+
+
+class TestConversationEndpoints:
+    def test_get_conversation_detail(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv = _make_conversation()
+
+        with (
+            patch("core.repos.conversation_repo.ConversationRepo.get", new_callable=AsyncMock, return_value=conv),
+            patch("core.repos.conversation_repo.ConversationRepo.get_energy_log", new_callable=AsyncMock, return_value=[]),
+        ):
+            resp = client.get(f"/api/admin/conversations/{conv.id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trigger_type"] == "idle"
+        assert data["participating_agents"] == ["vera", "rex"]
+        assert data["energy_history"] == []
+
+    def test_get_conversation_not_found(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch("core.repos.conversation_repo.ConversationRepo.get", new_callable=AsyncMock, return_value=None):
+            resp = client.get(f"/api/admin/conversations/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
+
+    def test_get_conversation_turns(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv_id = uuid.uuid4()
+        logs = [
+            SelectionLog(
+                id=1,
+                conversation_id=conv_id,
+                turn_number=1,
+                selected_agent_id="vera",
+                was_interrupt=False,
+                agent_scores={"vera": 0.8, "rex": 0.6},
+                detected_topic="architecture",
+                conversation_energy=0.75,
+            ),
+        ]
+
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get_selection_log",
+            new_callable=AsyncMock,
+            return_value=logs,
+        ):
+            resp = client.get(f"/api/admin/conversations/{conv_id}/turns")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["selected_agent_id"] == "vera"
+        assert data[0]["agent_scores"]["vera"] == 0.8
+
+    def test_get_conversation_selection_log(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv_id = uuid.uuid4()
+
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get_selection_log",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get(f"/api/admin/conversations/{conv_id}/selection-log")
+
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+# ── Eval Endpoint Tests ────────────────────────────────────────
+
+
+class TestEvalEndpoints:
+    def test_get_simulation_evals(self, mock_app):
+        client, _, _ = mock_app
+        resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/evals")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_run_simulation_evals(self, mock_app):
+        client, _, _ = mock_app
+        resp = client.post(
+            f"/api/admin/simulations/{uuid.uuid4()}/evals/run",
+            json={"eval_suite": "quick"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "job_id" in data
+        assert data["status"] == "queued"
+
+    def test_get_eval_not_implemented(self, mock_app):
+        client, _, _ = mock_app
+        resp = client.get("/api/admin/evals/some-id")
+        assert resp.status_code == 404
+
+
+# ── Pagination Tests ───────────────────────────────────────────
+
+
+class TestPagination:
+    def test_default_pagination(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with (
+            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[]),
+            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=0),
+        ):
+            resp = client.get("/api/admin/simulations")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["limit"] == 20
+        assert data["offset"] == 0
+
+    def test_custom_pagination(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with (
+            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[]),
+            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=100),
+        ):
+            resp = client.get("/api/admin/simulations?limit=5&offset=10")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["limit"] == 5
+        assert data["offset"] == 10
+        assert data["total"] == 100

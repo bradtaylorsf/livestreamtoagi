@@ -6,7 +6,7 @@ import enum
 import uuid  # noqa: TC003
 from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -721,3 +721,108 @@ class ConversationConfig(BaseModel):
     topics: TopicConfig
     adjacency: dict[str, dict[str, float]]
     logging: LoggingConfig
+
+
+# ── Admin API Response Models ──────────────────────────────────
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):  # noqa: UP046
+    """Generic paginated response wrapper."""
+
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
+
+
+class AgentSummary(BaseModel):
+    id: str
+    display_name: str
+    status: str
+    location: str | None = None
+    total_cost: str = "0"
+    message_count: int = 0
+
+
+class AgentDetail(BaseModel):
+    id: str
+    display_name: str
+    status: str
+    model_conversation: str
+    model_building: str
+    voice_id: str | None = None
+    chattiness: float
+    initiative: float
+    interrupt_tendency: float
+    eavesdrop_tendency: float
+    closing_weight: float
+    system_prompt: str = ""
+    behaviors: dict[str, Any] = {}
+
+
+class SystemPromptResponse(BaseModel):
+    agent_id: str
+    assembled_prompt: str
+    layers: dict[str, str]
+
+
+class CoreMemoryResponse(BaseModel):
+    current: CoreMemory | None = None
+    version_history: list[CoreMemoryHistory] = []
+
+
+class CostBreakdownResponse(BaseModel):
+    by_day: list[dict[str, str]] = []
+    by_type: list[dict[str, str]] = []
+    total: str = "0"
+
+
+class TimelineEvent(BaseModel):
+    timestamp: str | None = None
+    event_type: str
+    agent_id: str | None = None
+    details: dict[str, Any] = {}
+
+
+class ConversationDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    trigger_type: str
+    trigger_details: dict[str, Any] | None = None
+    initial_energy: float
+    final_energy: float | None = None
+    turn_count: int = 0
+    participating_agents: list[str]
+    topics_discussed: list[str] | None = None
+    closed_by: str | None = None
+    location: str | None = None
+    energy_history: list[dict[str, Any]] = []
+
+
+class TurnDetail(BaseModel):
+    turn_number: int
+    selected_agent_id: str
+    was_interrupt: bool = False
+    agent_scores: dict[str, Any] = {}
+    detected_topic: str | None = None
+    previous_speaker_id: str | None = None
+    conversation_energy: float | None = None
+    timestamp: datetime | None = None
+
+
+class EvalRunRequest(BaseModel):
+    eval_suite: str | list[str] = "full"
+
+
+class EvalRunResponse(BaseModel):
+    job_id: str
+    status: str = "queued"
+
+
+class SimulationCostResponse(BaseModel):
+    by_agent: list[dict[str, str]] = []
+    total: str = "0"
