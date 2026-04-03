@@ -234,7 +234,7 @@ class SelectionLog(BaseModel):
     timestamp: datetime | None = None
     selected_agent_id: str
     was_interrupt: bool = False
-    agent_scores: dict[str, float]
+    agent_scores: dict[str, Any]
     detected_topic: str | None = None
     previous_speaker_id: str | None = None
     conversation_energy: float | None = None
@@ -248,7 +248,7 @@ class SelectionLogCreate(BaseModel):
     turn_number: int
     selected_agent_id: str
     was_interrupt: bool = False
-    agent_scores: dict[str, float]
+    agent_scores: dict[str, Any]
     detected_topic: str | None = None
     previous_speaker_id: str | None = None
     conversation_energy: float | None = None
@@ -280,6 +280,24 @@ class InterruptLogCreate(BaseModel):
     threshold_at_time: float
     succeeded: bool
     reason: str | None = None
+
+
+# ── Energy Change Log ──────────────────────────────────────────
+
+
+class EnergyLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    conversation_id: uuid.UUID
+    turn_number: int
+    timestamp: datetime | None = None
+    changes: dict[str, Any]
+
+
+class EnergyLogCreate(BaseModel):
+    conversation_id: uuid.UUID
+    turn_number: int
+    changes: dict[str, Any]
 
 
 # ── World Chunks ────────────────────────────────────────────────
@@ -507,11 +525,19 @@ class ProximityConfig(BaseModel):
     eavesdrop_tendency: dict[str, float]
 
 
+class ScheduledEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    event_name: str
+    starter_agent_id: str
+
+
 class TriggerConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     idle_timeout_seconds: int = Field(ge=1)
     agent_initiative: dict[str, float]
     trigger_type_weights: dict[str, float]
+    memory_trigger_chance: float = Field(ge=0.0, le=1.0, default=0.02)
+    daily_schedule: dict[int, ScheduledEvent] = {}
 
 
 class TopicConfig(BaseModel):
@@ -531,6 +557,34 @@ class LoggingConfig(BaseModel):
     log_topic_classifications: bool = True
     retention_days: int = Field(ge=1, default=30)
     export_format: str = "jsonl"
+
+
+# ── Speaker Selection Result ───────────────────────────
+
+
+class InterruptAttempt(BaseModel):
+    """Record of a single interrupt attempt (successful or failed)."""
+
+    attempting_agent_id: str
+    would_have_spoken_id: str
+    interrupt_score: float
+    threshold: float
+    succeeded: bool
+    reason: str | None = None
+
+
+class SelectionResult(BaseModel):
+    """Result of the 5-factor speaker selection algorithm."""
+
+    selected_agent_id: str
+    scores: dict[str, float]
+    score_breakdown: dict[str, dict[str, float]]
+    eligible_agents: list[str]
+    previous_speaker_id: str | None = None
+    detected_topic: str | None = None
+    was_interrupt: bool = False
+    interrupted_agent_id: str | None = None
+    interrupt_attempts: list[InterruptAttempt] = []
 
 
 class ConversationConfig(BaseModel):
