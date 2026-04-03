@@ -27,7 +27,9 @@ class GenerateTilemapTool(BaseTool):
     """Execute tilemap generation code and register the output as a new world chunk."""
 
     name = "generate_tilemap"
-    description = "Execute tilemap generation code in sandbox and register output as a new world chunk"
+    description = (
+        "Execute tilemap generation code in sandbox and register output as a new world chunk"
+    )
     parameters = {
         "name": {"type": "string", "description": "Chunk name (e.g. 'library')"},
         "code": {"type": "string", "description": "Python code that outputs chunk JSON to stdout"},
@@ -59,11 +61,20 @@ class GenerateTilemapTool(BaseTool):
 
         # Parameter validation
         if not name or not isinstance(name, str):
-            return {"status": "rejected", "reason": "Parameter 'name' is required and must be a non-empty string"}
+            return {
+                "status": "rejected",
+                "reason": "Parameter 'name' is required and must be a non-empty string",
+            }
         if not code or not isinstance(code, str):
-            return {"status": "rejected", "reason": "Parameter 'code' is required and must be a non-empty string"}
+            return {
+                "status": "rejected",
+                "reason": "Parameter 'code' is required and must be a non-empty string",
+            }
         if not description or not isinstance(description, str):
-            return {"status": "rejected", "reason": "Parameter 'description' is required and must be a non-empty string"}
+            return {
+                "status": "rejected",
+                "reason": "Parameter 'description' is required and must be a non-empty string",
+            }
 
         # Execute code in sandbox
         exec_result = await self._execute_code.execute(language="python", code=code)
@@ -90,7 +101,10 @@ class GenerateTilemapTool(BaseTool):
         # Validate field types
         size = chunk_data["size"]
         if not isinstance(size, dict) or "width" not in size or "height" not in size:
-            return {"status": "error", "reason": "'size' must be an object with 'width' and 'height'"}
+            return {
+                "status": "error",
+                "reason": "'size' must be an object with 'width' and 'height'",
+            }
 
         tiles = chunk_data["tiles"]
         if not isinstance(tiles, list):
@@ -102,7 +116,10 @@ class GenerateTilemapTool(BaseTool):
 
         for obj in objects:
             if not isinstance(obj, dict) or not all(k in obj for k in ("type", "x", "y")):
-                return {"status": "error", "reason": "Each object must have 'type', 'x', and 'y' fields"}
+                return {
+                    "status": "error",
+                    "reason": "Each object must have 'type', 'x', and 'y' fields",
+                }
 
         # Build WorldChunkCreate and store
         chunk_create = WorldChunkCreate(

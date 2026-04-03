@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -69,7 +69,9 @@ def world_repo() -> AsyncMock:
 
 
 @pytest.fixture
-def tool(event_bus: AsyncMock, execute_code_tool: AsyncMock, world_repo: AsyncMock) -> GenerateTilemapTool:
+def tool(
+    event_bus: AsyncMock, execute_code_tool: AsyncMock, world_repo: AsyncMock
+) -> GenerateTilemapTool:
     return GenerateTilemapTool(
         event_bus=event_bus,
         agent_id="rex",
@@ -79,7 +81,9 @@ def tool(event_bus: AsyncMock, execute_code_tool: AsyncMock, world_repo: AsyncMo
 
 
 @pytest.fixture
-def unauthorized_tool(event_bus: AsyncMock, execute_code_tool: AsyncMock, world_repo: AsyncMock) -> GenerateTilemapTool:
+def unauthorized_tool(
+    event_bus: AsyncMock, execute_code_tool: AsyncMock, world_repo: AsyncMock
+) -> GenerateTilemapTool:
     return GenerateTilemapTool(
         event_bus=event_bus,
         agent_id="aurora",
@@ -93,7 +97,7 @@ def unauthorized_tool(event_bus: AsyncMock, execute_code_tool: AsyncMock, world_
 
 class TestAuthorization:
     async def test_allowed_agents(self) -> None:
-        assert GenerateTilemapTool.ALLOWED_AGENTS == frozenset({"rex", "fork"})
+        assert frozenset({"rex", "fork"}) == GenerateTilemapTool.ALLOWED_AGENTS
 
     async def test_unauthorized_agent_rejected(
         self, unauthorized_tool: GenerateTilemapTool, execute_code_tool: AsyncMock
@@ -144,7 +148,9 @@ class TestExecution:
     async def test_valid_chunk_accepted_and_stored(
         self, tool: GenerateTilemapTool, world_repo: AsyncMock
     ) -> None:
-        result = await tool.execute(name="library", code="print(json)", description="A cozy library")
+        result = await tool.execute(
+            name="library", code="print(json)", description="A cozy library"
+        )
         assert result["status"] == "ok"
         assert result["chunk_id"] == 42
         assert result["preview"]["name"] == "library"
