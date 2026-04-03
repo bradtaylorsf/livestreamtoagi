@@ -9,6 +9,7 @@ from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageT
 from .base import BaseTool
 from .code_execution import ExecuteCodeTool
 from .messaging import SendMessageTool
+from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.overseer import Overseer
     from core.redis_client import RedisClient
+    from core.repos.memory_repo import MemoryRepo
 
 __all__ = [
     "BaseTool",
@@ -25,9 +27,11 @@ __all__ = [
     "GetAudienceStatusTool",
     "GetPollResultsTool",
     "GetWorldStateTool",
+    "ProposeSelfModificationTool",
     "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
+    "ViewEvolutionLogTool",
     "get_core_tools",
 ]
 
@@ -57,6 +61,7 @@ def get_core_tools(
     agent_id: str = "unknown",
     overseer: Overseer | None = None,
     docker_client: docker.DockerClient | None = None,
+    memory_repo: MemoryRepo | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -83,5 +88,14 @@ def get_core_tools(
     tools.append(
         ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
     )
+
+    # Self-modification tools (available to all agents)
+    if memory_repo is not None:
+        tools.append(
+            ProposeSelfModificationTool(agent_id=agent_id, memory_repo=memory_repo)
+        )
+        tools.append(
+            ViewEvolutionLogTool(agent_id=agent_id, memory_repo=memory_repo)
+        )
 
     return tools
