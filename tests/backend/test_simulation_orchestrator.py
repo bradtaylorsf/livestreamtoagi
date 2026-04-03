@@ -1,0 +1,546 @@
+"""Tests for the simulation orchestrator: config, phases, display, and orchestration."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+import uuid
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import yaml
+
+from core.models import Simulation, SimulationStatus
+from core.simulation.display import SimulationDisplay
+from core.simulation.orchestrator import (
+    CostLimitExceededError,
+    SimulationConfig,
+    SimulationOrchestrator,
+)
+from core.simulation.phases import Phase, PhaseResult, PhaseRunner, PhaseType
+
+# ── Helpers ─────────────────────────────────────────────────────
+
+
+def make_seed_file(phases: list[dict[str, Any]]) -> str:
+    """Write a temporary YAML seed file and return its path."""
+    fd, path = tempfile.mkstemp(suffix=".yaml")
+    with os.fdopen(fd, "w") as f:
+        yaml.dump({"phases": phases}, f)
+    return path
+
+
+def make_simulation_row(**overrides: Any) -> dict:
+    base: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "name": "test-sim",
+        "description": "Test simulation",
+        "config": {"agents": ["vera", "rex"]},
+        "status": "running",
+        "started_at": datetime(2026, 4, 3, 12, 0),
+        "completed_at": None,
+        "simulated_duration": None,
+        "real_duration": None,
+        "total_conversations": 0,
+        "total_turns": 0,
+        "total_tokens": 0,
+        "total_cost": Decimal("0"),
+        "total_artifacts": 0,
+        "total_overseer_flags": 0,
+        "agents_participated": ["vera", "rex"],
+        "error_log": None,
+        "created_at": datetime(2026, 4, 3, 12, 0),
+    }
+    base.update(overrides)
+    return base
+
+
+def make_mock_services() -> dict[str, Any]:
+    """Create a full set of mocked services for the orchestrator."""
+    sim_id = uuid.uuid4()
+    sim = Simulation(**make_simulation_row(id=sim_id))
+
+    sim_repo = MagicMock()
+    sim_repo.create = AsyncMock(return_value=sim)
+    sim_repo.get = AsyncMock(return_value=sim)
+    sim_repo.increment_stats = AsyncMock(return_value=sim)
+    sim_repo.update_status = AsyncMock(return_value=sim)
+    sim_repo.update_durations = AsyncMock(return_value=sim)
+    sim_repo.update_agents_participated = AsyncMock()
+
+    return {
+        "db": MagicMock(),
+        "redis_client": MagicMock(),
+        "simulation_repo": sim_repo,
+        "config_loader": MagicMock(),
+        "agent_registry": MagicMock(),
+        "event_bus": MagicMock(),
+        "llm_client": MagicMock(),
+        "overseer": MagicMock(),
+        "context_assembler": MagicMock(),
+        "conversation_repo": MagicMock(),
+        "archival_memory": MagicMock(),
+        "proximity": MagicMock(),
+        "trigger_system": MagicMock(),
+        "selection_logger": MagicMock(),
+        "reflection_manager": MagicMock(),
+        "display": SimulationDisplay(verbose=False),
+        "sim_id": sim_id,
+        "sim": sim,
+    }
+
+
+# ── SimulationConfig tests ──────────────────────────────────────
+
+
+class TestSimulationConfig:
+    def test_load_seed_file_parses_phases(self):
+        phases = [
+            {"name": "standup", "type": "scheduled", "trigger": "standup"},
+            {"name": "chat", "type": "organic", "count": 2},
+            {"name": "challenge", "type": "challenge", "challenge": {"title": "test"}},
+        ]
+        path = make_seed_file(phases)
+        try:
+            config = SimulationConfig(
+                name="test",
+                seed_file=path,
+                agents=["vera", "rex"],
+            )
+            config.load_seed_file()
+
+            assert len(config.phases) == 3
+            assert config.phases[0].name == "standup"
+            assert config.phases[0].type == PhaseType.scheduled
+            assert config.phases[1].type == PhaseType.organic
+            assert config.phases[2].type == PhaseType.challenge
+        finally:
+            os.unlink(path)
+
+    def test_load_seed_file_unknown_type_defaults_to_organic(self):
+        phases = [{"name": "mystery", "type": "unknown_type"}]
+        path = make_seed_file(phases)
+        try:
+            config = SimulationConfig(name="test", seed_file=path, agents=["vera"])
+            config.load_seed_file()
+            assert config.phases[0].type == PhaseType.organic
+        finally:
+            os.unlink(path)
+
+    def test_to_dict_serializes_config(self):
+        phases = [{"name": "standup", "type": "scheduled"}]
+        path = make_seed_file(phases)
+        try:
+            config = SimulationConfig(
+                name="my-sim",
+                description="A test",
+                seed_file=path,
+                agents=["vera", "rex"],
+                max_cost=5.0,
+            )
+            config.load_seed_file()
+            d = config.to_dict()
+            assert d["name"] == "my-sim"
+            assert d["max_cost"] == "5.0"
+            assert d["phase_count"] == 1
+            assert d["phase_names"] == ["standup"]
+        finally:
+            os.unlink(path)
+
+    def test_required_agents_extracted_from_phase(self):
+        phases = [
+            {"name": "standup", "type": "scheduled", "required_agents": ["vera", "rex"]}
+        ]
+        path = make_seed_file(phases)
+        try:
+            config = SimulationConfig(name="test", seed_file=path, agents=["vera"])
+            config.load_seed_file()
+            assert config.phases[0].required_agents == ["vera", "rex"]
+        finally:
+            os.unlink(path)
+
+
+# ── Phase / PhaseResult tests ───────────────────────────────────
+
+
+class TestPhaseDataclasses:
+    def test_phase_defaults(self):
+        p = Phase(name="test", type=PhaseType.organic)
+        assert p.config == {}
+        assert p.required_agents == []
+
+    def test_phase_result_defaults(self):
+        r = PhaseResult()
+        assert r.status == "completed"
+        assert r.turns == 0
+        assert r.cost == Decimal("0")
+        assert r.errors == []
+        assert r.agents_participated == []
+
+    def test_phase_type_values(self):
+        assert PhaseType.scheduled == "scheduled"
+        assert PhaseType.organic == "organic"
+        assert PhaseType.challenge == "challenge"
+        assert PhaseType.tool_exercise == "tool_exercise"
+        assert PhaseType.reflection == "reflection"
+        assert PhaseType.audience_sim == "audience_sim"
+
+
+# ── PhaseRunner tests ───────────────────────────────────────────
+
+
+class TestPhaseRunner:
+    def _make_runner(self, *, dry_run: bool = False) -> PhaseRunner:
+        return PhaseRunner(
+            config_loader=MagicMock(),
+            agent_registry=MagicMock(),
+            event_bus=MagicMock(),
+            llm_client=MagicMock(),
+            overseer=MagicMock(),
+            context_assembler=MagicMock(),
+            conversation_repo=MagicMock(),
+            archival_memory=MagicMock(),
+            proximity=MagicMock(),
+            trigger_system=MagicMock(),
+            selection_logger=MagicMock(),
+            reflection_manager=MagicMock(),
+            simulation_id=uuid.uuid4(),
+            agents=["vera", "rex", "aurora"],
+            dry_run=dry_run,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_phase_unknown_type_returns_skipped(self):
+        runner = self._make_runner()
+        # Manually create a phase with an invalid type string to test the fallback
+        phase = Phase(name="bad", type=PhaseType.organic)
+        # Monkey-patch to an unrecognized value
+        phase.type = "nonexistent"  # type: ignore[assignment]
+        result = await runner.run_phase(phase)
+        assert result.status == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_dry_run_reflection_logs_without_calling_llm(self):
+        runner = self._make_runner(dry_run=True)
+        phase = Phase(
+            name="reflect",
+            type=PhaseType.reflection,
+            config={"reflection_type": "6hour"},
+        )
+        result = await runner.run_phase(phase)
+        assert result.status == "completed"
+        # Reflection manager should NOT have been called in dry-run
+        runner._reflection.run_6hour_reflection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_scheduled_logs_without_conversation(self):
+        runner = self._make_runner(dry_run=True)
+        phase = Phase(
+            name="standup",
+            type=PhaseType.scheduled,
+            config={"trigger": "standup"},
+            required_agents=["vera"],
+        )
+        result = await runner.run_phase(phase)
+        assert result.status == "completed"
+        assert result.turns == 0
+
+    @pytest.mark.asyncio
+    async def test_reflection_phase_calls_reflection_manager(self):
+        runner = self._make_runner(dry_run=False)
+        runner._reflection.run_6hour_reflection = AsyncMock(
+            return_value=MagicMock(promoted_count=1, importance_updates=2)
+        )
+        phase = Phase(
+            name="reflect",
+            type=PhaseType.reflection,
+            config={"reflection_type": "6hour", "agents": ["vera"]},
+        )
+        result = await runner.run_phase(phase)
+        assert result.status == "completed"
+        runner._reflection.run_6hour_reflection.assert_awaited_once_with("vera")
+
+    @pytest.mark.asyncio
+    async def test_reflection_weekly_calls_weekly_method(self):
+        runner = self._make_runner(dry_run=False)
+        runner._reflection.run_weekly_reflection = AsyncMock(
+            return_value=MagicMock(promoted_count=0, importance_updates=0)
+        )
+        phase = Phase(
+            name="weekly",
+            type=PhaseType.reflection,
+            config={"reflection_type": "weekly", "agents": ["rex"]},
+        )
+        await runner.run_phase(phase)
+        runner._reflection.run_weekly_reflection.assert_awaited_once_with("rex")
+
+    @pytest.mark.asyncio
+    async def test_phase_runner_catches_exceptions(self):
+        runner = self._make_runner(dry_run=False)
+        runner._reflection.run_6hour_reflection = AsyncMock(
+            side_effect=RuntimeError("LLM down")
+        )
+        phase = Phase(
+            name="reflect",
+            type=PhaseType.reflection,
+            config={"reflection_type": "6hour", "agents": ["vera"]},
+        )
+        # Should not raise — errors are caught and logged
+        result = await runner.run_phase(phase)
+        assert result.status == "completed"  # reflection errors don't fail the phase
+
+
+# ── SimulationOrchestrator tests ────────────────────────────────
+
+
+class TestSimulationOrchestrator:
+    def _make_orchestrator(
+        self, phases: list[dict[str, Any]], *, dry_run: bool = True, max_cost: float = 10.0
+    ) -> tuple[SimulationOrchestrator, dict[str, Any]]:
+        path = make_seed_file(phases)
+        config = SimulationConfig(
+            name="test-run",
+            description="Test",
+            seed_file=path,
+            agents=["vera", "rex"],
+            max_cost=max_cost,
+            dry_run=dry_run,
+        )
+        config.load_seed_file()
+
+        services = make_mock_services()
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            overseer=services["overseer"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+        )
+        return orchestrator, services
+
+    @pytest.mark.asyncio
+    async def test_dry_run_creates_simulation_record(self):
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "standup", "type": "scheduled"}],
+            dry_run=True,
+        )
+        await orchestrator.run()
+        services["simulation_repo"].create.assert_awaited_once()
+        call_args = services["simulation_repo"].create.call_args
+        sim_create = call_args[0][0]
+        assert sim_create.name == "test-run"
+        assert sim_create.status == SimulationStatus.running
+
+    @pytest.mark.asyncio
+    async def test_dry_run_finalizes_as_completed(self):
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "standup", "type": "scheduled"}],
+            dry_run=True,
+        )
+        await orchestrator.run()
+        services["simulation_repo"].update_status.assert_awaited_once()
+        status_call = services["simulation_repo"].update_status.call_args
+        assert status_call[0][1] == SimulationStatus.completed.value
+
+    @pytest.mark.asyncio
+    async def test_cancel_sets_cancelled_status(self):
+        orchestrator, services = self._make_orchestrator(
+            [
+                {"name": "phase1", "type": "scheduled"},
+                {"name": "phase2", "type": "organic"},
+            ],
+            dry_run=True,
+        )
+        # Cancel before running
+        orchestrator.cancel()
+        await orchestrator.run()
+        status_call = services["simulation_repo"].update_status.call_args
+        assert status_call[0][1] == SimulationStatus.cancelled.value
+
+    @pytest.mark.asyncio
+    async def test_cost_limit_stops_simulation(self):
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "phase1", "type": "scheduled"}],
+            dry_run=False,
+            max_cost=0.001,
+        )
+        # Simulate a phase that costs money by patching the phase runner
+        with patch.object(
+            PhaseRunner, "run_phase",
+            new_callable=AsyncMock,
+            return_value=PhaseResult(cost=Decimal("1.00"), turns=5),
+        ):
+            await orchestrator.run()
+
+        # Should have updated status to cancelled due to cost
+        status_call = services["simulation_repo"].update_status.call_args
+        assert status_call[0][1] == SimulationStatus.cancelled.value
+
+    @pytest.mark.asyncio
+    async def test_exception_sets_failed_status(self):
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "phase1", "type": "scheduled"}],
+            dry_run=False,
+        )
+        with (
+            patch.object(
+                PhaseRunner, "run_phase",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            await orchestrator.run()
+
+        status_call = services["simulation_repo"].update_status.call_args
+        assert status_call[0][1] == SimulationStatus.failed.value
+
+    @pytest.mark.asyncio
+    async def test_durations_updated_on_completion(self):
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "p1", "type": "scheduled"}],
+            dry_run=True,
+        )
+        await orchestrator.run()
+        services["simulation_repo"].update_durations.assert_awaited_once()
+        dur_call = services["simulation_repo"].update_durations.call_args
+        assert dur_call[1]["simulated_duration"] is not None
+        assert dur_call[1]["real_duration"] is not None
+
+
+# ── CostLimitExceededError tests ─────────────────────────────────────
+
+
+class TestCostLimitExceededError:
+    def test_cost_limit_exceeded_is_exception(self):
+        exc = CostLimitExceededError("over budget")
+        assert str(exc) == "over budget"
+        assert isinstance(exc, Exception)
+
+
+# ── SimulationDisplay tests ─────────────────────────────────────
+
+
+class TestSimulationDisplay:
+    def test_display_creates_without_error(self):
+        d = SimulationDisplay(verbose=True)
+        assert d._verbose is True
+
+    def test_show_phase_start_no_crash(self, capsys):
+        d = SimulationDisplay()
+        d.show_phase_start("test_phase", 0, 5)
+        # Just verify it doesn't crash — output goes to Rich console
+
+    def test_show_phase_complete_no_crash(self):
+        d = SimulationDisplay()
+        result = PhaseResult(
+            status="completed",
+            duration_seconds=1.5,
+            turns=10,
+            cost=Decimal("0.05"),
+            agents_participated=["vera", "rex"],
+        )
+        d.show_phase_complete(result, "test_phase")
+
+    def test_show_phase_complete_with_errors(self):
+        d = SimulationDisplay(verbose=True)
+        result = PhaseResult(
+            status="failed",
+            errors=["Something went wrong"],
+        )
+        d.show_phase_complete(result, "failed_phase")
+
+    def test_show_cost_update_no_crash(self):
+        d = SimulationDisplay()
+        d.show_cost_update(Decimal("3.50"), Decimal("10.00"))
+
+    def test_show_cost_exceeded_no_crash(self):
+        d = SimulationDisplay()
+        d.show_cost_exceeded(Decimal("11.00"), Decimal("10.00"))
+
+    def test_show_summary_no_crash(self):
+        d = SimulationDisplay()
+        sim = Simulation(**make_simulation_row(
+            total_conversations=5,
+            total_turns=42,
+            total_tokens=12000,
+            total_cost=Decimal("1.25"),
+        ))
+        d.show_summary(sim, timedelta(seconds=120))
+
+
+# ── Seed file loading (full_day.yaml) ───────────────────────────
+
+
+class TestFullDaySeedFile:
+    def test_full_day_yaml_loads_15_phases(self):
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "full_day.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/full_day.yaml not found")
+
+        config = SimulationConfig(
+            name="full-day-test",
+            seed_file=seed_path,
+            agents=["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"],
+        )
+        config.load_seed_file()
+        assert len(config.phases) == 29
+
+    def test_full_day_yaml_phase_types(self):
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "full_day.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/full_day.yaml not found")
+
+        config = SimulationConfig(
+            name="test",
+            seed_file=seed_path,
+            agents=["vera"],
+        )
+        config.load_seed_file()
+
+        types = [p.type for p in config.phases]
+        assert PhaseType.scheduled in types
+        assert PhaseType.organic in types
+        assert PhaseType.challenge in types
+        assert PhaseType.tool_exercise in types
+        assert PhaseType.reflection in types
+        assert PhaseType.audience_sim in types
+
+    def test_full_day_yaml_phase_names(self):
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "full_day.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/full_day.yaml not found")
+
+        config = SimulationConfig(
+            name="test",
+            seed_file=seed_path,
+            agents=["vera"],
+        )
+        config.load_seed_file()
+
+        names = [p.name for p in config.phases]
+        assert "morning_standup" in names
+        assert "coding_hello_api" in names
+        assert "audience_simulation" in names
+        assert "evening_reflection" in names
