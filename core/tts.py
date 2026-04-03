@@ -11,6 +11,7 @@ from pathlib import Path
 import edge_tts
 
 from core.event_bus import EventType, event_bus
+from core.speech_parser import parse_speech
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,7 @@ class TTSPipeline:
         self.cleanup_ttl = cleanup_ttl
         self.base_url = base_url.rstrip("/")
 
-    async def speak(
-        self, agent_id: str, text: str
-    ) -> dict[str, str | float] | None:
+    async def speak(self, agent_id: str, text: str) -> dict[str, str | float] | None:
         """Generate TTS audio for an agent's speech.
 
         Returns None for Alpha (no voice) or on failure after retry.
@@ -54,20 +53,22 @@ class TTSPipeline:
         if voice_id is None:
             return None
 
+        # Strip [action] tags so TTS only speaks dialogue
+        parsed = parse_speech(text)
+        tts_text = parsed.dialogue or parsed.raw
+
         filename = f"{uuid.uuid4()}.mp3"
         filepath = self.audio_dir / filename
 
         # Generate audio with one retry on failure
         for attempt in range(2):
             try:
-                communicate = edge_tts.Communicate(text, voice_id)
+                communicate = edge_tts.Communicate(tts_text, voice_id)
                 await communicate.save(str(filepath))
                 break
             except Exception:
                 if attempt == 0:
-                    logger.warning(
-                        "Edge TTS failed for %s, retrying once", agent_id
-                    )
+                    logger.warning("Edge TTS failed for %s, retrying once", agent_id)
                     continue
                 logger.warning(
                     "Edge TTS failed for %s after retry, skipping TTS",
@@ -84,9 +85,7 @@ class TTSPipeline:
                 filepath = processed_path
                 filename = processed_path.name
             except Exception:
-                logger.warning(
-                    "Overseer ffmpeg post-processing failed, using raw audio"
-                )
+                logger.warning("Overseer ffmpeg post-processing failed, using raw audio")
                 processed_path.unlink(missing_ok=True)
 
         # Get duration
@@ -120,9 +119,12 @@ async def _get_duration(filepath: Path) -> float:
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffprobe",
-            "-v", "quiet",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             str(filepath),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -134,15 +136,15 @@ async def _get_duration(filepath: Path) -> float:
         return 0.0
 
 
-async def _apply_overseer_effects(
-    input_path: Path, output_path: Path
-) -> None:
+async def _apply_overseer_effects(input_path: Path, output_path: Path) -> None:
     """Apply reverb + pitch-down via ffmpeg for the Overseer's ominous voice."""
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg",
         "-y",
-        "-i", str(input_path),
-        "-af", "afreeverb=wet_mix=0.3,asetrate=44100*0.85,aresample=44100",
+        "-i",
+        str(input_path),
+        "-af",
+        "afreeverb=wet_mix=0.3,asetrate=44100*0.85,aresample=44100",
         str(output_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

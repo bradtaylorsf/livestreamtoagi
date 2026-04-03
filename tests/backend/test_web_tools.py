@@ -659,6 +659,103 @@ class TestFetchUrlSsrfProtection:
         assert result["status"] == "error"
         assert "blocked" in result["reason"].lower()
 
+    async def test_redirect_to_private_ip_blocked(
+        self,
+        event_bus: AsyncMock,
+        redis_client: AsyncMock,
+        mock_http_client: AsyncMock,
+    ) -> None:
+        """Redirect to an internal URL must be caught after following redirects."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "secret data"
+        # Simulate a redirect: final URL is a private IP
+        mock_resp.url = httpx.URL("http://192.168.1.1/admin")
+        mock_http_client.get = AsyncMock(return_value=mock_resp)
+
+        tool = FetchUrlTool(
+            event_bus=event_bus,
+            redis_client=redis_client,
+            agent_id="pixel",
+            http_client=mock_http_client,
+        )
+        result = await tool.execute(url="https://redirect.example.com")
+        assert result["status"] == "error"
+        assert "redirect" in result["reason"].lower()
+
+    async def test_redirect_to_localhost_blocked(
+        self,
+        event_bus: AsyncMock,
+        redis_client: AsyncMock,
+        mock_http_client: AsyncMock,
+    ) -> None:
+        """Redirect to localhost must be blocked."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "internal"
+        mock_resp.url = httpx.URL("http://localhost:8080/secret")
+        mock_http_client.get = AsyncMock(return_value=mock_resp)
+
+        tool = FetchUrlTool(
+            event_bus=event_bus,
+            redis_client=redis_client,
+            agent_id="pixel",
+            http_client=mock_http_client,
+        )
+        result = await tool.execute(url="https://redirect.example.com")
+        assert result["status"] == "error"
+        assert "blocked" in result["reason"].lower()
+
+    async def test_redirect_to_dns_private_blocked(
+        self,
+        event_bus: AsyncMock,
+        redis_client: AsyncMock,
+        mock_http_client: AsyncMock,
+    ) -> None:
+        """Redirect to a hostname that resolves to a private IP must be blocked."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "internal"
+        mock_resp.url = httpx.URL("https://internal.corp.example.com/data")
+        mock_http_client.get = AsyncMock(return_value=mock_resp)
+
+        tool = FetchUrlTool(
+            event_bus=event_bus,
+            redis_client=redis_client,
+            agent_id="pixel",
+            http_client=mock_http_client,
+        )
+        with patch("tools.web_tools._dns_resolves_to_private", new_callable=AsyncMock) as mock_dns:
+            # First call (initial URL) returns False (safe), second call (redirect) returns True
+            mock_dns.side_effect = [False, True]
+            result = await tool.execute(url="https://redirect.example.com")
+        assert result["status"] == "error"
+        assert "redirect" in result["reason"].lower()
+
+    async def test_redirect_to_safe_url_allowed(
+        self,
+        event_bus: AsyncMock,
+        redis_client: AsyncMock,
+        mock_http_client: AsyncMock,
+    ) -> None:
+        """Redirect to another public URL should succeed."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "Redirected content"
+        mock_resp.url = httpx.URL("https://cdn.example.com/page")
+        mock_http_client.get = AsyncMock(return_value=mock_resp)
+
+        tool = FetchUrlTool(
+            event_bus=event_bus,
+            redis_client=redis_client,
+            agent_id="pixel",
+            http_client=mock_http_client,
+        )
+        with patch("tools.web_tools._dns_resolves_to_private", new_callable=AsyncMock, return_value=False):
+            result = await tool.execute(url="https://example.com")
+        assert result["status"] == "ok"
+        assert "Redirected content" in result["content"]
+
 
 # --- _strip_html helper ---
 
@@ -698,10 +795,8 @@ class TestWebSearchIntegration:
         event_bus = AsyncMock()
         event_bus.emit = AsyncMock()
         redis_client = AsyncMock()
-        inner = AsyncMock()
-        inner.incr = AsyncMock(return_value=1)
-        inner.expire = AsyncMock()
-        redis_client.client = inner
+        redis_client.incr = AsyncMock(return_value=1)
+        redis_client.expire = AsyncMock()
 
         tool = WebSearchTool(
             event_bus=event_bus,

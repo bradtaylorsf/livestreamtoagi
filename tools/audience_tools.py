@@ -46,10 +46,18 @@ class SendChatMessageTool(BaseTool):
         if not review.approved:
             return {"status": "rejected", "reason": review.reason}
 
-        # Store in Redis for audience status reads
-        await self._redis.set(
-            "audience:recent_chat",
-            json.dumps({"agent": self._agent_id, "message": message, "timestamp": time.time()}),
+        # Store in Redis for audience status reads (append to list, keep last 50)
+        entry = json.dumps({"agent": self._agent_id, "message": message, "timestamp": time.time()})
+        await self._redis.rpush("audience:recent_chat", entry)
+        await self._redis.ltrim("audience:recent_chat", -50, -1)
+
+        await self._event_bus.emit(
+            EventType.TOOL_EXECUTED,
+            {
+                "tool": self.name,
+                "agent_id": self._agent_id,
+                "message": message,
+            },
         )
 
         return {"status": "sent", "message": message, "agent": self._agent_id}

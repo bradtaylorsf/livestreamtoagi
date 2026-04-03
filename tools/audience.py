@@ -22,12 +22,16 @@ class GetAudienceStatusTool(BaseTool):
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         viewer_count_raw = await self._redis.get("audience:viewer_count")
-        chat_raw = await self._redis.get("audience:recent_chat")
         polls_raw = await self._redis.get("audience:active_polls")
+
+        # recent_chat is stored as a Redis list (one JSON entry per message)
+        chat_entries_raw: list[str] = await self._redis.lrange("audience:recent_chat", 0, -1)
+        chat_messages = [parse_json(entry, None) for entry in (chat_entries_raw or [])]
+        chat_messages = [m for m in chat_messages if m is not None]
 
         return {
             "viewer_count": _parse_int(viewer_count_raw, 0),
-            "recent_chat_messages": parse_json(chat_raw, []),
+            "recent_chat_messages": chat_messages,
             "active_polls": parse_json(polls_raw, []),
         }
 

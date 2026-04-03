@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -255,6 +256,13 @@ async def bootstrap_services(dry_run: bool = False):
     )
 
     from core.context_assembly import ContextAssembler
+    from core.event_bus import EventBus
+    from core.overseer import Overseer
+
+    event_bus = EventBus()
+    overseer = Overseer(
+        redis_client=redis_client, llm_client=llm_client, event_bus=event_bus,
+    )
 
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
@@ -278,6 +286,9 @@ async def bootstrap_services(dry_run: bool = False):
         "context_assembler": context_assembler,
         "token_counter": token_counter,
         "memory_repo": memory_repo,
+        "event_bus": event_bus,
+        "overseer": overseer,
+        "cost_repo": cost_repo,
     }
 
 
@@ -347,6 +358,155 @@ async def shutdown_services(services: dict) -> None:
         await services["db"].disconnect()
 
 
+# ── Tool support ─────────────────────────────────────────────────
+
+
+def build_tools_for_agent(agent_id: str, services: dict) -> dict:
+    """Build a ToolRegistry for a specific agent, returning {name: tool_instance}."""
+    from tools import ToolRegistry, get_core_tools, get_memory_tools
+
+    registry = ToolRegistry()
+
+    core_tools = get_core_tools(
+        event_bus=services["event_bus"],
+        redis_client=services["redis"],
+        agent_id=agent_id,
+        overseer=services.get("overseer"),
+        cost_repo=services.get("cost_repo"),
+        llm_client=services.get("llm_client"),
+        memory_repo=services.get("memory_repo"),
+    )
+    for tool in core_tools:
+        registry.register(tool)
+
+    core_memory = services.get("core_memory")
+    recall_memory = services.get("recall_memory")
+    archival_memory = services.get("archival_memory")
+    if all([core_memory, recall_memory, archival_memory]):
+        mem_tools = get_memory_tools(
+            recall_manager=recall_memory,
+            archival_manager=archival_memory,
+            core_manager=core_memory,
+            agent_id=agent_id,
+        )
+        for tool in mem_tools:
+            registry.register(tool)
+
+    return registry.all()
+
+
+def tools_to_openai_schema(tools: dict) -> list[dict]:
+    """Convert BaseTool instances to OpenAI function-calling tool definitions."""
+    schemas = []
+    for name, tool in tools.items():
+        properties = {}
+        required = []
+        for param_name, param_def in tool.parameters.items():
+            prop: dict = {"type": param_def.get("type", "string")}
+            if "description" in param_def:
+                prop["description"] = param_def["description"]
+            if "items" in param_def:
+                prop["items"] = param_def["items"]
+            if "enum" in param_def:
+                prop["enum"] = param_def["enum"]
+            properties[param_name] = prop
+            # Treat all params as required unless marked optional
+            if not param_def.get("optional", False):
+                required.append(param_name)
+
+        schemas.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": tool.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        })
+    return schemas
+
+
+async def execute_tool_calls(
+    tool_calls: list,
+    tools: dict,
+    agent_id: str,
+    verbose: bool = False,
+) -> list[dict]:
+    """Execute tool calls and return tool result messages for the LLM."""
+    results = []
+    for tc in tool_calls:
+        tool = tools.get(tc.name)
+        if tool is None:
+            result_content = json.dumps({"status": "error", "reason": f"Unknown tool: {tc.name}"})
+        else:
+            try:
+                if verbose:
+                    console.print(f"    [dim]→ {tc.name}({json.dumps(tc.arguments, default=str)[:200]})[/dim]")
+                result = await tool.execute(**tc.arguments)
+                result_content = json.dumps(result, default=str)
+            except Exception as exc:
+                result_content = json.dumps({"status": "error", "reason": str(exc)})
+                console.print(f"    [red]Tool error ({tc.name}): {exc}[/red]")
+
+        results.append({
+            "role": "tool",
+            "tool_call_id": tc.id,
+            "content": result_content,
+        })
+    return results
+
+
+# ── TTS playback ─────────────────────────────────────────────────
+
+
+async def play_tts(
+    agent_id: str, text: str, tts_pipeline, verbose: bool = False,
+) -> None:
+    """Generate TTS audio and play it through the system speaker."""
+    if tts_pipeline is None:
+        return
+
+    console.print(f"  [dim]🔊 Generating voice...[/dim]")
+    result = await tts_pipeline.speak(agent_id, text)
+    if result is None:
+        if verbose:
+            console.print("  [dim]No voice for this agent[/dim]")
+        return
+
+    # Play the audio file (macOS: afplay, Linux: aplay/paplay)
+    audio_path = tts_pipeline.audio_dir / Path(result["audio_url"]).name
+    duration = result.get("duration", 0)
+    if verbose:
+        console.print(
+            f"  [dim]🔊 Playing {duration:.1f}s audio[/dim]"
+        )
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "afplay", str(audio_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+    except FileNotFoundError:
+        # afplay not available (not macOS) — try paplay (PulseAudio)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "paplay", str(audio_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+        except FileNotFoundError:
+            console.print(
+                "  [yellow]No audio player found "
+                "(install afplay or paplay)[/yellow]"
+            )
+
+
 # ── Core pipeline: one turn ───────────────────────────────────────
 
 
@@ -357,8 +517,10 @@ async def run_turn(
     services: dict,
     stats: SessionStats,
     verbose: bool = False,
+    agent_tools: dict | None = None,
+    tts_pipeline=None,
 ) -> str:
-    """Execute one full turn: assemble context → call LLM → return response."""
+    """Execute one full turn: assemble context → call LLM → handle tool calls → return response."""
     context_assembler = services["context_assembler"]
     llm_client = services["llm_client"]
     token_counter = services["token_counter"]
@@ -388,21 +550,65 @@ async def run_turn(
             sections[f"{role} ({tokens}t)"] = tokens
         print_context_breakdown(sections)
 
-    # Call LLM
-    console.print(f"  [dim]🤖 Calling {model}...[/dim]")
-    response = await llm_client.complete(
-        messages=messages,
-        model=model,
-        agent_id=agent_id,
-        max_tokens=500,
-    )
+    # Build OpenAI tool schemas if tools are available
+    openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
 
-    stats.record_llm_call(
-        input_tokens=response.input_tokens,
-        output_tokens=response.output_tokens,
-        cost=response.estimated_cost,
-        latency_ms=response.latency_ms,
-    )
+    # Call LLM (with tool-call loop)
+    max_tool_rounds = 5
+    for round_num in range(max_tool_rounds + 1):
+        console.print(f"  [dim]🤖 Calling {model}...[/dim]")
+        response = await llm_client.complete(
+            messages=messages,
+            model=model,
+            agent_id=agent_id,
+            max_tokens=1000,
+            tools=openai_tools,
+        )
+
+        stats.record_llm_call(
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cost=response.estimated_cost,
+            latency_ms=response.latency_ms,
+        )
+
+        # If no tool calls, we have the final response
+        if not response.tool_calls or not agent_tools:
+            break
+
+        # Display and execute tool calls
+        console.print(f"  [bold cyan]🔧 Agent wants to use {len(response.tool_calls)} tool(s):[/bold cyan]")
+        for tc in response.tool_calls:
+            console.print(f"    [cyan]→ {tc.name}[/cyan]")
+
+        # Add assistant message with tool calls to messages
+        assistant_msg: dict = {"role": "assistant", "content": response.content or ""}
+        assistant_msg["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments, default=str)},
+            }
+            for tc in response.tool_calls
+        ]
+        messages.append(assistant_msg)
+
+        # Execute tools and append results
+        tool_results = await execute_tool_calls(
+            response.tool_calls, agent_tools, agent_id, verbose=verbose,
+        )
+        for tr in tool_results:
+            tool_name = next(
+                (tc.name for tc in response.tool_calls if tc.id == tr["tool_call_id"]),
+                "unknown",
+            )
+            result_data = json.loads(tr["content"])
+            status = result_data.get("status", "unknown")
+            status_color = "green" if status == "ok" or status == "sent" or status == "created" else "yellow"
+            console.print(f"    [dim]← {tool_name}: [{status_color}]{status}[/{status_color}][/dim]")
+            messages.append(tr)
+    else:
+        console.print("  [yellow]⚠ Max tool rounds reached, returning last response[/yellow]")
 
     print_agent_response(agent_id, response.content)
     print_token_usage(
@@ -412,6 +618,10 @@ async def run_turn(
         response.latency_ms,
         model,
     )
+
+    # Play TTS if enabled
+    if tts_pipeline and response.content:
+        await play_tts(agent_id, response.content, tts_pipeline, verbose)
 
     # Add assistant response to history
     conversation_history.append({"role": "assistant", "content": response.content})
@@ -669,16 +879,45 @@ async def run_dry_run(agent_id: str, services: dict, verbose: bool) -> None:
 
 # ── Interactive mode ──────────────────────────────────────────────
 
-async def run_interactive(agent_id: str, services: dict, verbose: bool) -> None:
-    """REPL loop: type messages, see responses."""
+async def run_interactive(
+    agent_id: str,
+    services: dict,
+    verbose: bool,
+    use_tools: bool = True,
+    tts_enabled: bool = False,
+) -> None:
+    """REPL loop: type messages, see responses. Tools are available by default."""
+    from core.tts import TTSPipeline
+
     stats = SessionStats()
     conversation_history: list[dict[str, str]] = []
 
+    # Build tools for this agent
+    agent_tools = (
+        build_tools_for_agent(agent_id, services)
+        if use_tools else None
+    )
+    tool_count = len(agent_tools) if agent_tools else 0
+
+    # Initialize TTS pipeline if enabled
+    tts_pipeline = TTSPipeline() if tts_enabled else None
+
     color = AGENT_COLORS.get(agent_id, "white")
+    tools_note = (
+        f"[green]{tool_count} tools loaded[/green]"
+        if agent_tools else "[dim]no tools[/dim]"
+    )
+    tts_note = (
+        " | [green]🔊 TTS on[/green]"
+        if tts_enabled else ""
+    )
     console.print(Panel(
-        f"[bold]Interactive session with {agent_id.upper()}[/bold]\n"
-        f"Type messages and press Enter. Type 'quit' or Ctrl+C to exit.\n"
-        f"Commands: /memory  /reflect  /stats  /clear  /verbose  /help",
+        f"[bold]Interactive session with {agent_id.upper()}[/bold]"
+        f" ({tools_note}{tts_note})\n"
+        f"Type messages and press Enter. "
+        f"Type 'quit' or Ctrl+C to exit.\n"
+        f"Commands: /memory  /reflect  /stats  /clear  "
+        f"/verbose  /tools  /tts  /help",
         border_style=color,
     ))
 
@@ -724,14 +963,40 @@ async def run_interactive(agent_id: str, services: dict, verbose: bool) -> None:
             await run_reflect_interactive(agent_id, services)
             continue
 
+        if user_input.lower() == "/tools":
+            if agent_tools:
+                console.print(Panel(
+                    "\n".join(
+                        f"[bold]{name}[/bold] — {tool.description}"
+                        for name, tool in sorted(agent_tools.items())
+                    ),
+                    title=f"Available Tools ({len(agent_tools)})",
+                    border_style="cyan",
+                ))
+            else:
+                console.print("  [dim]No tools loaded[/dim]")
+            continue
+
+        if user_input.lower() == "/tts":
+            if tts_pipeline is None:
+                tts_pipeline = TTSPipeline()
+                console.print("  [green]🔊 TTS enabled[/green]")
+            else:
+                await tts_pipeline.shutdown()
+                tts_pipeline = None
+                console.print("  [dim]🔇 TTS disabled[/dim]")
+            continue
+
         if user_input.lower() == "/help":
             console.print(Panel(
-                "[bold]/memory[/bold]   — Show this agent's core memory (Tier 1)\n"
-                "[bold]/reflect[/bold]  — Run reflection cycle (promotes facts to core memory)\n"
+                "[bold]/memory[/bold]   — Show agent's core memory\n"
+                "[bold]/reflect[/bold]  — Run reflection cycle\n"
                 "[bold]/stats[/bold]    — Show session statistics\n"
+                "[bold]/tools[/bold]    — List available tools\n"
+                "[bold]/tts[/bold]      — Toggle text-to-speech\n"
                 "[bold]/clear[/bold]    — Clear conversation history\n"
                 "[bold]/verbose[/bold]  — Toggle verbose mode\n"
-                "[bold]quit[/bold]      — Exit (saves session + runs reflection)",
+                "[bold]quit[/bold]      — Exit (saves session)",
                 title="Commands",
                 border_style="dim",
             ))
@@ -744,7 +1009,13 @@ async def run_interactive(agent_id: str, services: dict, verbose: bool) -> None:
             services=services,
             stats=stats,
             verbose=verbose,
+            agent_tools=agent_tools,
+            tts_pipeline=tts_pipeline,
         )
+
+    # Clean up TTS
+    if tts_pipeline:
+        await tts_pipeline.shutdown()
 
     # End-of-session: compact and reflect
     await end_session(agent_id, conversation_history, services, stats)
@@ -785,12 +1056,14 @@ async def run_auto(agent_id: str, services: dict, verbose: bool) -> None:
     """Run predefined test sequence exercising the full pipeline."""
     stats = SessionStats()
     conversation_history: list[dict[str, str]] = []
+    agent_tools = build_tools_for_agent(agent_id, services)
 
     color = AGENT_COLORS.get(agent_id, "white")
     console.print(Panel(
         f"[bold]Auto-test sequence for {agent_id.upper()}[/bold]\n"
         f"{len(AUTO_PROMPTS)} prompts testing: character, memory store, "
-        f"normal response, memory recall, continuity",
+        f"normal response, memory recall, continuity\n"
+        f"[green]{len(agent_tools)} tools available[/green]",
         border_style=color,
     ))
 
@@ -809,10 +1082,222 @@ async def run_auto(agent_id: str, services: dict, verbose: bool) -> None:
             services=services,
             stats=stats,
             verbose=verbose,
+            agent_tools=agent_tools,
         )
 
     # End-of-session: compact and reflect
     await end_session(agent_id, conversation_history, services, stats)
+    print_session_summary(stats)
+
+
+# ── Diagnostic mode ──────────────────────────────────────────────
+
+# Tools grouped by category so the agent exercises them in a logical order.
+# Each entry: (tool_name, instruction for the agent, expected_status).
+DIAGNOSTIC_TOOL_TESTS: list[dict[str, str]] = [
+    # ── Core tools ──
+    {
+        "label": "get_world_state",
+        "prompt": (
+            "Use the get_world_state tool to check the current world state. "
+            "Report what you find."
+        ),
+    },
+    {
+        "label": "get_audience_status",
+        "prompt": (
+            "Use the get_audience_status tool to check viewer count and recent chat. "
+            "Report the results."
+        ),
+    },
+    {
+        "label": "send_message",
+        "prompt": (
+            "Use the send_message tool to send a test message to Rex saying "
+            "'Diagnostic check — please ignore'. Report the result."
+        ),
+    },
+    # ── Audience tools ──
+    {
+        "label": "create_poll",
+        "prompt": (
+            "Use the create_poll tool to create a test poll with the title "
+            "'Diagnostic test poll' and options ['Option A', 'Option B']. "
+            "Report the poll_id."
+        ),
+    },
+    {
+        "label": "get_poll_results",
+        "prompt": (
+            "Use the get_poll_results tool with the poll_id from the previous step "
+            "to check poll results. Report what you see."
+        ),
+    },
+    # ── Revenue tools ──
+    {
+        "label": "get_revenue_status",
+        "prompt": (
+            "Use the get_revenue_status tool to check current revenue and costs. "
+            "Report the summary."
+        ),
+    },
+    {
+        "label": "draft_social_post",
+        "prompt": (
+            "Use the draft_social_post tool to draft a tweet about our diagnostic test. "
+            "Platform: twitter, content: 'Diagnostic test post — ignore'. Report the result."
+        ),
+    },
+    {
+        "label": "draft_email",
+        "prompt": (
+            "Use the draft_email tool to draft an email with subject 'Diagnostic Test', "
+            "recipient 'test@example.com', body 'This is a diagnostic test email'. "
+            "Report the result."
+        ),
+    },
+    # ── Web tools ──
+    {
+        "label": "web_search",
+        "prompt": (
+            "Use the web_search tool to search for 'python programming'. "
+            "Report how many results you got and the first title."
+        ),
+    },
+    {
+        "label": "fetch_url",
+        "prompt": (
+            "Use the fetch_url tool to fetch 'https://httpbin.org/html'. "
+            "Report whether you got content and approximately how long it is."
+        ),
+    },
+    # ── Memory tools ──
+    {
+        "label": "update_core_memory (append)",
+        "prompt": (
+            "Use the update_core_memory tool with action 'append' and section 'notes', "
+            "content 'Diagnostic test entry — safe to delete'. Report the result."
+        ),
+    },
+    {
+        "label": "recall_memory",
+        "prompt": (
+            "Use the recall_memory tool to search for 'diagnostic test'. "
+            "Report what memories you found."
+        ),
+    },
+    # ── Code execution ──
+    {
+        "label": "execute_code",
+        "prompt": (
+            "Use the execute_code tool to run this Python code: print('Hello from diagnostic!'). "
+            "Report the output."
+        ),
+    },
+    # ── Self-modification ──
+    {
+        "label": "view_evolution_log",
+        "prompt": (
+            "Use the view_evolution_log tool to check your evolution history. "
+            "Report how many entries you found."
+        ),
+    },
+]
+
+
+async def run_diagnostic(agent_id: str, services: dict, verbose: bool) -> None:
+    """Run diagnostic mode: systematically test each tool through the agent."""
+    stats = SessionStats()
+    conversation_history: list[dict[str, str]] = []
+    agent_tools = build_tools_for_agent(agent_id, services)
+
+    console.print(Panel(
+        f"[bold]🔬 DIAGNOSTIC MODE — {agent_id.upper()}[/bold]\n"
+        f"Testing {len(DIAGNOSTIC_TOOL_TESTS)} tools through the agent pipeline\n"
+        f"[green]{len(agent_tools)} tools loaded:[/green] "
+        + ", ".join(sorted(agent_tools.keys())),
+        border_style="bright_yellow",
+    ))
+
+    # System message telling the agent it's in diagnostic mode
+    diagnostic_system = (
+        "[DIAGNOSTIC MODE] You are being tested in diagnostic mode. "
+        "For each prompt, use the EXACT tool mentioned. Always call the tool — "
+        "do not just describe what you would do. After calling the tool, "
+        "briefly report the result status (success/failure) and key data returned. "
+        "Keep responses short and factual."
+    )
+    conversation_history.append({"role": "user", "content": diagnostic_system})
+
+    results: list[dict] = []
+
+    for i, test in enumerate(DIAGNOSTIC_TOOL_TESTS, 1):
+        tool_name = test["label"]
+        # Skip tools this agent doesn't have
+        base_tool_name = tool_name.split(" ")[0]
+        if base_tool_name not in agent_tools:
+            console.print(
+                f"\n  [dim]⏭  Step {i}/{len(DIAGNOSTIC_TOOL_TESTS)}: "
+                f"{tool_name} — [yellow]SKIPPED[/yellow] (not available for {agent_id})[/dim]"
+            )
+            results.append({"tool": tool_name, "status": "skipped", "reason": "not available"})
+            continue
+
+        console.print()
+        console.print(
+            f"[bold bright_yellow]━━━ Diagnostic {i}/{len(DIAGNOSTIC_TOOL_TESTS)}: "
+            f"{tool_name} ━━━[/bold bright_yellow]"
+        )
+
+        try:
+            response_text = await run_turn(
+                agent_id=agent_id,
+                user_message=test["prompt"],
+                conversation_history=conversation_history,
+                services=services,
+                stats=stats,
+                verbose=verbose,
+                agent_tools=agent_tools,
+            )
+            results.append({"tool": tool_name, "status": "pass", "response": response_text[:200]})
+        except Exception as exc:
+            console.print(f"  [bold red]FAILED: {exc}[/bold red]")
+            results.append({"tool": tool_name, "status": "fail", "error": str(exc)})
+
+    # ── Summary report ──
+    console.print()
+    console.print(Panel("[bold]🔬 DIAGNOSTIC REPORT[/bold]", border_style="bright_yellow"))
+
+    report_table = Table(show_header=True, border_style="bright_yellow")
+    report_table.add_column("#", width=3)
+    report_table.add_column("Tool", width=30)
+    report_table.add_column("Status", width=10)
+    report_table.add_column("Notes", style="dim")
+
+    passed = skipped = failed = 0
+    for i, r in enumerate(results, 1):
+        status = r["status"]
+        if status == "pass":
+            status_text = "[green]PASS[/green]"
+            passed += 1
+        elif status == "skipped":
+            status_text = "[yellow]SKIP[/yellow]"
+            skipped += 1
+        else:
+            status_text = "[red]FAIL[/red]"
+            failed += 1
+        notes = r.get("error", r.get("reason", ""))
+        report_table.add_row(str(i), r["tool"], status_text, notes[:60])
+
+    console.print(report_table)
+    console.print()
+    console.print(
+        f"  [bold]Results:[/bold] "
+        f"[green]{passed} passed[/green], "
+        f"[yellow]{skipped} skipped[/yellow], "
+        f"[red]{failed} failed[/red] "
+        f"out of {len(results)} tests"
+    )
     print_session_summary(stats)
 
 
@@ -1085,6 +1570,11 @@ Examples:
         help="Run reflection cycle (updates core memory from recent conversations)",
     )
     mode_group.add_argument(
+        "--diagnostic",
+        action="store_true",
+        help="Run diagnostic mode — test all tools through the agent pipeline",
+    )
+    mode_group.add_argument(
         "--list-agents",
         action="store_true",
         help="List all available agents and exit",
@@ -1099,6 +1589,11 @@ Examples:
         "--verbose", "-v",
         action="store_true",
         help="Show full context assembly and debug info",
+    )
+    parser.add_argument(
+        "--tts",
+        action="store_true",
+        help="Enable text-to-speech voice output for agent responses",
     )
 
     return parser.parse_args(argv)
@@ -1183,9 +1678,14 @@ async def async_main(args: argparse.Namespace) -> None:
             await run_reflect(args.agent, services, run_all=args.all)
         elif args.auto:
             await run_auto(args.agent, services, args.verbose)
+        elif args.diagnostic:
+            await run_diagnostic(args.agent, services, args.verbose)
         else:
             # Default to interactive
-            await run_interactive(args.agent, services, args.verbose)
+            await run_interactive(
+                args.agent, services, args.verbose,
+                tts_enabled=args.tts,
+            )
 
     finally:
         await shutdown_services(services)

@@ -27,6 +27,9 @@ def redis_client() -> AsyncMock:
     client = AsyncMock()
     client.get = AsyncMock(return_value=None)
     client.set = AsyncMock()
+    client.rpush = AsyncMock()
+    client.ltrim = AsyncMock()
+    client.lrange = AsyncMock(return_value=[])
     return client
 
 
@@ -83,7 +86,7 @@ class TestSendChatMessage:
 
         assert result["status"] == "rejected"
         assert "Blocked content" in result["reason"]
-        redis_client.set.assert_not_called()
+        redis_client.rpush.assert_not_called()
 
     async def test_unauthorized_agent_rejected(
         self, overseer: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
@@ -99,14 +102,16 @@ class TestSendChatMessage:
         overseer.review.assert_not_called()
 
     async def test_successful_send(
-        self, send_chat: SendChatMessageTool, redis_client: AsyncMock
+        self, send_chat: SendChatMessageTool, redis_client: AsyncMock, event_bus: AsyncMock
     ) -> None:
         result = await send_chat.execute(message="GG everyone!")
 
         assert result["status"] == "sent"
         assert result["message"] == "GG everyone!"
         assert result["agent"] == "pixel"
-        redis_client.set.assert_called_once()
+        redis_client.rpush.assert_called_once()
+        redis_client.ltrim.assert_called_once_with("audience:recent_chat", -50, -1)
+        event_bus.emit.assert_called_once()
 
     async def test_allowed_agents(self) -> None:
         assert {"pixel", "sentinel", "vera"} == SendChatMessageTool.ALLOWED_AGENTS

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from core.models import CostEventCreate, LLMResponse, StreamChunk
+from core.models import CostEventCreate, LLMResponse, StreamChunk, ToolCall
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -279,6 +279,8 @@ class OpenRouterClient:
         timeout: float = 30.0,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         model_config = self._resolve_model(model)
         payload: dict[str, Any] = {
@@ -288,6 +290,10 @@ class OpenRouterClient:
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if tools is not None:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
         start = time.monotonic()
         resp = await self._request_with_retry(payload, timeout, stream=False)
@@ -304,7 +310,25 @@ class OpenRouterClient:
         choices = data.get("choices")
         if not choices:
             raise LLMError("OpenRouter returned no choices in response")
-        content = choices[0]["message"]["content"] or ""
+
+        message = choices[0]["message"]
+        content = message.get("content") or ""
+
+        # Parse tool calls if present
+        tool_calls: list[ToolCall] = []
+        for tc in message.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            args_raw = fn.get("arguments", "{}")
+            try:
+                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except json.JSONDecodeError:
+                args = {"_raw": args_raw}
+            tool_calls.append(ToolCall(
+                id=tc.get("id", ""),
+                name=fn.get("name", ""),
+                arguments=args,
+            ))
+
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
@@ -325,6 +349,7 @@ class OpenRouterClient:
             estimated_cost=cost,
             latency_ms=latency_ms,
             openrouter_id=openrouter_id,
+            tool_calls=tool_calls,
         )
 
     async def stream(

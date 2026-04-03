@@ -452,6 +452,14 @@ class ContentReviewResult(BaseModel):
 
 # ── LLM Client ─────────────────────────────────────────────────
 
+class ToolCall(BaseModel):
+    """A single tool/function call requested by the LLM."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class LLMResponse(BaseModel):
     content: str
     model: str
@@ -460,6 +468,7 @@ class LLMResponse(BaseModel):
     estimated_cost: Decimal
     latency_ms: int
     openrouter_id: str | None = None
+    tool_calls: list[ToolCall] = Field(default_factory=list)
 
 
 class StreamChunk(BaseModel):

@@ -221,7 +221,7 @@ class FetchUrlTool(BaseTool):
 
         # DNS resolution check — block domains resolving to private IPs
         parsed_host = urlparse(url).hostname or ""
-        if parsed_host and _dns_resolves_to_private(parsed_host):
+        if parsed_host and await _dns_resolves_to_private(parsed_host):
             return {"status": "error", "reason": "URL blocked: resolves to private address"}
 
         client = self._http or httpx.AsyncClient(timeout=15)
@@ -243,7 +243,7 @@ class FetchUrlTool(BaseTool):
                         "reason": "URL blocked: redirect target is not public",
                     }
                 final_host = urlparse(final_url).hostname or ""
-                if final_host and _dns_resolves_to_private(final_host):
+                if final_host and await _dns_resolves_to_private(final_host):
                     return {
                         "status": "error",
                         "reason": "URL blocked: redirect target resolves to private address",
@@ -323,12 +323,16 @@ def _is_safe_url(url: str) -> bool:
     return True
 
 
-def _dns_resolves_to_private(hostname: str) -> bool:
+async def _dns_resolves_to_private(hostname: str) -> bool:
     """Resolve hostname and check if any resolved IP is private/internal."""
+    import asyncio
     import socket
 
+    loop = asyncio.get_running_loop()
     try:
-        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        infos = await loop.getaddrinfo(
+            hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM,
+        )
         for _family, _type, _proto, _canonname, sockaddr in infos:
             addr = ipaddress.ip_address(sockaddr[0])
             if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:

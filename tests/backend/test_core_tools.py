@@ -204,10 +204,10 @@ class TestGetAudienceStatus:
         redis_client.get = AsyncMock(
             side_effect=lambda key: {
                 "audience:viewer_count": "142",
-                "audience:recent_chat": json.dumps(chat),
                 "audience:active_polls": json.dumps(polls),
             }.get(key)
         )
+        redis_client.lrange = AsyncMock(return_value=[json.dumps(chat[0])])
 
         result = await get_audience_status.execute()
 
@@ -219,6 +219,7 @@ class TestGetAudienceStatus:
         self, get_audience_status: GetAudienceStatusTool, redis_client: AsyncMock
     ) -> None:
         redis_client.get = AsyncMock(return_value=None)
+        redis_client.lrange = AsyncMock(return_value=[])
 
         result = await get_audience_status.execute()
 
@@ -232,10 +233,10 @@ class TestGetAudienceStatus:
         redis_client.get = AsyncMock(
             side_effect=lambda key: {
                 "audience:viewer_count": "not-a-number",
-                "audience:recent_chat": None,
                 "audience:active_polls": None,
             }.get(key)
         )
+        redis_client.lrange = AsyncMock(return_value=[])
 
         result = await get_audience_status.execute()
         assert result["viewer_count"] == 0
