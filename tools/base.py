@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import uuid
+
+    from core.repos.artifact_repo import ArtifactRepo
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +28,75 @@ class BaseTool(ABC):
     description: str
     parameters: dict[str, Any]
 
+    artifact_repo: ArtifactRepo | None = None
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         """Execute the tool with the given parameters and return a result dict."""
+
+    async def run(
+        self,
+        *,
+        agent_id: str,
+        simulation_id: uuid.UUID | None = None,
+        conversation_id: uuid.UUID | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Execute the tool and persist the result as an artifact (async, non-blocking)."""
+        from core.models import ARTIFACT_TYPE_MAP, PENDING_APPROVAL_TOOLS, ArtifactCreate
+
+        start = time.monotonic()
+        status = "executed"
+        try:
+            result = await self.execute(**kwargs)
+        except Exception:
+            status = "failed"
+            raise
+        else:
+            if self.name in PENDING_APPROVAL_TOOLS:
+                status = "pending_approval"
+            return result
+        finally:
+            if self.artifact_repo is not None:
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+                artifact_type = ARTIFACT_TYPE_MAP.get(self.name, self.name)
+                meta: dict[str, Any] = {"execution_time_ms": elapsed_ms}
+
+                tool_output: dict[str, Any] | None
+                if status == "failed":
+                    tool_output = None
+                else:
+                    tool_output = result  # type: ignore[possibly-undefined]
+                    # Enrich metadata for code execution
+                    if self.name == "execute_code" and tool_output is not None:
+                        for key in ("stdout", "stderr", "exit_code"):
+                            if key in tool_output:
+                                meta[key] = tool_output[key]
+
+                artifact = ArtifactCreate(
+                    simulation_id=simulation_id,
+                    conversation_id=conversation_id,
+                    agent_id=agent_id,
+                    tool_name=self.name,
+                    tool_input=kwargs if kwargs else None,
+                    tool_output=tool_output,
+                    artifact_type=artifact_type,
+                    status=status,
+                    metadata=meta,
+                )
+                asyncio.create_task(_save_artifact(self.artifact_repo, artifact))
+
+
+async def _save_artifact(repo: ArtifactRepo, artifact: Any) -> None:
+    """Fire-and-forget artifact persistence."""
+    try:
+        await repo.save_artifact(artifact)
+    except Exception:
+        logger.exception(
+            "Failed to persist artifact for tool=%s agent=%s",
+            artifact.tool_name,
+            artifact.agent_id,
+        )
 
 
 def parse_json(raw: str | None, default: Any) -> Any:

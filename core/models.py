@@ -614,6 +614,58 @@ class SelectionResult(BaseModel):
     interrupt_attempts: list[InterruptAttempt] = []
 
 
+# ── Artifacts ──────────────────────────────────────────────────
+
+
+# Maps tool names to artifact_type values
+ARTIFACT_TYPE_MAP: dict[str, str] = {
+    "draft_social_post": "social_post",
+    "draft_email": "email",
+    "execute_code": "code_execution",
+    "web_search": "web_search",
+    "fetch_url": "web_search",
+    "generate_tilemap": "tilemap",
+    "create_poll": "poll",
+    "recall_memory": "memory_operation",
+    "update_core_memory": "memory_operation",
+    "retrieve_transcript": "memory_operation",
+    "dispatch_alpha": "alpha_dispatch",
+    "propose_self_modification": "self_modification",
+    "view_evolution_log": "self_modification",
+    "send_message": "message",
+}
+
+# Tools whose artifacts should default to pending_approval status
+PENDING_APPROVAL_TOOLS: set[str] = {"draft_social_post", "draft_email"}
+
+
+class Artifact(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    simulation_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
+    agent_id: str
+    tool_name: str
+    tool_input: dict[str, Any] | None = None
+    tool_output: dict[str, Any] | None = None
+    artifact_type: str
+    status: str = "executed"
+    metadata: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
+class ArtifactCreate(BaseModel):
+    simulation_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
+    agent_id: str
+    tool_name: str
+    tool_input: dict[str, Any] | None = None
+    tool_output: dict[str, Any] | None = None
+    artifact_type: str
+    status: str = "executed"
+    metadata: dict[str, Any] | None = None
+
+
 class ConversationConfig(BaseModel):
     """Top-level conversation engine configuration — loaded from YAML."""
 

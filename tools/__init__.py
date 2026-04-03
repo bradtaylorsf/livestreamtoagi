@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from core.memory.recall_memory import RecallMemoryManager
     from core.overseer import Overseer
     from core.redis_client import RedisClient
+    from core.repos.artifact_repo import ArtifactRepo
     from core.repos.cost_repo import CostRepo
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
@@ -86,6 +87,7 @@ def get_core_tools(
     cost_repo: CostRepo | None = None,
     llm_client: LLMClient | None = None,
     memory_repo: MemoryRepo | None = None,
+    artifact_repo: ArtifactRepo | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent."""
     tools: list[BaseTool] = [
@@ -167,6 +169,10 @@ def get_core_tools(
             ViewEvolutionLogTool(agent_id=agent_id, memory_repo=memory_repo)
         )
 
+    if artifact_repo is not None:
+        for tool in tools:
+            tool.artifact_repo = artifact_repo
+
     return tools
 
 
@@ -175,10 +181,17 @@ def get_memory_tools(
     archival_manager: ArchivalMemoryManager,
     core_manager: CoreMemoryManager,
     agent_id: str = "unknown",
+    artifact_repo: ArtifactRepo | None = None,
 ) -> list[BaseTool]:
     """Create instances of all memory tools for an agent."""
-    return [
+    tools = [
         RecallMemoryTool(recall_manager=recall_manager, agent_id=agent_id),
         RetrieveTranscriptTool(archival_manager=archival_manager),
         UpdateCoreMemoryTool(core_manager=core_manager, agent_id=agent_id),
     ]
+
+    if artifact_repo is not None:
+        for tool in tools:
+            tool.artifact_repo = artifact_repo
+
+    return tools
