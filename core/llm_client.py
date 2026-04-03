@@ -60,9 +60,9 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         output_price_per_1m=Decimal("15.00"),
     ),
     "gemini-flash": ModelConfig(
-        openrouter_id="google/gemini-flash-1.5",
-        input_price_per_1m=Decimal("0.075"),
-        output_price_per_1m=Decimal("0.30"),
+        openrouter_id="google/gemini-2.5-flash",
+        input_price_per_1m=Decimal("0.15"),
+        output_price_per_1m=Decimal("0.60"),
     ),
     "gemini-2.5-pro": ModelConfig(
         openrouter_id="google/gemini-2.5-pro",

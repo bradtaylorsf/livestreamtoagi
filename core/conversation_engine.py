@@ -96,11 +96,13 @@ class ConversationEngine:
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
         speed_multiplier: float = 1.0,
+        overseer_enabled: bool = True,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
         self._event_bus = event_bus
         self._llm = llm_client
+        self._overseer_enabled = overseer_enabled
         self._overseer = overseer
         self._context = context_assembler
         self._repo = conversation_repo
@@ -117,6 +119,7 @@ class ConversationEngine:
 
         self._active: _ActiveConversation | None = None
         self._running = False
+        self._last_llm_meta: dict[str, Any] | None = None
 
     # ── Properties ─────────────────────────────────────────────
 
@@ -224,6 +227,11 @@ class ConversationEngine:
         trigger_type = trigger.get("type", "idle")
         hint = self._hint_for_trigger(trigger_type)
 
+        # If trigger has a seeded topic, override the hint to include it
+        seeded_topic = trigger.get("topic")
+        if seeded_topic:
+            hint = f"topic:{seeded_topic}"
+
         # Generate opening line
         content = await self._generate_turn(opening_agent, prompt_hint=hint)
         if content is None:
@@ -244,6 +252,7 @@ class ConversationEngine:
                 "conversation_id": str(self._active.id),
                 "turn": 1,
                 "trigger_type": trigger_type,
+                **(self._last_llm_meta or {}),
             },
         )
 
@@ -300,6 +309,11 @@ class ConversationEngine:
 
         # Check energy before this turn
         if not conv.energy.should_continue:
+            logger.info(
+                "Energy check: ending (energy=%.1f, turns=%d, min=%d, max=%d)",
+                conv.energy.energy, conv.energy.turn_count,
+                cfg.energy.minimum_turns, cfg.energy.maximum_turns,
+            )
             return False
 
         # Get eligible agents for this turn
@@ -309,6 +323,7 @@ class ConversationEngine:
             if a.id in conv.participants and not self._is_muted(a)
         ]
         if not eligible:
+            logger.warning("No eligible agents for turn %d", conv.turn_number + 1)
             return False
 
         # Select speaker
@@ -319,11 +334,18 @@ class ConversationEngine:
             detected_topic=topic,
             interrupt_state=conv.interrupt_state,
         )
+        logger.debug(
+            "Speaker selected: %s (score=%.3f, interrupt=%s)",
+            result.selected_agent_id,
+            result.scores.get(result.selected_agent_id, 0.0),
+            result.was_interrupt,
+        )
 
         selected_agent = next(
             (a for a in eligible if a.id == result.selected_agent_id), None
         )
         if selected_agent is None:
+            logger.warning("Selected agent %s not in eligible list", result.selected_agent_id)
             return False
 
         # Determine prompt hint
@@ -356,6 +378,7 @@ class ConversationEngine:
                 "turn": conv.turn_number,
                 "topic": topic,
                 "was_interrupt": result.was_interrupt,
+                **(self._last_llm_meta or {}),
             },
         )
 
@@ -363,6 +386,10 @@ class ConversationEngine:
 
         # Tick energy
         energy_changes = conv.energy.tick(topic, events=events)
+        logger.debug(
+            "Energy after tick: %.1f (turn_count=%d, changes=%s, should_continue=%s)",
+            conv.energy.energy, conv.energy.turn_count, energy_changes, conv.energy.should_continue,
+        )
 
         # Log selection, energy, interrupts
         await self._selection_logger.log_selection(
@@ -421,6 +448,7 @@ class ConversationEngine:
                         "conversation_id": str(conv.id),
                         "turn": conv.turn_number,
                         "is_closing": True,
+                        **(self._last_llm_meta or {}),
                     },
                 )
 
@@ -499,7 +527,18 @@ class ConversationEngine:
                     )
                     continue
 
-                # Overseer review
+                # Save token/cost metadata from this call
+                self._last_llm_meta = {
+                    "model": response.model,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                    "cost": float(response.estimated_cost),
+                    "latency_ms": response.latency_ms,
+                }
+
+                # Overseer review (can be disabled for testing)
+                if not self._overseer_enabled:
+                    return content
                 review = await self._overseer.review(agent.id, content)
                 if review.approved:
                     return content

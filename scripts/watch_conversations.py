@@ -105,22 +105,44 @@ def print_agent_message(
     *,
     is_interrupt: bool = False,
     is_closing: bool = False,
+    model: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cost: float = 0.0,
+    latency_ms: int = 0,
 ) -> None:
+    from rich.markdown import Markdown
+    from rich.text import Text
+
     color = AGENT_COLORS.get(agent_id, "white")
     role = AGENT_ROLES.get(agent_id, "Agent")
-    timestamp = time.strftime("%H:%M:%S")
 
-    prefix = ""
+    # Agent label
+    label = Text()
+    label.append(f" {agent_id.upper()} ", style=f"bold {color} on grey23")
+    label.append(f" {role}", style=f"dim {color}")
     if is_interrupt:
-        prefix = "[bold red]INTERRUPTS![/bold red] "
+        label.append(" INTERRUPTS!", style="bold red")
     elif is_closing:
-        prefix = "[dim](closing)[/dim] "
+        label.append(" (closing)", style="dim")
 
+    console.print()
+    console.print(label)
     console.print(
-        f"  [dim]{timestamp}[/dim] "
-        f"[{color}][bold]{agent_id.capitalize()}[/bold] ({role})[/{color}] "
-        f"{prefix}{content}"
+        Panel(
+            Markdown(content),
+            border_style=color,
+            padding=(0, 1),
+        )
     )
+    # Token/cost stats line
+    if model or input_tokens or output_tokens:
+        console.print(
+            f"  [dim]  {model} | "
+            f"{input_tokens} {output_tokens} tokens | "
+            f"${cost:.6f} | "
+            f"{latency_ms}ms[/dim]"
+        )
 
 
 def print_selection_scores(scores: dict, selected: str, *, quiet: bool = False) -> None:
@@ -195,20 +217,29 @@ def make_event_handlers(
 ) -> dict[str, object]:
     """Create event handler callbacks for the EventBus."""
 
-    async def on_agent_speak(data: dict) -> None:
+    async def on_agent_speak(event: dict) -> None:
+        data = event.get("data", event)  # unwrap envelope
         agent_id = data.get("agent_id", "unknown")
         if filter_agent and agent_id != filter_agent:
             return
         stats.total_turns += 1
+        cost = data.get("cost", 0.0)
+        stats.total_cost += Decimal(str(cost))
         print_agent_message(
             agent_id,
             data.get("content", ""),
             data.get("turn", 0),
             is_interrupt=data.get("was_interrupt", False),
             is_closing=data.get("is_closing", False),
+            model=data.get("model", ""),
+            input_tokens=data.get("input_tokens", 0),
+            output_tokens=data.get("output_tokens", 0),
+            cost=cost,
+            latency_ms=data.get("latency_ms", 0),
         )
 
-    async def on_overseer_warning(data: dict) -> None:
+    async def on_overseer_warning(event: dict) -> None:
+        data = event.get("data", event)
         stats.overseer_actions += 1
         print_overseer_action(
             data.get("agent_id", "unknown"),
@@ -216,7 +247,8 @@ def make_event_handlers(
             data.get("reason", ""),
         )
 
-    async def on_overseer_intervention(data: dict) -> None:
+    async def on_overseer_intervention(event: dict) -> None:
+        data = event.get("data", event)
         stats.overseer_actions += 1
         print_overseer_action(
             data.get("agent_id", "unknown"),
@@ -235,7 +267,9 @@ def make_event_handlers(
 
 
 def build_test_trigger(
-    test_type: str, agents: list[str] | None = None
+    test_type: str,
+    agents: list[str] | None = None,
+    topic: str | None = None,
 ) -> dict:
     """Build a trigger dict for test mode."""
     triggers = {
@@ -253,7 +287,7 @@ def build_test_trigger(
         "debate": {
             "type": "environmental",
             "reason": "Forced debate topic",
-            "topic": "Should we rewrite everything in Rust?",
+            "topic": topic or "Should we rewrite everything in Rust?",
             "location": "workshop",
         },
         "freeform": {
@@ -265,6 +299,8 @@ def build_test_trigger(
     trigger = triggers.get(test_type, triggers["freeform"])
     if agents:
         trigger["starter_agent_id"] = agents[0]
+    if topic:
+        trigger["topic"] = topic
     return trigger
 
 
@@ -273,6 +309,15 @@ def build_test_trigger(
 
 async def run_watch(args: argparse.Namespace) -> None:
     """Main async entry point for watch mode."""
+    import logging as _logging
+
+    verbose = getattr(args, "verbose", False)
+    _logging.basicConfig(
+        level=_logging.DEBUG if verbose else _logging.WARNING,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     from core.agent_registry import AgentRegistry
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
@@ -346,6 +391,10 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     speed = float(args.speed) if hasattr(args, "speed") and args.speed is not None else 1.0
 
+    overseer_enabled = not getattr(args, "no_overseer", False)
+    if not overseer_enabled:
+        console.print("[yellow]Overseer disabled for testing[/yellow]")
+
     engine = ConversationEngine(
         config_loader=config_loader,
         agent_registry=agent_registry,
@@ -359,6 +408,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         trigger_system=trigger_system,
         selection_logger=selection_logger,
         speed_multiplier=speed,
+        overseer_enabled=overseer_enabled,
     )
 
     # Set up event handlers
@@ -387,34 +437,84 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     if args.test:
         # Test mode: seed a conversation immediately
-        trigger = build_test_trigger(
-            args.test_type or "freeform",
-            args.agents.split(",") if args.agents else None,
-        )
-        console.print(f"[bold]Test mode:[/bold] {args.test_type or 'freeform'}")
-        console.print(f"[dim]Trigger: {trigger}[/dim]\n")
 
-        # If --agents specified, seed agent locations
-        if args.agents:
-            for agent_id in args.agents.split(","):
-                location = trigger.get("location", "town_square")
-                await proximity.update_location(agent_id.strip(), location)
+        async def _run_test() -> None:
+            trigger = build_test_trigger(
+                args.test_type or "freeform",
+                args.agents.split(",") if args.agents else None,
+                topic=getattr(args, "topic", None),
+            )
+            console.print(f"[bold]Test mode:[/bold] {args.test_type or 'freeform'}")
+            console.print(f"[dim]Trigger: {trigger}[/dim]\n")
 
-        # Manually start with the test trigger
-        await engine._start_conversation(trigger)
+            # Seed agent locations — clear stale data first, then place
+            # only the requested agents at the conversation location
+            location = trigger.get("location", "town_square")
+            requested_agents = (
+                [a.strip() for a in args.agents.split(",")]
+                if args.agents
+                else [a.id for a in agent_registry.get_all_agents()
+                      if a.id not in ("overseer", "alpha")]
+            )
+            # Clear all agent locations so stale Redis data doesn't pull in extras
+            for agent in agent_registry.get_all_agents():
+                await redis_client.delete(f"agent:location:{agent.id}")
+            # Place only requested agents
+            for agent_id in requested_agents:
+                await proximity.update_location(agent_id, location)
 
-        # Run turns up to --turns cap
-        max_turns = args.turns or 999
-        while engine.active_conversation and stats.total_turns < max_turns:
-            should_continue = await engine._continue_conversation()
-            if not should_continue:
+            # Manually start with the test trigger
+            engine._running = True  # Enable the engine for test mode
+            await engine._start_conversation(trigger)
+
+            # Run turns up to --turns cap
+            max_turns = args.turns or 999
+            import logging as _log
+            _watch_log = _log.getLogger("watch_conversations")
+            while (
+                engine.active_conversation
+                and engine.is_running
+                and stats.total_turns < max_turns
+            ):
+                try:
+                    _watch_log.debug(
+                        "Calling _continue_conversation (total_turns=%d, max=%d)",
+                        stats.total_turns, max_turns,
+                    )
+                    should_continue = await engine._continue_conversation()
+                    _watch_log.debug("_continue_conversation returned %s", should_continue)
+                except Exception:
+                    _watch_log.exception("_continue_conversation raised an exception")
+                    should_continue = False
+                if not should_continue:
+                    await engine._end_conversation()
+                    break
+
+            if engine.active_conversation:
                 await engine._end_conversation()
-                break
 
-        if engine.active_conversation:
-            await engine._end_conversation()
+            stats.conversations_completed += 1
 
-        stats.conversations_completed += 1
+        test_task = asyncio.create_task(_run_test())
+
+        # Update signal handler to cancel the test task
+        def _test_signal_handler() -> None:
+            console.print("\n[dim]Shutting down...[/dim]")
+            engine.stop()
+            test_task.cancel()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _test_signal_handler)
+
+        try:
+            await test_task
+        except asyncio.CancelledError:
+            if engine.active_conversation:
+                try:
+                    await engine._end_conversation()
+                except Exception:
+                    pass
+
         print_summary(stats)
     else:
         # Live mode: run the engine loop
@@ -474,6 +574,21 @@ def main() -> None:
         "--turns",
         type=int,
         help="Cap conversation length (default: unlimited)",
+    )
+    parser.add_argument(
+        "--topic",
+        type=str,
+        help="Seed topic for the conversation",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable debug logging",
+    )
+    parser.add_argument(
+        "--no-overseer",
+        action="store_true",
+        help="Disable Overseer content filter (for testing)",
     )
 
     args = parser.parse_args()

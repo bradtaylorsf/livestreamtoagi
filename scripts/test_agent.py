@@ -816,6 +816,230 @@ async def run_auto(agent_id: str, services: dict, verbose: bool) -> None:
     print_session_summary(stats)
 
 
+# ── Multi-agent conversation mode ────────────────────────────────
+
+
+async def run_multi(
+    agent_ids: list[str],
+    services: dict,
+    *,
+    convo_type: str = "freeform",
+    topic: str | None = None,
+    max_turns: int | None = None,
+    verbose: bool = False,
+) -> None:
+    """Run a multi-agent conversation using the same pipeline as single-agent chat.
+
+    Reuses: bootstrap_services, context assembly, LLM client, memory,
+    display formatting, and end-of-session compaction/reflection.
+    """
+    from core.config_loader import ConfigLoader
+    from core.conversation.energy import ConversationEnergy
+    from core.conversation.speaker_selector import InterruptState, SpeakerSelector
+    from core.conversation.topic_detector import TopicDetector
+
+    stats = SessionStats()
+    conversation_history: list[dict[str, str]] = []
+    agent_registry = services["agent_registry"]
+    context_assembler = services["context_assembler"]
+    llm_client = services["llm_client"]
+    token_counter = services["token_counter"]
+
+    # Load conversation config for speaker selection + energy
+    config_loader = ConfigLoader()
+    config_loader.load()
+    cfg = config_loader.config
+
+    selector = SpeakerSelector(cfg)
+    topic_detector = TopicDetector(cfg.topics, llm_client)
+    energy = ConversationEnergy(cfg.energy)
+    interrupt_state = InterruptState()
+
+    # Validate agents and ensure core memory
+    agents = []
+    for aid in agent_ids:
+        agent_config = agent_registry.get_agent(aid)
+        if agent_config is None:
+            console.print(f"[bold red]Agent '{aid}' not found, skipping[/bold red]")
+            continue
+        agents.append(agent_config)
+        await _ensure_core_memory(aid, agent_config, services)
+
+    if len(agents) < 2:
+        console.print("[bold red]Need at least 2 valid agents for a conversation[/bold red]")
+        return
+
+    # Banner
+    agent_names = ", ".join(
+        f"[{AGENT_COLORS.get(a.id, 'white')}]{a.id}[/{AGENT_COLORS.get(a.id, 'white')}]"
+        for a in agents
+    )
+    console.print(Panel(
+        f"[bold]Multi-agent conversation[/bold]\n"
+        f"Agents: {agent_names}\n"
+        f"Type: {convo_type}"
+        + (f" | Topic: {topic}" if topic else "")
+        + (f" | Max turns: {max_turns}" if max_turns else ""),
+        border_style="bright_cyan",
+    ))
+
+    turn_cap = max_turns or cfg.energy.maximum_turns
+    detected_topic = "general"
+
+    # ── Opening turn ──────────────────────────────────────────────
+    # Pick opener: first specified agent, or Vera for standups
+    opener = agents[0]
+    if convo_type == "standup":
+        vera = next((a for a in agents if a.id == "vera"), None)
+        if vera:
+            opener = vera
+
+    # Build the opening prompt
+    if topic:
+        opening_prompt = (
+            f"[The group wants to discuss: {topic}. "
+            f"Open the conversation on this topic in your style.]"
+        )
+    elif convo_type == "standup":
+        opening_prompt = "[It's time for the daily standup. Lead the check-in.]"
+    else:
+        opening_prompt = "[Start a conversation with whoever is nearby.]"
+
+    # Generate opener using the same run_turn pipeline
+    console.print()
+    console.print(f"  [dim]Generating opening from {opener.id}...[/dim]")
+
+    messages = await context_assembler.assemble_context(
+        agent_id=opener.id,
+        conversation_history=[{"role": "user", "content": opening_prompt}],
+    )
+    response = await llm_client.complete(
+        messages=messages,
+        model=opener.model_conversation,
+        agent_id=opener.id,
+        max_tokens=500,
+    )
+    stats.record_llm_call(
+        response.input_tokens, response.output_tokens,
+        response.estimated_cost, response.latency_ms,
+    )
+
+    print_agent_response(opener.id, response.content)
+    print_token_usage(
+        response.input_tokens, response.output_tokens,
+        response.estimated_cost, response.latency_ms, opener.model_conversation,
+    )
+
+    conversation_history.append({
+        "role": "assistant", "speaker": opener.id, "content": response.content,
+    })
+    energy.tick(detected_topic)
+
+    # ── Conversation loop ─────────────────────────────────────────
+    previous_speaker = opener.id
+    turn = 1
+
+    while energy.should_continue and turn < turn_cap:
+        turn += 1
+
+        # Detect topic from recent history
+        detected_topic = await topic_detector.detect_topic(conversation_history[-5:])
+
+        # Select next speaker
+        result = selector.select(
+            conversation_history=conversation_history,
+            eligible_agents=agents,
+            energy=energy.energy,
+            detected_topic=detected_topic,
+            interrupt_state=interrupt_state,
+        )
+
+        speaker = next((a for a in agents if a.id == result.selected_agent_id), None)
+        if speaker is None:
+            break
+
+        # Build context: the conversation so far is the "history" for this agent.
+        # Each agent sees the conversation as alternating user/assistant messages
+        # from their perspective.
+        agent_history: list[dict[str, str]] = []
+        for msg in conversation_history:
+            if msg.get("speaker") == speaker.id:
+                agent_history.append({"role": "assistant", "content": msg["content"]})
+            else:
+                speaker_name = msg.get("speaker", "someone")
+                agent_history.append({
+                    "role": "user",
+                    "content": f"[{speaker_name}]: {msg['content']}",
+                })
+
+        # Assemble context and call LLM
+        messages = await context_assembler.assemble_context(
+            agent_id=speaker.id,
+            conversation_history=agent_history,
+        )
+        response = await llm_client.complete(
+            messages=messages,
+            model=speaker.model_conversation,
+            agent_id=speaker.id,
+            max_tokens=500,
+        )
+        stats.record_llm_call(
+            response.input_tokens, response.output_tokens,
+            response.estimated_cost, response.latency_ms,
+        )
+
+        # Display
+        is_closing = not energy.should_continue or turn >= turn_cap
+        if result.was_interrupt:
+            console.print(f"  [bold red]⚡ {speaker.id} interrupts![/bold red]")
+
+        print_agent_response(speaker.id, response.content)
+        print_token_usage(
+            response.input_tokens, response.output_tokens,
+            response.estimated_cost, response.latency_ms, speaker.model_conversation,
+        )
+
+        # Check recall memories
+        for msg in messages:
+            if "Relevant memories" in msg.get("content", ""):
+                stats.memories_recalled += 1
+                print_memory_event("🔍", f"Recalled memories for {speaker.id}")
+                break
+
+        conversation_history.append({
+            "role": "assistant", "speaker": speaker.id, "content": response.content,
+        })
+
+        # Tick energy
+        events = []
+        if detected_topic != (conversation_history[-2].get("topic") if len(conversation_history) > 1 else None):
+            events.append("topic_shift")
+        energy.tick(detected_topic, events=events)
+        previous_speaker = speaker.id
+
+    # ── End of conversation ───────────────────────────────────────
+    console.print()
+    console.print(
+        f"[dim]Conversation ended: {turn} turns, "
+        f"energy={energy.energy:.1f}[/dim]"
+    )
+
+    # Run end-of-session for each participant (compaction + reflection)
+    for agent in agents:
+        # Build this agent's view of the conversation
+        agent_view = []
+        for msg in conversation_history:
+            if msg.get("speaker") == agent.id:
+                agent_view.append({"role": "assistant", "content": msg["content"]})
+            else:
+                name = msg.get("speaker", "someone")
+                agent_view.append({"role": "user", "content": f"[{name}]: {msg['content']}"})
+
+        await end_session(agent.id, agent_view, services, stats)
+
+    print_session_summary(stats)
+
+
 # ── Argument parsing ──────────────────────────────────────────────
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
