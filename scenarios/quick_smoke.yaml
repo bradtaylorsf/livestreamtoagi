@@ -1,0 +1,70 @@
+# ============================================================================
+# Scenario: Quick Smoke Test
+# ============================================================================
+# Purpose: Minimal 5-phase run for fast validation (~5 min).
+#          Covers core functionality without exhaustive tool coverage.
+#
+# Estimated Duration: ~5 minutes (simulated)
+#
+# Tool Coverage:
+#   send_message           → conversation, audience_interaction (all agents)
+#   read_core_memory       → context_assembly (vera)
+#   update_core_memory     → reflection (vera, rex, pixel)
+#   recall_memory          → conversation (pixel)
+#   execute_code           → code_execution (rex)
+#   create_poll            → audience_interaction (vera)
+#   send_chat_message      → audience_interaction (pixel)
+#   get_world_state        → context_assembly (vera)
+#
+# Skipped (low-priority for smoke test):
+#   retrieve_transcript, generate_tilemap, web_search, fetch_url,
+#   draft_social_post, draft_email, get_poll_results, get_audience_status,
+#   dispatch_alpha, get_revenue_status, propose_self_modification,
+#   view_evolution_log
+# ============================================================================
+
+phases:
+  # Phase 1: Context Assembly
+  - name: context_assembly
+    type: tool_exercise
+    agent: vera
+    tool: read_core_memory
+    context: "Load your core memory and check the world state to prepare for a quick check-in."
+    location: town_square
+
+  # Phase 2: Quick Conversation
+  - name: conversation
+    type: scheduled
+    trigger: quick_checkin
+    required_agents: [vera, rex, pixel]
+    location: town_square
+    topic: "Quick status check — what's everyone working on?"
+    max_turns: 8
+
+  # Phase 3: Code Execution
+  - name: code_execution
+    type: challenge
+    challenge:
+      title: "Quick Math Check"
+      description: "Write a Python function that returns the sum of all numbers from 1 to 100, then print the result (should be 5050)"
+      assigned_to: rex
+      language: python
+      difficulty: easy
+      expected_output_pattern: "5050"
+    location: workshop
+
+  # Phase 4: Audience Interaction
+  - name: audience_interaction
+    type: audience_sim
+    messages:
+      - user: "SmokeTestViewer"
+        text: "Is everything working?"
+      - user: "QuickChecker"
+        text: "!vote yes"
+    location: town_square
+
+  # Phase 5: Reflection
+  - name: reflection
+    type: reflection
+    reflection_type: "6hour"
+    agents: [vera, rex, pixel]
