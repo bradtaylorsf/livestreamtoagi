@@ -281,14 +281,6 @@ class PhaseRunner:
                 logger.info("[DRY RUN] Would inject audience message: %s", msg)
                 continue
 
-            self._event_bus.emit_sync(
-                "audience",
-                {
-                    "event_type": "chat_highlight",
-                    "data": msg,
-                },
-            ) if hasattr(self._event_bus, "emit_sync") else None
-
             self._triggers.queue_event("chat_highlight", msg)
 
         # Run a conversation triggered by the audience event
@@ -357,6 +349,7 @@ class PhaseRunner:
                 selection_logger=self._selection_logger,
                 speed_multiplier=0,  # No delays in simulation
                 overseer_enabled=True,
+                simulation_id=self._simulation_id,
             )
 
             engine._running = True
