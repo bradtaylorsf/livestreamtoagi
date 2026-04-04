@@ -205,6 +205,33 @@ export interface InterruptEvent {
   timestamp: string | null;
 }
 
+export type ArtifactType =
+  | "social_post"
+  | "email"
+  | "code_execution"
+  | "web_search"
+  | "tilemap"
+  | "poll"
+  | "memory_operation"
+  | "alpha_dispatch"
+  | "self_modification"
+  | "message";
+
+export type ArtifactStatus = "draft" | "executed" | "failed" | "pending_approval";
+
+export interface ArtifactFilters {
+  simulation_id?: string;
+  agent_ids?: string[];
+  types?: ArtifactType[];
+  statuses?: ArtifactStatus[];
+  since?: string;
+  until?: string;
+  search?: string;
+  sort?: "newest" | "oldest" | "agent" | "type";
+  limit?: number;
+  offset?: number;
+}
+
 export interface AgentArtifact {
   id: string;
   simulation_id: string | null;

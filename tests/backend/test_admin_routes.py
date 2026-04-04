@@ -576,6 +576,104 @@ class TestConversationEndpoints:
         assert data[0]["interrupt_score"] == 0.85
 
 
+# ── Global Artifact Endpoint Tests ─────────────────────────────
+
+
+class TestGlobalArtifactEndpoints:
+    def test_list_artifacts_no_filters(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_all_artifacts",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ) as mock_get:
+            resp = client.get("/api/admin/artifacts")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["items"] == []
+        assert data["total"] == 0
+        mock_get.assert_called_once_with(
+            simulation_id=None,
+            agent_ids=None,
+            artifact_type=None,
+            status=None,
+            since=None,
+            until=None,
+            search=None,
+            sort="newest",
+            limit=50,
+            offset=0,
+        )
+
+    def test_list_artifacts_with_filters(self, mock_app):
+        client, mock_db, _ = mock_app
+        from core.models import Artifact
+
+        artifact = Artifact(
+            id=uuid.uuid4(),
+            simulation_id=uuid.uuid4(),
+            agent_id="rex",
+            tool_name="post_to_social",
+            tool_input={"content": "Hello world"},
+            tool_output={"posted": True},
+            artifact_type="social_post",
+            status="executed",
+            metadata={},
+            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        )
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_all_artifacts",
+            new_callable=AsyncMock,
+            return_value=([artifact], 1),
+        ) as mock_get:
+            resp = client.get(
+                "/api/admin/artifacts"
+                "?agent_id=rex,fork"
+                "&type=social_post,email"
+                "&status=executed"
+                "&sort=oldest"
+                "&limit=10&offset=5"
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        assert data["items"][0]["agent_id"] == "rex"
+        assert data["items"][0]["artifact_type"] == "social_post"
+
+        mock_get.assert_called_once_with(
+            simulation_id=None,
+            agent_ids=["rex", "fork"],
+            artifact_type=["social_post", "email"],
+            status=["executed"],
+            since=None,
+            until=None,
+            search=None,
+            sort="oldest",
+            limit=10,
+            offset=5,
+        )
+
+    def test_list_artifacts_with_search(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_all_artifacts",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ) as mock_get:
+            resp = client.get("/api/admin/artifacts?search=hello")
+
+        assert resp.status_code == 200
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args[1]
+        assert call_kwargs["search"] == "hello"
+
+
 # ── Eval Endpoint Tests ────────────────────────────────────────
 
 
