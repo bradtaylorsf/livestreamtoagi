@@ -28,6 +28,7 @@ from core.models import (
     SelectionResult,
     SelectionWeights,
     TimingConfig,
+    ToolCall,
     TopicConfig,
     Transcript,
     TriggerConfig,
@@ -1011,3 +1012,273 @@ class TestSpeedMultiplier:
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await engine._sleep(2.0)
             mock_sleep.assert_awaited_once_with(1.0)
+
+
+# ── Test: Tool support in _generate_turn ─────────────────────────
+
+
+def _make_llm_response_with_tool_calls(
+    content: str = "",
+    tool_calls: list[ToolCall] | None = None,
+) -> LLMResponse:
+    return LLMResponse(
+        content=content,
+        model="claude-haiku-4-5",
+        input_tokens=100,
+        output_tokens=20,
+        estimated_cost=Decimal("0.0001"),
+        latency_ms=200,
+        openrouter_id="test-id",
+        tool_calls=tool_calls or [],
+    )
+
+
+def _make_mock_services() -> MagicMock:
+    svc = MagicMock()
+    svc.core_memory = MagicMock()
+    svc.recall_memory = MagicMock()
+    svc.archival_memory = MagicMock()
+    return svc
+
+
+class TestToolSupport:
+    async def test_no_services_means_no_tools(
+        self,
+        engine: ConversationEngine,
+        mock_llm: MagicMock,
+    ) -> None:
+        """Without services, LLM is called without tools param."""
+        agent = _make_agent("rex")
+        await engine._generate_turn(agent, prompt_hint="idle")
+
+        call_kwargs = mock_llm.complete.call_args[1]
+        assert call_kwargs.get("tools") is None
+
+    async def test_tools_passed_to_llm_when_services_provided(
+        self,
+        mock_config_loader: MagicMock,
+        mock_agent_registry: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_llm: MagicMock,
+        mock_overseer: MagicMock,
+        mock_context_assembler: MagicMock,
+        mock_conversation_repo: MagicMock,
+        mock_archival_memory: MagicMock,
+        mock_proximity: MagicMock,
+        mock_trigger_system: MagicMock,
+        mock_selection_logger: MagicMock,
+        agents: list[AgentConfig],
+    ) -> None:
+        """When services are provided, tools are passed to llm.complete()."""
+        mock_services = _make_mock_services()
+
+        engine_with_tools = ConversationEngine(
+            config_loader=mock_config_loader,
+            agent_registry=mock_agent_registry,
+            event_bus=mock_event_bus,
+            llm_client=mock_llm,
+            overseer=mock_overseer,
+            context_assembler=mock_context_assembler,
+            conversation_repo=mock_conversation_repo,
+            archival_memory=mock_archival_memory,
+            proximity=mock_proximity,
+            trigger_system=mock_trigger_system,
+            selection_logger=mock_selection_logger,
+            speed_multiplier=0,
+            services=mock_services,
+        )
+
+        mock_tool = MagicMock()
+        mock_tool.name = "web_search"
+        mock_tool.description = "Search the web"
+        mock_tool.parameters = {"query": {"type": "string", "description": "Query"}}
+
+        with patch(
+            "core.conversation_engine.build_agent_tools",
+            return_value={"web_search": mock_tool},
+        ):
+            agent = _make_agent("rex")
+            await engine_with_tools._generate_turn(agent, prompt_hint="idle")
+
+        call_kwargs = mock_llm.complete.call_args[1]
+        assert call_kwargs.get("tools") is not None
+        assert len(call_kwargs["tools"]) == 1
+        assert call_kwargs["tools"][0]["function"]["name"] == "web_search"
+
+    async def test_tool_call_loop_executes_and_re_calls_llm(
+        self,
+        mock_config_loader: MagicMock,
+        mock_agent_registry: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_llm: MagicMock,
+        mock_overseer: MagicMock,
+        mock_context_assembler: MagicMock,
+        mock_conversation_repo: MagicMock,
+        mock_archival_memory: MagicMock,
+        mock_proximity: MagicMock,
+        mock_trigger_system: MagicMock,
+        mock_selection_logger: MagicMock,
+        agents: list[AgentConfig],
+    ) -> None:
+        """When LLM returns tool_calls, engine executes them and re-calls LLM."""
+        mock_services = _make_mock_services()
+
+        engine_with_tools = ConversationEngine(
+            config_loader=mock_config_loader,
+            agent_registry=mock_agent_registry,
+            event_bus=mock_event_bus,
+            llm_client=mock_llm,
+            overseer=mock_overseer,
+            context_assembler=mock_context_assembler,
+            conversation_repo=mock_conversation_repo,
+            archival_memory=mock_archival_memory,
+            proximity=mock_proximity,
+            trigger_system=mock_trigger_system,
+            selection_logger=mock_selection_logger,
+            speed_multiplier=0,
+            services=mock_services,
+        )
+
+        # First LLM call returns a tool call, second returns text
+        tool_call = ToolCall(id="call_123", name="web_search", arguments={"query": "test"})
+        mock_llm.complete = AsyncMock(
+            side_effect=[
+                _make_llm_response_with_tool_calls("", [tool_call]),
+                _make_llm_response("Here are the search results!"),
+            ]
+        )
+
+        mock_tool = MagicMock()
+        mock_tool.name = "web_search"
+        mock_tool.description = "Search the web"
+        mock_tool.parameters = {"query": {"type": "string", "description": "Query"}}
+        mock_tool.run = AsyncMock(return_value={"status": "ok", "results": ["r1"]})
+
+        with patch(
+            "core.conversation_engine.build_agent_tools",
+            return_value={"web_search": mock_tool},
+        ):
+            agent = _make_agent("rex")
+            content = await engine_with_tools._generate_turn(agent, prompt_hint="idle")
+
+        assert content == "Here are the search results!"
+        assert mock_llm.complete.await_count == 2
+        mock_tool.run.assert_awaited_once()
+
+    async def test_tool_call_accumulates_token_costs(
+        self,
+        mock_config_loader: MagicMock,
+        mock_agent_registry: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_llm: MagicMock,
+        mock_overseer: MagicMock,
+        mock_context_assembler: MagicMock,
+        mock_conversation_repo: MagicMock,
+        mock_archival_memory: MagicMock,
+        mock_proximity: MagicMock,
+        mock_trigger_system: MagicMock,
+        mock_selection_logger: MagicMock,
+        agents: list[AgentConfig],
+    ) -> None:
+        """Token/cost metadata is accumulated across tool rounds."""
+        mock_services = _make_mock_services()
+
+        engine_with_tools = ConversationEngine(
+            config_loader=mock_config_loader,
+            agent_registry=mock_agent_registry,
+            event_bus=mock_event_bus,
+            llm_client=mock_llm,
+            overseer=mock_overseer,
+            context_assembler=mock_context_assembler,
+            conversation_repo=mock_conversation_repo,
+            archival_memory=mock_archival_memory,
+            proximity=mock_proximity,
+            trigger_system=mock_trigger_system,
+            selection_logger=mock_selection_logger,
+            speed_multiplier=0,
+            services=mock_services,
+        )
+
+        tool_call = ToolCall(id="call_456", name="test_tool", arguments={})
+        resp1 = LLMResponse(
+            content="",
+            model="claude-haiku-4-5",
+            input_tokens=100,
+            output_tokens=20,
+            estimated_cost=Decimal("0.0001"),
+            latency_ms=200,
+            tool_calls=[tool_call],
+        )
+        resp2 = LLMResponse(
+            content="Final answer",
+            model="claude-haiku-4-5",
+            input_tokens=150,
+            output_tokens=30,
+            estimated_cost=Decimal("0.0002"),
+            latency_ms=300,
+        )
+        mock_llm.complete = AsyncMock(side_effect=[resp1, resp2])
+
+        mock_tool = MagicMock()
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test"
+        mock_tool.parameters = {}
+        mock_tool.run = AsyncMock(return_value={"status": "ok"})
+
+        with patch(
+            "core.conversation_engine.build_agent_tools",
+            return_value={"test_tool": mock_tool},
+        ):
+            agent = _make_agent("rex")
+            await engine_with_tools._generate_turn(agent, prompt_hint="idle")
+
+        meta = engine_with_tools._last_llm_meta
+        assert meta["input_tokens"] == 250  # 100 + 150
+        assert meta["output_tokens"] == 50  # 20 + 30
+        assert meta["cost"] == pytest.approx(0.0003)
+        assert meta["latency_ms"] == 500  # 200 + 300
+
+    async def test_tool_cache_reuses_tools(
+        self,
+        mock_config_loader: MagicMock,
+        mock_agent_registry: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_llm: MagicMock,
+        mock_overseer: MagicMock,
+        mock_context_assembler: MagicMock,
+        mock_conversation_repo: MagicMock,
+        mock_archival_memory: MagicMock,
+        mock_proximity: MagicMock,
+        mock_trigger_system: MagicMock,
+        mock_selection_logger: MagicMock,
+        agents: list[AgentConfig],
+    ) -> None:
+        """Tool registries are cached per agent — build_agent_tools called once."""
+        mock_services = _make_mock_services()
+
+        engine_with_tools = ConversationEngine(
+            config_loader=mock_config_loader,
+            agent_registry=mock_agent_registry,
+            event_bus=mock_event_bus,
+            llm_client=mock_llm,
+            overseer=mock_overseer,
+            context_assembler=mock_context_assembler,
+            conversation_repo=mock_conversation_repo,
+            archival_memory=mock_archival_memory,
+            proximity=mock_proximity,
+            trigger_system=mock_trigger_system,
+            selection_logger=mock_selection_logger,
+            speed_multiplier=0,
+            services=mock_services,
+        )
+
+        with patch(
+            "core.conversation_engine.build_agent_tools",
+            return_value={},
+        ) as mock_build:
+            agent = _make_agent("rex")
+            await engine_with_tools._generate_turn(agent, prompt_hint="idle")
+            await engine_with_tools._generate_turn(agent, prompt_hint="idle")
+
+        # Only built once despite two turns
+        mock_build.assert_called_once_with("rex", mock_services)

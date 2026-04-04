@@ -21,11 +21,6 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from uuid import UUID
-
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -180,113 +175,13 @@ def print_session_summary(stats: SessionStats) -> None:
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services  # noqa: E402
 
 
-# ── Tool support ─────────────────────────────────────────────────
+# ── Tool support (shared with ConversationEngine) ──────────────────
 
-
-def build_tools_for_agent(agent_id: str, services: Services) -> dict:
-    """Build a ToolRegistry for a specific agent, returning {name: tool_instance}."""
-    from tools import ToolRegistry, get_core_tools, get_memory_tools
-
-    registry = ToolRegistry()
-
-    core_tools = get_core_tools(
-        event_bus=services.event_bus,
-        redis_client=services.redis,
-        agent_id=agent_id,
-        overseer=services.overseer,
-        cost_repo=services.cost_repo,
-        llm_client=services.llm_client,
-        memory_repo=services.memory_repo,
-    )
-    for tool in core_tools:
-        registry.register(tool)
-
-    core_memory = services.core_memory
-    recall_memory = services.recall_memory
-    archival_memory = services.archival_memory
-    if all([core_memory, recall_memory, archival_memory]):
-        mem_tools = get_memory_tools(
-            recall_manager=recall_memory,
-            archival_manager=archival_memory,
-            core_manager=core_memory,
-            agent_id=agent_id,
-        )
-        for tool in mem_tools:
-            registry.register(tool)
-
-    return registry.all()
-
-
-def tools_to_openai_schema(tools: dict) -> list[dict]:
-    """Convert BaseTool instances to OpenAI function-calling tool definitions."""
-    schemas = []
-    for name, tool in tools.items():
-        properties = {}
-        required = []
-        for param_name, param_def in tool.parameters.items():
-            prop: dict = {"type": param_def.get("type", "string")}
-            if "description" in param_def:
-                prop["description"] = param_def["description"]
-            if "items" in param_def:
-                prop["items"] = param_def["items"]
-            if "enum" in param_def:
-                prop["enum"] = param_def["enum"]
-            properties[param_name] = prop
-            # Treat all params as required unless marked optional
-            if not param_def.get("optional", False):
-                required.append(param_name)
-
-        schemas.append({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": tool.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            },
-        })
-    return schemas
-
-
-async def execute_tool_calls(
-    tool_calls: list,
-    tools: dict,
-    agent_id: str,
-    verbose: bool = False,
-    *,
-    simulation_id: UUID | None = None,
-    conversation_id: UUID | None = None,
-) -> list[dict]:
-    """Execute tool calls and return tool result messages for the LLM."""
-    results = []
-    for tc in tool_calls:
-        tool = tools.get(tc.name)
-        if tool is None:
-            result_content = json.dumps({"status": "error", "reason": f"Unknown tool: {tc.name}"})
-        else:
-            try:
-                if verbose:
-                    console.print(f"    [dim]→ {tc.name}({json.dumps(tc.arguments, default=str)[:200]})[/dim]")
-                result = await tool.run(
-                    agent_id=agent_id,
-                    simulation_id=simulation_id,
-                    conversation_id=conversation_id,
-                    **tc.arguments,
-                )
-                result_content = json.dumps(result, default=str)
-            except Exception as exc:
-                result_content = json.dumps({"status": "error", "reason": str(exc)})
-                console.print(f"    [red]Tool error ({tc.name}): {exc}[/red]")
-
-        results.append({
-            "role": "tool",
-            "tool_call_id": tc.id,
-            "content": result_content,
-        })
-    return results
+from core.tool_executor import (  # noqa: E402
+    build_agent_tools as build_tools_for_agent,
+    execute_tool_calls,
+    tools_to_openai_schema,
+)
 
 
 # ── TTS playback ─────────────────────────────────────────────────
@@ -425,7 +320,7 @@ async def run_turn(
 
         # Execute tools and append results
         tool_results = await execute_tool_calls(
-            response.tool_calls, agent_tools, agent_id, verbose=verbose,
+            response.tool_calls, agent_tools, agent_id,
         )
         for tr in tool_results:
             tool_name = next(
