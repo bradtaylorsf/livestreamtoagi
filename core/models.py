@@ -826,6 +826,7 @@ class TimelineEvent(BaseModel):
 class ConversationDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    simulation_id: uuid.UUID | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     trigger_type: str
@@ -839,6 +840,8 @@ class ConversationDetail(BaseModel):
     location: str | None = None
     energy_history: list[dict[str, Any]] = []
     transcript: str | None = None
+    total_tokens: int = 0
+    total_cost: str = "0"
 
 
 class TurnDetail(BaseModel):

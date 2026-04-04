@@ -245,3 +245,58 @@ class ConversationRepo:
                 d["changes"] = json.loads(d["changes"])
             result.append(d)
         return result
+
+    async def get_overseer_flags(
+        self, conversation_id: uuid.UUID
+    ) -> list[dict[str, object]]:
+        """Return overseer shadow flags for a conversation."""
+        rows = await self.db.fetch(
+            """SELECT * FROM overseer_shadow_log
+               WHERE conversation_id = $1
+               ORDER BY created_at""",
+            conversation_id,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            result.append({
+                "id": str(d["id"]),
+                "agent_id": d["agent_id"],
+                "original_content": d["original_content"],
+                "filter_layer": d["filter_layer"],
+                "severity": d["severity"],
+                "action_would_take": d["action_would_take"],
+                "reason": d["reason"],
+                "flagged_keywords": d.get("flagged_keywords") or [],
+                "created_at": (
+                    d["created_at"].isoformat() if d["created_at"] else None
+                ),
+            })
+        return result
+
+    async def get_interrupts(
+        self, conversation_id: uuid.UUID
+    ) -> list[dict[str, object]]:
+        """Return interrupt log entries for a conversation."""
+        rows = await self.db.fetch(
+            """SELECT * FROM interrupt_log
+               WHERE conversation_id = $1
+               ORDER BY timestamp""",
+            conversation_id,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            result.append({
+                "id": d["id"],
+                "attempting_agent_id": d["attempting_agent_id"],
+                "would_have_spoken_id": d["would_have_spoken_id"],
+                "interrupt_score": d["interrupt_score"],
+                "threshold_at_time": d["threshold_at_time"],
+                "succeeded": d["succeeded"],
+                "reason": d.get("reason"),
+                "timestamp": (
+                    d["timestamp"].isoformat() if d["timestamp"] else None
+                ),
+            })
+        return result

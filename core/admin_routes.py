@@ -578,8 +578,13 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
     energy_log = await conv_repo.get_energy_log(conv_id)
     transcript_record = await transcript_repo.get_by_conversation(conv_id)
 
+    # Estimate tokens from transcript length (cost_events lacks conversation_id)
+    transcript_text = transcript_record.content if transcript_record else ""
+    total_tokens = len(transcript_text) // 4 if transcript_text else 0
+
     return ConversationDetail(
         id=conv.id,
+        simulation_id=conv.simulation_id,
         started_at=conv.started_at,
         ended_at=conv.ended_at,
         trigger_type=conv.trigger_type,
@@ -593,6 +598,8 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
         location=conv.location,
         energy_history=energy_log,
         transcript=transcript_record.content if transcript_record else None,
+        total_tokens=total_tokens,
+        total_cost="0",
     )
 
 
@@ -627,6 +634,30 @@ async def get_conversation_selection_log(conv_id: uuid_mod.UUID) -> list[Selecti
     conv_repo = ConversationRepo(db)
 
     return await conv_repo.get_selection_log(conv_id)
+
+
+@router.get("/conversations/{conv_id}/overseer-flags")
+async def get_conversation_overseer_flags(
+    conv_id: uuid_mod.UUID,
+) -> list[dict[str, Any]]:
+    """Overseer shadow flags for this conversation."""
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+    conv_repo = ConversationRepo(db)
+
+    return await conv_repo.get_overseer_flags(conv_id)
+
+
+@router.get("/conversations/{conv_id}/interrupts")
+async def get_conversation_interrupts(
+    conv_id: uuid_mod.UUID,
+) -> list[dict[str, Any]]:
+    """Interrupt events for this conversation."""
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+    conv_repo = ConversationRepo(db)
+
+    return await conv_repo.get_interrupts(conv_id)
 
 
 # ── Eval Endpoints ─────────────────────────────────────────────

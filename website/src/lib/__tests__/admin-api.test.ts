@@ -15,6 +15,10 @@ import {
   fetchAgentArtifacts,
   fetchAgentJournal,
   fetchAgentCosts,
+  fetchConversationTurns,
+  fetchConversationSelectionLog,
+  fetchConversationOverseerFlags,
+  fetchConversationInterrupts,
 } from "../admin-api";
 
 const mockFetch = vi.fn();
@@ -376,5 +380,104 @@ describe("error handling", () => {
       status: 500,
       message: "Internal Server Error",
     });
+  });
+});
+
+// ── Conversation Detail API Tests ──────────────────────────────
+
+describe("fetchConversationTurns", () => {
+  it("sends GET to /api/admin/conversations/:id/turns", async () => {
+    const turns = [
+      {
+        turn_number: 1,
+        selected_agent_id: "vera",
+        was_interrupt: false,
+        agent_scores: {},
+        detected_topic: null,
+        previous_speaker_id: null,
+        conversation_energy: 0.8,
+        timestamp: null,
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(turns));
+
+    const result = await fetchConversationTurns("conv-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-123/turns",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].selected_agent_id).toBe("vera");
+  });
+});
+
+describe("fetchConversationSelectionLog", () => {
+  it("sends GET to /api/admin/conversations/:id/selection-log", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+
+    const result = await fetchConversationSelectionLog("conv-456");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-456/selection-log",
+      expect.anything(),
+    );
+    expect(result).toEqual([]);
+  });
+});
+
+describe("fetchConversationOverseerFlags", () => {
+  it("sends GET to /api/admin/conversations/:id/overseer-flags", async () => {
+    const flags = [
+      {
+        id: "flag-1",
+        agent_id: "grok",
+        original_content: "bad content",
+        filter_layer: 1,
+        severity: 3,
+        action_would_take: "block",
+        reason: "harmful",
+        flagged_keywords: ["bad"],
+        created_at: "2026-04-01T12:00:00Z",
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(flags));
+
+    const result = await fetchConversationOverseerFlags("conv-789");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-789/overseer-flags",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].severity).toBe(3);
+  });
+});
+
+describe("fetchConversationInterrupts", () => {
+  it("sends GET to /api/admin/conversations/:id/interrupts", async () => {
+    const interrupts = [
+      {
+        id: 1,
+        attempting_agent_id: "fork",
+        would_have_spoken_id: "vera",
+        interrupt_score: 0.85,
+        threshold_at_time: 0.7,
+        succeeded: true,
+        reason: "urgent",
+        timestamp: "2026-04-01T12:01:00Z",
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(interrupts));
+
+    const result = await fetchConversationInterrupts("conv-abc");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-abc/interrupts",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].attempting_agent_id).toBe("fork");
+    expect(result[0].succeeded).toBe(true);
   });
 });

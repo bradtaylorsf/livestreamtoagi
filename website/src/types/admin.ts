@@ -130,6 +130,7 @@ export interface AgentConversation {
 
 export interface ConversationDetail {
   id: string;
+  simulation_id: string | null;
   started_at: string | null;
   ended_at: string | null;
   trigger_type: string;
@@ -143,6 +144,65 @@ export interface ConversationDetail {
   location: string | null;
   energy_history: Record<string, unknown>[];
   transcript: string | null;
+  total_tokens: number;
+  total_cost: string;
+}
+
+export interface TurnDetail {
+  turn_number: number;
+  selected_agent_id: string;
+  was_interrupt: boolean;
+  agent_scores: Record<string, AgentScoreBreakdown>;
+  detected_topic: string | null;
+  previous_speaker_id: string | null;
+  conversation_energy: number | null;
+  timestamp: string | null;
+}
+
+export interface AgentScoreBreakdown {
+  time_since_spoke: number;
+  topic_relevance: number;
+  chattiness: number;
+  adjacency_fit: number;
+  random_jitter: number;
+  total: number;
+}
+
+export interface SelectionLog {
+  id: number;
+  conversation_id: string;
+  turn_number: number;
+  timestamp: string | null;
+  selected_agent_id: string;
+  was_interrupt: boolean;
+  agent_scores: Record<string, unknown>;
+  detected_topic: string | null;
+  previous_speaker_id: string | null;
+  conversation_energy: number | null;
+  active_agents: string[] | null;
+}
+
+export interface OverseerFlag {
+  id: string;
+  agent_id: string;
+  original_content: string;
+  filter_layer: number;
+  severity: number;
+  action_would_take: string;
+  reason: string;
+  flagged_keywords: string[];
+  created_at: string | null;
+}
+
+export interface InterruptEvent {
+  id: number;
+  attempting_agent_id: string;
+  would_have_spoken_id: string;
+  interrupt_score: number;
+  threshold_at_time: number;
+  succeeded: boolean;
+  reason: string | null;
+  timestamp: string | null;
 }
 
 export interface AgentArtifact {
