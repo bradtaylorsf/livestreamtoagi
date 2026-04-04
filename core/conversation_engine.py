@@ -8,6 +8,7 @@ event emission. This is the central runtime loop of the show.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -672,8 +673,6 @@ class ConversationEngine:
                     conv_id = self._active.id if self._active else None
 
                     # Append assistant message with tool calls
-                    import json as _json
-
                     assistant_msg: dict[str, Any] = {
                         "role": "assistant",
                         "content": response.content or "",
@@ -684,7 +683,7 @@ class ConversationEngine:
                             "type": "function",
                             "function": {
                                 "name": tc.name,
-                                "arguments": _json.dumps(
+                                "arguments": json.dumps(
                                     tc.arguments, default=str
                                 ),
                             },

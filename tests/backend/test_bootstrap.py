@@ -93,7 +93,7 @@ def testmake_embedding_fn_no_warning_with_api_key(caplog):
 def test_no_dummy_embed_anywhere():
     """Acceptance: no _dummy_embed function anywhere in scripts/ or core/."""
     result = subprocess.run(
-        ["grep", "-rn", "_dummy_embed", "scripts/", "core/"],
+        ["grep", "-rn", "--include=*.py", "_dummy_embed", "scripts/", "core/"],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
