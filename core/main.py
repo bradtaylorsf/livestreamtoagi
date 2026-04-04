@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 
 from core.admin_routes import router as admin_router
-from core.bootstrap import Services, bootstrap_services, shutdown_services
+from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
 from core.event_bus import event_bus
 from core.scheduler import start_scheduler, stop_scheduler
 
@@ -27,6 +27,18 @@ async def lifespan(app: FastAPI):
     try:
         svc = await bootstrap_services()
         app.state.services = svc
+
+        # Initialize core memory for all agents at startup
+        if svc.core_memory:
+            initialized = await init_core_memories(svc.agent_registry, svc.core_memory)
+            if initialized:
+                logger.info("Initialized core memory for: %s", ", ".join(initialized))
+
+            # Health check: verify all agents have core memory
+            for agent in svc.agent_registry.get_all_agents():
+                mem = await svc.core_memory.get_core_memory(agent.id)
+                if mem is None:
+                    logger.warning("Agent %s still missing core memory after init", agent.id)
 
         await svc.config_loader.start_watching()
 
