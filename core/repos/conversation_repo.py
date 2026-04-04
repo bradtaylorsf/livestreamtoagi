@@ -274,6 +274,37 @@ class ConversationRepo:
             })
         return result
 
+    async def get_artifacts(
+        self, conversation_id: uuid.UUID
+    ) -> list[dict[str, object]]:
+        """Return artifacts (tool invocations) for a conversation."""
+        rows = await self.db.fetch(
+            """SELECT * FROM artifacts
+               WHERE conversation_id = $1
+               ORDER BY created_at""",
+            conversation_id,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            for key in ("tool_input", "tool_output", "metadata"):
+                if isinstance(d.get(key), str):
+                    d[key] = json.loads(d[key])
+            result.append({
+                "id": str(d["id"]),
+                "agent_id": d["agent_id"],
+                "tool_name": d["tool_name"],
+                "tool_input": d.get("tool_input") or {},
+                "tool_output": d.get("tool_output"),
+                "artifact_type": d["artifact_type"],
+                "status": d["status"],
+                "metadata": d.get("metadata"),
+                "created_at": (
+                    d["created_at"].isoformat() if d["created_at"] else None
+                ),
+            })
+        return result
+
     async def get_interrupts(
         self, conversation_id: uuid.UUID
     ) -> list[dict[str, object]]:

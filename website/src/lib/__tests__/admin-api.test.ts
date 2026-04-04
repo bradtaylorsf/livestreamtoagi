@@ -15,10 +15,12 @@ import {
   fetchAgentArtifacts,
   fetchAgentJournal,
   fetchAgentCosts,
+  fetchConversation,
   fetchConversationTurns,
   fetchConversationSelectionLog,
   fetchConversationOverseerFlags,
   fetchConversationInterrupts,
+  fetchConversationArtifacts,
 } from "../admin-api";
 
 const mockFetch = vi.fn();
@@ -385,6 +387,41 @@ describe("error handling", () => {
 
 // ── Conversation Detail API Tests ──────────────────────────────
 
+describe("fetchConversation", () => {
+  it("sends GET to /api/admin/conversations/:id", async () => {
+    const conv = {
+      id: "conv-123",
+      simulation_id: "sim-1",
+      started_at: "2026-04-01T12:00:00Z",
+      ended_at: "2026-04-01T12:05:00Z",
+      trigger_type: "idle",
+      trigger_details: null,
+      initial_energy: 0.8,
+      final_energy: 0.5,
+      turn_count: 10,
+      participating_agents: ["vera", "rex"],
+      topics_discussed: ["architecture"],
+      closed_by: "energy_depleted",
+      location: "main_hall",
+      energy_history: [],
+      transcript: "[vera]: Hello",
+      total_tokens: 250,
+      total_cost: "0",
+    };
+    mockFetch.mockReturnValue(jsonResponse(conv));
+
+    const result = await fetchConversation("conv-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-123",
+      expect.anything(),
+    );
+    expect(result.id).toBe("conv-123");
+    expect(result.turn_count).toBe(10);
+    expect(result.participating_agents).toEqual(["vera", "rex"]);
+  });
+});
+
 describe("fetchConversationTurns", () => {
   it("sends GET to /api/admin/conversations/:id/turns", async () => {
     const turns = [
@@ -479,5 +516,33 @@ describe("fetchConversationInterrupts", () => {
     expect(result).toHaveLength(1);
     expect(result[0].attempting_agent_id).toBe("fork");
     expect(result[0].succeeded).toBe(true);
+  });
+});
+
+describe("fetchConversationArtifacts", () => {
+  it("sends GET to /api/admin/conversations/:id/artifacts", async () => {
+    const artifacts = [
+      {
+        id: "art-1",
+        simulation_id: null,
+        artifact_type: "code",
+        tool_name: "write_file",
+        tool_input: { path: "test.py" },
+        tool_output: { success: true },
+        status: "executed",
+        metadata: null,
+        created_at: "2026-04-01T12:02:00Z",
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(artifacts));
+
+    const result = await fetchConversationArtifacts("conv-xyz");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-xyz/artifacts",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].tool_name).toBe("write_file");
   });
 });

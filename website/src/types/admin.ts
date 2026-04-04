@@ -208,6 +208,7 @@ export interface InterruptEvent {
 export interface AgentArtifact {
   id: string;
   simulation_id: string | null;
+  agent_id: string;
   artifact_type: string;
   tool_name: string;
   tool_input: Record<string, unknown>;

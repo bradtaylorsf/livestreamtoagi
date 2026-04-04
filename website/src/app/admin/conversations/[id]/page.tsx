@@ -8,8 +8,10 @@ import {
   fetchConversationTurns,
   fetchConversationOverseerFlags,
   fetchConversationInterrupts,
+  fetchConversationArtifacts,
 } from "@/lib/admin-api";
 import type {
+  AgentArtifact,
   ConversationDetail,
   InterruptEvent,
   OverseerFlag,
@@ -99,6 +101,7 @@ export default function ConversationDetailPage() {
   const [turnDetails, setTurnDetails] = useState<TurnDetail[]>([]);
   const [overseerFlags, setOverseerFlags] = useState<OverseerFlag[]>([]);
   const [interrupts, setInterrupts] = useState<InterruptEvent[]>([]);
+  const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedTurn, setSelectedTurn] = useState<number | null>(null);
 
@@ -108,12 +111,14 @@ export default function ConversationDetailPage() {
       fetchConversationTurns(id).catch(() => []),
       fetchConversationOverseerFlags(id).catch(() => []),
       fetchConversationInterrupts(id).catch(() => []),
+      fetchConversationArtifacts(id).catch(() => []),
     ])
-      .then(([convData, turns, flags, ints]) => {
+      .then(([convData, turns, flags, ints, arts]) => {
         setConv(convData);
         setTurnDetails(turns);
         setOverseerFlags(flags);
         setInterrupts(ints);
+        setArtifacts(arts);
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -140,28 +145,97 @@ export default function ConversationDetailPage() {
     turnDetailMap.set(td.turn_number, td);
   }
 
-  // Group overseer flags by matching them to turns by agent_id order
+  // Group overseer flags by matching each flag to the next unmatched turn
+  // by the same agent (flags are ordered by created_at from the API).
   const flagsByTurn = new Map<number, OverseerFlag[]>();
-  for (const flag of overseerFlags) {
-    // Match flags to turns by finding the turn where this agent spoke
-    for (let i = 0; i < turns.length; i++) {
-      if (turns[i].speaker === flag.agent_id) {
-        const existing = flagsByTurn.get(i) || [];
-        existing.push(flag);
-        flagsByTurn.set(i, existing);
+  {
+    const usedTurns = new Map<string, number>(); // agent_id → next turn index to check
+    for (const flag of overseerFlags) {
+      const startIdx = usedTurns.get(flag.agent_id) ?? 0;
+      let matched = false;
+      for (let i = startIdx; i < turns.length; i++) {
+        if (turns[i].speaker === flag.agent_id) {
+          const existing = flagsByTurn.get(i) || [];
+          existing.push(flag);
+          flagsByTurn.set(i, existing);
+          usedTurns.set(flag.agent_id, i + 1);
+          matched = true;
+          break;
+        }
+      }
+      // If no future turn found, attach to the last turn by this agent
+      if (!matched) {
+        for (let i = turns.length - 1; i >= 0; i--) {
+          if (turns[i].speaker === flag.agent_id) {
+            const existing = flagsByTurn.get(i) || [];
+            existing.push(flag);
+            flagsByTurn.set(i, existing);
+            break;
+          }
+        }
       }
     }
   }
 
-  // Group interrupts by turn (via attempting_agent matching turn detail)
+  // Group interrupts by turn — match each interrupt to the next unmatched
+  // turn by the attempting agent (interrupts ordered by timestamp from API).
   const interruptsByTurn = new Map<number, InterruptEvent[]>();
-  for (const interrupt of interrupts) {
-    // Match to the turn where the interrupting agent spoke
-    for (let i = 0; i < turns.length; i++) {
-      if (turns[i].speaker === interrupt.attempting_agent_id) {
-        const existing = interruptsByTurn.get(i) || [];
-        existing.push(interrupt);
-        interruptsByTurn.set(i, existing);
+  {
+    const usedTurns = new Map<string, number>();
+    for (const interrupt of interrupts) {
+      const agentId = interrupt.attempting_agent_id;
+      const startIdx = usedTurns.get(agentId) ?? 0;
+      let matched = false;
+      for (let i = startIdx; i < turns.length; i++) {
+        if (turns[i].speaker === agentId) {
+          const existing = interruptsByTurn.get(i) || [];
+          existing.push(interrupt);
+          interruptsByTurn.set(i, existing);
+          usedTurns.set(agentId, i + 1);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        for (let i = turns.length - 1; i >= 0; i--) {
+          if (turns[i].speaker === agentId) {
+            const existing = interruptsByTurn.get(i) || [];
+            existing.push(interrupt);
+            interruptsByTurn.set(i, existing);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Group artifacts (tool invocations) by turn via agent_id ordering
+  const artifactsByTurn = new Map<number, AgentArtifact[]>();
+  {
+    const usedTurns = new Map<string, number>();
+    for (const artifact of artifacts) {
+      const agentId = artifact.agent_id;
+      const startIdx = usedTurns.get(agentId) ?? 0;
+      let matched = false;
+      for (let i = startIdx; i < turns.length; i++) {
+        if (turns[i].speaker === agentId) {
+          const existing = artifactsByTurn.get(i) || [];
+          existing.push(artifact);
+          artifactsByTurn.set(i, existing);
+          usedTurns.set(agentId, i + 1);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        for (let i = turns.length - 1; i >= 0; i--) {
+          if (turns[i].speaker === agentId) {
+            const existing = artifactsByTurn.get(i) || [];
+            existing.push(artifact);
+            artifactsByTurn.set(i, existing);
+            break;
+          }
+        }
       }
     }
   }
@@ -326,7 +400,13 @@ export default function ConversationDetailPage() {
                 turnDetail={turnDetailMap.get(i + 1) || null}
                 overseerFlags={flagsByTurn.get(i) || []}
                 interrupts={interruptsByTurn.get(i) || []}
-                toolInvocations={[]}
+                toolInvocations={(artifactsByTurn.get(i) || []).map((a) => ({
+                  tool_name: a.tool_name,
+                  tool_input: a.tool_input,
+                  tool_output: a.tool_output,
+                  status: a.status,
+                  artifact_id: a.id,
+                }))}
                 convStartedAt={conv.started_at}
                 isSelected={selectedTurn === i}
                 onSelect={() =>

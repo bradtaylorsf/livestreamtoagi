@@ -213,6 +213,14 @@ export async function fetchConversationInterrupts(
   );
 }
 
+export async function fetchConversationArtifacts(
+  id: string,
+): Promise<AgentArtifact[]> {
+  return request<AgentArtifact[]>(
+    `/api/admin/conversations/${id}/artifacts`,
+  );
+}
+
 export async function fetchSimulationConversations(
   simId: string,
   opts?: { offset?: number; limit?: number },

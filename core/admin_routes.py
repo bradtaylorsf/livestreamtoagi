@@ -648,6 +648,18 @@ async def get_conversation_overseer_flags(
     return await conv_repo.get_overseer_flags(conv_id)
 
 
+@router.get("/conversations/{conv_id}/artifacts")
+async def get_conversation_artifacts(
+    conv_id: uuid_mod.UUID,
+) -> list[dict[str, Any]]:
+    """Tool invocation artifacts for this conversation."""
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+    conv_repo = ConversationRepo(db)
+
+    return await conv_repo.get_artifacts(conv_id)
+
+
 @router.get("/conversations/{conv_id}/interrupts")
 async def get_conversation_interrupts(
     conv_id: uuid_mod.UUID,
