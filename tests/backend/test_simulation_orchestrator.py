@@ -897,7 +897,7 @@ class TestToolCoverageSeedFile:
         config = self._load_tool_coverage()
         assert len(config.phases) == 25
 
-    def test_tool_coverage_exercises_all_21_tools(self):
+    def test_tool_coverage_exercises_all_tools(self):
         config = self._load_tool_coverage()
         tool_exercise_phases = [
             p for p in config.phases if p.type == PhaseType.tool_exercise
