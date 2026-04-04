@@ -202,23 +202,22 @@ class SimulationRepo:
         """
         events: list[dict] = []
 
-        # Conversations started
-        conv_where = "a.simulation_id = $1"
+        # Conversations started — use direct FK
+        conv_where = "c.simulation_id = $1"
         conv_params: list[object] = [simulation_id]
         idx = 2
         if agent_id is not None:
-            conv_where += f" AND c.participating_agents::text LIKE '%' || ${idx} || '%'"
+            conv_where += f" AND c.participating_agents @> to_jsonb(ARRAY[${idx}])"
             conv_params.append(agent_id)
             idx += 1
 
         if event_type is None or event_type == "conversation":
             rows = await self.db.fetch(
-                f"""SELECT DISTINCT ON (c.id) c.id, c.started_at, c.ended_at,
+                f"""SELECT c.id, c.started_at, c.ended_at,
                        c.participating_agents, c.trigger_type, c.turn_count
                     FROM conversations c
-                    JOIN artifacts a ON a.conversation_id = c.id
                     WHERE {conv_where}
-                    ORDER BY c.id, c.started_at""",  # noqa: S608
+                    ORDER BY c.started_at""",  # noqa: S608
                 *conv_params,
             )
             for r in rows:

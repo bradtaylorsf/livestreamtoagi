@@ -134,7 +134,9 @@ class UpdateCoreMemoryTool(BaseTool):
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         section: str = kwargs["section"]
         content: str = kwargs["content"]
-        agent_target: str = kwargs.get("agent_target", self._agent_id).lower()
+        raw_target: str = kwargs.get("agent_target", self._agent_id).lower()
+        # Resolve "self" to the calling agent's actual ID
+        agent_target = self._agent_id if raw_target == "self" else raw_target
 
         # Authorization: agents can only update their own memory unless privileged
         if agent_target != self._agent_id and self._agent_id not in self.CROSS_AGENT_WRITERS:

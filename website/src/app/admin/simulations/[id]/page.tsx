@@ -8,8 +8,8 @@ import SummaryCard from "@/components/admin/SummaryCard";
 import TimelineView from "@/components/admin/TimelineView";
 import CostChart from "@/components/admin/CostChart";
 import ConfigViewer from "@/components/admin/ConfigViewer";
-import { fetchSimulation } from "@/lib/admin-api";
-import type { Simulation } from "@/types/admin";
+import { fetchSimulation, fetchSimulationConversations } from "@/lib/admin-api";
+import type { AgentConversation, Simulation } from "@/types/admin";
 
 function formatDuration(iso: string | null): string {
   if (!iso) return "—";
@@ -30,6 +30,7 @@ export default function SimulationDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const [sim, setSim] = useState<Simulation | null>(null);
+  const [convos, setConvos] = useState<AgentConversation[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,6 +39,9 @@ export default function SimulationDetailPage() {
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load simulation"),
       );
+    fetchSimulationConversations(id)
+      .then((res) => setConvos(res.items))
+      .catch(() => {});
   }, [id]);
 
   if (error) {
@@ -116,6 +120,53 @@ export default function SimulationDetailPage() {
                 {agent}
               </span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Conversations */}
+      {convos.length > 0 && (
+        <div>
+          <h2 className="text-sm font-medium text-foreground/70 mb-3">
+            Conversations
+          </h2>
+          <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-foreground/50">
+                  <th className="px-4 py-2 font-medium">Trigger</th>
+                  <th className="px-4 py-2 font-medium">Participants</th>
+                  <th className="px-4 py-2 font-medium text-right">Turns</th>
+                  <th className="px-4 py-2 font-medium">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {convos.map((c) => (
+                  <tr
+                    key={c.id}
+                    className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
+                  >
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/admin/conversations/${c.id}`}
+                        className="text-neon-cyan hover:underline"
+                      >
+                        {c.topic || c.trigger_type}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-foreground/50 text-xs">
+                      {c.participating_agents.join(", ")}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {c.turn_count}
+                    </td>
+                    <td className="px-4 py-2 text-foreground/40 text-xs">
+                      {new Date(c.started_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

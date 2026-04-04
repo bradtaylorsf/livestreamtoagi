@@ -98,6 +98,7 @@ class ConversationEngine:
         selection_logger: SelectionLogger,
         speed_multiplier: float = 1.0,
         overseer_enabled: bool = True,
+        simulation_id: object | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -112,6 +113,7 @@ class ConversationEngine:
         self._triggers = trigger_system
         self._selection_logger = selection_logger
         self._speed_multiplier = speed_multiplier
+        self._simulation_id = simulation_id
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -204,6 +206,7 @@ class ConversationEngine:
                 participating_agents=participant_ids,
                 location=location,
                 config_hash=self._config_loader.config_hash,
+                simulation_id=self._simulation_id,
             )
         )
 
@@ -456,6 +459,7 @@ class ConversationEngine:
             conversation_id=conv.id,
             final_energy=final_normalized,
             closed_by=closer_id,
+            turn_count=conv.turn_number,
         )
 
         # Store transcript to archival memory
@@ -466,6 +470,7 @@ class ConversationEngine:
             event_type=conv.trigger.get("type", "idle"),
             participants=conv.participants,
             content=transcript_content,
+            conversation_id=conv.id,
         )
 
         # Reset triggers

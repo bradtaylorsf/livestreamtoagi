@@ -40,8 +40,8 @@ class ConversationRepo:
             row = await self.db.fetchrow(
                 """INSERT INTO conversations
                    (id, trigger_type, trigger_details, initial_energy,
-                    participating_agents, location, config_hash)
-                   VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7)
+                    participating_agents, location, config_hash, simulation_id)
+                   VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8)
                    RETURNING *""",
                 conv.id,
                 conv.trigger_type,
@@ -50,13 +50,14 @@ class ConversationRepo:
                 serialize_jsonb(conv.participating_agents),
                 conv.location,
                 conv.config_hash,
+                conv.simulation_id,
             )
         else:
             row = await self.db.fetchrow(
                 """INSERT INTO conversations
                    (trigger_type, trigger_details, initial_energy,
-                    participating_agents, location, config_hash)
-                   VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6)
+                    participating_agents, location, config_hash, simulation_id)
+                   VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6, $7)
                    RETURNING *""",
                 conv.trigger_type,
                 serialize_jsonb(conv.trigger_details),
@@ -64,6 +65,7 @@ class ConversationRepo:
                 serialize_jsonb(conv.participating_agents),
                 conv.location,
                 conv.config_hash,
+                conv.simulation_id,
             )
         return _row_to_conversation(row)
 
@@ -78,14 +80,17 @@ class ConversationRepo:
         conversation_id: uuid.UUID,
         final_energy: float,
         closed_by: str,
+        turn_count: int | None = None,
     ) -> Conversation | None:
         row = await self.db.fetchrow(
             """UPDATE conversations
-               SET ended_at = NOW(), final_energy = $1, closed_by = $2
-               WHERE id = $3
+               SET ended_at = NOW(), final_energy = $1, closed_by = $2,
+                   turn_count = COALESCE($3, turn_count)
+               WHERE id = $4
                RETURNING *""",
             final_energy,
             closed_by,
+            turn_count,
             conversation_id,
         )
         return _row_to_conversation(row) if row else None
@@ -174,13 +179,12 @@ class ConversationRepo:
         offset: int = 0,
     ) -> tuple[list[Conversation], int]:
         """Return paginated conversations where agent participated."""
-        clauses = ["participating_agents::text LIKE '%' || $1 || '%'"]
+        clauses = ["participating_agents @> to_jsonb(ARRAY[$1])"]
         params: list[object] = [agent_id]
         idx = 2
 
         if simulation_id is not None:
-            sub = f"id IN (SELECT conversation_id FROM artifacts WHERE simulation_id = ${idx})"
-            clauses.append(sub)
+            clauses.append(f"simulation_id = ${idx}")
             params.append(simulation_id)
             idx += 1
 
@@ -208,18 +212,15 @@ class ConversationRepo:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Conversation], int]:
-        """Return paginated conversations linked to a simulation via artifacts."""
+        """Return paginated conversations linked to a simulation via direct FK."""
         count = await self.db.fetchval(
-            """SELECT COUNT(DISTINCT c.id) FROM conversations c
-               JOIN artifacts a ON a.conversation_id = c.id
-               WHERE a.simulation_id = $1""",
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
             simulation_id,
         )
         rows = await self.db.fetch(
-            """SELECT DISTINCT ON (c.id) c.* FROM conversations c
-               JOIN artifacts a ON a.conversation_id = c.id
-               WHERE a.simulation_id = $1
-               ORDER BY c.id, c.started_at DESC
+            """SELECT * FROM conversations
+               WHERE simulation_id = $1
+               ORDER BY started_at DESC
                LIMIT $2 OFFSET $3""",
             simulation_id,
             limit,

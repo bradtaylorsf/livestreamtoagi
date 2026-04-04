@@ -356,6 +356,7 @@ async def run_watch(args: argparse.Namespace) -> None:
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.cost_repo import CostRepo
     from core.repos.memory_repo import MemoryRepo
+    from core.repos.simulation_repo import SimulationRepo
     from core.repos.transcript_repo import TranscriptRepo
 
     # Connect services
@@ -387,6 +388,17 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     recall_memory = RecallMemoryManager(memory_repo, _dummy_embed)
     archival_memory = ArchivalMemoryManager(transcript_repo, token_counter)
+
+    # Ensure all agents have core memory initialized
+    for agent in agent_registry.get_all_agents():
+        existing = await core_memory.get_core_memory(agent.id)
+        if existing is None:
+            identity = (
+                f"I am {agent.display_name}. "
+                f"My conversation model is {agent.model_conversation}."
+            )
+            await core_memory.initialize_agent_memory(agent.id, identity)
+            console.print(f"  [dim]Initialized core memory for {agent.id}[/dim]")
 
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
@@ -435,6 +447,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         selection_logger=selection_logger,
         speed_multiplier=speed,
         overseer_enabled=overseer_enabled,
+        # simulation_id is set later after sim record is created/attached
     )
 
     # Set up event handlers
@@ -460,6 +473,55 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
+
+    # ── Simulation tracking ──────────────────────────────────────
+    simulation_id = None
+    sim_repo = SimulationRepo(db)
+
+    # If --sim-id is provided (from dashboard), reuse existing record
+    existing_sim_id = getattr(args, "sim_id", None)
+    if existing_sim_id and args.test:
+        import uuid as _uuid
+        simulation_id = _uuid.UUID(existing_sim_id)
+        llm_client._simulation_id = simulation_id
+        await sim_repo.update_status(simulation_id, "running")
+        console.print(f"[bold cyan]Simulation (reattached):[/bold cyan] {simulation_id}")
+    elif getattr(args, "simulate", False) and args.test:
+        from core.models import SimulationCreate
+        sim_name = getattr(args, "sim_name", None) or (
+            f"cli-{args.test_type or 'freeform'}-"
+            f"{time.strftime('%Y%m%d-%H%M%S')}"
+        )
+        requested = (
+            [a.strip() for a in args.agents.split(",")]
+            if args.agents
+            else [a.id for a in agent_registry.get_all_agents()
+                  if a.id not in ("overseer", "alpha")]
+        )
+        sim = await sim_repo.create(SimulationCreate(
+            name=sim_name,
+            config={
+                "test_type": args.test_type or "freeform",
+                "turns": args.turns,
+                "speed": args.speed,
+                "overseer_shadow": overseer_shadow,
+                "agents": requested,
+                "topic": getattr(args, "topic", None),
+            },
+            agents_participated=requested,
+        ))
+        simulation_id = sim.id
+        # Expose simulation_id to the LLM client for cost attribution
+        llm_client._simulation_id = simulation_id
+        console.print(f"[bold cyan]Simulation:[/bold cyan] {sim.name} ({simulation_id})")
+
+    # Wire simulation_id into the engine so conversations get linked
+    if simulation_id is not None:
+        engine._simulation_id = simulation_id
+
+    # Captured conversation data for post-conversation reflection
+    _captured_history: list[dict[str, str]] = []
+    _captured_participants: list[str] = []
 
     if args.test:
         # Test mode: seed a conversation immediately
@@ -513,10 +575,16 @@ async def run_watch(args: argparse.Namespace) -> None:
                     _watch_log.exception("_continue_conversation raised an exception")
                     should_continue = False
                 if not should_continue:
+                    # Capture conversation data before _end_conversation clears it
+                    if engine.active_conversation:
+                        _captured_history.extend(engine.active_conversation.history)
+                        _captured_participants.extend(engine.active_conversation.participants)
                     await engine._end_conversation()
                     break
 
             if engine.active_conversation:
+                _captured_history.extend(engine.active_conversation.history)
+                _captured_participants.extend(engine.active_conversation.participants)
                 await engine._end_conversation()
 
             stats.conversations_completed += 1
@@ -541,7 +609,85 @@ async def run_watch(args: argparse.Namespace) -> None:
                 except Exception:
                     pass
 
+        # ── Post-conversation reflection: create recall memories + journal ──
+        if _captured_history and _captured_participants:
+            console.print("\n[dim]Creating recall memories and journal entries...[/dim]")
+            transcript = "\n".join(
+                f"[{msg.get('speaker', '?')}]: {msg.get('content', '')}"
+                for msg in _captured_history
+            )
+            # Build a short summary for recall memory
+            speakers = list(dict.fromkeys(
+                msg.get("speaker", "?") for msg in _captured_history
+            ))
+            topics_discussed = ", ".join(speakers)
+            summary = (
+                f"Conversation between {topics_discussed} "
+                f"({len(_captured_history)} turns). "
+                f"Excerpt: {_captured_history[0].get('content', '')[:200]}"
+            )
+            try:
+                # Generate embedding for the transcript summary
+                import httpx
+                async with httpx.AsyncClient() as http_client:
+                    from core.memory.embeddings import generate_embedding
+                    embedding = await generate_embedding(
+                        summary, http_client, api_key,
+                    )
+
+                for agent_id in set(_captured_participants):
+                    # Recall memory
+                    await recall_memory.store_recall_memory(
+                        agent_id=agent_id,
+                        summary=summary,
+                        embedding=embedding,
+                        event_type="conversation",
+                        participants=list(set(_captured_participants)),
+                        importance_score=0.6,
+                    )
+                    stats.memories_created += 1
+
+                    # Journal entry
+                    from core.models import JournalEntryCreate
+                    agent_lines = [
+                        msg.get("content", "")
+                        for msg in _captured_history
+                        if msg.get("speaker") == agent_id
+                    ]
+                    journal_content = (
+                        f"Participated in a conversation with {topics_discussed}. "
+                        f"I contributed {len(agent_lines)} messages. "
+                        f"Topics covered: {summary[:300]}"
+                    )
+                    await memory_repo.create_journal_entry(JournalEntryCreate(
+                        agent_id=agent_id,
+                        reflection_type="conversation",
+                        content=journal_content,
+                        token_count=len(journal_content.split()),
+                    ))
+
+                console.print(
+                    f"  [dim]Created {stats.memories_created} recall memories "
+                    f"and {len(set(_captured_participants))} journal entries[/dim]"
+                )
+            except Exception as exc:
+                console.print(f"  [yellow]Warning: post-conversation reflection failed: {exc}[/yellow]")
+
         print_summary(stats)
+
+        # Finalize simulation record
+        if simulation_id:
+            from datetime import UTC, datetime
+            await sim_repo.update_status(
+                simulation_id, "completed", completed_at=datetime.now(UTC),
+            )
+            await sim_repo.increment_stats(
+                simulation_id,
+                conversations=stats.conversations_completed,
+                turns=stats.total_turns,
+                cost=Decimal(str(stats.total_cost)),
+            )
+            console.print(f"\n[bold cyan]Simulation completed:[/bold cyan] {simulation_id}")
     else:
         # Live mode: run the engine loop
         console.print("[dim]Waiting for triggers...[/dim]\n")
@@ -620,6 +766,21 @@ def main() -> None:
         "--overseer-shadow",
         action="store_true",
         help="Run Overseer in shadow/log-only mode (filters run but never block)",
+    )
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Create a simulation record for tracking costs, artifacts, and conversations",
+    )
+    parser.add_argument(
+        "--sim-name",
+        type=str,
+        help="Name for the simulation (auto-generated if omitted)",
+    )
+    parser.add_argument(
+        "--sim-id",
+        type=str,
+        help="Reuse an existing simulation record by UUID (used by dashboard)",
     )
 
     args = parser.parse_args()

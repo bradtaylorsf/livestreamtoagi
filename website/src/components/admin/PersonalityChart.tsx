@@ -5,6 +5,7 @@ import {
   Radar,
   PolarGrid,
   PolarAngleAxis,
+  PolarRadiusAxis,
   ResponsiveContainer,
 } from "recharts";
 import type { PersonalityTraits } from "@/types/admin";
@@ -38,6 +39,12 @@ export default function PersonalityChart({ traits, size = "lg" }: Props) {
           <PolarAngleAxis
             dataKey="trait"
             tick={{ fill: "#999", fontSize: size === "sm" ? 9 : 11 }}
+          />
+          <PolarRadiusAxis
+            domain={[0, 1]}
+            tick={false}
+            axisLine={false}
+            tickCount={5}
           />
           <Radar
             dataKey="value"

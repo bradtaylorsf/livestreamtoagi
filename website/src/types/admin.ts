@@ -33,6 +33,8 @@ export interface TimelineEvent {
 export interface SimulationCostResponse {
   by_agent: { agent_id: string; total: string }[];
   total: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
 }
 
 export interface PaginatedResponse<T> {
@@ -126,13 +128,30 @@ export interface AgentConversation {
   started_at: string;
 }
 
+export interface ConversationDetail {
+  id: string;
+  started_at: string | null;
+  ended_at: string | null;
+  trigger_type: string;
+  trigger_details: Record<string, unknown> | null;
+  initial_energy: number;
+  final_energy: number | null;
+  turn_count: number;
+  participating_agents: string[];
+  topics_discussed: string[] | null;
+  closed_by: string | null;
+  location: string | null;
+  energy_history: Record<string, unknown>[];
+  transcript: string | null;
+}
+
 export interface AgentArtifact {
   id: string;
   simulation_id: string | null;
   artifact_type: string;
   tool_name: string;
   tool_input: Record<string, unknown>;
-  tool_output: string;
+  tool_output: Record<string, unknown> | string | null;
   status: string;
   metadata: Record<string, unknown> | null;
   created_at: string;

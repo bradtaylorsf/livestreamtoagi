@@ -2,14 +2,20 @@
 
 Exposes agent internals, simulation data, conversation details,
 artifacts, and eval results. Mounted at /api/admin.
+
+Protected by ADMIN_PASSWORD env var — requests must include
+``Authorization: Bearer <password>`` header.
 """
 
 from __future__ import annotations
 
+import os
 import uuid as uuid_mod
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 
 from core.models import (
     AgentDetail,
@@ -40,7 +46,28 @@ from core.system_prompt import INFRASTRUCTURE_PROMPT
 if TYPE_CHECKING:
     from datetime import datetime
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+_bearer_scheme = HTTPBearer()
+
+
+async def _require_admin(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),  # noqa: B008
+) -> None:
+    """Validate the admin password from the Authorization header."""
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    if not password:
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_PASSWORD not configured on server",
+        )
+    if credentials.credentials != password:
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+
+
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(_require_admin)],
+)
 
 # Agent metadata not stored in YAML configs — derived from character sheets.
 AGENT_ROLES: dict[str, str] = {
@@ -173,6 +200,7 @@ async def get_agent_system_prompt(agent_id: str) -> SystemPromptResponse:
     assembled = "\n\n".join(v for v in raw_layers.values() if v)
 
     def _estimate_tokens(text: str) -> int:
+        """Rough heuristic: ~4 chars per token. Not exact — for display only."""
         return len(text) // 4 if text else 0
 
     layers = [
@@ -280,13 +308,14 @@ async def get_agent_artifacts(
     from core.repos.artifact_repo import ArtifactRepo
     artifact_repo = ArtifactRepo(db)
 
-    artifacts = await artifact_repo.get_artifacts_by_agent(
-        agent_id, artifact_type=artifact_type, limit=limit
+    artifacts, total = await artifact_repo.get_artifacts_by_agent(
+        agent_id,
+        artifact_type=artifact_type,
+        simulation_id=simulation_id,
+        limit=limit,
+        offset=offset,
     )
-    total = len(artifacts)
-    # Apply offset manually since the base method doesn't support it
-    paged = artifacts[offset:offset + limit]
-    return PaginatedResponse(items=paged, total=total, limit=limit, offset=offset)
+    return PaginatedResponse(items=artifacts, total=total, limit=limit, offset=offset)
 
 
 @router.get("/agents/{agent_id}/costs", response_model=CostBreakdownResponse)
@@ -321,8 +350,8 @@ async def get_agent_costs(
         by_day=by_day,
         by_type=by_type,
         total=data.get("total", "0"),
-        total_input_tokens=0,
-        total_output_tokens=0,
+        total_input_tokens=data.get("total_input_tokens", 0),
+        total_output_tokens=data.get("total_output_tokens", 0),
     )
 
 
@@ -338,13 +367,93 @@ async def get_agent_journal(
     from core.repos.memory_repo import MemoryRepo
     memory_repo = MemoryRepo(db)
 
-    entries = await memory_repo.get_journal_entries(agent_id, limit=limit + offset)
-    # Apply offset manually; repo method returns most recent entries
-    paged = entries[offset:offset + limit]
-    return PaginatedResponse(items=paged, total=len(entries), limit=limit, offset=offset)
+    entries, total = await memory_repo.get_journal_entries(agent_id, limit=limit, offset=offset)
+    return PaginatedResponse(items=entries, total=total, limit=limit, offset=offset)
 
 
 # ── Simulation Endpoints ──────────────────────────────────────
+
+
+class NewSimulationRequest(BaseModel):
+    """Request body for launching a simulation from the dashboard."""
+
+    name: str | None = None
+    agents: list[str] = Field(default_factory=list)
+    convo_type: str = "freeform"
+    topic: str | None = None
+    turns: int | None = None
+    overseer_shadow: bool = True
+
+
+class NewSimulationResponse(BaseModel):
+    simulation_id: str
+    name: str
+    status: str
+
+
+@router.post("/simulations", response_model=NewSimulationResponse)
+async def create_simulation(body: NewSimulationRequest) -> NewSimulationResponse:
+    """Create a new simulation and launch it as a background subprocess."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+    sim_repo = SimulationRepo(db)
+
+    import time as _time
+    sim_name = body.name or f"dashboard-{body.convo_type}-{_time.strftime('%Y%m%d-%H%M%S')}"
+
+    registry = _get_registry()
+    agents = body.agents or [
+        a.id for a in registry.get_all_agents()
+        if a.id not in ("overseer", "alpha")
+    ]
+
+    from core.models import SimulationCreate
+    sim = await sim_repo.create(SimulationCreate(
+        name=sim_name,
+        config={
+            "convo_type": body.convo_type,
+            "turns": body.turns,
+            "topic": body.topic,
+            "overseer_shadow": body.overseer_shadow,
+            "agents": agents,
+            "source": "dashboard",
+        },
+        agents_participated=agents,
+    ))
+
+    # Launch watch_conversations.py in the background
+    project_root = Path(__file__).resolve().parent.parent
+    cmd = [
+        sys.executable,
+        str(project_root / "scripts" / "watch_conversations.py"),
+        "--test",
+        "--test-type", body.convo_type,
+        "--agents", ",".join(agents),
+        "--sim-id", str(sim.id),
+    ]
+    if body.turns is not None:
+        cmd += ["--turns", str(body.turns)]
+    if body.topic is not None:
+        cmd += ["--topic", body.topic]
+    if body.overseer_shadow:
+        cmd.append("--overseer-shadow")
+
+    subprocess.Popen(  # noqa: S603
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    return NewSimulationResponse(
+        simulation_id=str(sim.id),
+        name=sim_name,
+        status="running",
+    )
 
 
 @router.get("/simulations")
@@ -458,13 +567,16 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
     """Full conversation: transcript, participants, trigger, energy history."""
     db = _get_db()
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.transcript_repo import TranscriptRepo
     conv_repo = ConversationRepo(db)
+    transcript_repo = TranscriptRepo(db)
 
     conv = await conv_repo.get(conv_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     energy_log = await conv_repo.get_energy_log(conv_id)
+    transcript_record = await transcript_repo.get_by_conversation(conv_id)
 
     return ConversationDetail(
         id=conv.id,
@@ -480,6 +592,7 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
         closed_by=conv.closed_by,
         location=conv.location,
         energy_history=energy_log,
+        transcript=transcript_record.content if transcript_record else None,
     )
 
 

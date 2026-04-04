@@ -222,18 +222,24 @@ class MemoryRepo:
         return JournalEntry(**dict(row))
 
     async def get_journal_entries(
-        self, agent_id: str, limit: int = 20
-    ) -> list[JournalEntry]:
+        self, agent_id: str, limit: int = 20, offset: int = 0
+    ) -> tuple[list[JournalEntry], int]:
+        """Return paginated journal entries with total count."""
         limit = min(limit, MAX_LIMIT)
+        count = await self.db.fetchval(
+            "SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1",
+            agent_id,
+        )
         rows = await self.db.fetch(
             """SELECT * FROM journal_entries
                WHERE agent_id = $1
                ORDER BY created_at DESC
-               LIMIT $2""",
+               LIMIT $2 OFFSET $3""",
             agent_id,
             limit,
+            offset,
         )
-        return [JournalEntry(**dict(r)) for r in rows]
+        return [JournalEntry(**dict(r)) for r in rows], count or 0
 
     async def search_recall_memories_by_keyword(
         self,

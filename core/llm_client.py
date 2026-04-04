@@ -133,6 +133,7 @@ class OpenRouterClient:
         self._cost_repo = cost_repo
         self._langfuse = langfuse_client
         self._lost_cost_events: int = 0
+        self._simulation_id: object | None = None  # Set externally for simulation tracking
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
             base_url=OPENROUTER_BASE_URL,
@@ -166,6 +167,7 @@ class OpenRouterClient:
         latency_ms: int,
         stream: bool,
         openrouter_id: str | None,
+        simulation_id: object | None = None,
     ) -> None:
         """Log cost with single retry — never let DB errors break LLM calls."""
         event = CostEventCreate(
@@ -180,6 +182,7 @@ class OpenRouterClient:
                 "stream": stream,
                 "openrouter_id": openrouter_id,
             },
+            simulation_id=simulation_id,
         )
         for attempt in range(2):
             try:
@@ -281,6 +284,7 @@ class OpenRouterClient:
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        simulation_id: object | None = None,
     ) -> LLMResponse:
         model_config = self._resolve_model(model)
         payload: dict[str, Any] = {
@@ -338,6 +342,7 @@ class OpenRouterClient:
         await self._log_cost(
             agent_id, model, input_tokens, output_tokens, cost, latency_ms,
             stream=False, openrouter_id=openrouter_id,
+            simulation_id=simulation_id or self._simulation_id,
         )
         self._trace_langfuse(model, input_tokens, output_tokens, latency_ms, cost)
 
@@ -361,6 +366,7 @@ class OpenRouterClient:
         timeout: float = 30.0,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        simulation_id: object | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         model_config = self._resolve_model(model)
         payload: dict[str, Any] = {
@@ -427,5 +433,6 @@ class OpenRouterClient:
             await self._log_cost(
                 agent_id, model, input_tokens, output_tokens, cost, latency_ms,
                 stream=True, openrouter_id=openrouter_id,
+                simulation_id=simulation_id or self._simulation_id,
             )
             self._trace_langfuse(model, input_tokens, output_tokens, latency_ms, cost)

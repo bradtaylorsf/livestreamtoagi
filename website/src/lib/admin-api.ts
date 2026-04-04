@@ -9,6 +9,7 @@ import type {
   AgentCostBreakdown,
   AgentDetail,
   AgentSummary,
+  ConversationDetail,
   CoreMemoryResponse,
   DashboardStats,
   JournalEntry,
@@ -21,6 +22,21 @@ import type {
 } from "@/types/admin";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+function getAdminToken(): string {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("admin_password") ?? "";
+  }
+  return "";
+}
+
+export function setAdminToken(password: string): void {
+  localStorage.setItem("admin_password", password);
+}
+
+export function clearAdminToken(): void {
+  localStorage.removeItem("admin_password");
+}
 
 class AdminApiError extends Error {
   status: number;
@@ -38,6 +54,7 @@ async function request<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const token = getAdminToken();
 
   try {
     const response = await fetch(path, {
@@ -45,6 +62,7 @@ async function request<T>(
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers,
       },
     });
@@ -93,6 +111,30 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
 
 // ── Simulations ──────────────────────────────────────────────────
 
+export interface CreateSimulationParams {
+  name?: string;
+  agents?: string[];
+  convo_type?: string;
+  topic?: string;
+  turns?: number;
+  overseer_shadow?: boolean;
+}
+
+export interface CreateSimulationResult {
+  simulation_id: string;
+  name: string;
+  status: string;
+}
+
+export async function createSimulation(
+  params: CreateSimulationParams,
+): Promise<CreateSimulationResult> {
+  return request<CreateSimulationResult>("/api/admin/simulations", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
 export async function fetchSimulations(
   status?: string,
 ): Promise<PaginatedResponse<Simulation>> {
@@ -128,6 +170,25 @@ export async function fetchSimulationCosts(
 ): Promise<SimulationCostResponse> {
   return request<SimulationCostResponse>(
     `/api/admin/simulations/${id}/costs`,
+  );
+}
+
+// ── Conversations ───────────────────────────────────────────────
+
+export async function fetchConversation(id: string): Promise<ConversationDetail> {
+  return request<ConversationDetail>(`/api/admin/conversations/${id}`);
+}
+
+export async function fetchSimulationConversations(
+  simId: string,
+  opts?: { offset?: number; limit?: number },
+): Promise<PaginatedResponse<AgentConversation>> {
+  const params = new URLSearchParams();
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return request<PaginatedResponse<AgentConversation>>(
+    `/api/admin/simulations/${simId}/conversations${qs ? `?${qs}` : ""}`,
   );
 }
 

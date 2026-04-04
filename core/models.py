@@ -142,6 +142,7 @@ class TranscriptCreate(BaseModel):
     participants: list[str]
     content: str
     token_count: int
+    conversation_id: uuid.UUID | None = None
 
 
 # ── Journal Entries ─────────────────────────────────────────────
@@ -229,6 +230,7 @@ class ConversationCreate(BaseModel):
     participating_agents: list[str]
     location: str | None = None
     config_hash: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Selection Log ───────────────────────────────────────────────
@@ -387,6 +389,7 @@ class CostEvent(BaseModel):
     cost_type: str | None = None
     amount: Decimal | None = None
     details: dict[str, Any] | None = None
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 
@@ -395,6 +398,7 @@ class CostEventCreate(BaseModel):
     cost_type: str | None = None
     amount: Decimal
     details: dict[str, Any] | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Revenue Events ──────────────────────────────────────────────
@@ -681,7 +685,7 @@ class SimulationCreate(BaseModel):
     name: str
     description: str | None = None
     config: dict[str, Any]
-    status: str = "running"
+    status: SimulationStatus = SimulationStatus.running
     simulated_duration: timedelta | None = None
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
@@ -834,6 +838,7 @@ class ConversationDetail(BaseModel):
     closed_by: str | None = None
     location: str | None = None
     energy_history: list[dict[str, Any]] = []
+    transcript: str | None = None
 
 
 class TurnDetail(BaseModel):
@@ -859,3 +864,5 @@ class EvalRunResponse(BaseModel):
 class SimulationCostResponse(BaseModel):
     by_agent: list[dict[str, str]] = []
     total: str = "0"
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0

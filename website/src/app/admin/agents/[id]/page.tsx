@@ -84,27 +84,31 @@ export default function AgentDetailPage() {
       if (loadedTabs.has(tab)) return;
       setLoadedTabs((prev) => new Set(prev).add(tab));
 
+      const onErr = (err: unknown) =>
+        setTabError(err instanceof Error ? err.message : "Failed to load tab data");
+      setTabError(null);
+
       switch (tab) {
         case "system-prompt":
-          fetchAgentSystemPrompt(id).then(setSystemPrompt).catch(() => {});
+          fetchAgentSystemPrompt(id).then(setSystemPrompt).catch(onErr);
           break;
         case "core-memory":
-          fetchAgentCoreMemory(id).then(setCoreMemory).catch(() => {});
+          fetchAgentCoreMemory(id).then(setCoreMemory).catch(onErr);
           break;
         case "recall":
-          fetchAgentRecallMemories(id, { limit: PAGE_SIZE }).then(setRecallMemories).catch(() => {});
+          fetchAgentRecallMemories(id, { limit: PAGE_SIZE }).then(setRecallMemories).catch(onErr);
           break;
         case "conversations":
-          fetchAgentConversations(id, { limit: PAGE_SIZE }).then(setConversations).catch(() => {});
+          fetchAgentConversations(id, { limit: PAGE_SIZE }).then(setConversations).catch(onErr);
           break;
         case "artifacts":
-          fetchAgentArtifacts(id, { limit: PAGE_SIZE }).then(setArtifacts).catch(() => {});
+          fetchAgentArtifacts(id, { limit: PAGE_SIZE }).then(setArtifacts).catch(onErr);
           break;
         case "journal":
-          fetchAgentJournal(id, { limit: PAGE_SIZE }).then(setJournal).catch(() => {});
+          fetchAgentJournal(id, { limit: PAGE_SIZE }).then(setJournal).catch(onErr);
           break;
         case "costs":
-          fetchAgentCosts(id).then(setCosts).catch(() => {});
+          fetchAgentCosts(id).then(setCosts).catch(onErr);
           break;
       }
     },
@@ -116,30 +120,36 @@ export default function AgentDetailPage() {
     loadTabData(tab);
   };
 
+  // Tab-level error state
+  const [tabError, setTabError] = useState<string | null>(null);
+
   // Recall memories: refetch on search/pagination change
   const refreshRecall = useCallback(() => {
+    setTabError(null);
     fetchAgentRecallMemories(id, {
       search: recallSearch || undefined,
       offset: recallOffset,
       limit: PAGE_SIZE,
     })
       .then(setRecallMemories)
-      .catch(() => {});
+      .catch((err) => setTabError(err instanceof Error ? err.message : "Failed to load recall memories"));
   }, [id, recallSearch, recallOffset]);
 
   // Conversations: refetch on filter/pagination change
   const refreshConversations = useCallback(() => {
+    setTabError(null);
     fetchAgentConversations(id, {
       simulation_id: convSimFilter || undefined,
       offset: convOffset,
       limit: PAGE_SIZE,
     })
       .then(setConversations)
-      .catch(() => {});
+      .catch((err) => setTabError(err instanceof Error ? err.message : "Failed to load conversations"));
   }, [id, convSimFilter, convOffset]);
 
   // Artifacts: refetch on filter/pagination change
   const refreshArtifacts = useCallback(() => {
+    setTabError(null);
     fetchAgentArtifacts(id, {
       type: artTypeFilter || undefined,
       simulation_id: artSimFilter || undefined,
@@ -147,19 +157,26 @@ export default function AgentDetailPage() {
       limit: PAGE_SIZE,
     })
       .then(setArtifacts)
-      .catch(() => {});
+      .catch((err) => setTabError(err instanceof Error ? err.message : "Failed to load artifacts"));
   }, [id, artTypeFilter, artSimFilter, artOffset]);
 
   // Journal: refetch on filter/pagination change
   const refreshJournal = useCallback(() => {
+    setTabError(null);
     fetchAgentJournal(id, {
       simulation_id: journalSimFilter || undefined,
       offset: journalOffset,
       limit: PAGE_SIZE,
     })
       .then(setJournal)
-      .catch(() => {});
+      .catch((err) => setTabError(err instanceof Error ? err.message : "Failed to load journal"));
   }, [id, journalSimFilter, journalOffset]);
+
+  // Auto-refetch when pagination/filters change (replaces setTimeout pattern)
+  useEffect(() => { if (loadedTabs.has("recall")) refreshRecall(); }, [recallOffset, refreshRecall, loadedTabs]);
+  useEffect(() => { if (loadedTabs.has("conversations")) refreshConversations(); }, [convOffset, refreshConversations, loadedTabs]);
+  useEffect(() => { if (loadedTabs.has("artifacts")) refreshArtifacts(); }, [artOffset, refreshArtifacts, loadedTabs]);
+  useEffect(() => { if (loadedTabs.has("journal")) refreshJournal(); }, [journalOffset, refreshJournal, loadedTabs]);
 
   if (error) {
     return (
@@ -199,6 +216,13 @@ export default function AgentDetailPage() {
       {/* Tabs */}
       <TabNav tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange} />
 
+      {/* Tab error */}
+      {tabError && (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-400">
+          {tabError}
+        </div>
+      )}
+
       {/* Tab content */}
       <div>
         {activeTab === "overview" && (
@@ -218,7 +242,6 @@ export default function AgentDetailPage() {
             onSearch={refreshRecall}
             offset={recallOffset}
             onOffsetChange={setRecallOffset}
-            onPageChange={refreshRecall}
           />
         )}
         {activeTab === "conversations" && (
@@ -229,7 +252,6 @@ export default function AgentDetailPage() {
             onFilterChange={refreshConversations}
             offset={convOffset}
             onOffsetChange={setConvOffset}
-            onPageChange={refreshConversations}
           />
         )}
         {activeTab === "artifacts" && (
@@ -242,7 +264,6 @@ export default function AgentDetailPage() {
             onFilterChange={refreshArtifacts}
             offset={artOffset}
             onOffsetChange={setArtOffset}
-            onPageChange={refreshArtifacts}
           />
         )}
         {activeTab === "journal" && (
@@ -253,7 +274,6 @@ export default function AgentDetailPage() {
             onFilterChange={refreshJournal}
             offset={journalOffset}
             onOffsetChange={setJournalOffset}
-            onPageChange={refreshJournal}
           />
         )}
         {activeTab === "costs" && (
@@ -427,7 +447,6 @@ function RecallTab({
   onSearch,
   offset,
   onOffsetChange,
-  onPageChange,
 }: {
   data: PaginatedResponse<RecallMemory> | null;
   search: string;
@@ -435,7 +454,6 @@ function RecallTab({
   onSearch: () => void;
   offset: number;
   onOffsetChange: (n: number) => void;
-  onPageChange: () => void;
 }) {
   if (!data) {
     return <p className="text-sm text-foreground/50">Loading...</p>;
@@ -493,11 +511,7 @@ function RecallTab({
         total={data.total}
         offset={offset}
         limit={PAGE_SIZE}
-        onOffsetChange={(n) => {
-          onOffsetChange(n);
-          // Trigger refetch after state update
-          setTimeout(onPageChange, 0);
-        }}
+        onOffsetChange={onOffsetChange}
       />
     </div>
   );
@@ -510,7 +524,6 @@ function ConversationsTab({
   onFilterChange,
   offset,
   onOffsetChange,
-  onPageChange,
 }: {
   data: PaginatedResponse<AgentConversation> | null;
   simFilter: string;
@@ -518,7 +531,6 @@ function ConversationsTab({
   onFilterChange: () => void;
   offset: number;
   onOffsetChange: (n: number) => void;
-  onPageChange: () => void;
 }) {
   if (!data) {
     return <p className="text-sm text-foreground/50">Loading...</p>;
@@ -566,18 +578,12 @@ function ConversationsTab({
                   className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
                 >
                   <td className="px-4 py-2">
-                    {convo.simulation_id ? (
-                      <Link
-                        href={`/admin/simulations/${convo.simulation_id}`}
-                        className="text-neon-cyan hover:underline"
-                      >
-                        {convo.topic || convo.trigger_type}
-                      </Link>
-                    ) : (
-                      <span className="text-foreground/70">
-                        {convo.topic || convo.trigger_type}
-                      </span>
-                    )}
+                    <Link
+                      href={`/admin/conversations/${convo.id}`}
+                      className="text-neon-cyan hover:underline"
+                    >
+                      {convo.topic || convo.trigger_type}
+                    </Link>
                   </td>
                   <td className="px-4 py-2 text-foreground/50">
                     {convo.participating_agents.join(", ")}
@@ -602,10 +608,7 @@ function ConversationsTab({
         total={data.total}
         offset={offset}
         limit={PAGE_SIZE}
-        onOffsetChange={(n) => {
-          onOffsetChange(n);
-          setTimeout(onPageChange, 0);
-        }}
+        onOffsetChange={onOffsetChange}
       />
     </div>
   );
@@ -620,7 +623,6 @@ function ArtifactsTab({
   onFilterChange,
   offset,
   onOffsetChange,
-  onPageChange,
 }: {
   data: PaginatedResponse<AgentArtifact> | null;
   typeFilter: string;
@@ -630,7 +632,6 @@ function ArtifactsTab({
   onFilterChange: () => void;
   offset: number;
   onOffsetChange: (n: number) => void;
-  onPageChange: () => void;
 }) {
   if (!data) {
     return <p className="text-sm text-foreground/50">Loading...</p>;
@@ -647,7 +648,7 @@ function ArtifactsTab({
           value={typeFilter}
           onChange={(e) => {
             onTypeFilterChange(e.target.value);
-            setTimeout(onFilterChange, 0);
+            onFilterChange();
           }}
           className="rounded border border-border bg-surface-light px-3 py-1.5 text-xs text-foreground"
         >
@@ -689,10 +690,7 @@ function ArtifactsTab({
         total={data.total}
         offset={offset}
         limit={PAGE_SIZE}
-        onOffsetChange={(n) => {
-          onOffsetChange(n);
-          setTimeout(onPageChange, 0);
-        }}
+        onOffsetChange={onOffsetChange}
       />
     </div>
   );
@@ -705,7 +703,6 @@ function JournalTab({
   onFilterChange,
   offset,
   onOffsetChange,
-  onPageChange,
 }: {
   data: PaginatedResponse<JournalEntry> | null;
   simFilter: string;
@@ -713,7 +710,6 @@ function JournalTab({
   onFilterChange: () => void;
   offset: number;
   onOffsetChange: (n: number) => void;
-  onPageChange: () => void;
 }) {
   if (!data) {
     return <p className="text-sm text-foreground/50">Loading...</p>;
@@ -769,10 +765,7 @@ function JournalTab({
         total={data.total}
         offset={offset}
         limit={PAGE_SIZE}
-        onOffsetChange={(n) => {
-          onOffsetChange(n);
-          setTimeout(onPageChange, 0);
-        }}
+        onOffsetChange={onOffsetChange}
       />
     </div>
   );

@@ -36,13 +36,14 @@ class CostRepo:
 
     async def add_cost(self, cost: CostEventCreate) -> CostEvent:
         row = await self.db.fetchrow(
-            """INSERT INTO cost_events (agent_id, cost_type, amount, details)
-               VALUES ($1, $2, $3, $4::jsonb)
+            """INSERT INTO cost_events (agent_id, cost_type, amount, details, simulation_id)
+               VALUES ($1, $2, $3, $4::jsonb, $5)
                RETURNING *""",
             cost.agent_id,
             cost.cost_type,
             cost.amount,
             serialize_jsonb(cost.details),
+            cost.simulation_id,
         )
         d = dict(row)
         _parse_jsonb_field(d, "details")
@@ -102,37 +103,49 @@ class CostRepo:
             *params,
         )
         by_type_rows = await self.db.fetch(
-            f"""SELECT cost_type, SUM(amount) as total
+            f"""SELECT cost_type, SUM(amount) as total,
+                       SUM(COALESCE((details->>'input_tokens')::int, 0)
+                         + COALESCE((details->>'output_tokens')::int, 0)) as tokens
                 FROM cost_events WHERE {where}
                 GROUP BY cost_type ORDER BY total DESC""",  # noqa: S608
             *params,
         )
-        total = await self.db.fetchval(
-            f"SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE {where}",  # noqa: S608
+        totals_row = await self.db.fetchrow(
+            f"""SELECT COALESCE(SUM(amount), 0) as total,
+                       SUM(COALESCE((details->>'input_tokens')::int, 0)) as input_tokens,
+                       SUM(COALESCE((details->>'output_tokens')::int, 0)) as output_tokens
+                FROM cost_events WHERE {where}""",  # noqa: S608
             *params,
         )
 
         return {
             "by_day": [{"day": str(r["day"]), "total": str(r["total"])} for r in by_day_rows],
-            "by_type": [{"type": r["cost_type"], "total": str(r["total"])} for r in by_type_rows],
-            "total": str(total),
+            "by_type": [
+                {"type": r["cost_type"], "total": str(r["total"]), "tokens": int(r["tokens"] or 0)}
+                for r in by_type_rows
+            ],
+            "total": str(totals_row["total"]),
+            "total_input_tokens": int(totals_row["input_tokens"] or 0),
+            "total_output_tokens": int(totals_row["output_tokens"] or 0),
         }
 
     async def get_costs_by_simulation(
         self,
         simulation_id: uuid.UUID,
     ) -> dict[str, object]:
-        """Return cost breakdown by agent for a simulation's time window."""
+        """Return cost breakdown by agent for a simulation using direct FK."""
         by_agent_rows = await self.db.fetch(
-            """SELECT ce.agent_id, SUM(ce.amount) as total
-               FROM cost_events ce
-               JOIN simulations s ON ce.created_at
-                   BETWEEN s.started_at AND COALESCE(s.completed_at, NOW())
-               WHERE s.id = $1
-               GROUP BY ce.agent_id ORDER BY total DESC""",
+            """SELECT agent_id, SUM(amount) as total,
+                      SUM(COALESCE((details->>'input_tokens')::int, 0)) as input_tokens,
+                      SUM(COALESCE((details->>'output_tokens')::int, 0)) as output_tokens
+               FROM cost_events
+               WHERE simulation_id = $1
+               GROUP BY agent_id ORDER BY total DESC""",
             simulation_id,
         )
         total = sum(r["total"] for r in by_agent_rows) if by_agent_rows else Decimal("0")
+        total_input = sum(r["input_tokens"] for r in by_agent_rows) if by_agent_rows else 0
+        total_output = sum(r["output_tokens"] for r in by_agent_rows) if by_agent_rows else 0
 
         return {
             "by_agent": [
@@ -140,6 +153,8 @@ class CostRepo:
                 for r in by_agent_rows
             ],
             "total": str(total),
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
         }
 
     # ── Revenue Events ──────────────────────────────────────

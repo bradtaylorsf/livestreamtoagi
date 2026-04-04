@@ -93,31 +93,42 @@ class ArtifactRepo:
         agent_id: str,
         *,
         artifact_type: str | None = None,
+        simulation_id: uuid.UUID | None = None,
         limit: int = 50,
-    ) -> list[Artifact]:
+        offset: int = 0,
+    ) -> tuple[list[Artifact], int]:
+        """Return paginated artifacts for an agent with total count."""
+        clauses = ["agent_id = $1"]
+        params: list[object] = [agent_id]
+        idx = 2
+
         if artifact_type is not None:
-            rows = await self.db.fetch(
-                """SELECT * FROM artifacts
-                   WHERE agent_id = $1 AND artifact_type = $2
-                   ORDER BY created_at DESC LIMIT $3""",
-                agent_id,
-                artifact_type,
-                limit,
-            )
-        else:
-            rows = await self.db.fetch(
-                """SELECT * FROM artifacts
-                   WHERE agent_id = $1
-                   ORDER BY created_at DESC LIMIT $2""",
-                agent_id,
-                limit,
-            )
+            clauses.append(f"artifact_type = ${idx}")
+            params.append(artifact_type)
+            idx += 1
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = ${idx}")
+            params.append(simulation_id)
+            idx += 1
+
+        where = " AND ".join(clauses)
+        count = await self.db.fetchval(
+            f"SELECT COUNT(*) FROM artifacts WHERE {where}",  # noqa: S608
+            *params,
+        )
+        rows = await self.db.fetch(
+            f"SELECT * FROM artifacts WHERE {where}"  # noqa: S608
+            f" ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
+            *params,
+            limit,
+            offset,
+        )
         result = []
         for r in rows:
             d = dict(r)
             _parse_jsonb_fields(d)
             result.append(Artifact(**d))
-        return result
+        return result, count or 0
 
     async def get_artifacts_by_type(
         self,

@@ -266,7 +266,18 @@ class Overseer:
         }
 
         # Persist to database if available
-        if self._db is not None and conversation_id is not None:
+        if self._db is None:
+            logger.warning(
+                "Shadow log not persisted — no database connection (agent=%s, layer=%d)",
+                agent_id, filter_layer,
+            )
+        elif conversation_id is None:
+            logger.warning(
+                "Shadow log not persisted — conversation_id is None (agent=%s, layer=%d). "
+                "Caller should pass conversation_id for audit completeness.",
+                agent_id, filter_layer,
+            )
+        else:
             try:
                 await self._db.execute(
                     """

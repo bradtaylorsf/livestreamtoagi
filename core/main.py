@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -82,9 +83,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Livestream AGI", version="0.1.0", lifespan=lifespan)
 
+_default_origins = ["http://localhost:3000", "http://localhost:4000", "http://localhost:5173"]
+_extra = os.environ.get("CORS_ORIGINS", "")
+_cors_origins = _default_origins + [o.strip() for o in _extra.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:4000", "http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -16,14 +16,21 @@ interface Props {
   artifact: AgentArtifact;
 }
 
+function formatOutput(output: Record<string, unknown> | string | null): string {
+  if (output == null) return "(no output)";
+  if (typeof output === "string") return output;
+  return JSON.stringify(output, null, 2);
+}
+
 export default function ArtifactDetail({ artifact }: Props) {
   const [expanded, setExpanded] = useState(false);
   const icon = TYPE_ICONS[artifact.artifact_type] || "◇";
+  const outputStr = formatOutput(artifact.tool_output);
 
   const preview =
-    artifact.tool_output.length > 120
-      ? artifact.tool_output.slice(0, 120) + "…"
-      : artifact.tool_output;
+    outputStr.length > 120
+      ? outputStr.slice(0, 120) + "..."
+      : outputStr;
 
   return (
     <div className="rounded border border-border bg-surface">
@@ -75,7 +82,7 @@ export default function ArtifactDetail({ artifact }: Props) {
           <div>
             <p className="text-xs text-foreground/40 mb-1">Output</p>
             <pre className="text-xs font-mono text-foreground/70 bg-surface-light rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap">
-              {artifact.tool_output}
+              {outputStr}
             </pre>
           </div>
 

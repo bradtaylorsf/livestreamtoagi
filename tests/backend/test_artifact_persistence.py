@@ -164,23 +164,26 @@ class TestArtifactRepo:
     async def test_get_artifacts_by_agent(self) -> None:
         db = make_mock_db()
         db.fetch.return_value = [make_artifact_row()]
+        db.fetchval.return_value = 1
         repo = ArtifactRepo(db)
 
-        results = await repo.get_artifacts_by_agent("rex")
+        results, total = await repo.get_artifacts_by_agent("rex")
         assert len(results) == 1
+        assert total == 1
         sql = db.fetch.call_args[0][0]
         assert "agent_id = $1" in sql
-        assert "LIMIT $2" in sql
 
     async def test_get_artifacts_by_agent_with_type(self) -> None:
         db = make_mock_db()
         db.fetch.return_value = []
+        db.fetchval.return_value = 0
         repo = ArtifactRepo(db)
 
-        results = await repo.get_artifacts_by_agent("rex", artifact_type="web_search")
+        results, total = await repo.get_artifacts_by_agent("rex", artifact_type="web_search")
         assert results == []
-        sql = db.fetch.call_args[0][0]
-        assert "artifact_type = $2" in sql
+        assert total == 0
+        count_sql = db.fetchval.call_args[0][0]
+        assert "artifact_type = $2" in count_sql
 
     async def test_get_artifacts_by_type(self) -> None:
         db = make_mock_db()

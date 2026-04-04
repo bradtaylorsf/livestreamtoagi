@@ -118,6 +118,7 @@ def mock_app():
     env_overrides = {
         "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key-for-unit-tests",
         "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
+        "ADMIN_PASSWORD": "test-admin-password",
     }
     with (
         patch.dict(os.environ, env_overrides),
@@ -128,8 +129,10 @@ def mock_app():
         patch("core.admin_routes._get_registry", return_value=mock_registry),
     ):
         from core.main import app
-        with TestClient(app) as client:
-            yield client, mock_db, mock_registry
+        # Wrap client to inject auth header automatically
+        with TestClient(app) as raw_client:
+            raw_client.headers["Authorization"] = "Bearer test-admin-password"
+            yield raw_client, mock_db, mock_registry
 
 
 # ── Agent Endpoint Tests ───────────────────────────────────────
@@ -300,7 +303,7 @@ class TestAgentEndpoints:
         with patch(
             "core.repos.memory_repo.MemoryRepo.get_journal_entries",
             new_callable=AsyncMock,
-            return_value=entries,
+            return_value=(entries, 1),
         ):
             resp = client.get("/api/admin/agents/vera/journal?limit=10")
 
