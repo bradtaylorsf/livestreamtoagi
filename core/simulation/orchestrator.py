@@ -323,6 +323,18 @@ class SimulationOrchestrator:
                 self._total_cost += result.cost
                 self._display.show_phase_complete(result, phase.name)
 
+                # Advance simulated clock so reflection scheduler can track time
+                if result.duration_seconds > 0:
+                    if self._config.speed_multiplier > 0:
+                        advance = timedelta(
+                            seconds=result.duration_seconds * self._config.speed_multiplier
+                        )
+                    else:
+                        # In instant mode, treat each phase as ~30 simulated minutes
+                        # so time-based reflections can fire during seeded runs
+                        advance = timedelta(minutes=30)
+                    self.clock.advance(advance)
+
                 # Mark explicit reflection phases to prevent scheduler duplicates
                 if phase.type == PhaseType.reflection:
                     for agent_id in self._config.agents:
@@ -394,7 +406,7 @@ class SimulationOrchestrator:
         self._display.show_day_boundary(current_day, {})
 
         try:
-            while not self._terminated():
+            while not await self._terminated():
                 # Check for day boundary
                 new_day = self.clock.simulated_day()
                 if new_day != current_day:
@@ -521,7 +533,7 @@ class SimulationOrchestrator:
             )
             raise
 
-    def _terminated(self) -> bool:
+    async def _terminated(self) -> bool:
         """Check all termination conditions for autonomous mode."""
         if self._cancelled:
             return True
@@ -529,6 +541,12 @@ class SimulationOrchestrator:
         if self._config.duration and self.clock.elapsed() >= self._config.duration:
             logger.info("Duration limit reached (%s)", self._config.duration)
             return True
+        # Redis kill switch (accessible from Brad's phone)
+        if self._redis:
+            kill = await self._redis.get("kill_switch")
+            if kill == "active":
+                logger.info("Kill switch activated — stopping simulation")
+                return True
         return False
 
     @staticmethod

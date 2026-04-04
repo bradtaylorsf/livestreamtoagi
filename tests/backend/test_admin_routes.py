@@ -701,7 +701,7 @@ class TestEvalEndpoints:
             id=run_id,
             simulation_id=sim_id,
             eval_suite="quick",
-            status="completed",
+            status="running",
             started_at=now,
         )
         with (
@@ -712,7 +712,7 @@ class TestEvalEndpoints:
                 return_value=run_id,
             ),
             patch(
-                "core.repos.eval_repo.EvalRepo.get_eval_run",
+                "core.repos.eval_repo.EvalRepo.create_eval_run",
                 new_callable=AsyncMock,
                 return_value=mock_run,
             ),
@@ -723,7 +723,8 @@ class TestEvalEndpoints:
             )
         assert resp.status_code == 200
         data = resp.json()
-        assert "eval_run_id" in data
+        assert data["eval_run_id"] == str(run_id)
+        assert data["status"] == "running"
 
     def test_get_eval_not_found(self, mock_app):
         client, _, _ = mock_app

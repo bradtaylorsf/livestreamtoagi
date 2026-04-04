@@ -141,11 +141,12 @@ async def bootstrap_services(
         openrouter_api_key=api_key,
     )
 
-    event_bus = EventBus()
+    from core.event_bus import event_bus as _module_event_bus
+
     overseer = Overseer(
         redis_client=redis_client,
         llm_client=llm_client,
-        event_bus=event_bus,
+        event_bus=_module_event_bus,
     )
 
     context_assembler = ContextAssembler(
@@ -171,7 +172,7 @@ async def bootstrap_services(
         token_counter=token_counter,
         memory_repo=memory_repo,
         transcript_repo=transcript_repo,
-        event_bus=event_bus,
+        event_bus=_module_event_bus,
         overseer=overseer,
         cost_repo=cost_repo,
         artifact_repo=artifact_repo,

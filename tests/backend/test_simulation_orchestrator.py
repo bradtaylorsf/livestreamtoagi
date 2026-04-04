@@ -73,9 +73,12 @@ def make_mock_services() -> dict[str, Any]:
     sim_repo.update_config = AsyncMock(return_value=sim)
     sim_repo.update_agents_participated = AsyncMock()
 
+    redis_mock = MagicMock()
+    redis_mock.get = AsyncMock(return_value=None)
+
     return {
         "db": MagicMock(),
-        "redis_client": MagicMock(),
+        "redis_client": redis_mock,
         "simulation_repo": sim_repo,
         "config_loader": MagicMock(),
         "agent_registry": MagicMock(),

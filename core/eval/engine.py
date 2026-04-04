@@ -44,11 +44,15 @@ class EvalEngine:
         *,
         categories: list[str] | None = None,
         suite: str = "full",
+        existing_run_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Run evals and return the eval_run_id."""
-        # Create eval run record
-        eval_run = await self._eval_repo.create_eval_run(simulation_id, suite)
-        run_id = eval_run.id
+        # Use pre-created run record or create a new one
+        if existing_run_id is not None:
+            run_id = existing_run_id
+        else:
+            eval_run = await self._eval_repo.create_eval_run(simulation_id, suite)
+            run_id = eval_run.id
 
         # Load simulation data
         try:

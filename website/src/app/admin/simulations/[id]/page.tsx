@@ -161,7 +161,7 @@ export default function SimulationDetailPage() {
                         href={`/admin/conversations/${c.id}`}
                         className="text-neon-cyan hover:underline"
                       >
-                        {c.topic || c.trigger_type}
+                        {c.trigger_type}
                       </Link>
                     </td>
                     <td className="px-4 py-2 text-foreground/50 text-xs">

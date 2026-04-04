@@ -121,10 +121,8 @@ export interface AgentConversation {
   id: string;
   simulation_id: string | null;
   trigger_type: string;
-  topic: string | null;
   participating_agents: string[];
   turn_count: number;
-  agent_turn_count: number;
   started_at: string;
 }
 
@@ -295,7 +293,7 @@ export interface EvalRun {
   started_at: string;
   completed_at: string | null;
   overall_score: number | null;
-  cost: string;
+  cost: number | string;
   created_at: string | null;
   results?: EvalResult[];
 }

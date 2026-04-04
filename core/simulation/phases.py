@@ -119,6 +119,7 @@ class PhaseRunner:
         self._clock = clock
 
         # Stats accumulated during a phase run via event listeners
+        self._phase_conversations = 0
         self._phase_turns = 0
         self._phase_cost = Decimal("0")
         self._phase_tokens = 0
@@ -156,6 +157,7 @@ class PhaseRunner:
             result.errors.append(str(exc))
 
         result.duration_seconds = time.monotonic() - start
+        result.conversations = self._phase_conversations
         result.turns = self._phase_turns
         result.cost = self._phase_cost
         result.tokens = self._phase_tokens
@@ -165,6 +167,7 @@ class PhaseRunner:
         return result
 
     def _reset_phase_stats(self) -> None:
+        self._phase_conversations = 0
         self._phase_turns = 0
         self._phase_cost = Decimal("0")
         self._phase_tokens = 0
@@ -209,8 +212,11 @@ class PhaseRunner:
             if topic:
                 trigger["topic"] = topic
 
-            # Pick a starter from available agents
-            starter = self._agent_ids[i % len(self._agent_ids)]
+            # Use required_agents[0] as starter when specified, else rotate
+            if phase.required_agents:
+                starter = phase.required_agents[i % len(phase.required_agents)]
+            else:
+                starter = self._agent_ids[i % len(self._agent_ids)]
             trigger["starter_agent_id"] = starter
 
             await self._run_conversation(trigger, phase)
@@ -400,6 +406,7 @@ class PhaseRunner:
             self._event_bus.off("artifact_created", _on_artifact)
 
         # Accumulate stats
+        self._phase_conversations += 1
         self._phase_turns += turns_in_conv
         self._phase_cost += cost_in_conv
         self._phase_tokens += tokens_in_conv

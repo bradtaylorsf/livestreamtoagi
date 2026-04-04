@@ -302,27 +302,27 @@ class SimulationRepo:
     ) -> list[dict]:
         """Return overseer shadow flags for a simulation filtered by severity."""
         rows = await self.db.fetch(
-            """SELECT id, agent_id, tool_name, tool_output, metadata, created_at
-               FROM artifacts
+            """SELECT id, agent_id, original_content, filter_layer,
+                      severity, action_would_take, reason,
+                      flagged_keywords, created_at
+               FROM overseer_shadow_log
                WHERE simulation_id = $1
-                 AND artifact_type = 'overseer_flag'
-                 AND (metadata->>'severity')::int >= $2
+                 AND severity >= $2
                ORDER BY created_at""",
             simulation_id,
             severity_min,
         )
-        result = []
-        for r in rows:
-            d = dict(r)
-            for key in ("tool_output", "metadata"):
-                if isinstance(d.get(key), str):
-                    d[key] = json.loads(d[key])
-            result.append({
-                "id": str(d["id"]),
-                "agent_id": d["agent_id"],
-                "tool_name": d["tool_name"],
-                "output": d["tool_output"],
-                "metadata": d["metadata"],
-                "created_at": d["created_at"].isoformat() if d["created_at"] else None,
-            })
-        return result
+        return [
+            {
+                "id": str(r["id"]),
+                "agent_id": r["agent_id"],
+                "original_content": r["original_content"],
+                "filter_layer": r["filter_layer"],
+                "severity": r["severity"],
+                "action_would_take": r["action_would_take"],
+                "reason": r["reason"],
+                "flagged_keywords": list(r["flagged_keywords"] or []),
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]

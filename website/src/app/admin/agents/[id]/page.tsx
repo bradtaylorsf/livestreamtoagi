@@ -582,7 +582,7 @@ function ConversationsTab({
                       href={`/admin/conversations/${convo.id}`}
                       className="text-neon-cyan hover:underline"
                     >
-                      {convo.topic || convo.trigger_type}
+                      {convo.trigger_type}
                     </Link>
                   </td>
                   <td className="px-4 py-2 text-foreground/50">
@@ -592,7 +592,7 @@ function ConversationsTab({
                     {convo.turn_count}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {convo.agent_turn_count}
+                    {convo.turn_count}
                   </td>
                   <td className="px-4 py-2 text-foreground/40 text-xs">
                     {new Date(convo.started_at).toLocaleString()}

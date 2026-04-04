@@ -9,9 +9,13 @@ Protected by ADMIN_PASSWORD env var — requests must include
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import uuid as uuid_mod
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -740,7 +744,7 @@ async def get_simulation_evals(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
 async def run_simulation_evals(
     sim_id: uuid_mod.UUID, body: EvalRunRequest
 ) -> EvalRunResponse:
-    """Trigger eval run — runs synchronously and returns results."""
+    """Trigger eval run — dispatches asynchronously and returns immediately."""
     db = _get_db()
     llm = _get_llm()
     from core.eval.engine import EvalEngine
@@ -749,15 +753,28 @@ async def run_simulation_evals(
     eval_repo = EvalRepo(db)
     engine = EvalEngine(db=db, llm_client=llm, eval_repo=eval_repo)
 
-    run_id = await engine.run(
-        sim_id,
-        categories=body.categories,
-        suite=body.eval_suite,
-    )
-    run = await eval_repo.get_eval_run(run_id)
+    # Pre-create the eval run record so we can return its ID immediately
+    eval_run = await eval_repo.create_eval_run(sim_id, body.eval_suite or "full")
+    run_id = eval_run.id
+
+    # Fire-and-forget — run evals in background task
+    async def _run_eval_background() -> None:
+        try:
+            await engine.run(
+                sim_id,
+                categories=body.categories,
+                suite=body.eval_suite,
+                existing_run_id=run_id,
+            )
+        except Exception:
+            logger.exception("Background eval run %s failed", run_id)
+            await eval_repo.update_eval_run(run_id, status="failed")
+
+    asyncio.create_task(_run_eval_background())
+
     return EvalRunResponse(
         eval_run_id=str(run_id),
-        status=run.status if run else "failed",
+        status="running",
     )
 
 
