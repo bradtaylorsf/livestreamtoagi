@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import uuid
 
     from core.agent_registry import AgentRegistry
+    from core.bootstrap import Services
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
     from core.conversation.proximity import ProximityManager
@@ -30,10 +31,12 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.compaction import MemoryCompactor
     from core.memory.reflection import ReflectionManager
     from core.overseer import Overseer
     from core.redis_client import RedisClient
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.memory_repo import MemoryRepo
     from core.repos.simulation_repo import SimulationRepo
     from core.simulation.display import SimulationDisplay
 
@@ -134,7 +137,10 @@ class SimulationOrchestrator:
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
         reflection_manager: ReflectionManager,
+        compactor: MemoryCompactor | None = None,
+        memory_repo: MemoryRepo | None = None,
         display: SimulationDisplay,
+        services: Services | None = None,
     ) -> None:
         self._config = config
         self._db = db
@@ -148,11 +154,14 @@ class SimulationOrchestrator:
         self._context = context_assembler
         self._conversation_repo = conversation_repo
         self._archival = archival_memory
+        self._compactor = compactor
+        self._memory_repo = memory_repo
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
         self._reflection = reflection_manager
         self._display = display
+        self._services = services
 
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
@@ -194,9 +203,12 @@ class SimulationOrchestrator:
             trigger_system=self._triggers,
             selection_logger=self._selection_logger,
             reflection_manager=self._reflection,
+            compactor=self._compactor,
+            memory_repo=self._memory_repo,
             simulation_id=sim.id,
             agents=self._config.agents,
             dry_run=self._config.dry_run,
+            services=self._services,
         )
 
         phases = self._config.phases

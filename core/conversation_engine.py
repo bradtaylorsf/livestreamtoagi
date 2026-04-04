@@ -8,6 +8,7 @@ event emission. This is the central runtime loop of the show.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -19,9 +20,16 @@ from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
 from core.models import ConversationCreate
 from core.speech_parser import parse_speech
+from core.tool_executor import (
+    MAX_TOOL_ROUNDS,
+    build_agent_tools,
+    execute_tool_calls,
+    tools_to_openai_schema,
+)
 
 if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
+    from core.bootstrap import Services
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
     from core.conversation.proximity import ProximityManager
@@ -30,9 +38,12 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.compaction import MemoryCompactor
     from core.models import AgentConfig, ConversationConfig
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.memory_repo import MemoryRepo
+    from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +107,12 @@ class ConversationEngine:
         proximity: ProximityManager,
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
+        compactor: MemoryCompactor | None = None,
+        memory_repo: MemoryRepo | None = None,
         speed_multiplier: float = 1.0,
         overseer_enabled: bool = True,
         simulation_id: uuid.UUID | None = None,
+        services: Services | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -110,10 +124,13 @@ class ConversationEngine:
         self._context = context_assembler
         self._repo = conversation_repo
         self._archival = archival_memory
+        self._compactor = compactor
+        self._memory_repo = memory_repo
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
         self._speed_multiplier = speed_multiplier
+        self._services = services
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -123,6 +140,9 @@ class ConversationEngine:
         self._active: _ActiveConversation | None = None
         self._running = False
         self._last_llm_meta: dict[str, Any] | None = None
+
+        # Per-agent tool cache — lazily built on first use
+        self._tool_cache: dict[str, dict[str, BaseTool]] = {}
 
     # ── Properties ─────────────────────────────────────────────
 
@@ -462,16 +482,9 @@ class ConversationEngine:
             turn_count=conv.turn_number,
         )
 
-        # Store transcript to archival memory
-        transcript_content = "\n".join(
-            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}" for msg in conv.history
-        )
-        await self._archival.store_transcript(
-            event_type=conv.trigger.get("type", "idle"),
-            participants=conv.participants,
-            content=transcript_content,
-            conversation_id=conv.id,
-        )
+        # Use MemoryCompactor for transcript storage + recall memory creation,
+        # then create journal entries separately
+        await self._compact_and_journal(conv)
 
         # Reset triggers
         self._triggers.reset()
@@ -485,6 +498,119 @@ class ConversationEngine:
         )
 
         self._active = None
+
+    # ── Post-conversation memory creation ─────────────────────
+
+    async def _compact_and_journal(self, conv: _ActiveConversation) -> None:
+        """Use MemoryCompactor for archival + recall, then create journal entries.
+
+        Compactor handles: Tier 3 transcript storage, LLM summarization,
+        embedding generation, and Tier 2 recall memory creation.
+        Journal entries are a separate concern, created afterward.
+
+        Failures are logged but never break conversation close.
+        """
+        transcript_content = "\n".join(
+            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
+            for msg in conv.history
+        )
+        participants = list(set(conv.participants))
+        event_type = conv.trigger.get("type", "idle")
+
+        # Compaction: archival + summarization + embedding + recall
+        if self._compactor:
+            try:
+                for agent_id in participants:
+                    await self._compactor.compact_interaction(
+                        agent_id=agent_id,
+                        interaction=transcript_content,
+                        event_type=event_type,
+                        participants=participants,
+                        conversation_id=conv.id,
+                    )
+                logger.info(
+                    "Compacted memories for %d participants", len(participants),
+                )
+            except Exception:
+                logger.warning(
+                    "Memory compaction failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
+                )
+        else:
+            # No compactor — still store transcript via archival directly
+            try:
+                await self._archival.store_transcript(
+                    event_type=event_type,
+                    participants=participants,
+                    content=transcript_content,
+                    conversation_id=conv.id,
+                )
+            except Exception:
+                logger.warning(
+                    "Archival storage failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
+                )
+
+        # Journal entries (separate concern from compaction)
+        if self._memory_repo:
+            try:
+                from core.models import JournalEntryCreate
+
+                speakers = list(
+                    dict.fromkeys(
+                        msg.get("speaker", "unknown") for msg in conv.history
+                    )
+                )
+                speakers_str = ", ".join(speakers)
+
+                for agent_id in participants:
+                    agent_lines = [
+                        msg.get("content", "")
+                        for msg in conv.history
+                        if msg.get("speaker") == agent_id
+                    ]
+                    journal_content = (
+                        f"Participated in a conversation with {speakers_str}. "
+                        f"I contributed {len(agent_lines)} messages."
+                    )
+                    await self._memory_repo.create_journal_entry(
+                        JournalEntryCreate(
+                            agent_id=agent_id,
+                            reflection_type="conversation",
+                            content=journal_content,
+                            token_count=len(journal_content.split()),
+                        )
+                    )
+                logger.info(
+                    "Created journal entries for %d participants",
+                    len(participants),
+                )
+            except Exception:
+                logger.warning(
+                    "Journal creation failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
+                )
+
+    # ── Tool support ────────────────────────────────────────────
+
+    def _get_tools_for_agent(self, agent_id: str) -> dict[str, BaseTool] | None:
+        """Lazily build and cache a tool set for the given agent.
+
+        Returns None if services were not provided (tools disabled).
+        """
+        if self._services is None:
+            return None
+        if agent_id not in self._tool_cache:
+            self._tool_cache[agent_id] = build_agent_tools(agent_id, self._services)
+            logger.debug(
+                "Built %d tools for agent %s",
+                len(self._tool_cache[agent_id]),
+                agent_id,
+            )
+        return self._tool_cache[agent_id]
 
     # ── Turn generation ────────────────────────────────────────
 
@@ -501,6 +627,10 @@ class ConversationEngine:
         """
         conv_history = history or []
 
+        # Build tool schemas if tools are available for this agent
+        agent_tools = self._get_tools_for_agent(agent.id)
+        openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
+
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
@@ -510,12 +640,74 @@ class ConversationEngine:
                     prompt_hint=prompt_hint,
                 )
 
-                # Call LLM
-                response = await self._llm.complete(
-                    messages=messages,
-                    model=agent.model_conversation,
-                    agent_id=agent.id,
-                )
+                # Call LLM (with tool-call loop)
+                total_input_tokens = 0
+                total_output_tokens = 0
+                total_cost = 0.0
+                total_latency_ms = 0
+
+                for _tool_round in range(MAX_TOOL_ROUNDS + 1):
+                    response = await self._llm.complete(
+                        messages=messages,
+                        model=agent.model_conversation,
+                        agent_id=agent.id,
+                        tools=openai_tools,
+                    )
+
+                    total_input_tokens += response.input_tokens
+                    total_output_tokens += response.output_tokens
+                    total_cost += float(response.estimated_cost)
+                    total_latency_ms += response.latency_ms
+
+                    # No tool calls — we have the final text response
+                    if not response.tool_calls or not agent_tools:
+                        break
+
+                    # Execute tool calls
+                    logger.info(
+                        "Agent %s requested %d tool call(s): %s",
+                        agent.id,
+                        len(response.tool_calls),
+                        [tc.name for tc in response.tool_calls],
+                    )
+                    conv_id = self._active.id if self._active else None
+
+                    # Append assistant message with tool calls
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": response.content or "",
+                    }
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(
+                                    tc.arguments, default=str
+                                ),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    messages.append(assistant_msg)
+
+                    # Execute tools and append results
+                    tool_results = await execute_tool_calls(
+                        response.tool_calls,
+                        agent_tools,
+                        agent.id,
+                        simulation_id=self._simulation_id,
+                        conversation_id=conv_id,
+                    )
+                    messages.extend(tool_results)
+                else:
+                    logger.warning(
+                        "Max tool rounds (%d) reached for %s",
+                        MAX_TOOL_ROUNDS,
+                        agent.id,
+                    )
+
                 content = response.content.strip()
 
                 # Empty response — retry
@@ -528,13 +720,13 @@ class ConversationEngine:
                     )
                     continue
 
-                # Save token/cost metadata from this call
+                # Save token/cost metadata (accumulated across tool rounds)
                 self._last_llm_meta = {
                     "model": response.model,
-                    "input_tokens": response.input_tokens,
-                    "output_tokens": response.output_tokens,
-                    "cost": float(response.estimated_cost),
-                    "latency_ms": response.latency_ms,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "cost": total_cost,
+                    "latency_ms": total_latency_ms,
                 }
 
                 # Overseer review (can be disabled for testing)

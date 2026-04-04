@@ -162,6 +162,7 @@ class TestCompactInteraction:
             event_type="conversation",
             participants=["vera", "rex"],
             content="Vera: Let's build a dashboard.\nRex: Sounds good.",
+            conversation_id=None,
         )
 
         # Tier 2 was called
@@ -264,6 +265,7 @@ class TestCompactInteraction:
             event_type="reflection",
             participants=["fork"],
             content="Solo reflection time.",
+            conversation_id=None,
         )
 
 

@@ -41,7 +41,7 @@ where = ["."]
 include = ["core*", "tools*", "agents*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/backend"]
+testpaths = ["tests/backend", "tests/integration"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
 markers = [

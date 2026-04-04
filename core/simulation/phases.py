@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     import uuid
 
     from core.agent_registry import AgentRegistry
+    from core.bootstrap import Services
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
     from core.conversation.proximity import ProximityManager
@@ -26,9 +27,11 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.compaction import MemoryCompactor
     from core.memory.reflection import ReflectionManager
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.memory_repo import MemoryRepo
 
 logger = logging.getLogger(__name__)
 
@@ -86,9 +89,12 @@ class PhaseRunner:
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
         reflection_manager: ReflectionManager,
+        compactor: MemoryCompactor | None = None,
+        memory_repo: MemoryRepo | None = None,
         simulation_id: uuid.UUID,
         agents: list[str],
         dry_run: bool = False,
+        services: Services | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -98,6 +104,8 @@ class PhaseRunner:
         self._context = context_assembler
         self._conversation_repo = conversation_repo
         self._archival = archival_memory
+        self._compactor = compactor
+        self._memory_repo = memory_repo
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
@@ -105,6 +113,7 @@ class PhaseRunner:
         self._simulation_id = simulation_id
         self._agent_ids = agents
         self._dry_run = dry_run
+        self._services = services
 
         # Stats accumulated during a phase run via event listeners
         self._phase_turns = 0
@@ -347,9 +356,12 @@ class PhaseRunner:
                 proximity=self._proximity,
                 trigger_system=self._triggers,
                 selection_logger=self._selection_logger,
+                compactor=self._compactor,
+                memory_repo=self._memory_repo,
                 speed_multiplier=0,  # No delays in simulation
                 overseer_enabled=True,
                 simulation_id=self._simulation_id,
+                services=self._services,
             )
 
             engine._running = True

@@ -155,15 +155,15 @@ async def test_dry_run_bootstrap():
     from scripts.test_agent import bootstrap_services
 
     services = await bootstrap_services(dry_run=True)
-    assert services["db"] is None
-    assert services["redis"] is None
-    assert services["llm_client"] is None
-    assert services["agent_registry"] is not None
-    assert services["context_assembler"] is not None
-    assert services["token_counter"] is not None
+    assert services.db is None
+    assert services.redis is None
+    assert services.llm_client is None
+    assert services.agent_registry is not None
+    assert services.context_assembler is not None
+    assert services.token_counter is not None
 
     # Should have loaded agents
-    agents = services["agent_registry"].get_all_agents()
+    agents = services.agent_registry.get_all_agents()
     assert len(agents) > 0
 
 
@@ -173,7 +173,7 @@ async def test_dry_run_context_assembly():
     from scripts.test_agent import bootstrap_services
 
     services = await bootstrap_services(dry_run=True)
-    assembler = services["context_assembler"]
+    assembler = services.context_assembler
 
     messages = await assembler.assemble_context(
         agent_id="rex",
@@ -209,7 +209,7 @@ async def test_run_turn_with_mock_llm():
     )
     mock_llm = AsyncMock()
     mock_llm.complete = AsyncMock(return_value=mock_response)
-    services["llm_client"] = mock_llm
+    services.llm_client = mock_llm
 
     stats = SessionStats()
     history: list[dict[str, str]] = []

@@ -97,13 +97,13 @@ AGENT_COLORS: dict[str, str] = {
 
 def _get_db():
     """Lazy import to avoid circular dependency with core.main."""
-    from core.main import db
-    return db
+    from core.main import app
+    return app.state.services.db
 
 
 def _get_registry():
-    from core.main import agent_registry
-    return agent_registry
+    from core.main import app
+    return app.state.services.agent_registry
 
 
 def _agent_summary_from_config(a, *, total_cost: float = 0, message_count: int = 0,
