@@ -384,6 +384,10 @@ async def run_watch(args: argparse.Namespace) -> None:
     elif not overseer_enabled:
         console.print("[yellow]Overseer disabled for testing[/yellow]")
 
+    # Build embedding function for post-conversation recall memory creation
+    from core.bootstrap import _make_embedding_fn
+    embedding_fn = _make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
+
     engine = ConversationEngine(
         config_loader=svc.config_loader,
         agent_registry=svc.agent_registry,
@@ -396,6 +400,9 @@ async def run_watch(args: argparse.Namespace) -> None:
         proximity=proximity,
         trigger_system=trigger_system,
         selection_logger=selection_logger,
+        recall_memory=svc.recall_memory,
+        memory_repo=svc.memory_repo,
+        embedding_fn=embedding_fn,
         speed_multiplier=speed,
         overseer_enabled=overseer_enabled,
         # simulation_id is set later after sim record is created/attached
@@ -560,68 +567,8 @@ async def run_watch(args: argparse.Namespace) -> None:
                 except Exception:
                     pass
 
-        # ── Post-conversation reflection: create recall memories + journal ──
-        if _captured_history and _captured_participants:
-            console.print("\n[dim]Creating recall memories and journal entries...[/dim]")
-            transcript = "\n".join(
-                f"[{msg.get('speaker', '?')}]: {msg.get('content', '')}"
-                for msg in _captured_history
-            )
-            # Build a short summary for recall memory
-            speakers = list(dict.fromkeys(
-                msg.get("speaker", "?") for msg in _captured_history
-            ))
-            topics_discussed = ", ".join(speakers)
-            summary = (
-                f"Conversation between {topics_discussed} "
-                f"({len(_captured_history)} turns). "
-                f"Excerpt: {_captured_history[0].get('content', '')[:200]}"
-            )
-            try:
-                # Generate embedding for the transcript summary
-                from core.memory.embeddings import generate_embedding
-                api_key = os.environ.get("OPENROUTER_API_KEY", "")
-                embedding = await generate_embedding(
-                    summary, svc.http_client, api_key,
-                )
-
-                for agent_id in set(_captured_participants):
-                    # Recall memory
-                    await svc.recall_memory.store_recall_memory(
-                        agent_id=agent_id,
-                        summary=summary,
-                        embedding=embedding,
-                        event_type="conversation",
-                        participants=list(set(_captured_participants)),
-                        importance_score=0.6,
-                    )
-                    stats.memories_created += 1
-
-                    # Journal entry
-                    from core.models import JournalEntryCreate
-                    agent_lines = [
-                        msg.get("content", "")
-                        for msg in _captured_history
-                        if msg.get("speaker") == agent_id
-                    ]
-                    journal_content = (
-                        f"Participated in a conversation with {topics_discussed}. "
-                        f"I contributed {len(agent_lines)} messages. "
-                        f"Topics covered: {summary[:300]}"
-                    )
-                    await svc.memory_repo.create_journal_entry(JournalEntryCreate(
-                        agent_id=agent_id,
-                        reflection_type="conversation",
-                        content=journal_content,
-                        token_count=len(journal_content.split()),
-                    ))
-
-                console.print(
-                    f"  [dim]Created {stats.memories_created} recall memories "
-                    f"and {len(set(_captured_participants))} journal entries[/dim]"
-                )
-            except Exception as exc:
-                console.print(f"  [yellow]Warning: post-conversation reflection failed: {exc}[/yellow]")
+        # Post-conversation recall memories + journal entries are now
+        # created by ConversationEngine._end_conversation() automatically.
 
         print_summary(stats)
 

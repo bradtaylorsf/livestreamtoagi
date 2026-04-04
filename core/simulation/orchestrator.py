@@ -19,6 +19,7 @@ from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 if TYPE_CHECKING:
     import uuid
+    from collections.abc import Awaitable, Callable
 
     from core.agent_registry import AgentRegistry
     from core.config_loader import ConfigLoader
@@ -30,10 +31,12 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.recall_memory import RecallMemoryManager
     from core.memory.reflection import ReflectionManager
     from core.overseer import Overseer
     from core.redis_client import RedisClient
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.memory_repo import MemoryRepo
     from core.repos.simulation_repo import SimulationRepo
     from core.simulation.display import SimulationDisplay
 
@@ -134,6 +137,9 @@ class SimulationOrchestrator:
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
         reflection_manager: ReflectionManager,
+        recall_memory: RecallMemoryManager | None = None,
+        memory_repo: MemoryRepo | None = None,
+        embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         display: SimulationDisplay,
     ) -> None:
         self._config = config
@@ -148,6 +154,9 @@ class SimulationOrchestrator:
         self._context = context_assembler
         self._conversation_repo = conversation_repo
         self._archival = archival_memory
+        self._recall = recall_memory
+        self._memory_repo = memory_repo
+        self._embedding_fn = embedding_fn
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
@@ -194,6 +203,9 @@ class SimulationOrchestrator:
             trigger_system=self._triggers,
             selection_logger=self._selection_logger,
             reflection_manager=self._reflection,
+            recall_memory=self._recall,
+            memory_repo=self._memory_repo,
+            embedding_fn=self._embedding_fn,
             simulation_id=sim.id,
             agents=self._config.agents,
             dry_run=self._config.dry_run,

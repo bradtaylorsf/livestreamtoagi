@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import uuid
+    from collections.abc import Awaitable, Callable
 
     from core.agent_registry import AgentRegistry
     from core.config_loader import ConfigLoader
@@ -26,9 +27,11 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.recall_memory import RecallMemoryManager
     from core.memory.reflection import ReflectionManager
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.memory_repo import MemoryRepo
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +89,9 @@ class PhaseRunner:
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
         reflection_manager: ReflectionManager,
+        recall_memory: RecallMemoryManager | None = None,
+        memory_repo: MemoryRepo | None = None,
+        embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         simulation_id: uuid.UUID,
         agents: list[str],
         dry_run: bool = False,
@@ -98,6 +104,9 @@ class PhaseRunner:
         self._context = context_assembler
         self._conversation_repo = conversation_repo
         self._archival = archival_memory
+        self._recall = recall_memory
+        self._memory_repo = memory_repo
+        self._embedding_fn = embedding_fn
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
@@ -347,6 +356,9 @@ class PhaseRunner:
                 proximity=self._proximity,
                 trigger_system=self._triggers,
                 selection_logger=self._selection_logger,
+                recall_memory=self._recall,
+                memory_repo=self._memory_repo,
+                embedding_fn=self._embedding_fn,
                 speed_multiplier=0,  # No delays in simulation
                 overseer_enabled=True,
                 simulation_id=self._simulation_id,
