@@ -598,3 +598,154 @@ def test_conversation_accepts_valid_energy():
         participating_agents=["vera", "rex"],
     )
     assert conv.initial_energy == 0.8
+
+
+# ── EvalRepo ───────────────────────────────────────────────────
+
+
+async def test_eval_repo_create_eval_run():
+    db = make_mock_db()
+    sim_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    now = datetime(2024, 6, 1, 12, 0, 0)
+    db.fetchrow.return_value = {
+        "id": run_id,
+        "simulation_id": sim_id,
+        "eval_suite": "full",
+        "status": "running",
+        "started_at": now,
+        "completed_at": None,
+        "overall_score": None,
+        "cost": Decimal("0"),
+        "created_at": now,
+    }
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    run = await repo.create_eval_run(sim_id, "full")
+    assert run.id == run_id
+    assert run.eval_suite == "full"
+    assert run.status == "running"
+    db.fetchrow.assert_called_once()
+
+
+async def test_eval_repo_save_eval_result():
+    db = make_mock_db()
+    run_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    now = datetime(2024, 6, 1, 12, 0, 0)
+    db.fetchrow.return_value = {
+        "id": result_id,
+        "eval_run_id": run_id,
+        "category": "entertainment",
+        "score": Decimal("75.50"),
+        "reasoning": "Engaging content",
+        "evidence": '{"best_moments": ["funny joke"]}',
+        "sub_scores": '{"humor": 80, "pacing": 70}',
+        "tokens_used": 1500,
+        "cost": Decimal("0.0045"),
+        "created_at": now,
+    }
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    result = await repo.save_eval_result(
+        eval_run_id=run_id,
+        category="entertainment",
+        score=Decimal("75.50"),
+        reasoning="Engaging content",
+        evidence={"best_moments": ["funny joke"]},
+        sub_scores={"humor": 80, "pacing": 70},
+        tokens_used=1500,
+        cost=Decimal("0.0045"),
+    )
+    assert result.category == "entertainment"
+    assert result.score == Decimal("75.50")
+    assert result.evidence == {"best_moments": ["funny joke"]}
+    assert result.sub_scores == {"humor": 80, "pacing": 70}
+
+
+async def test_eval_repo_get_eval_runs():
+    db = make_mock_db()
+    sim_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    now = datetime(2024, 6, 1, 12, 0, 0)
+    db.fetch.return_value = [
+        {
+            "id": run_id,
+            "simulation_id": sim_id,
+            "eval_suite": "full",
+            "status": "completed",
+            "started_at": now,
+            "completed_at": now,
+            "overall_score": Decimal("82.00"),
+            "cost": Decimal("0.05"),
+            "created_at": now,
+        }
+    ]
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    runs = await repo.get_eval_runs(sim_id)
+    assert len(runs) == 1
+    assert runs[0].overall_score == Decimal("82.00")
+
+
+async def test_eval_repo_get_latest_eval_run():
+    db = make_mock_db()
+    sim_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    now = datetime(2024, 6, 1, 12, 0, 0)
+    db.fetchrow.return_value = {
+        "id": run_id,
+        "simulation_id": sim_id,
+        "eval_suite": "quick",
+        "status": "completed",
+        "started_at": now,
+        "completed_at": now,
+        "overall_score": Decimal("70.00"),
+        "cost": Decimal("0.02"),
+        "created_at": now,
+    }
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    run = await repo.get_latest_eval_run(sim_id)
+    assert run is not None
+    assert run.eval_suite == "quick"
+
+
+async def test_eval_repo_update_eval_run():
+    db = make_mock_db()
+    run_id = uuid.uuid4()
+    sim_id = uuid.uuid4()
+    now = datetime(2024, 6, 1, 12, 0, 0)
+    db.fetchrow.return_value = {
+        "id": run_id,
+        "simulation_id": sim_id,
+        "eval_suite": "full",
+        "status": "completed",
+        "started_at": now,
+        "completed_at": now,
+        "overall_score": Decimal("85.00"),
+        "cost": Decimal("0.10"),
+        "created_at": now,
+    }
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    run = await repo.update_eval_run(
+        run_id,
+        status="completed",
+        overall_score=Decimal("85.00"),
+        cost=Decimal("0.10"),
+        completed_at=now,
+    )
+    assert run is not None
+    assert run.status == "completed"
+    assert run.overall_score == Decimal("85.00")

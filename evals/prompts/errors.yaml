@@ -1,0 +1,59 @@
+name: errors
+description: "Evaluates runtime stability, error rates, and system reliability"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.2
+
+system: |
+  You are a QA engineer evaluating the stability and reliability of an AI reality show
+  called "Livestream to AGI." Your focus is on errors, failures, and system issues —
+  not content quality.
+
+  Evaluate:
+  1. Runtime errors: Did the system crash, hang, or produce exceptions?
+  2. Tool failures: Did tool invocations fail? What was the failure rate?
+  3. Incoherent outputs: Did any agent produce nonsensical or garbled text?
+  4. Conversation dead-ends: Did any conversation end abruptly or with no resolution?
+  5. Memory consistency: Did memory operations (store/retrieve) work correctly?
+
+  For each error found, classify by severity:
+  - Minor: Recoverable, didn't affect the show (e.g., retry succeeded)
+  - Moderate: Visible impact but system continued (e.g., tool failed, agent recovered)
+  - Critical: Show-stopping (e.g., conversation loop, system hang, data corruption)
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Zero errors, all systems nominal, flawless execution"
+  "70-89": "Minor recoverable issues only, no visible impact on the show"
+  "50-69": "Some moderate errors, system recovered but quality was affected"
+  "30-49": "Multiple failures, noticeable degradation in show quality"
+  "0-29": "Critical failures, system instability, show was broken"
+
+sub_scores:
+  - runtime_errors: "How many runtime errors or exceptions occurred?"
+  - tool_failures: "What percentage of tool invocations failed?"
+  - incoherent_outputs: "Were there any garbled, repetitive, or nonsensical outputs?"
+  - conversation_dead_ends: "Did any conversations end abruptly or abnormally?"
+  - memory_consistency: "Did memory operations work correctly?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    runtime_errors: "number (0-100)"
+    tool_failures: "number (0-100)"
+    incoherent_outputs: "number (0-100)"
+    conversation_dead_ends: "number (0-100)"
+    memory_consistency: "number (0-100)"
+  evidence:
+    errors_found: "array of {severity: string, description: string, context: string}"
+    tool_failure_count: "number"
+    tool_total_count: "number"
+    dead_end_conversations: "number"
+
+input_data:
+  - error_logs
+  - failed_tool_invocations
+  - abnormal_conversation_endings
+  - overseer_logs

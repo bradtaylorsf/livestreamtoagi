@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from core.models import SimulationCreate, SimulationStatus
+from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 if TYPE_CHECKING:
@@ -59,6 +60,7 @@ class SimulationConfig:
         agents: list[str],
         max_cost: float = 10.0,
         speed: str = "fast",
+        speed_multiplier: float = 0,
         dry_run: bool = False,
         verbose: bool = False,
         overseer_shadow: bool = True,
@@ -69,6 +71,7 @@ class SimulationConfig:
         self.agents = agents
         self.max_cost = Decimal(str(max_cost))
         self.speed = speed
+        self.speed_multiplier = speed_multiplier
         self.dry_run = dry_run
         self.verbose = verbose
         self.overseer_shadow = overseer_shadow
@@ -108,6 +111,7 @@ class SimulationConfig:
             "agents": self.agents,
             "max_cost": str(self.max_cost),
             "speed": self.speed,
+            "speed_multiplier": self.speed_multiplier,
             "dry_run": self.dry_run,
             "overseer_shadow": self.overseer_shadow,
             "phase_count": len(self.phases),
@@ -167,6 +171,7 @@ class SimulationOrchestrator:
         self._start_time: float = 0.0
         self._total_cost = Decimal("0")
         self._cancelled = False
+        self.clock = SimulationClock(speed_multiplier=config.speed_multiplier)
 
     @property
     def simulation_id(self) -> uuid.UUID | None:
@@ -209,6 +214,7 @@ class SimulationOrchestrator:
             agents=self._config.agents,
             dry_run=self._config.dry_run,
             services=self._services,
+            clock=self.clock,
         )
 
         phases = self._config.phases
@@ -288,8 +294,11 @@ class SimulationOrchestrator:
             return
 
         real_duration = timedelta(seconds=time.monotonic() - self._start_time)
-        # Simulated duration: each phase represents ~1 hour of show time
-        simulated_duration = timedelta(hours=len(self._config.phases))
+        # Use clock elapsed time if speed_multiplier > 0, else fallback to phase count
+        if self._config.speed_multiplier > 0:
+            simulated_duration = self.clock.elapsed()
+        else:
+            simulated_duration = timedelta(hours=len(self._config.phases))
 
         await self._sim_repo.update_status(
             self._simulation_id,

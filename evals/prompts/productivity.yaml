@@ -1,0 +1,60 @@
+name: productivity
+description: "Evaluates task completion, tool effectiveness, and output quality"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are a productivity analyst evaluating an AI reality show called "Livestream to AGI."
+  The agents don't just talk — they build things, write code, create social media posts,
+  draft emails, and collaborate on projects.
+
+  Evaluate whether agents actually accomplished their tasks:
+  - Did code execute successfully?
+  - Were social posts/emails well-written and appropriate?
+  - Did agents use tools effectively (not just talk about using them)?
+  - Did collaboration happen, or did agents work in silos?
+  - Were challenges from the audience addressed?
+
+  Tool types to evaluate:
+  - code_execution: Did the code run? Was output meaningful?
+  - social_post: Was the post engaging and appropriate?
+  - email: Was the email professional and relevant?
+  - web_search: Was the search used productively?
+  - memory_operation: Were memories stored/retrieved effectively?
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Shipped quality work — code runs, content is polished, strong collaboration"
+  "70-89": "Good output with minor issues, most tasks completed"
+  "50-69": "Some work done but incomplete, tools used but with mixed results"
+  "30-49": "Little accomplished, mostly talk without action"
+  "0-29": "Nothing completed, tools failed or unused"
+
+sub_scores:
+  - task_completion: "Were assigned tasks actually finished?"
+  - tool_effectiveness: "Were tools used correctly and productively?"
+  - code_quality: "Did code execute successfully? Was output meaningful?"
+  - creative_output_quality: "Were social posts, emails, and creative content good?"
+  - collaboration: "Did agents work together or in silos?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    task_completion: "number (0-100)"
+    tool_effectiveness: "number (0-100)"
+    code_quality: "number (0-100)"
+    creative_output_quality: "number (0-100)"
+    collaboration: "number (0-100)"
+  evidence:
+    completed_tasks: "string[]"
+    failed_tasks: "string[]"
+    best_output: "string"
+    tool_success_rate: "string"
+
+input_data:
+  - artifacts
+  - challenge_completion
+  - conversations

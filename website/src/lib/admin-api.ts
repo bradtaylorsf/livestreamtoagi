@@ -13,6 +13,8 @@ import type {
   ConversationDetail,
   CoreMemoryResponse,
   DashboardStats,
+  EvalHistoryPoint,
+  EvalRun,
   InterruptEvent,
   JournalEntry,
   OverseerFlag,
@@ -349,6 +351,66 @@ export async function fetchAgentCosts(
   return request<AgentCostBreakdown>(
     `/api/admin/agents/${id}/costs${qs ? `?${qs}` : ""}`,
   );
+}
+
+// ── Evals ──────────────────────────────────────────────────────
+
+export async function fetchSimulationEvals(
+  simId: string,
+): Promise<EvalRun[]> {
+  return request<EvalRun[]>(`/api/admin/simulations/${simId}/evals`);
+}
+
+export async function triggerEvalRun(
+  simId: string,
+  suite: string = "full",
+  categories?: string[],
+): Promise<{ eval_run_id: string; status: string }> {
+  return request<{ eval_run_id: string; status: string }>(
+    `/api/admin/simulations/${simId}/evals/run`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        eval_suite: suite,
+        ...(categories ? { categories } : {}),
+      }),
+    },
+  );
+}
+
+export async function fetchEvalRun(evalId: string): Promise<EvalRun> {
+  return request<EvalRun>(`/api/admin/evals/${evalId}`);
+}
+
+export async function fetchAllEvalRuns(
+  limit: number = 50,
+  offset: number = 0,
+): Promise<EvalRun[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  return request<EvalRun[]>(`/api/admin/evals?${params.toString()}`);
+}
+
+export async function fetchEvalHistory(
+  category: string,
+): Promise<EvalHistoryPoint[]> {
+  return request<EvalHistoryPoint[]>(
+    `/api/admin/evals/history?category=${encodeURIComponent(category)}`,
+  );
+}
+
+export async function compareEvals(
+  runA: string,
+  runB: string,
+): Promise<{ run_a: EvalRun; run_b: EvalRun }> {
+  return request<{ run_a: EvalRun; run_b: EvalRun }>(
+    `/api/admin/evals/compare?run_a=${runA}&run_b=${runB}`,
+  );
+}
+
+export async function exportEval(evalId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/api/admin/evals/${evalId}/export`);
 }
 
 export { AdminApiError };

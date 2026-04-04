@@ -56,6 +56,8 @@ async def db():
     # Clean all data (but keep schema) for test isolation
     async with database.acquire() as conn:
         await conn.execute("""
+            DELETE FROM eval_results;
+            DELETE FROM eval_runs;
             DELETE FROM interrupt_log;
             DELETE FROM conversation_selection_log;
             DELETE FROM conversation_buffer;
