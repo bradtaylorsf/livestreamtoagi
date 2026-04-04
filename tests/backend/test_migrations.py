@@ -40,6 +40,8 @@ ALL_TABLES = [
     "overseer_shadow_log",
     "artifacts",
     "simulations",
+    "eval_runs",
+    "eval_results",
 ]
 
 AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "overseer", "alpha"]
@@ -53,6 +55,7 @@ async def conn():
     # Drop all tables directly (faster and avoids FK ordering issues from test data)
     await c.execute("""
         DROP TABLE IF EXISTS
+            eval_results, eval_runs,
             energy_change_log, self_modification_proposals, journal_entries,
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,

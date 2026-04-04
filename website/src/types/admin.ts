@@ -121,10 +121,8 @@ export interface AgentConversation {
   id: string;
   simulation_id: string | null;
   trigger_type: string;
-  topic: string | null;
   participating_agents: string[];
   turn_count: number;
-  agent_turn_count: number;
   started_at: string;
 }
 
@@ -270,4 +268,39 @@ export interface AgentCostBreakdown {
   total: string;
   total_input_tokens: number;
   total_output_tokens: number;
+}
+
+// ── Eval types ────────────────────────────────────────────────
+
+export interface EvalResult {
+  id: string;
+  eval_run_id: string;
+  category: string;
+  score: number | null;
+  reasoning: string | null;
+  evidence: Record<string, unknown> | null;
+  sub_scores: Record<string, number> | null;
+  tokens_used: number;
+  cost: string;
+  created_at: string | null;
+}
+
+export interface EvalRun {
+  id: string;
+  simulation_id: string;
+  eval_suite: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  overall_score: number | null;
+  cost: number | string;
+  created_at: string | null;
+  results?: EvalResult[];
+}
+
+export interface EvalHistoryPoint {
+  score: number | null;
+  created_at: string | null;
+  simulation_id: string;
+  eval_run_id: string;
 }

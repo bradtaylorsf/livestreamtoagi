@@ -27,9 +27,11 @@ from core.memory.recall_memory import RecallMemoryManager
 from core.memory.token_counter import TokenCounter
 from core.overseer import Overseer
 from core.redis_client import RedisClient
+from core.repos.artifact_repo import ArtifactRepo
 from core.repos.cost_repo import CostRepo
 from core.repos.memory_repo import MemoryRepo
 from core.repos.transcript_repo import TranscriptRepo
+from core.repos.world_repo import WorldRepo
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,8 @@ class Services:
     event_bus: EventBus
     overseer: Overseer | None
     cost_repo: CostRepo | None
+    artifact_repo: ArtifactRepo | None
+    world_repo: WorldRepo | None
     config_loader: ConfigLoader
 
 
@@ -114,6 +118,8 @@ async def bootstrap_services(
     await agent_registry.load_all()
 
     cost_repo = CostRepo(db)
+    artifact_repo = ArtifactRepo(db)
+    world_repo = WorldRepo(db)
     memory_repo = MemoryRepo(db)
     transcript_repo = TranscriptRepo(db)
     http_client = httpx.AsyncClient()
@@ -135,11 +141,12 @@ async def bootstrap_services(
         openrouter_api_key=api_key,
     )
 
-    event_bus = EventBus()
+    from core.event_bus import event_bus as _module_event_bus
+
     overseer = Overseer(
         redis_client=redis_client,
         llm_client=llm_client,
-        event_bus=event_bus,
+        event_bus=_module_event_bus,
     )
 
     context_assembler = ContextAssembler(
@@ -165,9 +172,11 @@ async def bootstrap_services(
         token_counter=token_counter,
         memory_repo=memory_repo,
         transcript_repo=transcript_repo,
-        event_bus=event_bus,
+        event_bus=_module_event_bus,
         overseer=overseer,
         cost_repo=cost_repo,
+        artifact_repo=artifact_repo,
+        world_repo=world_repo,
         config_loader=config_loader,
     )
 
@@ -219,6 +228,8 @@ async def _bootstrap_dry_run(
         event_bus=EventBus(),
         overseer=None,
         cost_repo=None,
+        artifact_repo=None,
+        world_repo=None,
         config_loader=config_loader,
     )
 

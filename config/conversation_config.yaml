@@ -200,6 +200,18 @@ adjacency:
     rex: 0.4
     sentinel: 0.5
 
+# ─── Autonomous mode ────────────────────────────────
+autonomous:
+  idle_gap_mean_seconds: 90        # mean gap between conversations (simulated)
+  idle_gap_jitter: 0.3             # +/- 30% variation
+  target_conversations_per_day: 8  # baseline pacing target
+
+# ─── Reflection scheduling ──────────────────────────
+reflection:
+  six_hour_interval_hours: 6       # simulated hours between 6-hour reflections
+  daily_hour: 23                   # simulated hour for end-of-day reflection
+  weekly_day: 7                    # run weekly reflection every N simulated days
+
 # ─── Logging ─────────────────────────────────────────
 logging:
   log_every_selection: true         # log full weight breakdown for every turn

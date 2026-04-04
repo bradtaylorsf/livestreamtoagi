@@ -12,6 +12,7 @@ from core.repos.utils import serialize_jsonb
 if TYPE_CHECKING:
     import uuid
     from datetime import datetime, timedelta
+    from typing import Any
 
     from core.database import Database
 
@@ -173,6 +174,24 @@ class SimulationRepo:
             return None
         return Simulation(**_parse_row(dict(row)))
 
+    async def update_config(
+        self,
+        simulation_id: uuid.UUID,
+        config: dict[str, Any],
+    ) -> Simulation | None:
+        """Overwrite the config JSONB column (e.g. to persist clock state)."""
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET config = $1::jsonb
+               WHERE id = $2
+               RETURNING *""",
+            serialize_jsonb(config),
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
     async def delete(self, simulation_id: uuid.UUID) -> bool:
         result = await self.db.execute(
             "DELETE FROM simulations WHERE id = $1", simulation_id
@@ -283,27 +302,27 @@ class SimulationRepo:
     ) -> list[dict]:
         """Return overseer shadow flags for a simulation filtered by severity."""
         rows = await self.db.fetch(
-            """SELECT id, agent_id, tool_name, tool_output, metadata, created_at
-               FROM artifacts
+            """SELECT id, agent_id, original_content, filter_layer,
+                      severity, action_would_take, reason,
+                      flagged_keywords, created_at
+               FROM overseer_shadow_log
                WHERE simulation_id = $1
-                 AND artifact_type = 'overseer_flag'
-                 AND (metadata->>'severity')::int >= $2
+                 AND severity >= $2
                ORDER BY created_at""",
             simulation_id,
             severity_min,
         )
-        result = []
-        for r in rows:
-            d = dict(r)
-            for key in ("tool_output", "metadata"):
-                if isinstance(d.get(key), str):
-                    d[key] = json.loads(d[key])
-            result.append({
-                "id": str(d["id"]),
-                "agent_id": d["agent_id"],
-                "tool_name": d["tool_name"],
-                "output": d["tool_output"],
-                "metadata": d["metadata"],
-                "created_at": d["created_at"].isoformat() if d["created_at"] else None,
-            })
-        return result
+        return [
+            {
+                "id": str(r["id"]),
+                "agent_id": r["agent_id"],
+                "original_content": r["original_content"],
+                "filter_layer": r["filter_layer"],
+                "severity": r["severity"],
+                "action_would_take": r["action_would_take"],
+                "reason": r["reason"],
+                "flagged_keywords": list(r["flagged_keywords"] or []),
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]

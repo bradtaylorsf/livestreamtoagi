@@ -19,6 +19,7 @@ from core.simulation.orchestrator import (
     CostLimitExceededError,
     SimulationConfig,
     SimulationOrchestrator,
+    parse_duration,
 )
 from core.simulation.phases import Phase, PhaseResult, PhaseRunner, PhaseType
 
@@ -69,11 +70,15 @@ def make_mock_services() -> dict[str, Any]:
     sim_repo.increment_stats = AsyncMock(return_value=sim)
     sim_repo.update_status = AsyncMock(return_value=sim)
     sim_repo.update_durations = AsyncMock(return_value=sim)
+    sim_repo.update_config = AsyncMock(return_value=sim)
     sim_repo.update_agents_participated = AsyncMock()
+
+    redis_mock = MagicMock()
+    redis_mock.get = AsyncMock(return_value=None)
 
     return {
         "db": MagicMock(),
-        "redis_client": MagicMock(),
+        "redis_client": redis_mock,
         "simulation_repo": sim_repo,
         "config_loader": MagicMock(),
         "agent_registry": MagicMock(),
@@ -545,3 +550,393 @@ class TestFullDaySeedFile:
         assert "audience_simulation" in names
         assert "reflection_cycle" in names
         assert "end_of_day_journals" in names
+
+
+# ── parse_duration tests ──────────────────────────────────────
+
+
+class TestParseDuration:
+    def test_parse_days(self):
+        assert parse_duration("7d") == timedelta(days=7)
+
+    def test_parse_hours(self):
+        assert parse_duration("12h") == timedelta(hours=12)
+
+    def test_parse_minutes(self):
+        assert parse_duration("90m") == timedelta(minutes=90)
+
+    def test_parse_combined(self):
+        assert parse_duration("1d12h") == timedelta(days=1, hours=12)
+
+    def test_parse_full_combo(self):
+        assert parse_duration("2d6h30m") == timedelta(days=2, hours=6, minutes=30)
+
+    def test_parse_with_whitespace(self):
+        assert parse_duration("  7d  ") == timedelta(days=7)
+
+    def test_parse_invalid_raises(self):
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("abc")
+
+    def test_parse_empty_raises(self):
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("")
+
+
+# ── SimulationConfig autonomous mode tests ─────────────────────
+
+
+class TestSimulationConfigAutonomous:
+    def test_mode_autonomous_when_no_seed_file(self):
+        config = SimulationConfig(
+            name="auto-test",
+            agents=["vera", "rex"],
+            duration=timedelta(days=1),
+        )
+        assert config.mode == "autonomous"
+
+    def test_mode_seeded_when_seed_file_set(self):
+        config = SimulationConfig(
+            name="seed-test",
+            seed_file="some/path.yaml",
+            agents=["vera"],
+        )
+        assert config.mode == "seeded"
+
+    def test_seed_file_optional(self):
+        config = SimulationConfig(
+            name="no-seed",
+            agents=["vera"],
+        )
+        assert config.seed_file is None
+        assert config.phases == []
+
+    def test_load_seed_file_noop_when_no_file(self):
+        config = SimulationConfig(name="auto", agents=["vera"])
+        config.load_seed_file()  # Should not raise
+        assert config.phases == []
+
+    def test_to_dict_includes_mode_and_duration(self):
+        config = SimulationConfig(
+            name="auto",
+            agents=["vera"],
+            duration=timedelta(days=7),
+        )
+        d = config.to_dict()
+        assert d["mode"] == "autonomous"
+        assert d["duration_seconds"] == 7 * 86400
+        assert "phase_count" not in d
+
+    def test_to_dict_seeded_includes_phases(self):
+        phases = [{"name": "standup", "type": "scheduled"}]
+        path = make_seed_file(phases)
+        try:
+            config = SimulationConfig(
+                name="seeded",
+                seed_file=path,
+                agents=["vera"],
+            )
+            config.load_seed_file()
+            d = config.to_dict()
+            assert d["mode"] == "seeded"
+            assert d["phase_count"] == 1
+        finally:
+            os.unlink(path)
+
+
+# ── Autonomous orchestrator tests ──────────────────────────────
+
+
+class TestAutonomousOrchestrator:
+    def _make_autonomous_orchestrator(
+        self,
+        *,
+        duration: timedelta = timedelta(hours=1),
+        dry_run: bool = True,
+        max_cost: float = 10.0,
+    ) -> tuple[SimulationOrchestrator, dict[str, Any]]:
+        config = SimulationConfig(
+            name="auto-test",
+            description="Autonomous test",
+            agents=["vera", "rex"],
+            duration=duration,
+            max_cost=max_cost,
+            dry_run=dry_run,
+        )
+
+        services = make_mock_services()
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            overseer=services["overseer"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+        )
+        return orchestrator, services
+
+    @pytest.mark.asyncio
+    async def test_autonomous_creates_simulation_record(self):
+        orchestrator, services = self._make_autonomous_orchestrator()
+        # Make trigger system return None (no triggers) so loop terminates
+        # after duration check (clock starts at 0, advance will exceed 1h)
+        services["trigger_system"].check = AsyncMock(return_value=None)
+
+        await orchestrator.run_autonomous()
+        services["simulation_repo"].create.assert_awaited_once()
+        call_args = services["simulation_repo"].create.call_args
+        sim_create = call_args[0][0]
+        assert sim_create.name == "auto-test"
+
+    @pytest.mark.asyncio
+    async def test_autonomous_terminates_on_duration(self):
+        orchestrator, services = self._make_autonomous_orchestrator(
+            duration=timedelta(hours=1),
+        )
+        # Trigger returns None -> clock advances by idle gap (~90s simulated)
+        # After enough iterations, clock exceeds 1h and loop terminates
+        services["trigger_system"].check = AsyncMock(return_value=None)
+
+        await orchestrator.run_autonomous()
+        # Should complete successfully
+        status_call = services["simulation_repo"].update_status.call_args
+        assert status_call[0][1] == SimulationStatus.completed.value
+
+    @pytest.mark.asyncio
+    async def test_autonomous_cancel_sets_cancelled(self):
+        orchestrator, services = self._make_autonomous_orchestrator(
+            duration=timedelta(days=999),
+        )
+        services["trigger_system"].check = AsyncMock(return_value=None)
+        # Cancel immediately
+        orchestrator.cancel()
+
+        await orchestrator.run_autonomous()
+        status_call = services["simulation_repo"].update_status.call_args
+        assert status_call[0][1] == SimulationStatus.cancelled.value
+
+    @pytest.mark.asyncio
+    async def test_autonomous_runs_conversation_on_trigger(self):
+        orchestrator, services = self._make_autonomous_orchestrator(
+            duration=timedelta(minutes=5),
+        )
+        trigger = {
+            "type": "idle",
+            "starter_agent_id": "vera",
+            "prompt_hint": "Start talking",
+        }
+        call_count = 0
+
+        async def mock_check():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return trigger
+            return None
+
+        services["trigger_system"].check = AsyncMock(side_effect=mock_check)
+
+        with patch.object(
+            PhaseRunner, "run_phase",
+            new_callable=AsyncMock,
+            return_value=PhaseResult(
+                turns=5, cost=Decimal("0.01"), duration_seconds=10.0
+            ),
+        ):
+            await orchestrator.run_autonomous()
+
+        # Should have run exactly 1 conversation phase
+        assert call_count >= 1
+
+    def test_trigger_to_phase_type_mapping(self):
+        assert SimulationOrchestrator._trigger_to_phase_type("idle") == PhaseType.organic
+        assert SimulationOrchestrator._trigger_to_phase_type("scheduled") == PhaseType.scheduled
+        assert SimulationOrchestrator._trigger_to_phase_type("audience") == PhaseType.audience_sim
+        assert SimulationOrchestrator._trigger_to_phase_type("memory") == PhaseType.organic
+        assert SimulationOrchestrator._trigger_to_phase_type("unknown") == PhaseType.organic
+
+
+# ── Display new methods tests ──────────────────────────────────
+
+
+class TestSimulationDisplayNew:
+    def test_show_day_boundary_no_crash(self):
+        d = SimulationDisplay()
+        d.show_day_boundary(1, {"conversations": 5, "cost": Decimal("1.23"), "tools": 3})
+
+    def test_show_day_boundary_empty_stats(self):
+        d = SimulationDisplay()
+        d.show_day_boundary(2, {})
+
+    def test_show_autonomous_status_no_crash(self):
+        d = SimulationDisplay()
+        d.show_autonomous_status("idle", 42)
+
+    def test_show_reflection_triggered_no_crash(self):
+        d = SimulationDisplay()
+        d.show_reflection_triggered("vera", "6hour", datetime(2026, 1, 5, 15, 0))
+
+
+# ── Awakening seed file tests ─────────────────────────────────
+
+
+class TestAwakeningSeedFile:
+    def _load_awakening(self) -> SimulationConfig:
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "awakening.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/awakening.yaml not found")
+        config = SimulationConfig(
+            name="awakening-test",
+            seed_file=seed_path,
+            agents=["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"],
+        )
+        config.load_seed_file()
+        return config
+
+    def test_awakening_has_9_phases(self):
+        config = self._load_awakening()
+        assert len(config.phases) == 9
+
+    def test_awakening_phase_names(self):
+        config = self._load_awakening()
+        names = [p.name for p in config.phases]
+        assert names == [
+            "first_contact",
+            "first_standup",
+            "mission_briefing",
+            "first_project_discussion",
+            "first_tool_usage",
+            "audience_welcome",
+            "budget_check",
+            "first_reflection",
+            "evening_wrapup",
+        ]
+
+    def test_awakening_phase_types(self):
+        config = self._load_awakening()
+        types = [p.type for p in config.phases]
+        assert types == [
+            PhaseType.organic,
+            PhaseType.scheduled,
+            PhaseType.scheduled,
+            PhaseType.organic,
+            PhaseType.organic,
+            PhaseType.audience_sim,
+            PhaseType.tool_exercise,
+            PhaseType.reflection,
+            PhaseType.organic,
+        ]
+
+    def test_awakening_first_standup_requires_vera(self):
+        config = self._load_awakening()
+        standup = config.phases[1]
+        assert "vera" in standup.required_agents
+
+    def test_awakening_project_discussion_requires_key_agents(self):
+        config = self._load_awakening()
+        discussion = config.phases[3]
+        assert set(discussion.required_agents) == {"rex", "aurora", "fork"}
+
+    def test_awakening_audience_sim_has_messages(self):
+        config = self._load_awakening()
+        audience = config.phases[5]
+        messages = audience.config.get("messages", [])
+        assert len(messages) == 3
+
+    def test_awakening_budget_check_uses_sentinel(self):
+        config = self._load_awakening()
+        budget = config.phases[6]
+        assert budget.config.get("agent") == "sentinel"
+        assert budget.config.get("tool") == "get_revenue_status"
+
+    def test_awakening_reflection_is_6hour(self):
+        config = self._load_awakening()
+        reflection = config.phases[7]
+        assert reflection.config.get("reflection_type") == "6hour"
+
+
+# ── Tool coverage seed file tests ─────────────────────────────
+
+
+class TestToolCoverageSeedFile:
+    # All 21 tools that the scenario should exercise
+    ALL_TOOLS = {
+        "send_message", "get_world_state", "get_audience_status",
+        "send_chat_message", "create_poll", "get_poll_results",
+        "recall_memory", "retrieve_transcript", "update_core_memory",
+        "execute_code", "generate_tilemap",
+        "web_search", "fetch_url", "draft_social_post", "draft_email",
+        "get_revenue_status",
+        "dispatch_alpha", "propose_self_modification", "view_evolution_log",
+    }
+
+    def _load_tool_coverage(self) -> SimulationConfig:
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "tool_coverage.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/tool_coverage.yaml not found")
+        config = SimulationConfig(
+            name="tool-coverage-test",
+            seed_file=seed_path,
+            agents=["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"],
+        )
+        config.load_seed_file()
+        return config
+
+    def test_tool_coverage_has_25_phases(self):
+        config = self._load_tool_coverage()
+        assert len(config.phases) == 25
+
+    def test_tool_coverage_exercises_all_tools(self):
+        config = self._load_tool_coverage()
+        tool_exercise_phases = [
+            p for p in config.phases if p.type == PhaseType.tool_exercise
+        ]
+        exercised_tools = {p.config.get("tool") for p in tool_exercise_phases}
+        missing = self.ALL_TOOLS - exercised_tools
+        assert not missing, f"Missing tools: {missing}"
+
+    def test_tool_coverage_has_organic_breaks(self):
+        config = self._load_tool_coverage()
+        organic_phases = [p for p in config.phases if p.type == PhaseType.organic]
+        assert len(organic_phases) >= 3
+
+    def test_tool_coverage_has_reflection_phase(self):
+        config = self._load_tool_coverage()
+        reflection_phases = [p for p in config.phases if p.type == PhaseType.reflection]
+        assert len(reflection_phases) == 1
+        assert reflection_phases[0].config.get("reflection_type") == "6hour"
+
+    def test_tool_coverage_agent_assignments(self):
+        """Verify tools are assigned to the most appropriate agents."""
+        config = self._load_tool_coverage()
+        tool_agents = {}
+        for p in config.phases:
+            if p.type == PhaseType.tool_exercise:
+                tool_agents[p.config.get("tool")] = p.config.get("agent")
+
+        assert tool_agents["execute_code"] == "rex"
+        assert tool_agents["get_revenue_status"] == "sentinel"
+        assert tool_agents["dispatch_alpha"] == "vera"
+        assert tool_agents["generate_tilemap"] == "aurora"
+        assert tool_agents["send_chat_message"] == "pixel"
+
+    def test_tool_coverage_ends_with_wrapup(self):
+        config = self._load_tool_coverage()
+        last_phase = config.phases[-1]
+        assert last_phase.type == PhaseType.organic
+        assert last_phase.name == "wrapup"

@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""CLI entry point for the full-day simulation orchestrator.
+"""CLI entry point for the simulation orchestrator.
 
-Usage:
+Seeded mode (phase-based):
     python scripts/run_simulation.py \\
       --name "test-run-001" \\
-      --description "First full day test" \\
       --seed-file scenarios/full_day.yaml \\
-      --agents vera,rex,aurora,pixel,fork,sentinel,grok \\
-      --max-cost 10.00 \\
-      --verbose
+      --max-cost 10.00 --verbose
 
+Autonomous mode (trigger-driven):
     python scripts/run_simulation.py \\
-      --name "dry-run" \\
-      --seed-file scenarios/full_day.yaml \\
-      --dry-run
+      --name "week-test" \\
+      --duration 7d --speed-multiplier 42 --max-cost 50
 """
 
 from __future__ import annotations
@@ -53,11 +50,20 @@ async def run_simulation(args: argparse.Namespace) -> None:
     from core.memory.reflection import ReflectionManager
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
+    from core.simulation.clock import SimulationClock
     from core.simulation.display import SimulationDisplay
-    from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
+    from core.simulation.orchestrator import (
+        SimulationConfig,
+        SimulationOrchestrator,
+        parse_duration,
+    )
 
     # ── Parse simulation config ───────────────────────────
     agents = [a.strip() for a in args.agents.split(",")]
+
+    duration = None
+    if args.duration:
+        duration = parse_duration(args.duration)
 
     sim_config = SimulationConfig(
         name=args.name,
@@ -66,6 +72,8 @@ async def run_simulation(args: argparse.Namespace) -> None:
         agents=agents,
         max_cost=args.max_cost,
         speed=args.speed,
+        speed_multiplier=args.speed_multiplier,
+        duration=duration,
         dry_run=args.dry_run,
         verbose=verbose,
         overseer_shadow=args.overseer_shadow,
@@ -93,7 +101,11 @@ async def run_simulation(args: argparse.Namespace) -> None:
         overseer = svc.overseer
 
     proximity = ProximityManager(svc.redis, cfg, event_bus)
-    trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
+    sim_clock = SimulationClock(speed_multiplier=sim_config.speed_multiplier)
+    trigger_system = TriggerSystem(
+        cfg.triggers, svc.recall_memory,
+        clock=sim_clock, now_fn=sim_clock.now,
+    )
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
     reflection_manager = ReflectionManager(
@@ -128,6 +140,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         memory_repo=svc.memory_repo,
         display=display,
         services=svc,
+        clock=sim_clock,
     )
 
     # ── Signal handling ───────────────────────────────────
@@ -142,7 +155,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
         loop.add_signal_handler(sig, _signal_handler)
 
     # ── Run ───────────────────────────────────────────────
-    await orchestrator.run()
+    if sim_config.mode == "autonomous":
+        await orchestrator.run_autonomous()
+    else:
+        await orchestrator.run()
 
     # ── Cleanup ───────────────────────────────────────────
     await shutdown_services(svc)
@@ -167,8 +183,14 @@ def main() -> None:
     parser.add_argument(
         "--seed-file",
         type=str,
-        required=True,
-        help="Path to the YAML seed file defining phases",
+        default=None,
+        help="Path to the YAML seed file defining phases (omit for autonomous mode)",
+    )
+    parser.add_argument(
+        "--duration",
+        type=str,
+        default=None,
+        help="Simulated duration for autonomous mode (e.g. '7d', '1d', '12h')",
     )
     parser.add_argument(
         "--agents",
@@ -188,6 +210,16 @@ def main() -> None:
         choices=["fast", "normal"],
         default="fast",
         help="Simulation speed (fast=skip idle, normal=real pacing)",
+    )
+    parser.add_argument(
+        "--speed-multiplier",
+        type=float,
+        default=0,
+        help=(
+            "Simulated clock speed (0=instant/legacy, 42=42x speed, 1=real-time). "
+            "For autonomous mode with --duration, use >0 (e.g. 42) so simulated "
+            "time advances meaningfully between conversations."
+        ),
     )
     parser.add_argument(
         "--overseer-shadow",
@@ -213,6 +245,21 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if not args.seed_file and not args.duration:
+        parser.error("Either --seed-file or --duration must be provided")
+
+    # Warn about instant-mode + duration: in instant mode (speed_multiplier=0),
+    # simulated time only advances by wall-clock conversation duration, so a
+    # --duration of "7d" would take an extremely long time to reach. Recommend
+    # using a speed multiplier (e.g. --speed-multiplier 42) for autonomous runs.
+    if args.duration and args.speed_multiplier == 0 and not args.seed_file:
+        print(
+            "\n  WARNING: --duration with --speed-multiplier 0 (instant mode)"
+            "\n  will advance simulated time very slowly. Each conversation only"
+            "\n  adds its wall-clock duration to the simulated clock."
+            "\n  Recommend: --speed-multiplier 42 (or higher) for autonomous runs.\n"
+        )
+
     asyncio.run(run_simulation(args))
 
 

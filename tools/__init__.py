@@ -173,6 +173,10 @@ def get_core_tools(
         for tool in tools:
             tool.artifact_repo = artifact_repo
 
+    # Set event_bus on all tools so BaseTool.run() can emit artifact_created
+    for tool in tools:
+        tool.event_bus = event_bus
+
     return tools
 
 

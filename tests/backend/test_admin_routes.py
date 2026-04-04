@@ -680,24 +680,190 @@ class TestGlobalArtifactEndpoints:
 class TestEvalEndpoints:
     def test_get_simulation_evals(self, mock_app):
         client, _, _ = mock_app
-        resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/evals")
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_runs",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/evals")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_run_simulation_evals(self, mock_app):
         client, _, _ = mock_app
-        resp = client.post(
-            f"/api/admin/simulations/{uuid.uuid4()}/evals/run",
-            json={"eval_suite": "quick"},
+        run_id = uuid.uuid4()
+        sim_id = uuid.uuid4()
+        now = datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+        from core.models import EvalRun
+
+        mock_run = EvalRun(
+            id=run_id,
+            simulation_id=sim_id,
+            eval_suite="quick",
+            status="running",
+            started_at=now,
         )
+        with (
+            patch("core.admin_routes._get_llm", return_value=MagicMock()),
+            patch(
+                "core.eval.engine.EvalEngine.run",
+                new_callable=AsyncMock,
+                return_value=run_id,
+            ),
+            patch(
+                "core.repos.eval_repo.EvalRepo.create_eval_run",
+                new_callable=AsyncMock,
+                return_value=mock_run,
+            ),
+        ):
+            resp = client.post(
+                f"/api/admin/simulations/{sim_id}/evals/run",
+                json={"eval_suite": "quick"},
+            )
         assert resp.status_code == 200
         data = resp.json()
-        assert "job_id" in data
-        assert data["status"] == "queued"
+        assert data["eval_run_id"] == str(run_id)
+        assert data["status"] == "running"
 
-    def test_get_eval_not_implemented(self, mock_app):
+    def test_get_eval_not_found(self, mock_app):
         client, _, _ = mock_app
-        resp = client.get("/api/admin/evals/some-id")
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_run",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.get(f"/api/admin/evals/{uuid.uuid4()}")
+        assert resp.status_code == 404
+
+    def test_list_all_eval_runs(self, mock_app):
+        client, _, _ = mock_app
+        from core.models import EvalRun
+
+        run = EvalRun(
+            id=uuid.uuid4(),
+            simulation_id=uuid.uuid4(),
+            eval_suite="full",
+            status="completed",
+            started_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 4, 1, 0, 5, tzinfo=timezone.utc),
+            overall_score=Decimal("82.00"),
+            cost=Decimal("0.05"),
+        )
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_all_eval_runs",
+            new_callable=AsyncMock,
+            return_value=[run],
+        ):
+            resp = client.get("/api/admin/evals?limit=10&offset=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["eval_suite"] == "full"
+        assert data[0]["status"] == "completed"
+
+    def test_compare_evals(self, mock_app):
+        client, _, _ = mock_app
+        from core.models import EvalResult, EvalRun
+
+        run_a_id = uuid.uuid4()
+        run_b_id = uuid.uuid4()
+        sim_id = uuid.uuid4()
+        now = datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+        run_a = EvalRun(id=run_a_id, simulation_id=sim_id, eval_suite="full",
+                        status="completed", started_at=now, overall_score=Decimal("80"))
+        run_b = EvalRun(id=run_b_id, simulation_id=sim_id, eval_suite="full",
+                        status="completed", started_at=now, overall_score=Decimal("85"))
+        result_a = EvalResult(
+            id=uuid.uuid4(), eval_run_id=run_a_id, category="safety",
+            score=Decimal("80"), reasoning="Good", tokens_used=100, cost=Decimal("0.01"),
+        )
+        result_b = EvalResult(
+            id=uuid.uuid4(), eval_run_id=run_b_id, category="safety",
+            score=Decimal("85"), reasoning="Better", tokens_used=120, cost=Decimal("0.012"),
+        )
+
+        with (
+            patch("core.repos.eval_repo.EvalRepo.get_eval_run", new_callable=AsyncMock,
+                  side_effect=lambda rid: run_a if rid == run_a_id else run_b),
+            patch("core.repos.eval_repo.EvalRepo.get_eval_results", new_callable=AsyncMock,
+                  side_effect=lambda rid: [result_a] if rid == run_a_id else [result_b]),
+        ):
+            resp = client.get(f"/api/admin/evals/compare?run_a={run_a_id}&run_b={run_b_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "run_a" in data and "run_b" in data
+        assert len(data["run_a"]["results"]) == 1
+        assert len(data["run_b"]["results"]) == 1
+        assert data["run_a"]["results"][0]["category"] == "safety"
+
+    def test_compare_evals_invalid_uuid(self, mock_app):
+        client, _, _ = mock_app
+        resp = client.get("/api/admin/evals/compare?run_a=not-a-uuid&run_b=also-bad")
+        assert resp.status_code == 400
+
+    def test_compare_evals_not_found(self, mock_app):
+        client, _, _ = mock_app
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_run",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.get(f"/api/admin/evals/compare?run_a={uuid.uuid4()}&run_b={uuid.uuid4()}")
+        assert resp.status_code == 404
+
+    def test_eval_history(self, mock_app):
+        client, _, _ = mock_app
+        history_data = [
+            {"score": 75.0, "created_at": "2026-04-01T00:00:00", "simulation_id": str(uuid.uuid4()), "eval_run_id": str(uuid.uuid4())},
+            {"score": 82.0, "created_at": "2026-04-02T00:00:00", "simulation_id": str(uuid.uuid4()), "eval_run_id": str(uuid.uuid4())},
+        ]
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_history",
+            new_callable=AsyncMock,
+            return_value=history_data,
+        ):
+            resp = client.get("/api/admin/evals/history?category=entertainment")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["score"] == 75.0
+        assert data[1]["score"] == 82.0
+
+    def test_export_eval(self, mock_app):
+        client, _, _ = mock_app
+        from core.models import EvalResult, EvalRun
+
+        run_id = uuid.uuid4()
+        now = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        run = EvalRun(id=run_id, simulation_id=uuid.uuid4(), eval_suite="full",
+                      status="completed", started_at=now, overall_score=Decimal("80"))
+        result = EvalResult(
+            id=uuid.uuid4(), eval_run_id=run_id, category="safety",
+            score=Decimal("80"), reasoning="Good", tokens_used=100, cost=Decimal("0.01"),
+        )
+
+        with (
+            patch("core.repos.eval_repo.EvalRepo.get_eval_run", new_callable=AsyncMock, return_value=run),
+            patch("core.repos.eval_repo.EvalRepo.get_eval_results", new_callable=AsyncMock, return_value=[result]),
+        ):
+            resp = client.get(f"/api/admin/evals/{run_id}/export")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "eval_run" in data
+        assert "results" in data
+        assert data["eval_run"]["status"] == "completed"
+        assert len(data["results"]) == 1
+
+    def test_export_eval_not_found(self, mock_app):
+        client, _, _ = mock_app
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_run",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.get(f"/api/admin/evals/{uuid.uuid4()}/export")
         assert resp.status_code == 404
 
 

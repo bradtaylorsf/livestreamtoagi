@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ArtifactCard from "@/components/admin/ArtifactCard";
 import ArtifactDetailModal from "@/components/admin/ArtifactDetailModal";
+import { AGENT_COLORS, STATUS_STYLES, TYPE_ICONS } from "@/lib/artifact-constants";
 import { fetchArtifacts, fetchSimulations, fetchAgents } from "@/lib/admin-api";
 import type {
   AgentArtifact,
@@ -32,41 +33,6 @@ const ALL_STATUSES: ArtifactStatus[] = [
   "failed",
   "pending_approval",
 ];
-
-const TYPE_ICONS: Record<string, string> = {
-  social_post: "📱",
-  email: "✉",
-  code_execution: "⌨",
-  web_search: "🔍",
-  tilemap: "🗺",
-  poll: "📊",
-  memory_operation: "🧠",
-  alpha_dispatch: "🐺",
-  self_modification: "🔧",
-  message: "💬",
-};
-
-const AGENT_COLORS: Record<string, string> = {
-  vera: "#9b59b6",
-  rex: "#e74c3c",
-  aurora: "#f1c40f",
-  pixel: "#3498db",
-  fork: "#2ecc71",
-  sentinel: "#e67e22",
-  grok: "#1abc9c",
-  overseer: "#95a5a6",
-  alpha: "#8e44ad",
-};
-
-const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-yellow-500/10 text-yellow-400",
-  executed: "bg-green-500/10 text-green-400",
-  success: "bg-green-500/10 text-green-400",
-  failed: "bg-red-500/10 text-red-400",
-  error: "bg-red-500/10 text-red-400",
-  pending_approval: "bg-blue-500/10 text-blue-400",
-  pending: "bg-yellow-500/10 text-yellow-400",
-};
 
 type SortOption = "newest" | "oldest" | "agent" | "type";
 type ViewMode = "card" | "table";

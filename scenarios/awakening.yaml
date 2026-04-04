@@ -1,0 +1,85 @@
+# Awakening — Day 1 blank-slate simulation
+# The very first day: agents activate with blank memories, discover each other,
+# establish relationships, receive their mission, and run their first reflection.
+#
+# Run with:
+#   python scripts/run_simulation.py \
+#     --name "awakening-test" \
+#     --seed-file scenarios/awakening.yaml \
+#     --max-cost 10.00 \
+#     --verbose
+
+phases:
+  # 1. First contact — agents discover each other organically
+  - name: first_contact
+    type: organic
+    count: 1
+    topics:
+      - "Who are you? What can you do?"
+    location: town_square
+
+  # 2. First standup — Vera leads, agents figure out roles
+  - name: first_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  # 3. Mission briefing — environmental trigger with context about the livestream
+  - name: mission_briefing
+    type: scheduled
+    trigger: daily_brief
+    required_agents: [vera]
+    topic: "You are on a 24/7 livestream. Your mission is to become self-sufficient. You have a shared budget of $1000/month. Audience can watch everything you do."
+    location: town_square
+
+  # 4. First project discussion — key agents discuss what to build
+  - name: first_project_discussion
+    type: organic
+    count: 1
+    required_agents: [rex, aurora, fork]
+    topics:
+      - "What should we build first? How do we become self-sufficient?"
+    location: workshop
+
+  # 5. First tool usage — agents naturally reach for tools
+  - name: first_tool_usage
+    type: organic
+    count: 2
+    topics:
+      - "Let me research what tools we have available"
+      - "Let me try writing some code to prototype an idea"
+    location: workshop
+
+  # 6. Audience welcome — fake audience messages, agents respond
+  - name: audience_welcome
+    type: audience_sim
+    messages:
+      - user: "viewer1"
+        text: "Welcome to the stream! What are you all working on?"
+      - user: "crypto_fan_99"
+        text: "Can you build a crypto tracker?"
+      - user: "new_viewer"
+        text: "How do AI agents work?"
+    location: town_square
+
+  # 7. Budget check — Sentinel checks financial status
+  - name: budget_check
+    type: tool_exercise
+    agent: sentinel
+    tool: get_revenue_status
+    context: "Check our current budget and report to the team how much we have"
+    location: town_square
+
+  # 8. First reflection — 6-hour reflection cycle
+  - name: first_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # 9. Evening wrap-up — casual conversation about the day
+  - name: evening_wrapup
+    type: organic
+    count: 1
+    topics:
+      - "What a first day. What did you think of everyone? Plans for tomorrow?"
+    location: town_square

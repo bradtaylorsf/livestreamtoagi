@@ -37,9 +37,11 @@ def build_agent_tools(agent_id: str, services: Services) -> dict[str, BaseTool]:
         redis_client=services.redis,
         agent_id=agent_id,
         overseer=services.overseer,
+        world_repo=services.world_repo,
         cost_repo=services.cost_repo,
         llm_client=services.llm_client,
         memory_repo=services.memory_repo,
+        artifact_repo=services.artifact_repo,
     )
     for tool in core_tools:
         registry.register(tool)
@@ -53,6 +55,7 @@ def build_agent_tools(agent_id: str, services: Services) -> dict[str, BaseTool]:
             archival_manager=archival_memory,
             core_manager=core_memory,
             agent_id=agent_id,
+            artifact_repo=services.artifact_repo,
         )
         for tool in mem_tools:
             registry.register(tool)

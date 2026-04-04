@@ -572,6 +572,13 @@ class TriggerConfig(BaseModel):
     daily_schedule: dict[int, ScheduledEvent] = {}
 
 
+class ReflectionScheduleConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    six_hour_interval_hours: int = Field(default=6, ge=1)
+    daily_hour: int = Field(default=23, ge=0, le=23)
+    weekly_day: int = Field(default=7, ge=1, le=7)
+
+
 class TopicConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     relevance_map: dict[str, dict[str, float]]
@@ -726,6 +733,7 @@ class ConversationConfig(BaseModel):
     topics: TopicConfig
     adjacency: dict[str, dict[str, float]]
     logging: LoggingConfig
+    reflection: ReflectionScheduleConfig = ReflectionScheduleConfig()
 
 
 # ── Admin API Response Models ──────────────────────────────────
@@ -856,12 +864,74 @@ class TurnDetail(BaseModel):
 
 
 class EvalRunRequest(BaseModel):
-    eval_suite: str | list[str] = "full"
+    eval_suite: str = "full"
+    categories: list[str] | None = None
 
 
 class EvalRunResponse(BaseModel):
-    job_id: str
-    status: str = "queued"
+    eval_run_id: str
+    status: str = "running"
+
+
+class EvalRun(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    simulation_id: uuid.UUID
+    eval_suite: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    overall_score: Decimal | None = None
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+
+
+class EvalResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    eval_run_id: uuid.UUID
+    category: str
+    score: Decimal | None = None
+    reasoning: str | None = None
+    evidence: dict[str, Any] | None = None
+    sub_scores: dict[str, Any] | None = None
+    tokens_used: int = 0
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+
+
+class EvalRunDetail(BaseModel):
+    """Eval run with nested results for API responses."""
+    id: uuid.UUID
+    simulation_id: uuid.UUID
+    eval_suite: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    overall_score: Decimal | None = None
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+    results: list[EvalResult] = []
+
+
+class EvalComparisonResponse(BaseModel):
+    """Side-by-side comparison of two eval runs."""
+    run_a: EvalRunDetail
+    run_b: EvalRunDetail
+
+
+class EvalHistoryPoint(BaseModel):
+    """Single data point for eval score history charts."""
+    score: float | None = None
+    created_at: str | None = None
+    simulation_id: str
+    eval_run_id: str
+
+
+class EvalExportResponse(BaseModel):
+    """Full eval export payload."""
+    eval_run: EvalRun
+    results: list[EvalResult]
 
 
 class SimulationCostResponse(BaseModel):

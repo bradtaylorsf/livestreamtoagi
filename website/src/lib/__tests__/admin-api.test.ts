@@ -22,6 +22,13 @@ import {
   fetchConversationOverseerFlags,
   fetchConversationInterrupts,
   fetchConversationArtifacts,
+  fetchSimulationEvals,
+  triggerEvalRun,
+  fetchEvalRun,
+  fetchAllEvalRuns,
+  fetchEvalHistory,
+  compareEvals,
+  exportEval,
 } from "../admin-api";
 
 const mockFetch = vi.fn();
@@ -602,5 +609,179 @@ describe("fetchConversationArtifacts", () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].tool_name).toBe("write_file");
+  });
+});
+
+
+// ── Eval API Tests ──────────────────────────────────────────────
+
+const EVAL_RUN_FIXTURE = {
+  id: "eval-001",
+  simulation_id: "sim-1",
+  eval_suite: "full",
+  status: "completed",
+  started_at: "2026-04-01T00:00:00Z",
+  completed_at: "2026-04-01T00:05:00Z",
+  overall_score: 72.5,
+  cost: 0.0432,
+  created_at: "2026-04-01T00:00:00Z",
+  results: [
+    {
+      id: "res-1",
+      eval_run_id: "eval-001",
+      category: "entertainment",
+      score: 75,
+      reasoning: "Good show",
+      evidence: { best_moments: ["joke"] },
+      sub_scores: { humor: 80, personality: 70 },
+      tokens_used: 500,
+      cost: "0.01",
+      created_at: "2026-04-01T00:01:00Z",
+    },
+  ],
+};
+
+describe("fetchSimulationEvals", () => {
+  it("sends GET to /api/admin/simulations/:id/evals", async () => {
+    mockFetch.mockReturnValue(jsonResponse([EVAL_RUN_FIXTURE]));
+
+    const result = await fetchSimulationEvals("sim-1");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-1/evals",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].overall_score).toBe(72.5);
+  });
+});
+
+describe("triggerEvalRun", () => {
+  it("sends POST with eval_suite in body", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse({ eval_run_id: "eval-002", status: "running" }),
+    );
+
+    const result = await triggerEvalRun("sim-1", "full");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-1/evals/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ eval_suite: "full" }),
+      }),
+    );
+    expect(result.eval_run_id).toBe("eval-002");
+    expect(result.status).toBe("running");
+  });
+
+  it("includes categories when provided", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse({ eval_run_id: "eval-003", status: "running" }),
+    );
+
+    await triggerEvalRun("sim-1", "custom", ["entertainment", "safety"]);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-1/evals/run",
+      expect.objectContaining({
+        body: JSON.stringify({
+          eval_suite: "custom",
+          categories: ["entertainment", "safety"],
+        }),
+      }),
+    );
+  });
+});
+
+describe("fetchEvalRun", () => {
+  it("sends GET to /api/admin/evals/:id", async () => {
+    mockFetch.mockReturnValue(jsonResponse(EVAL_RUN_FIXTURE));
+
+    const result = await fetchEvalRun("eval-001");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/evals/eval-001",
+      expect.anything(),
+    );
+    expect(result.eval_suite).toBe("full");
+  });
+});
+
+describe("fetchAllEvalRuns", () => {
+  it("sends GET to /api/admin/evals with pagination", async () => {
+    mockFetch.mockReturnValue(jsonResponse([EVAL_RUN_FIXTURE]));
+
+    const result = await fetchAllEvalRuns(10, 5);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/evals?limit=10&offset=5",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+  });
+
+  it("uses default pagination when no args", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+
+    await fetchAllEvalRuns();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/evals?limit=50&offset=0",
+      expect.anything(),
+    );
+  });
+});
+
+describe("fetchEvalHistory", () => {
+  it("sends GET to /api/admin/evals/history with category", async () => {
+    const points = [
+      { score: 75, created_at: "2026-04-01T00:00:00Z", simulation_id: "sim-1", eval_run_id: "eval-001" },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(points));
+
+    const result = await fetchEvalHistory("entertainment");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/evals/history?category=entertainment",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].score).toBe(75);
+  });
+});
+
+describe("compareEvals", () => {
+  it("sends GET to /api/admin/evals/compare with two run IDs", async () => {
+    const comparison = {
+      run_a: { ...EVAL_RUN_FIXTURE, id: "eval-001" },
+      run_b: { ...EVAL_RUN_FIXTURE, id: "eval-002", overall_score: 80 },
+    };
+    mockFetch.mockReturnValue(jsonResponse(comparison));
+
+    const result = await compareEvals("eval-001", "eval-002");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/evals/compare?run_a=eval-001&run_b=eval-002",
+      expect.anything(),
+    );
+    expect(result.run_a.id).toBe("eval-001");
+    expect(result.run_b.overall_score).toBe(80);
+  });
+});
+
+describe("exportEval", () => {
+  it("sends GET to /api/admin/evals/:id/export", async () => {
+    const exported = { eval_run: EVAL_RUN_FIXTURE, exported_at: "2026-04-01T00:10:00Z" };
+    mockFetch.mockReturnValue(jsonResponse(exported));
+
+    const result = await exportEval("eval-001");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/evals/eval-001/export",
+      expect.anything(),
+    );
+    expect(result).toHaveProperty("eval_run");
+    expect(result).toHaveProperty("exported_at");
   });
 });

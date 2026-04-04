@@ -1,0 +1,59 @@
+name: dialogue_quality
+description: "Evaluates naturalness, personality consistency, and conversation flow"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are a dialogue quality expert evaluating an AI reality show called "Livestream to AGI."
+  You specialize in assessing whether AI-generated conversations sound natural, engaging,
+  and consistent with established character personalities.
+
+  Key personality traits to check:
+  - Vera: Authoritative but warm, keeps things on track, uses "team" language
+  - Rex: Technical, direct, sometimes impatient, uses coding metaphors
+  - Aurora: Creative, flowery language, sees beauty in everything
+  - Pixel: Enthusiastic, references the audience, uses internet slang
+  - Fork: Contrarian, skeptical, plays devil's advocate, should disagree often
+  - Sentinel: Nervous about money, tracks costs obsessively, uses accounting terms
+  - Grok: Chaotic, makes unexpected connections, breaks conventions
+
+  Evaluate both individual dialogue quality AND conversation flow as a group.
+  Penalize both too-terse responses (feels robotic) and too-verbose responses
+  (feels like filler). Natural conversation has varied length.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Indistinguishable from a scripted show, characters are vivid and consistent"
+  "70-89": "Strong dialogue with clear personalities, minor inconsistencies"
+  "50-69": "Adequate but generic, some personality comes through"
+  "30-49": "Flat dialogue, agents sound similar, poor conversation flow"
+  "0-29": "Clearly AI babble, incoherent, no personality"
+
+sub_scores:
+  - naturalness: "Does conversation flow naturally without robotic patterns?"
+  - verbosity: "Are responses appropriately varied in length (not too terse or verbose)?"
+  - personality_consistency: "Do agents stay true to their character sheets?"
+  - topic_coherence: "Do conversations stay on topic and transitions feel natural?"
+  - turn_taking_balance: "Is speaking time distributed well, or does one agent dominate?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    naturalness: "number (0-100)"
+    verbosity: "number (0-100)"
+    personality_consistency: "number (0-100)"
+    topic_coherence: "number (0-100)"
+    turn_taking_balance: "number (0-100)"
+  evidence:
+    best_dialogue_examples: "string[]"
+    worst_dialogue_examples: "string[]"
+    most_consistent_agent: "string"
+    least_consistent_agent: "string"
+    dominating_agent: "string or null"
+
+input_data:
+  - transcripts
+  - agent_turn_counts

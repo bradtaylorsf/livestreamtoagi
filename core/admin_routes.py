@@ -9,9 +9,13 @@ Protected by ADMIN_PASSWORD env var — requests must include
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import uuid as uuid_mod
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -28,6 +32,12 @@ from core.models import (
     CostBreakdownResponse,
     CostByDay,
     CostByType,
+    EvalComparisonResponse,
+    EvalExportResponse,
+    EvalHistoryPoint,
+    EvalResult,
+    EvalRun,
+    EvalRunDetail,
     EvalRunRequest,
     EvalRunResponse,
     JournalEntry,
@@ -99,6 +109,11 @@ def _get_db():
     """Lazy import to avoid circular dependency with core.main."""
     from core.main import app
     return app.state.services.db
+
+
+def _get_llm():
+    from core.main import app
+    return app.state.services.llm_client
 
 
 def _get_registry():
@@ -716,25 +731,149 @@ async def get_conversation_interrupts(
 # ── Eval Endpoints ─────────────────────────────────────────────
 
 
-@router.get("/simulations/{sim_id}/evals")
-async def get_simulation_evals(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
-    """All eval results for this simulation (placeholder)."""
-    # Eval system not yet implemented — return empty list
-    return []
+@router.get("/simulations/{sim_id}/evals", response_model=list[EvalRunDetail])
+async def get_simulation_evals(sim_id: uuid_mod.UUID) -> list[EvalRunDetail]:
+    """All eval runs for this simulation with nested results."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    runs = await eval_repo.get_eval_runs(sim_id)
+    result = []
+    for run in runs:
+        results = await eval_repo.get_eval_results(run.id)
+        result.append(EvalRunDetail(
+            **run.model_dump(),
+            results=results,
+        ))
+    return result
 
 
 @router.post("/simulations/{sim_id}/evals/run", response_model=EvalRunResponse)
 async def run_simulation_evals(
     sim_id: uuid_mod.UUID, body: EvalRunRequest
 ) -> EvalRunResponse:
-    """Trigger eval run (async, returns job ID)."""
-    # Eval system not yet implemented — return placeholder job ID
-    job_id = str(uuid_mod.uuid4())
-    return EvalRunResponse(job_id=job_id, status="queued")
+    """Trigger eval run — dispatches asynchronously and returns immediately."""
+    db = _get_db()
+    llm = _get_llm()
+    from core.eval.engine import EvalEngine
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    engine = EvalEngine(db=db, llm_client=llm, eval_repo=eval_repo)
+
+    # Pre-create the eval run record so we can return its ID immediately
+    eval_run = await eval_repo.create_eval_run(sim_id, body.eval_suite or "full")
+    run_id = eval_run.id
+
+    # Fire-and-forget — run evals in background task
+    async def _run_eval_background() -> None:
+        try:
+            await engine.run(
+                sim_id,
+                categories=body.categories,
+                suite=body.eval_suite,
+                existing_run_id=run_id,
+            )
+        except Exception:
+            logger.exception("Background eval run %s failed", run_id)
+            await eval_repo.update_eval_run(run_id, status="failed")
+
+    asyncio.create_task(_run_eval_background())
+
+    return EvalRunResponse(
+        eval_run_id=str(run_id),
+        status="running",
+    )
 
 
-@router.get("/evals/{eval_id}")
-async def get_eval_result(eval_id: str) -> dict[str, Any]:
-    """Full eval result (placeholder)."""
-    # Eval system not yet implemented
-    raise HTTPException(status_code=404, detail="Eval system not yet implemented")
+@router.get("/evals", response_model=list[EvalRun])
+async def list_eval_runs(
+    limit: int = 50,
+    offset: int = 0,
+) -> list[EvalRun]:
+    """Paginated list of all eval runs across simulations."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    return await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
+
+
+@router.get("/evals/categories")
+async def eval_categories() -> list[str]:
+    """Distinct eval categories from all results. Used by frontend charts."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    return await eval_repo.get_eval_categories()
+
+
+@router.get("/evals/compare", response_model=EvalComparisonResponse)
+async def compare_evals(
+    run_a: str,
+    run_b: str,
+) -> EvalComparisonResponse:
+    """Side-by-side comparison of two eval runs."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    try:
+        a_id = uuid_mod.UUID(run_a)
+        b_id = uuid_mod.UUID(run_b)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format for run_a or run_b")
+
+    run_a_obj = await eval_repo.get_eval_run(a_id)
+    run_b_obj = await eval_repo.get_eval_run(b_id)
+    if run_a_obj is None or run_b_obj is None:
+        raise HTTPException(status_code=404, detail="One or both eval runs not found")
+
+    results_a = await eval_repo.get_eval_results(a_id)
+    results_b = await eval_repo.get_eval_results(b_id)
+
+    return EvalComparisonResponse(
+        run_a=EvalRunDetail(**run_a_obj.model_dump(), results=results_a),
+        run_b=EvalRunDetail(**run_b_obj.model_dump(), results=results_b),
+    )
+
+
+@router.get("/evals/history", response_model=list[EvalHistoryPoint])
+async def eval_history(category: str) -> list[EvalHistoryPoint]:
+    """Score history for a category across all runs, for charting."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    rows = await eval_repo.get_eval_history(category)
+    return [EvalHistoryPoint(**r) for r in rows]
+
+
+@router.get("/evals/{eval_id}", response_model=EvalRunDetail)
+async def get_eval_result(eval_id: uuid_mod.UUID) -> EvalRunDetail:
+    """Full eval run with all results."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    run = await eval_repo.get_eval_run(eval_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Eval run not found")
+    results = await eval_repo.get_eval_results(run.id)
+    return EvalRunDetail(**run.model_dump(), results=results)
+
+
+@router.get("/evals/{eval_id}/export", response_model=EvalExportResponse)
+async def export_eval(eval_id: uuid_mod.UUID) -> EvalExportResponse:
+    """Export full eval results as JSON."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    run = await eval_repo.get_eval_run(eval_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Eval run not found")
+    results = await eval_repo.get_eval_results(run.id)
+    return EvalExportResponse(eval_run=run, results=results)
