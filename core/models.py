@@ -856,12 +856,52 @@ class TurnDetail(BaseModel):
 
 
 class EvalRunRequest(BaseModel):
-    eval_suite: str | list[str] = "full"
+    eval_suite: str = "full"
+    categories: list[str] | None = None
 
 
 class EvalRunResponse(BaseModel):
-    job_id: str
-    status: str = "queued"
+    eval_run_id: str
+    status: str = "running"
+
+
+class EvalRun(BaseModel):
+    id: uuid.UUID
+    simulation_id: uuid.UUID
+    eval_suite: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    overall_score: Decimal | None = None
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+
+
+class EvalResult(BaseModel):
+    id: uuid.UUID
+    eval_run_id: uuid.UUID
+    category: str
+    score: Decimal | None = None
+    reasoning: str | None = None
+    evidence: dict[str, Any] | None = None
+    sub_scores: dict[str, Any] | None = None
+    tokens_used: int = 0
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+
+
+class EvalRunDetail(BaseModel):
+    """Eval run with nested results for API responses."""
+    id: uuid.UUID
+    simulation_id: uuid.UUID
+    eval_suite: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    overall_score: Decimal | None = None
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+    results: list[EvalResult] = []
 
 
 class SimulationCostResponse(BaseModel):
