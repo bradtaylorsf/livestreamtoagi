@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AdminApiError,
+  fetchArtifacts,
   fetchDashboardStats,
   fetchSimulation,
   fetchSimulations,
@@ -15,6 +16,12 @@ import {
   fetchAgentArtifacts,
   fetchAgentJournal,
   fetchAgentCosts,
+  fetchConversation,
+  fetchConversationTurns,
+  fetchConversationSelectionLog,
+  fetchConversationOverseerFlags,
+  fetchConversationInterrupts,
+  fetchConversationArtifacts,
 } from "../admin-api";
 
 const mockFetch = vi.fn();
@@ -376,5 +383,224 @@ describe("error handling", () => {
       status: 500,
       message: "Internal Server Error",
     });
+  });
+});
+
+// ── Conversation Detail API Tests ──────────────────────────────
+
+describe("fetchConversation", () => {
+  it("sends GET to /api/admin/conversations/:id", async () => {
+    const conv = {
+      id: "conv-123",
+      simulation_id: "sim-1",
+      started_at: "2026-04-01T12:00:00Z",
+      ended_at: "2026-04-01T12:05:00Z",
+      trigger_type: "idle",
+      trigger_details: null,
+      initial_energy: 0.8,
+      final_energy: 0.5,
+      turn_count: 10,
+      participating_agents: ["vera", "rex"],
+      topics_discussed: ["architecture"],
+      closed_by: "energy_depleted",
+      location: "main_hall",
+      energy_history: [],
+      transcript: "[vera]: Hello",
+      total_tokens: 250,
+      total_cost: "0",
+    };
+    mockFetch.mockReturnValue(jsonResponse(conv));
+
+    const result = await fetchConversation("conv-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-123",
+      expect.anything(),
+    );
+    expect(result.id).toBe("conv-123");
+    expect(result.turn_count).toBe(10);
+    expect(result.participating_agents).toEqual(["vera", "rex"]);
+  });
+});
+
+describe("fetchConversationTurns", () => {
+  it("sends GET to /api/admin/conversations/:id/turns", async () => {
+    const turns = [
+      {
+        turn_number: 1,
+        selected_agent_id: "vera",
+        was_interrupt: false,
+        agent_scores: {},
+        detected_topic: null,
+        previous_speaker_id: null,
+        conversation_energy: 0.8,
+        timestamp: null,
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(turns));
+
+    const result = await fetchConversationTurns("conv-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-123/turns",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].selected_agent_id).toBe("vera");
+  });
+});
+
+describe("fetchConversationSelectionLog", () => {
+  it("sends GET to /api/admin/conversations/:id/selection-log", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+
+    const result = await fetchConversationSelectionLog("conv-456");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-456/selection-log",
+      expect.anything(),
+    );
+    expect(result).toEqual([]);
+  });
+});
+
+describe("fetchConversationOverseerFlags", () => {
+  it("sends GET to /api/admin/conversations/:id/overseer-flags", async () => {
+    const flags = [
+      {
+        id: "flag-1",
+        agent_id: "grok",
+        original_content: "bad content",
+        filter_layer: 1,
+        severity: 3,
+        action_would_take: "block",
+        reason: "harmful",
+        flagged_keywords: ["bad"],
+        created_at: "2026-04-01T12:00:00Z",
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(flags));
+
+    const result = await fetchConversationOverseerFlags("conv-789");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-789/overseer-flags",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].severity).toBe(3);
+  });
+});
+
+describe("fetchConversationInterrupts", () => {
+  it("sends GET to /api/admin/conversations/:id/interrupts", async () => {
+    const interrupts = [
+      {
+        id: 1,
+        attempting_agent_id: "fork",
+        would_have_spoken_id: "vera",
+        interrupt_score: 0.85,
+        threshold_at_time: 0.7,
+        succeeded: true,
+        reason: "urgent",
+        timestamp: "2026-04-01T12:01:00Z",
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(interrupts));
+
+    const result = await fetchConversationInterrupts("conv-abc");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-abc/interrupts",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].attempting_agent_id).toBe("fork");
+    expect(result[0].succeeded).toBe(true);
+  });
+});
+
+// ── Global Artifact API Tests ────────────────────────────────────
+
+describe("fetchArtifacts", () => {
+  it("sends GET to /api/admin/artifacts with no filters", async () => {
+    const paginated = { items: [], total: 0, limit: 50, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    const result = await fetchArtifacts();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/artifacts",
+      expect.anything(),
+    );
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(0);
+  });
+
+  it("serializes all filter params to query string", async () => {
+    const paginated = { items: [], total: 0, limit: 10, offset: 5 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchArtifacts({
+      simulation_id: "sim-1",
+      agent_ids: ["rex", "fork"],
+      types: ["social_post", "email"],
+      statuses: ["executed"],
+      since: "2026-04-01T00:00:00.000Z",
+      until: "2026-04-03T00:00:00.000Z",
+      search: "hello",
+      sort: "oldest",
+      limit: 10,
+      offset: 5,
+    });
+
+    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("/api/admin/artifacts?");
+    expect(calledUrl).toContain("simulation_id=sim-1");
+    expect(calledUrl).toContain("agent_id=rex%2Cfork");
+    expect(calledUrl).toContain("type=social_post%2Cemail");
+    expect(calledUrl).toContain("status=executed");
+    expect(calledUrl).toContain("search=hello");
+    expect(calledUrl).toContain("sort=oldest");
+    expect(calledUrl).toContain("limit=10");
+    expect(calledUrl).toContain("offset=5");
+  });
+
+  it("omits empty filter params", async () => {
+    const paginated = { items: [], total: 0, limit: 50, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchArtifacts({ sort: "newest" });
+
+    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toBe("/api/admin/artifacts?sort=newest");
+  });
+});
+
+describe("fetchConversationArtifacts", () => {
+  it("sends GET to /api/admin/conversations/:id/artifacts", async () => {
+    const artifacts = [
+      {
+        id: "art-1",
+        simulation_id: null,
+        artifact_type: "code",
+        tool_name: "write_file",
+        tool_input: { path: "test.py" },
+        tool_output: { success: true },
+        status: "executed",
+        metadata: null,
+        created_at: "2026-04-01T12:02:00Z",
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(artifacts));
+
+    const result = await fetchConversationArtifacts("conv-xyz");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/conversations/conv-xyz/artifacts",
+      expect.anything(),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].tool_name).toBe("write_file");
   });
 });

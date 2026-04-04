@@ -132,6 +132,47 @@ def _agent_summary_from_config(a, *, total_cost: float = 0, message_count: int =
     )
 
 
+# ── Global Artifact Endpoints ─────────────────────────────────
+
+
+@router.get("/artifacts")
+async def list_artifacts(
+    simulation_id: uuid_mod.UUID | None = Query(default=None),  # noqa: B008
+    agent_id: str | None = Query(None),
+    artifact_type: str | None = Query(None, alias="type"),
+    status: str | None = Query(None),
+    since: datetime | None = Query(default=None),  # noqa: B008
+    until: datetime | None = Query(default=None),  # noqa: B008
+    search: str | None = Query(None),
+    sort: str = Query("newest"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> PaginatedResponse[Artifact]:
+    """Browse all artifacts with filtering, search, and pagination."""
+    db = _get_db()
+    from core.repos.artifact_repo import ArtifactRepo
+    artifact_repo = ArtifactRepo(db)
+
+    # Parse comma-separated lists for multi-select filters
+    agent_ids = [a.strip() for a in agent_id.split(",") if a.strip()] if agent_id else None
+    types = [t.strip() for t in artifact_type.split(",") if t.strip()] if artifact_type else None
+    statuses = [s.strip() for s in status.split(",") if s.strip()] if status else None
+
+    artifacts, total = await artifact_repo.get_all_artifacts(
+        simulation_id=simulation_id,
+        agent_ids=agent_ids,
+        artifact_type=types,
+        status=statuses,
+        since=since,
+        until=until,
+        search=search,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
+    return PaginatedResponse(items=artifacts, total=total, limit=limit, offset=offset)
+
+
 # ── Agent Endpoints ────────────────────────────────────────────
 
 
@@ -578,8 +619,13 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
     energy_log = await conv_repo.get_energy_log(conv_id)
     transcript_record = await transcript_repo.get_by_conversation(conv_id)
 
+    # Estimate tokens from transcript length (cost_events lacks conversation_id)
+    transcript_text = transcript_record.content if transcript_record else ""
+    total_tokens = len(transcript_text) // 4 if transcript_text else 0
+
     return ConversationDetail(
         id=conv.id,
+        simulation_id=conv.simulation_id,
         started_at=conv.started_at,
         ended_at=conv.ended_at,
         trigger_type=conv.trigger_type,
@@ -593,6 +639,8 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
         location=conv.location,
         energy_history=energy_log,
         transcript=transcript_record.content if transcript_record else None,
+        total_tokens=total_tokens,
+        total_cost="0",
     )
 
 
@@ -627,6 +675,42 @@ async def get_conversation_selection_log(conv_id: uuid_mod.UUID) -> list[Selecti
     conv_repo = ConversationRepo(db)
 
     return await conv_repo.get_selection_log(conv_id)
+
+
+@router.get("/conversations/{conv_id}/overseer-flags")
+async def get_conversation_overseer_flags(
+    conv_id: uuid_mod.UUID,
+) -> list[dict[str, Any]]:
+    """Overseer shadow flags for this conversation."""
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+    conv_repo = ConversationRepo(db)
+
+    return await conv_repo.get_overseer_flags(conv_id)
+
+
+@router.get("/conversations/{conv_id}/artifacts")
+async def get_conversation_artifacts(
+    conv_id: uuid_mod.UUID,
+) -> list[dict[str, Any]]:
+    """Tool invocation artifacts for this conversation."""
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+    conv_repo = ConversationRepo(db)
+
+    return await conv_repo.get_artifacts(conv_id)
+
+
+@router.get("/conversations/{conv_id}/interrupts")
+async def get_conversation_interrupts(
+    conv_id: uuid_mod.UUID,
+) -> list[dict[str, Any]]:
+    """Interrupt events for this conversation."""
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+    conv_repo = ConversationRepo(db)
+
+    return await conv_repo.get_interrupts(conv_id)
 
 
 # ── Eval Endpoints ─────────────────────────────────────────────

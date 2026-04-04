@@ -9,16 +9,21 @@ import type {
   AgentCostBreakdown,
   AgentDetail,
   AgentSummary,
+  ArtifactFilters,
   ConversationDetail,
   CoreMemoryResponse,
   DashboardStats,
+  InterruptEvent,
   JournalEntry,
+  OverseerFlag,
   PaginatedResponse,
   RecallMemory,
+  SelectionLog,
   Simulation,
   SimulationCostResponse,
   SystemPromptResponse,
   TimelineEvent,
+  TurnDetail,
 } from "@/types/admin";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -109,6 +114,28 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   };
 }
 
+// ── Artifacts (global) ──────────────────────────────────────────
+
+export async function fetchArtifacts(
+  filters: ArtifactFilters = {},
+): Promise<PaginatedResponse<AgentArtifact>> {
+  const params = new URLSearchParams();
+  if (filters.simulation_id) params.set("simulation_id", filters.simulation_id);
+  if (filters.agent_ids?.length) params.set("agent_id", filters.agent_ids.join(","));
+  if (filters.types?.length) params.set("type", filters.types.join(","));
+  if (filters.statuses?.length) params.set("status", filters.statuses.join(","));
+  if (filters.since) params.set("since", filters.since);
+  if (filters.until) params.set("until", filters.until);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.limit != null) params.set("limit", String(filters.limit));
+  if (filters.offset != null) params.set("offset", String(filters.offset));
+  const qs = params.toString();
+  return request<PaginatedResponse<AgentArtifact>>(
+    `/api/admin/artifacts${qs ? `?${qs}` : ""}`,
+  );
+}
+
 // ── Simulations ──────────────────────────────────────────────────
 
 export interface CreateSimulationParams {
@@ -177,6 +204,44 @@ export async function fetchSimulationCosts(
 
 export async function fetchConversation(id: string): Promise<ConversationDetail> {
   return request<ConversationDetail>(`/api/admin/conversations/${id}`);
+}
+
+export async function fetchConversationTurns(
+  id: string,
+): Promise<TurnDetail[]> {
+  return request<TurnDetail[]>(`/api/admin/conversations/${id}/turns`);
+}
+
+export async function fetchConversationSelectionLog(
+  id: string,
+): Promise<SelectionLog[]> {
+  return request<SelectionLog[]>(
+    `/api/admin/conversations/${id}/selection-log`,
+  );
+}
+
+export async function fetchConversationOverseerFlags(
+  id: string,
+): Promise<OverseerFlag[]> {
+  return request<OverseerFlag[]>(
+    `/api/admin/conversations/${id}/overseer-flags`,
+  );
+}
+
+export async function fetchConversationInterrupts(
+  id: string,
+): Promise<InterruptEvent[]> {
+  return request<InterruptEvent[]>(
+    `/api/admin/conversations/${id}/interrupts`,
+  );
+}
+
+export async function fetchConversationArtifacts(
+  id: string,
+): Promise<AgentArtifact[]> {
+  return request<AgentArtifact[]>(
+    `/api/admin/conversations/${id}/artifacts`,
+  );
 }
 
 export async function fetchSimulationConversations(

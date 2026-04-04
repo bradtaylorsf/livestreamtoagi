@@ -452,6 +452,7 @@ class TestConversationEndpoints:
         with (
             patch("core.repos.conversation_repo.ConversationRepo.get", new_callable=AsyncMock, return_value=conv),
             patch("core.repos.conversation_repo.ConversationRepo.get_energy_log", new_callable=AsyncMock, return_value=[]),
+            patch("core.repos.transcript_repo.TranscriptRepo.get_by_conversation", new_callable=AsyncMock, return_value=None),
         ):
             resp = client.get(f"/api/admin/conversations/{conv.id}")
 
@@ -460,6 +461,8 @@ class TestConversationEndpoints:
         assert data["trigger_type"] == "idle"
         assert data["participating_agents"] == ["vera", "rex"]
         assert data["energy_history"] == []
+        assert data["total_tokens"] == 0
+        assert data["total_cost"] == "0"
 
     def test_get_conversation_not_found(self, mock_app):
         client, mock_db, _ = mock_app
@@ -511,6 +514,164 @@ class TestConversationEndpoints:
 
         assert resp.status_code == 200
         assert resp.json() == []
+
+    def test_get_conversation_overseer_flags(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv_id = uuid.uuid4()
+        flags = [
+            {
+                "id": str(uuid.uuid4()),
+                "agent_id": "grok",
+                "original_content": "test content",
+                "filter_layer": 1,
+                "severity": 3,
+                "action_would_take": "block",
+                "reason": "Potentially harmful",
+                "flagged_keywords": ["test"],
+                "created_at": "2026-04-01T12:00:00+00:00",
+            },
+        ]
+
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get_overseer_flags",
+            new_callable=AsyncMock,
+            return_value=flags,
+        ):
+            resp = client.get(f"/api/admin/conversations/{conv_id}/overseer-flags")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["agent_id"] == "grok"
+        assert data[0]["severity"] == 3
+
+    def test_get_conversation_interrupts(self, mock_app):
+        client, mock_db, _ = mock_app
+        conv_id = uuid.uuid4()
+        interrupts = [
+            {
+                "id": 1,
+                "attempting_agent_id": "fork",
+                "would_have_spoken_id": "vera",
+                "interrupt_score": 0.85,
+                "threshold_at_time": 0.7,
+                "succeeded": True,
+                "reason": "High urgency topic",
+                "timestamp": "2026-04-01T12:01:00+00:00",
+            },
+        ]
+
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get_interrupts",
+            new_callable=AsyncMock,
+            return_value=interrupts,
+        ):
+            resp = client.get(f"/api/admin/conversations/{conv_id}/interrupts")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["attempting_agent_id"] == "fork"
+        assert data[0]["succeeded"] is True
+        assert data[0]["interrupt_score"] == 0.85
+
+
+# ── Global Artifact Endpoint Tests ─────────────────────────────
+
+
+class TestGlobalArtifactEndpoints:
+    def test_list_artifacts_no_filters(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_all_artifacts",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ) as mock_get:
+            resp = client.get("/api/admin/artifacts")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["items"] == []
+        assert data["total"] == 0
+        mock_get.assert_called_once_with(
+            simulation_id=None,
+            agent_ids=None,
+            artifact_type=None,
+            status=None,
+            since=None,
+            until=None,
+            search=None,
+            sort="newest",
+            limit=50,
+            offset=0,
+        )
+
+    def test_list_artifacts_with_filters(self, mock_app):
+        client, mock_db, _ = mock_app
+        from core.models import Artifact
+
+        artifact = Artifact(
+            id=uuid.uuid4(),
+            simulation_id=uuid.uuid4(),
+            agent_id="rex",
+            tool_name="post_to_social",
+            tool_input={"content": "Hello world"},
+            tool_output={"posted": True},
+            artifact_type="social_post",
+            status="executed",
+            metadata={},
+            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        )
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_all_artifacts",
+            new_callable=AsyncMock,
+            return_value=([artifact], 1),
+        ) as mock_get:
+            resp = client.get(
+                "/api/admin/artifacts"
+                "?agent_id=rex,fork"
+                "&type=social_post,email"
+                "&status=executed"
+                "&sort=oldest"
+                "&limit=10&offset=5"
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        assert data["items"][0]["agent_id"] == "rex"
+        assert data["items"][0]["artifact_type"] == "social_post"
+
+        mock_get.assert_called_once_with(
+            simulation_id=None,
+            agent_ids=["rex", "fork"],
+            artifact_type=["social_post", "email"],
+            status=["executed"],
+            since=None,
+            until=None,
+            search=None,
+            sort="oldest",
+            limit=10,
+            offset=5,
+        )
+
+    def test_list_artifacts_with_search(self, mock_app):
+        client, mock_db, _ = mock_app
+
+        with patch(
+            "core.repos.artifact_repo.ArtifactRepo.get_all_artifacts",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ) as mock_get:
+            resp = client.get("/api/admin/artifacts?search=hello")
+
+        assert resp.status_code == 200
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args[1]
+        assert call_kwargs["search"] == "hello"
 
 
 # ── Eval Endpoint Tests ────────────────────────────────────────
