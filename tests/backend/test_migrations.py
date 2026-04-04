@@ -17,7 +17,7 @@ from db.migrate import down, up
 load_dotenv()
 
 DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi"
+    "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
 )
 
 ALL_TABLES = [

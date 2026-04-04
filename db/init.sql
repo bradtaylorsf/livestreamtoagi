@@ -5,3 +5,6 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Langfuse requires its own database
 CREATE DATABASE langfuse OWNER agi;
+
+-- Isolated test database (integration tests destroy and recreate tables)
+CREATE DATABASE livestream_agi_test OWNER agi;
