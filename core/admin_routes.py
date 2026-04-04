@@ -865,6 +865,72 @@ async def get_eval_result(eval_id: uuid_mod.UUID) -> EvalRunDetail:
     return EvalRunDetail(**run.model_dump(), results=results)
 
 
+# ── Relationship Endpoints ────────────────────────────────────────
+
+
+@router.get("/agents/{agent_id}/relationships")
+async def get_agent_relationships(
+    agent_id: str,
+    simulation_id: uuid_mod.UUID | None = Query(default=None),  # noqa: B008
+) -> list[dict[str, Any]]:
+    """All relationships for an agent in a simulation."""
+    if simulation_id is None:
+        raise HTTPException(status_code=400, detail="simulation_id query parameter required")
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+    repo = RelationshipRepo(db)
+    relationships = await repo.get_all_for_agent(simulation_id, agent_id)
+    return [r.model_dump(mode="json") for r in relationships]
+
+
+@router.get("/agents/{agent_id}/relationships/{target_id}")
+async def get_agent_relationship_detail(
+    agent_id: str,
+    target_id: str,
+    simulation_id: uuid_mod.UUID | None = Query(default=None),  # noqa: B008
+) -> dict[str, Any]:
+    """Specific relationship with evolution timeline."""
+    if simulation_id is None:
+        raise HTTPException(status_code=400, detail="simulation_id query parameter required")
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+    repo = RelationshipRepo(db)
+    rel = await repo.get(simulation_id, agent_id, target_id)
+    if rel is None:
+        raise HTTPException(status_code=404, detail="Relationship not found")
+    data = rel.model_dump(mode="json")
+    data["evolution"] = await repo.get_evolution(simulation_id, agent_id, target_id)
+    return data
+
+
+@router.get("/simulations/{sim_id}/assertions")
+async def get_simulation_assertions(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
+    """All assertion results for a simulation."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+    repo = AssertionRepo(db)
+    return await repo.get_by_simulation(sim_id)
+
+
+@router.get("/simulations/{sim_id}/assertions/summary")
+async def get_simulation_assertions_summary(sim_id: uuid_mod.UUID) -> dict[str, Any]:
+    """Pass/fail/warn summary for simulation assertions."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+    repo = AssertionRepo(db)
+    return await repo.get_pass_rates(sim_id)
+
+
+@router.get("/simulations/{sim_id}/social-graph")
+async def get_social_graph(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
+    """Full relationship matrix for a simulation."""
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+    repo = RelationshipRepo(db)
+    relationships = await repo.get_social_graph(sim_id)
+    return [r.model_dump(mode="json") for r in relationships]
+
+
 @router.get("/evals/{eval_id}/export", response_model=EvalExportResponse)
 async def export_eval(eval_id: uuid_mod.UUID) -> EvalExportResponse:
     """Export full eval results as JSON."""
