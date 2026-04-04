@@ -1,19 +1,37 @@
 #!/usr/bin/env python3
 """Interactive agent chat launcher.
 
-Presents a menu to pick an agent and mode, then delegates to test_agent.py
-or watch_conversations.py.  Can also be invoked directly with arguments.
+Presents a menu to pick an agent and mode, then delegates to the appropriate
+script.  Can also be invoked directly with arguments.
 
 Usage:
-    pnpm chat              # interactive menu
-    pnpm chat rex          # jump straight to chatting with Rex
-    pnpm chat vera auto    # run auto-test on Vera
-    pnpm chat --dry-run    # dry-run with default agent (Rex)
-    pnpm chat convo        # multi-agent conversation (interactive menu)
+    pnpm chat                   # interactive menu
+    pnpm chat rex               # jump straight to chatting with Rex
+    pnpm chat vera auto         # run auto-test on Vera
+    pnpm chat --dry-run         # dry-run with default agent (Rex)
+
+    # Multi-agent conversations
+    pnpm chat convo             # interactive conversation menu
     pnpm chat convo --topic "Should we rewrite in Rust?"
     pnpm chat convo --agents rex,fork,aurora --type debate --turns 10
-    pnpm chat sim          # run a tracked simulation (interactive menu)
-    pnpm chat sim --agents rex,fork --type debate --turns 10
+
+    # Simulations (new orchestrator)
+    pnpm chat sim               # interactive scenario picker
+    pnpm chat sim awakening     # run awakening Day 1 scenario
+    pnpm chat sim tool-coverage # run tool coverage scenario
+    pnpm chat sim full-day      # run full scripted day
+    pnpm chat sim autonomous    # autonomous trigger-driven (defaults: 1d, 42x)
+    pnpm chat sim autonomous --duration 7d --max-cost 50
+    pnpm chat sim --seed-file scenarios/custom.yaml --name my-test
+
+    # Evals
+    pnpm chat eval <sim-name>              # run full eval suite
+    pnpm chat eval <sim-name> --suite quick
+    pnpm chat eval <sim-name> --view-last  # view last eval results
+    pnpm chat eval --list                  # list eval categories
+
+    # Tool coverage check
+    pnpm chat coverage <sim-name>
 """
 
 from __future__ import annotations
@@ -116,7 +134,7 @@ def pick_mode() -> str | None:
     console.print()
     console.print("  [bold bright_cyan]Multi-agent modes:[/bold bright_cyan]")
     console.print(f"  [bold]{len(SINGLE_MODES) + 1}[/bold]  Multi-agent conversation (pick agents, topic, type)")
-    console.print(f"  [bold]{len(SINGLE_MODES) + 2}[/bold]  Simulation — tracked run with costs, artifacts, overseer shadow")
+    console.print(f"  [bold]{len(SINGLE_MODES) + 2}[/bold]  Simulation — seeded scenarios or autonomous (new orchestrator)")
     console.print()
 
     try:
@@ -315,7 +333,7 @@ def run_simulation(
     overseer_shadow: bool = True,
     sim_name: str | None = None,
 ) -> None:
-    """Launch a tracked simulation via watch_conversations.py --test --simulate."""
+    """Launch a tracked simulation via watch_conversations.py --test --simulate (legacy)."""
     import subprocess
 
     cmd = [
@@ -344,6 +362,244 @@ def run_simulation(
         subprocess.run(cmd, check=False)
     except KeyboardInterrupt:
         console.print("\n[dim]Simulation interrupted.[/dim]")
+
+
+# ── New simulation orchestrator integration ──────────────────
+
+SCENARIOS_DIR = PROJECT_ROOT / "scenarios"
+
+SCENARIO_PRESETS: list[tuple[str, str, str]] = [
+    ("awakening", "Day 1 blank-slate — agents discover each other", "scenarios/awakening.yaml"),
+    ("tool-coverage", "Exercise all 19 tools end-to-end", "scenarios/tool_coverage.yaml"),
+    ("full-day", "Full scripted day with standup, building, reflection", "scenarios/full_day.yaml"),
+    ("autonomous", "Trigger-driven — no script, agents decide what to do", ""),
+]
+
+
+def _discover_scenarios() -> list[tuple[str, str, str]]:
+    """Return scenario presets plus any extra YAML files in scenarios/."""
+    known_files = {p[2] for p in SCENARIO_PRESETS}
+    extra = []
+    if SCENARIOS_DIR.exists():
+        for f in sorted(SCENARIOS_DIR.glob("*.yaml")):
+            rel = f"scenarios/{f.name}"
+            if rel not in known_files:
+                name = f.stem.replace("_", "-")
+                extra.append((name, f"Custom scenario: {f.name}", rel))
+    return SCENARIO_PRESETS + extra
+
+
+def pick_scenario() -> tuple[str, str | None]:
+    """Interactive scenario picker. Returns (name, seed_file_or_None)."""
+    scenarios = _discover_scenarios()
+    console.print()
+    console.print("[bold bright_cyan]Simulation scenarios:[/bold bright_cyan]")
+    for i, (name, desc, _) in enumerate(scenarios, 1):
+        console.print(f"  [bold]{i}[/bold]  [bright_white]{name}[/bright_white] — {desc}")
+    console.print()
+
+    try:
+        choice = console.input(f"[bold]Pick a scenario (1-{len(scenarios)}): [/bold]").strip()
+    except (EOFError, KeyboardInterrupt):
+        return ("", None)
+
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(scenarios):
+            name, _, seed = scenarios[idx]
+            return (name, seed if seed else None)
+    except ValueError:
+        # Try matching by name
+        for name, _, seed in scenarios:
+            if choice.lower() == name.lower():
+                return (name, seed if seed else None)
+
+    console.print("[red]Invalid choice[/red]")
+    return pick_scenario()
+
+
+def pick_duration() -> str:
+    """Pick simulated duration for autonomous mode."""
+    console.print()
+    console.print("  [bold]1[/bold]  12 hours")
+    console.print("  [bold]2[/bold]  1 day")
+    console.print("  [bold]3[/bold]  3 days")
+    console.print("  [bold]4[/bold]  7 days (full week)")
+    console.print("  [bold]5[/bold]  Custom")
+    console.print()
+
+    try:
+        choice = console.input("[bold]Simulated duration (1-5, default: 1 day): [/bold]").strip()
+    except (EOFError, KeyboardInterrupt):
+        return "1d"
+
+    mapping = {"1": "12h", "2": "1d", "3": "3d", "4": "7d"}
+    if choice in mapping:
+        return mapping[choice]
+    if choice == "5":
+        try:
+            custom = console.input("[bold]Duration (e.g. 2d, 6h, 1d12h): [/bold]").strip()
+            return custom or "1d"
+        except (EOFError, KeyboardInterrupt):
+            return "1d"
+    return "1d"
+
+
+def pick_max_cost() -> float:
+    """Pick cost limit."""
+    console.print()
+    try:
+        cost_str = console.input(
+            "[bold]Max cost in $ (Enter for $10.00): [/bold]"
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        return 10.0
+    if not cost_str:
+        return 10.0
+    try:
+        return float(cost_str.replace("$", ""))
+    except ValueError:
+        return 10.0
+
+
+def run_sim_orchestrator(
+    *,
+    name: str,
+    seed_file: str | None = None,
+    duration: str | None = None,
+    speed_multiplier: float = 0,
+    max_cost: float = 10.0,
+    verbose: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Run a simulation via the new orchestrator (run_simulation.py)."""
+    import subprocess
+
+    cmd = [
+        sys.executable, str(PROJECT_ROOT / "scripts" / "run_simulation.py"),
+        "--name", name,
+        "--max-cost", str(max_cost),
+    ]
+    if seed_file:
+        cmd += ["--seed-file", seed_file]
+    if duration:
+        cmd += ["--duration", duration]
+    if speed_multiplier > 0:
+        cmd += ["--speed-multiplier", str(speed_multiplier)]
+    if verbose:
+        cmd.append("--verbose")
+    if dry_run:
+        cmd.append("--dry-run")
+
+    mode = "seeded" if seed_file else "autonomous"
+    console.print(f"\n[bold bright_cyan]Starting {mode} simulation: {name}[/bold bright_cyan]")
+    if seed_file:
+        console.print(f"[dim]Scenario: {seed_file}[/dim]")
+    else:
+        console.print(f"[dim]Duration: {duration} | Speed: {speed_multiplier}x[/dim]")
+    console.print(f"[dim]Max cost: ${max_cost:.2f}[/dim]\n")
+
+    try:
+        subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Simulation interrupted.[/dim]")
+
+
+def run_eval_cli(
+    *,
+    simulation_name: str | None = None,
+    simulation_id: str | None = None,
+    suite: str = "full",
+    categories: str | None = None,
+    view_last: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Run evals via run_eval.py, resolving simulation by name if needed."""
+    import asyncio
+
+    async def _resolve_sim_id() -> str | None:
+        if simulation_id:
+            return simulation_id
+        if not simulation_name:
+            return None
+        # Look up by name
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+
+        svc = await bootstrap_services()
+        sim_repo = SimulationRepo(svc.db)
+        sims = await sim_repo.list(limit=100)
+        await shutdown_services(svc)
+        for s in sims:
+            if s.name == simulation_name:
+                return str(s.id)
+        return None
+
+    resolved_id = asyncio.run(_resolve_sim_id())
+    if not resolved_id:
+        console.print(f"[red]Could not find simulation '{simulation_name or simulation_id}'[/red]")
+
+        # List available simulations
+        import asyncio as _asyncio
+
+        async def _list() -> None:
+            from core.bootstrap import bootstrap_services, shutdown_services
+            from core.repos.simulation_repo import SimulationRepo
+
+            svc = await bootstrap_services()
+            sim_repo = SimulationRepo(svc.db)
+            sims = await sim_repo.list(limit=20)
+            await shutdown_services(svc)
+            if sims:
+                console.print("\n[bold]Available simulations:[/bold]")
+                for s in sims:
+                    console.print(f"  {s.name} — {s.status} ({s.id})")
+            else:
+                console.print("[dim]No simulations found. Run one first.[/dim]")
+
+        _asyncio.run(_list())
+        return
+
+    import subprocess
+
+    cmd = [
+        sys.executable, str(PROJECT_ROOT / "scripts" / "run_eval.py"),
+        "--simulation-id", resolved_id,
+        "--suite", suite,
+    ]
+    if categories:
+        cmd += ["--categories", categories]
+    if view_last:
+        cmd.append("--view-last")
+    if verbose:
+        cmd.append("--verbose")
+
+    console.print(f"\n[bold bright_cyan]Running {suite} eval suite[/bold bright_cyan]")
+    console.print(f"[dim]Simulation: {simulation_name or resolved_id}[/dim]\n")
+
+    try:
+        subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Eval interrupted.[/dim]")
+
+
+def run_coverage_check(simulation_name: str | None = None) -> None:
+    """Run tool coverage check via check_tool_coverage.py."""
+    import subprocess
+
+    cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "check_tool_coverage.py")]
+    if simulation_name:
+        cmd += ["--name", simulation_name]
+    else:
+        console.print("[red]Simulation name required for coverage check[/red]")
+        return
+
+    console.print(f"\n[bold bright_cyan]Checking tool coverage: {simulation_name}[/bold bright_cyan]\n")
+
+    try:
+        subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Coverage check interrupted.[/dim]")
 
 
 def pick_sim_name() -> str | None:
@@ -447,62 +703,109 @@ def main() -> None:
     # ── Quick-launch: pnpm chat sim ... ──
     if args and args[0].lower() == "sim":
         sim_args = args[1:]
-        agents = None
-        convo_type = "freeform"
-        topic = None
-        turns = None
-        speed = 1.0
-        verbose = False
-        sim_name = None
-        overseer_shadow = True
+        verbose = "-v" in sim_args or "--verbose" in sim_args
+        dry_run = "--dry-run" in sim_args
+
+        # Check for scenario preset: pnpm chat sim awakening
+        scenario_names = {s[0]: s[2] for s in _discover_scenarios()}
+
+        if sim_args and sim_args[0].lower() in scenario_names:
+            preset_name = sim_args[0].lower()
+            seed = scenario_names[preset_name]
+            # Parse optional flags
+            max_cost = 10.0
+            name = preset_name
+            speed_multiplier = 0.0
+            duration = None
+            i = 1
+            while i < len(sim_args):
+                arg = sim_args[i]
+                if arg == "--max-cost" and i + 1 < len(sim_args):
+                    max_cost = float(sim_args[i + 1]); i += 2
+                elif arg == "--name" and i + 1 < len(sim_args):
+                    name = sim_args[i + 1]; i += 2
+                elif arg in ("--speed", "--speed-multiplier") and i + 1 < len(sim_args):
+                    speed_multiplier = float(sim_args[i + 1]); i += 2
+                elif arg == "--duration" and i + 1 < len(sim_args):
+                    duration = sim_args[i + 1]; i += 2
+                else:
+                    i += 1
+
+            if preset_name == "autonomous":
+                if not duration:
+                    duration = "1d"
+                if speed_multiplier == 0:
+                    speed_multiplier = 42.0
+                run_sim_orchestrator(
+                    name=name, duration=duration,
+                    speed_multiplier=speed_multiplier,
+                    max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                )
+            else:
+                run_sim_orchestrator(
+                    name=name, seed_file=seed,
+                    speed_multiplier=speed_multiplier,
+                    max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                )
+            return
+
+        # Parse general sim flags
+        seed_file = None
+        duration = None
+        speed_multiplier = 0.0
+        max_cost = 10.0
+        name = None
         i = 0
         while i < len(sim_args):
             arg = sim_args[i]
-            if arg == "--agents" and i + 1 < len(sim_args):
-                agents = sim_args[i + 1].split(",")
-                i += 2
-            elif arg == "--type" and i + 1 < len(sim_args):
-                convo_type = sim_args[i + 1]
-                i += 2
-            elif arg == "--topic" and i + 1 < len(sim_args):
-                topic = sim_args[i + 1]
-                i += 2
-            elif arg == "--turns" and i + 1 < len(sim_args):
-                turns = int(sim_args[i + 1])
-                i += 2
-            elif arg == "--speed" and i + 1 < len(sim_args):
-                speed = float(sim_args[i + 1])
-                i += 2
+            if arg == "--seed-file" and i + 1 < len(sim_args):
+                seed_file = sim_args[i + 1]; i += 2
+            elif arg == "--duration" and i + 1 < len(sim_args):
+                duration = sim_args[i + 1]; i += 2
+            elif arg in ("--speed", "--speed-multiplier") and i + 1 < len(sim_args):
+                speed_multiplier = float(sim_args[i + 1]); i += 2
+            elif arg == "--max-cost" and i + 1 < len(sim_args):
+                max_cost = float(sim_args[i + 1]); i += 2
             elif arg == "--name" and i + 1 < len(sim_args):
-                sim_name = sim_args[i + 1]
-                i += 2
-            elif arg in ("--verbose", "-v"):
-                verbose = True
-                i += 1
-            elif arg == "--no-shadow":
-                overseer_shadow = False
+                name = sim_args[i + 1]; i += 2
+            elif arg in ("-v", "--verbose", "--dry-run"):
                 i += 1
             else:
                 i += 1
 
-        if not agents:
+        # If no flags at all, show interactive picker
+        if not seed_file and not duration and not name:
             print_banner()
-            agents = pick_convo_agents()
-            if not agents:
+            scenario_name, seed_file = pick_scenario()
+            if not scenario_name:
                 console.print("[dim]Goodbye.[/dim]")
                 return
-            if convo_type == "freeform":
-                convo_type = pick_convo_type()
-            if topic is None:
-                topic = pick_topic()
-            if turns is None:
-                turns = pick_turns()
-            if sim_name is None:
-                sim_name = pick_sim_name()
+            name = pick_sim_name() or scenario_name
+            max_cost = pick_max_cost()
 
-        run_simulation(
-            agents, convo_type, topic=topic, turns=turns, speed=speed,
-            verbose=verbose, overseer_shadow=overseer_shadow, sim_name=sim_name,
+            if seed_file is None:
+                # Autonomous mode
+                dur = pick_duration()
+                speed_multiplier = 42.0
+                run_sim_orchestrator(
+                    name=name, duration=dur,
+                    speed_multiplier=speed_multiplier,
+                    max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                )
+            else:
+                run_sim_orchestrator(
+                    name=name, seed_file=seed_file,
+                    max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                )
+            return
+
+        if not name:
+            name = f"sim-{seed_file or 'auto'}"
+
+        run_sim_orchestrator(
+            name=name, seed_file=seed_file, duration=duration,
+            speed_multiplier=speed_multiplier,
+            max_cost=max_cost, verbose=verbose, dry_run=dry_run,
         )
         return
 
@@ -537,6 +840,60 @@ def main() -> None:
             subprocess.run(cmd, check=False)
         except KeyboardInterrupt:
             console.print("\n[dim]Restore cancelled.[/dim]")
+        return
+
+    # ── Quick-launch: pnpm chat eval ... ──
+    if args and args[0].lower() == "eval":
+        eval_args = args[1:]
+        verbose = "-v" in eval_args or "--verbose" in eval_args
+
+        if not eval_args or eval_args[0].startswith("-"):
+            # No sim name — list categories or show help
+            if "--list" in eval_args or "--list-categories" in eval_args:
+                import subprocess
+                subprocess.run([
+                    sys.executable, str(PROJECT_ROOT / "scripts" / "run_eval.py"),
+                    "--list-categories",
+                ], check=False)
+                return
+
+            console.print("[yellow]Usage: pnpm chat eval <simulation-name> [--suite quick|full] [--view-last][/yellow]")
+            console.print("[dim]  pnpm chat eval --list          List eval categories[/dim]")
+            return
+
+        sim_name = eval_args[0]
+        suite = "full"
+        categories = None
+        view_last = False
+        sim_id = None
+        i = 1
+        while i < len(eval_args):
+            arg = eval_args[i]
+            if arg == "--suite" and i + 1 < len(eval_args):
+                suite = eval_args[i + 1]; i += 2
+            elif arg == "--categories" and i + 1 < len(eval_args):
+                categories = eval_args[i + 1]; i += 2
+            elif arg == "--id" and i + 1 < len(eval_args):
+                sim_id = eval_args[i + 1]; i += 2
+            elif arg == "--view-last":
+                view_last = True; i += 1
+            else:
+                i += 1
+
+        run_eval_cli(
+            simulation_name=sim_name if not sim_id else None,
+            simulation_id=sim_id,
+            suite=suite,
+            categories=categories,
+            view_last=view_last,
+            verbose=verbose,
+        )
+        return
+
+    # ── Quick-launch: pnpm chat coverage <name> ──
+    if args and args[0].lower() == "coverage":
+        sim_name = args[1] if len(args) > 1 else None
+        run_coverage_check(sim_name)
         return
 
     # ── Quick-launch: pnpm chat --dry-run or --list-agents ──
@@ -611,18 +968,26 @@ def main() -> None:
         return
 
     if mode == "simulate":
-        agents = pick_convo_agents()
-        if not agents:
+        scenario_name, seed_file = pick_scenario()
+        if not scenario_name:
             console.print("[dim]Goodbye.[/dim]")
             return
-        convo_type = pick_convo_type()
-        topic = pick_topic()
-        turns = pick_turns()
-        sim_name = pick_sim_name()
-        run_simulation(
-            agents, convo_type, topic=topic, turns=turns,
-            verbose=verbose, overseer_shadow=True, sim_name=sim_name,
-        )
+        sim_name = pick_sim_name() or scenario_name
+        max_cost = pick_max_cost()
+
+        if seed_file is None:
+            # Autonomous mode
+            dur = pick_duration()
+            run_sim_orchestrator(
+                name=sim_name, duration=dur,
+                speed_multiplier=42.0,
+                max_cost=max_cost, verbose=verbose,
+            )
+        else:
+            run_sim_orchestrator(
+                name=sim_name, seed_file=seed_file,
+                max_cost=max_cost, verbose=verbose,
+            )
         return
 
     # Single-agent modes need an agent pick
