@@ -680,24 +680,59 @@ class TestGlobalArtifactEndpoints:
 class TestEvalEndpoints:
     def test_get_simulation_evals(self, mock_app):
         client, _, _ = mock_app
-        resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/evals")
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_runs",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/evals")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_run_simulation_evals(self, mock_app):
         client, _, _ = mock_app
-        resp = client.post(
-            f"/api/admin/simulations/{uuid.uuid4()}/evals/run",
-            json={"eval_suite": "quick"},
+        run_id = uuid.uuid4()
+        sim_id = uuid.uuid4()
+        now = datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+        from core.models import EvalRun
+
+        mock_run = EvalRun(
+            id=run_id,
+            simulation_id=sim_id,
+            eval_suite="quick",
+            status="completed",
+            started_at=now,
         )
+        with (
+            patch("core.admin_routes._get_llm", return_value=MagicMock()),
+            patch(
+                "core.eval.engine.EvalEngine.run",
+                new_callable=AsyncMock,
+                return_value=run_id,
+            ),
+            patch(
+                "core.repos.eval_repo.EvalRepo.get_eval_run",
+                new_callable=AsyncMock,
+                return_value=mock_run,
+            ),
+        ):
+            resp = client.post(
+                f"/api/admin/simulations/{sim_id}/evals/run",
+                json={"eval_suite": "quick"},
+            )
         assert resp.status_code == 200
         data = resp.json()
-        assert "job_id" in data
-        assert data["status"] == "queued"
+        assert "eval_run_id" in data
 
-    def test_get_eval_not_implemented(self, mock_app):
+    def test_get_eval_not_found(self, mock_app):
         client, _, _ = mock_app
-        resp = client.get("/api/admin/evals/some-id")
+        with patch(
+            "core.repos.eval_repo.EvalRepo.get_eval_run",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.get(f"/api/admin/evals/{uuid.uuid4()}")
         assert resp.status_code == 404
 
 
