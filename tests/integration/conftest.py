@@ -41,6 +41,20 @@ async def services():
 
     yield svc
 
+    # Clean up data created during integration tests so we don't pollute
+    # the shared test database for subsequent test runs.
+    if svc.db:
+        await svc.db.execute("DELETE FROM overseer_shadow_log")
+        await svc.db.execute("DELETE FROM journal_entries WHERE reflection_type = 'conversation'")
+        await svc.db.execute("DELETE FROM recall_memory")
+        await svc.db.execute("DELETE FROM artifacts")
+        await svc.db.execute("DELETE FROM cost_events")
+        await svc.db.execute("DELETE FROM energy_change_log")
+        await svc.db.execute("DELETE FROM conversation_selection_log")
+        await svc.db.execute("DELETE FROM transcripts")
+        await svc.db.execute("DELETE FROM conversations")
+        await svc.db.execute("DELETE FROM simulations")
+
     await shutdown_services(svc)
 
 
