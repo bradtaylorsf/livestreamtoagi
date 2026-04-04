@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from core.agent_registry import AgentRegistry
+    from core.bootstrap import Services
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
     from core.conversation.proximity import ProximityManager
@@ -95,6 +96,7 @@ class PhaseRunner:
         simulation_id: uuid.UUID,
         agents: list[str],
         dry_run: bool = False,
+        services: Services | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -114,6 +116,7 @@ class PhaseRunner:
         self._simulation_id = simulation_id
         self._agent_ids = agents
         self._dry_run = dry_run
+        self._services = services
 
         # Stats accumulated during a phase run via event listeners
         self._phase_turns = 0
@@ -362,6 +365,7 @@ class PhaseRunner:
                 speed_multiplier=0,  # No delays in simulation
                 overseer_enabled=True,
                 simulation_id=self._simulation_id,
+                services=self._services,
             )
 
             engine._running = True

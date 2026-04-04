@@ -133,6 +133,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         memory_repo=svc.memory_repo,
         embedding_fn=embedding_fn,
         display=display,
+        services=svc,
     )
 
     # ── Signal handling ───────────────────────────────────

@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "summary": "Tool registration properly wired into ConversationEngine with shared tool_executor module; fixed missing services passthrough in simulation orchestrator/phases",
+  "findings": [
+    {
+      "severity": "critical",
+      "description": "SimulationOrchestrator and PhaseRunner did not pass 'services' to ConversationEngine, meaning tools were unavailable during run_simulation.py simulations — only watch_conversations.py and test_agent.py had tools wired",
+      "fixed": true,
+      "file": "core/simulation/phases.py"
+    },
+    {
+      "severity": "critical",
+      "description": "run_simulation.py did not pass services=svc when constructing SimulationOrchestrator",
+      "fixed": true,
+      "file": "scripts/run_simulation.py"
+    }
+  ]
+}
