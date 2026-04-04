@@ -1,0 +1,185 @@
+/** Admin dashboard types — mirrors backend Pydantic models from core/models.py */
+
+export type SimulationStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface Simulation {
+  id: string;
+  name: string;
+  description: string | null;
+  config: Record<string, unknown>;
+  status: SimulationStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  simulated_duration: string | null;
+  real_duration: string | null;
+  total_conversations: number;
+  total_turns: number;
+  total_tokens: number;
+  total_cost: string;
+  total_artifacts: number;
+  total_overseer_flags: number;
+  agents_participated: string[];
+  error_log: Record<string, unknown> | unknown[] | null;
+  created_at: string | null;
+}
+
+export interface TimelineEvent {
+  timestamp: string | null;
+  event_type: string;
+  agent_id: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface SimulationCostResponse {
+  by_agent: { agent_id: string; total: string }[];
+  total: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface DashboardStats {
+  total_simulations: number;
+  last_run_date: string | null;
+  average_cost: string;
+  total_conversations: number;
+}
+
+// ── Agent types ─────────────────────────────────────────────────
+
+export interface AgentSummary {
+  id: string;
+  display_name: string;
+  role: string;
+  color: string;
+  status: string;
+  conversation_model: string;
+  building_model: string;
+  total_cost: string;
+  message_count: number;
+  conversation_count: number;
+  artifact_count: number;
+  personality_traits: PersonalityTraits;
+}
+
+export interface PersonalityTraits {
+  chattiness: number;
+  initiative: number;
+  interrupt_tendency: number;
+  eavesdrop_tendency: number;
+  closing_weight: number;
+}
+
+export interface AgentDetail extends AgentSummary {
+  voice: string | null;
+  behaviors: Record<string, unknown>;
+}
+
+export interface SystemPromptLayer {
+  name: string;
+  content: string;
+  token_count: number;
+}
+
+export interface SystemPromptResponse {
+  assembled_prompt: string;
+  layers: SystemPromptLayer[];
+  total_tokens: number;
+}
+
+export interface CoreMemoryVersion {
+  version: number;
+  content: string;
+  changed_at: string;
+  change_reason: string | null;
+}
+
+export interface CoreMemoryResponse {
+  current_content: string;
+  current_version: number;
+  token_count: number;
+  last_updated: string | null;
+  version_history: CoreMemoryVersion[];
+}
+
+export interface RecallMemory {
+  id: string;
+  summary: string;
+  event_type: string;
+  importance_score: number;
+  created_at: string;
+  simulation_id: string | null;
+}
+
+export interface AgentConversation {
+  id: string;
+  simulation_id: string | null;
+  trigger_type: string;
+  topic: string | null;
+  participating_agents: string[];
+  turn_count: number;
+  agent_turn_count: number;
+  started_at: string;
+}
+
+export interface ConversationDetail {
+  id: string;
+  started_at: string | null;
+  ended_at: string | null;
+  trigger_type: string;
+  trigger_details: Record<string, unknown> | null;
+  initial_energy: number;
+  final_energy: number | null;
+  turn_count: number;
+  participating_agents: string[];
+  topics_discussed: string[] | null;
+  closed_by: string | null;
+  location: string | null;
+  energy_history: Record<string, unknown>[];
+  transcript: string | null;
+}
+
+export interface AgentArtifact {
+  id: string;
+  simulation_id: string | null;
+  artifact_type: string;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_output: Record<string, unknown> | string | null;
+  status: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  simulation_id: string | null;
+  content: string;
+  reflection_type: string;
+  created_at: string;
+}
+
+export interface CostByDay {
+  date: string;
+  cost: string;
+}
+
+export interface CostByType {
+  type: string;
+  cost: string;
+  tokens: number;
+}
+
+export interface AgentCostBreakdown {
+  by_day: CostByDay[];
+  by_type: CostByType[];
+  total: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}

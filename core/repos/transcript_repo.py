@@ -24,15 +24,23 @@ class TranscriptRepo:
 
     async def create(self, transcript: TranscriptCreate) -> Transcript:
         row = await self.db.fetchrow(
-            """INSERT INTO transcripts (event_type, participants, content, token_count)
-               VALUES ($1, $2, $3, $4)
+            """INSERT INTO transcripts (event_type, participants, content, token_count, conversation_id)
+               VALUES ($1, $2, $3, $4, $5)
                RETURNING *""",
             transcript.event_type,
             transcript.participants,
             transcript.content,
             transcript.token_count,
+            transcript.conversation_id,
         )
         return _row_to_transcript(row)
+
+    async def get_by_conversation(self, conversation_id: object) -> Transcript | None:
+        row = await self.db.fetchrow(
+            "SELECT * FROM transcripts WHERE conversation_id = $1",
+            conversation_id,
+        )
+        return _row_to_transcript(row) if row else None
 
     async def get(self, transcript_id: int) -> Transcript | None:
         row = await self.db.fetchrow(

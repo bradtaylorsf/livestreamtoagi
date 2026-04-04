@@ -40,8 +40,8 @@ class ConversationRepo:
             row = await self.db.fetchrow(
                 """INSERT INTO conversations
                    (id, trigger_type, trigger_details, initial_energy,
-                    participating_agents, location, config_hash)
-                   VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7)
+                    participating_agents, location, config_hash, simulation_id)
+                   VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8)
                    RETURNING *""",
                 conv.id,
                 conv.trigger_type,
@@ -50,13 +50,14 @@ class ConversationRepo:
                 serialize_jsonb(conv.participating_agents),
                 conv.location,
                 conv.config_hash,
+                conv.simulation_id,
             )
         else:
             row = await self.db.fetchrow(
                 """INSERT INTO conversations
                    (trigger_type, trigger_details, initial_energy,
-                    participating_agents, location, config_hash)
-                   VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6)
+                    participating_agents, location, config_hash, simulation_id)
+                   VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6, $7)
                    RETURNING *""",
                 conv.trigger_type,
                 serialize_jsonb(conv.trigger_details),
@@ -64,6 +65,7 @@ class ConversationRepo:
                 serialize_jsonb(conv.participating_agents),
                 conv.location,
                 conv.config_hash,
+                conv.simulation_id,
             )
         return _row_to_conversation(row)
 
@@ -78,14 +80,17 @@ class ConversationRepo:
         conversation_id: uuid.UUID,
         final_energy: float,
         closed_by: str,
+        turn_count: int | None = None,
     ) -> Conversation | None:
         row = await self.db.fetchrow(
             """UPDATE conversations
-               SET ended_at = NOW(), final_energy = $1, closed_by = $2
-               WHERE id = $3
+               SET ended_at = NOW(), final_energy = $1, closed_by = $2,
+                   turn_count = COALESCE($3, turn_count)
+               WHERE id = $4
                RETURNING *""",
             final_energy,
             closed_by,
+            turn_count,
             conversation_id,
         )
         return _row_to_conversation(row) if row else None
@@ -163,4 +168,80 @@ class ConversationRepo:
                 if isinstance(d.get(key), str):
                     d[key] = json.loads(d[key])
             result.append(SelectionLog(**d))
+        return result
+
+    async def get_conversations_by_agent(
+        self,
+        agent_id: str,
+        *,
+        simulation_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Conversation], int]:
+        """Return paginated conversations where agent participated."""
+        clauses = ["participating_agents @> to_jsonb(ARRAY[$1])"]
+        params: list[object] = [agent_id]
+        idx = 2
+
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = ${idx}")
+            params.append(simulation_id)
+            idx += 1
+
+        where = " AND ".join(clauses)
+        count = await self.db.fetchval(
+            f"SELECT COUNT(*) FROM conversations WHERE {where}",  # noqa: S608
+            *params,
+        )
+        query = (
+            f"SELECT * FROM conversations WHERE {where}"  # noqa: S608
+            f" ORDER BY started_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
+        )
+        rows = await self.db.fetch(
+            query,
+            *params,
+            limit,
+            offset,
+        )
+        return [_row_to_conversation(r) for r in rows], count or 0
+
+    async def get_conversations_by_simulation(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Conversation], int]:
+        """Return paginated conversations linked to a simulation via direct FK."""
+        count = await self.db.fetchval(
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+            simulation_id,
+        )
+        rows = await self.db.fetch(
+            """SELECT * FROM conversations
+               WHERE simulation_id = $1
+               ORDER BY started_at DESC
+               LIMIT $2 OFFSET $3""",
+            simulation_id,
+            limit,
+            offset,
+        )
+        return [_row_to_conversation(r) for r in rows], count or 0
+
+    async def get_energy_log(
+        self, conversation_id: uuid.UUID
+    ) -> list[dict[str, object]]:
+        """Return energy change log entries for a conversation."""
+        rows = await self.db.fetch(
+            """SELECT * FROM energy_change_log
+               WHERE conversation_id = $1
+               ORDER BY turn_number""",
+            conversation_id,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("changes"), str):
+                d["changes"] = json.loads(d["changes"])
+            result.append(d)
         return result

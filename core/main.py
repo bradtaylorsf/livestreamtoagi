@@ -1,10 +1,13 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 
+from core.admin_routes import router as admin_router
 from core.agent_registry import AgentRegistry
 from core.config_loader import ConfigLoader
 from core.database import Database
@@ -79,6 +82,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Livestream AGI", version="0.1.0", lifespan=lifespan)
+
+_default_origins = ["http://localhost:3000", "http://localhost:4000", "http://localhost:5173"]
+_extra = os.environ.get("CORS_ORIGINS", "")
+_cors_origins = _default_origins + [o.strip() for o in _extra.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(admin_router)
 
 
 @app.websocket("/ws")

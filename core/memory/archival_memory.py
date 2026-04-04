@@ -32,6 +32,7 @@ class ArchivalMemoryManager:
         event_type: str,
         participants: list[str],
         content: str,
+        conversation_id: object | None = None,
     ) -> Transcript:
         """Store a full transcript with automatically calculated token count."""
         token_count = self._token_counter.count_tokens(content)
@@ -40,6 +41,7 @@ class ArchivalMemoryManager:
             participants=participants,
             content=content,
             token_count=token_count,
+            conversation_id=conversation_id,
         )
         return await self._repo.create(create)
 

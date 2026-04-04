@@ -12,6 +12,8 @@ Usage:
     pnpm chat convo        # multi-agent conversation (interactive menu)
     pnpm chat convo --topic "Should we rewrite in Rust?"
     pnpm chat convo --agents rex,fork,aurora --type debate --turns 10
+    pnpm chat sim          # run a tracked simulation (interactive menu)
+    pnpm chat sim --agents rex,fork --type debate --turns 10
 """
 
 from __future__ import annotations
@@ -114,11 +116,12 @@ def pick_mode() -> str | None:
     console.print()
     console.print("  [bold bright_cyan]Multi-agent modes:[/bold bright_cyan]")
     console.print(f"  [bold]{len(SINGLE_MODES) + 1}[/bold]  Multi-agent conversation (pick agents, topic, type)")
+    console.print(f"  [bold]{len(SINGLE_MODES) + 2}[/bold]  Simulation — tracked run with costs, artifacts, overseer shadow")
     console.print()
 
     try:
         choice = console.input(
-            f"[bold]Pick a mode (1-{len(SINGLE_MODES) + 1}, or 'q' to quit): [/bold]"
+            f"[bold]Pick a mode (1-{len(SINGLE_MODES) + 2}, or 'q' to quit): [/bold]"
         ).strip()
     except (EOFError, KeyboardInterrupt):
         return None
@@ -132,12 +135,14 @@ def pick_mode() -> str | None:
             return SINGLE_MODES[idx][0]
         if idx == len(SINGLE_MODES):
             return "convo"
+        if idx == len(SINGLE_MODES) + 1:
+            return "simulate"
     except ValueError:
         pass
 
     choice_lower = choice.lower()
-    if choice_lower == "convo":
-        return "convo"
+    if choice_lower in ("convo", "sim", "simulate"):
+        return "simulate" if choice_lower in ("sim", "simulate") else "convo"
     for mode_id, _, _ in SINGLE_MODES:
         if choice_lower == mode_id:
             return mode_id
@@ -300,6 +305,59 @@ def run_convo(
         console.print("\n[dim]Conversation ended.[/dim]")
 
 
+def run_simulation(
+    agents: list[str],
+    convo_type: str,
+    topic: str | None = None,
+    turns: int | None = None,
+    speed: float = 1.0,
+    verbose: bool = False,
+    overseer_shadow: bool = True,
+    sim_name: str | None = None,
+) -> None:
+    """Launch a tracked simulation via watch_conversations.py --test --simulate."""
+    import subprocess
+
+    cmd = [
+        sys.executable, str(PROJECT_ROOT / "scripts" / "watch_conversations.py"),
+        "--test", "--simulate",
+        "--test-type", convo_type,
+        "--agents", ",".join(agents),
+        "--speed", str(speed),
+    ]
+    if turns is not None:
+        cmd += ["--turns", str(turns)]
+    if topic is not None:
+        cmd += ["--topic", topic]
+    if verbose:
+        cmd.append("--verbose")
+    if overseer_shadow:
+        cmd.append("--overseer-shadow")
+    if sim_name:
+        cmd += ["--sim-name", sim_name]
+
+    console.print(f"\n[bold bright_cyan]Starting simulation...[/bold bright_cyan]")
+    console.print(f"[dim]Agents: {', '.join(agents)}[/dim]")
+    console.print(f"[dim]Type: {convo_type} | Turns: {turns or 'default'} | Overseer shadow: {overseer_shadow}[/dim]\n")
+
+    try:
+        subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Simulation interrupted.[/dim]")
+
+
+def pick_sim_name() -> str | None:
+    """Optionally name the simulation."""
+    console.print()
+    try:
+        name = console.input(
+            "[bold]Simulation name? (Enter to auto-generate): [/bold]"
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    return name if name else None
+
+
 def run_single(
     agent_id: str,
     mode: str,
@@ -386,6 +444,68 @@ def main() -> None:
         run_convo(agents, convo_type, topic, turns, speed, quiet, verbose, no_overseer)
         return
 
+    # ── Quick-launch: pnpm chat sim ... ──
+    if args and args[0].lower() == "sim":
+        sim_args = args[1:]
+        agents = None
+        convo_type = "freeform"
+        topic = None
+        turns = None
+        speed = 1.0
+        verbose = False
+        sim_name = None
+        overseer_shadow = True
+        i = 0
+        while i < len(sim_args):
+            arg = sim_args[i]
+            if arg == "--agents" and i + 1 < len(sim_args):
+                agents = sim_args[i + 1].split(",")
+                i += 2
+            elif arg == "--type" and i + 1 < len(sim_args):
+                convo_type = sim_args[i + 1]
+                i += 2
+            elif arg == "--topic" and i + 1 < len(sim_args):
+                topic = sim_args[i + 1]
+                i += 2
+            elif arg == "--turns" and i + 1 < len(sim_args):
+                turns = int(sim_args[i + 1])
+                i += 2
+            elif arg == "--speed" and i + 1 < len(sim_args):
+                speed = float(sim_args[i + 1])
+                i += 2
+            elif arg == "--name" and i + 1 < len(sim_args):
+                sim_name = sim_args[i + 1]
+                i += 2
+            elif arg in ("--verbose", "-v"):
+                verbose = True
+                i += 1
+            elif arg == "--no-shadow":
+                overseer_shadow = False
+                i += 1
+            else:
+                i += 1
+
+        if not agents:
+            print_banner()
+            agents = pick_convo_agents()
+            if not agents:
+                console.print("[dim]Goodbye.[/dim]")
+                return
+            if convo_type == "freeform":
+                convo_type = pick_convo_type()
+            if topic is None:
+                topic = pick_topic()
+            if turns is None:
+                turns = pick_turns()
+            if sim_name is None:
+                sim_name = pick_sim_name()
+
+        run_simulation(
+            agents, convo_type, topic=topic, turns=turns, speed=speed,
+            verbose=verbose, overseer_shadow=overseer_shadow, sim_name=sim_name,
+        )
+        return
+
     # ── Quick-launch: pnpm chat --dry-run or --list-agents ──
     if args and args[0].startswith("--"):
         from scripts.test_agent import async_main, parse_args
@@ -455,6 +575,21 @@ def main() -> None:
         topic = pick_topic()
         turns = pick_turns()
         run_convo(agents, convo_type, topic, turns, verbose=verbose, no_overseer=no_overseer)
+        return
+
+    if mode == "simulate":
+        agents = pick_convo_agents()
+        if not agents:
+            console.print("[dim]Goodbye.[/dim]")
+            return
+        convo_type = pick_convo_type()
+        topic = pick_topic()
+        turns = pick_turns()
+        sim_name = pick_sim_name()
+        run_simulation(
+            agents, convo_type, topic=topic, turns=turns,
+            verbose=verbose, overseer_shadow=True, sim_name=sim_name,
+        )
         return
 
     # Single-agent modes need an agent pick

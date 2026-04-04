@@ -178,3 +178,132 @@ class SimulationRepo:
             "DELETE FROM simulations WHERE id = $1", simulation_id
         )
         return result == "DELETE 1"
+
+    async def count(self, *, status: str | None = None) -> int:
+        """Return total count of simulations, optionally filtered by status."""
+        if status is not None:
+            val = await self.db.fetchval(
+                "SELECT COUNT(*) FROM simulations WHERE status = $1", status
+            )
+        else:
+            val = await self.db.fetchval("SELECT COUNT(*) FROM simulations")
+        return val or 0
+
+    async def get_timeline_events(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        agent_id: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict]:
+        """Return a chronological timeline of events for a simulation.
+
+        Unions conversations (start/end), artifacts, and overseer flags.
+        """
+        events: list[dict] = []
+
+        # Conversations started — use direct FK
+        conv_where = "c.simulation_id = $1"
+        conv_params: list[object] = [simulation_id]
+        idx = 2
+        if agent_id is not None:
+            conv_where += f" AND c.participating_agents @> to_jsonb(ARRAY[${idx}])"
+            conv_params.append(agent_id)
+            idx += 1
+
+        if event_type is None or event_type == "conversation":
+            rows = await self.db.fetch(
+                f"""SELECT c.id, c.started_at, c.ended_at,
+                       c.participating_agents, c.trigger_type, c.turn_count
+                    FROM conversations c
+                    WHERE {conv_where}
+                    ORDER BY c.started_at""",  # noqa: S608
+                *conv_params,
+            )
+            for r in rows:
+                d = dict(r)
+                agents = d["participating_agents"]
+                if isinstance(agents, str):
+                    agents = json.loads(agents)
+                events.append({
+                    "timestamp": d["started_at"].isoformat() if d["started_at"] else None,
+                    "event_type": "conversation_started",
+                    "agent_id": None,
+                    "details": {
+                        "conversation_id": str(d["id"]),
+                        "participants": agents,
+                        "trigger_type": d["trigger_type"],
+                        "turn_count": d["turn_count"],
+                    },
+                })
+                if d["ended_at"]:
+                    events.append({
+                        "timestamp": d["ended_at"].isoformat(),
+                        "event_type": "conversation_ended",
+                        "agent_id": None,
+                        "details": {"conversation_id": str(d["id"])},
+                    })
+
+        # Artifacts (tool usage)
+        if event_type is None or event_type == "tool_use":
+            art_where = "simulation_id = $1"
+            art_params: list[object] = [simulation_id]
+            art_idx = 2
+            if agent_id is not None:
+                art_where += f" AND agent_id = ${art_idx}"
+                art_params.append(agent_id)
+            rows = await self.db.fetch(
+                f"""SELECT id, agent_id, tool_name, artifact_type, created_at
+                    FROM artifacts WHERE {art_where}
+                    ORDER BY created_at""",  # noqa: S608
+                *art_params,
+            )
+            for r in rows:
+                d = dict(r)
+                events.append({
+                    "timestamp": d["created_at"].isoformat() if d["created_at"] else None,
+                    "event_type": "tool_use",
+                    "agent_id": d["agent_id"],
+                    "details": {
+                        "artifact_id": str(d["id"]),
+                        "tool_name": d["tool_name"],
+                        "artifact_type": d["artifact_type"],
+                    },
+                })
+
+        # Sort all events chronologically
+        events.sort(key=lambda e: e["timestamp"] or "")
+        return events
+
+    async def get_overseer_log(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        severity_min: int = 1,
+    ) -> list[dict]:
+        """Return overseer shadow flags for a simulation filtered by severity."""
+        rows = await self.db.fetch(
+            """SELECT id, agent_id, tool_name, tool_output, metadata, created_at
+               FROM artifacts
+               WHERE simulation_id = $1
+                 AND artifact_type = 'overseer_flag'
+                 AND (metadata->>'severity')::int >= $2
+               ORDER BY created_at""",
+            simulation_id,
+            severity_min,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            for key in ("tool_output", "metadata"):
+                if isinstance(d.get(key), str):
+                    d[key] = json.loads(d[key])
+            result.append({
+                "id": str(d["id"]),
+                "agent_id": d["agent_id"],
+                "tool_name": d["tool_name"],
+                "output": d["tool_output"],
+                "metadata": d["metadata"],
+                "created_at": d["created_at"].isoformat() if d["created_at"] else None,
+            })
+        return result

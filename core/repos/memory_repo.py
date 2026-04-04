@@ -222,18 +222,76 @@ class MemoryRepo:
         return JournalEntry(**dict(row))
 
     async def get_journal_entries(
-        self, agent_id: str, limit: int = 20
-    ) -> list[JournalEntry]:
+        self, agent_id: str, limit: int = 20, offset: int = 0
+    ) -> tuple[list[JournalEntry], int]:
+        """Return paginated journal entries with total count."""
         limit = min(limit, MAX_LIMIT)
+        count = await self.db.fetchval(
+            "SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1",
+            agent_id,
+        )
         rows = await self.db.fetch(
             """SELECT * FROM journal_entries
                WHERE agent_id = $1
                ORDER BY created_at DESC
-               LIMIT $2""",
+               LIMIT $2 OFFSET $3""",
             agent_id,
             limit,
+            offset,
         )
-        return [JournalEntry(**dict(r)) for r in rows]
+        return [JournalEntry(**dict(r)) for r in rows], count or 0
+
+    async def search_recall_memories_by_keyword(
+        self,
+        agent_id: str,
+        keyword: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[RecallMemory], int]:
+        """Text search recall memories using ILIKE (pg_trgm if available)."""
+        limit = min(limit, MAX_LIMIT)
+        pattern = f"%{keyword}%"
+        count = await self.db.fetchval(
+            "SELECT COUNT(*) FROM recall_memory WHERE agent_id = $1 AND summary ILIKE $2",
+            agent_id,
+            pattern,
+        )
+        rows = await self.db.fetch(
+            """SELECT * FROM recall_memory
+               WHERE agent_id = $1 AND summary ILIKE $2
+               ORDER BY timestamp DESC
+               LIMIT $3 OFFSET $4""",
+            agent_id,
+            pattern,
+            limit,
+            offset,
+        )
+        return [_row_to_recall(r) for r in rows], count or 0
+
+    async def get_recall_memories_paginated(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[RecallMemory], int]:
+        """Return paginated recall memories for an agent."""
+        limit = min(limit, MAX_LIMIT)
+        count = await self.db.fetchval(
+            "SELECT COUNT(*) FROM recall_memory WHERE agent_id = $1",
+            agent_id,
+        )
+        rows = await self.db.fetch(
+            """SELECT * FROM recall_memory
+               WHERE agent_id = $1
+               ORDER BY timestamp DESC
+               LIMIT $2 OFFSET $3""",
+            agent_id,
+            limit,
+            offset,
+        )
+        return [_row_to_recall(r) for r in rows], count or 0
 
     # ── Self-Modification Proposals ────────────────────────────
 

@@ -206,6 +206,7 @@ class ConversationEngine:
                 participating_agents=participant_ids,
                 location=location,
                 config_hash=self._config_loader.config_hash,
+                simulation_id=self._simulation_id,
             )
         )
 
@@ -458,6 +459,7 @@ class ConversationEngine:
             conversation_id=conv.id,
             final_energy=final_normalized,
             closed_by=closer_id,
+            turn_count=conv.turn_number,
         )
 
         # Store transcript to archival memory
@@ -468,6 +470,7 @@ class ConversationEngine:
             event_type=conv.trigger.get("type", "idle"),
             participants=conv.participants,
             content=transcript_content,
+            conversation_id=conv.id,
         )
 
         # Reset triggers
