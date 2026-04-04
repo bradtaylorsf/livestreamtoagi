@@ -215,7 +215,11 @@ def main() -> None:
         "--speed-multiplier",
         type=float,
         default=0,
-        help="Simulated clock speed (0=instant/legacy, 42=42x speed, 1=real-time)",
+        help=(
+            "Simulated clock speed (0=instant/legacy, 42=42x speed, 1=real-time). "
+            "For autonomous mode with --duration, use >0 (e.g. 42) so simulated "
+            "time advances meaningfully between conversations."
+        ),
     )
     parser.add_argument(
         "--overseer-shadow",
@@ -243,6 +247,19 @@ def main() -> None:
     args = parser.parse_args()
     if not args.seed_file and not args.duration:
         parser.error("Either --seed-file or --duration must be provided")
+
+    # Warn about instant-mode + duration: in instant mode (speed_multiplier=0),
+    # simulated time only advances by wall-clock conversation duration, so a
+    # --duration of "7d" would take an extremely long time to reach. Recommend
+    # using a speed multiplier (e.g. --speed-multiplier 42) for autonomous runs.
+    if args.duration and args.speed_multiplier == 0 and not args.seed_file:
+        print(
+            "\n  WARNING: --duration with --speed-multiplier 0 (instant mode)"
+            "\n  will advance simulated time very slowly. Each conversation only"
+            "\n  adds its wall-clock duration to the simulated clock."
+            "\n  Recommend: --speed-multiplier 42 (or higher) for autonomous runs.\n"
+        )
+
     asyncio.run(run_simulation(args))
 
 

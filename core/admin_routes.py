@@ -32,6 +32,12 @@ from core.models import (
     CostBreakdownResponse,
     CostByDay,
     CostByType,
+    EvalComparisonResponse,
+    EvalExportResponse,
+    EvalHistoryPoint,
+    EvalResult,
+    EvalRun,
+    EvalRunDetail,
     EvalRunRequest,
     EvalRunResponse,
     JournalEntry,
@@ -723,8 +729,8 @@ async def get_conversation_interrupts(
 # ── Eval Endpoints ─────────────────────────────────────────────
 
 
-@router.get("/simulations/{sim_id}/evals")
-async def get_simulation_evals(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
+@router.get("/simulations/{sim_id}/evals", response_model=list[EvalRunDetail])
+async def get_simulation_evals(sim_id: uuid_mod.UUID) -> list[EvalRunDetail]:
     """All eval runs for this simulation with nested results."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
@@ -734,9 +740,10 @@ async def get_simulation_evals(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
     result = []
     for run in runs:
         results = await eval_repo.get_eval_results(run.id)
-        d = run.model_dump(mode="json")
-        d["results"] = [r.model_dump(mode="json") for r in results]
-        result.append(d)
+        result.append(EvalRunDetail(
+            **run.model_dump(),
+            results=results,
+        ))
     return result
 
 
@@ -778,18 +785,17 @@ async def run_simulation_evals(
     )
 
 
-@router.get("/evals")
+@router.get("/evals", response_model=list[EvalRun])
 async def list_eval_runs(
     limit: int = 50,
     offset: int = 0,
-) -> list[dict[str, Any]]:
+) -> list[EvalRun]:
     """Paginated list of all eval runs across simulations."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    runs = await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
-    return [r.model_dump(mode="json") for r in runs]
+    return await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
 
 
 @router.get("/evals/categories")
@@ -802,11 +808,11 @@ async def eval_categories() -> list[str]:
     return await eval_repo.get_eval_categories()
 
 
-@router.get("/evals/compare")
+@router.get("/evals/compare", response_model=EvalComparisonResponse)
 async def compare_evals(
     run_a: str,
     run_b: str,
-) -> dict[str, Any]:
+) -> EvalComparisonResponse:
     """Side-by-side comparison of two eval runs."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
@@ -826,30 +832,25 @@ async def compare_evals(
     results_a = await eval_repo.get_eval_results(a_id)
     results_b = await eval_repo.get_eval_results(b_id)
 
-    return {
-        "run_a": {
-            **run_a_obj.model_dump(mode="json"),
-            "results": [r.model_dump(mode="json") for r in results_a],
-        },
-        "run_b": {
-            **run_b_obj.model_dump(mode="json"),
-            "results": [r.model_dump(mode="json") for r in results_b],
-        },
-    }
+    return EvalComparisonResponse(
+        run_a=EvalRunDetail(**run_a_obj.model_dump(), results=results_a),
+        run_b=EvalRunDetail(**run_b_obj.model_dump(), results=results_b),
+    )
 
 
-@router.get("/evals/history")
-async def eval_history(category: str) -> list[dict[str, Any]]:
+@router.get("/evals/history", response_model=list[EvalHistoryPoint])
+async def eval_history(category: str) -> list[EvalHistoryPoint]:
     """Score history for a category across all runs, for charting."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    return await eval_repo.get_eval_history(category)
+    rows = await eval_repo.get_eval_history(category)
+    return [EvalHistoryPoint(**r) for r in rows]
 
 
-@router.get("/evals/{eval_id}")
-async def get_eval_result(eval_id: uuid_mod.UUID) -> dict[str, Any]:
+@router.get("/evals/{eval_id}", response_model=EvalRunDetail)
+async def get_eval_result(eval_id: uuid_mod.UUID) -> EvalRunDetail:
     """Full eval run with all results."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
@@ -859,13 +860,11 @@ async def get_eval_result(eval_id: uuid_mod.UUID) -> dict[str, Any]:
     if run is None:
         raise HTTPException(status_code=404, detail="Eval run not found")
     results = await eval_repo.get_eval_results(run.id)
-    d = run.model_dump(mode="json")
-    d["results"] = [r.model_dump(mode="json") for r in results]
-    return d
+    return EvalRunDetail(**run.model_dump(), results=results)
 
 
-@router.get("/evals/{eval_id}/export")
-async def export_eval(eval_id: uuid_mod.UUID) -> dict[str, Any]:
+@router.get("/evals/{eval_id}/export", response_model=EvalExportResponse)
+async def export_eval(eval_id: uuid_mod.UUID) -> EvalExportResponse:
     """Export full eval results as JSON."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
@@ -875,7 +874,4 @@ async def export_eval(eval_id: uuid_mod.UUID) -> dict[str, Any]:
     if run is None:
         raise HTTPException(status_code=404, detail="Eval run not found")
     results = await eval_repo.get_eval_results(run.id)
-    return {
-        "eval_run": run.model_dump(mode="json"),
-        "results": [r.model_dump(mode="json") for r in results],
-    }
+    return EvalExportResponse(eval_run=run, results=results)

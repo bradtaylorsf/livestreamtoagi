@@ -914,6 +914,26 @@ class EvalRunDetail(BaseModel):
     results: list[EvalResult] = []
 
 
+class EvalComparisonResponse(BaseModel):
+    """Side-by-side comparison of two eval runs."""
+    run_a: EvalRunDetail
+    run_b: EvalRunDetail
+
+
+class EvalHistoryPoint(BaseModel):
+    """Single data point for eval score history charts."""
+    score: float | None = None
+    created_at: str | None = None
+    simulation_id: str
+    eval_run_id: str
+
+
+class EvalExportResponse(BaseModel):
+    """Full eval export payload."""
+    eval_run: EvalRun
+    results: list[EvalResult]
+
+
 class SimulationCostResponse(BaseModel):
     by_agent: list[dict[str, str]] = []
     total: str = "0"

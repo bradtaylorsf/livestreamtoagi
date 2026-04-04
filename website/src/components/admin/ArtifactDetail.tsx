@@ -1,16 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { TYPE_ICONS } from "@/lib/artifact-constants";
 import type { AgentArtifact } from "@/types/admin";
-
-const TYPE_ICONS: Record<string, string> = {
-  social_post: "📱",
-  email: "✉",
-  code: "⌨",
-  search: "🔍",
-  web_fetch: "🌐",
-  file_write: "📄",
-};
 
 interface Props {
   artifact: AgentArtifact;
