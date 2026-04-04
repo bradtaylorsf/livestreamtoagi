@@ -380,8 +380,8 @@ async def run_watch(args: argparse.Namespace) -> None:
         console.print("[yellow]Overseer disabled for testing[/yellow]")
 
     # Build embedding function for post-conversation recall memory creation
-    from core.bootstrap import _make_embedding_fn
-    embedding_fn = _make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
+    from core.bootstrap import make_embedding_fn
+    embedding_fn = make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
 
     engine = ConversationEngine(
         config_loader=svc.config_loader,

@@ -59,7 +59,7 @@ class Services:
     config_loader: ConfigLoader
 
 
-def _make_embedding_fn(
+def make_embedding_fn(
     http_client: httpx.AsyncClient, api_key: str,
 ) -> EmbeddingFn:
     """Create an embedding function using the real OpenRouter API."""
@@ -122,7 +122,7 @@ async def bootstrap_services(
     core_memory = CoreMemoryManager(memory_repo=memory_repo, token_counter=token_counter)
     recall_memory = RecallMemoryManager(
         memory_repo=memory_repo,
-        embedding_fn=_make_embedding_fn(http_client, api_key),
+        embedding_fn=make_embedding_fn(http_client, api_key),
     )
     archival_memory = ArchivalMemoryManager(
         transcript_repo=transcript_repo, token_counter=token_counter,

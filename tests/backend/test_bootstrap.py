@@ -58,32 +58,32 @@ def test_no_database_construction_in_scripts():
     )
 
 
-def test_make_embedding_fn_warns_on_missing_api_key(caplog):
-    """_make_embedding_fn logs a warning when api_key is empty."""
+def testmake_embedding_fn_warns_on_missing_api_key(caplog):
+    """make_embedding_fn logs a warning when api_key is empty."""
     import logging
 
     import httpx
 
-    from core.bootstrap import _make_embedding_fn
+    from core.bootstrap import make_embedding_fn
 
     with caplog.at_level(logging.WARNING, logger="core.bootstrap"):
-        _make_embedding_fn(httpx.AsyncClient(), "")
+        make_embedding_fn(httpx.AsyncClient(), "")
 
     assert any(
         "OPENROUTER_API_KEY not set" in msg for msg in caplog.messages
     ), f"Expected warning about missing API key, got: {caplog.messages}"
 
 
-def test_make_embedding_fn_no_warning_with_api_key(caplog):
-    """_make_embedding_fn does NOT warn when api_key is provided."""
+def testmake_embedding_fn_no_warning_with_api_key(caplog):
+    """make_embedding_fn does NOT warn when api_key is provided."""
     import logging
 
     import httpx
 
-    from core.bootstrap import _make_embedding_fn
+    from core.bootstrap import make_embedding_fn
 
     with caplog.at_level(logging.WARNING, logger="core.bootstrap"):
-        _make_embedding_fn(httpx.AsyncClient(), "sk-test-key")
+        make_embedding_fn(httpx.AsyncClient(), "sk-test-key")
 
     assert not any(
         "OPENROUTER_API_KEY not set" in msg for msg in caplog.messages
