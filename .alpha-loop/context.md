@@ -1,26 +1,26 @@
 Here's the project context:
 
 ## Architecture
-- **Entry point:** `core/main.py` — FastAPI app with WebSocket support, mounts static files, initializes DB/Redis/AgentRegistry/Scheduler in lifespan handler
-- **Database:** PostgreSQL 16 + pgvector (port 5434), schema in `db/init.sql`, migrations in `db/migrations/`, run via `pnpm db:migrate` (`python -m db`)
-- **Key directories:** `core/` (orchestrator, memory, conversation engine, LLM client, TTS), `tools/` (agent tool implementations — code execution, web, messaging, world state), `agents/` (YAML personality configs), `frontend/` (Phaser.js pixel art renderer), `website/` (Next.js public site)
-- **Infrastructure:** Docker Compose runs Redis (6381), PostgreSQL (5434), Langfuse (3100); `scripts/check-services.sh` validates all 5 health checks before dev
-- **Dev startup:** `pnpm dev` launches Docker, backend (uvicorn :8010), and website (:4000) concurrently
+- **Entry point:** `core/main.py` — FastAPI app with lifespan that bootstraps services (DB, Redis, LLM, TTS, memory), mounts `admin_routes.py` REST router, and opens WebSocket for frontend
+- **Database:** PostgreSQL 16 + pgvector. Schema managed by custom migrator in `db/` (12 up/down migration pairs in `db/migrations/`). Repos in `core/repos/` (agent, artifact, conversation, cost, memory, simulation, transcript, world)
+- **Core engine:** `core/conversation_engine.py` drives agent dialogue; speaker selection in `core/conversation/speaker_selector.py` with energy, pacing, proximity, and topic subsystems
+- **Memory system:** 3-tier in `core/memory/` — core (always-in-prompt), recall (pgvector semantic search), archival (full transcripts). Reflection/compaction run periodically
+- **Frontend:** Phaser.js pixel art renderer in `frontend/` (Vite + TypeScript). Website: Next.js in `website/`. Both connect to backend via REST/WebSocket
 
 ## Conventions
-- **Python 3.13** (pinned in `.python-version`), type hints everywhere, async/await for I/O, Pydantic models for schemas, `ruff` for lint/format
-- **TypeScript:** strict mode, ESM, Vite + Vitest (frontend), Next.js + Vitest + Playwright (website)
-- **Tests:** all Python tests in `tests/backend/`, run via `pytest` (asyncio_mode=auto); integration tests marked `@pytest.mark.integration`; `pnpm test` runs all three suites in parallel
-- **Git:** conventional commits (`feat:`, `fix:`, etc.), branch naming `feat/`, `fix/`; one feature per PR
-- **New features:** Python tools go in `tools/`, core logic in `core/`, agent configs in `agents/` YAML; register tools in `tools/__init__.py`, wire endpoints in `core/main.py`
+- Python 3.13 (pinned in `.python-version`), strict type hints, async/await everywhere. Ruff for lint/format
+- TypeScript strict mode, ESM, Vite builds for both frontend and website
+- Tests: `tests/backend/` (pytest, unit) and `tests/integration/` (needs Docker services). Frontend/website use Vitest. Run all via `pnpm test` at root
+- New tools go in `tools/`, new repos in `core/repos/`, new conversation subsystems in `core/conversation/`. Agent configs are YAML in `agents/`
+- DB changes: add numbered migration pair in `db/migrations/`, run `pnpm db:migrate`
 
 ## Critical Rules
-- **`db/init.sql` + `db/migrations/`** — schema changes require migrations; init.sql seeds Docker fresh installs, migrations handle incremental updates — keep both in sync
-- **Docker services must be healthy** before running integration tests or backend — always run `scripts/check-services.sh` first
-- **Overseer filter** (`core/overseer.py`) gates all agent output before TTS — bypassing it breaks content safety
-- **Non-default ports:** Redis=6381, Postgres=5434, Langfuse=3100 — don't assume standard ports
-- **`.env` secrets** never committed; `OPENROUTER_API_KEY` required for any LLM calls; cost governor in `core/repos/cost_repo.py` tracks spend
+- Docker services (Redis:6381, PostgreSQL:5434, Langfuse:3100) must be healthy before integration tests — run `scripts/check-services.sh` first
+- `core/bootstrap.py` wires all services together; adding a new service requires updating both bootstrap and shutdown
+- Cost tracking must be 100% accurate (eval integrity depends on it) — every LLM call must log to `cost_repo`
+- Agent configs in `agents/` and seed migration `002_seed_agents` must stay in sync
+- Overseer content filter (`core/overseer.py`) sits between agent output and TTS — bypassing it breaks safety guarantees
 
 ## Active State
-- Test status: *(to be filled)*
-- Recent changes: structured dialogue/action parsing for TTS (#143), security fixes in tools milestone, session review fixes
+- Test status: _(to be filled by loop)_
+- Recent changes: _(to be filled by loop)_
