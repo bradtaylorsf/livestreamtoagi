@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Post-run validation: check that all 21 agent tools were exercised.
+"""Post-run validation: check that all 19 agent tools were exercised.
 
 Usage:
     python scripts/check_tool_coverage.py --name "tool-coverage"
     python scripts/check_tool_coverage.py --simulation-id <uuid>
 
-Exits with code 0 if 21/21 tools found, 1 otherwise.
+Exits with code 0 if 19/19 tools found, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-# All 21 tools that should be exercised
+# All 19 tools that should be exercised
 ALL_TOOLS = sorted([
     "send_message",
     "get_world_state",

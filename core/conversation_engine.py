@@ -650,11 +650,17 @@ class ConversationEngine:
                 total_latency_ms = 0
 
                 for _tool_round in range(MAX_TOOL_ROUNDS + 1):
+                    # Check if trigger requests a specific tool (first round only)
+                    tc = None
+                    if _tool_round == 0 and self._active and self._active.trigger:
+                        tc = self._active.trigger.get("tool_choice")
+
                     response = await self._llm.complete(
                         messages=messages,
                         model=agent.model_conversation,
                         agent_id=agent.id,
                         tools=openai_tools,
+                        tool_choice=tc,
                     )
 
                     total_input_tokens += response.input_tokens

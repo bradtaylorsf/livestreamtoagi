@@ -135,3 +135,4 @@ class ReflectionScheduler:
         now = self._clock.now()
         self._last_6hour[agent_id] = now
         self._last_daily[agent_id] = now.strftime("%Y-%m-%d")
+        self._last_weekly[agent_id] = self._clock.simulated_day()

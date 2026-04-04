@@ -12,6 +12,7 @@ from core.repos.utils import serialize_jsonb
 if TYPE_CHECKING:
     import uuid
     from datetime import datetime, timedelta
+    from typing import Any
 
     from core.database import Database
 
@@ -167,6 +168,24 @@ class SimulationRepo:
                RETURNING *""",
             simulated_duration,
             real_duration,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def update_config(
+        self,
+        simulation_id: uuid.UUID,
+        config: dict[str, Any],
+    ) -> Simulation | None:
+        """Overwrite the config JSONB column (e.g. to persist clock state)."""
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET config = $1::jsonb
+               WHERE id = $2
+               RETURNING *""",
+            serialize_jsonb(config),
             simulation_id,
         )
         if row is None:

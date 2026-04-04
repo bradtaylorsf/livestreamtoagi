@@ -144,8 +144,8 @@ export interface ConversationDetail {
   location: string | null;
   energy_history: Record<string, unknown>[];
   transcript: string | null;
-  total_tokens: number;
-  total_cost: string;
+  total_tokens: number | null;
+  total_cost: string | null;
 }
 
 export interface TurnDetail {
@@ -297,7 +297,7 @@ export interface EvalRun {
   overall_score: number | null;
   cost: string;
   created_at: string | null;
-  results: EvalResult[];
+  results?: EvalResult[];
 }
 
 export interface EvalHistoryPoint {

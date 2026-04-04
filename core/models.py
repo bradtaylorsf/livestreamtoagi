@@ -576,7 +576,7 @@ class ReflectionScheduleConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     six_hour_interval_hours: int = Field(default=6, ge=1)
     daily_hour: int = Field(default=23, ge=0, le=23)
-    weekly_day: int = Field(default=7, ge=1)
+    weekly_day: int = Field(default=7, ge=1, le=7)
 
 
 class TopicConfig(BaseModel):
@@ -848,8 +848,8 @@ class ConversationDetail(BaseModel):
     location: str | None = None
     energy_history: list[dict[str, Any]] = []
     transcript: str | None = None
-    total_tokens: int = 0
-    total_cost: str = "0"
+    total_tokens: int | None = None
+    total_cost: str | None = None
 
 
 class TurnDetail(BaseModel):
@@ -874,6 +874,7 @@ class EvalRunResponse(BaseModel):
 
 
 class EvalRun(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     simulation_id: uuid.UUID
     eval_suite: str
@@ -886,6 +887,7 @@ class EvalRun(BaseModel):
 
 
 class EvalResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     eval_run_id: uuid.UUID
     category: str

@@ -624,9 +624,7 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
     energy_log = await conv_repo.get_energy_log(conv_id)
     transcript_record = await transcript_repo.get_by_conversation(conv_id)
 
-    # Estimate tokens from transcript length (cost_events lacks conversation_id)
-    transcript_text = transcript_record.content if transcript_record else ""
-    total_tokens = len(transcript_text) // 4 if transcript_text else 0
+    total_tokens = None
 
     return ConversationDetail(
         id=conv.id,
@@ -645,7 +643,7 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
         energy_history=energy_log,
         transcript=transcript_record.content if transcript_record else None,
         total_tokens=total_tokens,
-        total_cost="0",
+        total_cost=None,
     )
 
 
@@ -787,8 +785,11 @@ async def compare_evals(
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    a_id = uuid_mod.UUID(run_a)
-    b_id = uuid_mod.UUID(run_b)
+    try:
+        a_id = uuid_mod.UUID(run_a)
+        b_id = uuid_mod.UUID(run_b)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format for run_a or run_b")
 
     run_a_obj = await eval_repo.get_eval_run(a_id)
     run_b_obj = await eval_repo.get_eval_run(b_id)
@@ -821,13 +822,13 @@ async def eval_history(category: str) -> list[dict[str, Any]]:
 
 
 @router.get("/evals/{eval_id}")
-async def get_eval_result(eval_id: str) -> dict[str, Any]:
+async def get_eval_result(eval_id: uuid_mod.UUID) -> dict[str, Any]:
     """Full eval run with all results."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    run = await eval_repo.get_eval_run(uuid_mod.UUID(eval_id))
+    run = await eval_repo.get_eval_run(eval_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Eval run not found")
     results = await eval_repo.get_eval_results(run.id)
@@ -837,13 +838,13 @@ async def get_eval_result(eval_id: str) -> dict[str, Any]:
 
 
 @router.get("/evals/{eval_id}/export")
-async def export_eval(eval_id: str) -> dict[str, Any]:
+async def export_eval(eval_id: uuid_mod.UUID) -> dict[str, Any]:
     """Export full eval results as JSON."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    run = await eval_repo.get_eval_run(uuid_mod.UUID(eval_id))
+    run = await eval_repo.get_eval_run(eval_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Eval run not found")
     results = await eval_repo.get_eval_results(run.id)

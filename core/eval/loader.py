@@ -72,16 +72,6 @@ async def load_simulation_data(
     )
     overseer_logs = [dict(r) for r in overseer_rows]
 
-    # Cost events
-    cost_rows = await db.fetch(
-        """SELECT agent_id, cost_type, amount, details, created_at
-           FROM cost_events
-           WHERE simulation_id = $1
-           ORDER BY created_at""",
-        simulation_id,
-    )
-    cost_events = [dict(r) for r in cost_rows]
-
     # Agent participation stats
     agent_turns: dict[str, int] = {}
     for conv in conversations:
@@ -96,7 +86,6 @@ async def load_simulation_data(
         "transcript_text": transcript_text,
         "artifacts": artifacts,
         "overseer_logs": overseer_logs,
-        "cost_events": cost_events,
         "agent_turns": agent_turns,
         "total_conversations": len(conversations),
         "total_artifacts": len(artifacts),

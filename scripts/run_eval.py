@@ -26,6 +26,12 @@ import logging
 import sys
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+    from core.repos.eval_repo import EvalRepo
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -121,38 +127,32 @@ async def run_eval(args: argparse.Namespace) -> None:
 
 
 async def _view_last(
-    console: object,
-    eval_repo: object,
+    console: Console,
+    eval_repo: EvalRepo,
     sim_id: uuid.UUID,
 ) -> None:
     """Show the most recent eval results for a simulation."""
-    from rich.console import Console
-
-    console = Console()  # type: ignore[assignment]
-    run = await eval_repo.get_latest_eval_run(sim_id)  # type: ignore[union-attr]
+    run = await eval_repo.get_latest_eval_run(sim_id)
     if run is None:
         console.print("[dim]No eval runs found for this simulation.[/dim]")
         return
-    await _view_results(console, eval_repo, run.id)  # type: ignore[arg-type]
+    await _view_results(console, eval_repo, run.id)
 
 
 async def _view_results(
-    console: object,
-    eval_repo: object,
+    console: Console,
+    eval_repo: EvalRepo,
     run_id: uuid.UUID,
 ) -> None:
     """Display formatted eval results."""
-    from rich.console import Console
     from rich.table import Table
 
-    console = Console()  # type: ignore[assignment]
-
-    run = await eval_repo.get_eval_run(run_id)  # type: ignore[union-attr]
+    run = await eval_repo.get_eval_run(run_id)
     if run is None:
         console.print("[red]Eval run not found[/red]")
         return
 
-    results = await eval_repo.get_eval_results(run_id)  # type: ignore[union-attr]
+    results = await eval_repo.get_eval_results(run_id)
 
     # Overall score
     overall = float(run.overall_score) if run.overall_score is not None else 0
@@ -224,7 +224,7 @@ def main() -> None:
     parser.add_argument(
         "--suite",
         type=str,
-        choices=["full", "quick", "custom"],
+        choices=["full", "quick"],
         default="full",
         help="Eval suite to run (default: full)",
     )

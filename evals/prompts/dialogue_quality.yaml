@@ -56,5 +56,4 @@ output_schema:
 
 input_data:
   - transcripts
-  - speaker_selection_logs
   - agent_turn_counts

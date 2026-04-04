@@ -181,6 +181,7 @@ class SimulationOrchestrator:
         memory_repo: MemoryRepo | None = None,
         display: SimulationDisplay,
         services: Services | None = None,
+        clock: SimulationClock | None = None,
     ) -> None:
         self._config = config
         self._db = db
@@ -207,7 +208,7 @@ class SimulationOrchestrator:
         self._start_time: float = 0.0
         self._total_cost = Decimal("0")
         self._cancelled = False
-        self.clock = SimulationClock(speed_multiplier=config.speed_multiplier)
+        self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
     @property
     def simulation_id(self) -> uuid.UUID | None:
@@ -274,11 +275,12 @@ class SimulationOrchestrator:
         """Execute the seeded simulation — create record, run phases, finalize."""
         self._start_time = time.monotonic()
 
-        # Create simulation record
+        # Create simulation record (include clock state in config snapshot)
+        config_snapshot = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
         sim = await self._sim_repo.create(SimulationCreate(
             name=self._config.name,
             description=self._config.description,
-            config=self._config.to_dict(),
+            config=config_snapshot,
             status=SimulationStatus.running,
             agents_participated=self._config.agents,
         ))
@@ -367,10 +369,11 @@ class SimulationOrchestrator:
         """Run in autonomous mode — trigger system drives all conversations."""
         self._start_time = time.monotonic()
 
+        config_snapshot = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
         sim = await self._sim_repo.create(SimulationCreate(
             name=self._config.name,
             description=self._config.description,
-            config=self._config.to_dict(),
+            config=config_snapshot,
             status=SimulationStatus.running,
             agents_participated=self._config.agents,
         ))
@@ -456,7 +459,11 @@ class SimulationOrchestrator:
                 self._display.show_phase_complete(result, phase.name)
 
                 # Advance clock by conversation duration + idle gap
-                conv_duration = timedelta(seconds=result.duration_seconds)
+                multiplier = self._config.speed_multiplier
+                if multiplier > 0:
+                    conv_duration = timedelta(seconds=result.duration_seconds * multiplier)
+                else:
+                    conv_duration = timedelta(seconds=result.duration_seconds)
                 self.clock.advance(conv_duration + self._idle_gap())
                 self._triggers.notify_speech()
 
@@ -575,6 +582,10 @@ class SimulationOrchestrator:
             simulated_duration=simulated_duration,
             real_duration=real_duration,
         )
+
+        # Persist final clock state into config
+        final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        await self._sim_repo.update_config(self._simulation_id, final_config)
 
         # Fetch final record for summary
         sim = await self._sim_repo.get(self._simulation_id)

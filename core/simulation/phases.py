@@ -123,6 +123,7 @@ class PhaseRunner:
         self._phase_cost = Decimal("0")
         self._phase_tokens = 0
         self._phase_overseer_flags = 0
+        self._phase_artifacts = 0
         self._phase_agents: set[str] = set()
 
     async def run_phase(self, phase: Phase) -> PhaseResult:
@@ -159,6 +160,7 @@ class PhaseRunner:
         result.cost = self._phase_cost
         result.tokens = self._phase_tokens
         result.overseer_flags = self._phase_overseer_flags
+        result.artifacts = self._phase_artifacts
         result.agents_participated = list(self._phase_agents)
         return result
 
@@ -167,6 +169,7 @@ class PhaseRunner:
         self._phase_cost = Decimal("0")
         self._phase_tokens = 0
         self._phase_overseer_flags = 0
+        self._phase_artifacts = 0
         self._phase_agents.clear()
 
     # ── Phase runners ─────────────────────────────────────
@@ -247,6 +250,7 @@ class PhaseRunner:
             "event_type": "tool_exercise",
             "event_data": {"tool": tool_name, "context": context},
             "location": phase.config.get("location", "town_square"),
+            "tool_choice": {"type": "function", "function": {"name": tool_name}},
         }
 
         await self._run_conversation(trigger, phase)
@@ -342,9 +346,13 @@ class PhaseRunner:
         async def _on_overseer(event: dict) -> None:
             self._phase_overseer_flags += 1
 
+        async def _on_artifact(event: dict) -> None:
+            self._phase_artifacts += 1
+
         self._event_bus.on("agent_speak", _on_speak)
         self._event_bus.on("overseer_shadow", _on_overseer)
         self._event_bus.on("overseer_warning", _on_overseer)
+        self._event_bus.on("artifact_created", _on_artifact)
 
         try:
             engine = ConversationEngine(
@@ -386,9 +394,10 @@ class PhaseRunner:
                 await engine._end_conversation()
 
         finally:
-            # Unregister handlers (EventBus doesn't have off(), so we accept
-            # minor leakage — handlers are cheap and short-lived)
-            pass
+            self._event_bus.off("agent_speak", _on_speak)
+            self._event_bus.off("overseer_shadow", _on_overseer)
+            self._event_bus.off("overseer_warning", _on_overseer)
+            self._event_bus.off("artifact_created", _on_artifact)
 
         # Accumulate stats
         self._phase_turns += turns_in_conv

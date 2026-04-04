@@ -70,6 +70,7 @@ def make_mock_services() -> dict[str, Any]:
     sim_repo.increment_stats = AsyncMock(return_value=sim)
     sim_repo.update_status = AsyncMock(return_value=sim)
     sim_repo.update_durations = AsyncMock(return_value=sim)
+    sim_repo.update_config = AsyncMock(return_value=sim)
     sim_repo.update_agents_participated = AsyncMock()
 
     return {

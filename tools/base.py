@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import uuid
 
+    from core.event_bus import EventBus
     from core.repos.artifact_repo import ArtifactRepo
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class BaseTool(ABC):
     parameters: dict[str, Any]
 
     artifact_repo: ArtifactRepo | None = None
+    event_bus: EventBus | None = None
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
@@ -85,6 +87,20 @@ class BaseTool(ABC):
                     metadata=meta,
                 )
                 asyncio.create_task(_save_artifact(self.artifact_repo, artifact))
+
+                if self.event_bus is not None:
+                    from core.event_bus import EventType
+
+                    asyncio.create_task(
+                        self.event_bus.emit(
+                            EventType.ARTIFACT_CREATED,
+                            {
+                                "agent_id": agent_id,
+                                "tool_name": self.name,
+                                "simulation_id": str(simulation_id) if simulation_id else None,
+                            },
+                        )
+                    )
 
 
 async def _save_artifact(repo: ArtifactRepo, artifact: Any) -> None:

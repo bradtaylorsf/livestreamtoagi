@@ -50,6 +50,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
     from core.memory.reflection import ReflectionManager
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
+    from core.simulation.clock import SimulationClock
     from core.simulation.display import SimulationDisplay
     from core.simulation.orchestrator import (
         SimulationConfig,
@@ -100,7 +101,11 @@ async def run_simulation(args: argparse.Namespace) -> None:
         overseer = svc.overseer
 
     proximity = ProximityManager(svc.redis, cfg, event_bus)
-    trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
+    sim_clock = SimulationClock(speed_multiplier=sim_config.speed_multiplier)
+    trigger_system = TriggerSystem(
+        cfg.triggers, svc.recall_memory,
+        clock=sim_clock, now_fn=sim_clock.now,
+    )
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
     reflection_manager = ReflectionManager(
@@ -135,6 +140,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         memory_repo=svc.memory_repo,
         display=display,
         services=svc,
+        clock=sim_clock,
     )
 
     # ── Signal handling ───────────────────────────────────

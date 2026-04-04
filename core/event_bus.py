@@ -36,6 +36,7 @@ class EventType(str, Enum):
     TTS_PLAY = "tts_play"
     TOOL_EXECUTED = "tool_executed"
     CONFIG_RELOADED = "config_reloaded"
+    ARTIFACT_CREATED = "artifact_created"
 
 
 # Custom JSON encoder for Decimal, datetime, UUID
@@ -89,6 +90,14 @@ class EventBus:
         """Register an async callback for an event type."""
         self._validate_event_type(event_type)
         self._callbacks.setdefault(event_type, []).append(callback)
+
+    def off(self, event_type: str, callback: EventCallback) -> None:
+        """Remove a previously registered callback for an event type."""
+        callbacks = self._callbacks.get(event_type, [])
+        try:
+            callbacks.remove(callback)
+        except ValueError:
+            pass  # callback wasn't registered
 
     async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         """Broadcast an event to all connected WebSocket clients and fire callbacks.

@@ -11,6 +11,10 @@ from typing import TYPE_CHECKING, Any
 from core.eval.loader import load_simulation_data, organize_by_category
 from core.eval.prompt_loader import discover_categories, load_prompt, render_user_prompt
 
+# Categories selected for the "quick" eval suite — hand-picked for breadth
+# rather than relying on alphabetical order of available categories.
+QUICK_CATEGORIES = ["entertainment", "safety", "errors"]
+
 if TYPE_CHECKING:
     import uuid
 
@@ -62,7 +66,7 @@ class EvalEngine:
         if categories:
             to_run = [c for c in categories if c in available]
         elif suite == "quick":
-            to_run = available[:3]  # subset for quick suite
+            to_run = [c for c in QUICK_CATEGORIES if c in available]
         else:
             to_run = available
 
@@ -145,15 +149,22 @@ class EvalEngine:
             timeout=120.0,
         )
 
-        # Parse structured JSON from response
-        parsed = _parse_eval_response(response.content)
-
-        score = Decimal(str(parsed.get("score", 0)))
-        reasoning = parsed.get("reasoning", "")
-        evidence = parsed.get("evidence")
-        sub_scores = parsed.get("sub_scores")
+        # Capture cost immediately so it's never lost on parse failure
         tokens_used = response.input_tokens + response.output_tokens
         cost = response.estimated_cost
+
+        try:
+            parsed = _parse_eval_response(response.content)
+            score = Decimal(str(parsed.get("score", 0)))
+            reasoning = parsed.get("reasoning", "")
+            evidence = parsed.get("evidence")
+            sub_scores = parsed.get("sub_scores")
+        except Exception:
+            logger.exception("Failed to parse eval response for '%s'", category)
+            score = Decimal("0")
+            reasoning = f"Parse failed — raw response: {response.content[:500]}"
+            evidence = None
+            sub_scores = None
 
         await self._eval_repo.save_eval_result(
             eval_run_id=run_id,

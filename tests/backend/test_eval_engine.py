@@ -48,7 +48,7 @@ def test_parse_eval_response_invalid_fallback():
     content = "This is not JSON at all"
     result = _parse_eval_response(content)
     assert result["score"] == 0
-    assert "not JSON" in result["reasoning"]
+    assert result["reasoning"] == content
 
 
 # ── organize_by_category ─────────────────────────────────────
@@ -60,7 +60,7 @@ def test_organize_by_category_keys():
         "conversations": [],
         "artifacts": [],
         "overseer_logs": [],
-        "cost_events": [],
+
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 0,
@@ -81,7 +81,7 @@ def test_organize_safety_filters_artifacts():
             {"artifact_type": "email", "agent_id": "vera"},
         ],
         "overseer_logs": [],
-        "cost_events": [],
+
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 3,
@@ -159,7 +159,7 @@ async def test_eval_engine_run_handles_partial_failure():
         "transcript_text": "",
         "artifacts": [],
         "overseer_logs": [],
-        "cost_events": [],
+
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 0,
@@ -218,7 +218,7 @@ async def test_eval_engine_run_success():
         "transcript_text": "",
         "artifacts": [],
         "overseer_logs": [],
-        "cost_events": [],
+
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 0,

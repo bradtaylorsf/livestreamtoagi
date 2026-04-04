@@ -3,20 +3,26 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import ScoreHistoryChart from "@/components/admin/ScoreHistoryChart";
-import { fetchAllEvalRuns, exportEval } from "@/lib/admin-api";
+import { fetchAllEvalRuns, exportEval, compareEvals } from "@/lib/admin-api";
+import { scoreColor } from "@/lib/score-utils";
 import type { EvalRun } from "@/types/admin";
-
-function scoreColor(score: number): string {
-  if (score >= 70) return "text-green-400";
-  if (score >= 40) return "text-yellow-400";
-  return "text-red-400";
-}
 
 export default function EvalsPage() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [compareA, setCompareA] = useState<string | null>(null);
   const [compareB, setCompareB] = useState<string | null>(null);
+  const [comparisonData, setComparisonData] = useState<{run_a: EvalRun; run_b: EvalRun} | null>(null);
+
+  useEffect(() => {
+    if (compareA && compareB) {
+      compareEvals(compareA, compareB)
+        .then(setComparisonData)
+        .catch(() => setComparisonData(null));
+    } else {
+      setComparisonData(null);
+    }
+  }, [compareA, compareB]);
 
   useEffect(() => {
     fetchAllEvalRuns()
@@ -59,7 +65,7 @@ export default function EvalsPage() {
       </div>
 
       {/* Comparison */}
-      {compareA && compareB && (
+      {comparisonData && (
         <div className="rounded-lg border border-neon-cyan/30 bg-neon-cyan/5 p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-neon-cyan">
@@ -76,11 +82,9 @@ export default function EvalsPage() {
             </button>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            {[compareA, compareB].map((runId) => {
-              const run = runs.find((r) => r.id === runId);
-              if (!run) return null;
+            {[comparisonData.run_a, comparisonData.run_b].map((run) => {
               return (
-                <div key={runId} className="space-y-1">
+                <div key={run.id} className="space-y-1">
                   <div className="text-xs text-foreground/50">
                     {run.started_at
                       ? new Date(run.started_at).toLocaleString()

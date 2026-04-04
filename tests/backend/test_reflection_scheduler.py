@@ -121,7 +121,7 @@ class TestReflectionScheduler:
         mgr.run_weekly_reflection.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_mark_recently_reflected_prevents_duplicate(self):
+    async def test_mark_recently_reflected_fires_after_interval(self):
         scheduler, clock, mgr = self._make_scheduler()
         # Mark as recently reflected
         scheduler.mark_recently_reflected("vera")
