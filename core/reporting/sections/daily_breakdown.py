@@ -87,8 +87,65 @@ def generate_daily_breakdown(
                 round(((last_turns - first_turns) / first_turns) * 100, 1)
             )
 
+    # Day-over-day metric series for #195
+    dod_metrics = _compute_day_over_day_metrics(result_days, agent_turns_by_day)
+
     return {
         "days": result_days,
         "total_days": len(result_days),
         "trends": trends,
+        "day_over_day": dod_metrics,
+    }
+
+
+def _compute_day_over_day_metrics(
+    result_days: list[dict[str, Any]],
+    agent_turns_by_day: dict[str, Counter],
+) -> dict[str, Any]:
+    """Compute day-over-day metric series for comparison reporting."""
+    if len(result_days) < 2:
+        return {}
+
+    # Conversation depth trend
+    turns_series = [d["turns"] / max(d["conversations"], 1) for d in result_days]
+    first_avg = turns_series[0]
+    last_avg = turns_series[-1]
+    depth_trend = "up" if last_avg > first_avg * 1.1 else ("down" if last_avg < first_avg * 0.9 else "flat")
+
+    # Tool diversity trend (cumulative new tools)
+    cumulative_tools: list[int] = []
+    seen: set[str] = set()
+    for d in result_days:
+        for tool in d.get("tools_used", []):
+            seen.add(tool)
+        cumulative_tools.append(len(seen))
+
+    # Cost trajectory
+    cost_series = [Decimal(d["cost"]) for d in result_days]
+    first_cost = cost_series[0]
+    last_cost = cost_series[-1]
+    cost_trend = "up" if last_cost > first_cost * Decimal("1.1") else (
+        "down" if last_cost < first_cost * Decimal("0.9") else "flat"
+    )
+
+    # Agent participation balance (stddev of turns per agent)
+    balance_series = []
+    for d in result_days:
+        day = d["date"]
+        agent_counts = agent_turns_by_day.get(day, Counter())
+        if agent_counts:
+            values = list(agent_counts.values())
+            mean = sum(values) / len(values)
+            variance = sum((v - mean) ** 2 for v in values) / len(values)
+            balance_series.append(round(variance ** 0.5, 1))
+        else:
+            balance_series.append(0)
+
+    return {
+        "avg_turns_per_conversation": turns_series,
+        "depth_trend": depth_trend,
+        "cumulative_tools": cumulative_tools,
+        "cost_series": [str(c) for c in cost_series],
+        "cost_trend": cost_trend,
+        "participation_stddev": balance_series,
     }

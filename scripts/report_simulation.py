@@ -78,6 +78,26 @@ async def run_report(args: argparse.Namespace) -> None:
         )
         report = await reporter.generate(days=days, format=args.format)
 
+        # Append scorecard if requested
+        if args.scorecard:
+            from core.repos.assertion_repo import AssertionRepo
+            from core.reporting.scorecard import LaunchScorecard
+
+            assertion_repo = AssertionRepo(svc.db) if svc.db else None
+            scorecard = LaunchScorecard(
+                db=svc.db,
+                simulation_id=args.simulation_id,
+                assertion_repo=assertion_repo,
+                relationship_repo=svc.relationship_repo,
+            )
+            scorecard_result = await scorecard.evaluate()
+            from core.reporting.timeline_reporter import ReportSection
+
+            report.sections.append(ReportSection(
+                title="Launch Readiness Scorecard",
+                data=scorecard_result.to_dict(),
+            ))
+
         if args.format == "json":
             output = format_json(report)
         elif args.format == "markdown":
@@ -130,6 +150,11 @@ def main() -> None:
         nargs=2,
         metavar=("UUID1", "UUID2"),
         help="Compare two simulation runs side-by-side",
+    )
+    parser.add_argument(
+        "--scorecard",
+        action="store_true",
+        help="Include launch-readiness scorecard in the report",
     )
     parser.add_argument(
         "--output",
