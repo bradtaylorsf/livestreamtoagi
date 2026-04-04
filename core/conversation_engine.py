@@ -98,7 +98,7 @@ class ConversationEngine:
         selection_logger: SelectionLogger,
         speed_multiplier: float = 1.0,
         overseer_enabled: bool = True,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -106,6 +106,7 @@ class ConversationEngine:
         self._llm = llm_client
         self._overseer_enabled = overseer_enabled
         self._overseer = overseer
+        self._simulation_id = simulation_id
         self._context = context_assembler
         self._repo = conversation_repo
         self._archival = archival_memory
@@ -113,7 +114,6 @@ class ConversationEngine:
         self._triggers = trigger_system
         self._selection_logger = selection_logger
         self._speed_multiplier = speed_multiplier
-        self._simulation_id = simulation_id
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -542,7 +542,9 @@ class ConversationEngine:
                     return content
                 conv_id = self._active.id if self._active else None
                 review = await self._overseer.review(
-                    agent.id, content, conversation_id=conv_id,
+                    agent.id, content,
+                    conversation_id=conv_id,
+                    simulation_id=self._simulation_id,
                 )
                 if review.approved:
                     return content
