@@ -562,17 +562,89 @@ async def run_watch(args: argparse.Namespace) -> None:
 
         print_summary(stats)
 
+        # ── Post-simulation reflection ──────────────────────────────
+        reflection_cost = Decimal("0")
+        if getattr(args, "reflect_after", False) and _captured_participants:
+            from core.memory.reflection import ReflectionManager
+
+            reflection_mgr = ReflectionManager(
+                memory_repo=svc.memory_repo,
+                llm_client=svc.llm_client,
+                core_memory_mgr=svc.core_memory,
+                token_counter=svc.token_counter,
+                agent_registry=svc.agent_registry,
+            )
+
+            reflect_type = getattr(args, "reflect_type", "6hour")
+            unique_participants = list(dict.fromkeys(_captured_participants))
+            console.print(
+                f"\n[bold bright_cyan]Running {reflect_type} reflection "
+                f"for {len(unique_participants)} agents...[/bold bright_cyan]"
+            )
+
+            reflection_cost = Decimal("0")
+            reflection_table = Table(
+                show_header=True, border_style="bright_cyan", padding=(0, 1),
+            )
+            reflection_table.add_column("Agent", width=12)
+            reflection_table.add_column("Promoted", width=10, justify="right")
+            reflection_table.add_column("Importance", width=12, justify="right")
+            reflection_table.add_column("Journal", min_width=30)
+
+            for agent_id in unique_participants:
+                try:
+                    if reflect_type == "weekly":
+                        result = await reflection_mgr.run_weekly_reflection(agent_id)
+                    else:
+                        result = await reflection_mgr.run_6hour_reflection(agent_id)
+
+                    color = AGENT_COLORS.get(agent_id, "white")
+                    journal_title = ""
+                    if result.journal_entry:
+                        # Use first line of journal content as title
+                        journal_title = result.journal_entry.content.split("\n")[0][:60]
+
+                    reflection_table.add_row(
+                        f"[{color}]{agent_id}[/{color}]",
+                        str(result.promoted_count),
+                        str(result.importance_updates),
+                        journal_title,
+                    )
+                except Exception:
+                    import traceback
+                    console.print(
+                        f"  [red]Reflection failed for {agent_id}: "
+                        f"{traceback.format_exc().splitlines()[-1]}[/red]"
+                    )
+
+            console.print(Panel(
+                reflection_table,
+                title="Reflection Results",
+                border_style="bright_cyan",
+            ))
+
+            # Capture any additional LLM costs incurred during reflection
+            if hasattr(svc.llm_client, "_total_cost"):
+                post_reflection_cost = Decimal(str(svc.llm_client._total_cost)) - stats.total_cost
+                if post_reflection_cost > 0:
+                    reflection_cost = post_reflection_cost
+                    console.print(f"  [dim]Reflection cost: ${reflection_cost:.6f}[/dim]")
+
         # Finalize simulation record
         if simulation_id:
             from datetime import UTC, datetime
             await sim_repo.update_status(
                 simulation_id, "completed", completed_at=datetime.now(UTC),
             )
+            total_cost = Decimal(str(stats.total_cost))
+            # Include reflection costs if --reflect-after was used
+            if getattr(args, "reflect_after", False):
+                total_cost += reflection_cost
             await sim_repo.increment_stats(
                 simulation_id,
                 conversations=stats.conversations_completed,
                 turns=stats.total_turns,
-                cost=Decimal(str(stats.total_cost)),
+                cost=total_cost,
             )
             console.print(f"\n[bold cyan]Simulation completed:[/bold cyan] {simulation_id}")
     else:
@@ -666,6 +738,18 @@ def main() -> None:
         "--sim-id",
         type=str,
         help="Reuse an existing simulation record by UUID (used by dashboard)",
+    )
+    parser.add_argument(
+        "--reflect-after",
+        action="store_true",
+        help="Run a single reflection cycle for participating agents after the simulation ends",
+    )
+    parser.add_argument(
+        "--reflect-type",
+        type=str,
+        choices=["6hour", "weekly"],
+        default="6hour",
+        help="Which reflection cycle to run (default: 6hour)",
     )
 
     args = parser.parse_args()
