@@ -634,7 +634,9 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
     energy_log = await conv_repo.get_energy_log(conv_id)
     transcript_record = await transcript_repo.get_by_conversation(conv_id)
 
-    total_tokens = None
+    # Estimate tokens from transcript length (cost_events lacks conversation_id)
+    transcript_text = transcript_record.content if transcript_record else ""
+    total_tokens = len(transcript_text) // 4 if transcript_text else 0
 
     return ConversationDetail(
         id=conv.id,
@@ -653,7 +655,7 @@ async def get_conversation(conv_id: uuid_mod.UUID) -> ConversationDetail:
         energy_history=energy_log,
         transcript=transcript_record.content if transcript_record else None,
         total_tokens=total_tokens,
-        total_cost=None,
+        total_cost="0",
     )
 
 

@@ -142,8 +142,8 @@ export interface ConversationDetail {
   location: string | null;
   energy_history: Record<string, unknown>[];
   transcript: string | null;
-  total_tokens: number | null;
-  total_cost: string | null;
+  total_tokens: number;
+  total_cost: string;
 }
 
 export interface TurnDetail {

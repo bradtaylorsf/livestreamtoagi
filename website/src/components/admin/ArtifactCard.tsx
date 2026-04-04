@@ -3,6 +3,7 @@
 import { AGENT_COLORS, STATUS_STYLES, TYPE_ICONS } from "@/lib/artifact-constants";
 import type { AgentArtifact } from "@/types/admin";
 
+
 function getPreview(artifact: AgentArtifact): string {
   const output = artifact.tool_output;
   let text: string;

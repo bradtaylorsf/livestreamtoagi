@@ -319,12 +319,12 @@ export default function ConversationDetailPage() {
             <div>
               <div className="text-foreground/40 mb-0.5">Tokens</div>
               <div className="text-foreground/70">
-                {conv.total_tokens != null ? conv.total_tokens.toLocaleString() : "N/A"}
+                {conv.total_tokens.toLocaleString()}
               </div>
             </div>
             <div>
               <div className="text-foreground/40 mb-0.5">Cost</div>
-              <div className="text-foreground/70">{conv.total_cost != null ? `$${conv.total_cost}` : "N/A"}</div>
+              <div className="text-foreground/70">${conv.total_cost}</div>
             </div>
             <div>
               <div className="text-foreground/40 mb-0.5">Energy</div>

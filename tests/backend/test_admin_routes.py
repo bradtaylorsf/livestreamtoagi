@@ -461,8 +461,8 @@ class TestConversationEndpoints:
         assert data["trigger_type"] == "idle"
         assert data["participating_agents"] == ["vera", "rex"]
         assert data["energy_history"] == []
-        assert data["total_tokens"] is None
-        assert data["total_cost"] is None
+        assert data["total_tokens"] == 0
+        assert data["total_cost"] == "0"
 
     def test_get_conversation_not_found(self, mock_app):
         client, mock_db, _ = mock_app

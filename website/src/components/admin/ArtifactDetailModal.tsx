@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { AGENT_COLORS, STATUS_STYLES, TYPE_ICONS } from "@/lib/artifact-constants";
 import type { AgentArtifact } from "@/types/admin";
 
+
 function getInput(artifact: AgentArtifact): Record<string, unknown> {
   return artifact.tool_input ?? {};
 }

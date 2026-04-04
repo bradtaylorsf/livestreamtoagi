@@ -848,8 +848,8 @@ class ConversationDetail(BaseModel):
     location: str | None = None
     energy_history: list[dict[str, Any]] = []
     transcript: str | None = None
-    total_tokens: int | None = None
-    total_cost: str | None = None
+    total_tokens: int = 0
+    total_cost: str = "0"
 
 
 class TurnDetail(BaseModel):
