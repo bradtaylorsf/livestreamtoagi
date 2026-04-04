@@ -79,7 +79,10 @@ class AssertionRepo:
             simulation_id,
         )
         if row is None:
-            return {"passed": 0, "failed_error": 0, "failed_warning": 0, "failed_info": 0, "total": 0}
+            return {
+                "passed": 0, "failed_error": 0, "failed_warning": 0,
+                "failed_info": 0, "total": 0,
+            }
         return dict(row)
 
     @staticmethod

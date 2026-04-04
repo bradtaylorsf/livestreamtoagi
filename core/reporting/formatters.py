@@ -13,7 +13,7 @@ def format_terminal(report: Report) -> str:
     """Format report for terminal output with Rich-compatible markup."""
     lines: list[str] = []
     lines.append(f"\n{'=' * 60}")
-    lines.append(f"  SIMULATION TIMELINE REPORT")
+    lines.append("  SIMULATION TIMELINE REPORT")
     lines.append(f"  {report.simulation_name} ({report.simulation_id})")
     lines.append(f"{'=' * 60}\n")
 
@@ -32,11 +32,11 @@ def format_json(report: Report) -> str:
 def format_markdown(report: Report) -> str:
     """Format report as a markdown document."""
     lines: list[str] = []
-    lines.append(f"# Simulation Timeline Report")
-    lines.append(f"")
+    lines.append("# Simulation Timeline Report")
+    lines.append("")
     lines.append(f"**Simulation:** {report.simulation_name}")
     lines.append(f"**ID:** {report.simulation_id}")
-    lines.append(f"")
+    lines.append("")
 
     for section in report.sections:
         lines.append(f"## {section.title}")
@@ -52,7 +52,7 @@ def format_comparison_terminal(report: ComparisonReport) -> str:
     data = report.to_dict()
     lines: list[str] = []
     lines.append(f"\n{'=' * 60}")
-    lines.append(f"  SIMULATION COMPARISON")
+    lines.append("  SIMULATION COMPARISON")
     lines.append(f"{'=' * 60}\n")
 
     a = data.get("simulation_a", {})
@@ -62,10 +62,28 @@ def format_comparison_terminal(report: ComparisonReport) -> str:
     lines.append(f"  {'Metric':<25} {'Run A':<15} {'Run B':<15} {'Delta':<10}")
     lines.append(f"  {'-' * 65}")
 
-    lines.append(f"  {'Name':<25} {a.get('name', ''):<15} {b.get('name', ''):<15}")
-    lines.append(f"  {'Total Cost':<25} ${a.get('total_cost', '0'):<14} ${b.get('total_cost', '0'):<14} {comp.get('cost_delta', '0')}")
-    lines.append(f"  {'Conversations':<25} {a.get('total_conversations', 0):<15} {b.get('total_conversations', 0):<15} {comp.get('conversation_delta', 0)}")
-    lines.append(f"  {'Avg Turns':<25} {a.get('avg_turns', 0):<15} {b.get('avg_turns', 0):<15} {comp.get('turns_delta', 0)}")
+    name_a = a.get("name", "")
+    name_b = b.get("name", "")
+    cost_a = a.get("total_cost", "0")
+    cost_b = b.get("total_cost", "0")
+    conv_a = a.get("total_conversations", 0)
+    conv_b = b.get("total_conversations", 0)
+    turns_a = a.get("avg_turns", 0)
+    turns_b = b.get("avg_turns", 0)
+
+    lines.append(f"  {'Name':<25} {name_a:<15} {name_b:<15}")
+    lines.append(
+        f"  {'Total Cost':<25} ${cost_a:<14} ${cost_b:<14} "
+        f"{comp.get('cost_delta', '0')}"
+    )
+    lines.append(
+        f"  {'Conversations':<25} {conv_a:<15} {conv_b:<15} "
+        f"{comp.get('conversation_delta', 0)}"
+    )
+    lines.append(
+        f"  {'Avg Turns':<25} {turns_a:<15} {turns_b:<15} "
+        f"{comp.get('turns_delta', 0)}"
+    )
 
     return "\n".join(lines)
 

@@ -116,7 +116,9 @@ class TimelineReporter:
         # 1. Executive Summary
         report.sections.append(ReportSection(
             title="Executive Summary",
-            data=generate_executive_summary(sim, conversations, cost_events, artifacts, overseer_log),
+            data=generate_executive_summary(
+                sim, conversations, cost_events, artifacts, overseer_log,
+            ),
         ))
 
         # 2. Daily Breakdown

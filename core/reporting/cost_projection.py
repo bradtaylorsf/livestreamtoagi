@@ -22,7 +22,9 @@ class CostProjection:
         return {
             "weekly_estimate": str(self.weekly_estimate),
             "monthly_estimate": str(self.monthly_estimate),
-            "cost_per_1k_conversations": str(self.cost_per_1k_conversations) if self.cost_per_1k_conversations else None,
+            "cost_per_1k_conversations": (
+                str(self.cost_per_1k_conversations) if self.cost_per_1k_conversations else None
+            ),
             "growth_rate_pct": round(self.growth_rate, 1),
             "is_sustainable": self.is_sustainable,
             "warnings": self.warnings,

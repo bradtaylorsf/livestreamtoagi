@@ -56,7 +56,7 @@ async def run_restore(args: argparse.Namespace) -> None:
             clear_first=args.clear_first,
         )
 
-        print(f"Restore complete:")
+        print("Restore complete:")
         print(f"  Agents: {result.agents_restored}")
         print(f"  Core memories: {result.core_memories_restored}")
         print(f"  Recall memories: {result.recall_memories_restored}")

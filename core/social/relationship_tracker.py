@@ -156,8 +156,14 @@ class RelationshipTracker:
             existing = await self._repo.get(
                 self._simulation_id, from_id, to_id,
             )
-            old_sentiment = float(existing.sentiment_score) if existing and existing.sentiment_score else None
-            old_trust = float(existing.trust_score) if existing and existing.trust_score else None
+            old_sentiment = (
+                float(existing.sentiment_score)
+                if existing and existing.sentiment_score else None
+            )
+            old_trust = (
+                float(existing.trust_score)
+                if existing and existing.trust_score else None
+            )
 
             await self._repo.upsert(
                 self._simulation_id,

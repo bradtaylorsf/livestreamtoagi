@@ -80,8 +80,8 @@ async def run_report(args: argparse.Namespace) -> None:
 
         # Append scorecard if requested
         if args.scorecard:
-            from core.repos.assertion_repo import AssertionRepo
             from core.reporting.scorecard import LaunchScorecard
+            from core.repos.assertion_repo import AssertionRepo
 
             assertion_repo = AssertionRepo(svc.db) if svc.db else None
             scorecard = LaunchScorecard(
