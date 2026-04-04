@@ -19,11 +19,18 @@ from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
 from core.models import ConversationCreate
 from core.speech_parser import parse_speech
+from core.tool_executor import (
+    MAX_TOOL_ROUNDS,
+    build_agent_tools,
+    execute_tool_calls,
+    tools_to_openai_schema,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from core.agent_registry import AgentRegistry
+    from core.bootstrap import Services
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
     from core.conversation.proximity import ProximityManager
@@ -37,6 +44,7 @@ if TYPE_CHECKING:
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
+    from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +114,7 @@ class ConversationEngine:
         speed_multiplier: float = 1.0,
         overseer_enabled: bool = True,
         simulation_id: uuid.UUID | None = None,
+        services: Services | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -124,6 +133,7 @@ class ConversationEngine:
         self._triggers = trigger_system
         self._selection_logger = selection_logger
         self._speed_multiplier = speed_multiplier
+        self._services = services
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -133,6 +143,9 @@ class ConversationEngine:
         self._active: _ActiveConversation | None = None
         self._running = False
         self._last_llm_meta: dict[str, Any] | None = None
+
+        # Per-agent tool cache — lazily built on first use
+        self._tool_cache: dict[str, dict[str, BaseTool]] = {}
 
     # ── Properties ─────────────────────────────────────────────
 
@@ -578,6 +591,24 @@ class ConversationEngine:
                 exc_info=True,
             )
 
+    # ── Tool support ────────────────────────────────────────────
+
+    def _get_tools_for_agent(self, agent_id: str) -> dict[str, BaseTool] | None:
+        """Lazily build and cache a tool set for the given agent.
+
+        Returns None if services were not provided (tools disabled).
+        """
+        if self._services is None:
+            return None
+        if agent_id not in self._tool_cache:
+            self._tool_cache[agent_id] = build_agent_tools(agent_id, self._services)
+            logger.debug(
+                "Built %d tools for agent %s",
+                len(self._tool_cache[agent_id]),
+                agent_id,
+            )
+        return self._tool_cache[agent_id]
+
     # ── Turn generation ────────────────────────────────────────
 
     async def _generate_turn(
@@ -593,6 +624,10 @@ class ConversationEngine:
         """
         conv_history = history or []
 
+        # Build tool schemas if tools are available for this agent
+        agent_tools = self._get_tools_for_agent(agent.id)
+        openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
+
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
@@ -602,12 +637,76 @@ class ConversationEngine:
                     prompt_hint=prompt_hint,
                 )
 
-                # Call LLM
-                response = await self._llm.complete(
-                    messages=messages,
-                    model=agent.model_conversation,
-                    agent_id=agent.id,
-                )
+                # Call LLM (with tool-call loop)
+                total_input_tokens = 0
+                total_output_tokens = 0
+                total_cost = 0.0
+                total_latency_ms = 0
+
+                for _tool_round in range(MAX_TOOL_ROUNDS + 1):
+                    response = await self._llm.complete(
+                        messages=messages,
+                        model=agent.model_conversation,
+                        agent_id=agent.id,
+                        tools=openai_tools,
+                    )
+
+                    total_input_tokens += response.input_tokens
+                    total_output_tokens += response.output_tokens
+                    total_cost += float(response.estimated_cost)
+                    total_latency_ms += response.latency_ms
+
+                    # No tool calls — we have the final text response
+                    if not response.tool_calls or not agent_tools:
+                        break
+
+                    # Execute tool calls
+                    logger.info(
+                        "Agent %s requested %d tool call(s): %s",
+                        agent.id,
+                        len(response.tool_calls),
+                        [tc.name for tc in response.tool_calls],
+                    )
+                    conv_id = self._active.id if self._active else None
+
+                    # Append assistant message with tool calls
+                    import json as _json
+
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": response.content or "",
+                    }
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": _json.dumps(
+                                    tc.arguments, default=str
+                                ),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    messages.append(assistant_msg)
+
+                    # Execute tools and append results
+                    tool_results = await execute_tool_calls(
+                        response.tool_calls,
+                        agent_tools,
+                        agent.id,
+                        simulation_id=self._simulation_id,
+                        conversation_id=conv_id,
+                    )
+                    messages.extend(tool_results)
+                else:
+                    logger.warning(
+                        "Max tool rounds (%d) reached for %s",
+                        MAX_TOOL_ROUNDS,
+                        agent.id,
+                    )
+
                 content = response.content.strip()
 
                 # Empty response — retry
@@ -620,13 +719,13 @@ class ConversationEngine:
                     )
                     continue
 
-                # Save token/cost metadata from this call
+                # Save token/cost metadata (accumulated across tool rounds)
                 self._last_llm_meta = {
                     "model": response.model,
-                    "input_tokens": response.input_tokens,
-                    "output_tokens": response.output_tokens,
-                    "cost": float(response.estimated_cost),
-                    "latency_ms": response.latency_ms,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "cost": total_cost,
+                    "latency_ms": total_latency_ms,
                 }
 
                 # Overseer review (can be disabled for testing)

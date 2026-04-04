@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from core.agent_registry import AgentRegistry
+    from core.bootstrap import Services
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
     from core.conversation.proximity import ProximityManager
@@ -141,6 +142,7 @@ class SimulationOrchestrator:
         memory_repo: MemoryRepo | None = None,
         embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         display: SimulationDisplay,
+        services: Services | None = None,
     ) -> None:
         self._config = config
         self._db = db
@@ -162,6 +164,7 @@ class SimulationOrchestrator:
         self._selection_logger = selection_logger
         self._reflection = reflection_manager
         self._display = display
+        self._services = services
 
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
@@ -209,6 +212,7 @@ class SimulationOrchestrator:
             simulation_id=sim.id,
             agents=self._config.agents,
             dry_run=self._config.dry_run,
+            services=self._services,
         )
 
         phases = self._config.phases

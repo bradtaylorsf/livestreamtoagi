@@ -405,6 +405,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         embedding_fn=embedding_fn,
         speed_multiplier=speed,
         overseer_enabled=overseer_enabled,
+        services=svc,
         # simulation_id is set later after sim record is created/attached
     )
 
