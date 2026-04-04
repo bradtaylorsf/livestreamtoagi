@@ -36,6 +36,80 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── Live display helpers (Rich output during simulation) ─────
+
+_AGENT_STYLES: dict[str, str] = {
+    "vera": "bright_magenta",
+    "rex": "bright_green",
+    "aurora": "bright_cyan",
+    "pixel": "bright_yellow",
+    "fork": "bright_red",
+    "sentinel": "blue",
+    "grok": "dark_orange",
+    "overseer": "bright_white",
+    "alpha": "grey70",
+}
+
+
+def _display_agent_speak(agent_id: str, data: dict) -> None:
+    """Print agent dialogue line to terminal."""
+    from core.simulation.display import console
+
+    color = _AGENT_STYLES.get(agent_id, "white")
+    # Prefer parsed dialogue over raw content for cleaner display
+    text = data.get("dialogue") or data.get("content", "")
+    actions = data.get("actions", [])
+    preview = text[:300] + "..." if len(text) > 300 else text
+    cost = data.get("cost", 0)
+    tokens = data.get("input_tokens", 0) + data.get("output_tokens", 0)
+
+    # Show actions (stage directions) if present
+    if actions:
+        action_str = " ".join(f"*{a}*" for a in actions)
+        console.print(f"       [dim]{'':>10}  {action_str}[/dim]")
+
+    console.print(
+        f"       [{color}]{agent_id:>10}[/{color}]  "
+        f"{preview}"
+    )
+    console.print(
+        f"       [dim]{'':>10}  "
+        f"${float(cost):.4f} | {tokens:,} tokens[/dim]"
+    )
+
+
+def _display_overseer_flag(data: dict) -> None:
+    """Print overseer flag event."""
+    from core.simulation.display import console
+
+    agent = data.get("agent_id", "?")
+    severity = data.get("severity", "?")
+    reason = data.get("reason", "")[:100]
+    console.print(
+        f"       [yellow]  OVERSEER[/yellow]  "
+        f"flagged {agent} (severity {severity}): {reason}"
+    )
+
+
+def _display_artifact(data: dict) -> None:
+    """Print tool/artifact creation event."""
+    from core.simulation.display import console
+
+    agent = data.get("agent_id", "?")
+    tool = data.get("tool_name", data.get("artifact_type", "?"))
+    status = data.get("status", "ok")
+    color = _AGENT_STYLES.get(agent, "white")
+    if status in ("executed", "success"):
+        status_color = "green"
+    elif status == "failed":
+        status_color = "red"
+    else:
+        status_color = "yellow"
+    console.print(
+        f"       [{color}]{'':>10}[/{color}]  "
+        f"[dim]tool:[/dim] {tool} [{status_color}]{status}[/{status_color}]"
+    )
+
 
 class PhaseType(enum.StrEnum):
     scheduled = "scheduled"
@@ -349,12 +423,18 @@ class PhaseRunner:
             agent_id = data.get("agent_id")
             if agent_id:
                 agents_in_conv.add(agent_id)
+            # Live display of agent dialogue
+            _display_agent_speak(agent_id or "?", data)
 
         async def _on_overseer(event: dict) -> None:
             self._phase_overseer_flags += 1
+            data = event.get("data", event)
+            _display_overseer_flag(data)
 
         async def _on_artifact(event: dict) -> None:
             self._phase_artifacts += 1
+            data = event.get("data", event)
+            _display_artifact(data)
 
         self._event_bus.on("agent_speak", _on_speak)
         self._event_bus.on("overseer_shadow", _on_overseer)

@@ -37,10 +37,18 @@ async def run_simulation(args: argparse.Namespace) -> None:
     """Main async entry point."""
     verbose = getattr(args, "verbose", False)
     logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.WARNING,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(asctime)s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # Only enable DEBUG on our modules — silence noisy HTTP libraries
+    if verbose:
+        for module in ("core", "tools", "scripts"):
+            logging.getLogger(module).setLevel(logging.DEBUG)
+    # Always silence HTTP-level noise (httpcore, httpx, asyncpg, urllib3)
+    for noisy in ("httpcore", "httpx", "asyncpg", "urllib3", "hpack", "asyncio"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     from core.bootstrap import bootstrap_services, shutdown_services
     from core.conversation.proximity import ProximityManager
