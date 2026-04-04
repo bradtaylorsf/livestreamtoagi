@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
+    from core.simulation.clock import SimulationClock
     from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ class ConversationEngine:
         overseer_enabled: bool = True,
         simulation_id: uuid.UUID | None = None,
         services: Services | None = None,
+        clock: SimulationClock | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -131,6 +133,7 @@ class ConversationEngine:
         self._selection_logger = selection_logger
         self._speed_multiplier = speed_multiplier
         self._services = services
+        self._clock = clock
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -793,10 +796,20 @@ class ConversationEngine:
         return mapping.get(trigger_type)
 
     async def _sleep(self, seconds: float) -> None:
-        """Sleep with speed multiplier applied. 0 = no sleep."""
-        if self._speed_multiplier == 0:
-            return
-        adjusted = seconds * self._speed_multiplier
+        """Sleep with speed multiplier applied. 0 = no sleep.
+
+        When a SimulationClock is attached, uses inverse of its speed_multiplier
+        (faster sim = shorter real sleep). Falls back to the raw
+        speed_multiplier attribute with original semantics for backward compat.
+        """
+        if self._clock is not None:
+            if self._clock.speed_multiplier == 0:
+                return
+            adjusted = seconds / self._clock.speed_multiplier
+        else:
+            if self._speed_multiplier == 0:
+                return
+            adjusted = seconds * self._speed_multiplier
         if adjusted > 0:
             await asyncio.sleep(adjusted)
 

@@ -66,6 +66,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         agents=agents,
         max_cost=args.max_cost,
         speed=args.speed,
+        speed_multiplier=args.speed_multiplier,
         dry_run=args.dry_run,
         verbose=verbose,
         overseer_shadow=args.overseer_shadow,
@@ -188,6 +189,12 @@ def main() -> None:
         choices=["fast", "normal"],
         default="fast",
         help="Simulation speed (fast=skip idle, normal=real pacing)",
+    )
+    parser.add_argument(
+        "--speed-multiplier",
+        type=float,
+        default=0,
+        help="Simulated clock speed (0=instant/legacy, 42=42x speed, 1=real-time)",
     )
     parser.add_argument(
         "--overseer-shadow",
