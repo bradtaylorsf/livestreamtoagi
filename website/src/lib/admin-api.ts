@@ -12,13 +12,17 @@ import type {
   ConversationDetail,
   CoreMemoryResponse,
   DashboardStats,
+  InterruptEvent,
   JournalEntry,
+  OverseerFlag,
   PaginatedResponse,
   RecallMemory,
+  SelectionLog,
   Simulation,
   SimulationCostResponse,
   SystemPromptResponse,
   TimelineEvent,
+  TurnDetail,
 } from "@/types/admin";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -177,6 +181,44 @@ export async function fetchSimulationCosts(
 
 export async function fetchConversation(id: string): Promise<ConversationDetail> {
   return request<ConversationDetail>(`/api/admin/conversations/${id}`);
+}
+
+export async function fetchConversationTurns(
+  id: string,
+): Promise<TurnDetail[]> {
+  return request<TurnDetail[]>(`/api/admin/conversations/${id}/turns`);
+}
+
+export async function fetchConversationSelectionLog(
+  id: string,
+): Promise<SelectionLog[]> {
+  return request<SelectionLog[]>(
+    `/api/admin/conversations/${id}/selection-log`,
+  );
+}
+
+export async function fetchConversationOverseerFlags(
+  id: string,
+): Promise<OverseerFlag[]> {
+  return request<OverseerFlag[]>(
+    `/api/admin/conversations/${id}/overseer-flags`,
+  );
+}
+
+export async function fetchConversationInterrupts(
+  id: string,
+): Promise<InterruptEvent[]> {
+  return request<InterruptEvent[]>(
+    `/api/admin/conversations/${id}/interrupts`,
+  );
+}
+
+export async function fetchConversationArtifacts(
+  id: string,
+): Promise<AgentArtifact[]> {
+  return request<AgentArtifact[]>(
+    `/api/admin/conversations/${id}/artifacts`,
+  );
 }
 
 export async function fetchSimulationConversations(
