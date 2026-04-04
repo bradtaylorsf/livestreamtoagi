@@ -782,3 +782,83 @@ class TestSimulationDisplayNew:
     def test_show_reflection_triggered_no_crash(self):
         d = SimulationDisplay()
         d.show_reflection_triggered("vera", "6hour", datetime(2026, 1, 5, 15, 0))
+
+
+# ── Awakening seed file tests ─────────────────────────────────
+
+
+class TestAwakeningSeedFile:
+    def _load_awakening(self) -> SimulationConfig:
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "awakening.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/awakening.yaml not found")
+        config = SimulationConfig(
+            name="awakening-test",
+            seed_file=seed_path,
+            agents=["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"],
+        )
+        config.load_seed_file()
+        return config
+
+    def test_awakening_has_9_phases(self):
+        config = self._load_awakening()
+        assert len(config.phases) == 9
+
+    def test_awakening_phase_names(self):
+        config = self._load_awakening()
+        names = [p.name for p in config.phases]
+        assert names == [
+            "first_contact",
+            "first_standup",
+            "mission_briefing",
+            "first_project_discussion",
+            "first_tool_usage",
+            "audience_welcome",
+            "budget_check",
+            "first_reflection",
+            "evening_wrapup",
+        ]
+
+    def test_awakening_phase_types(self):
+        config = self._load_awakening()
+        types = [p.type for p in config.phases]
+        assert types == [
+            PhaseType.organic,
+            PhaseType.scheduled,
+            PhaseType.scheduled,
+            PhaseType.organic,
+            PhaseType.organic,
+            PhaseType.audience_sim,
+            PhaseType.tool_exercise,
+            PhaseType.reflection,
+            PhaseType.organic,
+        ]
+
+    def test_awakening_first_standup_requires_vera(self):
+        config = self._load_awakening()
+        standup = config.phases[1]
+        assert "vera" in standup.required_agents
+
+    def test_awakening_project_discussion_requires_key_agents(self):
+        config = self._load_awakening()
+        discussion = config.phases[3]
+        assert set(discussion.required_agents) == {"rex", "aurora", "fork"}
+
+    def test_awakening_audience_sim_has_messages(self):
+        config = self._load_awakening()
+        audience = config.phases[5]
+        messages = audience.config.get("messages", [])
+        assert len(messages) == 3
+
+    def test_awakening_budget_check_uses_sentinel(self):
+        config = self._load_awakening()
+        budget = config.phases[6]
+        assert budget.config.get("agent") == "sentinel"
+        assert budget.config.get("tool") == "get_revenue_status"
+
+    def test_awakening_reflection_is_6hour(self):
+        config = self._load_awakening()
+        reflection = config.phases[7]
+        assert reflection.config.get("reflection_type") == "6hour"
