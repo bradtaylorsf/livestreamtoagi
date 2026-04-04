@@ -988,3 +988,34 @@ class RelationshipUpdate(BaseModel):
     trust_score: Decimal | None = None
     interaction_count: int | None = None
     relationship_summary: str | None = None
+
+
+# ── Phase Assertions ───────────────────────────────────────────
+
+
+class AssertionResult(BaseModel):
+    """Outcome of a single assertion check."""
+
+    name: str
+    passed: bool
+    expected: Any = None
+    actual: Any = None
+    severity: str = "warning"  # "error", "warning", "info"
+    error_message: str | None = None
+
+
+class AssertionDefinition(BaseModel):
+    """Definition of an assertion from seed YAML or config."""
+
+    type: str  # conversation, tool, memory, relationship, cost, safety
+    severity: str = "warning"
+    # Type-specific fields
+    min_turns: int | None = None
+    required_participants: list[str] | None = None
+    any_of: list[str] | None = None
+    all_of: list[str] | None = None
+    recall_created: bool | None = None
+    core_memory_updated: bool | None = None
+    max_cost: float | None = None
+    max_overseer_severity: int | None = None
+    interaction_count_increased: bool | None = None

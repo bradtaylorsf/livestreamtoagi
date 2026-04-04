@@ -70,6 +70,7 @@ class PhaseResult:
     overseer_flags: int = 0
     errors: list[str] = field(default_factory=list)
     agents_participated: list[str] = field(default_factory=list)
+    assertions: list[Any] = field(default_factory=list)
 
 
 class PhaseRunner:

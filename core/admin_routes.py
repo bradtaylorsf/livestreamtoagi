@@ -903,6 +903,24 @@ async def get_agent_relationship_detail(
     return data
 
 
+@router.get("/simulations/{sim_id}/assertions")
+async def get_simulation_assertions(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
+    """All assertion results for a simulation."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+    repo = AssertionRepo(db)
+    return await repo.get_by_simulation(sim_id)
+
+
+@router.get("/simulations/{sim_id}/assertions/summary")
+async def get_simulation_assertions_summary(sim_id: uuid_mod.UUID) -> dict[str, Any]:
+    """Pass/fail/warn summary for simulation assertions."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+    repo = AssertionRepo(db)
+    return await repo.get_pass_rates(sim_id)
+
+
 @router.get("/simulations/{sim_id}/social-graph")
 async def get_social_graph(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
     """Full relationship matrix for a simulation."""
