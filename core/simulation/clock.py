@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-
 # Default simulation start: Monday 9:00 AM UTC
-_DEFAULT_START = datetime(2026, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+_DEFAULT_START = datetime(2026, 1, 5, 9, 0, 0, tzinfo=UTC)
 
 
 class SimulationClock:

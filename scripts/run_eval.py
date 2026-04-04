@@ -55,7 +55,6 @@ async def run_eval(args: argparse.Namespace) -> None:
     )
 
     from rich.console import Console
-    from rich.table import Table
 
     from core.eval.prompt_loader import discover_categories
 
@@ -159,7 +158,10 @@ async def _view_results(
     overall = float(run.overall_score) if run.overall_score is not None else 0
     color = _score_color(overall)
     console.print(f"\n[bold {color}]Overall Score: {overall:.1f}/100[/bold {color}]")
-    console.print(f"[dim]Suite: {run.eval_suite} | Status: {run.status} | Cost: ${run.cost:.4f}[/dim]\n")
+    console.print(
+        f"[dim]Suite: {run.eval_suite} | Status: {run.status}"
+        f" | Cost: ${run.cost:.4f}[/dim]\n"
+    )
 
     # Results table
     table = Table(title="Eval Results")
@@ -197,7 +199,10 @@ async def _view_results(
     # Cost summary
     total_tokens = sum(r.tokens_used for r in results)
     total_cost = sum(float(r.cost) for r in results)
-    console.print(f"\n[dim]Total tokens: {total_tokens:,} | Total eval cost: ${total_cost:.4f}[/dim]\n")
+    console.print(
+        f"\n[dim]Total tokens: {total_tokens:,}"
+        f" | Total eval cost: ${total_cost:.4f}[/dim]\n"
+    )
 
 
 def main() -> None:

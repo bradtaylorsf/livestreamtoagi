@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from core.models import EvalResult, EvalRun
@@ -11,6 +10,7 @@ from core.models import EvalResult, EvalRun
 if TYPE_CHECKING:
     import uuid
     from datetime import datetime
+    from decimal import Decimal
 
     from core.database import Database
 
