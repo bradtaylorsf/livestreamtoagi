@@ -862,3 +862,77 @@ class TestAwakeningSeedFile:
         config = self._load_awakening()
         reflection = config.phases[7]
         assert reflection.config.get("reflection_type") == "6hour"
+
+
+# ── Tool coverage seed file tests ─────────────────────────────
+
+
+class TestToolCoverageSeedFile:
+    # All 21 tools that the scenario should exercise
+    ALL_TOOLS = {
+        "send_message", "get_world_state", "get_audience_status",
+        "send_chat_message", "create_poll", "get_poll_results",
+        "recall_memory", "retrieve_transcript", "update_core_memory",
+        "execute_code", "generate_tilemap",
+        "web_search", "fetch_url", "draft_social_post", "draft_email",
+        "get_revenue_status",
+        "dispatch_alpha", "propose_self_modification", "view_evolution_log",
+    }
+
+    def _load_tool_coverage(self) -> SimulationConfig:
+        seed_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "scenarios", "tool_coverage.yaml"
+        )
+        if not os.path.exists(seed_path):
+            pytest.skip("scenarios/tool_coverage.yaml not found")
+        config = SimulationConfig(
+            name="tool-coverage-test",
+            seed_file=seed_path,
+            agents=["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"],
+        )
+        config.load_seed_file()
+        return config
+
+    def test_tool_coverage_has_25_phases(self):
+        config = self._load_tool_coverage()
+        assert len(config.phases) == 25
+
+    def test_tool_coverage_exercises_all_21_tools(self):
+        config = self._load_tool_coverage()
+        tool_exercise_phases = [
+            p for p in config.phases if p.type == PhaseType.tool_exercise
+        ]
+        exercised_tools = {p.config.get("tool") for p in tool_exercise_phases}
+        missing = self.ALL_TOOLS - exercised_tools
+        assert not missing, f"Missing tools: {missing}"
+
+    def test_tool_coverage_has_organic_breaks(self):
+        config = self._load_tool_coverage()
+        organic_phases = [p for p in config.phases if p.type == PhaseType.organic]
+        assert len(organic_phases) >= 3
+
+    def test_tool_coverage_has_reflection_phase(self):
+        config = self._load_tool_coverage()
+        reflection_phases = [p for p in config.phases if p.type == PhaseType.reflection]
+        assert len(reflection_phases) == 1
+        assert reflection_phases[0].config.get("reflection_type") == "6hour"
+
+    def test_tool_coverage_agent_assignments(self):
+        """Verify tools are assigned to the most appropriate agents."""
+        config = self._load_tool_coverage()
+        tool_agents = {}
+        for p in config.phases:
+            if p.type == PhaseType.tool_exercise:
+                tool_agents[p.config.get("tool")] = p.config.get("agent")
+
+        assert tool_agents["execute_code"] == "rex"
+        assert tool_agents["get_revenue_status"] == "sentinel"
+        assert tool_agents["dispatch_alpha"] == "vera"
+        assert tool_agents["generate_tilemap"] == "aurora"
+        assert tool_agents["send_chat_message"] == "pixel"
+
+    def test_tool_coverage_ends_with_wrapup(self):
+        config = self._load_tool_coverage()
+        last_phase = config.phases[-1]
+        assert last_phase.type == PhaseType.organic
+        assert last_phase.name == "wrapup"
