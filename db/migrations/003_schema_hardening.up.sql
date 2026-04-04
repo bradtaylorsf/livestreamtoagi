@@ -34,11 +34,17 @@ ALTER TABLE world_events ALTER COLUMN description SET NOT NULL;
 -- 3. Add CHECK constraints on status columns
 -- ============================================================
 
-ALTER TABLE agents ADD CONSTRAINT chk_agents_status
-    CHECK (status IN ('active', 'sleeping', 'paused', 'muted'));
-
-ALTER TABLE challenges ADD CONSTRAINT chk_challenges_status
-    CHECK (status IN ('pending', 'active', 'completed', 'failed'));
-
-ALTER TABLE expansion_proposals ADD CONSTRAINT chk_proposals_status
-    CHECK (status IN ('proposed', 'approved', 'rejected', 'built'));
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_agents_status') THEN
+        ALTER TABLE agents ADD CONSTRAINT chk_agents_status
+            CHECK (status IN ('active', 'sleeping', 'paused', 'muted'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_challenges_status') THEN
+        ALTER TABLE challenges ADD CONSTRAINT chk_challenges_status
+            CHECK (status IN ('pending', 'active', 'completed', 'failed'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_proposals_status') THEN
+        ALTER TABLE expansion_proposals ADD CONSTRAINT chk_proposals_status
+            CHECK (status IN ('proposed', 'approved', 'rejected', 'built'));
+    END IF;
+END $$;

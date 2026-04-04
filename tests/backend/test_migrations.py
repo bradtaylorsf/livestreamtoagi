@@ -94,24 +94,14 @@ async def test_migration_idempotent(conn):
 @pytest.mark.integration
 async def test_rollback(conn):
     await up(conn)
-    # Roll back simulations table
-    await down(conn)
-    # Roll back artifacts table
-    await down(conn)
-    # Roll back overseer shadow log
-    await down(conn)
-    # Roll back self-modification fields
-    await down(conn)
-    # Roll back energy change log
-    await down(conn)
-    # Roll back reflection tables
-    await down(conn)
-    # Roll back schema hardening
-    await down(conn)
-    # Roll back seed data
-    await down(conn)
-    # Roll back initial schema
-    await down(conn)
+    # Roll back all migrations in reverse order
+    # Get current version to know how many times to call down()
+    row = await conn.fetchrow(
+        "SELECT MAX(version) as v FROM schema_migrations"
+    )
+    num_migrations = row["v"] if row and row["v"] else 0
+    for _ in range(num_migrations):
+        await down(conn)
 
     rows = await conn.fetch(
         "SELECT table_name FROM information_schema.tables "
