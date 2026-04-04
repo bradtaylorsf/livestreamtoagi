@@ -63,6 +63,11 @@ def _make_embedding_fn(
     http_client: httpx.AsyncClient, api_key: str,
 ) -> EmbeddingFn:
     """Create an embedding function using the real OpenRouter API."""
+    if not api_key:
+        logger.warning(
+            "OPENROUTER_API_KEY not set — recall memory embeddings will fail",
+        )
+
     from core.memory.embeddings import generate_embedding
 
     async def embedding_fn(text: str) -> list[float]:
