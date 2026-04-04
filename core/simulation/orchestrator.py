@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import SimulationCreate, SimulationStatus
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
@@ -194,6 +195,24 @@ class SimulationOrchestrator:
 
         self._display.show_simulation_start(sim, self._config)
 
+        # Build reflection scheduler from config (if available)
+        reflection_kwargs: dict[str, int] = {}
+        try:
+            rc = self._config_loader.config.reflection
+            if hasattr(rc, "six_hour_interval_hours") and isinstance(
+                rc.six_hour_interval_hours, int
+            ):
+                reflection_kwargs = {
+                    "six_hour_interval_hours": rc.six_hour_interval_hours,
+                    "daily_hour": rc.daily_hour,
+                    "weekly_day": rc.weekly_day,
+                }
+        except (AttributeError, TypeError):
+            pass  # Use defaults
+        reflection_scheduler = ReflectionScheduler(
+            self.clock, self._reflection, **reflection_kwargs
+        )
+
         # Build phase runner
         runner = PhaseRunner(
             config_loader=self._config_loader,
@@ -247,6 +266,24 @@ class SimulationOrchestrator:
 
                 self._total_cost += result.cost
                 self._display.show_phase_complete(result, phase.name)
+
+                # Mark explicit reflection phases to prevent scheduler duplicates
+                if phase.type == PhaseType.reflection:
+                    for agent_id in self._config.agents:
+                        reflection_scheduler.mark_recently_reflected(agent_id)
+
+                # Run auto-scheduled reflections after each phase
+                if not self._config.dry_run:
+                    reflection_results = await reflection_scheduler.check_and_run_all(
+                        self._config.agents
+                    )
+                    for rr in reflection_results:
+                        if rr.journal_entry:
+                            self._display.show_reflection_triggered(
+                                rr.journal_entry.agent_id,
+                                rr.journal_entry.reflection_type,
+                                self.clock.now(),
+                            )
 
                 # Check cost limit
                 if not self._config.dry_run:

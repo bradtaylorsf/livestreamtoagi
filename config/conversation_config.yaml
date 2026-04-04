@@ -200,6 +200,12 @@ adjacency:
     rex: 0.4
     sentinel: 0.5
 
+# ─── Reflection scheduling ──────────────────────────
+reflection:
+  six_hour_interval_hours: 6       # simulated hours between 6-hour reflections
+  daily_hour: 23                   # simulated hour for end-of-day reflection
+  weekly_day: 7                    # run weekly reflection every N simulated days
+
 # ─── Logging ─────────────────────────────────────────
 logging:
   log_every_selection: true         # log full weight breakdown for every turn

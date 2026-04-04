@@ -10,7 +10,7 @@ from rich.table import Table
 from rich.theme import Theme
 
 if TYPE_CHECKING:
-    from datetime import timedelta
+    from datetime import datetime, timedelta
     from decimal import Decimal
 
     from core.models import Simulation
@@ -118,6 +118,45 @@ class SimulationDisplay:
             f"Spent: ${current:.4f} | Limit: ${limit:.2f}",
             border_style="red",
         ))
+
+    def show_reflection_triggered(
+        self, agent_id: str, reflection_type: str, simulated_time: datetime
+    ) -> None:
+        """Display auto-triggered reflection event."""
+        color = AGENT_COLORS.get(agent_id, "white")
+        time_str = simulated_time.strftime("%H:%M")
+        console.print(
+            f"  [dim]~~[/dim] [{color}]{agent_id}[/{color}] "
+            f"{reflection_type} reflection [dim](simulated {time_str})[/dim]"
+        )
+
+    def show_day_boundary(self, day_num: int, stats: dict[str, Any]) -> None:
+        """Display day boundary marker with per-day stats."""
+        console.print()
+        console.print(
+            f"  [bold bright_cyan]=== Day {day_num} ===[/bold bright_cyan]"
+        )
+        if stats:
+            parts = []
+            if stats.get("conversations"):
+                parts.append(f"{stats['conversations']} conversations")
+            if stats.get("cost"):
+                parts.append(f"${stats['cost']:.4f}")
+            if stats.get("tools"):
+                parts.append(f"{stats['tools']} tools")
+            if parts:
+                console.print(f"  [dim]{' | '.join(parts)}[/dim]")
+        console.print()
+
+    def show_autonomous_status(
+        self, trigger_type: str, conversation_num: int
+    ) -> None:
+        """Display autonomous mode conversation start."""
+        icon = PHASE_ICONS.get(trigger_type, "??")
+        console.print(
+            f"  [bold bright_cyan][#{conversation_num}][/bold bright_cyan] "
+            f"[dim]{icon}[/dim] Trigger: {trigger_type}"
+        )
 
     def show_summary(self, sim: Simulation, real_duration: timedelta) -> None:
         """Display final simulation summary table."""
