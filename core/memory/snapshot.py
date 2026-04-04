@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from core.database import Database
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.recall_memory import RecallMemoryManager
+    from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
     from core.repos.relationship_repo import RelationshipRepo
 
@@ -99,8 +100,8 @@ class MemorySnapshotExporter:
             snapshot_at=datetime.now(UTC).isoformat(),
         )
 
-        # Get all agents from core_memory table
-        all_agent_ids = await self._get_agent_ids()
+        # Get agents from simulation record, falling back to core_memory table
+        all_agent_ids = await self._get_agent_ids(sim_uuid)
         if agents:
             all_agent_ids = [a for a in all_agent_ids if a in agents]
 
@@ -155,8 +156,21 @@ class MemorySnapshotExporter:
 
         return snapshot.model_dump()
 
-    async def _get_agent_ids(self) -> list[str]:
-        """Get all agent IDs that have core memory."""
+    async def _get_agent_ids(self, sim_uuid: Any = None) -> list[str]:
+        """Get agent IDs scoped to the simulation.
+
+        Tries the simulation record's agents_participated first,
+        then falls back to all agents with core memory.
+        """
+        if sim_uuid is not None:
+            row = await self._db.fetchrow(
+                "SELECT agents_participated FROM simulations WHERE id = $1",
+                sim_uuid,
+            )
+            if row and row["agents_participated"]:
+                return sorted(row["agents_participated"])
+
+        # Fallback: all agents with core memory
         rows = await self._db.fetch(
             "SELECT DISTINCT agent_id FROM core_memory ORDER BY agent_id"
         )
@@ -178,6 +192,7 @@ class MemorySnapshotImporter:
         recall_memory_mgr: RecallMemoryManager,
         relationship_repo: RelationshipRepo | None = None,
         embedding_fn: Callable[[str], Coroutine[Any, Any, list[float]]] | None = None,
+        token_counter: TokenCounter | None = None,
     ) -> None:
         self._db = db
         self._memory_repo = memory_repo
@@ -185,6 +200,7 @@ class MemorySnapshotImporter:
         self._recall_memory = recall_memory_mgr
         self._relationship_repo = relationship_repo
         self._embedding_fn = embedding_fn
+        self._token_counter = token_counter
 
     async def restore(
         self,
@@ -233,7 +249,13 @@ class MemorySnapshotImporter:
                         )
                     else:
                         # Use upsert_core_memory via the repo
-                        token_count = len(agent_snap.core_memory.split())
+                        if self._token_counter:
+                            token_count = self._token_counter.count_tokens(
+                                agent_snap.core_memory
+                            )
+                        else:
+                            # Fallback: rough estimate (~1.3 tokens per word)
+                            token_count = int(len(agent_snap.core_memory.split()) * 1.3)
                         await self._memory_repo.upsert_core_memory(
                             agent_id,
                             agent_snap.core_memory,

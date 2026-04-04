@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
+    from core.social.relationship_tracker import RelationshipTracker
     from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ class ConversationEngine:
         simulation_id: uuid.UUID | None = None,
         services: Services | None = None,
         clock: SimulationClock | None = None,
+        relationship_tracker: RelationshipTracker | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -134,6 +136,7 @@ class ConversationEngine:
         self._speed_multiplier = speed_multiplier
         self._services = services
         self._clock = clock
+        self._relationship_tracker = relationship_tracker
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -488,6 +491,19 @@ class ConversationEngine:
         # Use MemoryCompactor for transcript storage + recall memory creation,
         # then create journal entries separately
         await self._compact_and_journal(conv)
+
+        # Update relationship data after conversation
+        if self._relationship_tracker and len(conv.participants) >= 2:
+            try:
+                await self._relationship_tracker.update_after_conversation(
+                    conv.history, conv.participants,
+                )
+            except Exception:
+                logger.warning(
+                    "Relationship update failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
+                )
 
         # Reset triggers
         self._triggers.reset()

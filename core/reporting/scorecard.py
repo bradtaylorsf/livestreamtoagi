@@ -148,10 +148,29 @@ class LaunchScorecard:
 
     async def _check_reflection_updates(self) -> ScorecardCriterion:
         """Check that reflections produced core memory updates."""
-        row = await self._db.fetchrow(
-            """SELECT COUNT(*) as cnt FROM core_memory_history
-               WHERE change_reason LIKE '%reflection%'""",
+        # Scope by simulation's agents and time range
+        sim = await self._db.fetchrow(
+            "SELECT agents_participated, started_at, completed_at FROM simulations WHERE id = $1",
+            self._sim_uuid,
         )
+        if sim and sim["agents_participated"] and sim["started_at"]:
+            params: list = [sim["agents_participated"]]
+            conditions = ["agent_id = ANY($1)", "change_reason LIKE '%reflection%'"]
+            params.append(sim["started_at"])
+            conditions.append(f"changed_at >= ${len(params)}")
+            if sim["completed_at"]:
+                params.append(sim["completed_at"])
+                conditions.append(f"changed_at <= ${len(params)}")
+            where = " AND ".join(conditions)
+            row = await self._db.fetchrow(
+                f"SELECT COUNT(*) as cnt FROM core_memory_history WHERE {where}",
+                *params,
+            )
+        else:
+            row = await self._db.fetchrow(
+                """SELECT COUNT(*) as cnt FROM core_memory_history
+                   WHERE change_reason LIKE '%reflection%'""",
+            )
         count = row["cnt"] if row else 0
         return ScorecardCriterion(
             name="reflection_updates",

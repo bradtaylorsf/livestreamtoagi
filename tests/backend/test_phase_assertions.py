@@ -81,6 +81,7 @@ def basic_phase_result():
         artifacts=2,
         overseer_flags=0,
         agents_participated=["vera", "rex", "fork"],
+        tools_used=["web_search", "code_execute"],
     )
 
 

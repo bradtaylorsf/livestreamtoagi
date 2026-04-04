@@ -149,6 +149,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         display=display,
         services=svc,
         clock=sim_clock,
+        relationship_repo=svc.relationship_repo,
     )
 
     # ── Signal handling ───────────────────────────────────
@@ -162,7 +163,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
 
-    # ��─ Restore snapshot if provided ─────────────────────
+    # ── Restore snapshot if provided ──────────────────────
     if args.restore_snapshot:
         import json as _json
 
@@ -176,6 +177,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
             recall_memory_mgr=svc.recall_memory,
             relationship_repo=svc.relationship_repo,
             embedding_fn=None,  # Use embedded vectors from snapshot
+            token_counter=svc.token_counter,
         )
         restore_result = await importer.restore(snapshot_data)
         logger = logging.getLogger(__name__)

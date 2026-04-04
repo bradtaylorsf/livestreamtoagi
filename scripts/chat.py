@@ -506,6 +506,39 @@ def main() -> None:
         )
         return
 
+    # ── Quick-launch: pnpm chat report ... ──
+    if args and args[0].lower() == "report":
+        import subprocess
+
+        cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "report_simulation.py")] + args[1:]
+        try:
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Report cancelled.[/dim]")
+        return
+
+    # ── Quick-launch: pnpm chat snapshot ... ──
+    if args and args[0].lower() == "snapshot":
+        import subprocess
+
+        cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "snapshot_memory.py")] + args[1:]
+        try:
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Snapshot cancelled.[/dim]")
+        return
+
+    # ── Quick-launch: pnpm chat restore ... ──
+    if args and args[0].lower() == "restore":
+        import subprocess
+
+        cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "restore_memory.py")] + args[1:]
+        try:
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Restore cancelled.[/dim]")
+        return
+
     # ── Quick-launch: pnpm chat --dry-run or --list-agents ──
     if args and args[0].startswith("--"):
         from scripts.test_agent import async_main, parse_args

@@ -218,17 +218,33 @@ class AssertionEngine:
         self, defn: AssertionDefinition, result: PhaseResult,
     ) -> AssertionResult:
         """Check tool assertions: any_of, all_of tools used."""
-        # We track artifact count but not specific tools in PhaseResult
-        # Check artifacts > 0 as a proxy
+        tools_used = set(result.tools_used)
+
         if defn.any_of is not None:
-            if result.artifacts == 0:
+            matched = tools_used & set(defn.any_of)
+            if not matched:
                 return AssertionResult(
                     name="tool:any_of",
                     passed=False,
                     expected=f"any of {defn.any_of}",
-                    actual="no tools used",
+                    actual=sorted(tools_used) if tools_used else "no tools used",
                     severity=defn.severity,
-                    error_message=f"Expected tool usage from {defn.any_of}, but no tools were used",
+                    error_message=(
+                        f"Expected any of {defn.any_of}, "
+                        f"got {sorted(tools_used) or 'none'}"
+                    ),
+                )
+
+        if defn.all_of is not None:
+            missing = set(defn.all_of) - tools_used
+            if missing:
+                return AssertionResult(
+                    name="tool:all_of",
+                    passed=False,
+                    expected=f"all of {defn.all_of}",
+                    actual=sorted(tools_used),
+                    severity=defn.severity,
+                    error_message=f"Missing required tools: {sorted(missing)}",
                 )
 
         return AssertionResult(
@@ -240,9 +256,23 @@ class AssertionEngine:
     def _check_memory(
         self, defn: AssertionDefinition, result: PhaseResult,
     ) -> AssertionResult:
-        """Check memory assertions."""
-        # Memory assertions require external data not in PhaseResult
-        # Pass by default when we can't verify
+        """Check memory assertions using conversation activity as evidence.
+
+        Recall memories are created by MemoryCompactor after each conversation,
+        so conversations > 0 with turns > 0 means recall memories were created.
+        """
+        has_activity = result.turns > 0 and (result.conversations or 0) > 0
+
+        if defn.recall_created and not has_activity:
+            return AssertionResult(
+                name="memory:recall_created",
+                passed=False,
+                expected="recall memories created (conversations with turns)",
+                actual=f"turns={result.turns}, conversations={result.conversations}",
+                severity=defn.severity,
+                error_message="No conversation activity to generate recall memories",
+            )
+
         return AssertionResult(
             name="memory",
             passed=True,
@@ -252,9 +282,27 @@ class AssertionEngine:
     def _check_relationship(
         self, defn: AssertionDefinition, result: PhaseResult,
     ) -> AssertionResult:
-        """Check relationship assertions: interaction_count_increased."""
-        # Relationship assertions require RelationshipRepo data not in PhaseResult.
-        # Pass by default when we can't verify from phase results alone.
+        """Check relationship assertions: interaction_count_increased.
+
+        RelationshipTracker.update_after_conversation() fires after each
+        conversation with 2+ participants, so multi-agent conversations
+        with turns > 0 means interaction counts were incremented.
+        """
+        has_multi_agent = len(result.agents_participated) >= 2 and result.turns > 0
+
+        if defn.interaction_count_increased and not has_multi_agent:
+            return AssertionResult(
+                name="relationship:interaction_count",
+                passed=False,
+                expected="multi-agent conversation (interaction count increase)",
+                actual=f"agents={result.agents_participated}, turns={result.turns}",
+                severity=defn.severity,
+                error_message=(
+                    f"Expected multi-agent interaction, got "
+                    f"{len(result.agents_participated)} agents with {result.turns} turns"
+                ),
+            )
+
         return AssertionResult(
             name="relationship",
             passed=True,

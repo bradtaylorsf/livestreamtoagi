@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from core.reporting.sections.cost_analysis import generate_cost_analysis
@@ -110,8 +109,9 @@ class TimelineReporter:
 
         # Filter by requested days
         if days:
-            conversations = self._filter_by_days(conversations, days)
-            cost_events = self._filter_cost_by_days(cost_events, days)
+            sim_start = sim.get("started_at") or sim.get("created_at")
+            conversations = self._filter_by_days(conversations, days, sim_start)
+            cost_events = self._filter_cost_by_days(cost_events, days, sim_start)
 
         # 1. Executive Summary
         report.sections.append(ReportSection(
@@ -127,10 +127,13 @@ class TimelineReporter:
             data=generate_daily_breakdown(conversations, cost_events, artifacts),
         ))
 
-        # 3. Memory Evolution
-        core_memory_history = await self._load_core_memory_history()
-        recall_counts = await self._load_recall_memory_counts()
-        journal_entries = await self._load_journal_entries()
+        # 3. Memory Evolution (scoped to simulation agents and time range)
+        sim_agents = sim.get("agents_participated", [])
+        sim_start = sim.get("started_at") or sim.get("created_at")
+        sim_end = sim.get("completed_at")
+        core_memory_history = await self._load_core_memory_history(sim_agents, sim_start, sim_end)
+        recall_counts = await self._load_recall_memory_counts(sim_agents)
+        journal_entries = await self._load_journal_entries(sim_agents, sim_start, sim_end)
         report.sections.append(ReportSection(
             title="Memory Evolution",
             data=generate_memory_evolution(
@@ -176,54 +179,61 @@ class TimelineReporter:
         return report
 
     async def compare(self, other_simulation_id: str) -> ComparisonReport:
-        """Generate a side-by-side comparison of two simulations."""
-        sim_a = await self._load_simulation()
-        other = TimelineReporter(
+        """Generate a side-by-side comparison of two simulations.
+
+        Delegates to CrossRunComparison for the richer metric analysis,
+        then adapts the result to the ComparisonReport format used by CLI.
+        """
+        from core.reporting.comparison import CrossRunComparison
+
+        cross = CrossRunComparison(
             db=self._db,
-            simulation_id=other_simulation_id,
+            simulation_ids=[self._simulation_id, other_simulation_id],
             relationship_repo=self._relationship_repo,
         )
-        sim_b = await other._load_simulation()
+        result = await cross.compare()
 
-        if sim_a is None or sim_b is None:
-            return ComparisonReport(
-                comparison={"error": "One or both simulations not found"},
-            )
+        # Adapt CrossRunComparison result to ComparisonReport format
+        # Build flat comparison dict from metrics for backward compatibility
+        comparison: dict[str, Any] = {}
+        for m in result.metrics:
+            comparison[m.metric] = {
+                "run_a": m.run_a_value,
+                "run_b": m.run_b_value,
+                "delta": m.delta,
+                "better_run": m.better_run,
+            }
 
-        costs_a = await self._load_cost_events()
-        costs_b = await other._load_cost_events()
-        convs_a = await self._load_conversations()
-        convs_b = await other._load_conversations()
-
-        total_cost_a = sum(Decimal(str(c.get("amount", 0))) for c in costs_a)
-        total_cost_b = sum(Decimal(str(c.get("amount", 0))) for c in costs_b)
-        avg_turns_a = (
-            sum(c.get("turn_count", 0) for c in convs_a) / max(len(convs_a), 1)
+        # Also include legacy flat keys for existing formatters
+        cost_m = next((m for m in result.metrics if m.metric == "total_cost"), None)
+        conv_m = next((m for m in result.metrics if m.metric == "total_conversations"), None)
+        turns_m = next(
+            (m for m in result.metrics if m.metric == "avg_turns_per_conversation"),
+            None,
         )
-        avg_turns_b = (
-            sum(c.get("turn_count", 0) for c in convs_b) / max(len(convs_b), 1)
-        )
+        if cost_m:
+            comparison["cost_delta"] = cost_m.delta
+        if conv_m:
+            comparison["conversation_delta"] = conv_m.delta
+        if turns_m:
+            comparison["turns_delta"] = turns_m.delta
 
         return ComparisonReport(
             simulation_a={
+                **result.run_a,
                 "id": self._simulation_id,
-                "name": sim_a.get("name", "Unknown"),
-                "total_cost": str(total_cost_a),
-                "total_conversations": len(convs_a),
-                "avg_turns": round(avg_turns_a, 1),
+                "total_cost": cost_m.run_a_value if cost_m else "0",
+                "total_conversations": conv_m.run_a_value if conv_m else 0,
+                "avg_turns": turns_m.run_a_value if turns_m else 0,
             },
             simulation_b={
+                **result.run_b,
                 "id": other_simulation_id,
-                "name": sim_b.get("name", "Unknown"),
-                "total_cost": str(total_cost_b),
-                "total_conversations": len(convs_b),
-                "avg_turns": round(avg_turns_b, 1),
+                "total_cost": cost_m.run_b_value if cost_m else "0",
+                "total_conversations": conv_m.run_b_value if conv_m else 0,
+                "avg_turns": turns_m.run_b_value if turns_m else 0,
             },
-            comparison={
-                "cost_delta": str(total_cost_b - total_cost_a),
-                "conversation_delta": len(convs_b) - len(convs_a),
-                "turns_delta": round(avg_turns_b - avg_turns_a, 1),
-            },
+            comparison=comparison,
         )
 
     # ── Data loading helpers ──────────────────────────────────
@@ -273,45 +283,115 @@ class TimelineReporter:
         )
         return [dict(r) for r in rows]
 
-    async def _load_core_memory_history(self) -> list[dict[str, Any]]:
+    async def _load_core_memory_history(
+        self,
+        agents: list[str] | None = None,
+        sim_start: Any = None,
+        sim_end: Any = None,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if agents:
+            params.append(agents)
+            conditions.append(f"agent_id = ANY(${len(params)})")
+        if sim_start:
+            params.append(sim_start)
+            conditions.append(f"changed_at >= ${len(params)}")
+        if sim_end:
+            params.append(sim_end)
+            conditions.append(f"changed_at <= ${len(params)}")
+
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await self._db.fetch(
-            """SELECT * FROM core_memory_history
-               ORDER BY changed_at""",
+            f"SELECT * FROM core_memory_history{where} ORDER BY changed_at",
+            *params,
         )
         return [dict(r) for r in rows]
 
-    async def _load_recall_memory_counts(self) -> dict[str, int]:
-        rows = await self._db.fetch(
-            """SELECT agent_id, COUNT(*) as cnt
-               FROM recall_memory
-               GROUP BY agent_id""",
-        )
+    async def _load_recall_memory_counts(
+        self, agents: list[str] | None = None,
+    ) -> dict[str, int]:
+        if agents:
+            rows = await self._db.fetch(
+                """SELECT agent_id, COUNT(*) as cnt
+                   FROM recall_memory
+                   WHERE agent_id = ANY($1)
+                   GROUP BY agent_id""",
+                agents,
+            )
+        else:
+            rows = await self._db.fetch(
+                """SELECT agent_id, COUNT(*) as cnt
+                   FROM recall_memory
+                   GROUP BY agent_id""",
+            )
         return {r["agent_id"]: r["cnt"] for r in rows}
 
-    async def _load_journal_entries(self) -> list[dict[str, Any]]:
+    async def _load_journal_entries(
+        self,
+        agents: list[str] | None = None,
+        sim_start: Any = None,
+        sim_end: Any = None,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if agents:
+            params.append(agents)
+            conditions.append(f"agent_id = ANY(${len(params)})")
+        if sim_start:
+            params.append(sim_start)
+            conditions.append(f"created_at >= ${len(params)}")
+        if sim_end:
+            params.append(sim_end)
+            conditions.append(f"created_at <= ${len(params)}")
+
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         rows = await self._db.fetch(
-            """SELECT * FROM journal_entries
-               ORDER BY created_at""",
+            f"SELECT * FROM journal_entries{where} ORDER BY created_at",
+            *params,
         )
         return [dict(r) for r in rows]
 
     @staticmethod
     def _filter_by_days(
-        conversations: list[dict], days: list[int],
+        conversations: list[dict],
+        days: list[int],
+        sim_start: Any = None,
     ) -> list[dict]:
-        """Filter conversations to only include specified simulated days."""
+        """Filter conversations to only include specified simulated days.
+
+        Day numbering is 1-based: day 1 = first 24h from simulation start.
+        """
+        if not sim_start or not hasattr(sim_start, "timetuple"):
+            return conversations
+
         filtered = []
         for conv in conversations:
             started = conv.get("started_at")
             if started and hasattr(started, "timetuple"):
-                # Approximate day from sequence position
-                filtered.append(conv)
-            else:
-                filtered.append(conv)
+                delta = started - sim_start
+                conv_day = delta.days + 1  # 1-based day number
+                if conv_day in days:
+                    filtered.append(conv)
+            # Skip conversations without valid timestamps
         return filtered
 
     @staticmethod
     def _filter_cost_by_days(
-        costs: list[dict], days: list[int],
+        costs: list[dict],
+        days: list[int],
+        sim_start: Any = None,
     ) -> list[dict]:
-        return costs  # Cost filtering by simulated day not directly supported
+        """Filter cost events to only include specified simulated days."""
+        if not sim_start or not hasattr(sim_start, "timetuple"):
+            return costs
+
+        filtered = []
+        for cost in costs:
+            created = cost.get("created_at")
+            if created and hasattr(created, "timetuple"):
+                delta = created - sim_start
+                cost_day = delta.days + 1
+                if cost_day in days:
+                    filtered.append(cost)
+        return filtered

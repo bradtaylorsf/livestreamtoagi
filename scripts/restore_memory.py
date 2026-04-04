@@ -43,6 +43,7 @@ async def run_restore(args: argparse.Namespace) -> None:
             recall_memory_mgr=svc.recall_memory,
             relationship_repo=svc.relationship_repo,
             embedding_fn=embedding_fn,
+            token_counter=svc.token_counter,
         )
 
         agents = None

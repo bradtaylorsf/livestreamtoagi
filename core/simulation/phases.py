@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
+    from core.social.relationship_tracker import RelationshipTracker
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ class PhaseResult:
     errors: list[str] = field(default_factory=list)
     agents_participated: list[str] = field(default_factory=list)
     assertions: list[Any] = field(default_factory=list)
+    tools_used: list[str] = field(default_factory=list)
 
 
 class PhaseRunner:
@@ -172,6 +174,7 @@ class PhaseRunner:
         dry_run: bool = False,
         services: Services | None = None,
         clock: SimulationClock | None = None,
+        relationship_tracker: RelationshipTracker | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -192,6 +195,7 @@ class PhaseRunner:
         self._dry_run = dry_run
         self._services = services
         self._clock = clock
+        self._relationship_tracker = relationship_tracker
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0
@@ -201,6 +205,7 @@ class PhaseRunner:
         self._phase_overseer_flags = 0
         self._phase_artifacts = 0
         self._phase_agents: set[str] = set()
+        self._phase_tools_used: set[str] = set()
 
     async def run_phase(self, phase: Phase) -> PhaseResult:
         """Dispatch to the appropriate phase runner method."""
@@ -239,6 +244,7 @@ class PhaseRunner:
         result.overseer_flags = self._phase_overseer_flags
         result.artifacts = self._phase_artifacts
         result.agents_participated = list(self._phase_agents)
+        result.tools_used = sorted(self._phase_tools_used)
         return result
 
     def _reset_phase_stats(self) -> None:
@@ -249,6 +255,7 @@ class PhaseRunner:
         self._phase_overseer_flags = 0
         self._phase_artifacts = 0
         self._phase_agents.clear()
+        self._phase_tools_used.clear()
 
     # ── Phase runners ─────────────────────────────────────
 
@@ -443,6 +450,9 @@ class PhaseRunner:
         async def _on_artifact(event: dict) -> None:
             self._phase_artifacts += 1
             data = event.get("data", event)
+            tool_name = data.get("tool_name", data.get("artifact_type"))
+            if tool_name:
+                self._phase_tools_used.add(tool_name)
             _display_artifact(data)
 
         self._event_bus.on("agent_speak", _on_speak)
@@ -470,6 +480,7 @@ class PhaseRunner:
                 simulation_id=self._simulation_id,
                 services=self._services,
                 clock=self._clock,
+                relationship_tracker=self._relationship_tracker,
             )
 
             engine._running = True
