@@ -51,6 +51,7 @@ async def run_restore(args: argparse.Namespace) -> None:
 
         result = await importer.restore(
             snapshot_data,
+            simulation_id=args.simulation_id,
             agents=agents,
             clear_first=args.clear_first,
         )
@@ -82,6 +83,10 @@ def main() -> None:
     parser.add_argument(
         "--clear-first", action="store_true",
         help="Clear existing recall/journal state before restore",
+    )
+    parser.add_argument(
+        "--simulation-id", type=str, default=None,
+        help="Simulation ID to associate restored relationships with",
     )
     asyncio.run(run_restore(parser.parse_args()))
 

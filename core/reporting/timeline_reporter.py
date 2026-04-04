@@ -78,8 +78,10 @@ class TimelineReporter:
         simulation_id: str,
         relationship_repo: RelationshipRepo | None = None,
     ) -> None:
+        import uuid as uuid_mod
         self._db = db
         self._simulation_id = simulation_id
+        self._simulation_uuid = uuid_mod.UUID(simulation_id)
         self._relationship_repo = relationship_repo
 
     async def generate(
@@ -139,10 +141,8 @@ class TimelineReporter:
         relationship_data = None
         if self._relationship_repo:
             try:
-                import uuid as uuid_mod
-
                 relationships = await self._relationship_repo.get_social_graph(
-                    uuid_mod.UUID(self._simulation_id)
+                    self._simulation_uuid
                 )
                 relationship_data = [r.model_dump(mode="json") for r in relationships]
             except Exception:
@@ -229,7 +229,7 @@ class TimelineReporter:
     async def _load_simulation(self) -> dict[str, Any] | None:
         row = await self._db.fetchrow(
             "SELECT * FROM simulations WHERE id = $1",
-            self._simulation_id,
+            self._simulation_uuid,
         )
         if row is None:
             return None
@@ -240,7 +240,7 @@ class TimelineReporter:
             """SELECT * FROM conversations
                WHERE simulation_id = $1
                ORDER BY started_at""",
-            self._simulation_id,
+            self._simulation_uuid,
         )
         return [dict(r) for r in rows]
 
@@ -249,7 +249,7 @@ class TimelineReporter:
             """SELECT * FROM cost_events
                WHERE simulation_id = $1
                ORDER BY created_at""",
-            self._simulation_id,
+            self._simulation_uuid,
         )
         return [dict(r) for r in rows]
 
@@ -258,7 +258,7 @@ class TimelineReporter:
             """SELECT * FROM artifacts
                WHERE simulation_id = $1
                ORDER BY created_at""",
-            self._simulation_id,
+            self._simulation_uuid,
         )
         return [dict(r) for r in rows]
 
@@ -267,7 +267,7 @@ class TimelineReporter:
             """SELECT * FROM overseer_shadow_log
                WHERE simulation_id = $1
                ORDER BY created_at""",
-            self._simulation_id,
+            self._simulation_uuid,
         )
         return [dict(r) for r in rows]
 

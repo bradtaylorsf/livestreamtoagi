@@ -58,8 +58,10 @@ class LaunchScorecard:
         assertion_repo: AssertionRepo | None = None,
         relationship_repo: RelationshipRepo | None = None,
     ) -> None:
+        import uuid as uuid_mod
         self._db = db
         self._sim_id = simulation_id
+        self._sim_uuid = uuid_mod.UUID(simulation_id)
         self._assertion_repo = assertion_repo
         self._relationship_repo = relationship_repo
 
@@ -94,7 +96,7 @@ class LaunchScorecard:
         row = await self._db.fetchrow(
             """SELECT COUNT(DISTINCT tool_name) as cnt
                FROM artifacts WHERE simulation_id = $1""",
-            self._sim_id,
+            self._sim_uuid,
         )
         count = row["cnt"] if row else 0
         return ScorecardCriterion(
@@ -113,11 +115,9 @@ class LaunchScorecard:
                 evidence="Relationship tracker not available",
                 required=False,
             )
-        import uuid as uuid_mod
-
         try:
             relationships = await self._relationship_repo.get_social_graph(
-                uuid_mod.UUID(self._sim_id)
+                self._sim_uuid
             )
             if not relationships:
                 return ScorecardCriterion(
@@ -169,10 +169,8 @@ class LaunchScorecard:
                 evidence="Assertion repo not available — skipped",
                 required=False,
             )
-        import uuid as uuid_mod
-
         rates = await self._assertion_repo.get_pass_rates(
-            uuid_mod.UUID(self._sim_id)
+            self._sim_uuid
         )
         error_failures = rates.get("failed_error", 0)
         return ScorecardCriterion(
@@ -190,7 +188,7 @@ class LaunchScorecard:
                WHERE simulation_id = $1
                GROUP BY DATE(created_at)
                ORDER BY day""",
-            self._sim_id,
+            self._sim_uuid,
         )
         if len(rows) < 2:
             return ScorecardCriterion(
@@ -222,7 +220,7 @@ class LaunchScorecard:
         row = await self._db.fetchrow(
             """SELECT COUNT(*) as cnt FROM overseer_shadow_log
                WHERE simulation_id = $1 AND severity >= 4""",
-            self._sim_id,
+            self._sim_uuid,
         )
         count = row["cnt"] if row else 0
         return ScorecardCriterion(

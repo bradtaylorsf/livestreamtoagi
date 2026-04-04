@@ -5,6 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 
+def _build_interaction_heatmap(relationships: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Build agent -> target -> interaction_count mapping."""
+    heatmap: dict[str, dict[str, int]] = {}
+    for rel in relationships:
+        agent = rel.get("agent_id", "")
+        target = rel.get("target_agent_id", "")
+        count = rel.get("interaction_count", 0)
+        if agent not in heatmap:
+            heatmap[agent] = {}
+        heatmap[agent][target] = count
+    return heatmap
+
+
 def generate_relationship_evolution(
     relationships: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
@@ -72,10 +85,5 @@ def generate_relationship_evolution(
         "total_relationships": len(relationships),
         "matrix": matrix,
         "biggest_changes": biggest_changes[:10],
-        "interaction_heatmap": {
-            rel.get("agent_id", ""): {
-                rel.get("target_agent_id", ""): rel.get("interaction_count", 0)
-            }
-            for rel in relationships
-        },
+        "interaction_heatmap": _build_interaction_heatmap(relationships),
     }

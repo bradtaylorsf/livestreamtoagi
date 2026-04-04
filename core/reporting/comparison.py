@@ -139,18 +139,20 @@ class CrossRunComparison:
         )
 
     async def _load_sim_summary(self, sim_id: str) -> dict[str, Any]:
+        import uuid as uuid_mod
         row = await self._db.fetchrow(
-            "SELECT * FROM simulations WHERE id = $1", sim_id
+            "SELECT * FROM simulations WHERE id = $1", uuid_mod.UUID(sim_id)
         )
         if row is None:
             return {"id": sim_id, "name": "NOT FOUND"}
         return dict(row)
 
     async def _count_unique_tools(self, sim_id: str) -> int:
+        import uuid as uuid_mod
         row = await self._db.fetchrow(
             """SELECT COUNT(DISTINCT tool_name) as cnt
                FROM artifacts WHERE simulation_id = $1""",
-            sim_id,
+            uuid_mod.UUID(sim_id),
         )
         return row["cnt"] if row else 0
 
