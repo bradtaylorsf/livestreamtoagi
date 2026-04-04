@@ -109,8 +109,8 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
     # ── Build orchestrator ────────────────────────────────
     # Build embedding function for post-conversation recall memory creation
-    from core.bootstrap import _make_embedding_fn
-    embedding_fn = _make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
+    from core.bootstrap import make_embedding_fn
+    embedding_fn = make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
 
     orchestrator = SimulationOrchestrator(
         config=sim_config,
