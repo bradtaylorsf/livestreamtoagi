@@ -21,6 +21,8 @@ from core.models import ConversationCreate
 from core.speech_parser import parse_speech
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from core.agent_registry import AgentRegistry
     from core.config_loader import ConfigLoader
     from core.context_assembly import ContextAssembler
@@ -30,9 +32,11 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.recall_memory import RecallMemoryManager
     from core.models import AgentConfig, ConversationConfig
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.memory_repo import MemoryRepo
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +100,9 @@ class ConversationEngine:
         proximity: ProximityManager,
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
+        recall_memory: RecallMemoryManager | None = None,
+        memory_repo: MemoryRepo | None = None,
+        embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         speed_multiplier: float = 1.0,
         overseer_enabled: bool = True,
         simulation_id: uuid.UUID | None = None,
@@ -110,6 +117,9 @@ class ConversationEngine:
         self._context = context_assembler
         self._repo = conversation_repo
         self._archival = archival_memory
+        self._recall = recall_memory
+        self._memory_repo = memory_repo
+        self._embedding_fn = embedding_fn
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
@@ -473,6 +483,9 @@ class ConversationEngine:
             conversation_id=conv.id,
         )
 
+        # Create recall memories + journal entries for each participant
+        await self._create_post_conversation_memories(conv)
+
         # Reset triggers
         self._triggers.reset()
 
@@ -485,6 +498,85 @@ class ConversationEngine:
         )
 
         self._active = None
+
+    # ── Post-conversation memory creation ─────────────────────
+
+    async def _create_post_conversation_memories(
+        self, conv: _ActiveConversation
+    ) -> None:
+        """Create recall memories and journal entries for each participant.
+
+        Failures are logged but never break conversation close.
+        """
+        if not self._recall or not self._memory_repo or not self._embedding_fn:
+            logger.debug(
+                "Skipping post-conversation memories (recall=%s, repo=%s, embed=%s)",
+                self._recall is not None,
+                self._memory_repo is not None,
+                self._embedding_fn is not None,
+            )
+            return
+
+        try:
+            speakers = list(
+                dict.fromkeys(
+                    msg.get("speaker", "unknown") for msg in conv.history
+                )
+            )
+            speakers_str = ", ".join(speakers)
+            first_excerpt = conv.history[0].get("content", "")[:200] if conv.history else ""
+            summary = (
+                f"Conversation between {speakers_str} "
+                f"({len(conv.history)} turns). "
+                f"Excerpt: {first_excerpt}"
+            )
+
+            embedding = await self._embedding_fn(summary)
+            participants = list(set(conv.participants))
+
+            for agent_id in participants:
+                # Recall memory (Tier 2)
+                await self._recall.store_recall_memory(
+                    agent_id=agent_id,
+                    summary=summary,
+                    embedding=embedding,
+                    event_type="conversation",
+                    participants=participants,
+                    importance_score=0.6,
+                )
+
+                # Journal entry
+                from core.models import JournalEntryCreate
+
+                agent_lines = [
+                    msg.get("content", "")
+                    for msg in conv.history
+                    if msg.get("speaker") == agent_id
+                ]
+                journal_content = (
+                    f"Participated in a conversation with {speakers_str}. "
+                    f"I contributed {len(agent_lines)} messages. "
+                    f"Topics covered: {summary[:300]}"
+                )
+                await self._memory_repo.create_journal_entry(
+                    JournalEntryCreate(
+                        agent_id=agent_id,
+                        reflection_type="conversation",
+                        content=journal_content,
+                        token_count=len(journal_content.split()),
+                    )
+                )
+
+            logger.info(
+                "Created recall memories and journal entries for %d participants",
+                len(participants),
+            )
+        except Exception:
+            logger.warning(
+                "Post-conversation memory creation failed for conversation %s",
+                conv.id,
+                exc_info=True,
+            )
 
     # ── Turn generation ────────────────────────────────────────
 
