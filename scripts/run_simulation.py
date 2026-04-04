@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import signal
 import sys
 from pathlib import Path
@@ -108,10 +107,6 @@ async def run_simulation(args: argparse.Namespace) -> None:
     display = SimulationDisplay(verbose=verbose)
 
     # ── Build orchestrator ────────────────────────────────
-    # Build embedding function for post-conversation recall memory creation
-    from core.bootstrap import make_embedding_fn
-    embedding_fn = make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
-
     orchestrator = SimulationOrchestrator(
         config=sim_config,
         db=svc.db,
@@ -129,9 +124,8 @@ async def run_simulation(args: argparse.Namespace) -> None:
         trigger_system=trigger_system,
         selection_logger=selection_logger,
         reflection_manager=reflection_manager,
-        recall_memory=svc.recall_memory,
+        compactor=svc.compactor,
         memory_repo=svc.memory_repo,
-        embedding_fn=embedding_fn,
         display=display,
         services=svc,
     )
