@@ -122,9 +122,6 @@ def mock_app():
     }
     with (
         patch.dict(os.environ, env_overrides),
-        patch("core.main.db", mock_db),
-        patch("core.main.redis_client", mock_redis),
-        patch("core.main.agent_registry", mock_registry),
         patch("core.admin_routes._get_db", return_value=mock_db),
         patch("core.admin_routes._get_registry", return_value=mock_registry),
     ):

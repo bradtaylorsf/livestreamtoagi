@@ -337,90 +337,41 @@ async def run_watch(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
 
-    from core.agent_registry import AgentRegistry
-    from core.config_loader import ConfigLoader
-    from core.context_assembly import ContextAssembler
+    from core.bootstrap import bootstrap_services, init_core_memories
+    from core.bootstrap import shutdown_services as _shutdown_services
     from core.conversation.proximity import ProximityManager
     from core.conversation.selection_logger import SelectionLogger
     from core.conversation.triggers import TriggerSystem
     from core.conversation_engine import ConversationEngine
-    from core.database import Database
     from core.event_bus import event_bus
-    from core.llm_client import OpenRouterClient
-    from core.memory.archival_memory import ArchivalMemoryManager
-    from core.memory.core_memory import CoreMemoryManager
-    from core.memory.recall_memory import RecallMemoryManager
-    from core.memory.token_counter import TokenCounter
-    from core.overseer import Overseer
-    from core.redis_client import RedisClient
     from core.repos.conversation_repo import ConversationRepo
-    from core.repos.cost_repo import CostRepo
-    from core.repos.memory_repo import MemoryRepo
     from core.repos.simulation_repo import SimulationRepo
-    from core.repos.transcript_repo import TranscriptRepo
 
-    # Connect services
-    db = Database()
-    redis_client = RedisClient()
-    await db.connect()
-    await redis_client.connect()
-
-    # Load agents and config
-    agent_registry = AgentRegistry(redis_client=redis_client)
-    await agent_registry.load_all()
-    config_loader = ConfigLoader()
-    config_loader.load()
-    cfg = config_loader.config
-
-    # Initialize subsystems
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    cost_repo = CostRepo(db)
-    llm_client = OpenRouterClient(api_key=api_key, cost_repo=cost_repo)
-
-    memory_repo = MemoryRepo(db)
-    transcript_repo = TranscriptRepo(db)
-    token_counter = TokenCounter()
-
-    core_memory = CoreMemoryManager(memory_repo, token_counter)
-
-    async def _dummy_embed(text: str) -> list[float]:
-        return [0.0] * 1536
-
-    recall_memory = RecallMemoryManager(memory_repo, _dummy_embed)
-    archival_memory = ArchivalMemoryManager(transcript_repo, token_counter)
+    svc = await bootstrap_services()
+    cfg = svc.config_loader.config
 
     # Ensure all agents have core memory initialized
-    for agent in agent_registry.get_all_agents():
-        existing = await core_memory.get_core_memory(agent.id)
-        if existing is None:
-            identity = (
-                f"I am {agent.display_name}. "
-                f"My conversation model is {agent.model_conversation}."
-            )
-            await core_memory.initialize_agent_memory(agent.id, identity)
-            console.print(f"  [dim]Initialized core memory for {agent.id}[/dim]")
+    initialized = await init_core_memories(svc.agent_registry, svc.core_memory)
+    for agent_id in initialized:
+        console.print(f"  [dim]Initialized core memory for {agent_id}[/dim]")
 
-    context_assembler = ContextAssembler(
-        agent_registry=agent_registry,
-        core_memory=core_memory,
-        recall_memory=recall_memory,
-        archival_memory=archival_memory,
-        token_counter=token_counter,
-        redis_client=redis_client,
-    )
-
-    conversation_repo = ConversationRepo(db)
+    conversation_repo = ConversationRepo(svc.db)
     overseer_shadow = getattr(args, "overseer_shadow", False)
-    overseer = Overseer(
-        redis_client=redis_client,
-        llm_client=llm_client,
-        event_bus=event_bus,
-        shadow_mode=overseer_shadow,
-        db=db if overseer_shadow else None,
-    )
+    if overseer_shadow:
+        from core.overseer import Overseer
 
-    proximity = ProximityManager(redis_client, cfg, event_bus)
-    trigger_system = TriggerSystem(cfg.triggers, recall_memory)
+        overseer = Overseer(
+            redis_client=svc.redis,
+            llm_client=svc.llm_client,
+            event_bus=event_bus,
+            shadow_mode=True,
+            db=svc.db,
+        )
+    else:
+        overseer = svc.overseer
+
+    proximity = ProximityManager(svc.redis, cfg, event_bus)
+    trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
     speed = float(args.speed) if hasattr(args, "speed") and args.speed is not None else 1.0
@@ -434,14 +385,14 @@ async def run_watch(args: argparse.Namespace) -> None:
         console.print("[yellow]Overseer disabled for testing[/yellow]")
 
     engine = ConversationEngine(
-        config_loader=config_loader,
-        agent_registry=agent_registry,
+        config_loader=svc.config_loader,
+        agent_registry=svc.agent_registry,
         event_bus=event_bus,
-        llm_client=llm_client,
+        llm_client=svc.llm_client,
         overseer=overseer,
-        context_assembler=context_assembler,
+        context_assembler=svc.context_assembler,
         conversation_repo=conversation_repo,
-        archival_memory=archival_memory,
+        archival_memory=svc.archival_memory,
         proximity=proximity,
         trigger_system=trigger_system,
         selection_logger=selection_logger,
@@ -476,14 +427,14 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     # ── Simulation tracking ──────────────────────────────────────
     simulation_id = None
-    sim_repo = SimulationRepo(db)
+    sim_repo = SimulationRepo(svc.db)
 
     # If --sim-id is provided (from dashboard), reuse existing record
     existing_sim_id = getattr(args, "sim_id", None)
     if existing_sim_id and args.test:
         import uuid as _uuid
         simulation_id = _uuid.UUID(existing_sim_id)
-        llm_client._simulation_id = simulation_id
+        svc.llm_client._simulation_id = simulation_id
         await sim_repo.update_status(simulation_id, "running")
         console.print(f"[bold cyan]Simulation (reattached):[/bold cyan] {simulation_id}")
     elif getattr(args, "simulate", False) and args.test:
@@ -495,7 +446,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         requested = (
             [a.strip() for a in args.agents.split(",")]
             if args.agents
-            else [a.id for a in agent_registry.get_all_agents()
+            else [a.id for a in svc.agent_registry.get_all_agents()
                   if a.id not in ("overseer", "alpha")]
         )
         sim = await sim_repo.create(SimulationCreate(
@@ -512,7 +463,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         ))
         simulation_id = sim.id
         # Expose simulation_id to the LLM client for cost attribution
-        llm_client._simulation_id = simulation_id
+        svc.llm_client._simulation_id = simulation_id
         console.print(f"[bold cyan]Simulation:[/bold cyan] {sim.name} ({simulation_id})")
 
     # Wire simulation_id into the engine so conversations get linked
@@ -541,12 +492,12 @@ async def run_watch(args: argparse.Namespace) -> None:
             requested_agents = (
                 [a.strip() for a in args.agents.split(",")]
                 if args.agents
-                else [a.id for a in agent_registry.get_all_agents()
+                else [a.id for a in svc.agent_registry.get_all_agents()
                       if a.id not in ("overseer", "alpha")]
             )
             # Clear all agent locations so stale Redis data doesn't pull in extras
-            for agent in agent_registry.get_all_agents():
-                await redis_client.delete(f"agent:location:{agent.id}")
+            for agent in svc.agent_registry.get_all_agents():
+                await svc.redis.delete(f"agent:location:{agent.id}")
             # Place only requested agents
             for agent_id in requested_agents:
                 await proximity.update_location(agent_id, location)
@@ -628,16 +579,15 @@ async def run_watch(args: argparse.Namespace) -> None:
             )
             try:
                 # Generate embedding for the transcript summary
-                import httpx
-                async with httpx.AsyncClient() as http_client:
-                    from core.memory.embeddings import generate_embedding
-                    embedding = await generate_embedding(
-                        summary, http_client, api_key,
-                    )
+                from core.memory.embeddings import generate_embedding
+                api_key = os.environ.get("OPENROUTER_API_KEY", "")
+                embedding = await generate_embedding(
+                    summary, svc.http_client, api_key,
+                )
 
                 for agent_id in set(_captured_participants):
                     # Recall memory
-                    await recall_memory.store_recall_memory(
+                    await svc.recall_memory.store_recall_memory(
                         agent_id=agent_id,
                         summary=summary,
                         embedding=embedding,
@@ -659,7 +609,7 @@ async def run_watch(args: argparse.Namespace) -> None:
                         f"I contributed {len(agent_lines)} messages. "
                         f"Topics covered: {summary[:300]}"
                     )
-                    await memory_repo.create_journal_entry(JournalEntryCreate(
+                    await svc.memory_repo.create_journal_entry(JournalEntryCreate(
                         agent_id=agent_id,
                         reflection_type="conversation",
                         content=journal_content,
@@ -700,9 +650,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         print_summary(stats)
 
     # Cleanup
-    await llm_client.close()
-    await redis_client.disconnect()
-    await db.disconnect()
+    await _shutdown_services(svc)
 
 
 def main() -> None:
