@@ -17,8 +17,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
-import signal
 import sys
 import time
 from decimal import Decimal
@@ -177,215 +175,35 @@ def print_session_summary(stats: SessionStats) -> None:
     console.print(table)
 
 
-# ── Service bootstrapping ─────────────────────────────────────────
+# ── Service bootstrapping (shared) ────────────────────────────────
 
-async def bootstrap_services(dry_run: bool = False):
-    """Wire up all services and return them as a dict.
-
-    In dry-run mode, database and Redis are not connected — repos/LLM
-    are replaced with lightweight stubs so context assembly still works.
-    """
-    from core.agent_registry import AgentRegistry
-    from core.memory.token_counter import TokenCounter
-
-    token_counter = TokenCounter()
-
-    if dry_run:
-        return await _bootstrap_dry_run(token_counter)
-
-    from core.database import Database
-    from core.llm_client import OpenRouterClient
-    from core.memory.archival_memory import ArchivalMemoryManager
-    from core.memory.compaction import MemoryCompactor
-    from core.memory.core_memory import CoreMemoryManager
-    from core.memory.recall_memory import RecallMemoryManager
-    from core.redis_client import RedisClient
-    from core.repos.cost_repo import CostRepo
-    from core.repos.memory_repo import MemoryRepo
-    from core.repos.transcript_repo import TranscriptRepo
-
-    import httpx
-
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
-        console.print("[bold red]Error:[/bold red] OPENROUTER_API_KEY not set in .env")
-        sys.exit(1)
-
-    db = Database()
-    redis_client = RedisClient()
-
-    console.print("[dim]Connecting to services...[/dim]")
-    await db.connect()
-    await redis_client.connect()
-    console.print("[dim green]✓ Database and Redis connected[/dim green]")
-
-    # Auto-run migrations if tables are missing
-    try:
-        await db.fetchval("SELECT 1 FROM core_memory LIMIT 0")
-    except Exception:
-        console.print("[dim yellow]Tables missing — running migrations...[/dim yellow]")
-        import asyncpg as _apg
-
-        conn = await _apg.connect(db.dsn, timeout=60)
-        try:
-            from db.migrate import up
-            await up(conn)
-            console.print("[dim green]✓ Migrations applied[/dim green]")
-        finally:
-            await conn.close()
-
-    agent_registry = AgentRegistry(redis_client=redis_client)
-    await agent_registry.load_all()
-
-    cost_repo = CostRepo(db)
-    memory_repo = MemoryRepo(db)
-    transcript_repo = TranscriptRepo(db)
-    http_client = httpx.AsyncClient()
-
-    llm_client = OpenRouterClient(api_key=api_key, cost_repo=cost_repo)
-    core_memory = CoreMemoryManager(memory_repo=memory_repo, token_counter=token_counter)
-    recall_memory = RecallMemoryManager(
-        memory_repo=memory_repo,
-        embedding_fn=_make_embedding_fn(http_client, api_key),
-    )
-    archival_memory = ArchivalMemoryManager(
-        transcript_repo=transcript_repo, token_counter=token_counter
-    )
-    compactor = MemoryCompactor(
-        archival=archival_memory,
-        recall=recall_memory,
-        llm_client=llm_client,
-        http_client=http_client,
-        openrouter_api_key=api_key,
-    )
-
-    from core.context_assembly import ContextAssembler
-    from core.event_bus import EventBus
-    from core.overseer import Overseer
-
-    event_bus = EventBus()
-    overseer = Overseer(
-        redis_client=redis_client, llm_client=llm_client, event_bus=event_bus,
-    )
-
-    context_assembler = ContextAssembler(
-        agent_registry=agent_registry,
-        core_memory=core_memory,
-        recall_memory=recall_memory,
-        archival_memory=archival_memory,
-        token_counter=token_counter,
-        redis_client=redis_client,
-    )
-
-    return {
-        "db": db,
-        "redis": redis_client,
-        "http_client": http_client,
-        "agent_registry": agent_registry,
-        "llm_client": llm_client,
-        "core_memory": core_memory,
-        "recall_memory": recall_memory,
-        "archival_memory": archival_memory,
-        "compactor": compactor,
-        "context_assembler": context_assembler,
-        "token_counter": token_counter,
-        "memory_repo": memory_repo,
-        "event_bus": event_bus,
-        "overseer": overseer,
-        "cost_repo": cost_repo,
-    }
-
-
-async def _bootstrap_dry_run(token_counter):
-    """Lightweight bootstrap for --dry-run: no DB/Redis needed."""
-    from core.agent_registry import AgentRegistry
-    from core.context_assembly import ContextAssembler
-
-    agent_registry = AgentRegistry(redis_client=None)
-    await agent_registry.load_all()
-
-    # Stub memory managers that return empty data
-    class StubCoreMemory:
-        async def get_core_memory(self, agent_id: str):
-            return None
-
-    class StubRecallMemory:
-        async def retrieve_recall_memories(self, agent_id: str, query: str, limit: int = 3):
-            return ""
-
-    class StubArchivalMemory:
-        async def retrieve_full_transcript(self, transcript_id: int):
-            return None
-
-    context_assembler = ContextAssembler(
-        agent_registry=agent_registry,
-        core_memory=StubCoreMemory(),
-        recall_memory=StubRecallMemory(),
-        archival_memory=StubArchivalMemory(),
-        token_counter=token_counter,
-        redis_client=None,
-    )
-
-    return {
-        "db": None,
-        "redis": None,
-        "http_client": None,
-        "agent_registry": agent_registry,
-        "llm_client": None,
-        "core_memory": None,
-        "recall_memory": None,
-        "archival_memory": None,
-        "compactor": None,
-        "context_assembler": context_assembler,
-        "token_counter": token_counter,
-        "memory_repo": None,
-    }
-
-
-def _make_embedding_fn(http_client, api_key):
-    from core.memory.embeddings import generate_embedding
-
-    async def embedding_fn(text: str) -> list[float]:
-        return await generate_embedding(text, http_client, api_key)
-
-    return embedding_fn
-
-
-async def shutdown_services(services: dict) -> None:
-    if services.get("llm_client"):
-        await services["llm_client"].close()
-    if services.get("http_client"):
-        await services["http_client"].aclose()
-    if services.get("redis"):
-        await services["redis"].disconnect()
-    if services.get("db"):
-        await services["db"].disconnect()
+from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services  # noqa: E402
 
 
 # ── Tool support ─────────────────────────────────────────────────
 
 
-def build_tools_for_agent(agent_id: str, services: dict) -> dict:
+def build_tools_for_agent(agent_id: str, services: Services) -> dict:
     """Build a ToolRegistry for a specific agent, returning {name: tool_instance}."""
     from tools import ToolRegistry, get_core_tools, get_memory_tools
 
     registry = ToolRegistry()
 
     core_tools = get_core_tools(
-        event_bus=services["event_bus"],
-        redis_client=services["redis"],
+        event_bus=services.event_bus,
+        redis_client=services.redis,
         agent_id=agent_id,
-        overseer=services.get("overseer"),
-        cost_repo=services.get("cost_repo"),
-        llm_client=services.get("llm_client"),
-        memory_repo=services.get("memory_repo"),
+        overseer=services.overseer,
+        cost_repo=services.cost_repo,
+        llm_client=services.llm_client,
+        memory_repo=services.memory_repo,
     )
     for tool in core_tools:
         registry.register(tool)
 
-    core_memory = services.get("core_memory")
-    recall_memory = services.get("recall_memory")
-    archival_memory = services.get("archival_memory")
+    core_memory = services.core_memory
+    recall_memory = services.recall_memory
+    archival_memory = services.archival_memory
     if all([core_memory, recall_memory, archival_memory]):
         mem_tools = get_memory_tools(
             recall_manager=recall_memory,
@@ -526,18 +344,18 @@ async def run_turn(
     agent_id: str,
     user_message: str,
     conversation_history: list[dict[str, str]],
-    services: dict,
+    services: Services,
     stats: SessionStats,
     verbose: bool = False,
     agent_tools: dict | None = None,
     tts_pipeline=None,
 ) -> str:
     """Execute one full turn: assemble context → call LLM → handle tool calls → return response."""
-    context_assembler = services["context_assembler"]
-    llm_client = services["llm_client"]
-    token_counter = services["token_counter"]
+    context_assembler = services.context_assembler
+    llm_client = services.llm_client
+    token_counter = services.token_counter
 
-    agent_config = services["agent_registry"].get_agent(agent_id)
+    agent_config = services.agent_registry.get_agent(agent_id)
     if agent_config is None:
         console.print(f"[bold red]Agent '{agent_id}' not found[/bold red]")
         return ""
@@ -654,7 +472,7 @@ async def run_turn(
 async def end_session(
     agent_id: str,
     conversation_history: list[dict[str, str]],
-    services: dict,
+    services: Services,
     stats: SessionStats,
 ) -> None:
     """Graceful session end: compact full conversation → run reflection → update core memory."""
@@ -664,7 +482,7 @@ async def end_session(
     console.print()
     console.print("[bold cyan]━━━ Saving session memories... ━━━[/bold cyan]")
 
-    compactor = services.get("compactor")
+    compactor = services.compactor
     if compactor:
         # Compact the full conversation into archival + recall
         transcript_text = "\n".join(
@@ -686,11 +504,11 @@ async def end_session(
             )
 
     # Run a mini-reflection to promote important facts to core memory
-    llm_client = services.get("llm_client")
-    core_memory_mgr = services.get("core_memory")
-    memory_repo = services.get("memory_repo")
-    token_counter = services.get("token_counter")
-    agent_registry = services.get("agent_registry")
+    llm_client = services.llm_client
+    core_memory_mgr = services.core_memory
+    memory_repo = services.memory_repo
+    token_counter = services.token_counter
+    agent_registry = services.agent_registry
 
     if all([llm_client, core_memory_mgr, memory_repo, token_counter, agent_registry]):
         from core.memory.reflection import ReflectionManager
@@ -730,15 +548,15 @@ async def end_session(
 # ── Reflect mode ──────────────────────────────────────────────────
 
 
-async def run_reflect(agent_id: str | None, services: dict, run_all: bool = False) -> None:
+async def run_reflect(agent_id: str | None, services: Services, run_all: bool = False) -> None:
     """Run 6-hour reflection on one agent or all agents."""
     from core.memory.reflection import ReflectionManager
 
-    llm_client = services["llm_client"]
-    core_memory_mgr = services["core_memory"]
-    memory_repo = services["memory_repo"]
-    token_counter = services["token_counter"]
-    agent_registry = services["agent_registry"]
+    llm_client = services.llm_client
+    core_memory_mgr = services.core_memory
+    memory_repo = services.memory_repo
+    token_counter = services.token_counter
+    agent_registry = services.agent_registry
 
     reflection_mgr = ReflectionManager(
         memory_repo=memory_repo,
@@ -806,15 +624,15 @@ async def run_reflect(agent_id: str | None, services: dict, run_all: bool = Fals
     console.print("[bold green]Reflection complete.[/bold green]")
 
 
-async def run_reflect_interactive(agent_id: str, services: dict) -> None:
+async def run_reflect_interactive(agent_id: str, services: Services) -> None:
     """Run reflection for a single agent from within interactive mode."""
     from core.memory.reflection import ReflectionManager
 
-    llm_client = services.get("llm_client")
-    core_memory_mgr = services.get("core_memory")
-    memory_repo = services.get("memory_repo")
-    token_counter = services.get("token_counter")
-    agent_registry = services.get("agent_registry")
+    llm_client = services.llm_client
+    core_memory_mgr = services.core_memory
+    memory_repo = services.memory_repo
+    token_counter = services.token_counter
+    agent_registry = services.agent_registry
 
     if not all([llm_client, core_memory_mgr, memory_repo, token_counter, agent_registry]):
         console.print("  [red]Reflection requires full services (not available in dry-run)[/red]")
@@ -845,12 +663,12 @@ async def run_reflect_interactive(agent_id: str, services: dict) -> None:
 
 # ── Dry-run mode ──────────────────────────────────────────────────
 
-async def run_dry_run(agent_id: str, services: dict, verbose: bool) -> None:
+async def run_dry_run(agent_id: str, services: Services, verbose: bool) -> None:
     """Show assembled context without calling LLM."""
-    context_assembler = services["context_assembler"]
-    token_counter = services["token_counter"]
+    context_assembler = services.context_assembler
+    token_counter = services.token_counter
 
-    agent_config = services["agent_registry"].get_agent(agent_id)
+    agent_config = services.agent_registry.get_agent(agent_id)
     if agent_config is None:
         console.print(f"[bold red]Agent '{agent_id}' not found[/bold red]")
         return
@@ -893,7 +711,7 @@ async def run_dry_run(agent_id: str, services: dict, verbose: bool) -> None:
 
 async def run_interactive(
     agent_id: str,
-    services: dict,
+    services: Services,
     verbose: bool,
     use_tools: bool = True,
     tts_enabled: bool = False,
@@ -962,7 +780,7 @@ async def run_interactive(
             continue
 
         if user_input.lower() == "/memory":
-            core_mem = services.get("core_memory")
+            core_mem = services.core_memory
             if core_mem:
                 content = await core_mem.get_core_memory(agent_id)
                 if content:
@@ -1064,7 +882,7 @@ AUTO_PROMPTS = [
 ]
 
 
-async def run_auto(agent_id: str, services: dict, verbose: bool) -> None:
+async def run_auto(agent_id: str, services: Services, verbose: bool) -> None:
     """Run predefined test sequence exercising the full pipeline."""
     stats = SessionStats()
     conversation_history: list[dict[str, str]] = []
@@ -1217,7 +1035,7 @@ DIAGNOSTIC_TOOL_TESTS: list[dict[str, str]] = [
 ]
 
 
-async def run_diagnostic(agent_id: str, services: dict, verbose: bool) -> None:
+async def run_diagnostic(agent_id: str, services: Services, verbose: bool) -> None:
     """Run diagnostic mode: systematically test each tool through the agent."""
     stats = SessionStats()
     conversation_history: list[dict[str, str]] = []
@@ -1318,7 +1136,7 @@ async def run_diagnostic(agent_id: str, services: dict, verbose: bool) -> None:
 
 async def run_multi(
     agent_ids: list[str],
-    services: dict,
+    services: Services,
     *,
     convo_type: str = "freeform",
     topic: str | None = None,
@@ -1337,10 +1155,10 @@ async def run_multi(
 
     stats = SessionStats()
     conversation_history: list[dict[str, str]] = []
-    agent_registry = services["agent_registry"]
-    context_assembler = services["context_assembler"]
-    llm_client = services["llm_client"]
-    token_counter = services["token_counter"]
+    agent_registry = services.agent_registry
+    context_assembler = services.context_assembler
+    llm_client = services.llm_client
+    token_counter = services.token_counter
 
     # Load conversation config for speaker selection + energy
     config_loader = ConfigLoader()
@@ -1613,31 +1431,18 @@ Examples:
 
 # ── Main ──────────────────────────────────────────────────────────
 
-async def _ensure_core_memory(agent_id: str, agent_config, services: dict) -> None:
+async def _ensure_core_memory(agent_id: str, agent_config, services: Services) -> None:
     """Initialize core memory for an agent if it doesn't exist yet."""
-    core_memory = services["core_memory"]
-    existing = await core_memory.get_core_memory(agent_id)
-    if existing is not None:
-        return
-
-    # Extract identity from system prompt (first paragraph after the character intro)
-    identity = agent_config.system_prompt.strip()
-    # Use the display_name and a brief identity line
-    identity_line = (
-        f"I am {agent_config.display_name}. "
-        f"My conversation model is {agent_config.model_conversation}."
-    )
-    await core_memory.initialize_agent_memory(agent_id, identity_line)
-    print_memory_event("🧠", f"Initialized core memory for {agent_id}")
+    initialized = await init_core_memories(services.agent_registry, services.core_memory)
+    if agent_id in initialized:
+        print_memory_event("🧠", f"Initialized core memory for {agent_id}")
 
 
 async def async_main(args: argparse.Namespace) -> None:
     # List agents mode
     if args.list_agents:
-        from core.agent_registry import AgentRegistry
-
-        registry = AgentRegistry(redis_client=None)
-        await registry.load_all()
+        list_svc = await bootstrap_services(dry_run=True)
+        registry = list_svc.agent_registry
         console.print()
         table = Table(title="Available Agents", show_header=True, border_style="cyan")
         table.add_column("ID", style="bold")
@@ -1660,13 +1465,13 @@ async def async_main(args: argparse.Namespace) -> None:
         return
 
     is_dry_run = args.dry_run
-    services = await bootstrap_services(dry_run=is_dry_run)
+    services = await bootstrap_services(dry_run=is_dry_run, auto_migrate=True)
 
     try:
         # Validate agent exists
-        agent_config = services["agent_registry"].get_agent(args.agent)
+        agent_config = services.agent_registry.get_agent(args.agent)
         if agent_config is None:
-            available = [a.id for a in services["agent_registry"].get_all_agents()]
+            available = [a.id for a in services.agent_registry.get_all_agents()]
             console.print(
                 f"[bold red]Agent '{args.agent}' not found.[/bold red] "
                 f"Available: {', '.join(available)}"
@@ -1681,7 +1486,7 @@ async def async_main(args: argparse.Namespace) -> None:
         console.print()
 
         # Auto-initialize core memory if missing (requires DB)
-        if not is_dry_run and services.get("core_memory"):
+        if not is_dry_run and services.core_memory:
             await _ensure_core_memory(args.agent, agent_config, services)
 
         if is_dry_run:

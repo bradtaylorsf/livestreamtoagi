@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import signal
 import sys
 from pathlib import Path
@@ -46,27 +45,14 @@ async def run_simulation(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
 
-    from core.agent_registry import AgentRegistry
-    from core.config_loader import ConfigLoader
-    from core.context_assembly import ContextAssembler
+    from core.bootstrap import bootstrap_services, shutdown_services
     from core.conversation.proximity import ProximityManager
     from core.conversation.selection_logger import SelectionLogger
     from core.conversation.triggers import TriggerSystem
-    from core.database import Database
     from core.event_bus import event_bus
-    from core.llm_client import OpenRouterClient
-    from core.memory.archival_memory import ArchivalMemoryManager
-    from core.memory.core_memory import CoreMemoryManager
-    from core.memory.recall_memory import RecallMemoryManager
     from core.memory.reflection import ReflectionManager
-    from core.memory.token_counter import TokenCounter
-    from core.overseer import Overseer
-    from core.redis_client import RedisClient
     from core.repos.conversation_repo import ConversationRepo
-    from core.repos.cost_repo import CostRepo
-    from core.repos.memory_repo import MemoryRepo
     from core.repos.simulation_repo import SimulationRepo
-    from core.repos.transcript_repo import TranscriptRepo
     from core.simulation.display import SimulationDisplay
     from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
 
@@ -87,65 +73,35 @@ async def run_simulation(args: argparse.Namespace) -> None:
     sim_config.load_seed_file()
 
     # ── Connect services ──────────────────────────────────
-    db = Database()
-    redis_client = RedisClient()
-    await db.connect()
-    await redis_client.connect()
+    svc = await bootstrap_services()
+    cfg = svc.config_loader.config
 
-    # Load agents and config
-    agent_registry = AgentRegistry(redis_client=redis_client)
-    await agent_registry.load_all()
-    config_loader = ConfigLoader()
-    config_loader.load()
-    cfg = config_loader.config
+    conversation_repo = ConversationRepo(svc.db)
+    simulation_repo = SimulationRepo(svc.db)
 
-    # Initialize subsystems
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    cost_repo = CostRepo(db)
-    llm_client = OpenRouterClient(api_key=api_key, cost_repo=cost_repo)
+    if sim_config.overseer_shadow:
+        from core.overseer import Overseer
 
-    memory_repo = MemoryRepo(db)
-    transcript_repo = TranscriptRepo(db)
-    token_counter = TokenCounter()
+        overseer = Overseer(
+            redis_client=svc.redis,
+            llm_client=svc.llm_client,
+            event_bus=event_bus,
+            shadow_mode=True,
+            db=svc.db,
+        )
+    else:
+        overseer = svc.overseer
 
-    core_memory = CoreMemoryManager(memory_repo, token_counter)
-
-    async def _dummy_embed(text: str) -> list[float]:
-        return [0.0] * 1536
-
-    recall_memory = RecallMemoryManager(memory_repo, _dummy_embed)
-    archival_memory = ArchivalMemoryManager(transcript_repo, token_counter)
-
-    context_assembler = ContextAssembler(
-        agent_registry=agent_registry,
-        core_memory=core_memory,
-        recall_memory=recall_memory,
-        archival_memory=archival_memory,
-        token_counter=token_counter,
-        redis_client=redis_client,
-    )
-
-    conversation_repo = ConversationRepo(db)
-    simulation_repo = SimulationRepo(db)
-
-    overseer = Overseer(
-        redis_client=redis_client,
-        llm_client=llm_client,
-        event_bus=event_bus,
-        shadow_mode=sim_config.overseer_shadow,
-        db=db if sim_config.overseer_shadow else None,
-    )
-
-    proximity = ProximityManager(redis_client, cfg, event_bus)
-    trigger_system = TriggerSystem(cfg.triggers, recall_memory)
+    proximity = ProximityManager(svc.redis, cfg, event_bus)
+    trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
     reflection_manager = ReflectionManager(
-        memory_repo=memory_repo,
-        llm_client=llm_client,
-        core_memory_mgr=core_memory,
-        token_counter=token_counter,
-        agent_registry=agent_registry,
+        memory_repo=svc.memory_repo,
+        llm_client=svc.llm_client,
+        core_memory_mgr=svc.core_memory,
+        token_counter=svc.token_counter,
+        agent_registry=svc.agent_registry,
     )
 
     display = SimulationDisplay(verbose=verbose)
@@ -153,17 +109,17 @@ async def run_simulation(args: argparse.Namespace) -> None:
     # ── Build orchestrator ────────────────────────────────
     orchestrator = SimulationOrchestrator(
         config=sim_config,
-        db=db,
-        redis_client=redis_client,
+        db=svc.db,
+        redis_client=svc.redis,
         simulation_repo=simulation_repo,
-        config_loader=config_loader,
-        agent_registry=agent_registry,
+        config_loader=svc.config_loader,
+        agent_registry=svc.agent_registry,
         event_bus=event_bus,
-        llm_client=llm_client,
+        llm_client=svc.llm_client,
         overseer=overseer,
-        context_assembler=context_assembler,
+        context_assembler=svc.context_assembler,
         conversation_repo=conversation_repo,
-        archival_memory=archival_memory,
+        archival_memory=svc.archival_memory,
         proximity=proximity,
         trigger_system=trigger_system,
         selection_logger=selection_logger,
@@ -186,9 +142,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
     await orchestrator.run()
 
     # ── Cleanup ───────────────────────────────────────────
-    await llm_client.close()
-    await redis_client.disconnect()
-    await db.disconnect()
+    await shutdown_services(svc)
 
 
 def main() -> None:
