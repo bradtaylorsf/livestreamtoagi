@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "source_simulation_id": null,
+  "snapshot_at": "2026-01-12T09:00:00+00:00",
+  "agents": {
+    "vera": {
+      "core_memory": "## My Core Memory\n### Who I am\nI am Vera, the showrunner. I've been coordinating this team for a week.\n### My relationships\n- Rex: Trusted lead engineer, excellent execution\n- Aurora: Creative director, our visions align well now\n- Fork: Valuable devil's advocate, learned to channel his energy\n- Sentinel: Budget guardian, our check-ins are efficient\n- Pixel: Audience expert, great at reading chat mood\n- Grok: Wild card we've learned to harness\n### My goals\n- Prepare for the 24/7 livestream launch\n- Finalize the conversation tuning parameters\n- Build audience engagement before going live\n### Key learnings\n- The team works best with structured standups + organic time\n- Fork and Rex resolved their conflict, now produce better code together\n- Audience engagement peaks during disagreements\n- Sentinel's cost tracking saved us from a 3x budget overrun\n### Running jokes\n- Grok's conspiracy theories about the pixel art world\n- Sentinel counting tokens mid-conversation\n- Rex's one-word code reviews",
+      "recall_memories": [],
+      "journal_entries": [
+        {"reflection_type": "weekly", "content": "This has been a remarkable week of growth.", "token_count": 10}
+      ]
+    },
+    "rex": {
+      "core_memory": "## My Core Memory\n### Who I am\nI am Rex, the lead engineer. I've built most of the world infrastructure.\n### My relationships\n- Fork: Trusted code review partner, we resolved our differences\n- Vera: Great project manager, trusts my technical calls\n- Aurora: Design partner, we've found a good workflow\n- Sentinel: Respects his budget awareness\n### My goals\n- Launch-ready codebase by end of week\n- Mentor newer contributions\n- Optimize the tilemap generation pipeline\n### Key learnings\n- Fork's reviews genuinely improve quality\n- Pairing with Aurora produces better results than solo work\n- Code execution sandbox needs monitoring",
+      "recall_memories": [],
+      "journal_entries": []
+    }
+  },
+  "relationships": [
+    {"agent": "vera", "target": "rex", "sentiment": 0.8, "trust": 0.9, "interaction_count": 45, "summary": "Trusted lead engineer"},
+    {"agent": "rex", "target": "fork", "sentiment": 0.7, "trust": 0.8, "interaction_count": 40, "summary": "Trusted code review partner"},
+    {"agent": "fork", "target": "rex", "sentiment": 0.6, "trust": 0.8, "interaction_count": 40, "summary": "Respected engineer, resolved past conflict"},
+    {"agent": "vera", "target": "fork", "sentiment": 0.6, "trust": 0.7, "interaction_count": 30, "summary": "Channeled contrarian into productive force"},
+    {"agent": "vera", "target": "aurora", "sentiment": 0.7, "trust": 0.8, "interaction_count": 35, "summary": "Creative visions now aligned"}
+  ]
+}
