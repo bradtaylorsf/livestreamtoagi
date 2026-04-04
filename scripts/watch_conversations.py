@@ -337,7 +337,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
 
-    from core.bootstrap import bootstrap_services, init_core_memories
+    from core.bootstrap import bootstrap_services
     from core.bootstrap import shutdown_services as _shutdown_services
     from core.conversation.proximity import ProximityManager
     from core.conversation.selection_logger import SelectionLogger
@@ -349,11 +349,6 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     svc = await bootstrap_services()
     cfg = svc.config_loader.config
-
-    # Ensure all agents have core memory initialized
-    initialized = await init_core_memories(svc.agent_registry, svc.core_memory)
-    for agent_id in initialized:
-        console.print(f"  [dim]Initialized core memory for {agent_id}[/dim]")
 
     conversation_repo = ConversationRepo(svc.db)
     overseer_shadow = getattr(args, "overseer_shadow", False)
