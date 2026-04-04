@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AdminApiError,
+  fetchArtifacts,
   fetchDashboardStats,
   fetchSimulation,
   fetchSimulations,
@@ -516,6 +517,63 @@ describe("fetchConversationInterrupts", () => {
     expect(result).toHaveLength(1);
     expect(result[0].attempting_agent_id).toBe("fork");
     expect(result[0].succeeded).toBe(true);
+  });
+});
+
+// ── Global Artifact API Tests ────────────────────────────────────
+
+describe("fetchArtifacts", () => {
+  it("sends GET to /api/admin/artifacts with no filters", async () => {
+    const paginated = { items: [], total: 0, limit: 50, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    const result = await fetchArtifacts();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/artifacts",
+      expect.anything(),
+    );
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(0);
+  });
+
+  it("serializes all filter params to query string", async () => {
+    const paginated = { items: [], total: 0, limit: 10, offset: 5 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchArtifacts({
+      simulation_id: "sim-1",
+      agent_ids: ["rex", "fork"],
+      types: ["social_post", "email"],
+      statuses: ["executed"],
+      since: "2026-04-01T00:00:00.000Z",
+      until: "2026-04-03T00:00:00.000Z",
+      search: "hello",
+      sort: "oldest",
+      limit: 10,
+      offset: 5,
+    });
+
+    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("/api/admin/artifacts?");
+    expect(calledUrl).toContain("simulation_id=sim-1");
+    expect(calledUrl).toContain("agent_id=rex%2Cfork");
+    expect(calledUrl).toContain("type=social_post%2Cemail");
+    expect(calledUrl).toContain("status=executed");
+    expect(calledUrl).toContain("search=hello");
+    expect(calledUrl).toContain("sort=oldest");
+    expect(calledUrl).toContain("limit=10");
+    expect(calledUrl).toContain("offset=5");
+  });
+
+  it("omits empty filter params", async () => {
+    const paginated = { items: [], total: 0, limit: 50, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await fetchArtifacts({ sort: "newest" });
+
+    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toBe("/api/admin/artifacts?sort=newest");
   });
 });
 

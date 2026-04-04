@@ -130,6 +130,83 @@ class ArtifactRepo:
             result.append(Artifact(**d))
         return result, count or 0
 
+    async def get_all_artifacts(
+        self,
+        *,
+        simulation_id: uuid.UUID | None = None,
+        agent_ids: list[str] | None = None,
+        artifact_type: list[str] | None = None,
+        status: list[str] | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        search: str | None = None,
+        sort: str = "newest",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Artifact], int]:
+        """Global artifact query with filtering, search, sorting, and pagination."""
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
+
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = ${idx}")
+            params.append(simulation_id)
+            idx += 1
+        if agent_ids:
+            clauses.append(f"agent_id = ANY(${idx}::text[])")
+            params.append(agent_ids)
+            idx += 1
+        if artifact_type:
+            clauses.append(f"artifact_type = ANY(${idx}::text[])")
+            params.append(artifact_type)
+            idx += 1
+        if status:
+            clauses.append(f"status = ANY(${idx}::text[])")
+            params.append(status)
+            idx += 1
+        if since is not None:
+            clauses.append(f"created_at >= ${idx}")
+            params.append(since)
+            idx += 1
+        if until is not None:
+            clauses.append(f"created_at <= ${idx}")
+            params.append(until)
+            idx += 1
+        if search:
+            clauses.append(
+                f"(tool_input::text ILIKE ${idx} OR tool_output::text ILIKE ${idx})"
+            )
+            params.append(f"%{search}%")
+            idx += 1
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        order = {
+            "newest": "created_at DESC",
+            "oldest": "created_at ASC",
+            "agent": "agent_id ASC, created_at DESC",
+            "type": "artifact_type ASC, created_at DESC",
+        }.get(sort, "created_at DESC")
+
+        count = await self.db.fetchval(
+            f"SELECT COUNT(*) FROM artifacts{where}",  # noqa: S608
+            *params,
+        )
+        rows = await self.db.fetch(
+            f"SELECT * FROM artifacts{where}"  # noqa: S608
+            f" ORDER BY {order} LIMIT ${idx} OFFSET ${idx + 1}",
+            *params,
+            limit,
+            offset,
+        )
+        result = []
+        for r in rows:
+            d = dict(r)
+            _parse_jsonb_fields(d)
+            result.append(Artifact(**d))
+        return result, count or 0
+
     async def get_artifacts_by_type(
         self,
         artifact_type: str,

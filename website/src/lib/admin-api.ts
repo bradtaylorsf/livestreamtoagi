@@ -9,6 +9,7 @@ import type {
   AgentCostBreakdown,
   AgentDetail,
   AgentSummary,
+  ArtifactFilters,
   ConversationDetail,
   CoreMemoryResponse,
   DashboardStats,
@@ -111,6 +112,28 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     average_cost: avgCost.toFixed(4),
     total_conversations: totalConversations,
   };
+}
+
+// ── Artifacts (global) ──────────────────────────────────────────
+
+export async function fetchArtifacts(
+  filters: ArtifactFilters = {},
+): Promise<PaginatedResponse<AgentArtifact>> {
+  const params = new URLSearchParams();
+  if (filters.simulation_id) params.set("simulation_id", filters.simulation_id);
+  if (filters.agent_ids?.length) params.set("agent_id", filters.agent_ids.join(","));
+  if (filters.types?.length) params.set("type", filters.types.join(","));
+  if (filters.statuses?.length) params.set("status", filters.statuses.join(","));
+  if (filters.since) params.set("since", filters.since);
+  if (filters.until) params.set("until", filters.until);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.limit != null) params.set("limit", String(filters.limit));
+  if (filters.offset != null) params.set("offset", String(filters.offset));
+  const qs = params.toString();
+  return request<PaginatedResponse<AgentArtifact>>(
+    `/api/admin/artifacts${qs ? `?${qs}` : ""}`,
+  );
 }
 
 // ── Simulations ──────────────────────────────────────────────────

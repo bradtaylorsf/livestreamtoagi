@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: "◆" },
   { href: "/admin/agents", label: "Agents", icon: "●" },
   { href: "/admin/simulations", label: "Simulations", icon: "▶" },
+  { href: "/admin/artifacts", label: "Artifacts", icon: "◇" },
 ] as const;
 
 export default function AdminSidebar() {
