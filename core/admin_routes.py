@@ -763,22 +763,6 @@ async def run_simulation_evals(
     )
 
 
-@router.get("/evals/{eval_id}")
-async def get_eval_result(eval_id: str) -> dict[str, Any]:
-    """Full eval run with all results."""
-    db = _get_db()
-    from core.repos.eval_repo import EvalRepo
-
-    eval_repo = EvalRepo(db)
-    run = await eval_repo.get_eval_run(uuid_mod.UUID(eval_id))
-    if run is None:
-        raise HTTPException(status_code=404, detail="Eval run not found")
-    results = await eval_repo.get_eval_results(run.id)
-    d = run.model_dump(mode="json")
-    d["results"] = [r.model_dump(mode="json") for r in results]
-    return d
-
-
 @router.get("/evals")
 async def list_eval_runs(
     limit: int = 50,
@@ -834,6 +818,22 @@ async def eval_history(category: str) -> list[dict[str, Any]]:
 
     eval_repo = EvalRepo(db)
     return await eval_repo.get_eval_history(category)
+
+
+@router.get("/evals/{eval_id}")
+async def get_eval_result(eval_id: str) -> dict[str, Any]:
+    """Full eval run with all results."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    run = await eval_repo.get_eval_run(uuid_mod.UUID(eval_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Eval run not found")
+    results = await eval_repo.get_eval_results(run.id)
+    d = run.model_dump(mode="json")
+    d["results"] = [r.model_dump(mode="json") for r in results]
+    return d
 
 
 @router.get("/evals/{eval_id}/export")

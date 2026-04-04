@@ -207,7 +207,7 @@ async def test_eval_engine_run_success():
     })
     mock_response.input_tokens = 1000
     mock_response.output_tokens = 500
-    mock_response.cost = Decimal("0.01")
+    mock_response.estimated_cost = Decimal("0.01")
     llm.complete = AsyncMock(return_value=mock_response)
 
     engine = EvalEngine(db=db, llm_client=llm, eval_repo=eval_repo)

@@ -153,7 +153,7 @@ class EvalEngine:
         evidence = parsed.get("evidence")
         sub_scores = parsed.get("sub_scores")
         tokens_used = response.input_tokens + response.output_tokens
-        cost = response.cost
+        cost = response.estimated_cost
 
         await self._eval_repo.save_eval_result(
             eval_run_id=run_id,

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
+    from core.simulation.clock import SimulationClock
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class PhaseRunner:
         agents: list[str],
         dry_run: bool = False,
         services: Services | None = None,
+        clock: SimulationClock | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -114,6 +116,7 @@ class PhaseRunner:
         self._agent_ids = agents
         self._dry_run = dry_run
         self._services = services
+        self._clock = clock
 
         # Stats accumulated during a phase run via event listeners
         self._phase_turns = 0
@@ -362,6 +365,7 @@ class PhaseRunner:
                 overseer_enabled=True,
                 simulation_id=self._simulation_id,
                 services=self._services,
+                clock=self._clock,
             )
 
             engine._running = True

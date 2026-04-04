@@ -214,6 +214,7 @@ class SimulationOrchestrator:
             agents=self._config.agents,
             dry_run=self._config.dry_run,
             services=self._services,
+            clock=self.clock,
         )
 
         phases = self._config.phases
