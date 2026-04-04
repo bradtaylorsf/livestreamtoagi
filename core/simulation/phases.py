@@ -319,7 +319,11 @@ class PhaseRunner:
         await self._run_conversation(trigger, phase)
 
     async def _run_tool_exercise(self, phase: Phase) -> None:
-        """Run a tool exercise — trigger a conversation that uses a specific tool."""
+        """Run a tool exercise — short conversation forcing a specific tool.
+
+        Tool exercises are capped at 4 turns by default (not 15) since the
+        goal is just to verify the tool fires, not to have a long conversation.
+        """
         agent_id = phase.config.get("agent", "pixel")
         tool_name = phase.config.get("tool", "web_search")
         context = phase.config.get("context", f"Use the {tool_name} tool")
@@ -328,11 +332,16 @@ class PhaseRunner:
             "type": "environmental",
             "starter_agent_id": agent_id,
             "prompt_hint": context,
+            "topic": context,
             "event_type": "tool_exercise",
             "event_data": {"tool": tool_name, "context": context},
             "location": phase.config.get("location", "town_square"),
             "tool_choice": {"type": "function", "function": {"name": tool_name}},
         }
+
+        # Override max_turns for tool exercises — keep them short
+        if "max_turns" not in phase.config:
+            phase.config["max_turns"] = 4
 
         await self._run_conversation(trigger, phase)
 
