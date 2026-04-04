@@ -30,6 +30,7 @@ from core.redis_client import RedisClient
 from core.repos.artifact_repo import ArtifactRepo
 from core.repos.cost_repo import CostRepo
 from core.repos.memory_repo import MemoryRepo
+from core.repos.relationship_repo import RelationshipRepo
 from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
 
@@ -60,6 +61,7 @@ class Services:
     cost_repo: CostRepo | None
     artifact_repo: ArtifactRepo | None
     world_repo: WorldRepo | None
+    relationship_repo: RelationshipRepo | None
     config_loader: ConfigLoader
 
 
@@ -120,6 +122,7 @@ async def bootstrap_services(
     cost_repo = CostRepo(db)
     artifact_repo = ArtifactRepo(db)
     world_repo = WorldRepo(db)
+    relationship_repo = RelationshipRepo(db)
     memory_repo = MemoryRepo(db)
     transcript_repo = TranscriptRepo(db)
     http_client = httpx.AsyncClient()
@@ -177,6 +180,7 @@ async def bootstrap_services(
         cost_repo=cost_repo,
         artifact_repo=artifact_repo,
         world_repo=world_repo,
+        relationship_repo=relationship_repo,
         config_loader=config_loader,
     )
 
@@ -230,6 +234,7 @@ async def _bootstrap_dry_run(
         cost_repo=None,
         artifact_repo=None,
         world_repo=None,
+        relationship_repo=None,
         config_loader=config_loader,
     )
 
