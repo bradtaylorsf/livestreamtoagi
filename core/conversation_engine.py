@@ -27,8 +27,6 @@ from core.tool_executor import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from core.agent_registry import AgentRegistry
     from core.bootstrap import Services
     from core.config_loader import ConfigLoader
@@ -39,7 +37,7 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
-    from core.memory.recall_memory import RecallMemoryManager
+    from core.memory.compaction import MemoryCompactor
     from core.models import AgentConfig, ConversationConfig
     from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
@@ -108,9 +106,8 @@ class ConversationEngine:
         proximity: ProximityManager,
         trigger_system: TriggerSystem,
         selection_logger: SelectionLogger,
-        recall_memory: RecallMemoryManager | None = None,
+        compactor: MemoryCompactor | None = None,
         memory_repo: MemoryRepo | None = None,
-        embedding_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         speed_multiplier: float = 1.0,
         overseer_enabled: bool = True,
         simulation_id: uuid.UUID | None = None,
@@ -126,9 +123,8 @@ class ConversationEngine:
         self._context = context_assembler
         self._repo = conversation_repo
         self._archival = archival_memory
-        self._recall = recall_memory
+        self._compactor = compactor
         self._memory_repo = memory_repo
-        self._embedding_fn = embedding_fn
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
@@ -485,19 +481,9 @@ class ConversationEngine:
             turn_count=conv.turn_number,
         )
 
-        # Store transcript to archival memory
-        transcript_content = "\n".join(
-            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}" for msg in conv.history
-        )
-        await self._archival.store_transcript(
-            event_type=conv.trigger.get("type", "idle"),
-            participants=conv.participants,
-            content=transcript_content,
-            conversation_id=conv.id,
-        )
-
-        # Create recall memories + journal entries for each participant
-        await self._create_post_conversation_memories(conv)
+        # Use MemoryCompactor for transcript storage + recall memory creation,
+        # then create journal entries separately
+        await self._compact_and_journal(conv)
 
         # Reset triggers
         self._triggers.reset()
@@ -514,82 +500,98 @@ class ConversationEngine:
 
     # ── Post-conversation memory creation ─────────────────────
 
-    async def _create_post_conversation_memories(
-        self, conv: _ActiveConversation
-    ) -> None:
-        """Create recall memories and journal entries for each participant.
+    async def _compact_and_journal(self, conv: _ActiveConversation) -> None:
+        """Use MemoryCompactor for archival + recall, then create journal entries.
+
+        Compactor handles: Tier 3 transcript storage, LLM summarization,
+        embedding generation, and Tier 2 recall memory creation.
+        Journal entries are a separate concern, created afterward.
 
         Failures are logged but never break conversation close.
         """
-        if not self._recall or not self._memory_repo or not self._embedding_fn:
-            logger.debug(
-                "Skipping post-conversation memories (recall=%s, repo=%s, embed=%s)",
-                self._recall is not None,
-                self._memory_repo is not None,
-                self._embedding_fn is not None,
-            )
-            return
+        transcript_content = "\n".join(
+            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
+            for msg in conv.history
+        )
+        participants = list(set(conv.participants))
+        event_type = conv.trigger.get("type", "idle")
 
-        try:
-            speakers = list(
-                dict.fromkeys(
-                    msg.get("speaker", "unknown") for msg in conv.history
+        # Compaction: archival + summarization + embedding + recall
+        if self._compactor:
+            try:
+                for agent_id in participants:
+                    await self._compactor.compact_interaction(
+                        agent_id=agent_id,
+                        interaction=transcript_content,
+                        event_type=event_type,
+                        participants=participants,
+                        conversation_id=conv.id,
+                    )
+                logger.info(
+                    "Compacted memories for %d participants", len(participants),
                 )
-            )
-            speakers_str = ", ".join(speakers)
-            first_excerpt = conv.history[0].get("content", "")[:200] if conv.history else ""
-            summary = (
-                f"Conversation between {speakers_str} "
-                f"({len(conv.history)} turns). "
-                f"Excerpt: {first_excerpt}"
-            )
-
-            embedding = await self._embedding_fn(summary)
-            participants = list(set(conv.participants))
-
-            for agent_id in participants:
-                # Recall memory (Tier 2)
-                await self._recall.store_recall_memory(
-                    agent_id=agent_id,
-                    summary=summary,
-                    embedding=embedding,
-                    event_type="conversation",
+            except Exception:
+                logger.warning(
+                    "Memory compaction failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
+                )
+        else:
+            # No compactor — still store transcript via archival directly
+            try:
+                await self._archival.store_transcript(
+                    event_type=event_type,
                     participants=participants,
-                    importance_score=0.6,
+                    content=transcript_content,
+                    conversation_id=conv.id,
+                )
+            except Exception:
+                logger.warning(
+                    "Archival storage failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
                 )
 
-                # Journal entry
+        # Journal entries (separate concern from compaction)
+        if self._memory_repo:
+            try:
                 from core.models import JournalEntryCreate
 
-                agent_lines = [
-                    msg.get("content", "")
-                    for msg in conv.history
-                    if msg.get("speaker") == agent_id
-                ]
-                journal_content = (
-                    f"Participated in a conversation with {speakers_str}. "
-                    f"I contributed {len(agent_lines)} messages. "
-                    f"Topics covered: {summary[:300]}"
-                )
-                await self._memory_repo.create_journal_entry(
-                    JournalEntryCreate(
-                        agent_id=agent_id,
-                        reflection_type="conversation",
-                        content=journal_content,
-                        token_count=len(journal_content.split()),
+                speakers = list(
+                    dict.fromkeys(
+                        msg.get("speaker", "unknown") for msg in conv.history
                     )
                 )
+                speakers_str = ", ".join(speakers)
 
-            logger.info(
-                "Created recall memories and journal entries for %d participants",
-                len(participants),
-            )
-        except Exception:
-            logger.warning(
-                "Post-conversation memory creation failed for conversation %s",
-                conv.id,
-                exc_info=True,
-            )
+                for agent_id in participants:
+                    agent_lines = [
+                        msg.get("content", "")
+                        for msg in conv.history
+                        if msg.get("speaker") == agent_id
+                    ]
+                    journal_content = (
+                        f"Participated in a conversation with {speakers_str}. "
+                        f"I contributed {len(agent_lines)} messages."
+                    )
+                    await self._memory_repo.create_journal_entry(
+                        JournalEntryCreate(
+                            agent_id=agent_id,
+                            reflection_type="conversation",
+                            content=journal_content,
+                            token_count=len(journal_content.split()),
+                        )
+                    )
+                logger.info(
+                    "Created journal entries for %d participants",
+                    len(participants),
+                )
+            except Exception:
+                logger.warning(
+                    "Journal creation failed for conversation %s",
+                    conv.id,
+                    exc_info=True,
+                )
 
     # ── Tool support ────────────────────────────────────────────
 

@@ -24,7 +24,6 @@ from core.models import (
     LoggingConfig,
     PauseMultipliers,
     ProximityConfig,
-    RecallMemory,
     SelectionResult,
     SelectionWeights,
     TimingConfig,
@@ -291,18 +290,10 @@ def mock_selection_logger() -> MagicMock:
 
 
 @pytest.fixture()
-def mock_recall_memory() -> MagicMock:
-    recall = MagicMock()
-    recall.store_recall_memory = AsyncMock(
-        return_value=RecallMemory(
-            id=1,
-            agent_id="rex",
-            summary="test",
-            embedding=[0.1] * 1536,
-            importance_score=0.6,
-        )
-    )
-    return recall
+def mock_compactor() -> MagicMock:
+    compactor = MagicMock()
+    compactor.compact_interaction = AsyncMock(return_value=MagicMock())
+    return compactor
 
 
 @pytest.fixture()
@@ -321,11 +312,6 @@ def mock_memory_repo() -> MagicMock:
 
 
 @pytest.fixture()
-def mock_embedding_fn() -> AsyncMock:
-    return AsyncMock(return_value=[0.1] * 1536)
-
-
-@pytest.fixture()
 def engine(
     mock_config_loader: MagicMock,
     mock_agent_registry: MagicMock,
@@ -338,9 +324,8 @@ def engine(
     mock_proximity: MagicMock,
     mock_trigger_system: MagicMock,
     mock_selection_logger: MagicMock,
-    mock_recall_memory: MagicMock,
+    mock_compactor: MagicMock,
     mock_memory_repo: MagicMock,
-    mock_embedding_fn: AsyncMock,
     agents: list[AgentConfig],
 ) -> ConversationEngine:
     # Make proximity return eligible agents from the fixture
@@ -358,9 +343,8 @@ def engine(
         proximity=mock_proximity,
         trigger_system=mock_trigger_system,
         selection_logger=mock_selection_logger,
-        recall_memory=mock_recall_memory,
+        compactor=mock_compactor,
         memory_repo=mock_memory_repo,
-        embedding_fn=mock_embedding_fn,
         speed_multiplier=0,  # No delays in tests
     )
 
@@ -492,7 +476,6 @@ class TestEnergyDepletion:
         await engine._end_conversation()
         assert engine.active_conversation is None
         mock_conversation_repo.close.assert_awaited_once()
-        mock_archival_memory.store_transcript.assert_awaited_once()
 
     async def test_end_conversation_generates_closing_line(
         self,
@@ -536,22 +519,26 @@ class TestEnergyDepletion:
 
 
 class TestPostConversationMemories:
-    async def test_end_conversation_creates_recall_memories(
+    async def test_end_conversation_calls_compactor_per_participant(
         self,
         engine: ConversationEngine,
-        mock_recall_memory: MagicMock,
-        mock_embedding_fn: AsyncMock,
+        mock_compactor: MagicMock,
     ) -> None:
-        """End conversation creates recall memory for each participant."""
+        """End conversation calls compactor.compact_interaction for each participant."""
         trigger = {"type": "idle", "location": "town_square"}
         await engine._start_conversation(trigger)
         await engine._end_conversation()
 
-        mock_embedding_fn.assert_awaited_once()
-        # Should create recall memory for each participant
-        assert mock_recall_memory.store_recall_memory.await_count == len(
+        # Should call compact_interaction once per participant
+        assert mock_compactor.compact_interaction.await_count == len(
             engine._agents.get_all_agents()
         )
+        # Verify event_type and participants are passed
+        call_kwargs = mock_compactor.compact_interaction.call_args_list[0][1]
+        assert call_kwargs["event_type"] == "idle"
+        assert isinstance(call_kwargs["participants"], list)
+        assert len(call_kwargs["participants"]) > 0
+        assert call_kwargs["conversation_id"] is not None
 
     async def test_end_conversation_creates_journal_entries(
         self,
@@ -572,29 +559,14 @@ class TestPostConversationMemories:
         assert isinstance(entry, JournalEntryCreate)
         assert entry.reflection_type == "conversation"
 
-    async def test_end_conversation_recall_contains_participants(
+    async def test_compaction_failure_does_not_break_end(
         self,
         engine: ConversationEngine,
-        mock_recall_memory: MagicMock,
-    ) -> None:
-        """Recall memory includes participant list."""
-        trigger = {"type": "idle", "location": "town_square"}
-        await engine._start_conversation(trigger)
-        await engine._end_conversation()
-
-        call_kwargs = mock_recall_memory.store_recall_memory.call_args_list[0][1]
-        assert call_kwargs["event_type"] == "conversation"
-        assert isinstance(call_kwargs["participants"], list)
-        assert len(call_kwargs["participants"]) > 0
-
-    async def test_memory_creation_failure_does_not_break_end(
-        self,
-        engine: ConversationEngine,
-        mock_embedding_fn: AsyncMock,
+        mock_compactor: MagicMock,
         mock_conversation_repo: MagicMock,
     ) -> None:
-        """If memory creation fails, conversation still closes normally."""
-        mock_embedding_fn.side_effect = RuntimeError("Embedding API down")
+        """If compaction fails, conversation still closes normally."""
+        mock_compactor.compact_interaction.side_effect = RuntimeError("LLM down")
 
         trigger = {"type": "idle", "location": "town_square"}
         await engine._start_conversation(trigger)
@@ -604,7 +576,7 @@ class TestPostConversationMemories:
         assert engine.active_conversation is None
         mock_conversation_repo.close.assert_awaited_once()
 
-    async def test_no_recall_memory_skips_gracefully(
+    async def test_no_compactor_still_stores_transcript(
         self,
         mock_config_loader: MagicMock,
         mock_agent_registry: MagicMock,
@@ -619,9 +591,9 @@ class TestPostConversationMemories:
         mock_selection_logger: MagicMock,
         agents: list[AgentConfig],
     ) -> None:
-        """Engine without recall_memory/memory_repo skips memory creation."""
+        """Engine without compactor falls back to direct archival storage."""
         mock_proximity.get_eligible_speakers = AsyncMock(return_value=agents)
-        engine_no_recall = ConversationEngine(
+        engine_no_compactor = ConversationEngine(
             config_loader=mock_config_loader,
             agent_registry=mock_agent_registry,
             event_bus=mock_event_bus,
@@ -637,12 +609,13 @@ class TestPostConversationMemories:
         )
 
         trigger = {"type": "idle", "location": "town_square"}
-        await engine_no_recall._start_conversation(trigger)
-        await engine_no_recall._end_conversation()
+        await engine_no_compactor._start_conversation(trigger)
+        await engine_no_compactor._end_conversation()
 
-        # Should complete without error
-        assert engine_no_recall.active_conversation is None
+        # Should complete without error and still store transcript
+        assert engine_no_compactor.active_conversation is None
         mock_conversation_repo.close.assert_awaited()
+        mock_archival_memory.store_transcript.assert_awaited()
 
 
 # ── Test: Muted agent is skipped ───────────────────────────────
@@ -951,7 +924,6 @@ class TestIntegration:
         # Should have created and closed 10 conversations
         assert mock_conversation_repo.create.await_count == 10
         assert mock_conversation_repo.close.await_count == 10
-        assert mock_archival_memory.store_transcript.await_count == 10
 
     async def test_full_conversation_lifecycle(
         self,

@@ -69,6 +69,7 @@ class MemoryCompactor:
         interaction: str,
         event_type: str,
         participants: list[str] | None = None,
+        conversation_id: object | None = None,
     ) -> CompactionResult | None:
         """Compact a full interaction into Tier 3 transcript + Tier 2 recall memory.
 
@@ -85,6 +86,7 @@ class MemoryCompactor:
             event_type=event_type,
             participants=participants,
             content=interaction,
+            conversation_id=conversation_id,
         )
 
         # Step 2: Generate summary via cheap LLM

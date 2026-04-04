@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import signal
 import sys
 import time
@@ -379,10 +378,6 @@ async def run_watch(args: argparse.Namespace) -> None:
     elif not overseer_enabled:
         console.print("[yellow]Overseer disabled for testing[/yellow]")
 
-    # Build embedding function for post-conversation recall memory creation
-    from core.bootstrap import make_embedding_fn
-    embedding_fn = make_embedding_fn(svc.http_client, os.environ.get("OPENROUTER_API_KEY", ""))
-
     engine = ConversationEngine(
         config_loader=svc.config_loader,
         agent_registry=svc.agent_registry,
@@ -395,9 +390,8 @@ async def run_watch(args: argparse.Namespace) -> None:
         proximity=proximity,
         trigger_system=trigger_system,
         selection_logger=selection_logger,
-        recall_memory=svc.recall_memory,
+        compactor=svc.compactor,
         memory_repo=svc.memory_repo,
-        embedding_fn=embedding_fn,
         speed_multiplier=speed,
         overseer_enabled=overseer_enabled,
         services=svc,
