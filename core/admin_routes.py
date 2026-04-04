@@ -792,6 +792,16 @@ async def list_eval_runs(
     return [r.model_dump(mode="json") for r in runs]
 
 
+@router.get("/evals/categories")
+async def eval_categories() -> list[str]:
+    """Distinct eval categories from all results. Used by frontend charts."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    return await eval_repo.get_eval_categories()
+
+
 @router.get("/evals/compare")
 async def compare_evals(
     run_a: str,

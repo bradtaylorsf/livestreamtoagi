@@ -392,6 +392,10 @@ export async function fetchAllEvalRuns(
   return request<EvalRun[]>(`/api/admin/evals?${params.toString()}`);
 }
 
+export async function fetchEvalCategories(): Promise<string[]> {
+  return request<string[]>("/api/admin/evals/categories");
+}
+
 export async function fetchEvalHistory(
   category: string,
 ): Promise<EvalHistoryPoint[]> {

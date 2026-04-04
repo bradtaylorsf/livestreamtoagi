@@ -749,3 +749,57 @@ async def test_eval_repo_update_eval_run():
     assert run is not None
     assert run.status == "completed"
     assert run.overall_score == Decimal("85.00")
+
+
+async def test_eval_repo_get_eval_history():
+    db = make_mock_db()
+    sim_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    now = datetime(2024, 6, 1, 12, 0, 0)
+    db.fetch.return_value = [
+        {
+            "score": Decimal("75.50"),
+            "created_at": now,
+            "simulation_id": sim_id,
+            "eval_run_id": run_id,
+        },
+        {
+            "score": Decimal("82.00"),
+            "created_at": datetime(2024, 6, 2, 12, 0, 0),
+            "simulation_id": sim_id,
+            "eval_run_id": run_id,
+        },
+    ]
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    history = await repo.get_eval_history("entertainment")
+    assert len(history) == 2
+    assert history[0]["score"] == 75.50
+    assert history[1]["score"] == 82.00
+    assert history[0]["simulation_id"] == str(sim_id)
+    assert history[0]["eval_run_id"] == str(run_id)
+    assert history[0]["created_at"] is not None
+    # Verify the query was called with the right category
+    call_args = db.fetch.call_args
+    assert "entertainment" in call_args[0]
+
+
+async def test_eval_repo_get_eval_history_handles_null_score():
+    db = make_mock_db()
+    db.fetch.return_value = [
+        {
+            "score": None,
+            "created_at": datetime(2024, 6, 1, 12, 0, 0),
+            "simulation_id": uuid.uuid4(),
+            "eval_run_id": uuid.uuid4(),
+        },
+    ]
+
+    from core.repos.eval_repo import EvalRepo
+
+    repo = EvalRepo(db)
+    history = await repo.get_eval_history("safety")
+    assert len(history) == 1
+    assert history[0]["score"] is None

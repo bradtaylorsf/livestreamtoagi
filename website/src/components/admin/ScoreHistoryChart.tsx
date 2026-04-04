@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchEvalHistory } from "@/lib/admin-api";
+import { fetchEvalCategories, fetchEvalHistory } from "@/lib/admin-api";
 import type { EvalHistoryPoint } from "@/types/admin";
 
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   "entertainment",
   "safety",
   "dialogue_quality",
@@ -20,17 +20,38 @@ const COLORS: Record<string, string> = {
   errors: "#a855f7",
 };
 
-export default function ScoreHistoryChart() {
-  const [history, setHistory] = useState<Record<string, EvalHistoryPoint[]>>({});
-  const [selectedCat, setSelectedCat] = useState<string>("entertainment");
+function pickColor(category: string, index: number): string {
+  if (COLORS[category]) return COLORS[category];
+  // Generate a deterministic color for unknown categories
+  const hue = (index * 137) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
+}
 
+export default function ScoreHistoryChart() {
+  const [cats, setCats] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [history, setHistory] = useState<Record<string, EvalHistoryPoint[]>>({});
+  const [selectedCat, setSelectedCat] = useState<string>(DEFAULT_CATEGORIES[0]);
+
+  // Discover available categories from backend
   useEffect(() => {
-    CATEGORIES.forEach((cat) => {
+    fetchEvalCategories()
+      .then((fetched) => {
+        if (fetched.length > 0) {
+          setCats(fetched);
+          setSelectedCat((prev) => fetched.includes(prev) ? prev : fetched[0]);
+        }
+      })
+      .catch(() => {}); // Fall back to defaults
+  }, []);
+
+  // Fetch history for all categories
+  useEffect(() => {
+    cats.forEach((cat) => {
       fetchEvalHistory(cat)
         .then((data) => setHistory((prev) => ({ ...prev, [cat]: data })))
         .catch(() => {});
     });
-  }, []);
+  }, [cats.join(",")]);
 
   const data = history[selectedCat] ?? [];
   if (data.length === 0) {
@@ -60,7 +81,7 @@ export default function ScoreHistoryChart() {
   return (
     <div>
       <div className="flex gap-2 mb-3 flex-wrap">
-        {CATEGORIES.map((cat) => (
+        {cats.map((cat) => (
           <button
             key={cat}
             onClick={() => setSelectedCat(cat)}
@@ -102,7 +123,7 @@ export default function ScoreHistoryChart() {
         <path
           d={line}
           fill="none"
-          stroke={COLORS[selectedCat] ?? "#0ff"}
+          stroke={pickColor(selectedCat, cats.indexOf(selectedCat))}
           strokeWidth={2}
         />
 
@@ -113,7 +134,7 @@ export default function ScoreHistoryChart() {
             cx={p.x}
             cy={p.y}
             r={3}
-            fill={COLORS[selectedCat] ?? "#0ff"}
+            fill={pickColor(selectedCat, cats.indexOf(selectedCat))}
           />
         ))}
       </svg>

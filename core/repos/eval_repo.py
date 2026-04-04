@@ -155,6 +155,13 @@ class EvalRepo:
         )
         return [EvalRun(**dict(r)) for r in rows]
 
+    async def get_eval_categories(self) -> list[str]:
+        """Return distinct category names from all eval results."""
+        rows = await self.db.fetch(
+            "SELECT DISTINCT category FROM eval_results ORDER BY category"
+        )
+        return [r["category"] for r in rows]
+
     async def get_eval_history(
         self, category: str
     ) -> list[dict[str, Any]]:

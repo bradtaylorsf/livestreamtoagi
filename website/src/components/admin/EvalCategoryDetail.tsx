@@ -1,11 +1,77 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { scoreColor, scoreBg } from "@/lib/score-utils";
 import type { EvalResult } from "@/types/admin";
 
+// UUID v4 pattern for detecting linkable IDs in evidence values
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface Props {
   result: EvalResult;
+}
+
+/** Render an evidence value, turning UUIDs into clickable links based on key context. */
+function EvidenceValue({ keyName, value }: { keyName: string; value: unknown }) {
+  if (typeof value === "string" && UUID_RE.test(value)) {
+    const lk = keyName.toLowerCase();
+    if (lk.includes("conversation")) {
+      return (
+        <Link href={`/admin/conversations/${value}`} className="text-neon-cyan hover:underline">
+          {value}
+        </Link>
+      );
+    }
+    if (lk.includes("artifact")) {
+      return (
+        <Link href={`/admin/artifacts?search=${value}`} className="text-neon-cyan hover:underline">
+          {value}
+        </Link>
+      );
+    }
+    if (lk.includes("simulation")) {
+      return (
+        <Link href={`/admin/simulations/${value}`} className="text-neon-cyan hover:underline">
+          {value}
+        </Link>
+      );
+    }
+  }
+  // For arrays containing UUIDs, render each item
+  if (Array.isArray(value)) {
+    return (
+      <span>
+        [
+        {value.map((item, i) => (
+          <span key={i}>
+            {i > 0 && ", "}
+            <EvidenceValue keyName={keyName} value={item} />
+          </span>
+        ))}
+        ]
+      </span>
+    );
+  }
+  return <span>{JSON.stringify(value)}</span>;
+}
+
+/** Render evidence as a key-value list with clickable links for IDs. */
+function EvidenceList({ evidence }: { evidence: Record<string, unknown> }) {
+  return (
+    <div className="space-y-2">
+      {Object.entries(evidence).map(([key, value]) => (
+        <div key={key}>
+          <span className="text-xs font-medium text-foreground/50 capitalize">
+            {key.replace(/_/g, " ")}
+          </span>
+          <div className="text-xs text-foreground/60 mt-0.5 break-all">
+            <EvidenceValue keyName={key} value={value} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function EvalCategoryDetail({ result }: Props) {
@@ -83,9 +149,9 @@ export default function EvalCategoryDetail({ result }: Props) {
               <h4 className="text-xs font-medium text-foreground/50 mb-2">
                 Evidence
               </h4>
-              <pre className="text-xs text-foreground/60 bg-surface-light rounded p-3 overflow-x-auto max-h-48 font-mono">
-                {JSON.stringify(result.evidence, null, 2)}
-              </pre>
+              <div className="bg-surface-light rounded p-3 overflow-x-auto max-h-64">
+                <EvidenceList evidence={result.evidence} />
+              </div>
             </div>
           )}
         </div>
