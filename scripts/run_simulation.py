@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""CLI entry point for the full-day simulation orchestrator.
+"""CLI entry point for the simulation orchestrator.
 
-Usage:
+Seeded mode (phase-based):
     python scripts/run_simulation.py \\
       --name "test-run-001" \\
-      --description "First full day test" \\
       --seed-file scenarios/full_day.yaml \\
-      --agents vera,rex,aurora,pixel,fork,sentinel,grok \\
-      --max-cost 10.00 \\
-      --verbose
+      --max-cost 10.00 --verbose
 
+Autonomous mode (trigger-driven):
     python scripts/run_simulation.py \\
-      --name "dry-run" \\
-      --seed-file scenarios/full_day.yaml \\
-      --dry-run
+      --name "week-test" \\
+      --duration 7d --speed-multiplier 42 --max-cost 50
 """
 
 from __future__ import annotations
@@ -54,10 +51,18 @@ async def run_simulation(args: argparse.Namespace) -> None:
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
     from core.simulation.display import SimulationDisplay
-    from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
+    from core.simulation.orchestrator import (
+        SimulationConfig,
+        SimulationOrchestrator,
+        parse_duration,
+    )
 
     # ── Parse simulation config ───────────────────────────
     agents = [a.strip() for a in args.agents.split(",")]
+
+    duration = None
+    if args.duration:
+        duration = parse_duration(args.duration)
 
     sim_config = SimulationConfig(
         name=args.name,
@@ -67,6 +72,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         max_cost=args.max_cost,
         speed=args.speed,
         speed_multiplier=args.speed_multiplier,
+        duration=duration,
         dry_run=args.dry_run,
         verbose=verbose,
         overseer_shadow=args.overseer_shadow,
@@ -143,7 +149,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
         loop.add_signal_handler(sig, _signal_handler)
 
     # ── Run ───────────────────────────────────────────────
-    await orchestrator.run()
+    if sim_config.mode == "autonomous":
+        await orchestrator.run_autonomous()
+    else:
+        await orchestrator.run()
 
     # ── Cleanup ───────────────────────────────────────────
     await shutdown_services(svc)
@@ -168,8 +177,14 @@ def main() -> None:
     parser.add_argument(
         "--seed-file",
         type=str,
-        required=True,
-        help="Path to the YAML seed file defining phases",
+        default=None,
+        help="Path to the YAML seed file defining phases (omit for autonomous mode)",
+    )
+    parser.add_argument(
+        "--duration",
+        type=str,
+        default=None,
+        help="Simulated duration for autonomous mode (e.g. '7d', '1d', '12h')",
     )
     parser.add_argument(
         "--agents",
@@ -220,6 +235,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if not args.seed_file and not args.duration:
+        parser.error("Either --seed-file or --duration must be provided")
     asyncio.run(run_simulation(args))
 
 

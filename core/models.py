@@ -572,6 +572,13 @@ class TriggerConfig(BaseModel):
     daily_schedule: dict[int, ScheduledEvent] = {}
 
 
+class ReflectionScheduleConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    six_hour_interval_hours: int = Field(default=6, ge=1)
+    daily_hour: int = Field(default=23, ge=0, le=23)
+    weekly_day: int = Field(default=7, ge=1)
+
+
 class TopicConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
     relevance_map: dict[str, dict[str, float]]
@@ -726,6 +733,7 @@ class ConversationConfig(BaseModel):
     topics: TopicConfig
     adjacency: dict[str, dict[str, float]]
     logging: LoggingConfig
+    reflection: ReflectionScheduleConfig = ReflectionScheduleConfig()
 
 
 # ── Admin API Response Models ──────────────────────────────────
