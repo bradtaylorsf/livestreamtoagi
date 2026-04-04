@@ -177,7 +177,7 @@ def print_session_summary(stats: SessionStats) -> None:
 
 # ── Service bootstrapping (shared) ────────────────────────────────
 
-from core.bootstrap import Services, bootstrap_services, shutdown_services  # noqa: E402
+from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services  # noqa: E402
 
 
 # ── Tool support ─────────────────────────────────────────────────
@@ -1433,29 +1433,16 @@ Examples:
 
 async def _ensure_core_memory(agent_id: str, agent_config, services: Services) -> None:
     """Initialize core memory for an agent if it doesn't exist yet."""
-    core_memory = services.core_memory
-    existing = await core_memory.get_core_memory(agent_id)
-    if existing is not None:
-        return
-
-    # Extract identity from system prompt (first paragraph after the character intro)
-    identity = agent_config.system_prompt.strip()
-    # Use the display_name and a brief identity line
-    identity_line = (
-        f"I am {agent_config.display_name}. "
-        f"My conversation model is {agent_config.model_conversation}."
-    )
-    await core_memory.initialize_agent_memory(agent_id, identity_line)
-    print_memory_event("🧠", f"Initialized core memory for {agent_id}")
+    initialized = await init_core_memories(services.agent_registry, services.core_memory)
+    if agent_id in initialized:
+        print_memory_event("🧠", f"Initialized core memory for {agent_id}")
 
 
 async def async_main(args: argparse.Namespace) -> None:
     # List agents mode
     if args.list_agents:
-        from core.agent_registry import AgentRegistry
-
-        registry = AgentRegistry(redis_client=None)
-        await registry.load_all()
+        list_svc = await bootstrap_services(dry_run=True)
+        registry = list_svc.agent_registry
         console.print()
         table = Table(title="Available Agents", show_header=True, border_style="cyan")
         table.add_column("ID", style="bold")
