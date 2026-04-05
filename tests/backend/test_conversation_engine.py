@@ -1284,10 +1284,10 @@ class TestConversationProgression:
         with patch.object(engine._selector, "select", return_value=result):
             await engine._continue_conversation()
 
-        # No tools used → streak should be 1
-        assert engine._dialogue_only_streak == 1
+        # No tools used → streak should be 2 (opening + 1 continue turn)
+        assert engine._dialogue_only_streak == 2
         assert engine._productive_turns == 0
-        assert engine._total_turns == 1
+        assert engine._total_turns == 2
 
     async def test_tool_usage_resets_dialogue_streak(
         self,

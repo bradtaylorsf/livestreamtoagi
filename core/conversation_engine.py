@@ -311,6 +311,13 @@ class ConversationEngine:
             self._active = None
             return
 
+        # Track opening turn productivity (#248)
+        self._total_turns += 1
+        if self._last_turn_had_tools:
+            self._productive_turns += 1
+        else:
+            self._dialogue_only_streak += 1
+
         self._active.turn_number = 1
         self._agents_who_spoke.add(opening_agent.id)
         self._active.history.append(
