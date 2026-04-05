@@ -112,6 +112,18 @@ export default function SimulationDetailPage() {
         >
           Social Graph
         </Link>
+        <Link
+          href={`/admin/simulations/${id}/report`}
+          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+        >
+          Report
+        </Link>
+        <Link
+          href={`/admin/simulations/${id}/snapshots`}
+          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+        >
+          Snapshots
+        </Link>
       </div>
 
       {/* Summary Panel */}

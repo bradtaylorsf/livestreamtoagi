@@ -12,8 +12,10 @@ import type {
   ArtifactFilters,
   AssertionResult,
   AssertionSummary,
+  ComparisonResult,
   ConversationDetail,
   CoreMemoryResponse,
+  CurrentMemoryState,
   DashboardStats,
   EvalHistoryPoint,
   EvalRun,
@@ -27,6 +29,9 @@ import type {
   SelectionLog,
   Simulation,
   SimulationCostResponse,
+  SimulationReport,
+  SnapshotData,
+  SnapshotSummary,
   SystemPromptResponse,
   TimelineEvent,
   TurnDetail,
@@ -452,6 +457,62 @@ export async function fetchSimulationAssertionsSummary(
 ): Promise<AssertionSummary> {
   return request<AssertionSummary>(
     `/api/admin/simulations/${simId}/assertions/summary`,
+  );
+}
+
+// ── Reports ───────────────────────────────────────────────────
+
+export async function fetchSimulationReport(
+  simId: string,
+  days?: string,
+): Promise<SimulationReport> {
+  const params = new URLSearchParams();
+  if (days) params.set("days", days);
+  const qs = params.toString();
+  return request<SimulationReport>(
+    `/api/admin/simulations/${simId}/report${qs ? `?${qs}` : ""}`,
+  );
+}
+
+// ── Snapshots ─────────────────────────────────────────────────
+
+export async function fetchSnapshots(simId: string): Promise<SnapshotSummary[]> {
+  return request<SnapshotSummary[]>(`/api/admin/simulations/${simId}/snapshots`);
+}
+
+export async function fetchSnapshot(
+  simId: string,
+  filename: string,
+): Promise<SnapshotData> {
+  return request<SnapshotData>(
+    `/api/admin/simulations/${simId}/snapshots/${encodeURIComponent(filename)}`,
+  );
+}
+
+export async function triggerSnapshotExport(
+  simId: string,
+): Promise<SnapshotSummary> {
+  return request<SnapshotSummary>(`/api/admin/simulations/${simId}/snapshots`, {
+    method: "POST",
+  });
+}
+
+export async function fetchCurrentMemoryState(
+  simId: string,
+): Promise<CurrentMemoryState> {
+  return request<CurrentMemoryState>(
+    `/api/admin/simulations/${simId}/memory-current`,
+  );
+}
+
+// ── Comparison ────────────────────────────────────────────────
+
+export async function compareSimulations(
+  simA: string,
+  simB: string,
+): Promise<ComparisonResult> {
+  return request<ComparisonResult>(
+    `/api/admin/simulations/compare?sim_a=${simA}&sim_b=${simB}`,
   );
 }
 

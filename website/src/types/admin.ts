@@ -327,6 +327,33 @@ export interface RelationshipDetail extends Relationship {
   evolution: RelationshipEvolution[];
 }
 
+// ── Snapshot types ────────────────────────────────────────────
+
+export interface SnapshotSummary {
+  filename: string;
+  simulation_id: string;
+  snapshot_at: string;
+  agent_count: number;
+}
+
+export interface SnapshotData {
+  version: number;
+  source_simulation_id: string | null;
+  snapshot_at: string;
+  agents: Record<string, AgentSnapshotData>;
+  relationships: Record<string, unknown>[];
+}
+
+export interface AgentSnapshotData {
+  core_memory: string;
+  recall_memories: Record<string, unknown>[];
+  journal_entries: Record<string, unknown>[];
+}
+
+export interface CurrentMemoryState {
+  agents: Record<string, { core_memory: string; recall_count: number; journal_count: number }>;
+}
+
 // ── Assertion types ───────────────────────────────────────────
 
 export interface AssertionResult {
@@ -346,4 +373,37 @@ export interface AssertionSummary {
   passed: number;
   failed: number;
   warnings: number;
+}
+
+// ── Report types ──────────────────────────────────────────────
+
+export interface ReportSection {
+  title: string;
+  data: Record<string, unknown>;
+}
+
+export interface SimulationReport {
+  simulation_id: string;
+  simulation_name: string;
+  sections: ReportSection[];
+}
+
+// ── Comparison types ──────────────────────────────────────────
+
+export interface MetricComparison {
+  metric: string;
+  run_a: unknown;
+  run_b: unknown;
+  delta: unknown;
+  better_run: "a" | "b" | null;
+}
+
+export interface ComparisonResult {
+  run_a: Record<string, unknown>;
+  run_b: Record<string, unknown>;
+  metrics: MetricComparison[];
+  daily_costs: {
+    run_a: { day: string; cost: string }[];
+    run_b: { day: string; cost: string }[];
+  };
 }
