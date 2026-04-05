@@ -607,6 +607,19 @@ class ConversationEngine:
         # Reset triggers (preserves _fired_today and _recent_conversations)
         self._triggers.reset()
 
+        # Log participation distribution (#247)
+        turn_counts: dict[str, int] = {}
+        for msg in conv.history:
+            spk = msg.get("speaker")
+            if spk:
+                turn_counts[spk] = turn_counts.get(spk, 0) + 1
+        total = conv.turn_number or 1
+        participation_parts = [
+            f"{aid}: {cnt}/{total} ({cnt * 100 // total}%)"
+            for aid, cnt in sorted(turn_counts.items())
+        ]
+        logger.info("Participation: %s", ", ".join(participation_parts))
+
         # Log conversation productivity (#248)
         productivity_ratio = (
             self._productive_turns / self._total_turns
