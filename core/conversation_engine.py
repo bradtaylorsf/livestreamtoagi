@@ -552,7 +552,13 @@ class ConversationEngine:
                     exc_info=True,
                 )
 
-        # Reset triggers
+        # Record conversation for cross-conversation dedup
+        trigger_type = conv.trigger.get("type", "idle")
+        event_key = conv.trigger.get("event_name", "") or conv.trigger.get("event_type", "")
+        if event_key:
+            self._triggers.record_conversation(trigger_type, event_key)
+
+        # Reset triggers (preserves _fired_today and _recent_conversations)
         self._triggers.reset()
 
         logger.info(
@@ -871,8 +877,8 @@ class ConversationEngine:
                         "role": "user",
                         "content": (
                             "[SYSTEM: Your response is very similar to something "
-                            "said recently. Take a different angle or bring up a "
-                            "new topic.]"
+                            "said recently. Take a completely different angle, "
+                            "bring up a new topic, or ask someone a question.]"
                         ),
                     })
                     retry_resp = await self._llm.complete(
@@ -887,6 +893,15 @@ class ConversationEngine:
                     total_latency_ms += retry_resp.latency_ms
                     if retry_resp.content and retry_resp.content.strip():
                         content = retry_resp.content.strip()
+
+                    # Escalated repetition block: if retry is ALSO repetitive,
+                    # skip this turn entirely rather than accepting stale content
+                    if self._is_repetitive(content):
+                        logger.warning(
+                            "Repetition persists for %s after retry — skipping turn",
+                            agent.id,
+                        )
+                        return None
 
                 # Empty response — retry
                 if not content:

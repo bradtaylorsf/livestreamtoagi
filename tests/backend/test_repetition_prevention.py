@@ -208,6 +208,16 @@ def test_phase_runner_summaries_buffer():
     assert runner._conversation_summaries[0] == "Summary 2"
 
 
+def test_is_repetitive_blocks_after_retry():
+    """If content is repetitive after retry, _is_repetitive still returns True."""
+    engine = _make_engine_for_repetition(
+        recent_outputs=["We need to check the budget status and make sure everything is fine."]
+    )
+    # Simulates the retry also producing similar content
+    retry_content = "We need to check the budget status and make sure everything is okay."
+    assert engine._is_repetitive(retry_content)
+
+
 def test_engine_conversation_summary_property():
     """Engine should expose last_conversation_summary and recent_outputs."""
     engine = _make_engine_for_repetition(recent_outputs=["a", "b"])
