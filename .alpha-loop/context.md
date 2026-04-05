@@ -1,26 +1,26 @@
 Here's the project context file:
 
 ## Architecture
-- **Backend entry:** `core/main.py` — FastAPI app with lifespan bootstrap, mounts WebSocket, admin routes (`core/admin_routes.py`), static audio, and scheduler. Services (DB, Redis, LLM, memory) initialized in `core/bootstrap.py`
-- **Frontend entry:** `frontend/src/main.ts` — Phaser.js game (1280x720, pixel art) loads `MainScene` from `frontend/src/scenes/`. Connects to backend via WebSocket (`frontend/src/network/`)
-- **Website:** `website/` — Next.js app on Vercel, consumes FastAPI REST API
-- **Database:** PostgreSQL 16 + pgvector. Schema in `db/init.sql`, migrations in `db/migrations/`, managed via `pnpm db:migrate` (custom `db/migrate.py`). Redis on port 6381 for shared state/kill switches
-- **Key directories:** `core/` (orchestrator, conversation engine, memory, LLM client, eval, simulation), `tools/` (agent tool implementations), `agents/` (YAML personality configs), `specs/` (read-only design docs), `scripts/` (CLI entry points)
+- **Entry point:** `core/main.py` — FastAPI app with WebSocket support, bootstraps services (agent registry, memory, LLM, TTS, config watcher) in `lifespan()`, mounts `admin_routes.py` for REST API
+- **Database:** PostgreSQL 16 + pgvector; schema in `db/init.sql`, migrations in `db/migrations/`, managed via `pnpm db:migrate`/`db:rollback` (runs `db/migrate.py`). Redis for shared state/kill switches
+- **Key directories:** `core/` (orchestrator, conversation engine, memory, eval, simulation), `tools/` (agent tool implementations), `agents/` (YAML personality configs), `frontend/` (Phaser.js pixel art renderer), `website/` (Next.js public site), `specs/` (read-only design docs)
+- **Memory system:** 3-tier — `core/memory/core_memory.py` (always in prompt), `recall_memory.py` (pgvector search), `archival_memory.py` (full transcripts). Reflection system compacts/evolves memories
+- **Monorepo orchestration:** Root `package.json` uses `concurrently` — `pnpm dev` starts Docker + backend (port 8010) + website (port 4000). All CLI commands wired through `pnpm` scripts calling `scripts/chat.py`
 
 ## Conventions
-- **Python 3.13**, type hints everywhere, async/await for I/O, `ruff` for lint/format. Pydantic models for all schemas
-- **TypeScript** strict mode, Phaser.js frontend with Vite, Next.js website. Vitest for both
-- **Tests:** `tests/backend/` and `tests/integration/` (pytest + pytest-asyncio). Frontend/website use Vitest. Run all: `pnpm test`. Integration tests need Docker services running first (`docker compose up -d && bash scripts/check-services.sh`)
-- **CLI via pnpm:** All scripts wired through root `package.json` — `pnpm chat`, `pnpm sim`, `pnpm eval`, `pnpm db:migrate`, etc. Never use raw python commands directly
-- **Git:** Conventional commits (`feat:`, `fix:`, etc.), focused PRs, branch naming `feat/` or `fix/`
+- **Python 3.13**, type hints everywhere, async/await for I/O, `ruff` for lint/format, Pydantic models for schemas
+- **TypeScript** strict mode, ESM, Vite + Vitest (frontend), Next.js + Vitest + Playwright (website)
+- **Tests:** `tests/backend/` and `tests/integration/` (pytest, asyncio_mode=auto). Frontend/website have their own Vitest suites. Run all: `pnpm test`
+- **New features:** Backend routes go in `core/admin_routes.py` or new route files imported in `core/main.py`. Agent tools go in `tools/`. New CLI commands must be wired into `package.json` scripts via `scripts/chat.py` — never require raw python commands
+- **Git:** Conventional commits (`feat:`, `fix:`, etc.), branch naming `feat/description`
 
 ## Critical Rules
-- **`specs/` is read-only** — reference docs, never modify
-- **All agent output passes through Management content filter** (`core/management.py`) before TTS — bypassing this breaks the safety pipeline
-- **"Overseer" is renamed to "Management"** everywhere — any new code must use "Management" not "Overseer"
-- **Docker services must be healthy before integration tests** — 5 checks must pass (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse). Ports: Redis=6381, Postgres=5434, Langfuse=3100
-- **Cost tracking must be 100% accurate** — every LLM call tracked via Langfuse. Never approximate or skip cost recording
+- **`specs/` is read-only** — design reference only, never modify
+- **Agent name "Management" not "Overseer"** — all code/configs must use "Management" for the content filter agent
+- **Docker services must be healthy** before integration tests: run `scripts/check-services.sh` (Redis:6381, PostgreSQL:5434, Langfuse:3100)
+- **Cost tracking must be 100% accurate** — eval integrity depends on it; every LLM call must be tracked through Langfuse
+- **`.env` never committed** — contains all API keys (OpenRouter, Twitch, YouTube, PixelLab, Langfuse, DB, Redis, kill switch)
 
 ## Active State
 - Test status: _(to be filled by loop)_
-- Recent changes: Layer 8 Phaser.js frontend milestone, Overseer→Management rename, conversation continuity fixes
+- Recent changes: _(to be filled by loop)_
