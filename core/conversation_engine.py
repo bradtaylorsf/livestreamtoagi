@@ -152,7 +152,7 @@ class ConversationEngine:
         # Subsystems that depend on config
         cfg = config_loader.config
         self._selector = SpeakerSelector(cfg)
-        self._topic_detector = TopicDetector(cfg.topics, llm_client)
+        self._topic_detector = TopicDetector(cfg.topics, llm_client, simulation_id=simulation_id)
 
         self._active: _ActiveConversation | None = None
         self._running = False
@@ -1303,7 +1303,7 @@ class ConversationEngine:
     def on_config_reloaded(self, new_config: ConversationConfig) -> None:
         """Update subsystem configs when the config file changes."""
         self._selector.config = new_config
-        self._topic_detector = TopicDetector(new_config.topics, self._llm)
+        self._topic_detector = TopicDetector(new_config.topics, self._llm, simulation_id=self._simulation_id)
         self._proximity.config = new_config
         self._selection_logger.config = new_config.logging
         logger.info("ConversationEngine config hot-reloaded")
