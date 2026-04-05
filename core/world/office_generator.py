@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from core.world.pixellab_client import PixelLabClient
+if TYPE_CHECKING:
+    from core.world.pixellab_client import PixelLabClient
 
 logger = logging.getLogger(__name__)
 
