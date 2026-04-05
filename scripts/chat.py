@@ -537,7 +537,12 @@ def run_eval_cli(
 
     resolved_id = asyncio.run(_resolve_sim_id())
     if not resolved_id:
-        console.print(f"[red]Could not find simulation '{simulation_name or simulation_id}'[/red]")
+        if simulation_name or simulation_id:
+            console.print(f"[red]Could not find simulation '{simulation_name or simulation_id}'[/red]")
+        else:
+            console.print("[yellow]No simulation specified. Usage:[/yellow]")
+            console.print("[dim]  pnpm chat eval <simulation-name>[/dim]")
+            console.print("[dim]  pnpm chat eval --id <uuid>[/dim]")
 
         # List available simulations
         import asyncio as _asyncio
@@ -583,18 +588,26 @@ def run_eval_cli(
         console.print("\n[dim]Eval interrupted.[/dim]")
 
 
-def run_coverage_check(simulation_name: str | None = None) -> None:
+def run_coverage_check(
+    simulation_name: str | None = None,
+    simulation_id: str | None = None,
+) -> None:
     """Run tool coverage check via check_tool_coverage.py."""
     import subprocess
 
     cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "check_tool_coverage.py")]
-    if simulation_name:
+    if simulation_id:
+        cmd += ["--simulation-id", simulation_id]
+    elif simulation_name:
         cmd += ["--name", simulation_name]
     else:
-        console.print("[red]Simulation name required for coverage check[/red]")
+        console.print("[yellow]No simulation specified. Usage:[/yellow]")
+        console.print("[dim]  pnpm chat coverage <simulation-name>[/dim]")
+        console.print("[dim]  pnpm chat coverage --id <uuid>[/dim]")
         return
 
-    console.print(f"\n[bold bright_cyan]Checking tool coverage: {simulation_name}[/bold bright_cyan]\n")
+    label = simulation_name or simulation_id
+    console.print(f"\n[bold bright_cyan]Checking tool coverage: {label}[/bold bright_cyan]\n")
 
     try:
         subprocess.run(cmd, check=False)
@@ -847,26 +860,23 @@ def main() -> None:
         eval_args = args[1:]
         verbose = "-v" in eval_args or "--verbose" in eval_args
 
-        if not eval_args or eval_args[0].startswith("-"):
-            # No sim name — list categories or show help
-            if "--list" in eval_args or "--list-categories" in eval_args:
-                import subprocess
-                subprocess.run([
-                    sys.executable, str(PROJECT_ROOT / "scripts" / "run_eval.py"),
-                    "--list-categories",
-                ], check=False)
-                return
-
-            console.print("[yellow]Usage: pnpm chat eval <simulation-name> [--suite quick|full] [--view-last][/yellow]")
-            console.print("[dim]  pnpm chat eval --list          List eval categories[/dim]")
+        # Check for --list flag
+        if "--list" in eval_args or "--list-categories" in eval_args:
+            import subprocess
+            subprocess.run([
+                sys.executable, str(PROJECT_ROOT / "scripts" / "run_eval.py"),
+                "--list-categories",
+            ], check=False)
             return
 
-        sim_name = eval_args[0]
+        # Parse all flags first
+        sim_name = None
         suite = "full"
         categories = None
         view_last = False
         sim_id = None
-        i = 1
+        positional_args: list[str] = []
+        i = 0
         while i < len(eval_args):
             arg = eval_args[i]
             if arg == "--suite" and i + 1 < len(eval_args):
@@ -877,8 +887,20 @@ def main() -> None:
                 sim_id = eval_args[i + 1]; i += 2
             elif arg == "--view-last":
                 view_last = True; i += 1
+            elif arg in ("-v", "--verbose"):
+                i += 1
+            elif not arg.startswith("-"):
+                positional_args.append(arg); i += 1
             else:
                 i += 1
+
+        if positional_args:
+            sim_name = positional_args[0]
+
+        # If no sim name and no --id, list available simulations
+        if not sim_name and not sim_id:
+            run_eval_cli(simulation_name=None, simulation_id=None)
+            return
 
         run_eval_cli(
             simulation_name=sim_name if not sim_id else None,
@@ -890,10 +912,20 @@ def main() -> None:
         )
         return
 
-    # ── Quick-launch: pnpm chat coverage <name> ──
+    # ── Quick-launch: pnpm chat coverage <name> | --id <uuid> ──
     if args and args[0].lower() == "coverage":
-        sim_name = args[1] if len(args) > 1 else None
-        run_coverage_check(sim_name)
+        coverage_args = args[1:]
+        cov_name = None
+        cov_id = None
+        i = 0
+        while i < len(coverage_args):
+            if coverage_args[i] == "--id" and i + 1 < len(coverage_args):
+                cov_id = coverage_args[i + 1]; i += 2
+            elif not coverage_args[i].startswith("-"):
+                cov_name = coverage_args[i]; i += 1
+            else:
+                i += 1
+        run_coverage_check(simulation_name=cov_name, simulation_id=cov_id)
         return
 
     # ── Quick-launch: pnpm chat --dry-run or --list-agents ──
