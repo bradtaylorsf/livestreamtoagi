@@ -37,6 +37,7 @@ class EventType(str, Enum):
     TOOL_EXECUTED = "tool_executed"
     CONFIG_RELOADED = "config_reloaded"
     ARTIFACT_CREATED = "artifact_created"
+    CONVERSATION_PRODUCTIVITY = "conversation_productivity"
 
 
 # Custom JSON encoder for Decimal, datetime, UUID
