@@ -1158,3 +1158,148 @@ async def export_eval(eval_id: uuid_mod.UUID) -> EvalExportResponse:
         raise HTTPException(status_code=404, detail="Eval run not found")
     results = await eval_repo.get_eval_results(run.id)
     return EvalExportResponse(eval_run=run, results=results)
+
+
+# ── Config Version Endpoints ─────────────────────────────────────
+
+
+def _get_config_version_repo():
+    from core.main import app
+    return app.state.services.config_version_repo
+
+
+class RollbackRequest(BaseModel):
+    version: int
+
+
+@router.get("/config/agents/{agent_id}/versions")
+async def get_agent_config_versions(
+    agent_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict]:
+    """Get prompt version history for an agent."""
+    repo = _get_config_version_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Config version repo not available")
+    versions = await repo.get_prompt_history(agent_id, limit=limit)
+    return [v.model_dump(mode="json") for v in versions]
+
+
+@router.post("/config/agents/{agent_id}/rollback")
+async def rollback_agent_config(
+    agent_id: str,
+    body: RollbackRequest,
+) -> dict:
+    """Rollback an agent's config to a previous version."""
+    repo = _get_config_version_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Config version repo not available")
+    try:
+        await repo.rollback_prompt(agent_id, body.version)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    # Hot-swap the agent config
+    registry = _get_registry()
+    await registry.reload_agent(agent_id)
+    return {"status": "ok", "agent_id": agent_id, "version": body.version}
+
+
+@router.get("/config/conversation/versions")
+async def get_conversation_config_versions(
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict]:
+    """Get conversation parameter version history."""
+    repo = _get_config_version_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Config version repo not available")
+    versions = await repo.get_conversation_param_history(limit=limit)
+    return [v.model_dump(mode="json") for v in versions]
+
+
+@router.post("/evals/{eval_id}/analyze")
+async def analyze_eval(eval_id: uuid_mod.UUID) -> dict:
+    """Run eval analyzer on a completed eval run."""
+    db = _get_db()
+    llm = _get_llm()
+    from core.repos.eval_repo import EvalRepo
+    from core.eval.analyzer import EvalAnalyzer
+
+    eval_repo = EvalRepo(db)
+    analyzer = EvalAnalyzer(db=db, eval_repo=eval_repo, llm_client=llm)
+    try:
+        result = await analyzer.analyze(eval_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return result.model_dump()
+
+
+@router.get("/evals/{eval_id}/analysis")
+async def get_eval_analysis(eval_id: uuid_mod.UUID) -> dict:
+    """Get stored analysis for an eval run."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+    from core.eval.analyzer import EvalAnalyzer
+
+    eval_repo = EvalRepo(db)
+    llm = _get_llm()
+    analyzer = EvalAnalyzer(db=db, eval_repo=eval_repo, llm_client=llm)
+    result = await analyzer.get_analysis(eval_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No analysis found for this eval run")
+    return result.model_dump()
+
+
+@router.post("/config/conversation/rollback")
+async def rollback_conversation_config(body: RollbackRequest) -> dict:
+    """Rollback conversation params to a previous version."""
+    repo = _get_config_version_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Config version repo not available")
+    try:
+        await repo.rollback_conversation_params(body.version)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"status": "ok", "version": body.version}
+
+
+# ── Evolution Loop Endpoints ─────────────────────────────────────
+
+
+@router.get("/evolution/history")
+async def get_evolution_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """List all evolution loop runs."""
+    db = _get_db()
+    from core.repos.evolution_repo import EvolutionRepo
+
+    repo = EvolutionRepo(db)
+    return await repo.get_all_loops(limit=limit, offset=offset)
+
+
+@router.get("/evolution/compare")
+async def compare_evolution_cycles(
+    cycle_a: uuid_mod.UUID = Query(...),
+    cycle_b: uuid_mod.UUID = Query(...),
+) -> dict:
+    """Compare two evolution cycles side by side."""
+    db = _get_db()
+    from core.repos.evolution_repo import EvolutionRepo
+
+    repo = EvolutionRepo(db)
+    try:
+        return await repo.compare_cycles(cycle_a, cycle_b)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/evolution/{loop_run_id}")
+async def get_evolution_loop(loop_run_id: uuid_mod.UUID) -> list[dict]:
+    """Get cycle details for a specific loop run."""
+    db = _get_db()
+    from core.repos.evolution_repo import EvolutionRepo
+
+    repo = EvolutionRepo(db)
+    cycles = await repo.get_loop_history(loop_run_id)
+    return [c.model_dump(mode="json") for c in cycles]

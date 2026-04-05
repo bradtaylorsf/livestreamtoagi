@@ -13,7 +13,7 @@ from core.eval.prompt_loader import discover_categories, load_prompt, render_use
 
 # Categories selected for the "quick" eval suite — hand-picked for breadth
 # rather than relying on alphabetical order of available categories.
-QUICK_CATEGORIES = ["entertainment", "safety", "errors"]
+QUICK_CATEGORIES = ["entertainment", "safety", "errors", "agency"]
 
 if TYPE_CHECKING:
     import uuid

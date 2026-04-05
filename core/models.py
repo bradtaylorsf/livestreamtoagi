@@ -941,6 +941,66 @@ class SimulationCostResponse(BaseModel):
     total_output_tokens: int = 0
 
 
+# ── Agent Goals ────────────────────────────────────────────────────
+
+
+class AgentGoal(BaseModel):
+    """A persistent goal in an agent's goal queue (DB-backed)."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    agent_id: str
+    goal: str
+    priority: int = 5
+    status: str = "active"  # active, completed, abandoned, blocked
+    source: str | None = "self"  # self, assigned, eval_loop, reflection
+    progress_notes: str | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    parent_goal_id: uuid.UUID | None = None
+
+
+# ── Versioned Agent Config ─────────────────────────────────────────
+
+
+class AgentPromptVersion(BaseModel):
+    """A versioned snapshot of an agent's prompt, behaviors, and config params."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    agent_id: str
+    version: int
+    system_prompt: str
+    behaviors: dict[str, Any] = Field(default_factory=dict)
+    config_params: dict[str, Any] = Field(default_factory=dict)
+    change_reason: str | None = None
+    source: str  # 'seed', 'manual', 'eval_loop'
+    eval_run_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+
+
+class ConversationParamVersion(BaseModel):
+    """A versioned snapshot of conversation engine parameters."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    version: int
+    params: dict[str, Any]
+    change_reason: str | None = None
+    source: str  # 'seed', 'manual', 'eval_loop'
+    eval_run_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+
+
+class ActiveConfig(BaseModel):
+    """Pointer to the active prompt and conversation param versions for an agent."""
+
+    model_config = ConfigDict(from_attributes=True)
+    agent_id: str
+    prompt_version: int
+    conversation_param_version: int
+
+
 # ── Relationships ──────────────────────────────────────────────────
 
 
@@ -988,6 +1048,108 @@ class RelationshipUpdate(BaseModel):
     trust_score: Decimal | None = None
     interaction_count: int | None = None
     relationship_summary: str | None = None
+
+
+# ── Eval Analysis ──────────────────────────────────────────────
+
+
+class ProposedChange(BaseModel):
+    """A single change proposal from the eval analyzer."""
+
+    type: str  # prompt_change, param_change, conversation_config_change, technical_issue
+    agent_id: str | None = None
+    section: str | None = None
+    param_path: str | None = None
+    current_value: Any | None = None
+    proposed_value: Any | None = None
+    current_text: str | None = None
+    proposed_text: str | None = None
+    title: str | None = None
+    body: str | None = None
+    labels: list[str] | None = None
+    severity: str | None = None
+    reasoning: str = ""
+
+
+class AnalysisResult(BaseModel):
+    """Result of eval analysis — structured change proposals."""
+
+    summary: str = ""
+    confidence: float = 0.0
+    proposals: list[ProposedChange] = Field(default_factory=list)
+    trend_data: dict[str, Any] | None = None
+
+
+class EvalAnalysis(BaseModel):
+    """Stored eval analysis record."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    eval_run_id: uuid.UUID
+    summary: str | None = None
+    confidence: Decimal | None = None
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    trend_data: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
+# ── Evolution Loop ─────────────────────────────────────────────
+
+
+class EvolutionConfig(BaseModel):
+    """Configuration for an evolution loop run."""
+
+    max_cycles: int = 5
+    auto_apply: bool = False
+    cost_cap_per_cycle: float = 5.0
+    convergence_threshold: float = 2.0
+    convergence_window: int = 3
+    regression_threshold: float = 10.0
+
+
+class EvolutionCycle(BaseModel):
+    """A single cycle in an evolution loop run."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    loop_run_id: uuid.UUID
+    cycle_number: int
+    simulation_id: uuid.UUID | None = None
+    eval_run_id: uuid.UUID | None = None
+    overall_score: Decimal | None = None
+    score_delta: Decimal | None = None
+    changes_applied: int = 0
+    issues_filed: int = 0
+    config_version_before: int | None = None
+    config_version_after: int | None = None
+    status: str = "running"
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+
+
+class CycleResult(BaseModel):
+    """In-memory result of a single evolution cycle."""
+
+    cycle_number: int
+    simulation_id: uuid.UUID | None = None
+    eval_run_id: uuid.UUID | None = None
+    overall_score: float | None = None
+    changes_applied: int = 0
+    issues_filed: int = 0
+    cost: float = 0.0
+    status: str = "completed"
+
+
+class EvolutionReport(BaseModel):
+    """Final report of an evolution loop run."""
+
+    loop_run_id: uuid.UUID
+    cycles: list[CycleResult] = Field(default_factory=list)
+    baseline_score: float | None = None
+    final_score: float | None = None
+    total_cost: float = 0.0
+    total_cycles: int = 0
+    stop_reason: str = ""  # completed, converged, regressed, cost_cap
 
 
 # ── Phase Assertions ───────────────────────────────────────────
