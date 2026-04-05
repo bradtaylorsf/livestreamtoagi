@@ -42,7 +42,7 @@ def mock_registry() -> MagicMock:
     """Registry with 9 agents matching the show's cast."""
     agent_ids = [
         "vera", "rex", "aurora", "pixel", "fork",
-        "sentinel", "grok", "overseer", "alpha",
+        "sentinel", "grok", "management", "alpha",
     ]
     agents = []
     for aid in agent_ids:
@@ -70,7 +70,7 @@ async def test_init_core_memories_initializes_all_agents(
     assert len(initialized) == 9
     assert set(initialized) == {
         "vera", "rex", "aurora", "pixel", "fork",
-        "sentinel", "grok", "overseer", "alpha",
+        "sentinel", "grok", "management", "alpha",
     }
     assert mock_repo.upsert_core_memory.call_count == 9
 

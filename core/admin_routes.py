@@ -496,7 +496,7 @@ async def create_simulation(body: NewSimulationRequest) -> NewSimulationResponse
     if body.topic is not None:
         cmd += ["--topic", body.topic]
     if body.management_shadow:
-        cmd.append("--overseer-shadow")
+        cmd.append("--management-shadow")
 
     subprocess.Popen(  # noqa: S603
         cmd,

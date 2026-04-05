@@ -180,7 +180,7 @@ export interface SelectionLog {
   active_agents: string[] | null;
 }
 
-export interface OverseerFlag {
+export interface ManagementFlag {
   id: string;
   agent_id: string;
   original_content: string;

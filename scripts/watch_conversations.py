@@ -178,7 +178,7 @@ def print_management_action(agent_id: str, severity: int, reason: str) -> None:
     style = "yellow" if severity <= 2 else "red" if severity <= 4 else "bold red"
     label = "WARNING" if severity <= 2 else "BLOCKED" if severity <= 4 else "KILL SWITCH"
     console.print(
-        f"  [bright_white][bold]OVERSEER[/bold][/bright_white] "
+        f"  [bright_white][bold]MANAGEMENT[/bold][/bright_white] "
         f"[{style}][{label}][/{style}] "
         f"Agent {agent_id}: {reason}"
     )
@@ -186,7 +186,7 @@ def print_management_action(agent_id: str, severity: int, reason: str) -> None:
 
 def print_management_shadow(agent_id: str, severity: int, action: str, reason: str) -> None:
     console.print(
-        f"  [dim][bright_white]OVERSEER[/bright_white] "
+        f"  [dim][bright_white]MANAGEMENT[/bright_white] "
         f"SHADOW would-{action} (sev={severity}) "
         f"Agent {agent_id}: {reason}[/dim]"
     )

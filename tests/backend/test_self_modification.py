@@ -166,12 +166,12 @@ class TestProposeSelfModification:
         assert result["status"] == "rejected"
         memory_repo.create_proposal.assert_not_called()
 
-    async def test_path_traversal_overseer_rejected(
+    async def test_path_traversal_management_rejected(
         self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
     ) -> None:
         result = await propose_tool.execute(
-            file="agents/rex/../overseer/config.yaml",
-            change_description="Bypass overseer check",
+            file="agents/rex/../management/config.yaml",
+            change_description="Bypass management check",
             new_content="enabled: false",
         )
 

@@ -129,7 +129,7 @@ class UpdateCoreMemoryTool(BaseTool):
         self._agent_id = agent_id
 
     # Only these agents are allowed to update other agents' core memory
-    CROSS_AGENT_WRITERS = frozenset({"vera", "overseer"})
+    CROSS_AGENT_WRITERS = frozenset({"vera", "management"})
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         section: str = kwargs["section"]

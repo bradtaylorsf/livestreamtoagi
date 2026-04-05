@@ -443,11 +443,11 @@ class ChallengeCreate(BaseModel):
     cost_estimate: float | None = None
 
 
-# ── Overseer / Content Filter ──────────────────────────────────
+# ── Management / Content Filter ──────────────────────────────────
 
 
 class ContentReviewResult(BaseModel):
-    """Result of Overseer content review."""
+    """Result of Management content review."""
 
     approved: bool
     reason: str

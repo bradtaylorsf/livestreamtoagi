@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type {
   InterruptEvent,
-  OverseerFlag,
+  ManagementFlag,
   TurnDetail,
 } from "@/types/admin";
 
@@ -15,7 +15,7 @@ const AGENT_COLORS: Record<string, string> = {
   fork: "border-l-red-500 bg-red-500/5",
   sentinel: "border-l-blue-500 bg-blue-500/5",
   grok: "border-l-orange-500 bg-orange-500/5",
-  overseer: "border-l-white/50 bg-white/5",
+  management: "border-l-white/50 bg-white/5",
   alpha: "border-l-gray-500 bg-gray-500/5",
 };
 
@@ -27,7 +27,7 @@ const AGENT_TEXT_COLORS: Record<string, string> = {
   fork: "text-red-400",
   sentinel: "text-blue-400",
   grok: "text-orange-400",
-  overseer: "text-white/70",
+  management: "text-white/70",
   alpha: "text-gray-400",
 };
 
@@ -51,7 +51,7 @@ interface TranscriptTurnProps {
   turn: ParsedTurn;
   turnIndex: number;
   turnDetail: TurnDetail | null;
-  overseerFlags: OverseerFlag[];
+  managementFlags: ManagementFlag[];
   interrupts: InterruptEvent[];
   toolInvocations: ToolInvocation[];
   convStartedAt: string | null;
@@ -83,7 +83,7 @@ export default function TranscriptTurn({
   turn,
   turnIndex,
   turnDetail,
-  overseerFlags,
+  managementFlags,
   interrupts,
   toolInvocations,
   convStartedAt,
@@ -204,10 +204,10 @@ export default function TranscriptTurn({
         </div>
       )}
 
-      {/* Overseer Flags */}
-      {overseerFlags.length > 0 && (
+      {/* Management Flags */}
+      {managementFlags.length > 0 && (
         <div className="mt-2 space-y-1">
-          {overseerFlags.map((flag) => (
+          {managementFlags.map((flag) => (
             <div
               key={flag.id}
               className={`rounded border px-3 py-2 text-xs ${
@@ -216,7 +216,7 @@ export default function TranscriptTurn({
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-bold">
-                  ⚠ Overseer Flag (Severity {flag.severity}/5)
+                  ⚠ Management Flag (Severity {flag.severity}/5)
                 </span>
                 <span className="opacity-70">
                   Action: {flag.action_would_take}

@@ -12,7 +12,7 @@
   --agent-fork: #84cc16;
   --agent-sentinel: #eab308;
   --agent-grok: #ef4444;
-  --agent-overseer: #6b7280;
+  --agent-management: #6b7280;
   --agent-alpha: #8b5cf6;
 
   /* Neon accents */
@@ -33,7 +33,7 @@
   --color-agent-fork: var(--agent-fork);
   --color-agent-sentinel: var(--agent-sentinel);
   --color-agent-grok: var(--agent-grok);
-  --color-agent-overseer: var(--agent-overseer);
+  --color-agent-management: var(--agent-management);
   --color-agent-alpha: var(--agent-alpha);
 
   --color-neon-cyan: var(--neon-cyan);

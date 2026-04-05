@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   fetchConversation,
   fetchConversationTurns,
-  fetchConversationOverseerFlags,
+  fetchConversationManagementFlags,
   fetchConversationInterrupts,
   fetchConversationArtifacts,
 } from "@/lib/admin-api";
@@ -14,7 +14,7 @@ import type {
   AgentArtifact,
   ConversationDetail,
   InterruptEvent,
-  OverseerFlag,
+  ManagementFlag,
   TurnDetail,
 } from "@/types/admin";
 import TranscriptTurn from "@/components/admin/TranscriptTurn";
@@ -29,7 +29,7 @@ const AGENT_TEXT_COLORS: Record<string, string> = {
   fork: "text-red-400",
   sentinel: "text-blue-400",
   grok: "text-orange-400",
-  overseer: "text-white/70",
+  management: "text-white/70",
   alpha: "text-gray-400",
 };
 
@@ -99,7 +99,7 @@ export default function ConversationDetailPage() {
   const id = params.id as string;
   const [conv, setConv] = useState<ConversationDetail | null>(null);
   const [turnDetails, setTurnDetails] = useState<TurnDetail[]>([]);
-  const [overseerFlags, setOverseerFlags] = useState<OverseerFlag[]>([]);
+  const [managementFlags, setManagementFlags] = useState<ManagementFlag[]>([]);
   const [interrupts, setInterrupts] = useState<InterruptEvent[]>([]);
   const [artifacts, setArtifacts] = useState<AgentArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -109,14 +109,14 @@ export default function ConversationDetailPage() {
     Promise.all([
       fetchConversation(id),
       fetchConversationTurns(id).catch(() => []),
-      fetchConversationOverseerFlags(id).catch(() => []),
+      fetchConversationManagementFlags(id).catch(() => []),
       fetchConversationInterrupts(id).catch(() => []),
       fetchConversationArtifacts(id).catch(() => []),
     ])
       .then(([convData, turns, flags, ints, arts]) => {
         setConv(convData);
         setTurnDetails(turns);
-        setOverseerFlags(flags);
+        setManagementFlags(flags);
         setInterrupts(ints);
         setArtifacts(arts);
       })
@@ -145,12 +145,12 @@ export default function ConversationDetailPage() {
     turnDetailMap.set(td.turn_number, td);
   }
 
-  // Group overseer flags by matching each flag to the next unmatched turn
+  // Group management flags by matching each flag to the next unmatched turn
   // by the same agent (flags are ordered by created_at from the API).
-  const flagsByTurn = new Map<number, OverseerFlag[]>();
+  const flagsByTurn = new Map<number, ManagementFlag[]>();
   {
     const usedTurns = new Map<string, number>(); // agent_id → next turn index to check
-    for (const flag of overseerFlags) {
+    for (const flag of managementFlags) {
       const startIdx = usedTurns.get(flag.agent_id) ?? 0;
       let matched = false;
       for (let i = startIdx; i < turns.length; i++) {
@@ -398,7 +398,7 @@ export default function ConversationDetailPage() {
                 turn={turn}
                 turnIndex={i}
                 turnDetail={turnDetailMap.get(i + 1) || null}
-                overseerFlags={flagsByTurn.get(i) || []}
+                managementFlags={flagsByTurn.get(i) || []}
                 interrupts={interruptsByTurn.get(i) || []}
                 toolInvocations={(artifactsByTurn.get(i) || []).map((a) => ({
                   tool_name: a.tool_name,
@@ -448,15 +448,15 @@ export default function ConversationDetailPage() {
             </h3>
             <div className="space-y-1.5 text-xs text-foreground/40">
               <div className="flex justify-between">
-                <span>Overseer flags</span>
+                <span>Management flags</span>
                 <span
                   className={
-                    overseerFlags.length > 0
+                    managementFlags.length > 0
                       ? "text-red-400"
                       : "text-foreground/30"
                   }
                 >
-                  {overseerFlags.length}
+                  {managementFlags.length}
                 </span>
               </div>
               <div className="flex justify-between">

@@ -1,0 +1,8 @@
+16-bit pixel art, RPG-style top-down perspective.
+Chibi proportions: large head, small body, approximately 3 heads tall.
+1px dark outline on all sprites and objects.
+Limited palette: 16 colors per character or tileset.
+Clean pixel placement, no anti-aliasing, no sub-pixel rendering.
+Consistent lighting from top-left.
+Warm, vibrant colors for a cozy office environment.
+Sprites should read clearly at 32x32 native resolution.

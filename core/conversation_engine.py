@@ -781,9 +781,20 @@ class ConversationEngine:
 
                 for _tool_round in range(MAX_TOOL_ROUNDS + 1):
                     # Check if trigger requests a specific tool (first round only)
+                    # Only apply tool_choice if the tool is in this agent's set
                     tc = None
                     if _tool_round == 0 and self._active and self._active.trigger:
                         tc = self._active.trigger.get("tool_choice")
+                        if tc and agent_tools:
+                            # Extract tool name from tool_choice structure
+                            forced_name = (
+                                tc.get("function", {}).get("name")
+                                if isinstance(tc, dict) else None
+                            )
+                            if forced_name and forced_name not in agent_tools:
+                                tc = None  # Tool not available for this agent
+                        elif tc and not agent_tools:
+                            tc = None  # Agent has no tools at all
 
                     response = await self._llm.complete(
                         messages=messages,

@@ -36,7 +36,7 @@ def _make_config(**overrides) -> ConversationConfig:
             "agent_interrupt_tendency": {
                 "grok": 0.8,
                 "sentinel": 0.7,
-                "overseer": 1.0,
+                "management": 1.0,
                 "rex": 0.3,
                 "vera": 0.2,
             },
@@ -44,7 +44,7 @@ def _make_config(**overrides) -> ConversationConfig:
         "topics": {
             "relevance_map": {
                 "code": {"rex": 0.9, "fork": 0.7, "grok": 0.95, "vera": 0.4},
-                "safety": {"overseer": 1.0, "sentinel": 0.9, "vera": 0.5},
+                "safety": {"management": 1.0, "sentinel": 0.9, "vera": 0.5},
             },
             "fallback_to_llm": False,
             "classifier_model": "claude-haiku-4-5",
@@ -66,20 +66,20 @@ class TestHighRelevanceInterrupt:
 
         # grok: code relevance=0.95, tendency=0.8 → score=0.76 (below 0.85)
         # But let's set up a scenario where score >= 0.85:
-        # overseer: safety relevance=1.0, tendency=1.0 → score=1.0
+        # management: safety relevance=1.0, tendency=1.0 → score=1.0
         agents = [
             _make_agent("vera", interrupt_tendency=0.2),
             _make_agent("rex", interrupt_tendency=0.3),
-            _make_agent("overseer", interrupt_tendency=1.0),
+            _make_agent("management", interrupt_tendency=1.0),
         ]
 
         # Force vera to be the normal selection by seeding,
-        # then overseer should interrupt on "safety" topic
+        # then management should interrupt on "safety" topic
         history = [
             {"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()},
         ]
 
-        # We need to ensure vera gets selected normally (not overseer).
+        # We need to ensure vera gets selected normally (not management).
         # Use a patched _weighted_random_select to guarantee vera is picked first.
         with patch.object(
             SpeakerSelector, "_weighted_random_select", return_value="vera",
@@ -91,7 +91,7 @@ class TestHighRelevanceInterrupt:
             )
 
         assert result.was_interrupt is True
-        assert result.selected_agent_id == "overseer"
+        assert result.selected_agent_id == "management"
         assert result.interrupted_agent_id == "vera"
         assert state.interrupt_count == 1
 
@@ -139,7 +139,7 @@ class TestInterruptCapEnforced:
 
         agents = [
             _make_agent("vera", interrupt_tendency=0.2),
-            _make_agent("overseer", interrupt_tendency=1.0),
+            _make_agent("management", interrupt_tendency=1.0),
         ]
 
         history = [
@@ -157,7 +157,7 @@ class TestInterruptCapEnforced:
 
         assert result.was_interrupt is False
         assert result.selected_agent_id == "vera"
-        # Overseer's attempt should be logged as failed
+        # Management's attempt should be logged as failed
         failed = [a for a in result.interrupt_attempts if not a.succeeded]
         assert any(a.reason == "conversation_cap_reached" for a in failed)
         assert state.interrupt_count == 3  # unchanged
@@ -169,15 +169,15 @@ class TestCooldownPreventsReinterrupt:
         config = _make_config()
         selector = SpeakerSelector(config)
 
-        # overseer interrupted 5 seconds ago (well within 30s cooldown)
+        # management interrupted 5 seconds ago (well within 30s cooldown)
         state = InterruptState(
             interrupt_count=1,
-            last_interrupt_time={"overseer": time.monotonic() - 5},
+            last_interrupt_time={"management": time.monotonic() - 5},
         )
 
         agents = [
             _make_agent("vera", interrupt_tendency=0.2),
-            _make_agent("overseer", interrupt_tendency=1.0),
+            _make_agent("management", interrupt_tendency=1.0),
         ]
 
         history = [
@@ -200,18 +200,18 @@ class TestCooldownPreventsReinterrupt:
         assert state.interrupt_count == 1  # unchanged
 
 
-class TestOverseerAlwaysInterrupts:
-    def test_overseer_always_interrupts_on_safety(self):
-        """Overseer with tendency=1.0 interrupts when topic relevance is high enough."""
+class TestManagementAlwaysInterrupts:
+    def test_management_always_interrupts_on_safety(self):
+        """Management with tendency=1.0 interrupts when topic relevance is high enough."""
         config = _make_config()
         selector = SpeakerSelector(config)
         state = InterruptState()
 
-        # overseer: safety relevance=1.0, tendency=1.0 → score=1.0 >= 0.85
+        # management: safety relevance=1.0, tendency=1.0 → score=1.0 >= 0.85
         agents = [
             _make_agent("vera", interrupt_tendency=0.2),
             _make_agent("rex", interrupt_tendency=0.3),
-            _make_agent("overseer", interrupt_tendency=1.0),
+            _make_agent("management", interrupt_tendency=1.0),
         ]
 
         history = [
@@ -228,7 +228,7 @@ class TestOverseerAlwaysInterrupts:
             )
 
         assert result.was_interrupt is True
-        assert result.selected_agent_id == "overseer"
+        assert result.selected_agent_id == "management"
         assert state.interrupt_count == 1
 
 
@@ -239,11 +239,11 @@ class TestInterruptLogRecordsAttempts:
         selector = SpeakerSelector(config)
         state = InterruptState()
 
-        # overseer will succeed (score=1.0), rex will fail (score=0.27)
+        # management will succeed (score=1.0), rex will fail (score=0.27)
         agents = [
             _make_agent("vera", interrupt_tendency=0.2),
             _make_agent("rex", interrupt_tendency=0.3),
-            _make_agent("overseer", interrupt_tendency=1.0),
+            _make_agent("management", interrupt_tendency=1.0),
         ]
 
         history = [
@@ -259,12 +259,12 @@ class TestInterruptLogRecordsAttempts:
                 interrupt_state=state,
             )
 
-        # Should have attempts for both overseer and rex (vera is selected, excluded)
+        # Should have attempts for both management and rex (vera is selected, excluded)
         assert len(result.interrupt_attempts) >= 2
         succeeded = [a for a in result.interrupt_attempts if a.succeeded]
         failed = [a for a in result.interrupt_attempts if not a.succeeded]
         assert len(succeeded) == 1
-        assert succeeded[0].attempting_agent_id == "overseer"
+        assert succeeded[0].attempting_agent_id == "management"
         assert len(failed) >= 1
         # rex should fail with below_threshold
         rex_attempts = [a for a in failed if a.attempting_agent_id == "rex"]
@@ -281,7 +281,7 @@ class TestInterruptedAgentRecorded:
 
         agents = [
             _make_agent("vera", interrupt_tendency=0.2),
-            _make_agent("overseer", interrupt_tendency=1.0),
+            _make_agent("management", interrupt_tendency=1.0),
         ]
 
         history = [
@@ -298,7 +298,7 @@ class TestInterruptedAgentRecorded:
             )
 
         assert result.interrupted_agent_id == "vera"
-        assert result.selected_agent_id == "overseer"
+        assert result.selected_agent_id == "management"
         # The successful attempt should also record would_have_spoken_id
         succeeded = [a for a in result.interrupt_attempts if a.succeeded]
         assert succeeded[0].would_have_spoken_id == "vera"

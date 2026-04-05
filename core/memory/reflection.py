@@ -473,8 +473,12 @@ def _repair_truncated_json(text: str) -> str:
     repaired = text.rstrip()
     if in_string:
         repaired += '"'
-    # Remove trailing comma or colon that would make JSON invalid
-    repaired = repaired.rstrip(",:")
+    # Handle trailing colon (truncated key-value pair) — add null as placeholder
+    stripped = repaired.rstrip()
+    if stripped.endswith(":"):
+        repaired = stripped + " null"
+    # Remove trailing commas that would make JSON invalid
+    repaired = repaired.rstrip().rstrip(",")
     # Close remaining open structures in reverse order
     for bracket in reversed(stack):
         repaired += "}" if bracket == "{" else "]"

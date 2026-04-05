@@ -97,7 +97,7 @@ class TestWebSearchAccess:
             result = await tool.execute(query="test")
         assert result["status"] == "ok"
 
-    @pytest.mark.parametrize("agent_id", ["rex", "sentinel", "fork", "alpha", "overseer"])
+    @pytest.mark.parametrize("agent_id", ["rex", "sentinel", "fork", "alpha", "management"])
     async def test_unauthorized_agents_rejected(
         self,
         agent_id: str,

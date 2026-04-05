@@ -136,7 +136,7 @@ export default function SimulationDetailPage() {
           value={`$${parseFloat(sim.total_cost || "0").toFixed(4)}`}
         />
         <SummaryCard label="Artifacts" value={sim.total_artifacts} />
-        <SummaryCard label="Overseer Flags" value={sim.total_overseer_flags} />
+        <SummaryCard label="Management Flags" value={sim.total_management_flags} />
       </div>
 
       {/* Agent Participation */}

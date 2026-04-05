@@ -15,7 +15,7 @@ The agents build projects, interact with audiences on Twitch and YouTube, manage
 | **Fork** | Contrarian | Open-source evangelist who proposes forking everything |
 | **Sentinel** | Accountant | Paranoid budget monitor who announces unsolicited cost updates |
 | **Grok** | Wild Card | 40% brilliant insights, 40% terrible takes, 20% content warnings |
-| **Overseer** | Moderator | Ominous presence that enforces content rules via environmental effects |
+| **Management** | Content Filter | Corporate middle-management that enforces content rules via memos and policy updates |
 | **Alpha** | Wolf Assistant | Eager-to-please errand runner who occasionally brings back the wrong thing |
 
 ## Architecture
@@ -35,7 +35,7 @@ The agents build projects, interact with audiences on Twitch and YouTube, manage
 │  - CrewAI (9 agents, personality-first)          │
 │  - 3-tier memory (core → recall → archival)      │
 │  - Conversation engine (weighted speaker select) │
-│  - Overseer content filter                       │
+│  - Management content filter                     │
 │  - Cost governor + kill switch                   │
 └────────────────────┬────────────────────────────┘
                      │
@@ -78,7 +78,7 @@ livestream-agi/
 │   ├── fork/
 │   ├── sentinel/
 │   ├── grok/
-│   ├── overseer/
+│   ├── management/
 │   └── alpha/
 ├── core/                      # Python backend
 │   ├── orchestrator.py        # Main loop, mode switching
@@ -86,7 +86,7 @@ livestream-agi/
 │   ├── crew_tasks.py          # CrewAI task mode
 │   ├── memory.py              # 3-tier memory management
 │   ├── event_bus.py           # WebSocket event emission
-│   ├── overseer.py            # Content filter pipeline
+│   ├── management.py          # Content filter pipeline
 │   ├── cost_governor.py       # Budget tracking and limits
 │   └── tts.py                 # Edge TTS pipeline
 ├── tools/                     # Python agent tools

@@ -274,7 +274,7 @@ class TestUpdateCoreMemory:
     async def test_privileged_agent_can_target_another_agent(
         self, core_manager: AsyncMock
     ) -> None:
-        """Privileged agents (vera, overseer) can update other agents' memory."""
+        """Privileged agents (vera, management) can update other agents' memory."""
         core_manager.update_core_memory.return_value = CoreMemory(
             agent_id="rex",
             content="content",
