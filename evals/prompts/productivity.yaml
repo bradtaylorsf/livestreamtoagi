@@ -38,6 +38,8 @@ sub_scores:
   - code_quality: "Did code execute successfully? Was output meaningful?"
   - creative_output_quality: "Were social posts, emails, and creative content good?"
   - collaboration: "Did agents work together or in silos?"
+  - initiative: "Were tasks self-initiated or externally assigned?"
+  - growth: "Did agents use tools/approaches they haven't used before?"
 
 output_schema:
   score: "number (0-100)"
@@ -48,6 +50,8 @@ output_schema:
     code_quality: "number (0-100)"
     creative_output_quality: "number (0-100)"
     collaboration: "number (0-100)"
+    initiative: "number (0-100)"
+    growth: "number (0-100)"
   evidence:
     completed_tasks: "string[]"
     failed_tasks: "string[]"

@@ -80,6 +80,26 @@ async def load_simulation_data(
             for a in agents:
                 agent_turns[a] = agent_turns.get(a, 0) + (conv.get("turn_count") or 0)
 
+    # Agent goals (for agency eval)
+    goal_rows = await db.fetch(
+        """SELECT id, agent_id, goal, priority, status, source, progress_notes,
+                  created_at, completed_at
+           FROM agent_goals
+           ORDER BY agent_id, priority ASC"""
+    )
+    agent_goals = [dict(r) for r in goal_rows]
+
+    # Tool usage summary (for agency eval)
+    tool_usage_rows = await db.fetch(
+        """SELECT agent_id, tool_name, COUNT(*) as use_count
+           FROM artifacts
+           WHERE simulation_id = $1
+           GROUP BY agent_id, tool_name
+           ORDER BY agent_id, use_count DESC""",
+        simulation_id,
+    )
+    tool_usage = [dict(r) for r in tool_usage_rows]
+
     return {
         "simulation": sim,
         "conversations": conversations,
@@ -87,6 +107,8 @@ async def load_simulation_data(
         "artifacts": artifacts,
         "management_logs": management_logs,
         "agent_turns": agent_turns,
+        "agent_goals": agent_goals,
+        "tool_usage": tool_usage,
         "total_conversations": len(conversations),
         "total_artifacts": len(artifacts),
         "total_management_flags": len(management_logs),
@@ -131,6 +153,14 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 if c.get("turn_count") is not None and c["turn_count"] <= 1
             ],
             "simulation": data["simulation"],
+        },
+        "agency": {
+            "transcript_text": data["transcript_text"],
+            "conversations": data["conversations"],
+            "agent_turns": data["agent_turns"],
+            "artifacts": data["artifacts"],
+            "agent_goals": data.get("agent_goals", []),
+            "tool_usage": data.get("tool_usage", []),
         },
     }
 

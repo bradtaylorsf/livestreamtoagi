@@ -125,4 +125,24 @@ def render_user_prompt(
             parts.append("\n### Error Log")
             parts.append(json.dumps(error_log, indent=2, default=str))
 
+    if "agent_goals" in category_data:
+        goals = category_data["agent_goals"]
+        parts.append(f"\n### Agent Goals ({len(goals)} total)")
+        for goal in goals[:50]:
+            parts.append(
+                f"- [{goal.get('status')}] Agent: {goal.get('agent_id')}, "
+                f"Goal: {goal.get('goal')}, Priority: {goal.get('priority')}, "
+                f"Source: {goal.get('source')}"
+            )
+
+    if "tool_usage" in category_data:
+        usage = category_data["tool_usage"]
+        parts.append(f"\n### Tool Usage Summary ({len(usage)} entries)")
+        for entry in usage[:50]:
+            parts.append(
+                f"- Agent: {entry.get('agent_id')}, "
+                f"Tool: {entry.get('tool_name')}, "
+                f"Uses: {entry.get('use_count')}"
+            )
+
     return "\n".join(parts)
