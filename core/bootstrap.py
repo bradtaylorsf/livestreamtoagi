@@ -28,6 +28,7 @@ from core.memory.token_counter import TokenCounter
 from core.management import Management
 from core.redis_client import RedisClient
 from core.repos.artifact_repo import ArtifactRepo
+from core.repos.config_version_repo import ConfigVersionRepo
 from core.repos.cost_repo import CostRepo
 from core.repos.memory_repo import MemoryRepo
 from core.repos.relationship_repo import RelationshipRepo
@@ -67,6 +68,7 @@ class Services:
     shared_working_state: SharedWorkingState | None
     goal_manager: AgentGoalManager | None
     config_loader: ConfigLoader
+    config_version_repo: ConfigVersionRepo | None
 
 
 def make_embedding_fn(
@@ -101,7 +103,7 @@ async def bootstrap_services(
         load_config: If True, load ConversationConfig from YAML.
     """
     token_counter = TokenCounter()
-    config_loader = ConfigLoader()
+    config_loader = ConfigLoader()  # repo injected below after DB init
 
     if load_config:
         config_loader.load()
@@ -120,7 +122,12 @@ async def bootstrap_services(
     if auto_migrate:
         await _auto_migrate(db)
 
-    agent_registry = AgentRegistry(redis_client=redis_client)
+    config_version_repo = ConfigVersionRepo(db)
+
+    agent_registry = AgentRegistry(
+        redis_client=redis_client,
+        config_version_repo=config_version_repo,
+    )
     await agent_registry.load_all()
 
     cost_repo = CostRepo(db)
@@ -155,6 +162,9 @@ async def bootstrap_services(
         llm_client=llm_client,
         event_bus=_module_event_bus,
     )
+
+    # Inject config_version_repo into config_loader for DB-backed config
+    config_loader._config_repo = config_version_repo
 
     shared_working_state = SharedWorkingState(redis_client.client)
     goal_manager = AgentGoalManager(redis_client.client)
@@ -191,6 +201,7 @@ async def bootstrap_services(
         shared_working_state=shared_working_state,
         goal_manager=goal_manager,
         config_loader=config_loader,
+        config_version_repo=config_version_repo,
     )
 
 
@@ -247,6 +258,7 @@ async def _bootstrap_dry_run(
         shared_working_state=None,
         goal_manager=None,
         config_loader=config_loader,
+        config_version_repo=None,
     )
 
 

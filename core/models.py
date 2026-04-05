@@ -941,6 +941,47 @@ class SimulationCostResponse(BaseModel):
     total_output_tokens: int = 0
 
 
+# ── Versioned Agent Config ─────────────────────────────────────────
+
+
+class AgentPromptVersion(BaseModel):
+    """A versioned snapshot of an agent's prompt, behaviors, and config params."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    agent_id: str
+    version: int
+    system_prompt: str
+    behaviors: dict[str, Any] = Field(default_factory=dict)
+    config_params: dict[str, Any] = Field(default_factory=dict)
+    change_reason: str | None = None
+    source: str  # 'seed', 'manual', 'eval_loop'
+    eval_run_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+
+
+class ConversationParamVersion(BaseModel):
+    """A versioned snapshot of conversation engine parameters."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    version: int
+    params: dict[str, Any]
+    change_reason: str | None = None
+    source: str  # 'seed', 'manual', 'eval_loop'
+    eval_run_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+
+
+class ActiveConfig(BaseModel):
+    """Pointer to the active prompt and conversation param versions for an agent."""
+
+    model_config = ConfigDict(from_attributes=True)
+    agent_id: str
+    prompt_version: int
+    conversation_param_version: int
+
+
 # ── Relationships ──────────────────────────────────────────────────
 
 

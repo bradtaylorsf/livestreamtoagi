@@ -1,8 +1,8 @@
 """Conversation config loader with hot-reload via watchfiles.
 
-Loads config/conversation_config.yaml, validates it through the
-ConversationConfig Pydantic model, and watches for file changes to
-hot-reload without restart.
+Loads config from the database (versioned conversation_param_versions table)
+with fallback to config/conversation_config.yaml. Validates through the
+ConversationConfig Pydantic model and watches for file changes to hot-reload.
 """
 
 from __future__ import annotations
@@ -12,11 +12,15 @@ import contextlib
 import hashlib
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from core.event_bus import event_bus
 from core.models import ConversationConfig
+
+if TYPE_CHECKING:
+    from core.repos.config_version_repo import ConfigVersionRepo
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +28,18 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "conve
 
 
 class ConfigLoader:
-    """Loads, validates, and hot-reloads conversation_config.yaml."""
+    """Loads, validates, and hot-reloads conversation config from DB or YAML."""
 
-    def __init__(self, path: str | Path = DEFAULT_CONFIG_PATH) -> None:
+    def __init__(
+        self,
+        path: str | Path = DEFAULT_CONFIG_PATH,
+        config_version_repo: ConfigVersionRepo | None = None,
+    ) -> None:
         self._path = Path(path)
         self._config: ConversationConfig | None = None
         self._config_hash: str = ""
         self._watch_task: asyncio.Task[None] | None = None
+        self._config_repo = config_version_repo
 
     @property
     def config(self) -> ConversationConfig:
@@ -69,6 +78,42 @@ class ConfigLoader:
             self._path,
         )
         return config
+
+    async def load_from_db(self) -> ConversationConfig | None:
+        """Try to load conversation config from the versioned DB table.
+
+        Returns the config if successful, None if no DB config exists or
+        the repo is not configured.
+        """
+        if self._config_repo is None:
+            return None
+
+        try:
+            version = await self._config_repo.get_active_conversation_params()
+            if version is None:
+                return None
+
+            config = ConversationConfig(**version.params)
+            file_hash = hashlib.sha256(
+                str(version.params).encode()
+            ).hexdigest()[:16]
+
+            self._config = config
+            self._config_hash = file_hash
+
+            logger.info(
+                "Loaded conversation config from DB (version=%d, hash=%s)",
+                version.version,
+                file_hash,
+            )
+            return config
+        except Exception:
+            logger.warning(
+                "Failed to load conversation config from DB, "
+                "will fall back to YAML",
+                exc_info=True,
+            )
+            return None
 
     async def start_watching(self) -> None:
         """Start an async background task that watches for file changes."""

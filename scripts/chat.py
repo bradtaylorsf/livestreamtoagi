@@ -890,6 +890,17 @@ def main() -> None:
         )
         return
 
+    # ── Quick-launch: pnpm chat seed-config ──
+    if args and args[0].lower() == "seed-config":
+        import subprocess
+
+        cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / "seed_config.py")] + args[1:]
+        try:
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Seed cancelled.[/dim]")
+        return
+
     # ── Quick-launch: pnpm chat report ... ──
     if args and args[0].lower() == "report":
         import subprocess
