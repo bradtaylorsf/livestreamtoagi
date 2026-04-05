@@ -49,10 +49,12 @@ class BaseTool(ABC):
 
         start = time.monotonic()
         status = "executed"
+        _error_msg: str | None = None
         try:
             result = await self.execute(**kwargs)
-        except Exception:
+        except Exception as exc:
             status = "failed"
+            _error_msg = str(exc)
             raise
         else:
             if self.name in PENDING_APPROVAL_TOOLS:
@@ -66,7 +68,7 @@ class BaseTool(ABC):
 
                 tool_output: dict[str, Any] | None
                 if status == "failed":
-                    tool_output = None
+                    tool_output = {"error": _error_msg} if _error_msg else None
                 else:
                     tool_output = result  # type: ignore[possibly-undefined]
                     # Enrich metadata for code execution

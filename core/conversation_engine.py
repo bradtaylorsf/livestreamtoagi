@@ -141,6 +141,7 @@ class ConversationEngine:
         self._services = services
         self._clock = clock
         self._relationship_tracker = relationship_tracker
+        self._simulation_mode = simulation_id is not None
 
         # Subsystems that depend on config
         cfg = config_loader.config
@@ -650,7 +651,9 @@ class ConversationEngine:
         if self._services is None:
             return None
         if agent_id not in self._tool_cache:
-            self._tool_cache[agent_id] = build_agent_tools(agent_id, self._services)
+            self._tool_cache[agent_id] = build_agent_tools(
+                agent_id, self._services, simulation_mode=self._simulation_mode,
+            )
             logger.debug(
                 "Built %d tools for agent %s",
                 len(self._tool_cache[agent_id]),
