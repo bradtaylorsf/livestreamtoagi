@@ -36,7 +36,8 @@ MAX_BUDGET = 13000
 SYSTEM_PROMPT_BUDGET = 1200
 INFRASTRUCTURE_BUDGET = 500
 CORE_MEMORY_BUDGET = 3000
-RECALL_BUDGET = 900
+RECALL_BUDGET = 600
+RECENT_SUMMARIES_BUDGET = 300
 CONVERSATION_BUFFER_BUDGET = 3000
 WORLD_STATE_BUDGET = 300
 CHAT_HIGHLIGHTS_BUDGET = 200
@@ -106,6 +107,7 @@ class ContextAssembler:
         conversation_history: list[dict[str, str]],
         prompt_hint: str | None = None,
         transcript_id: int | None = None,
+        recent_conversation_summaries: list[str] | None = None,
     ) -> list[dict[str, str]]:
         """Assemble the complete context window for an agent turn.
 
@@ -200,6 +202,16 @@ class ContextAssembler:
             system_sections.append(core_memory_text)
         if recall_text:
             system_sections.append(recall_text)
+
+        # Recent conversation summaries (cross-phase repetition prevention)
+        if recent_conversation_summaries:
+            numbered = "\n".join(
+                f"{i + 1}. {s}" for i, s in enumerate(recent_conversation_summaries)
+            )
+            system_sections.append(
+                "## Recent Conversations (do NOT repeat these)\n" + numbered
+            )
+
         if transcript_text:
             system_sections.append(transcript_text)
         if world_state_text:

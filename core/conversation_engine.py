@@ -11,6 +11,8 @@ import asyncio
 import json
 import logging
 import uuid
+from collections import deque
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
 from core.conversation.energy import ConversationEnergy
@@ -117,6 +119,8 @@ class ConversationEngine:
         services: Services | None = None,
         clock: SimulationClock | None = None,
         relationship_tracker: RelationshipTracker | None = None,
+        recent_conversation_summaries: list[str] | None = None,
+        recent_outputs: list[str] | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -147,6 +151,11 @@ class ConversationEngine:
         self._running = False
         self._last_llm_meta: dict[str, Any] | None = None
 
+        # Cross-phase repetition prevention
+        self._recent_summaries = recent_conversation_summaries or []
+        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=15)
+        self._last_conversation_summary: str | None = None
+
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
 
@@ -163,6 +172,14 @@ class ConversationEngine:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def last_conversation_summary(self) -> str | None:
+        return self._last_conversation_summary
+
+    @property
+    def recent_outputs(self) -> list[str]:
+        return list(self._recent_outputs)
 
     # ── Main loop ──────────────────────────────────────────────
 
@@ -492,6 +509,16 @@ class ConversationEngine:
         # then create journal entries separately
         await self._compact_and_journal(conv)
 
+        # Build a brief summary for cross-phase context
+        speakers = list(dict.fromkeys(
+            msg.get("speaker", "unknown") for msg in conv.history
+        ))
+        topics_str = ", ".join(conv.topics[:3]) if conv.topics else "general"
+        self._last_conversation_summary = (
+            f"Conversation between {', '.join(speakers)} about {topics_str} "
+            f"({conv.turn_number} turns)."
+        )
+
         # Update relationship data after conversation
         if self._relationship_tracker and len(conv.participants) >= 2:
             try:
@@ -657,6 +684,7 @@ class ConversationEngine:
                     agent_id=agent.id,
                     conversation_history=conv_history,
                     prompt_hint=prompt_hint,
+                    recent_conversation_summaries=self._recent_summaries or None,
                 )
 
                 # Call LLM (with tool-call loop)
@@ -735,6 +763,33 @@ class ConversationEngine:
 
                 content = response.content.strip()
 
+                # Repetition detection — check against recent outputs
+                if content and self._is_repetitive(content):
+                    logger.info(
+                        "Repetition detected for %s, regenerating with nudge",
+                        agent.id,
+                    )
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[SYSTEM: Your response is very similar to something "
+                            "said recently. Take a different angle or bring up a "
+                            "new topic.]"
+                        ),
+                    })
+                    retry_resp = await self._llm.complete(
+                        messages=messages,
+                        model=agent.model_conversation,
+                        agent_id=agent.id,
+                        tools=openai_tools,
+                    )
+                    total_input_tokens += retry_resp.input_tokens
+                    total_output_tokens += retry_resp.output_tokens
+                    total_cost += float(retry_resp.estimated_cost)
+                    total_latency_ms += retry_resp.latency_ms
+                    if retry_resp.content and retry_resp.content.strip():
+                        content = retry_resp.content.strip()
+
                 # Empty response — retry
                 if not content:
                     logger.warning(
@@ -753,6 +808,9 @@ class ConversationEngine:
                     "cost": total_cost,
                     "latency_ms": total_latency_ms,
                 }
+
+                # Track output for cross-phase repetition detection
+                self._recent_outputs.append(content)
 
                 # Overseer review (can be disabled for testing)
                 if not self._overseer_enabled:
@@ -795,6 +853,16 @@ class ConversationEngine:
 
         logger.error("All %d generation attempts failed for %s", MAX_GENERATE_RETRIES, agent.id)
         return None
+
+    # ── Repetition detection ─────────────────────────────────
+
+    def _is_repetitive(self, content: str, threshold: float = 0.80) -> bool:
+        """Check if content is >threshold similar to any recent output."""
+        for prev in self._recent_outputs:
+            ratio = SequenceMatcher(None, content, prev).ratio()
+            if ratio > threshold:
+                return True
+        return False
 
     # ── Helpers ────────────────────────────────────────────────
 

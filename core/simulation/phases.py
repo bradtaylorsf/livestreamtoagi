@@ -10,6 +10,7 @@ from __future__ import annotations
 import enum
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -196,6 +197,10 @@ class PhaseRunner:
         self._services = services
         self._clock = clock
         self._relationship_tracker = relationship_tracker
+
+        # Cross-phase conversation context to prevent repetition
+        self._conversation_summaries: list[str] = []  # Rolling buffer (max 5)
+        self._recent_outputs: deque[str] = deque(maxlen=15)  # Last 15 agent outputs
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0
@@ -481,6 +486,8 @@ class PhaseRunner:
                 services=self._services,
                 clock=self._clock,
                 relationship_tracker=self._relationship_tracker,
+                recent_conversation_summaries=list(self._conversation_summaries),
+                recent_outputs=list(self._recent_outputs),
             )
 
             engine._running = True
@@ -505,6 +512,15 @@ class PhaseRunner:
             self._event_bus.off("overseer_shadow", _on_overseer)
             self._event_bus.off("overseer_warning", _on_overseer)
             self._event_bus.off("artifact_created", _on_artifact)
+
+        # Collect conversation summary for cross-phase context
+        if engine.active_conversation is None and engine.last_conversation_summary:
+            self._conversation_summaries.append(engine.last_conversation_summary)
+            if len(self._conversation_summaries) > 5:
+                self._conversation_summaries = self._conversation_summaries[-5:]
+
+        # Collect recent outputs for repetition detection
+        self._recent_outputs.extend(engine.recent_outputs)
 
         # Accumulate stats
         self._phase_conversations += 1
