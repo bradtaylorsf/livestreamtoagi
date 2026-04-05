@@ -119,8 +119,8 @@ class SimulationConfig:
             data = yaml.safe_load(f)
 
         self.audience_config = data.get("audience")
-        self.seed_tasks: bool = data.get("seed_tasks", False)
-        self.seed_goals: bool = data.get("seed_goals", False)
+        self.seed_tasks = bool(data.get("seed_tasks", False))
+        self.seed_goals = bool(data.get("seed_goals", False))
 
         raw_phases = data.get("phases", [])
         for entry in raw_phases:

@@ -49,7 +49,8 @@ class SharedWorkingState:
         status: str,
         blocked_reason: str | None = None,
         owner: str | None = None,
-    ) -> None:
+    ) -> bool:
+        """Update a task's status. Returns True if the task was found and updated."""
         raw = await self._redis.hget(TASK_KEY, task_id)
         if raw:
             data = json.loads(raw)
@@ -59,6 +60,8 @@ class SharedWorkingState:
             if owner:
                 data["owner"] = owner
             await self._redis.hset(TASK_KEY, task_id, json.dumps(data))
+            return True
+        return False
 
     async def get_tasks(self) -> list[SharedTask]:
         raw_all = await self._redis.hgetall(TASK_KEY)

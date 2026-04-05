@@ -112,7 +112,7 @@ class AgentGoalManager:
         goals = await self.get_goals(agent_id)
         for g in goals:
             if g.id == goal_id:
-                if status:
+                if status is not None:
                     g.status = status
                 if blocked_reason is not None:
                     g.blocked_reason = blocked_reason
@@ -174,7 +174,7 @@ class AgentGoalManager:
                 line += " [STALE — no progress in 24h]"
             lines.append(line)
 
-        return " ".join(lines)
+        return "\n".join(lines)
 
     async def seed_story_goals(self) -> None:
         """Seed initial story-arc goals for agents.
