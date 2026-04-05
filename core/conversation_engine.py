@@ -523,6 +523,9 @@ class ConversationEngine:
         # then create journal entries separately
         await self._compact_and_journal(conv)
 
+        # Extract commitments and create goals
+        await self._extract_commitments(conv)
+
         # Build a rich summary for cross-phase context
         speakers = list(dict.fromkeys(msg.get("speaker", "unknown") for msg in conv.history))
         topics_str = ", ".join(conv.topics[:3]) if conv.topics else "general"
@@ -712,6 +715,72 @@ class ConversationEngine:
                     exc_info=True,
                 )
 
+    # ── Commitment extraction ─────────────────────────────────
+
+    async def _extract_commitments(self, conv: _ActiveConversation) -> None:
+        """Extract commitments from conversation and create agent goals.
+
+        Uses a cheap LLM call to identify explicit commitments like
+        "I'll do X" or "Let me handle Y". Creates goals for each committing
+        agent. Failures are logged but never break conversation close.
+        """
+        if not self._services or not self._services.goal_manager:
+            return
+
+        transcript = "\n".join(
+            f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
+            for msg in conv.history
+        )
+
+        if len(transcript) < 50:
+            return  # Too short to contain meaningful commitments
+
+        prompt = (
+            "Extract explicit commitments from this conversation. "
+            "A commitment is when an agent says they will do something specific. "
+            "Return a JSON array: "
+            '[{"agent_id": "...", "commitment": "...", "related_to_agent": "..."}]\n'
+            "Return [] if no commitments found.\n\n"
+            f"Conversation:\n{transcript}"
+        )
+
+        try:
+            response = await self._llm.complete(
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": "Extract commitments now."},
+                ],
+                model="anthropic/claude-haiku-4.5",
+                agent_id="system",
+                temperature=0.1,
+                max_tokens=300,
+            )
+
+            from core.agent_goals import parse_commitments
+
+            commitments = parse_commitments(response.content)
+            goal_mgr = self._services.goal_manager
+            for c in commitments:
+                await goal_mgr.add_goal(
+                    agent_id=c["agent_id"],
+                    goal_text=c["commitment"],
+                    priority=2,
+                    related_agent=c.get("related_to_agent") or None,
+                )
+
+            if commitments:
+                logger.info(
+                    "Extracted %d commitments from conversation %s",
+                    len(commitments),
+                    conv.id,
+                )
+        except Exception:
+            logger.warning(
+                "Commitment extraction failed for conversation %s",
+                conv.id,
+                exc_info=True,
+            )
+
     # ── Tool support ────────────────────────────────────────────
 
     def _get_tools_for_agent(self, agent_id: str) -> dict[str, BaseTool] | None:
@@ -768,6 +837,16 @@ class ConversationEngine:
                     "Failed to build relationship context for %s", agent.id, exc_info=True
                 )
 
+        # Build agent goals context if available
+        agent_goals_context: str | None = None
+        if self._services and self._services.goal_manager:
+            try:
+                agent_goals_context = (
+                    await self._services.goal_manager.get_agenda_context(agent.id)
+                ) or None
+            except Exception:
+                logger.warning("Failed to get agent goals for %s", agent.id, exc_info=True)
+
         # Build shared working state context if available
         shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
@@ -787,6 +866,7 @@ class ConversationEngine:
                     recent_conversation_summaries=self._recent_summaries or None,
                     relationship_context=relationship_context,
                     shared_state_context=shared_state_context,
+                    agent_goals_context=agent_goals_context,
                 )
 
                 # Call LLM (with tool-call loop)

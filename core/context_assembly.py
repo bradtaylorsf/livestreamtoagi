@@ -106,6 +106,7 @@ class ContextAssembler:
         recent_conversation_summaries: list[str] | None = None,
         relationship_context: str | None = None,
         shared_state_context: str | None = None,
+        agent_goals_context: str | None = None,
     ) -> list[dict[str, str]]:
         """Assemble the complete context window for an agent turn.
 
@@ -212,6 +213,15 @@ class ContextAssembler:
             system_sections.append(
                 "## Your relationships with other agents in this conversation\n"
                 + relationship_context
+            )
+
+        # Agent goals / personal agenda
+        if agent_goals_context:
+            system_sections.append(
+                "## Your current agenda\n"
+                "These are your personal goals and commitments. "
+                "Work toward them and honor your promises.\n\n"
+                + agent_goals_context
             )
 
         # Shared working state
