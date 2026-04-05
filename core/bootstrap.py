@@ -33,6 +33,7 @@ from core.repos.memory_repo import MemoryRepo
 from core.repos.relationship_repo import RelationshipRepo
 from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
+from core.shared_state import SharedWorkingState
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class Services:
     artifact_repo: ArtifactRepo | None
     world_repo: WorldRepo | None
     relationship_repo: RelationshipRepo | None
+    shared_working_state: SharedWorkingState | None
     config_loader: ConfigLoader
 
 
@@ -152,6 +154,8 @@ async def bootstrap_services(
         event_bus=_module_event_bus,
     )
 
+    shared_working_state = SharedWorkingState(redis_client.client)
+
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
         core_memory=core_memory,
@@ -181,6 +185,7 @@ async def bootstrap_services(
         artifact_repo=artifact_repo,
         world_repo=world_repo,
         relationship_repo=relationship_repo,
+        shared_working_state=shared_working_state,
         config_loader=config_loader,
     )
 
@@ -235,6 +240,7 @@ async def _bootstrap_dry_run(
         artifact_repo=None,
         world_repo=None,
         relationship_repo=None,
+        shared_working_state=None,
         config_loader=config_loader,
     )
 

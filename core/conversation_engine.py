@@ -768,6 +768,15 @@ class ConversationEngine:
                     "Failed to build relationship context for %s", agent.id, exc_info=True
                 )
 
+        # Build shared working state context if available
+        shared_state_context: str | None = None
+        if self._services and self._services.shared_working_state:
+            try:
+                _sws = await self._services.shared_working_state.get_summary_for_context()
+                shared_state_context = _sws or None
+            except Exception:
+                logger.warning("Failed to get shared working state context", exc_info=True)
+
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
@@ -777,6 +786,7 @@ class ConversationEngine:
                     prompt_hint=prompt_hint,
                     recent_conversation_summaries=self._recent_summaries or None,
                     relationship_context=relationship_context,
+                    shared_state_context=shared_state_context,
                 )
 
                 # Call LLM (with tool-call loop)

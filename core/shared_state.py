@@ -88,6 +88,55 @@ class SharedWorkingState:
         raw = await self._redis.get(PRIORITIES_KEY)
         return json.loads(raw) if raw else None
 
+    async def seed_initial_tasks(self) -> None:
+        """Populate the task board with starter tasks for each agent.
+
+        Safe to call multiple times — skips if tasks already exist.
+        """
+        existing = await self.get_tasks()
+        if existing:
+            return
+
+        seeds = [
+            SharedTask(
+                id="seed-vera-revenue",
+                title="Set up revenue streams — brainstorm and evaluate monetization options",
+                owner="vera",
+            ),
+            SharedTask(
+                id="seed-rex-build",
+                title="Design and build first world area",
+                owner="rex",
+            ),
+            SharedTask(
+                id="seed-pixel-social",
+                title="Create initial social media presence",
+                owner="pixel",
+            ),
+            SharedTask(
+                id="seed-fork-review",
+                title="Review and critique revenue proposals",
+                owner="fork",
+            ),
+            SharedTask(
+                id="seed-sentinel-budget",
+                title="Establish budget tracking and cost monitoring",
+                owner="sentinel",
+            ),
+            SharedTask(
+                id="seed-aurora-creative",
+                title="Design creative content for the stream",
+                owner="aurora",
+            ),
+            SharedTask(
+                id="seed-grok-marketing",
+                title="Explore viral marketing angles",
+                owner="grok",
+            ),
+        ]
+        for task in seeds:
+            await self.add_task(task)
+
     async def get_summary_for_context(self) -> str:
         """Build a text summary suitable for injection into agent context."""
         lines: list[str] = []

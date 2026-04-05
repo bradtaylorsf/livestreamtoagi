@@ -25,6 +25,9 @@ audience:
     - name: "first_timer"
       style: "confused but engaged"
 
+# Seed the shared task board before conversations begin
+seed_tasks: true
+
 phases:
   # 1. First contact — agents discover each other organically
   - name: first_contact
