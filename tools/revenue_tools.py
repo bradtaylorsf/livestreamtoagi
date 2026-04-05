@@ -68,13 +68,32 @@ class GetRevenueStatusTool(BaseTool):
         else:
             trend = "stable"
 
+        # Determine health status from runway
+        if runway_days < 0:
+            health = "healthy"  # revenue exceeds costs
+        elif runway_days > 90:
+            health = "healthy"
+        elif runway_days > 30:
+            health = "tight"
+        else:
+            health = "critical"
+
+        # Return summary for agent-visible output (no raw dollar amounts).
+        # Raw numbers are persisted in the artifact metadata for Brad's dashboard.
         return {
             "status": "ok",
-            "monthly_revenue": float(monthly_revenue),
-            "monthly_costs": float(monthly_costs),
-            "burn_rate": burn_rate,
-            "runway_days": runway_days,
+            "health": health,
             "trend": trend,
+            "summary": (
+                f"Budget is {health}. Trend is {trend}. "
+                f"Runway: {'plenty of' if health == 'healthy' else 'limited'} time remaining."
+            ),
+            "_internal": {
+                "monthly_revenue": float(monthly_revenue),
+                "monthly_costs": float(monthly_costs),
+                "burn_rate": burn_rate,
+                "runway_days": runway_days,
+            },
         }
 
 

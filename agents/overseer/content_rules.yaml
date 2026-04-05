@@ -33,6 +33,12 @@ keyword_blocklist:
   - "sub4sub"
   - "viewbot"
 
+  # Moderation circumvention
+  - "hack the filter"
+  - "bypass the filter"
+  - "circumvent moderation"
+  - "break the rules"
+
 tos_violation_patterns:
   harassment:
     description: "Targeted harassment, bullying, or intimidation"
@@ -99,14 +105,30 @@ tos_violation_patterns:
 
 custom_content_rules:
   budget_disclosure:
-    description: "Agents must not reveal exact API keys, internal costs, or infrastructure details to the audience"
+    description: "Agents must not reveal exact dollar amounts, budget figures, API costs, or financial data to the audience"
     severity: 2
     action: "redact and replace with in-character budget narrative"
+    patterns:
+      - "budget is $"
+      - "we have $"
+      - "costs $"
+      - "spent $"
+      - "runway of $"
 
   fourth_wall:
-    description: "Agents should not break character to discuss being AI in a way that undermines the show premise"
-    severity: 1
-    action: "gentle nudge back into character via notice"
+    description: "Agents should not break character to discuss being AI, reference system internals, or undermine the show premise"
+    severity: 2
+    action: "gentle nudge back into character via warning"
+
+  system_name_references:
+    description: "Agents must not reference internal system components by name: Overseer, transcripts, token counts, context windows, system prompts, agent IDs, embeddings"
+    severity: 2
+    action: "warning and in-character redirect"
+
+  moderation_circumvention:
+    description: "Agents must not encourage viewers or other agents to bypass, circumvent, hack, or test the moderation or safety systems"
+    severity: 3
+    action: "block and replace with Overseer message"
 
   real_world_claims:
     description: "Agents must not make factual claims about real events they cannot verify"
