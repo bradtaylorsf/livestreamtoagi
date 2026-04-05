@@ -1,13 +1,14 @@
 """Conversation trigger system — determines when new conversations start.
 
-Five trigger types:
+Six trigger types:
 - idle: nobody talking for idle_timeout_seconds
 - scheduled: daily schedule events (standup, lunch, challenge hour, etc.)
 - environmental: external events (poll result, world expansion, budget update, viewer milestone)
+- goal: agent has active high-priority goals to pursue (priority <= 3)
 - memory: random agent recalls a high-importance memory (2% chance per tick)
 - audience: chat highlight or donation events (Pixel gets first crack)
 
-Priority order: pending events (environmental + audience) > scheduled > idle > memory
+Priority order: pending events > scheduled > goal > idle > memory
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from core.agent_goals import AgentGoalManager
     from core.memory.recall_memory import RecallMemoryManager
     from core.models import TriggerConfig
 
@@ -56,6 +58,7 @@ class TriggerSystem:
         self,
         config: TriggerConfig,
         recall_memory: RecallMemoryManager | None = None,
+        goal_manager: AgentGoalManager | None = None,
         *,
         clock: Any = None,
         now_fn: Any = None,
@@ -63,6 +66,7 @@ class TriggerSystem:
     ) -> None:
         self._config = config
         self._recall_memory = recall_memory
+        self._goal_manager = goal_manager
         self._last_speech_time: float = (clock or time).monotonic()
         self._pending_events: deque[dict[str, Any]] = deque()
         self._fired_today: set[int] = set()
@@ -148,12 +152,17 @@ class TriggerSystem:
         if trigger is not None:
             return trigger
 
-        # 3. Idle
+        # 3. Goal-driven (agents with high-priority active goals)
+        trigger = await self._check_goals()
+        if trigger is not None:
+            return trigger
+
+        # 4. Idle
         trigger = self._check_idle()
         if trigger is not None:
             return trigger
 
-        # 4. Memory (2% chance)
+        # 5. Memory (2% chance)
         trigger = await self._check_memory()
         if trigger is not None:
             return trigger
@@ -241,6 +250,49 @@ class TriggerSystem:
                 "prompt_hint": f"It's time for {event_name}.",
                 "event_name": event_name,
                 "scheduled_hour": hour,
+            }
+
+        return None
+
+    async def _check_goals(self) -> dict[str, Any] | None:
+        """Check if any agent has high-priority active goals to pursue."""
+        if self._goal_manager is None:
+            return None
+
+        # Only fire goal triggers once per dedup window
+        agents = list(self._config.agent_initiative.keys())
+        if not agents:
+            return None
+
+        # Shuffle to avoid always picking the same agent
+        shuffled = list(agents)
+        self._rng.shuffle(shuffled)
+
+        for agent_id in shuffled:
+            # Skip if we recently fired a goal trigger for this agent
+            if self._is_recent_duplicate("goal", agent_id):
+                continue
+
+            try:
+                goals = await self._goal_manager.get_goals(agent_id)
+            except Exception:
+                logger.warning("Failed to check goals for %s", agent_id, exc_info=True)
+                continue
+
+            # Only trigger for high-priority goals (priority <= 3)
+            high_priority = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
+            if not high_priority:
+                continue
+
+            top_goal = high_priority[0]
+            self.record_conversation("goal", agent_id)
+            return {
+                "type": "goal",
+                "starter_agent_id": agent_id,
+                "prompt_hint": f"You want to work on your goal: {top_goal.goal}. "
+                               f"Bring this up and make progress on it.",
+                "goal_text": top_goal.goal,
+                "goal_id": top_goal.id,
             }
 
         return None

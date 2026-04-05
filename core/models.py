@@ -941,6 +941,25 @@ class SimulationCostResponse(BaseModel):
     total_output_tokens: int = 0
 
 
+# ── Agent Goals ────────────────────────────────────────────────────
+
+
+class AgentGoal(BaseModel):
+    """A persistent goal in an agent's goal queue (DB-backed)."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    agent_id: str
+    goal: str
+    priority: int = 5
+    status: str = "active"  # active, completed, abandoned, blocked
+    source: str | None = "self"  # self, assigned, eval_loop, reflection
+    progress_notes: str | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    parent_goal_id: uuid.UUID | None = None
+
+
 # ── Versioned Agent Config ─────────────────────────────────────────
 
 

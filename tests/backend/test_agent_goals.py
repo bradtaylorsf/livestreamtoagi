@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.agent_goals import AgentGoal, AgentGoalManager, parse_commitments
+from core.agent_goals import AgentGoalLegacy as AgentGoal, AgentGoalManager, parse_commitments
 
 
 # ── Helpers ───────────────────────────────────────────────────

@@ -22,6 +22,7 @@ from core.models import (
 )
 
 if TYPE_CHECKING:
+    from core.agent_goals import AgentGoalManager
     from core.agent_registry import AgentRegistry
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
@@ -119,6 +120,7 @@ class ReflectionManager:
         core_memory_mgr: CoreMemoryManager,
         token_counter: TokenCounter,
         agent_registry: AgentRegistry,
+        goal_manager: AgentGoalManager | None = None,
     ) -> None:
         self._repo = memory_repo
         self._llm = llm_client
@@ -126,6 +128,7 @@ class ReflectionManager:
         self._tc = token_counter
         self._registry = agent_registry
         self._relationship_tracker: RelationshipTracker | None = None
+        self._goal_manager = goal_manager
 
     def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
         """Set the relationship tracker (called after simulation_id is known)."""
@@ -221,11 +224,28 @@ class ReflectionManager:
                     agent_id, exc_info=True,
                 )
 
+        # Review goals: update progress and identify new goals from reflection
+        goal_context = ""
+        if self._goal_manager is not None:
+            try:
+                goals = await self._goal_manager.get_goals(agent_id)
+                active_goals = [g for g in goals if g.status not in ("done", "completed")]
+                if active_goals:
+                    goal_context = (
+                        f" Active goals: {', '.join(g.goal for g in active_goals[:3])}."
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to review goals during 6h reflection for %s",
+                    agent_id, exc_info=True,
+                )
+
         # Generate journal entry
         context = (
             f"Reviewed {len(recall_memories)} memories. "
             f"Promoted {promoted_count} items. "
             f"Updated {importance_updates} importance scores."
+            f"{goal_context}"
         )
         journal = await self._generate_journal_entry(agent_id, "6hour", context)
 

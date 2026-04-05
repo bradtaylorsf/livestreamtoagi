@@ -30,6 +30,7 @@ from core.redis_client import RedisClient
 from core.repos.artifact_repo import ArtifactRepo
 from core.repos.config_version_repo import ConfigVersionRepo
 from core.repos.cost_repo import CostRepo
+from core.repos.goal_repo import GoalRepo
 from core.repos.memory_repo import MemoryRepo
 from core.repos.relationship_repo import RelationshipRepo
 from core.repos.transcript_repo import TranscriptRepo
@@ -167,7 +168,8 @@ async def bootstrap_services(
     config_loader._config_repo = config_version_repo
 
     shared_working_state = SharedWorkingState(redis_client.client)
-    goal_manager = AgentGoalManager(redis_client.client)
+    goal_repo = GoalRepo(db)
+    goal_manager = AgentGoalManager(redis=redis_client.client, goal_repo=goal_repo)
 
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
