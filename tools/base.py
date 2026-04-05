@@ -59,6 +59,8 @@ class BaseTool(ABC):
         else:
             if self.name in PENDING_APPROVAL_TOOLS:
                 status = "pending_approval"
+            elif isinstance(result, dict) and result.get("simulated"):
+                status = "simulated"
             return result
         finally:
             if self.artifact_repo is not None:

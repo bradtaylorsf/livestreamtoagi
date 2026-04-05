@@ -204,3 +204,22 @@ async def test_base_tool_persists_error():
     assert artifact.status == "failed"
     assert artifact.tool_output is not None
     assert "Docker connection refused" in artifact.tool_output["error"]
+
+
+@pytest.mark.asyncio
+async def test_stub_tool_artifact_status_is_simulated():
+    """Stub tools should record artifacts with status='simulated'."""
+    import asyncio
+
+    tool = StubExecuteCodeTool(agent_id="rex")
+    mock_repo = AsyncMock()
+    tool.artifact_repo = mock_repo
+
+    await tool.run(agent_id="rex", language="python", code="print(1)")
+
+    # Let fire-and-forget tasks complete
+    await asyncio.sleep(0.05)
+
+    mock_repo.save_artifact.assert_called_once()
+    artifact = mock_repo.save_artifact.call_args[0][0]
+    assert artifact.status == "simulated"
