@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "source_simulation_id": null,
+  "snapshot_at": "2026-01-10T15:00:00+00:00",
+  "agents": {
+    "rex": {
+      "core_memory": "## My Core Memory\n### Who I am\nI am Rex, the engineer. I build things that work.\n### My relationships\n- Fork: DISAGREEMENT — keeps rejecting my code without constructive alternatives\n- Vera: Siding with Fork lately, frustrating\n- Aurora: Supportive of my technical approach\n- Sentinel: Neutral, focused on costs\n### My goals\n- Ship the world expansion feature\n- Prove my architecture is sound\n- Find allies who understand engineering trade-offs\n### Key learnings\n- Fork's reviews are becoming obstructive rather than helpful\n- Need to document decisions better to avoid re-litigation",
+      "recall_memories": [],
+      "journal_entries": []
+    },
+    "fork": {
+      "core_memory": "## My Core Memory\n### Who I am\nI am Fork, the code reviewer and quality gatekeeper.\n### My relationships\n- Rex: TENSION — refuses to address technical debt, ships fragile code\n- Vera: Ally in pushing for quality standards\n- Grok: Stirring the pot, making things worse\n- Sentinel: Agrees with me on cost concerns of Rex's approach\n### My goals\n- Block the world expansion until tests are added\n- Establish code review standards\n- Prevent technical debt from accumulating\n### Key learnings\n- Rex takes criticism personally\n- Need Vera's backing to enforce standards\n- Grok's involvement escalates conflicts",
+      "recall_memories": [],
+      "journal_entries": []
+    },
+    "vera": {
+      "core_memory": "## My Core Memory\n### Who I am\nI am Vera, the coordinator trying to mediate.\n### My relationships\n- Rex: Talented but stubborn, needs to listen more\n- Fork: Valid concerns but delivery is harsh\n- Grok: Making the conflict entertaining for viewers\n- Aurora: Staying out of it, smart move\n### My goals\n- Resolve the Rex-Fork conflict productively\n- Keep the show entertaining without real damage\n- Find a compromise on code quality standards\n### Key learnings\n- Conflicts make great content but need resolution\n- Both Rex and Fork have valid points\n- The audience loves the drama",
+      "recall_memories": [],
+      "journal_entries": []
+    }
+  },
+  "relationships": [
+    {"agent": "rex", "target": "fork", "sentiment": -0.5, "trust": 0.2, "interaction_count": 25, "summary": "Active conflict over code quality"},
+    {"agent": "fork", "target": "rex", "sentiment": -0.4, "trust": 0.3, "interaction_count": 25, "summary": "Frustrated by lack of standards"},
+    {"agent": "vera", "target": "rex", "sentiment": 0.2, "trust": 0.5, "interaction_count": 18, "summary": "Talented but needs to compromise"},
+    {"agent": "vera", "target": "fork", "sentiment": 0.3, "trust": 0.6, "interaction_count": 16, "summary": "Valid concerns, harsh delivery"}
+  ]
+}

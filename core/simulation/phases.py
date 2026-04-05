@@ -33,8 +33,83 @@ if TYPE_CHECKING:
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
+    from core.social.relationship_tracker import RelationshipTracker
 
 logger = logging.getLogger(__name__)
+
+# ── Live display helpers (Rich output during simulation) ─────
+
+_AGENT_STYLES: dict[str, str] = {
+    "vera": "bright_magenta",
+    "rex": "bright_green",
+    "aurora": "bright_cyan",
+    "pixel": "bright_yellow",
+    "fork": "bright_red",
+    "sentinel": "blue",
+    "grok": "dark_orange",
+    "overseer": "bright_white",
+    "alpha": "grey70",
+}
+
+
+def _display_agent_speak(agent_id: str, data: dict) -> None:
+    """Print agent dialogue line to terminal."""
+    from core.simulation.display import console
+
+    color = _AGENT_STYLES.get(agent_id, "white")
+    # Prefer parsed dialogue over raw content for cleaner display
+    text = data.get("dialogue") or data.get("content", "")
+    actions = data.get("actions", [])
+    preview = text[:300] + "..." if len(text) > 300 else text
+    cost = data.get("cost", 0)
+    tokens = data.get("input_tokens", 0) + data.get("output_tokens", 0)
+
+    # Show actions (stage directions) if present
+    if actions:
+        action_str = " ".join(f"*{a}*" for a in actions)
+        console.print(f"       [dim]{'':>10}  {action_str}[/dim]")
+
+    console.print(
+        f"       [{color}]{agent_id:>10}[/{color}]  "
+        f"{preview}"
+    )
+    console.print(
+        f"       [dim]{'':>10}  "
+        f"${float(cost):.4f} | {tokens:,} tokens[/dim]"
+    )
+
+
+def _display_overseer_flag(data: dict) -> None:
+    """Print overseer flag event."""
+    from core.simulation.display import console
+
+    agent = data.get("agent_id", "?")
+    severity = data.get("severity", "?")
+    reason = data.get("reason", "")[:100]
+    console.print(
+        f"       [yellow]  OVERSEER[/yellow]  "
+        f"flagged {agent} (severity {severity}): {reason}"
+    )
+
+
+def _display_artifact(data: dict) -> None:
+    """Print tool/artifact creation event."""
+    from core.simulation.display import console
+
+    agent = data.get("agent_id", "?")
+    tool = data.get("tool_name", data.get("artifact_type", "?"))
+    status = data.get("status", "ok")
+    color = _AGENT_STYLES.get(agent, "white")
+    if status in ("executed", "success"):
+        status_color = "green"
+    elif status == "failed":
+        status_color = "red"
+    else:
+        status_color = "yellow"
+    console.print(
+        f"       [{color}]{'':>10}[/{color}]  "
+        f"[dim]tool:[/dim] {tool} [{status_color}]{status}[/{status_color}]"
+    )
 
 
 class PhaseType(enum.StrEnum):
@@ -70,6 +145,8 @@ class PhaseResult:
     overseer_flags: int = 0
     errors: list[str] = field(default_factory=list)
     agents_participated: list[str] = field(default_factory=list)
+    assertions: list[Any] = field(default_factory=list)
+    tools_used: list[str] = field(default_factory=list)
 
 
 class PhaseRunner:
@@ -97,6 +174,7 @@ class PhaseRunner:
         dry_run: bool = False,
         services: Services | None = None,
         clock: SimulationClock | None = None,
+        relationship_tracker: RelationshipTracker | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -117,6 +195,7 @@ class PhaseRunner:
         self._dry_run = dry_run
         self._services = services
         self._clock = clock
+        self._relationship_tracker = relationship_tracker
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0
@@ -126,6 +205,7 @@ class PhaseRunner:
         self._phase_overseer_flags = 0
         self._phase_artifacts = 0
         self._phase_agents: set[str] = set()
+        self._phase_tools_used: set[str] = set()
 
     async def run_phase(self, phase: Phase) -> PhaseResult:
         """Dispatch to the appropriate phase runner method."""
@@ -164,6 +244,7 @@ class PhaseRunner:
         result.overseer_flags = self._phase_overseer_flags
         result.artifacts = self._phase_artifacts
         result.agents_participated = list(self._phase_agents)
+        result.tools_used = sorted(self._phase_tools_used)
         return result
 
     def _reset_phase_stats(self) -> None:
@@ -174,6 +255,7 @@ class PhaseRunner:
         self._phase_overseer_flags = 0
         self._phase_artifacts = 0
         self._phase_agents.clear()
+        self._phase_tools_used.clear()
 
     # ── Phase runners ─────────────────────────────────────
 
@@ -244,7 +326,11 @@ class PhaseRunner:
         await self._run_conversation(trigger, phase)
 
     async def _run_tool_exercise(self, phase: Phase) -> None:
-        """Run a tool exercise — trigger a conversation that uses a specific tool."""
+        """Run a tool exercise — short conversation forcing a specific tool.
+
+        Tool exercises are capped at 4 turns by default (not 15) since the
+        goal is just to verify the tool fires, not to have a long conversation.
+        """
         agent_id = phase.config.get("agent", "pixel")
         tool_name = phase.config.get("tool", "web_search")
         context = phase.config.get("context", f"Use the {tool_name} tool")
@@ -253,11 +339,16 @@ class PhaseRunner:
             "type": "environmental",
             "starter_agent_id": agent_id,
             "prompt_hint": context,
+            "topic": context,
             "event_type": "tool_exercise",
             "event_data": {"tool": tool_name, "context": context},
             "location": phase.config.get("location", "town_square"),
             "tool_choice": {"type": "function", "function": {"name": tool_name}},
         }
+
+        # Override max_turns for tool exercises — keep them short
+        if "max_turns" not in phase.config:
+            phase.config["max_turns"] = 4
 
         await self._run_conversation(trigger, phase)
 
@@ -348,12 +439,21 @@ class PhaseRunner:
             agent_id = data.get("agent_id")
             if agent_id:
                 agents_in_conv.add(agent_id)
+            # Live display of agent dialogue
+            _display_agent_speak(agent_id or "?", data)
 
         async def _on_overseer(event: dict) -> None:
             self._phase_overseer_flags += 1
+            data = event.get("data", event)
+            _display_overseer_flag(data)
 
         async def _on_artifact(event: dict) -> None:
             self._phase_artifacts += 1
+            data = event.get("data", event)
+            tool_name = data.get("tool_name", data.get("artifact_type"))
+            if tool_name:
+                self._phase_tools_used.add(tool_name)
+            _display_artifact(data)
 
         self._event_bus.on("agent_speak", _on_speak)
         self._event_bus.on("overseer_shadow", _on_overseer)
@@ -380,6 +480,7 @@ class PhaseRunner:
                 simulation_id=self._simulation_id,
                 services=self._services,
                 clock=self._clock,
+                relationship_tracker=self._relationship_tracker,
             )
 
             engine._running = True

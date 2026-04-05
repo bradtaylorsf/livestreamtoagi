@@ -37,10 +37,18 @@ async def run_simulation(args: argparse.Namespace) -> None:
     """Main async entry point."""
     verbose = getattr(args, "verbose", False)
     logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.WARNING,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(asctime)s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # Only enable DEBUG on our modules — silence noisy HTTP libraries
+    if verbose:
+        for module in ("core", "tools", "scripts"):
+            logging.getLogger(module).setLevel(logging.DEBUG)
+    # Always silence HTTP-level noise (httpcore, httpx, asyncpg, urllib3)
+    for noisy in ("httpcore", "httpx", "asyncpg", "urllib3", "hpack", "asyncio"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     from core.bootstrap import bootstrap_services, shutdown_services
     from core.conversation.proximity import ProximityManager
@@ -141,6 +149,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         display=display,
         services=svc,
         clock=sim_clock,
+        relationship_repo=svc.relationship_repo,
     )
 
     # ── Signal handling ───────────────────────────────────
@@ -153,6 +162,36 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
+
+    # ── Restore snapshot if provided ──────────────────────
+    if args.restore_snapshot:
+        import json as _json
+
+        from core.memory.snapshot import MemorySnapshotImporter
+
+        snapshot_data = _json.loads(Path(args.restore_snapshot).read_text())
+        importer = MemorySnapshotImporter(
+            db=svc.db,
+            memory_repo=svc.memory_repo,
+            core_memory_mgr=svc.core_memory,
+            recall_memory_mgr=svc.recall_memory,
+            relationship_repo=svc.relationship_repo,
+            embedding_fn=None,  # Use embedded vectors from snapshot
+            token_counter=svc.token_counter,
+        )
+        restore_result = await importer.restore(snapshot_data)
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "Restored snapshot: %d agents, %d core, %d recall, %d journal, %d relationships",
+            len(restore_result.agents_restored),
+            restore_result.core_memories_restored,
+            restore_result.recall_memories_restored,
+            restore_result.journal_entries_restored,
+            restore_result.relationships_restored,
+        )
+        if restore_result.warnings:
+            for w in restore_result.warnings:
+                logger.warning("Snapshot restore warning: %s", w)
 
     # ── Run ───────────────────────────────────────────────
     if sim_config.mode == "autonomous":
@@ -232,6 +271,12 @@ def main() -> None:
         action="store_false",
         dest="overseer_shadow",
         help="Run Overseer in full enforcement mode",
+    )
+    parser.add_argument(
+        "--restore-snapshot",
+        type=str,
+        default=None,
+        help="Path to a memory snapshot JSON file to pre-load before simulation",
     )
     parser.add_argument(
         "--dry-run",

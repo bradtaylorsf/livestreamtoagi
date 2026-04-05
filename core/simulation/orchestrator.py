@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from core.redis_client import RedisClient
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
+    from core.repos.relationship_repo import RelationshipRepo
     from core.repos.simulation_repo import SimulationRepo
     from core.simulation.display import SimulationDisplay
 
@@ -182,6 +183,7 @@ class SimulationOrchestrator:
         display: SimulationDisplay,
         services: Services | None = None,
         clock: SimulationClock | None = None,
+        relationship_repo: RelationshipRepo | None = None,
     ) -> None:
         self._config = config
         self._db = db
@@ -203,6 +205,7 @@ class SimulationOrchestrator:
         self._reflection = reflection_manager
         self._display = display
         self._services = services
+        self._relationship_repo = relationship_repo
 
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
@@ -231,7 +234,11 @@ class SimulationOrchestrator:
             pass
         return ReflectionScheduler(self.clock, self._reflection, **kwargs)
 
-    def _build_phase_runner(self, sim_id: uuid.UUID) -> PhaseRunner:
+    def _build_phase_runner(
+        self,
+        sim_id: uuid.UUID,
+        relationship_tracker: Any | None = None,
+    ) -> PhaseRunner:
         """Create a PhaseRunner with all dependencies wired."""
         return PhaseRunner(
             config_loader=self._config_loader,
@@ -253,6 +260,7 @@ class SimulationOrchestrator:
             dry_run=self._config.dry_run,
             services=self._services,
             clock=self.clock,
+            relationship_tracker=relationship_tracker,
         )
 
     def _idle_gap(self) -> timedelta:
@@ -289,8 +297,16 @@ class SimulationOrchestrator:
 
         self._display.show_simulation_start(sim, self._config)
 
+        # Create RelationshipTracker and AssertionEngine now that sim_id is known
+        relationship_tracker = self._build_relationship_tracker(sim.id)
+        assertion_engine = self._build_assertion_engine()
+
+        # Wire relationship tracker into reflection manager
+        if relationship_tracker:
+            self._reflection.set_relationship_tracker(relationship_tracker)
+
         reflection_scheduler = self._build_reflection_scheduler()
-        runner = self._build_phase_runner(sim.id)
+        runner = self._build_phase_runner(sim.id, relationship_tracker)
 
         phases = self._config.phases
         total_phases = len(phases)
@@ -303,6 +319,13 @@ class SimulationOrchestrator:
                 self._display.show_phase_start(phase.name, idx, total_phases)
 
                 result = await runner.run_phase(phase)
+
+                # Evaluate phase assertions
+                if assertion_engine and not self._config.dry_run:
+                    assertion_results = await assertion_engine.evaluate_phase(
+                        phase, result, sim.id,
+                    )
+                    result.assertions = assertion_results
 
                 # Update DB stats
                 if not self._config.dry_run:
@@ -396,8 +419,15 @@ class SimulationOrchestrator:
 
         self._display.show_simulation_start(sim, self._config)
 
+        # Create RelationshipTracker and AssertionEngine now that sim_id is known
+        relationship_tracker = self._build_relationship_tracker(sim.id)
+        assertion_engine = self._build_assertion_engine()
+
+        if relationship_tracker:
+            self._reflection.set_relationship_tracker(relationship_tracker)
+
         reflection_scheduler = self._build_reflection_scheduler()
-        runner = self._build_phase_runner(sim.id)
+        runner = self._build_phase_runner(sim.id, relationship_tracker)
 
         conversation_num = 0
         current_day = self.clock.simulated_day()
@@ -462,6 +492,19 @@ class SimulationOrchestrator:
                         await self._sim_repo.update_agents_participated(
                             sim.id, result.agents_participated
                         )
+
+                # Evaluate assertions for autonomous conversations
+                if assertion_engine and not self._config.dry_run:
+                    try:
+                        conv_config = self._config_loader.config.conversation_config
+                    except AttributeError:
+                        conv_config = {}
+                    assertion_results = (
+                        await assertion_engine.evaluate_conversation_defaults(
+                            result, sim.id, conv_config if isinstance(conv_config, dict) else {},
+                        )
+                    )
+                    result.assertions = assertion_results
 
                 self._total_cost += result.cost
                 day_stats["conversations"] += 1
@@ -560,6 +603,27 @@ class SimulationOrchestrator:
             "audience": PhaseType.audience_sim,
         }
         return mapping.get(trigger_type, PhaseType.organic)
+
+    def _build_relationship_tracker(self, sim_id: uuid.UUID) -> Any | None:
+        """Create a RelationshipTracker if relationship_repo is available."""
+        if self._relationship_repo is None:
+            return None
+        from core.social.relationship_tracker import RelationshipTracker
+
+        return RelationshipTracker(
+            llm_client=self._llm,
+            relationship_repo=self._relationship_repo,
+            simulation_id=sim_id,
+            clock=self.clock,
+        )
+
+    def _build_assertion_engine(self) -> Any | None:
+        """Create an AssertionEngine with repo for persisting results."""
+        from core.repos.assertion_repo import AssertionRepo
+        from core.simulation.assertions import AssertionEngine
+
+        repo = AssertionRepo(self._db) if self._db else None
+        return AssertionEngine(assertion_repo=repo)
 
     def cancel(self) -> None:
         """Signal the orchestrator to stop after the current phase."""

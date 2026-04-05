@@ -212,6 +212,13 @@ reflection:
   daily_hour: 23                   # simulated hour for end-of-day reflection
   weekly_day: 7                    # run weekly reflection every N simulated days
 
+# ─── Phase Assertions (autonomous mode defaults) ────
+assertions:
+  min_turns_per_conversation: 2
+  max_cost_per_conversation: 1.00
+  require_memory_storage: true
+  max_overseer_severity: 3
+
 # ─── Logging ─────────────────────────────────────────
 logging:
   log_every_selection: true         # log full weight breakdown for every turn

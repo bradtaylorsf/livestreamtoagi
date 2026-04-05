@@ -1,25 +1,25 @@
-Here's the project context:
+Here's the project context file:
 
 ## Architecture
-- **Entry point:** `core/main.py` — FastAPI app with lifespan that bootstraps services (DB, Redis, LLM, TTS, memory), mounts `admin_routes.py` REST router, and opens WebSocket for frontend
-- **Database:** PostgreSQL 16 + pgvector. Schema managed by custom migrator in `db/` (12 up/down migration pairs in `db/migrations/`). Repos in `core/repos/` (agent, artifact, conversation, cost, memory, simulation, transcript, world)
-- **Core engine:** `core/conversation_engine.py` drives agent dialogue; speaker selection in `core/conversation/speaker_selector.py` with energy, pacing, proximity, and topic subsystems
-- **Memory system:** 3-tier in `core/memory/` — core (always-in-prompt), recall (pgvector semantic search), archival (full transcripts). Reflection/compaction run periodically
-- **Frontend:** Phaser.js pixel art renderer in `frontend/` (Vite + TypeScript). Website: Next.js in `website/`. Both connect to backend via REST/WebSocket
+- **Entry point:** `core/main.py` — FastAPI app with lifespan that bootstraps services (Redis, Postgres, agent registry, memory, TTS), mounts `admin_routes.py`, starts scheduler, and opens WebSocket for frontend
+- **Database:** PostgreSQL 16 + pgvector, schema in `db/init.sql`, migrations in `db/migrations/`, repos in `core/repos/` (cost_repo, memory_repo, conversation_repo, etc.). Redis on port 6381 for shared state
+- **Key directories:** `core/` (orchestrator, conversation engine, memory system, LLM client, eval engine), `tools/` (agent tool implementations — code exec, web, messaging, audience), `agents/` (YAML personality configs), `frontend/` (Phaser.js pixel world), `website/` (Next.js public site), `specs/` (read-only design docs)
+- **Simulation loop:** `core/simulation/orchestrator.py` drives phases via `core/conversation/speaker_selector.py`; all agent output passes through `core/overseer.py` content filter
+- **Services:** Docker Compose runs Redis (6381), Postgres (5434), Langfuse (3100); `scripts/check-services.sh` validates health
 
 ## Conventions
-- Python 3.13 (pinned in `.python-version`), strict type hints, async/await everywhere. Ruff for lint/format
-- TypeScript strict mode, ESM, Vite builds for both frontend and website
-- Tests: `tests/backend/` (pytest, unit) and `tests/integration/` (needs Docker services). Frontend/website use Vitest. Run all via `pnpm test` at root
-- New tools go in `tools/`, new repos in `core/repos/`, new conversation subsystems in `core/conversation/`. Agent configs are YAML in `agents/`
-- DB changes: add numbered migration pair in `db/migrations/`, run `pnpm db:migrate`
+- Python 3.13, type hints everywhere, async/await for I/O, Pydantic models for schemas, `ruff` for lint/format
+- Tests in `tests/backend/` and `tests/integration/`; run all with `pnpm test`, Python only with `pnpm test:python` (pytest with asyncio_mode=auto)
+- Conventional commits (`feat:`, `fix:`, `refactor:`), branch naming `feat/`, `fix/`
+- New tools go in `tools/`, new repos in `core/repos/`, new conversation features in `core/conversation/`
+- Root `package.json` orchestrates everything via `concurrently`; `pnpm dev` starts Docker + backend + website together
 
 ## Critical Rules
-- Docker services (Redis:6381, PostgreSQL:5434, Langfuse:3100) must be healthy before integration tests — run `scripts/check-services.sh` first
-- `core/bootstrap.py` wires all services together; adding a new service requires updating both bootstrap and shutdown
-- Cost tracking must be 100% accurate (eval integrity depends on it) — every LLM call must log to `cost_repo`
-- Agent configs in `agents/` and seed migration `002_seed_agents` must stay in sync
-- Overseer content filter (`core/overseer.py`) sits between agent output and TTS — bypassing it breaks safety guarantees
+- **`specs/` is read-only** — design reference only, never modify
+- **Costs must be 100% accurate** — cost tracking in `core/repos/cost_repo.py` and eval engine are critical for eval integrity; no approximations
+- **Memory system is 3-tier** (core/recall/archival in `core/memory/`) — changes to one tier can break the others; update together
+- **Docker services must be healthy before integration tests** — run `scripts/check-services.sh` first (5 checks must pass)
+- **Agent YAML configs in `agents/`** are loaded by `core/config_loader.py` with hot-reload; schema changes require updating both
 
 ## Active State
 - Test status: _(to be filled by loop)_

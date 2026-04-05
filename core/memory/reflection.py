@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
+    from core.social.relationship_tracker import RelationshipTracker
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,11 @@ class ReflectionManager:
         self._core = core_memory_mgr
         self._tc = token_counter
         self._registry = agent_registry
+        self._relationship_tracker: RelationshipTracker | None = None
+
+    def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
+        """Set the relationship tracker (called after simulation_id is known)."""
+        self._relationship_tracker = tracker
 
     # ── Public API ─────────────────────────────────────────────
 
@@ -200,6 +206,20 @@ class ReflectionManager:
                 promoted_count += 1
             except Exception:
                 logger.exception("Failed to promote to %s for %s", section, agent_id)
+
+        # Update relationships from reflection
+        if self._relationship_tracker and promoted_count > 0:
+            try:
+                core_mem = await self._core.get_core_memory(agent_id)
+                if core_mem:
+                    await self._relationship_tracker.update_from_reflection(
+                        agent_id, analysis, core_mem,
+                    )
+            except Exception:
+                logger.warning(
+                    "Relationship update from 6h reflection failed for %s",
+                    agent_id, exc_info=True,
+                )
 
         # Generate journal entry
         context = (
@@ -297,6 +317,20 @@ class ReflectionManager:
                 proposals.append(proposal)
             except Exception:
                 logger.exception("Failed to create proposal for %s", agent_id)
+
+        # Update relationships from weekly reflection
+        if self._relationship_tracker and promoted_count > 0:
+            try:
+                core_mem = await self._core.get_core_memory(agent_id)
+                if core_mem:
+                    await self._relationship_tracker.update_from_reflection(
+                        agent_id, analysis, core_mem,
+                    )
+            except Exception:
+                logger.warning(
+                    "Relationship update from weekly reflection failed for %s",
+                    agent_id, exc_info=True,
+                )
 
         # Generate journal entry
         context = (
