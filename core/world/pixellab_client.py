@@ -35,7 +35,10 @@ MAX_CONCURRENCY = 10  # Tier 2 concurrent generation limit
 ALLOWED_AGENTS = frozenset({"aurora", "rex", "system"})
 
 PIXELLAB_API_URL = "https://api.pixellab.ai/v1/generate"
-COST_PER_GENERATION = Decimal("0.01")  # estimated cost per generation
+# TODO: PixelLab is subscription-based (Tier 2 plan) — no per-call cost from API.
+# This amortized estimate should be replaced with real plan cost / generation count
+# once we have usage data. See also: PixelLab MCP tools for actual API structure.
+COST_PER_GENERATION = Decimal("0.01")
 
 
 class PixelLabError(Exception):
