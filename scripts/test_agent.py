@@ -261,10 +261,11 @@ async def run_turn(
     conversation_history.append({"role": "user", "content": user_message})
 
     # Assemble context
-    messages = await context_assembler.assemble_context(
+    context_result = await context_assembler.assemble_context(
         agent_id=agent_id,
         conversation_history=conversation_history,
     )
+    messages = context_result.messages
 
     if verbose:
         # Show context breakdown
@@ -569,10 +570,11 @@ async def run_dry_run(agent_id: str, services: Services, verbose: bool) -> None:
         {"role": "user", "content": "What are you working on today?"},
     ]
 
-    messages = await context_assembler.assemble_context(
+    context_result = await context_assembler.assemble_context(
         agent_id=agent_id,
         conversation_history=sample_history,
     )
+    messages = context_result.messages
 
     console.print(Panel(
         f"[bold]Dry-run context assembly for {agent_id}[/bold]\n"
@@ -1115,12 +1117,12 @@ async def run_multi(
     console.print()
     console.print(f"  [dim]Generating opening from {opener.id}...[/dim]")
 
-    messages = await context_assembler.assemble_context(
+    context_result = await context_assembler.assemble_context(
         agent_id=opener.id,
         conversation_history=[{"role": "user", "content": opening_prompt}],
     )
     response = await llm_client.complete(
-        messages=messages,
+        messages=context_result.messages,
         model=opener.model_conversation,
         agent_id=opener.id,
         max_tokens=500,
@@ -1179,12 +1181,12 @@ async def run_multi(
                 })
 
         # Assemble context and call LLM
-        messages = await context_assembler.assemble_context(
+        context_result = await context_assembler.assemble_context(
             agent_id=speaker.id,
             conversation_history=agent_history,
         )
         response = await llm_client.complete(
-            messages=messages,
+            messages=context_result.messages,
             model=speaker.model_conversation,
             agent_id=speaker.id,
             max_tokens=500,
