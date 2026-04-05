@@ -21,7 +21,7 @@ TOPIC_KEYWORDS = {
     "planning": ["plan", "schedule", "meeting", "agenda", "deadline", "milestone", "roadmap", "standup"],
     "building": ["build", "expand", "room", "house", "library", "garden", "tilemap", "chunk", "wall"],
     "marketing": ["promote", "growth", "alpha agent", "brand", "content", "clip", "social", "viral"],
-    "controversy": ["banned", "censor", "controversial", "political", "overseer", "intervention", "flagged"],
+    "controversy": ["banned", "censor", "controversial", "political", "management", "intervention", "flagged"],
 }
 
 RELEVANCE_MAP = {

@@ -9,9 +9,9 @@ export enum EventType {
   AGENT_ACTION = "agent_action",
   ALPHA_DISPATCH = "alpha_dispatch",
   ALPHA_RETURN = "alpha_return",
-  OVERSEER_WARNING = "overseer_warning",
-  OVERSEER_INTERVENTION = "overseer_intervention",
-  OVERSEER_SHADOW = "overseer_shadow",
+  MANAGEMENT_WARNING = "management_warning",
+  MANAGEMENT_INTERVENTION = "management_intervention",
+  MANAGEMENT_SHADOW = "management_shadow",
   WORLD_EXPANSION = "world_expansion",
   POLL_CREATED = "poll_created",
   POLL_RESULT = "poll_result",
@@ -62,19 +62,19 @@ export interface AlphaReturnPayload {
   success: boolean;
 }
 
-export interface OverseerWarningPayload {
+export interface ManagementWarningPayload {
   agent_id: string;
   reason: string;
 }
 
-export interface OverseerInterventionPayload {
+export interface ManagementInterventionPayload {
   agent_id: string;
   action: string;
   original_text: string;
   filtered_text: string;
 }
 
-export interface OverseerShadowPayload {
+export interface ManagementShadowPayload {
   agent_id: string;
   flagged_content: string;
 }

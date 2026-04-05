@@ -10,7 +10,7 @@ const AGENT_COLORS: Record<string, string> = {
   fork: "#ffd700",
   sentinel: "#8a2be2",
   grok: "#ff4500",
-  overseer: "#808080",
+  management: "#808080",
   alpha: "#c0c0c0",
 };
 

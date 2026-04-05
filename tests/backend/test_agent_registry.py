@@ -648,7 +648,7 @@ def test_agent_config_defaults_closing_weight_to_zero():
 
 @pytest.mark.asyncio
 async def test_special_agents_have_zero_weights():
-    """Overseer and Alpha have conversation weights at 0.0."""
+    """Management and Alpha have conversation weights at 0.0."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
@@ -814,7 +814,7 @@ async def test_reload():
     assert len(registry.get_all_agents()) == 9
 
 
-# ── Overseer-specific tests ─────────────────────────────────────
+# ── Management-specific tests ─────────────────────────────────────
 
 
 # ── Alpha-specific tests ───────────────────────────────────────
@@ -902,12 +902,12 @@ async def test_alpha_behaviors_and_prompt_match_spec():
     assert "natural" in product["message_style"]
 
 
-# ── Overseer-specific tests ─────────────────────────────────────
+# ── Management-specific tests ─────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_management_config_loads_with_expected_values():
-    """Overseer loads with the exact config values required by issue #14."""
+    """Management loads with the exact config values required by issue #14."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
@@ -926,7 +926,7 @@ async def test_management_config_loads_with_expected_values():
 
 @pytest.mark.asyncio
 async def test_management_prompt_and_behaviors_match_spec():
-    """Overseer prompt contains key persona markers; behaviors has 5 intervention levels."""
+    """Management prompt contains key persona markers; behaviors has 5 intervention levels."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
@@ -1084,7 +1084,7 @@ async def test_all_agents_have_behaviors():
 
 @pytest.mark.asyncio
 async def test_management_content_rules_loaded_into_behaviors():
-    """Overseer's content_rules.yaml should be accessible via behaviors dict."""
+    """Management's content_rules.yaml should be accessible via behaviors dict."""
     registry = AgentRegistry(agents_dir=AGENTS_DIR)
     await registry.load_all()
 

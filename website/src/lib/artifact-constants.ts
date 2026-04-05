@@ -33,7 +33,7 @@ export const AGENT_COLORS: Record<string, string> = {
   fork: "#2ecc71",
   sentinel: "#e67e22",
   grok: "#1abc9c",
-  overseer: "#95a5a6",
+  management: "#95a5a6",
   alpha: "#8e44ad",
 };
 

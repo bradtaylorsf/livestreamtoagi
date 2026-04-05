@@ -88,7 +88,7 @@ def _display_management_flag(data: dict) -> None:
     severity = data.get("severity", "?")
     reason = data.get("reason", "")[:100]
     console.print(
-        f"       [yellow]  OVERSEER[/yellow]  "
+        f"       [yellow]  MANAGEMENT[/yellow]  "
         f"flagged {agent} (severity {severity}): {reason}"
     )
 

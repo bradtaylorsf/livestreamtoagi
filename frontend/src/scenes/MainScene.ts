@@ -4,15 +4,13 @@ import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import type { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
-/** Office grid dimensions in tiles. */
-const GRID_W = 50;
-const GRID_H = 34;
 const TILE_SIZE = 32;
 
-/** Agents that have sprite assets (excludes overseer). */
+/** Agents that have sprite assets (excludes management). */
 const SPRITE_AGENT_IDS = AGENTS
   .filter((a) => a.spriteSize > 0)
   .map((a) => a.id);
+
 
 /** Cardinal + ordinal directions available for animations. */
 const DIRECTIONS = [
@@ -40,39 +38,39 @@ interface FurniturePlacement {
   y: number;
 }
 
+// Desk image is 96px wide. Desk x is top-left. Agent stands at desk center x (desk.x + 48).
+// Top row: desks at y=2 tiles, chairs at y=5, agents at y=5 (below desk)
+// Bottom row: desks at y=17 tiles, chairs at y=16, agents at y=16 (above desk)
+const DESK_TOP_Y = 2;     // desk tile row (top)
+const DESK_BOT_Y = 17;    // desk tile row (bottom)
+
+// Top-row desk x positions (in tiles, left edge of 3-tile-wide desk)
+const TOP_DESKS = [2, 10, 24, 33]; // Vera, Aurora, Sentinel, Grok
+// Bottom-row desk x positions
+const BOT_DESKS = [2, 10, 24];     // Rex, Fork, Pixel
+
 const FURNITURE: FurniturePlacement[] = [
-  // Desks for top-row agents
-  { key: "desk", x: 6 * 32, y: 5 * 32 },    // Vera
-  { key: "desk", x: 14 * 32, y: 5 * 32 },   // Aurora
-  { key: "desk", x: 22 * 32, y: 5 * 32 },   // Fork
-  { key: "desk", x: 36 * 32, y: 5 * 32 },   // Sentinel
-  { key: "desk", x: 44 * 32, y: 5 * 32 },   // Grok
-  // Desks for bottom-row agents
-  { key: "desk", x: 6 * 32, y: 27 * 32 },   // Rex
-  { key: "desk", x: 14 * 32, y: 27 * 32 },  // Pixel
-  // Meeting area
-  { key: "meeting_table", x: 25 * 32, y: 14 * 32 },
-  // Workshop
-  { key: "workshop_bench", x: 25 * 32, y: 22 * 32 },
-  // Whiteboard
-  { key: "whiteboard", x: 35 * 32, y: 29 * 32 },
-  // Coffee machine
-  { key: "coffee_machine", x: 28 * 32, y: 4 * 32 },
-  // Bookshelf
-  { key: "bookshelf", x: 20 * 32, y: 29 * 32 },
-  // Plants
-  { key: "plant", x: 42 * 32, y: 29 * 32 },
-  { key: "plant", x: 43 * 32, y: 29 * 32 },
-  // Chairs (near desks, one per agent desk)
-  { key: "chair", x: 6 * 32, y: 7 * 32 },
-  { key: "chair", x: 14 * 32, y: 7 * 32 },
-  { key: "chair", x: 22 * 32, y: 7 * 32 },
-  { key: "chair", x: 36 * 32, y: 7 * 32 },
-  { key: "chair", x: 44 * 32, y: 7 * 32 },
-  { key: "chair", x: 6 * 32, y: 26 * 32 },
-  { key: "chair", x: 14 * 32, y: 26 * 32 },
-  // Rug in meeting area
-  { key: "rug", x: 24 * 32, y: 13 * 32 },
+  // Top-row desks + chairs
+  ...TOP_DESKS.map(tx => ({ key: "desk", x: tx * 32, y: DESK_TOP_Y * 32 })),
+  ...TOP_DESKS.map(tx => ({ key: "chair", x: (tx + 1) * 32, y: (DESK_TOP_Y + 3) * 32 })),
+  // Bottom-row desks + chairs
+  ...BOT_DESKS.map(tx => ({ key: "desk", x: tx * 32, y: DESK_BOT_Y * 32 })),
+  ...BOT_DESKS.map(tx => ({ key: "chair", x: (tx + 1) * 32, y: (DESK_BOT_Y - 1) * 32 })),
+  // Center: meeting table + rug
+  { key: "rug", x: 16 * 32, y: 7 * 32 },
+  { key: "meeting_table", x: 15 * 32, y: 7 * 32 },
+  // Workshop below meeting
+  { key: "workshop_bench", x: 15 * 32, y: 13 * 32 },
+  // Coffee machine (top center between Aurora and Sentinel)
+  { key: "coffee_machine", x: 19 * 32, y: 2 * 32 },
+  // Bookshelf + whiteboard on right side
+  { key: "bookshelf", x: 35 * 32, y: 12 * 32 },
+  { key: "whiteboard", x: 33 * 32, y: 17 * 32 },
+  // Plants in corners
+  { key: "plant", x: 1 * 32, y: 1 * 32 },
+  { key: "plant", x: 38 * 32, y: 1 * 32 },
+  { key: "plant", x: 1 * 32, y: 20 * 32 },
+  { key: "plant", x: 38 * 32, y: 20 * 32 },
 ];
 
 export class MainScene extends Phaser.Scene {
@@ -89,11 +87,17 @@ export class MainScene extends Phaser.Scene {
   }
 
   preload(): void {
-    // ── Tileset spritesheet ─────────────────────────────────────
+    // Silently skip missing asset files (e.g. Grok missing some directions)
+    this.load.on("loaderror", (file: Phaser.Loader.File) => {
+      console.warn(`Skipping missing asset: ${file.key}`);
+    });
+
+    // ── Tileset spritesheet + tilemap JSON ────────────────────────
     this.load.spritesheet("office_tiles", "assets/tilesets/office/tileset.png", {
       frameWidth: TILE_SIZE,
       frameHeight: TILE_SIZE,
     });
+    this.load.tilemapTiledJSON("tilemap_office", "assets/tilesets/office/tilemap_office.json");
 
     // ── Agent rotation sprites (default facing south) ───────────
     for (const agentId of SPRITE_AGENT_IDS) {
@@ -150,8 +154,6 @@ export class MainScene extends Phaser.Scene {
       this.load.image(item, `assets/tilesets/office/objects/${item}.png`);
     }
 
-    // ── Generate and cache the tilemap JSON ─────────────────────
-    this.generateTilemapJSON();
   }
 
   create(): void {
@@ -188,85 +190,13 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Build a Phaser-compatible tilemap JSON and inject it into the
-   * tilemap cache so ChunkLoader can load it via `tilemap_office`.
-   */
-  private generateTilemapJSON(): void {
-    // Wang tile index 13 = first tile in spritesheet (index 0 in spritesheet)
-    // We need to map from Wang IDs to spritesheet positions.
-    // The spritesheet is a 4x4 grid. The metadata lists tiles in order:
-    //   Row 0: wang_13, wang_10, wang_4, wang_12
-    //   Row 1: wang_6,  wang_8,  wang_0, wang_1
-    //   Row 2: wang_11, wang_3,  wang_2, wang_5
-    //   Row 3: wang_15, wang_14, wang_9, wang_7
-    // Phaser spritesheet index = row*4 + col
-    // So wang_15 (full floor) is at spritesheet index 12 (row 3, col 0)
-    // And wang_0 (full wall) is at spritesheet index 6 (row 1, col 2)
-
-    const FLOOR_TILE = 13; // spritesheet index 12 + firstgid 1 = 13
-    const WALL_TILE = 7;   // spritesheet index 6 + firstgid 1 = 7
-
-    const groundData: number[] = [];
-    const wallData: number[] = [];
-
-    for (let row = 0; row < GRID_H; row++) {
-      for (let col = 0; col < GRID_W; col++) {
-        const isPerimeter =
-          row === 0 || row === GRID_H - 1 || col === 0 || col === GRID_W - 1;
-
-        // Ground layer: floor everywhere inside, 0 on perimeter
-        groundData.push(isPerimeter ? WALL_TILE : FLOOR_TILE);
-
-        // Collision layer: 1 on walls, 0 inside
-        wallData.push(isPerimeter ? 1 : 0);
-      }
-    }
-
-    // Areas from the layout (tile coordinates -> pixel coordinates)
-    const areas: Record<string, { x: number; y: number; width: number; height: number }> = {
-      desk_vera:     { x: 3 * TILE_SIZE, y: 3 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      desk_aurora:   { x: 11 * TILE_SIZE, y: 3 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      desk_fork:     { x: 19 * TILE_SIZE, y: 3 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      desk_sentinel: { x: 33 * TILE_SIZE, y: 3 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      desk_grok:     { x: 41 * TILE_SIZE, y: 3 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      desk_rex:      { x: 3 * TILE_SIZE, y: 25 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      desk_pixel:    { x: 11 * TILE_SIZE, y: 25 * TILE_SIZE, width: 6 * TILE_SIZE, height: 6 * TILE_SIZE },
-      meeting_area:  { x: 20 * TILE_SIZE, y: 12 * TILE_SIZE, width: 10 * TILE_SIZE, height: 6 * TILE_SIZE },
-      workshop:      { x: 20 * TILE_SIZE, y: 20 * TILE_SIZE, width: 10 * TILE_SIZE, height: 6 * TILE_SIZE },
-    };
-
-    const tilemapJSON = {
-      width: GRID_W,
-      height: GRID_H,
-      tilewidth: TILE_SIZE,
-      tileheight: TILE_SIZE,
-      tilesets: [{ name: "office_tiles", firstgid: 1 }],
-      layers: [
-        { name: "ground", data: groundData },
-        { name: "collision", data: wallData },
-      ],
-      areas,
-    };
-
-    // Inject into Phaser tilemap cache so ChunkLoader can find "tilemap_office"
-    this.cache.tilemap.add("tilemap_office", {
-      format: Phaser.Tilemaps.Formats.TILED_JSON,
-      data: tilemapJSON,
-    });
-  }
-
-  /**
    * Register Phaser animations for each agent from loaded frame images.
+   * Skips animations whose textures failed to load (e.g. missing directions).
    */
   private registerAnimations(): void {
     for (const agentId of SPRITE_AGENT_IDS) {
       // Idle animation (south-facing, used as default)
-      this.anims.create({
-        key: `${agentId}_idle`,
-        frames: this.buildFrameKeys(agentId, "idle", "south", IDLE_FRAME_COUNT),
-        frameRate: 4,
-        repeat: -1,
-      });
+      this.tryCreateAnim(`${agentId}_idle`, agentId, "idle", "south", IDLE_FRAME_COUNT, 4);
 
       // Walking animations mapped to directional names
       const walkMapping: Record<string, string> = {
@@ -277,38 +207,42 @@ export class MainScene extends Phaser.Scene {
       };
 
       for (const [animName, direction] of Object.entries(walkMapping)) {
-        this.anims.create({
-          key: `${agentId}_${animName}`,
-          frames: this.buildFrameKeys(agentId, "walk", direction, WALK_FRAME_COUNT),
-          frameRate: 8,
-          repeat: -1,
-        });
+        this.tryCreateAnim(`${agentId}_${animName}`, agentId, "walk", direction, WALK_FRAME_COUNT, 8);
       }
 
-      // Talking = idle south-east (reuse idle frames with different direction)
-      this.anims.create({
-        key: `${agentId}_talking`,
-        frames: this.buildFrameKeys(agentId, "idle", "south-east", IDLE_FRAME_COUNT),
-        frameRate: 6,
-        repeat: -1,
-      });
+      // Talking = idle south-east, fallback to south
+      if (!this.tryCreateAnim(`${agentId}_talking`, agentId, "idle", "south-east", IDLE_FRAME_COUNT, 6)) {
+        this.tryCreateAnim(`${agentId}_talking`, agentId, "idle", "south", IDLE_FRAME_COUNT, 6);
+      }
 
       // Thinking = idle north (looking up)
-      this.anims.create({
-        key: `${agentId}_thinking`,
-        frames: this.buildFrameKeys(agentId, "idle", "north", IDLE_FRAME_COUNT),
-        frameRate: 3,
-        repeat: -1,
-      });
+      this.tryCreateAnim(`${agentId}_thinking`, agentId, "idle", "north", IDLE_FRAME_COUNT, 3);
 
       // Building = idle east (focused sideways)
-      this.anims.create({
-        key: `${agentId}_building`,
-        frames: this.buildFrameKeys(agentId, "idle", "east", IDLE_FRAME_COUNT),
-        frameRate: 5,
-        repeat: -1,
-      });
+      this.tryCreateAnim(`${agentId}_building`, agentId, "idle", "east", IDLE_FRAME_COUNT, 5);
     }
+  }
+
+  /**
+   * Try to create an animation. Returns false if any frame texture is missing.
+   */
+  private tryCreateAnim(
+    key: string,
+    agentId: string,
+    animType: string,
+    direction: string,
+    frameCount: number,
+    frameRate: number,
+  ): boolean {
+    const frames = this.buildFrameKeys(agentId, animType, direction, frameCount);
+    // Check all frame textures exist
+    for (const frame of frames) {
+      if (!this.textures.exists(frame.key!)) {
+        return false;
+      }
+    }
+    this.anims.create({ key, frames, frameRate, repeat: -1 });
+    return true;
   }
 
   /**

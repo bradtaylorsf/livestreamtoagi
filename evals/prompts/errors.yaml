@@ -53,4 +53,4 @@ output_schema:
     dead_end_conversations: "number"
 
 input_data:
-  - overseer_logs
+  - management_logs

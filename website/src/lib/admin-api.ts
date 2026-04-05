@@ -21,7 +21,7 @@ import type {
   EvalRun,
   InterruptEvent,
   JournalEntry,
-  OverseerFlag,
+  ManagementFlag,
   PaginatedResponse,
   RecallMemory,
   Relationship,
@@ -155,7 +155,7 @@ export interface CreateSimulationParams {
   convo_type?: string;
   topic?: string;
   turns?: number;
-  overseer_shadow?: boolean;
+  management_shadow?: boolean;
 }
 
 export interface CreateSimulationResult {
@@ -231,11 +231,11 @@ export async function fetchConversationSelectionLog(
   );
 }
 
-export async function fetchConversationOverseerFlags(
+export async function fetchConversationManagementFlags(
   id: string,
-): Promise<OverseerFlag[]> {
-  return request<OverseerFlag[]>(
-    `/api/admin/conversations/${id}/overseer-flags`,
+): Promise<ManagementFlag[]> {
+  return request<ManagementFlag[]>(
+    `/api/admin/conversations/${id}/management-flags`,
   );
 }
 

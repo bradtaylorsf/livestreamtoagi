@@ -66,7 +66,7 @@ describe("AgentSpriteManager", () => {
     manager = new AgentSpriteManager(scene as any, wsClient as any, null);
   });
 
-  it("creates sprites for all 8 entities (excludes overseer)", () => {
+  it("creates sprites for all 8 entities (excludes management)", () => {
     expect(manager.getSpriteCount()).toBe(8);
   });
 
@@ -88,8 +88,8 @@ describe("AgentSpriteManager", () => {
     expect(manager.getSprite("alpha")).toBeDefined();
   });
 
-  it("does not create sprite for overseer", () => {
-    expect(manager.getSprite("overseer")).toBeUndefined();
+  it("does not create sprite for management", () => {
+    expect(manager.getSprite("management")).toBeUndefined();
   });
 
   it("registers WebSocket event handler", () => {

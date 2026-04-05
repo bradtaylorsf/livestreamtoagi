@@ -8,20 +8,20 @@ export interface Agent {
   deskPosition: { x: number; y: number };
 }
 
-// Desk positions are pixel coordinates: center of each 6x6 tile area (tile * 32px).
-// Layout: 50x34 tiles at 32px = 1600x1088px
-// Top row: Vera(3,3) Aurora(11,3) Fork(19,3) Sentinel(33,3) Grok(41,3)
-// Bottom row: Rex(3,25) Pixel(11,25)
+// Agent stands at center-x of their desk (desk.x + 48px), below/above desk.
+// Desk image is 96px wide (3 tiles). Top-row desks at y=2, bottom at y=17.
+// Top-row agents at y=5.5 tiles (below desk+chair). Bottom-row at y=16 tiles (above desk).
+// Desk x positions (tiles): Top=[2,10,24,33], Bottom=[2,10,24]
 export const AGENTS: Agent[] = [
-  { id: "vera", name: "Vera", chattiness: 0.7, initiative: 0.8, interruptTendency: 0.2, spriteSize: 32, deskPosition: { x: 192, y: 192 } },
-  { id: "rex", name: "Rex", chattiness: 0.3, initiative: 0.2, interruptTendency: 0.3, spriteSize: 32, deskPosition: { x: 192, y: 896 } },
-  { id: "aurora", name: "Aurora", chattiness: 0.8, initiative: 0.5, interruptTendency: 0.4, spriteSize: 32, deskPosition: { x: 448, y: 192 } },
-  { id: "pixel", name: "Pixel", chattiness: 0.9, initiative: 0.7, interruptTendency: 0.5, spriteSize: 32, deskPosition: { x: 448, y: 896 } },
-  { id: "fork", name: "Fork", chattiness: 0.5, initiative: 0.3, interruptTendency: 0.6, spriteSize: 32, deskPosition: { x: 704, y: 192 } },
-  { id: "sentinel", name: "Sentinel", chattiness: 0.6, initiative: 0.4, interruptTendency: 0.7, spriteSize: 32, deskPosition: { x: 1152, y: 192 } },
-  { id: "grok", name: "Grok", chattiness: 0.8, initiative: 0.6, interruptTendency: 0.8, spriteSize: 32, deskPosition: { x: 1408, y: 192 } },
-  { id: "overseer", name: "The Management", chattiness: 0, initiative: 0, interruptTendency: 0, spriteSize: 0, deskPosition: { x: 0, y: 0 } },
-  { id: "alpha", name: "Alpha", chattiness: 0, initiative: 0, interruptTendency: 0, spriteSize: 24, deskPosition: { x: 240, y: 240 } },
+  { id: "vera", name: "Vera", chattiness: 0.7, initiative: 0.8, interruptTendency: 0.2, spriteSize: 32, deskPosition: { x: 2 * 32 + 48, y: 6 * 32 } },
+  { id: "aurora", name: "Aurora", chattiness: 0.8, initiative: 0.5, interruptTendency: 0.4, spriteSize: 32, deskPosition: { x: 10 * 32 + 48, y: 6 * 32 } },
+  { id: "sentinel", name: "Sentinel", chattiness: 0.6, initiative: 0.4, interruptTendency: 0.7, spriteSize: 32, deskPosition: { x: 24 * 32 + 48, y: 6 * 32 } },
+  { id: "grok", name: "Grok", chattiness: 0.8, initiative: 0.6, interruptTendency: 0.8, spriteSize: 32, deskPosition: { x: 33 * 32 + 48, y: 6 * 32 } },
+  { id: "rex", name: "Rex", chattiness: 0.3, initiative: 0.2, interruptTendency: 0.3, spriteSize: 32, deskPosition: { x: 2 * 32 + 48, y: 16 * 32 } },
+  { id: "fork", name: "Fork", chattiness: 0.5, initiative: 0.3, interruptTendency: 0.6, spriteSize: 32, deskPosition: { x: 10 * 32 + 48, y: 16 * 32 } },
+  { id: "pixel", name: "Pixel", chattiness: 0.9, initiative: 0.7, interruptTendency: 0.5, spriteSize: 32, deskPosition: { x: 24 * 32 + 48, y: 16 * 32 } },
+  { id: "management", name: "The Management", chattiness: 0, initiative: 0, interruptTendency: 0, spriteSize: 0, deskPosition: { x: 0, y: 0 } },
+  { id: "alpha", name: "Alpha", chattiness: 0, initiative: 0, interruptTendency: 0, spriteSize: 24, deskPosition: { x: 2 * 32 + 80, y: 7 * 32 } },
 ];
 
 export function getAgentById(id: string): Agent | undefined {

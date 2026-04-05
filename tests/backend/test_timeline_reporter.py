@@ -75,9 +75,9 @@ def test_executive_summary_basic():
     convs = [_make_conversation(turn_count=5), _make_conversation(turn_count=8)]
     costs = [_make_cost(amount=Decimal("0.01")), _make_cost(amount=Decimal("0.02"))]
     artifacts = [_make_artifact()]
-    overseer = []
+    management_flags = []
 
-    result = generate_executive_summary(sim, convs, costs, artifacts, overseer)
+    result = generate_executive_summary(sim, convs, costs, artifacts, management_flags)
 
     assert result["total_conversations"] == 2
     assert result["total_turns"] == 13

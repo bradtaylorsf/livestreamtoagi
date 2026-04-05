@@ -19,7 +19,7 @@ import {
   fetchConversation,
   fetchConversationTurns,
   fetchConversationSelectionLog,
-  fetchConversationOverseerFlags,
+  fetchConversationManagementFlags,
   fetchConversationInterrupts,
   fetchConversationArtifacts,
   fetchSimulationEvals,
@@ -61,7 +61,7 @@ const SIM_FIXTURE = {
   total_tokens: 10000,
   total_cost: "0.1234",
   total_artifacts: 3,
-  total_overseer_flags: 1,
+  total_management_flags: 1,
   agents_participated: ["vera", "rex"],
   config: {},
 };
@@ -471,8 +471,8 @@ describe("fetchConversationSelectionLog", () => {
   });
 });
 
-describe("fetchConversationOverseerFlags", () => {
-  it("sends GET to /api/admin/conversations/:id/overseer-flags", async () => {
+describe("fetchConversationManagementFlags", () => {
+  it("sends GET to /api/admin/conversations/:id/management-flags", async () => {
     const flags = [
       {
         id: "flag-1",
@@ -488,10 +488,10 @@ describe("fetchConversationOverseerFlags", () => {
     ];
     mockFetch.mockReturnValue(jsonResponse(flags));
 
-    const result = await fetchConversationOverseerFlags("conv-789");
+    const result = await fetchConversationManagementFlags("conv-789");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "/api/admin/conversations/conv-789/overseer-flags",
+      "/api/admin/conversations/conv-789/management-flags",
       expect.anything(),
     );
     expect(result).toHaveLength(1);

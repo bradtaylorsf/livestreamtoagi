@@ -678,7 +678,7 @@ class TestMutedAgent:
 
 
 class TestManagementRejection:
-    async def test_overseer_rejection_retries(
+    async def test_management_rejection_retries(
         self,
         engine: ConversationEngine,
         mock_management: MagicMock,
@@ -707,7 +707,7 @@ class TestManagementRejection:
         # Management intervene called for the rejection
         mock_management.intervene.assert_awaited_once()
 
-    async def test_overseer_high_severity_returns_replacement(
+    async def test_management_high_severity_returns_replacement(
         self,
         engine: ConversationEngine,
         mock_management: MagicMock,

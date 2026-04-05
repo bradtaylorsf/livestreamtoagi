@@ -35,7 +35,7 @@ describe("AGENTS", () => {
 
   it("main agents have 32x32 sprite size", () => {
     const mainAgents = AGENTS.filter(
-      (a) => a.id !== "alpha" && a.id !== "overseer",
+      (a) => a.id !== "alpha" && a.id !== "management",
     );
     for (const agent of mainAgents) {
       expect(agent.spriteSize).toBe(32);

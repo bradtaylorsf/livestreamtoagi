@@ -6,7 +6,7 @@ const AGENTS = [
   { name: "Fork", role: "Contrarian", color: "text-agent-fork" },
   { name: "Sentinel", role: "Budget Monitor", color: "text-agent-sentinel" },
   { name: "Grok", role: "Wild Card", color: "text-agent-grok" },
-  { name: "Overseer", role: "Content Filter", color: "text-agent-overseer" },
+  { name: "Management", role: "Content Filter", color: "text-agent-management" },
   { name: "Alpha", role: "Errand Runner", color: "text-agent-alpha" },
 ];
 

@@ -61,7 +61,7 @@ export default function SimulationsPage() {
     convo_type: string;
     topic: string;
     turns: number | undefined;
-    overseer_shadow: boolean;
+    management_shadow: boolean;
   }) => {
     setCreating(true);
     setError(null);
@@ -72,7 +72,7 @@ export default function SimulationsPage() {
         convo_type: params.convo_type,
         topic: params.topic || undefined,
         turns: params.turns,
-        overseer_shadow: params.overseer_shadow,
+        management_shadow: params.management_shadow,
       });
       setShowNewDialog(false);
       // Reload after a short delay to let the simulation start
@@ -189,9 +189,9 @@ export default function SimulationsPage() {
                     ${parseFloat(sim.total_cost || "0").toFixed(4)}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    {sim.total_overseer_flags > 0 ? (
+                    {sim.total_management_flags > 0 ? (
                       <span className="text-red-400 font-mono">
-                        {sim.total_overseer_flags}
+                        {sim.total_management_flags}
                       </span>
                     ) : (
                       <span className="text-foreground/40">0</span>
@@ -221,7 +221,7 @@ function NewSimulationDialog({
     convo_type: string;
     topic: string;
     turns: number | undefined;
-    overseer_shadow: boolean;
+    management_shadow: boolean;
   }) => void;
   onCancel: () => void;
   submitting: boolean;
@@ -233,7 +233,7 @@ function NewSimulationDialog({
   const [convoType, setConvoType] = useState("freeform");
   const [topic, setTopic] = useState("");
   const [turnsStr, setTurnsStr] = useState("10");
-  const [overseerShadow, setOverseerShadow] = useState(true);
+  const [managementShadow, setManagementShadow] = useState(true);
 
   const toggleAgent = (id: string) => {
     setSelectedAgents((prev) => {
@@ -253,7 +253,7 @@ function NewSimulationDialog({
       convo_type: convoType,
       topic,
       turns: turns && !isNaN(turns) ? turns : undefined,
-      overseer_shadow: overseerShadow,
+      management_shadow: managementShadow,
     });
   };
 
@@ -346,15 +346,15 @@ function NewSimulationDialog({
           />
         </div>
 
-        {/* Overseer Shadow */}
+        {/* Management Shadow */}
         <label className="flex items-center gap-2 text-xs text-foreground/60">
           <input
             type="checkbox"
-            checked={overseerShadow}
-            onChange={(e) => setOverseerShadow(e.target.checked)}
+            checked={managementShadow}
+            onChange={(e) => setManagementShadow(e.target.checked)}
             className="rounded border-border"
           />
-          Overseer shadow mode (log-only, never blocks)
+          Management shadow mode (log-only, never blocks)
         </label>
 
         {/* Actions */}

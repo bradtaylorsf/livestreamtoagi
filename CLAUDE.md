@@ -132,14 +132,14 @@ Nine agents with distinct personalities and model assignments (see `agents/` and
 | Fork | Contrarian/Code Reviewer | DeepSeek V3.2 | DeepSeek V3.2 |
 | Sentinel | Budget Monitor/QA | Claude Haiku 4.5 | Claude Haiku 4.5 |
 | Grok | Wild Card/Provocateur | Grok 3 Mini | Grok 3 |
-| Overseer | Content Filter | Claude Haiku 4.5 | — |
+| Management | Content Filter | Claude Haiku 4.5 | — |
 | Alpha | Errand Runner (wolf) | DeepSeek V3.2 | — |
 
 ## Key Design Decisions
 
 - **Memory is 3-tier:** Core (always in prompt, ~2-3K tokens), Recall (pgvector semantic search), Archival (full transcripts, never deleted)
 - **Conversation engine** uses weighted speaker selection: time_since_spoke (0.30), topic_relevance (0.30), chattiness (0.15), adjacency_fit (0.15), random_jitter (0.10)
-- **Every agent output** passes through Overseer content filter before TTS (3-second delay for intervention)
+- **Every agent output** passes through Management content filter before TTS (3-second delay for intervention)
 - **Cost governor** tracks every API call; kill switch API accessible from Brad's phone
 - **All external comms** (social posts, emails) require human approval for first 3 months
 
