@@ -708,7 +708,7 @@ class TestContextResultMetadata:
         expected_sections = {
             "infrastructure", "character", "core_memory", "recall",
             "transcript", "world_state", "chat_highlights", "summaries",
-            "relationships", "goals", "shared_state",
+            "relationships", "goals", "shared_state", "commitment_reminders",
         }
         assert set(result.sections_included.keys()) == expected_sections
 
