@@ -157,6 +157,11 @@ class ConversationEngine:
         self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=15)
         self._last_conversation_summary: str | None = None
 
+        # Required-agent participation tracking
+        self._required_agents: set[str] = set()
+        self._agents_who_spoke: set[str] = set()
+        self._max_turns: int = 15
+
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
 
@@ -286,6 +291,7 @@ class ConversationEngine:
             return
 
         self._active.turn_number = 1
+        self._agents_who_spoke.add(opening_agent.id)
         self._active.history.append(
             {"role": "assistant", "speaker": opening_agent.id, "content": content}
         )
@@ -380,6 +386,10 @@ class ConversationEngine:
             energy=conv.energy.energy,
             detected_topic=topic,
             interrupt_state=conv.interrupt_state,
+            required_agents=self._required_agents,
+            agents_who_spoke=self._agents_who_spoke,
+            turn_number=conv.turn_number,
+            max_turns=self._max_turns,
         )
         logger.debug(
             "Speaker selected: %s (score=%.3f, interrupt=%s)",
@@ -407,6 +417,7 @@ class ConversationEngine:
             conv.turn_number -= 1
             return True  # Skip this turn but keep going
 
+        self._agents_who_spoke.add(selected_agent.id)
         conv.history.append({"role": "assistant", "speaker": selected_agent.id, "content": content})
 
         # Emit speak event

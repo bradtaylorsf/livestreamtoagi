@@ -490,6 +490,11 @@ class PhaseRunner:
                 recent_outputs=list(self._recent_outputs),
             )
 
+            # Set required_agents for participation guarantee
+            if phase.required_agents:
+                engine._required_agents = set(phase.required_agents)
+            engine._max_turns = max_turns
+
             engine._running = True
             await engine._start_conversation(trigger)
 
