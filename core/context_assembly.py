@@ -238,14 +238,56 @@ class ContextAssembler:
         if buffer_tokens > available_for_buffer:
             buffer = self._truncate_buffer(buffer, available_for_buffer)
 
+        # --- Label buffer messages with speaker identity ---
+        # The LLM API ignores the non-standard 'speaker' field, so we
+        # prepend [AgentName]: to the content and set the 'name' field
+        # to prevent identity bleed between agents.
+        labeled_buffer = self._label_buffer_messages(buffer)
+
         # --- Assemble final messages list ---
         messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
-        messages.extend(buffer)
+        messages.extend(labeled_buffer)
+
+        # Identity reinforcement before the agent's turn
+        messages.append({
+            "role": "user",
+            "content": (
+                f"[SYSTEM: You are {agent.display_name if agent else agent_id}. "
+                f"Respond only as {agent.display_name if agent else agent_id}. "
+                f"Previous speakers are labeled with [Name]: prefix.]"
+            ),
+        })
 
         if hint_text:
             messages.append({"role": "user", "content": hint_text})
 
         return messages
+
+    def _label_buffer_messages(
+        self, buffer: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """Add speaker labels to buffer messages for LLM identity clarity.
+
+        For each assistant message with a 'speaker' field:
+        - Prepends '[DisplayName]: ' to the content
+        - Sets the 'name' field (supported by OpenAI message spec)
+        - Removes the non-standard 'speaker' field
+        """
+        labeled: list[dict[str, str]] = []
+        for msg in buffer:
+            out = dict(msg)
+            speaker = out.pop("speaker", None)
+            if speaker and out.get("role") == "assistant":
+                # Look up display name from registry
+                agent_obj = self._agent_registry.get_agent(speaker)
+                display_name = agent_obj.display_name if agent_obj else speaker.capitalize()
+                content = out.get("content", "")
+                # Only prepend if not already labeled
+                if not content.startswith(f"[{display_name}]:"):
+                    out["content"] = f"[{display_name}]: {content}"
+                out["name"] = speaker
+            labeled.append(out)
+        return labeled
 
     def _derive_query(self, conversation_history: list[dict[str, str]]) -> str:
         """Derive a search query from the last few conversation messages."""

@@ -32,7 +32,8 @@ def _make_agent(agent_id: str = "rex", system_prompt: str = "You are Rex.") -> A
 
 def _make_assembler() -> ContextAssembler:
     registry = MagicMock()
-    registry.get_agent.return_value = _make_agent()
+    # Return agent with correct display name for any agent_id lookup
+    registry.get_agent.side_effect = lambda aid: _make_agent(agent_id=aid)
     core_memory = AsyncMock()
     core_memory.get_core_memory = AsyncMock(return_value="")
     recall_memory = AsyncMock()
@@ -216,6 +217,67 @@ def test_is_repetitive_blocks_after_retry():
     # Simulates the retry also producing similar content
     retry_content = "We need to check the budget status and make sure everything is okay."
     assert engine._is_repetitive(retry_content)
+
+
+# ── ContextAssembler: speaker labeling (identity bleed fix) ──────
+
+
+@pytest.mark.asyncio
+async def test_context_assembler_labels_buffer_messages():
+    """Assistant messages in buffer should have [AgentName]: prefix."""
+    assembler = _make_assembler()
+    history = [
+        {"role": "assistant", "speaker": "vera", "content": "We need to manage our budget."},
+        {"role": "assistant", "speaker": "fork", "content": "I disagree with that approach."},
+    ]
+    messages = await assembler.assemble_context(
+        agent_id="rex",
+        conversation_history=history,
+    )
+    # Find assistant messages in the output
+    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    assert len(assistant_msgs) == 2
+    assert assistant_msgs[0]["content"].startswith("[Vera]:")
+    assert assistant_msgs[1]["content"].startswith("[Fork]:")
+    # name field should be set
+    assert assistant_msgs[0]["name"] == "vera"
+    assert assistant_msgs[1]["name"] == "fork"
+    # speaker field should be removed
+    assert "speaker" not in assistant_msgs[0]
+    assert "speaker" not in assistant_msgs[1]
+
+
+@pytest.mark.asyncio
+async def test_context_assembler_identity_reinforcement():
+    """An identity reinforcement message should appear before the hint."""
+    assembler = _make_assembler()
+    messages = await assembler.assemble_context(
+        agent_id="rex",
+        conversation_history=[],
+        prompt_hint="idle",
+    )
+    # Find identity reinforcement message
+    identity_msgs = [
+        m for m in messages
+        if m.get("role") == "user" and "You are Rex" in m.get("content", "")
+    ]
+    assert len(identity_msgs) == 1
+    assert "Respond only as Rex" in identity_msgs[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_context_assembler_no_double_label():
+    """Messages already labeled should not get double-labeled."""
+    assembler = _make_assembler()
+    history = [
+        {"role": "assistant", "speaker": "vera", "content": "[Vera]: Already labeled."},
+    ]
+    messages = await assembler.assemble_context(
+        agent_id="rex",
+        conversation_history=history,
+    )
+    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    assert assistant_msgs[0]["content"] == "[Vera]: Already labeled."
 
 
 def test_engine_conversation_summary_property():
