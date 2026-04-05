@@ -23,9 +23,11 @@ class TopicDetector:
         self,
         config: TopicConfig,
         llm_client: OpenRouterClient | None = None,
+        simulation_id: object | None = None,
     ) -> None:
         self._config = config
         self._llm_client = llm_client
+        self._simulation_id = simulation_id
 
     async def detect_topic(self, recent_messages: list[dict]) -> str:
         """Classify recent messages into a single topic string.
@@ -73,6 +75,7 @@ class TopicDetector:
             messages=[{"role": "user", "content": prompt}],
             model=self._config.classifier_model,
             max_tokens=5,
+            simulation_id=self._simulation_id,
         )
         topic = response.content.strip().lower()
         return topic if topic in allowed else "general"

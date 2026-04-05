@@ -607,6 +607,7 @@ class ConversationEngine:
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.3,
+                simulation_id=self._simulation_id,
                 max_tokens=300,
             )
             summary = response.content.strip()
@@ -765,6 +766,7 @@ class ConversationEngine:
                 agent_id="system",
                 temperature=0.1,
                 max_tokens=300,
+                simulation_id=self._simulation_id,
             )
 
             from core.agent_goals import parse_commitments
@@ -910,6 +912,7 @@ class ConversationEngine:
                         tools=openai_tools,
                         tool_choice=tc,
                         temperature=0.9,
+                        simulation_id=self._simulation_id,
                     )
 
                     total_input_tokens += response.input_tokens
@@ -987,6 +990,7 @@ class ConversationEngine:
                         model=agent.model_conversation,
                         agent_id=agent.id,
                         tools=openai_tools,
+                        simulation_id=self._simulation_id,
                     )
                     total_input_tokens += retry_resp.input_tokens
                     total_output_tokens += retry_resp.output_tokens

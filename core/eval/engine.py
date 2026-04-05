@@ -81,7 +81,8 @@ class EvalEngine:
         for cat in to_run:
             try:
                 result = await self._run_category(
-                    run_id, cat, category_data.get(cat, {}), data
+                    run_id, cat, category_data.get(cat, {}), data,
+                    simulation_id=simulation_id,
                 )
                 if result["score"] is not None:
                     total_scores.append(result["score"])
@@ -128,6 +129,8 @@ class EvalEngine:
         category: str,
         cat_data: dict[str, Any],
         full_data: dict[str, Any],
+        *,
+        simulation_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Run a single eval category and store the result."""
         prompt_config = load_prompt(category)
@@ -151,6 +154,7 @@ class EvalEngine:
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=120.0,
+            simulation_id=simulation_id,
         )
 
         # Capture cost immediately so it's never lost on parse failure

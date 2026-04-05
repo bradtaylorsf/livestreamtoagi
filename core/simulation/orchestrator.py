@@ -307,6 +307,7 @@ class SimulationOrchestrator:
             agents_participated=self._config.agents,
         ))
         self._simulation_id = sim.id
+        self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._seed_rng(sim.id)
         logger.info("Created simulation %s (%s)", sim.id, sim.name)
 
@@ -452,6 +453,7 @@ class SimulationOrchestrator:
             agents_participated=self._config.agents,
         ))
         self._simulation_id = sim.id
+        self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._seed_rng(sim.id)
         logger.info(
             "Created autonomous simulation %s (%s)", sim.id, sim.name
@@ -704,6 +706,24 @@ class SimulationOrchestrator:
             simulated_duration=simulated_duration,
             real_duration=real_duration,
         )
+
+        # Reconcile total_cost from cost_events (authoritative source)
+        try:
+            actual_cost = await self._sim_repo.get_total_cost_from_events(
+                self._simulation_id
+            )
+            if actual_cost > 0:
+                await self._sim_repo.increment_stats(
+                    self._simulation_id,
+                    cost=actual_cost - self._total_cost,
+                )
+                self._total_cost = actual_cost
+        except Exception:
+            logger.warning(
+                "Failed to reconcile cost from cost_events for %s",
+                self._simulation_id,
+                exc_info=True,
+            )
 
         # Persist final clock state into config
         final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}

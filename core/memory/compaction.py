@@ -56,12 +56,14 @@ class MemoryCompactor:
         llm_client: OpenRouterClient,
         http_client: httpx.AsyncClient,
         openrouter_api_key: str,
+        simulation_id: object | None = None,
     ) -> None:
         self._archival = archival
         self._recall = recall
         self._llm = llm_client
         self._http = http_client
         self._api_key = openrouter_api_key
+        self._simulation_id = simulation_id
 
     async def compact_interaction(
         self,
@@ -182,6 +184,7 @@ class MemoryCompactor:
             agent_id=agent_id,
             max_tokens=SUMMARY_MAX_TOKENS,
             temperature=0.3,
+            simulation_id=self._simulation_id,
         )
         return response.content
 
