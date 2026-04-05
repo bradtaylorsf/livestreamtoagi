@@ -171,6 +171,12 @@ class ConversationEngine:
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
 
+        # Conversation progression tracking (#248)
+        self._dialogue_only_streak: int = 0
+        self._productive_turns: int = 0
+        self._total_turns: int = 0
+        self._last_turn_had_tools: bool = False
+
     # ── Properties ─────────────────────────────────────────────
 
     @property
@@ -436,6 +442,29 @@ class ConversationEngine:
         self._agents_who_spoke.add(selected_agent.id)
         conv.history.append({"role": "assistant", "speaker": selected_agent.id, "content": content})
 
+        # Track conversation progression (#248)
+        self._total_turns += 1
+        if self._last_turn_had_tools:
+            self._productive_turns += 1
+            self._dialogue_only_streak = 0
+        else:
+            self._dialogue_only_streak += 1
+
+        # Inject action nudge after 4 consecutive dialogue-only turns
+        if self._dialogue_only_streak >= 4 and self._dialogue_only_streak % 4 == 0:
+            conv.history.append({
+                "role": "user",
+                "content": (
+                    "[SYSTEM: You've been discussing for several turns without "
+                    "taking action. Use a tool: write code, create a task, "
+                    "check status, or propose something specific.]"
+                ),
+            })
+            logger.info(
+                "Action nudge injected after %d dialogue-only turns in conversation %s",
+                self._dialogue_only_streak, conv.id,
+            )
+
         # Emit speak event
         _parsed = parse_speech(content)
         await self._event_bus.emit(
@@ -577,6 +606,31 @@ class ConversationEngine:
 
         # Reset triggers (preserves _fired_today and _recent_conversations)
         self._triggers.reset()
+
+        # Log conversation productivity (#248)
+        productivity_ratio = (
+            self._productive_turns / self._total_turns
+            if self._total_turns > 0 else 0.0
+        )
+        logger.info(
+            "Conversation productivity: %d/%d turns productive (%.0f%%) in %s",
+            self._productive_turns,
+            self._total_turns,
+            productivity_ratio * 100,
+            conv.id,
+        )
+
+        # Emit productivity event for phase-level tracking
+        await self._event_bus.emit(
+            "conversation_productivity",
+            {
+                "conversation_id": str(conv.id),
+                "productive_turns": self._productive_turns,
+                "total_turns": self._total_turns,
+                "ratio": productivity_ratio,
+                "participants": conv.participants,
+            },
+        )
 
         logger.info(
             "Ended conversation %s (turns=%d, final_energy=%.1f, closer=%s)",
@@ -930,6 +984,7 @@ class ConversationEngine:
                 total_output_tokens = 0
                 total_cost = 0.0
                 total_latency_ms = 0
+                turn_used_tools = False
 
                 for _tool_round in range(MAX_TOOL_ROUNDS + 1):
                     # Check if trigger requests a specific tool (first round only)
@@ -968,6 +1023,7 @@ class ConversationEngine:
                         break
 
                     # Execute tool calls
+                    turn_used_tools = True
                     logger.info(
                         "Agent %s requested %d tool call(s): %s",
                         agent.id,
@@ -1072,6 +1128,9 @@ class ConversationEngine:
 
                 # Track output for cross-phase repetition detection
                 self._recent_outputs.append(content)
+
+                # Track tool usage for conversation progression (#248)
+                self._last_turn_had_tools = turn_used_tools
 
                 # Management review (can be disabled for testing)
                 if not self._management_enabled:

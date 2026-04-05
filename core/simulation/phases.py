@@ -464,10 +464,33 @@ class PhaseRunner:
                 self._phase_tools_used.add(tool_name)
             _display_artifact(data)
 
+        async def _on_productivity(event: dict) -> None:
+            """Boost proactivity for agents in low-productivity conversations (#248)."""
+            data = event.get("data", event)
+            ratio = data.get("ratio", 1.0)
+            participants = data.get("participants", [])
+            if ratio < 0.25 and self._services and self._services.goal_manager:
+                for agent_id in participants:
+                    try:
+                        await self._services.goal_manager.add_goal(
+                            agent_id=agent_id,
+                            goal_text=(
+                                "Be more proactive — use tools, write code, "
+                                "create tasks, or take concrete actions"
+                            ),
+                            priority=1,
+                            source="system",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to add proactivity goal for %s", agent_id,
+                        )
+
         self._event_bus.on("agent_speak", _on_speak)
         self._event_bus.on("management_shadow", _on_management)
         self._event_bus.on("management_warning", _on_management)
         self._event_bus.on("artifact_created", _on_artifact)
+        self._event_bus.on("conversation_productivity", _on_productivity)
 
         try:
             engine = ConversationEngine(
@@ -520,6 +543,7 @@ class PhaseRunner:
             self._event_bus.off("management_shadow", _on_management)
             self._event_bus.off("management_warning", _on_management)
             self._event_bus.off("artifact_created", _on_artifact)
+            self._event_bus.off("conversation_productivity", _on_productivity)
 
         # Collect conversation summary for cross-phase context
         if engine.active_conversation is None and engine.last_conversation_summary:

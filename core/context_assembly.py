@@ -68,6 +68,10 @@ PROMPT_HINTS: dict[str, str] = {
         "[SYSTEM: You just remembered something relevant. Bring it up naturally if you want to.]"
     ),
     "closing": ("[SYSTEM: This conversation is winding down. Wrap it up naturally in your style.]"),
+    "action_nudge": (
+        "[SYSTEM: You've been discussing for several turns without taking action. "
+        "Use a tool: write code, create a task, check status, or propose something specific.]"
+    ),
 }
 
 # Pixel is the audience liaison agent

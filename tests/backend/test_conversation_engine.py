@@ -1266,3 +1266,146 @@ class TestToolSupport:
 
         # Only built once despite two turns
         mock_build.assert_called_once_with("rex", mock_services, simulation_mode=False)
+
+
+# ── Test: Conversation progression enforcement (#248) ──────────
+
+
+class TestConversationProgression:
+    async def test_dialogue_only_streak_tracks_turns_without_tools(
+        self,
+        engine: ConversationEngine,
+    ) -> None:
+        """Dialogue-only streak increments when no tools are used."""
+        trigger = {"type": "idle", "location": "town_square"}
+        await engine._start_conversation(trigger)
+
+        result = _make_selection_result("rex")
+        with patch.object(engine._selector, "select", return_value=result):
+            await engine._continue_conversation()
+
+        # No tools used → streak should be 1
+        assert engine._dialogue_only_streak == 1
+        assert engine._productive_turns == 0
+        assert engine._total_turns == 1
+
+    async def test_tool_usage_resets_dialogue_streak(
+        self,
+        mock_config_loader: MagicMock,
+        mock_agent_registry: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_llm: MagicMock,
+        mock_management: MagicMock,
+        mock_context_assembler: MagicMock,
+        mock_conversation_repo: MagicMock,
+        mock_archival_memory: MagicMock,
+        mock_proximity: MagicMock,
+        mock_trigger_system: MagicMock,
+        mock_selection_logger: MagicMock,
+        agents: list[AgentConfig],
+    ) -> None:
+        """When a tool is used, the dialogue-only streak resets to 0."""
+        mock_services = _make_mock_services()
+        mock_services.goal_manager = None
+        mock_services.shared_working_state = None
+        mock_proximity.get_eligible_speakers = AsyncMock(return_value=agents)
+
+        engine_with_tools = ConversationEngine(
+            config_loader=mock_config_loader,
+            agent_registry=mock_agent_registry,
+            event_bus=mock_event_bus,
+            llm_client=mock_llm,
+            management=mock_management,
+            context_assembler=mock_context_assembler,
+            conversation_repo=mock_conversation_repo,
+            archival_memory=mock_archival_memory,
+            proximity=mock_proximity,
+            trigger_system=mock_trigger_system,
+            selection_logger=mock_selection_logger,
+            speed_multiplier=0,
+            services=mock_services,
+        )
+
+        # Set up a turn that uses tools
+        tool_call = ToolCall(id="call_1", name="web_search", arguments={"query": "test"})
+        mock_llm.complete = AsyncMock(
+            side_effect=[
+                _make_llm_response("Opening line"),  # start conv
+                _make_llm_response_with_tool_calls("", [tool_call]),  # tool call
+                _make_llm_response("Found results!"),  # after tool
+            ]
+        )
+
+        mock_tool = MagicMock()
+        mock_tool.name = "web_search"
+        mock_tool.description = "Search"
+        mock_tool.parameters = {"query": {"type": "string"}}
+        mock_tool.run = AsyncMock(return_value={"status": "ok"})
+
+        # Manually set a streak to verify reset
+        engine_with_tools._dialogue_only_streak = 3
+
+        with patch(
+            "core.conversation_engine.build_agent_tools",
+            return_value={"web_search": mock_tool},
+        ):
+            trigger = {"type": "idle", "location": "town_square"}
+            await engine_with_tools._start_conversation(trigger)
+
+            result = _make_selection_result("rex")
+            with patch.object(engine_with_tools._selector, "select", return_value=result):
+                await engine_with_tools._continue_conversation()
+
+        # Tool was used → streak should reset to 0, productive turn counted
+        assert engine_with_tools._dialogue_only_streak == 0
+        assert engine_with_tools._productive_turns == 1
+
+    async def test_action_nudge_injected_after_4_dialogue_turns(
+        self,
+        engine: ConversationEngine,
+    ) -> None:
+        """After 4 consecutive dialogue-only turns, a system nudge is injected."""
+        trigger = {"type": "idle", "location": "town_square"}
+        await engine._start_conversation(trigger)
+
+        result = _make_selection_result("rex")
+        with patch.object(engine._selector, "select", return_value=result):
+            for _ in range(4):
+                await engine._continue_conversation()
+
+        # After 4 dialogue-only turns, history should contain nudge message
+        conv = engine.active_conversation
+        nudge_msgs = [
+            msg for msg in conv.history
+            if msg.get("role") == "user"
+            and "taking action" in msg.get("content", "")
+        ]
+        assert len(nudge_msgs) >= 1
+
+    async def test_productivity_event_emitted_on_end(
+        self,
+        engine: ConversationEngine,
+        mock_event_bus: MagicMock,
+    ) -> None:
+        """Ending a conversation emits a conversation_productivity event."""
+        trigger = {"type": "idle", "location": "town_square"}
+        await engine._start_conversation(trigger)
+
+        result = _make_selection_result("rex")
+        with patch.object(engine._selector, "select", return_value=result):
+            await engine._continue_conversation()
+
+        mock_event_bus.emit.reset_mock()
+        await engine._end_conversation()
+
+        # Find the productivity event
+        productivity_calls = [
+            c for c in mock_event_bus.emit.call_args_list
+            if c[0][0] == "conversation_productivity"
+        ]
+        assert len(productivity_calls) == 1
+        data = productivity_calls[0][0][1]
+        assert "productive_turns" in data
+        assert "total_turns" in data
+        assert "ratio" in data
+        assert "participants" in data
