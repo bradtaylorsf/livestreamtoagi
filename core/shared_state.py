@@ -48,14 +48,20 @@ class SharedWorkingState:
         task_id: str,
         status: str,
         blocked_reason: str | None = None,
-    ) -> None:
+        owner: str | None = None,
+    ) -> bool:
+        """Update a task's status. Returns True if the task was found and updated."""
         raw = await self._redis.hget(TASK_KEY, task_id)
         if raw:
             data = json.loads(raw)
             data["status"] = status
             if blocked_reason:
                 data["blocked_reason"] = blocked_reason
+            if owner:
+                data["owner"] = owner
             await self._redis.hset(TASK_KEY, task_id, json.dumps(data))
+            return True
+        return False
 
     async def get_tasks(self) -> list[SharedTask]:
         raw_all = await self._redis.hgetall(TASK_KEY)
@@ -87,6 +93,55 @@ class SharedWorkingState:
     async def get_priorities(self) -> dict[str, object] | None:
         raw = await self._redis.get(PRIORITIES_KEY)
         return json.loads(raw) if raw else None
+
+    async def seed_initial_tasks(self) -> None:
+        """Populate the task board with starter tasks for each agent.
+
+        Safe to call multiple times — skips if tasks already exist.
+        """
+        existing = await self.get_tasks()
+        if existing:
+            return
+
+        seeds = [
+            SharedTask(
+                id="seed-vera-revenue",
+                title="Set up revenue streams — brainstorm and evaluate monetization options",
+                owner="vera",
+            ),
+            SharedTask(
+                id="seed-rex-build",
+                title="Design and build first world area",
+                owner="rex",
+            ),
+            SharedTask(
+                id="seed-pixel-social",
+                title="Create initial social media presence",
+                owner="pixel",
+            ),
+            SharedTask(
+                id="seed-fork-review",
+                title="Review and critique revenue proposals",
+                owner="fork",
+            ),
+            SharedTask(
+                id="seed-sentinel-budget",
+                title="Establish budget tracking and cost monitoring",
+                owner="sentinel",
+            ),
+            SharedTask(
+                id="seed-aurora-creative",
+                title="Design creative content for the stream",
+                owner="aurora",
+            ),
+            SharedTask(
+                id="seed-grok-marketing",
+                title="Explore viral marketing angles",
+                owner="grok",
+            ),
+        ]
+        for task in seeds:
+            await self.add_task(task)
 
     async def get_summary_for_context(self) -> str:
         """Build a text summary suitable for injection into agent context."""

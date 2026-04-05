@@ -31,7 +31,8 @@ _TIME_BONUS_CAP = 2.0
 _TIME_BONUS_INTERVAL = 300.0  # 5 minutes
 _ROLE_BONUS: dict[str, float] = {
     "vera": 0.5,
-    "sentinel": 0.3,
+    "sentinel": 0.15,
+    "rex": 0.1,
 }
 
 

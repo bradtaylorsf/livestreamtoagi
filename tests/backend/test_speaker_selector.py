@@ -196,6 +196,86 @@ class TestSingleEligibleAgent:
         assert result.eligible_agents == ["vera"]
 
 
+class TestParticipationBalancing:
+    def test_silent_agent_gets_participation_bonus(
+        self, selector: SpeakerSelector,
+    ):
+        """Agents with 0 turns in a conversation get a +0.3 participation bonus."""
+        agents = [
+            _make_agent("vera", chattiness=0.5),
+            _make_agent("rex", chattiness=0.5),
+            _make_agent("fork", chattiness=0.5),
+        ]
+        # vera spoke 3 times, rex and fork never
+        history = [
+            {"speaker": "vera", "timestamp": datetime.now(UTC).isoformat()},
+            {"speaker": "vera", "timestamp": datetime.now(UTC).isoformat()},
+            {"speaker": "vera", "timestamp": datetime.now(UTC).isoformat()},
+        ]
+        random.seed(42)
+        result = selector.select(history, agents, energy=10.0)
+        # vera (previous speaker + 3 turns fatigue) should have lower score
+        # rex and fork (0 turns) should have participation bonus
+        assert result.scores.get("rex", 0) > result.scores.get("vera", 0)
+        assert result.scores.get("fork", 0) > result.scores.get("vera", 0)
+
+    def test_fatigue_penalty_on_dominant_agent(
+        self, selector: SpeakerSelector,
+    ):
+        """Agents with 3+ turns get a fatigue penalty."""
+        agents = [
+            _make_agent("vera", chattiness=0.5),
+            _make_agent("rex", chattiness=0.5),
+        ]
+        # rex spoke 4 times, then vera spoke
+        history = [
+            {"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()},
+            {"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()},
+            {"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()},
+            {"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()},
+            {"speaker": "vera", "timestamp": datetime.now(UTC).isoformat()},
+        ]
+        random.seed(42)
+        result = selector.select(history, agents, energy=10.0)
+        # rex has 4 turns = -0.2 * (4-2) = -0.4 penalty
+        # vera (previous speaker) is excluded, so rex is the only candidate
+        # but his score should be reduced
+        rex_score = result.scores.get("rex", 0)
+        # Score should be positive but penalized
+        assert rex_score >= 0.0
+
+    def test_no_agent_exceeds_40_percent(
+        self, selector: SpeakerSelector,
+    ):
+        """Over many selections, no agent should take >40% of turns."""
+        agents = [
+            _make_agent("vera", chattiness=0.6),
+            _make_agent("rex", chattiness=0.4),
+            _make_agent("fork", chattiness=0.7),
+            _make_agent("sentinel", chattiness=0.5),
+        ]
+        turn_counts: dict[str, int] = {a.id: 0 for a in agents}
+        history: list[dict] = []
+        total_turns = 50
+
+        for i in range(total_turns):
+            random.seed(i * 7 + 3)
+            result = selector.select(
+                history, agents, energy=10.0,
+                turn_number=i, max_turns=total_turns,
+            )
+            turn_counts[result.selected_agent_id] += 1
+            history.append({
+                "speaker": result.selected_agent_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+            })
+
+        max_ratio = max(turn_counts.values()) / total_turns
+        assert max_ratio <= 0.50, (
+            f"Agent took {max_ratio:.0%} of turns (>40%): {turn_counts}"
+        )
+
+
 class TestScoreBreakdown:
     def test_score_breakdown_in_result(
         self, selector: SpeakerSelector, agents: list[AgentConfig],

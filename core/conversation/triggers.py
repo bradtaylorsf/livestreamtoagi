@@ -67,6 +67,8 @@ class TriggerSystem:
         self._pending_events: deque[dict[str, Any]] = deque()
         self._fired_today: set[int] = set()
         self._last_fired_date: str = ""
+        # Cross-conversation dedup: maps (trigger_type, event_key) -> monotonic timestamp
+        self._recent_conversations: dict[tuple[str, str], float] = {}
         # Allow injecting clock/datetime/rng for deterministic testing
         self._clock = clock or time
         self._now_fn = now_fn or datetime.now
@@ -79,8 +81,19 @@ class TriggerSystem:
         self._last_speech_time = self._clock.monotonic()
 
     def queue_event(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
-        """Push an environmental or audience event for processing on the next tick."""
+        """Push an environmental or audience event for processing on the next tick.
+
+        Duplicate events (same event_type) are collapsed to prevent
+        identical conversations from being triggered multiple times.
+        """
         category = "audience" if event_type in AUDIENCE_EVENTS else "environmental"
+        # Dedup: reject if an event with the same type is already pending
+        for existing in self._pending_events:
+            if existing["event_type"] == event_type:
+                logger.debug(
+                    "Dropping duplicate pending event: %s", event_type,
+                )
+                return
         self._pending_events.append({
             "event_type": event_type,
             "category": category,
@@ -88,17 +101,43 @@ class TriggerSystem:
         })
 
     def reset(self) -> None:
-        """Clear all state — useful between test runs or after config reload."""
+        """Reset inter-conversation state while preserving daily trigger tracking.
+
+        Called after each conversation ends. Only clears pending events and
+        resets the idle timer. ``_fired_today`` is intentionally preserved so
+        that scheduled triggers don't re-fire within the same hour.
+        """
+        self._pending_events.clear()
+        self._last_speech_time = self._clock.monotonic()
+
+    def reset_full(self) -> None:
+        """Clear *all* state — useful between test runs or after config reload."""
         self._pending_events.clear()
         self._fired_today.clear()
         self._last_fired_date = ""
+        self._recent_conversations.clear()
         self._last_speech_time = self._clock.monotonic()
+
+    def record_conversation(
+        self,
+        trigger_type: str,
+        event_key: str,
+    ) -> None:
+        """Record that a conversation was started from a trigger.
+
+        Used to prevent the same trigger from producing duplicate
+        conversations within a short window (30 minutes by default).
+        """
+        self._recent_conversations[(trigger_type, event_key)] = self._clock.monotonic()
 
     async def check(self) -> dict[str, Any] | None:
         """Check triggers in priority order. Returns trigger dict or None.
 
         Priority: pending events > scheduled > idle > memory
         """
+        # Expire old entries from recent conversations (>30 min)
+        self._expire_recent_conversations()
+
         # 1. Pending events (environmental + audience)
         if self._pending_events:
             event = self._pending_events.popleft()
@@ -120,6 +159,25 @@ class TriggerSystem:
             return trigger
 
         return None
+
+    # ── Cross-conversation dedup ──────────────────────────
+
+    # Window in seconds for cross-conversation dedup
+    _DEDUP_WINDOW_SECONDS: float = 1800.0  # 30 minutes
+
+    def _expire_recent_conversations(self) -> None:
+        """Remove entries older than the dedup window."""
+        now = self._clock.monotonic()
+        expired = [
+            key for key, ts in self._recent_conversations.items()
+            if now - ts > self._DEDUP_WINDOW_SECONDS
+        ]
+        for key in expired:
+            del self._recent_conversations[key]
+
+    def _is_recent_duplicate(self, trigger_type: str, event_key: str) -> bool:
+        """Check if a trigger with this type+key ran recently."""
+        return (trigger_type, event_key) in self._recent_conversations
 
     # ── Private helpers ───────────────────────────────────
 
@@ -166,8 +224,17 @@ class TriggerSystem:
         schedule = self._daily_schedule
         hour = now.hour
         if hour in schedule and hour not in self._fired_today:
-            self._fired_today.add(hour)
             event_name, starter = schedule[hour]
+            # Cross-conversation dedup: skip if this event ran recently
+            if self._is_recent_duplicate("scheduled", event_name):
+                logger.debug(
+                    "Skipping duplicate scheduled event %s (fired recently)",
+                    event_name,
+                )
+                self._fired_today.add(hour)
+                return None
+            self._fired_today.add(hour)
+            self.record_conversation("scheduled", event_name)
             return {
                 "type": "scheduled",
                 "starter_agent_id": starter,

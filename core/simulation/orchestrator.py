@@ -102,6 +102,8 @@ class SimulationConfig:
         self.management_shadow = management_shadow
         self.phases: list[Phase] = []
         self.audience_config: dict[str, Any] | None = None
+        self.seed_tasks: bool = False
+        self.seed_goals: bool = False
 
     @property
     def mode(self) -> str:
@@ -117,6 +119,8 @@ class SimulationConfig:
             data = yaml.safe_load(f)
 
         self.audience_config = data.get("audience")
+        self.seed_tasks = bool(data.get("seed_tasks", False))
+        self.seed_goals = bool(data.get("seed_goals", False))
 
         raw_phases = data.get("phases", [])
         for entry in raw_phases:
@@ -327,6 +331,15 @@ class SimulationOrchestrator:
             audience_sim = AudienceSimulator(self._redis, self._config.audience_config)
             await audience_sim.seed_initial_state()
             audience_sim.start()
+
+        # Seed shared task board and agent goals if configured
+        if not self._config.dry_run:
+            if self._config.seed_tasks and self._services and self._services.shared_working_state:
+                await self._services.shared_working_state.seed_initial_tasks()
+                logger.info("Seeded initial tasks on shared task board")
+            if self._config.seed_goals and self._services and self._services.goal_manager:
+                await self._services.goal_manager.seed_story_goals()
+                logger.info("Seeded story goals for agents")
 
         phases = self._config.phases
         total_phases = len(phases)
