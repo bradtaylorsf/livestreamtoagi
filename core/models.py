@@ -1050,6 +1050,49 @@ class RelationshipUpdate(BaseModel):
     relationship_summary: str | None = None
 
 
+# ── Eval Analysis ──────────────────────────────────────────────
+
+
+class ProposedChange(BaseModel):
+    """A single change proposal from the eval analyzer."""
+
+    type: str  # prompt_change, param_change, conversation_config_change, technical_issue
+    agent_id: str | None = None
+    section: str | None = None
+    param_path: str | None = None
+    current_value: Any | None = None
+    proposed_value: Any | None = None
+    current_text: str | None = None
+    proposed_text: str | None = None
+    title: str | None = None
+    body: str | None = None
+    labels: list[str] | None = None
+    severity: str | None = None
+    reasoning: str = ""
+
+
+class AnalysisResult(BaseModel):
+    """Result of eval analysis — structured change proposals."""
+
+    summary: str = ""
+    confidence: float = 0.0
+    proposals: list[ProposedChange] = Field(default_factory=list)
+    trend_data: dict[str, Any] | None = None
+
+
+class EvalAnalysis(BaseModel):
+    """Stored eval analysis record."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    eval_run_id: uuid.UUID
+    summary: str | None = None
+    confidence: Decimal | None = None
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    trend_data: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
 # ── Phase Assertions ───────────────────────────────────────────
 
 

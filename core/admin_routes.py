@@ -1216,6 +1216,39 @@ async def get_conversation_config_versions(
     return [v.model_dump(mode="json") for v in versions]
 
 
+@router.post("/evals/{eval_id}/analyze")
+async def analyze_eval(eval_id: uuid_mod.UUID) -> dict:
+    """Run eval analyzer on a completed eval run."""
+    db = _get_db()
+    llm = _get_llm()
+    from core.repos.eval_repo import EvalRepo
+    from core.eval.analyzer import EvalAnalyzer
+
+    eval_repo = EvalRepo(db)
+    analyzer = EvalAnalyzer(db=db, eval_repo=eval_repo, llm_client=llm)
+    try:
+        result = await analyzer.analyze(eval_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return result.model_dump()
+
+
+@router.get("/evals/{eval_id}/analysis")
+async def get_eval_analysis(eval_id: uuid_mod.UUID) -> dict:
+    """Get stored analysis for an eval run."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+    from core.eval.analyzer import EvalAnalyzer
+
+    eval_repo = EvalRepo(db)
+    llm = _get_llm()
+    analyzer = EvalAnalyzer(db=db, eval_repo=eval_repo, llm_client=llm)
+    result = await analyzer.get_analysis(eval_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No analysis found for this eval run")
+    return result.model_dump()
+
+
 @router.post("/config/conversation/rollback")
 async def rollback_conversation_config(body: RollbackRequest) -> dict:
     """Rollback conversation params to a previous version."""
