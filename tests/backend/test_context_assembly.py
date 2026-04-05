@@ -174,10 +174,10 @@ class TestAssemblyOrder:
         messages = await assembler.assemble_context("rex", history)
 
         assert messages[0]["role"] == "system"
-        # Buffer messages follow
-        for i, msg in enumerate(messages[1:], start=1):
+        # Buffer messages follow (last non-hint user msg is identity reinforcement)
+        for msg in messages[1:]:
             assert msg["role"] in ("user", "assistant")
-            assert "Message" in msg["content"]
+            assert "Message" in msg["content"] or "You are Rex" in msg["content"]
 
     @pytest.mark.asyncio
     async def test_infrastructure_prompt_is_included(
@@ -276,7 +276,8 @@ class TestBufferTruncation:
         messages = await assembler.assemble_context("rex", history)
 
         buffer_msgs = [m for m in messages if m["role"] != "system"]
-        assert len(buffer_msgs) <= 20
+        # +1 for identity reinforcement message
+        assert len(buffer_msgs) <= 21
 
     @pytest.mark.asyncio
     async def test_keeps_newest_messages_when_truncating(
@@ -313,16 +314,20 @@ class TestBufferTruncation:
 
         buffer_msgs = [m for m in messages if m["role"] != "system"]
         if buffer_msgs:
-            # Last buffer message should be the newest from history
-            assert buffer_msgs[-1]["content"] == "Message 14"
+            # Last non-identity message should be the newest from history
+            history_msgs = [m for m in buffer_msgs if "You are Rex" not in m.get("content", "")]
+            if history_msgs:
+                assert history_msgs[-1]["content"] == "Message 14"
 
     @pytest.mark.asyncio
     async def test_empty_history_produces_only_system_message(
         self, assembler: ContextAssembler
     ) -> None:
         messages = await assembler.assemble_context("rex", [])
-        assert len(messages) == 1
+        # system + identity reinforcement
+        assert len(messages) == 2
         assert messages[0]["role"] == "system"
+        assert "You are Rex" in messages[1]["content"]
 
 
 # ── Pixel chat highlights tests ──────────────────────────────────
@@ -429,9 +434,15 @@ class TestPromptHints:
         self, assembler: ContextAssembler
     ) -> None:
         messages = await assembler.assemble_context("rex", _make_history(3))
-        last = messages[-1]
-        # Last message should be from buffer, not a hint
-        assert "[SYSTEM:" not in last["content"]
+        # Last message is identity reinforcement (no prompt hint added)
+        # No prompt hint should appear
+        hint_msgs = [
+            m for m in messages
+            if m.get("role") == "user"
+            and "[SYSTEM:" in m.get("content", "")
+            and "You are Rex" not in m.get("content", "")
+        ]
+        assert len(hint_msgs) == 0
 
     @pytest.mark.asyncio
     async def test_unknown_hint_ignored(
@@ -440,8 +451,14 @@ class TestPromptHints:
         messages = await assembler.assemble_context(
             "rex", _make_history(3), prompt_hint="nonexistent"
         )
-        last = messages[-1]
-        assert "[SYSTEM:" not in last["content"]
+        # Unknown hint should not produce a hint message
+        hint_msgs = [
+            m for m in messages
+            if m.get("role") == "user"
+            and "[SYSTEM:" in m.get("content", "")
+            and "You are Rex" not in m.get("content", "")
+        ]
+        assert len(hint_msgs) == 0
 
 
 # ── World state tests ────────────────────────────────────────────
@@ -595,8 +612,8 @@ class TestEdgeCases:
         messages = await assembler.assemble_context(
             "rex", [], prompt_hint="idle"
         )
-        assert len(messages) == 2  # system + hint
-        assert "been quiet" in messages[1]["content"]
+        assert len(messages) == 3  # system + identity reinforcement + hint
+        assert "been quiet" in messages[-1]["content"]
 
     @pytest.mark.asyncio
     async def test_returns_list_of_dicts_with_role_and_content(
