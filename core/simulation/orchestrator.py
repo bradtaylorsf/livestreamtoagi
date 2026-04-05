@@ -100,6 +100,7 @@ class SimulationConfig:
         self.verbose = verbose
         self.overseer_shadow = overseer_shadow
         self.phases: list[Phase] = []
+        self.audience_config: dict[str, Any] | None = None
 
     @property
     def mode(self) -> str:
@@ -113,6 +114,8 @@ class SimulationConfig:
 
         with open(self.seed_file) as f:
             data = yaml.safe_load(f)
+
+        self.audience_config = data.get("audience")
 
         raw_phases = data.get("phases", [])
         for entry in raw_phases:
@@ -308,6 +311,15 @@ class SimulationOrchestrator:
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
 
+        # Start audience simulator if configured
+        audience_sim = None
+        if self._config.audience_config and not self._config.dry_run:
+            from core.simulation.audience_sim import AudienceSimulator
+
+            audience_sim = AudienceSimulator(self._redis, self._config.audience_config)
+            await audience_sim.seed_initial_state()
+            audience_sim.start()
+
         phases = self._config.phases
         total_phases = len(phases)
 
@@ -381,10 +393,14 @@ class SimulationOrchestrator:
                     self._check_cost_limit()
 
             # Finalize
+            if audience_sim:
+                await audience_sim.stop()
             status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
             await self._finalize(status)
 
         except CostLimitExceededError:
+            if audience_sim:
+                await audience_sim.stop()
             logger.warning("Cost limit exceeded ($%s), stopping simulation", self._total_cost)
             self._display.show_cost_exceeded(self._total_cost, self._config.max_cost)
             await self._finalize(
@@ -393,6 +409,8 @@ class SimulationOrchestrator:
             )
 
         except Exception as exc:
+            if audience_sim:
+                await audience_sim.stop()
             logger.exception("Simulation failed")
             await self._finalize(
                 SimulationStatus.failed,

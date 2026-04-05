@@ -9,6 +9,22 @@
 #     --max-cost 10.00 \
 #     --verbose
 
+audience:
+  initial_viewers: 0
+  growth_rate: slow    # 0 → 20 over the simulation
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "viewer1"
+      style: "curious newcomer"
+    - name: "crypto_fan_99"
+      style: "enthusiastic, asks about crypto"
+    - name: "dev_lurker"
+      style: "technical questions, lurks mostly"
+    - name: "artsy_watcher"
+      style: "interested in creative aspects"
+    - name: "first_timer"
+      style: "confused but engaged"
+
 phases:
   # 1. First contact — agents discover each other organically
   - name: first_contact

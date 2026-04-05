@@ -292,7 +292,9 @@ class TestBaseToolRun:
         await asyncio.sleep(0.05)
         call_arg = tool.artifact_repo.save_artifact.call_args[0][0]
         assert call_arg.status == "failed"
-        assert call_arg.tool_output is None
+        assert call_arg.tool_output is not None
+        assert "error" in call_arg.tool_output
+        assert "boom" in call_arg.tool_output["error"]
 
     async def test_run_passes_simulation_and_conversation_ids(self) -> None:
         sim_id = uuid.uuid4()

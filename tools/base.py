@@ -49,14 +49,18 @@ class BaseTool(ABC):
 
         start = time.monotonic()
         status = "executed"
+        _error_msg: str | None = None
         try:
             result = await self.execute(**kwargs)
-        except Exception:
+        except Exception as exc:
             status = "failed"
+            _error_msg = str(exc)
             raise
         else:
             if self.name in PENDING_APPROVAL_TOOLS:
                 status = "pending_approval"
+            elif isinstance(result, dict) and result.get("simulated"):
+                status = "simulated"
             return result
         finally:
             if self.artifact_repo is not None:
@@ -66,7 +70,7 @@ class BaseTool(ABC):
 
                 tool_output: dict[str, Any] | None
                 if status == "failed":
-                    tool_output = None
+                    tool_output = {"error": _error_msg} if _error_msg else None
                 else:
                     tool_output = result  # type: ignore[possibly-undefined]
                     # Enrich metadata for code execution
@@ -74,6 +78,14 @@ class BaseTool(ABC):
                         for key in ("stdout", "stderr", "exit_code"):
                             if key in tool_output:
                                 meta[key] = tool_output[key]
+                    # Move _internal data to artifact metadata only —
+                    # strip it from the LLM-visible tool result
+                    if isinstance(tool_output, dict) and "_internal" in tool_output:
+                        meta["_internal"] = tool_output["_internal"]
+                        tool_output = {
+                            k: v for k, v in tool_output.items() if k != "_internal"
+                        }
+                        result = tool_output  # type: ignore[possibly-undefined]
 
                 artifact = ArtifactCreate(
                     simulation_id=simulation_id,

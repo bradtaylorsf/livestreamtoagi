@@ -47,8 +47,11 @@ class TestGetRevenueStatus:
         result = await tool.execute()
 
         assert result["status"] == "ok"
-        assert result["monthly_revenue"] == 500.0
-        assert result["monthly_costs"] == 300.0
+        # Raw numbers are now in _internal, agent sees health/trend/summary
+        assert "health" in result
+        assert "summary" in result
+        assert result["_internal"]["monthly_revenue"] == 500.0
+        assert result["_internal"]["monthly_costs"] == 300.0
 
     async def test_burn_rate_computed_correctly(self, cost_repo: AsyncMock) -> None:
         cost_repo.get_total_revenue = AsyncMock(
@@ -62,7 +65,7 @@ class TestGetRevenueStatus:
         result = await tool.execute()
 
         # burn_rate = (400 - 100) / 30 = 10.0
-        assert result["burn_rate"] == 10.0
+        assert result["_internal"]["burn_rate"] == 10.0
 
     async def test_runway_days_computed_correctly(self, cost_repo: AsyncMock) -> None:
         # Total balance = 500 - 800 = -300 (already negative)
@@ -78,7 +81,8 @@ class TestGetRevenueStatus:
         tool = GetRevenueStatusTool(cost_repo=cost_repo, agent_id="vera")
         result = await tool.execute()
 
-        assert result["runway_days"] == 0
+        assert result["_internal"]["runway_days"] == 0
+        assert result["health"] == "critical"
 
     async def test_runway_infinite_when_profitable(self, cost_repo: AsyncMock) -> None:
         # Revenue > costs => net positive => burn_rate <= 0
@@ -92,7 +96,8 @@ class TestGetRevenueStatus:
         tool = GetRevenueStatusTool(cost_repo=cost_repo, agent_id="sentinel")
         result = await tool.execute()
 
-        assert result["runway_days"] == -1  # infinite
+        assert result["_internal"]["runway_days"] == -1  # infinite
+        assert result["health"] == "healthy"
 
     async def test_trend_improving(self, cost_repo: AsyncMock) -> None:
         # Current: rev=500, costs=200 => net=+300

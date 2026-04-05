@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_ROUNDS = 5
 
 
-def build_agent_tools(agent_id: str, services: Services) -> dict[str, BaseTool]:
+def build_agent_tools(
+    agent_id: str,
+    services: Services,
+    simulation_mode: bool = False,
+) -> dict[str, BaseTool]:
     """Build a tool registry for a specific agent, returning {name: tool_instance}.
 
     Uses the shared tool factories from tools/__init__.py so both
@@ -42,6 +46,7 @@ def build_agent_tools(agent_id: str, services: Services) -> dict[str, BaseTool]:
         llm_client=services.llm_client,
         memory_repo=services.memory_repo,
         artifact_repo=services.artifact_repo,
+        simulation_mode=simulation_mode,
     )
     for tool in core_tools:
         registry.register(tool)

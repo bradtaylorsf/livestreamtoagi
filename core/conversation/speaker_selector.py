@@ -65,6 +65,10 @@ class SpeakerSelector:
         energy: float,
         detected_topic: str | None = None,
         interrupt_state: InterruptState | None = None,
+        required_agents: set[str] | None = None,
+        agents_who_spoke: set[str] | None = None,
+        turn_number: int = 0,
+        max_turns: int = 15,
     ) -> SelectionResult:
         """Pick the next speaker from *eligible_agents*.
 
@@ -84,6 +88,15 @@ class SpeakerSelector:
             Mutable per-conversation interrupt tracking. If provided and
             interrupts are enabled, interrupt checking runs after normal
             selection.
+        required_agents:
+            Agent IDs that must participate. Silent required agents get
+            boosted scores and may be force-selected mid-conversation.
+        agents_who_spoke:
+            Agent IDs that have already spoken in this conversation.
+        turn_number:
+            Current turn number in the conversation.
+        max_turns:
+            Maximum turns for this conversation.
 
         Returns
         -------
@@ -124,16 +137,49 @@ class SpeakerSelector:
         scores: dict[str, float] = {}
         breakdown: dict[str, dict[str, float]] = {}
 
+        # Count consecutive turns by previous speaker
+        consecutive_count = self._count_consecutive_turns(
+            conversation_history, previous_speaker_id,
+        )
+
+        _required = required_agents or set()
+        _spoke = agents_who_spoke or set()
+
         for agent in candidates:
             factors = self._score_agent(
                 agent, previous_speaker_id, detected_topic,
                 conversation_history, now,
             )
             total = self._weighted_sum(factors, weights)
+
+            # Consecutive-turn penalty: penalize the previous speaker
+            if agent.id == previous_speaker_id:
+                if consecutive_count >= 2:
+                    total = 0.0  # Hard block after 2 consecutive turns
+                else:
+                    total = max(0.0, total - 0.4)
+
+            # Required-agent boost: if agent is required but hasn't spoken
+            if agent.id in _required and agent.id not in _spoke:
+                if turn_number >= 3:
+                    total += 0.5
+
             scores[agent.id] = total
             breakdown[agent.id] = factors
 
-        selected_id = self._weighted_random_select(scores)
+        # Force-select a silent required agent past mid-conversation
+        selected_id: str | None = None
+        if _required and turn_number >= (max_turns // 2):
+            silent_required = [
+                a for a in candidates
+                if a.id in _required and a.id not in _spoke
+            ]
+            if silent_required:
+                # Pick the silent required agent with highest base score
+                selected_id = max(silent_required, key=lambda a: scores.get(a.id, 0)).id
+
+        if selected_id is None:
+            selected_id = self._weighted_random_select(scores)
 
         # ── Interrupt check ────────────────────────────────────
         was_interrupt = False
@@ -270,6 +316,22 @@ class SpeakerSelector:
         return attempts
 
     # ── internal helpers ────────────────────────────────────────
+
+    @staticmethod
+    def _count_consecutive_turns(
+        conversation_history: list[dict[str, Any]],
+        speaker_id: str | None,
+    ) -> int:
+        """Count how many consecutive turns the speaker has at the end of history."""
+        if not speaker_id or not conversation_history:
+            return 0
+        count = 0
+        for msg in reversed(conversation_history):
+            if msg.get("speaker") == speaker_id:
+                count += 1
+            else:
+                break
+        return count
 
     @staticmethod
     def _get_previous_speaker(

@@ -1253,4 +1253,4 @@ class TestToolSupport:
             await engine_with_tools._generate_turn(agent, prompt_hint="idle")
 
         # Only built once despite two turns
-        mock_build.assert_called_once_with("rex", mock_services)
+        mock_build.assert_called_once_with("rex", mock_services, simulation_mode=False)

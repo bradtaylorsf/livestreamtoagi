@@ -88,8 +88,13 @@ def get_core_tools(
     llm_client: LLMClient | None = None,
     memory_repo: MemoryRepo | None = None,
     artifact_repo: ArtifactRepo | None = None,
+    simulation_mode: bool = False,
 ) -> list[BaseTool]:
-    """Create instances of all core tools available to every agent."""
+    """Create instances of all core tools available to every agent.
+
+    When simulation_mode=True, Docker-dependent tools are replaced with
+    stubs that return synthetic results (status="simulated").
+    """
     tools: list[BaseTool] = [
         SendMessageTool(event_bus=event_bus, agent_id=agent_id),
         GetWorldStateTool(redis_client=redis_client),
@@ -110,20 +115,26 @@ def get_core_tools(
         CreatePollTool(redis_client=redis_client, event_bus=event_bus, agent_id=agent_id)
     )
 
-    # Code execution sandbox
-    exec_tool = ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
-    tools.append(exec_tool)
+    # Code execution sandbox (or simulation stub)
+    if simulation_mode:
+        from .stubs import StubExecuteCodeTool, StubGenerateTilemapTool
 
-    # Tilemap generation (requires world_repo for chunk storage)
-    if world_repo is not None:
-        tools.append(
-            GenerateTilemapTool(
-                event_bus=event_bus,
-                agent_id=agent_id,
-                execute_code_tool=exec_tool,
-                world_repo=world_repo,
+        tools.append(StubExecuteCodeTool(event_bus=event_bus, agent_id=agent_id))
+        tools.append(StubGenerateTilemapTool(event_bus=event_bus, agent_id=agent_id))
+    else:
+        exec_tool = ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
+        tools.append(exec_tool)
+
+        # Tilemap generation (requires world_repo for chunk storage)
+        if world_repo is not None:
+            tools.append(
+                GenerateTilemapTool(
+                    event_bus=event_bus,
+                    agent_id=agent_id,
+                    execute_code_tool=exec_tool,
+                    world_repo=world_repo,
+                )
             )
-        )
 
     # Revenue and marketing tools
     if cost_repo is not None:
@@ -176,6 +187,14 @@ def get_core_tools(
     # Set event_bus on all tools so BaseTool.run() can emit artifact_created
     for tool in tools:
         tool.event_bus = event_bus
+
+    # Filter out tools the agent isn't authorized to use so they never
+    # appear in the tool schema (prevents unauthorized call attempts).
+    if agent_id != "unknown":
+        tools = [
+            t for t in tools
+            if not hasattr(t, "ALLOWED_AGENTS") or agent_id in t.ALLOWED_AGENTS
+        ]
 
     return tools
 
