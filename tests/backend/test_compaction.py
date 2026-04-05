@@ -414,6 +414,58 @@ class TestSummaryFormat:
         assert "Aurora designed a new logo." in user_msg
 
 
+# ── compact_recall_only tests ──────────────────────────────────
+
+
+class TestCompactRecallOnly:
+    """Tests for compact_recall_only — per-agent recall without duplicate transcript."""
+
+    @pytest.mark.asyncio
+    async def test_creates_recall_without_transcript(
+        self,
+        compactor: MemoryCompactor,
+        archival_mock: AsyncMock,
+        recall_mock: AsyncMock,
+    ) -> None:
+        """compact_recall_only creates recall memory but does NOT store transcript."""
+        with patch(
+            "core.memory.compaction.generate_embedding",
+            return_value=_fake_embedding(),
+        ):
+            result = await compactor.compact_recall_only(
+                agent_id="rex",
+                interaction="Vera: Let's build a dashboard.\nRex: Sounds good.",
+                event_type="conversation",
+                transcript_id=42,
+                participants=["vera", "rex"],
+            )
+
+        assert result is not None
+        # Transcript must NOT be stored again
+        archival_mock.store_transcript.assert_not_awaited()
+        # Recall memory was created with the existing transcript_id
+        recall_mock.store_recall_memory.assert_awaited_once()
+        call_kwargs = recall_mock.store_recall_memory.call_args.kwargs
+        assert call_kwargs["agent_id"] == "rex"
+        assert call_kwargs["transcript_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_empty_interaction_returns_none(
+        self,
+        compactor: MemoryCompactor,
+        archival_mock: AsyncMock,
+    ) -> None:
+        """Empty interaction returns None without any DB calls."""
+        result = await compactor.compact_recall_only(
+            agent_id="vera",
+            interaction="",
+            event_type="conversation",
+            transcript_id=1,
+        )
+        assert result is None
+        archival_mock.store_transcript.assert_not_awaited()
+
+
 # ── Integration test (marked for CI with real services) ──────────
 
 

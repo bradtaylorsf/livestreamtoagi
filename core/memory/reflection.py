@@ -121,6 +121,7 @@ class ReflectionManager:
         token_counter: TokenCounter,
         agent_registry: AgentRegistry,
         goal_manager: AgentGoalManager | None = None,
+        simulation_id: object | None = None,
     ) -> None:
         self._repo = memory_repo
         self._llm = llm_client
@@ -129,6 +130,7 @@ class ReflectionManager:
         self._registry = agent_registry
         self._relationship_tracker: RelationshipTracker | None = None
         self._goal_manager = goal_manager
+        self._simulation_id = simulation_id
 
     def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
         """Set the relationship tracker (called after simulation_id is known)."""
@@ -170,6 +172,7 @@ class ReflectionManager:
             agent_id=agent_id,
             temperature=0.4,
             max_tokens=2000,
+            simulation_id=self._simulation_id,
         )
 
         analysis = _parse_json_response(response.content)
@@ -279,6 +282,7 @@ class ReflectionManager:
             agent_id=agent_id,
             temperature=0.4,
             max_tokens=3000,
+            simulation_id=self._simulation_id,
         )
 
         analysis = _parse_json_response(response.content)
@@ -400,6 +404,7 @@ class ReflectionManager:
             agent_id=agent_id,
             temperature=0.7,
             max_tokens=1000,
+            simulation_id=self._simulation_id,
         )
 
         token_count = self._tc.count_tokens(response.content)
@@ -434,6 +439,7 @@ class ReflectionManager:
             agent_id=agent_id,
             temperature=0.2,
             max_tokens=2000,
+            simulation_id=self._simulation_id,
         )
         trimmed = _parse_json_response(response.content)
         for update in trimmed.get("updates", []):

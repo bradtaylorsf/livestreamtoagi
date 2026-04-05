@@ -176,6 +176,8 @@ class PhaseRunner:
         services: Services | None = None,
         clock: SimulationClock | None = None,
         relationship_tracker: RelationshipTracker | None = None,
+        debug_prompts: bool = False,
+        prompt_log_repo: object | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -197,10 +199,12 @@ class PhaseRunner:
         self._services = services
         self._clock = clock
         self._relationship_tracker = relationship_tracker
+        self._debug_prompts = debug_prompts
+        self._prompt_log_repo = prompt_log_repo
 
         # Cross-phase conversation context to prevent repetition
         self._conversation_summaries: deque[str] = deque(maxlen=5)
-        self._recent_outputs: deque[str] = deque(maxlen=15)  # Last 15 agent outputs
+        self._recent_outputs: deque[str] = deque(maxlen=50)  # Last 50 agent outputs
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0
@@ -490,6 +494,8 @@ class PhaseRunner:
                 recent_outputs=list(self._recent_outputs),
                 required_agents=set(phase.required_agents) if phase.required_agents else None,
                 max_turns=max_turns,
+                debug_prompts=self._debug_prompts,
+                prompt_log_repo=self._prompt_log_repo,
             )
 
             engine._running = True

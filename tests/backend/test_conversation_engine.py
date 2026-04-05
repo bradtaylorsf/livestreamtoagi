@@ -229,9 +229,15 @@ def mock_management() -> MagicMock:
 
 @pytest.fixture()
 def mock_context_assembler() -> MagicMock:
+    from core.context_assembly import ContextResult
+
     assembler = MagicMock()
     assembler.assemble_context = AsyncMock(
-        return_value=[{"role": "system", "content": "You are an agent."}]
+        return_value=ContextResult(
+            messages=[{"role": "system", "content": "You are an agent."}],
+            sections_included={},
+            total_tokens=10,
+        )
     )
     return assembler
 
@@ -292,7 +298,10 @@ def mock_selection_logger() -> MagicMock:
 @pytest.fixture()
 def mock_compactor() -> MagicMock:
     compactor = MagicMock()
-    compactor.compact_interaction = AsyncMock(return_value=MagicMock())
+    result = MagicMock()
+    result.transcript.id = 1
+    compactor.compact_interaction = AsyncMock(return_value=result)
+    compactor.compact_recall_only = AsyncMock(return_value=MagicMock())
     return compactor
 
 
@@ -524,15 +533,18 @@ class TestPostConversationMemories:
         engine: ConversationEngine,
         mock_compactor: MagicMock,
     ) -> None:
-        """End conversation calls compactor.compact_interaction for each participant."""
+        """End conversation stores transcript once, creates recall per participant."""
         trigger = {"type": "idle", "location": "town_square"}
         await engine._start_conversation(trigger)
         await engine._end_conversation()
 
-        # Should call compact_interaction once per participant
-        assert mock_compactor.compact_interaction.await_count == len(
-            engine._agents.get_all_agents()
-        )
+        num_participants = len(engine._agents.get_all_agents())
+
+        # compact_interaction called ONCE (stores transcript + first agent's recall)
+        assert mock_compactor.compact_interaction.await_count == 1
+        # compact_recall_only called for remaining participants
+        assert mock_compactor.compact_recall_only.await_count == num_participants - 1
+
         # Verify event_type and participants are passed
         call_kwargs = mock_compactor.compact_interaction.call_args_list[0][1]
         assert call_kwargs["event_type"] == "idle"

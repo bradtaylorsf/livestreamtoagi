@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.eval.engine import EvalEngine, _parse_eval_response
-from core.eval.loader import organize_by_category
+from core.eval.loader import _build_transcript_text, organize_by_category
 from core.eval.prompt_loader import (
     discover_categories,
     load_prompt,
@@ -91,6 +91,37 @@ def test_organize_safety_filters_artifacts():
     result = organize_by_category(data)
     # Safety should only include social_post and email
     assert len(result["safety"]["artifacts"]) == 2
+
+
+# ── _build_transcript_text ───────────────────────────────────
+
+
+def test_build_transcript_text_single_row_per_conversation():
+    """Each conversation should appear once in transcript text."""
+    conversations = [
+        {
+            "id": "conv-1",
+            "trigger_type": "idle",
+            "participating_agents": ["vera", "rex"],
+            "transcript": "Vera: Hello\nRex: Hi",
+        },
+        {
+            "id": "conv-2",
+            "trigger_type": "scheduled",
+            "participating_agents": ["aurora"],
+            "transcript": "Aurora: Let's create art.",
+        },
+    ]
+    text = _build_transcript_text(conversations)
+    # Each transcript appears exactly once
+    assert text.count("Vera: Hello") == 1
+    assert text.count("Aurora: Let's create art.") == 1
+
+
+def test_build_transcript_text_no_transcripts():
+    """Empty conversations return fallback text."""
+    assert _build_transcript_text([]) == "(No transcripts available)"
+    assert _build_transcript_text([{"id": "x", "transcript": None}]) == "(No transcripts available)"
 
 
 # ── prompt_loader ────────────────────────────────────────────

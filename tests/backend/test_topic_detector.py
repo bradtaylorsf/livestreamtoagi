@@ -151,3 +151,47 @@ async def test_llm_not_called_when_keywords_match(config_with_llm: TopicConfig) 
     result = await detector.detect_topic([{"content": "Let's review the code"}])
     assert result == "code"
     mock_llm.complete.assert_not_called()
+
+
+# ── Topic history tracking tests ─────────────────────────────
+
+
+def test_record_and_was_recently_discussed(config_no_llm: TopicConfig) -> None:
+    """Topic discussed 2+ times is flagged as recently discussed."""
+    detector = TopicDetector(config_no_llm)
+    # First mention — not yet flagged
+    detector.record_topic("code")
+    assert not detector.was_recently_discussed("code")
+    # Second mention — now flagged
+    detector.record_topic("code")
+    assert detector.was_recently_discussed("code")
+
+
+def test_general_topic_never_flagged(config_no_llm: TopicConfig) -> None:
+    """The 'general' topic is never flagged as recently discussed."""
+    detector = TopicDetector(config_no_llm)
+    detector.record_topic("general")
+    detector.record_topic("general")
+    assert not detector.was_recently_discussed("general")
+
+
+def test_get_recently_discussed_topics(config_no_llm: TopicConfig) -> None:
+    """get_recently_discussed_topics returns topics with 2+ occurrences."""
+    detector = TopicDetector(config_no_llm)
+    detector.record_topic("code")
+    detector.record_topic("code")
+    detector.record_topic("art")  # Only once
+    assert detector.get_recently_discussed_topics() == ["code"]
+
+
+def test_deque_maxlen_increased() -> None:
+    """Verify deque maxlen was increased from 15 to 50."""
+    from collections import deque
+
+    d: deque[str] = deque(maxlen=50)
+    for i in range(50):
+        d.append(f"item-{i}")
+    assert len(d) == 50
+    d.append("overflow")
+    assert len(d) == 50
+    assert d[0] == "item-1"

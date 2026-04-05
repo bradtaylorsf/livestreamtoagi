@@ -43,10 +43,12 @@ class EvalAnalyzer:
         db: Database,
         eval_repo: EvalRepo,
         llm_client: OpenRouterClient,
+        simulation_id: object | None = None,
     ) -> None:
         self._db = db
         self._eval_repo = eval_repo
         self._llm = llm_client
+        self._simulation_id = simulation_id
 
     async def analyze(self, eval_run_id: uuid.UUID) -> AnalysisResult:
         """Analyze eval results and return classified change proposals.
@@ -107,6 +109,7 @@ class EvalAnalyzer:
             agent_id="eval_analyzer",
             temperature=prompt_config.get("temperature", 0.3),
             max_tokens=prompt_config.get("max_tokens", 8192),
+            simulation_id=self._simulation_id,
         )
 
         # Parse response

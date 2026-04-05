@@ -208,6 +208,17 @@ class SimulationRepo:
             val = await self.db.fetchval("SELECT COUNT(*) FROM simulations")
         return val or 0
 
+    async def get_total_cost_from_events(
+        self,
+        simulation_id: uuid.UUID,
+    ) -> Decimal:
+        """Derive total cost from cost_events table instead of manual accumulation."""
+        val = await self.db.fetchval(
+            "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE simulation_id = $1",
+            simulation_id,
+        )
+        return Decimal(str(val)) if val is not None else Decimal("0")
+
     async def get_timeline_events(
         self,
         simulation_id: uuid.UUID,

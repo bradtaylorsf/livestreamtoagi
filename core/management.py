@@ -48,12 +48,14 @@ class Management:
         rules_path: Path | None = None,
         shadow_mode: bool = False,
         db: Database | None = None,
+        simulation_id: object | None = None,
     ) -> None:
         self._redis = redis_client
         self._llm = llm_client
         self._event_bus = event_bus
         self._shadow_mode = shadow_mode
         self._db = db
+        self._simulation_id = simulation_id
 
         rules_file = rules_path or CONTENT_RULES_PATH
         with open(rules_file) as f:
@@ -231,6 +233,7 @@ class Management:
                 agent_id="management",
                 temperature=0.4,
                 max_tokens=100,
+                simulation_id=self._simulation_id,
             )
             return resp.content.strip()
         except Exception:
@@ -377,6 +380,7 @@ class Management:
                 agent_id="management",
                 temperature=0.1,
                 max_tokens=150,
+                simulation_id=self._simulation_id,
             )
             return self._parse_llm_response(resp.content)
         except Exception:

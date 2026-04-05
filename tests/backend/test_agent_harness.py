@@ -175,10 +175,11 @@ async def test_dry_run_context_assembly():
     services = await bootstrap_services(dry_run=True)
     assembler = services.context_assembler
 
-    messages = await assembler.assemble_context(
+    result = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=[{"role": "user", "content": "Hello Rex!"}],
     )
+    messages = result.messages
     assert len(messages) >= 1
     assert messages[0]["role"] == "system"
     # System message should contain Rex's prompt

@@ -123,6 +123,8 @@ class ConversationEngine:
         recent_outputs: list[str] | None = None,
         required_agents: set[str] | None = None,
         max_turns: int = 15,
+        debug_prompts: bool = False,
+        prompt_log_repo: object | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -139,6 +141,8 @@ class ConversationEngine:
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
+        self._debug_prompts = debug_prompts
+        self._prompt_log_repo = prompt_log_repo
         self._speed_multiplier = speed_multiplier
         self._services = services
         self._clock = clock
@@ -156,7 +160,7 @@ class ConversationEngine:
 
         # Cross-phase repetition prevention
         self._recent_summaries = recent_conversation_summaries or []
-        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=15)
+        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=50)
         self._last_conversation_summary: str | None = None
 
         # Required-agent participation tracking
@@ -285,6 +289,15 @@ class ConversationEngine:
         if seeded_topic:
             hint = f"topic:{seeded_topic}"
 
+        # Inject topic avoidance if recent topics are being rehashed
+        avoided = self._topic_detector.get_recently_discussed_topics()
+        if avoided:
+            avoidance_note = (
+                f"[SYSTEM: The group recently discussed: {', '.join(avoided)}. "
+                "Choose a different angle or topic.]"
+            )
+            trigger["topic_avoidance"] = avoidance_note
+
         # Generate opening line
         content = await self._generate_turn(opening_agent, prompt_hint=hint)
         if content is None:
@@ -339,6 +352,7 @@ class ConversationEngine:
         topic = await self._topic_detector.detect_topic(conv.history[-5:])
         if topic not in conv.topics:
             conv.topics.append(topic)
+            self._topic_detector.record_topic(topic)
 
         # Check for eavesdroppers joining
         all_agents = self._agents.get_all_agents()
@@ -607,6 +621,7 @@ class ConversationEngine:
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.3,
+                simulation_id=self._simulation_id,
                 max_tokens=300,
             )
             summary = response.content.strip()
@@ -641,14 +656,25 @@ class ConversationEngine:
         # Compaction: archival + summarization + embedding + recall
         if self._compactor:
             try:
-                for agent_id in participants:
-                    await self._compactor.compact_interaction(
-                        agent_id=agent_id,
-                        interaction=transcript_content,
-                        event_type=event_type,
-                        participants=participants,
-                        conversation_id=conv.id,
-                    )
+                # Store transcript ONCE for the conversation (not per-agent)
+                first_agent = participants[0]
+                result = await self._compactor.compact_interaction(
+                    agent_id=first_agent,
+                    interaction=transcript_content,
+                    event_type=event_type,
+                    participants=participants,
+                    conversation_id=conv.id,
+                )
+                # Create per-agent recall memories for remaining participants
+                if result is not None:
+                    for agent_id in participants[1:]:
+                        await self._compactor.compact_recall_only(
+                            agent_id=agent_id,
+                            interaction=transcript_content,
+                            event_type=event_type,
+                            transcript_id=result.transcript.id,
+                            participants=participants,
+                        )
                 logger.info(
                     "Compacted memories for %d participants", len(participants),
                 )
@@ -754,6 +780,7 @@ class ConversationEngine:
                 agent_id="system",
                 temperature=0.1,
                 max_tokens=300,
+                simulation_id=self._simulation_id,
             )
 
             from core.agent_goals import parse_commitments
@@ -814,7 +841,14 @@ class ConversationEngine:
 
         Returns the final approved content, or None on total failure.
         """
-        conv_history = history or []
+        conv_history = list(history or [])
+
+        # Inject topic avoidance hint into conversation history if present
+        if self._active and self._active.trigger.get("topic_avoidance"):
+            conv_history.append({
+                "role": "user",
+                "content": self._active.trigger["topic_avoidance"],
+            })
 
         # Build tool schemas if tools are available for this agent
         agent_tools = self._get_tools_for_agent(agent.id)
@@ -859,7 +893,7 @@ class ConversationEngine:
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
-                messages = await self._context.assemble_context(
+                context_result = await self._context.assemble_context(
                     agent_id=agent.id,
                     conversation_history=conv_history,
                     prompt_hint=prompt_hint,
@@ -868,6 +902,28 @@ class ConversationEngine:
                     shared_state_context=shared_state_context,
                     agent_goals_context=agent_goals_context,
                 )
+                messages = context_result.messages
+
+                # Store prompt log when debug flag is enabled
+                if self._debug_prompts and self._prompt_log_repo and self._active:
+                    try:
+                        from core.models import PromptLogCreate
+
+                        await self._prompt_log_repo.create(PromptLogCreate(
+                            conversation_id=self._active.id,
+                            simulation_id=self._simulation_id,
+                            agent_id=agent.id,
+                            turn_number=self._active.turn_number,
+                            full_prompt=messages[0]["content"] if messages else "",
+                            sections_included=context_result.sections_included,
+                            total_tokens=context_result.total_tokens,
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "Failed to store prompt log for %s turn %d",
+                            agent.id, self._active.turn_number,
+                            exc_info=True,
+                        )
 
                 # Call LLM (with tool-call loop)
                 total_input_tokens = 0
@@ -899,6 +955,7 @@ class ConversationEngine:
                         tools=openai_tools,
                         tool_choice=tc,
                         temperature=0.9,
+                        simulation_id=self._simulation_id,
                     )
 
                     total_input_tokens += response.input_tokens
@@ -976,6 +1033,7 @@ class ConversationEngine:
                         model=agent.model_conversation,
                         agent_id=agent.id,
                         tools=openai_tools,
+                        simulation_id=self._simulation_id,
                     )
                     total_input_tokens += retry_resp.input_tokens
                     total_output_tokens += retry_resp.output_tokens
