@@ -37,7 +37,14 @@ def generate_daily_breakdown(
         day = _get_day_key(conv)
         days[day]["conversations"] += 1
         days[day]["turns"] += conv.get("turn_count", 0)
-        for agent in conv.get("participating_agents", []):
+        agents = conv.get("participating_agents", [])
+        if isinstance(agents, str):
+            import json
+            try:
+                agents = json.loads(agents)
+            except (json.JSONDecodeError, TypeError):
+                agents = []
+        for agent in agents:
             days[day]["agents_active"].add(agent)
             agent_turns_by_day[day][agent] += conv.get("turn_count", 0)
 
