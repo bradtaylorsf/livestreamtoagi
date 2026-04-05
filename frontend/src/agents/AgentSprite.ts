@@ -50,7 +50,7 @@ export class AgentSprite {
   private scene: Phaser.Scene;
   private currentAnimation: string = "idle";
   private currentStatus: StatusType = "idle";
-  private moveTween: Phaser.Tweens.Tween | null = null;
+  private moveTweens: Phaser.Tweens.Tween[] = [];
 
   constructor(scene: Phaser.Scene, config: AgentSpriteConfig) {
     this.scene = scene;
@@ -99,10 +99,11 @@ export class AgentSprite {
   }
 
   moveTo(x: number, y: number): Phaser.Tweens.Tween {
-    // Cancel existing tween
-    if (this.moveTween) {
-      this.moveTween.stop();
+    // Cancel all existing movement tweens
+    for (const tween of this.moveTweens) {
+      tween.stop();
     }
+    this.moveTweens = [];
 
     // Determine walk direction animation
     const dx = x - this.sprite.x;
@@ -113,27 +114,21 @@ export class AgentSprite {
       this.playAnimation(dy > 0 ? "walk_down" : "walk_up");
     }
 
-    this.moveTween = this.scene.tweens.add({
-      targets: [this.sprite, this.nameLabel, this.statusLabel],
-      duration: TWEEN_DURATION_MS,
-      ease: "Power2",
-      onComplete: () => {
-        this.moveTween = null;
-        this.playAnimation("idle");
-      },
-    });
-
     // Tween sprite to target
-    this.scene.tweens.add({
+    const spriteTween = this.scene.tweens.add({
       targets: this.sprite,
       x,
       y,
       duration: TWEEN_DURATION_MS,
       ease: "Power2",
+      onComplete: () => {
+        this.moveTweens = [];
+        this.playAnimation("idle");
+      },
     });
 
     // Tween labels to follow
-    this.scene.tweens.add({
+    const nameTween = this.scene.tweens.add({
       targets: this.nameLabel,
       x,
       y: y + 4,
@@ -141,7 +136,7 @@ export class AgentSprite {
       ease: "Power2",
     });
 
-    this.scene.tweens.add({
+    const statusTween = this.scene.tweens.add({
       targets: this.statusLabel,
       x,
       y: y - this.sprite.height - 4,
@@ -149,7 +144,8 @@ export class AgentSprite {
       ease: "Power2",
     });
 
-    return this.moveTween;
+    this.moveTweens = [spriteTween, nameTween, statusTween];
+    return spriteTween;
   }
 
   setStatus(status: StatusType): void {
@@ -176,8 +172,8 @@ export class AgentSprite {
   }
 
   destroy(): void {
-    if (this.moveTween) {
-      this.moveTween.stop();
+    for (const tween of this.moveTweens) {
+      tween.stop();
     }
     this.sprite.destroy();
     this.nameLabel.destroy();
