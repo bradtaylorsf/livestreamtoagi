@@ -1,0 +1,59 @@
+{
+  "characters": {
+    "vera": {
+      "pixellab_id": "6852984e-0085-43d6-85d9-8b2c6d6ca03d",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "rex": {
+      "pixellab_id": "52cd36c6-3f01-45a5-b7c5-c3a39b15bc9e",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "aurora": {
+      "pixellab_id": "cdca70c7-942d-4ec4-ade2-989cd845e61f",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "pixel": {
+      "pixellab_id": "1f9de7a4-4cc4-4f6b-b0a9-53ce4f0958d9",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "fork": {
+      "pixellab_id": "6697d2a9-a459-4aee-8cc1-4dbfbc6429f3",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "sentinel": {
+      "pixellab_id": "282a3839-835e-4e4c-b352-2ffe800a8a8f",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "grok": {
+      "pixellab_id": "6759c603-5821-41fd-96ed-aae877cd51af",
+      "size": 32,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    },
+    "alpha": {
+      "pixellab_id": "cfe5c2c3-b4a6-4491-9047-bce627a3dd22",
+      "size": 24,
+      "directions": 8,
+      "animations": ["breathing-idle", "walking"]
+    }
+  },
+  "tilesets": {
+    "office_floor_wall": {
+      "pixellab_id": "8d364187-3c7b-4e92-bbd7-ebbb625eb9da",
+      "tile_size": 32,
+      "tiles": 16
+    }
+  }
+}

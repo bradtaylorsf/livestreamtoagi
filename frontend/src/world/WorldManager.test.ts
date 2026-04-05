@@ -116,10 +116,10 @@ describe("WorldManager", () => {
   it("configures camera bounds to world size", () => {
     worldManager.create();
     expect(mockScene.scene.cameras.main.setBounds).toHaveBeenCalledWith(
-      0,
-      0,
-      1280,
-      704,
+      -16,
+      -16,
+      1312,
+      736,
     );
   });
 

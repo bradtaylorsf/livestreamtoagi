@@ -56,15 +56,13 @@ export class WorldManager {
       this.areas = cacheEntry.data.areas as TilemapAreas;
     }
 
-    // Configure camera
+    // Configure camera — zoom to fit entire office in viewport with padding
     const cam = this.scene.cameras.main;
-    cam.setBounds(0, 0, this.worldWidth, this.worldHeight);
-
-    // Zoom to fit the full office in view
-    const zoomX = cam.width / this.worldWidth;
-    const zoomY = cam.height / this.worldHeight;
-    const zoom = Math.min(zoomX, zoomY, 1);
-    cam.setZoom(zoom);
+    const pad = 16; // pixels of padding around the edges
+    cam.setBounds(-pad, -pad, this.worldWidth + pad * 2, this.worldHeight + pad * 2);
+    const zoomX = cam.width / (this.worldWidth + pad * 2);
+    const zoomY = cam.height / (this.worldHeight + pad * 2);
+    cam.setZoom(Math.min(zoomX, zoomY));
     cam.centerOn(this.worldWidth / 2, this.worldHeight / 2);
   }
 
