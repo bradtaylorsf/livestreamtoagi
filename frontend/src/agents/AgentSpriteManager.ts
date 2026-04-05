@@ -137,16 +137,17 @@ export class AgentSpriteManager {
       if (pos) return pos;
     }
 
-    // Fallback desk positions (pixel coordinates matching office_layout.json)
+    // Fallback desk positions (pixel coordinates matching 50x34 office_layout.json)
+    // Center of each 6x6 tile area: (tileX + 3) * 32, (tileY + 3) * 32
     const fallbackPositions: Record<string, { x: number; y: number }> = {
-      vera: { x: 176, y: 160 },
-      rex: { x: 176, y: 288 },
-      aurora: { x: 176, y: 416 },
-      pixel: { x: 176, y: 544 },
-      fork: { x: 496, y: 160 },
-      sentinel: { x: 496, y: 288 },
-      grok: { x: 496, y: 416 },
-      alpha: { x: 176, y: 224 }, // Near Vera by default
+      vera: { x: 192, y: 192 },       // area (3,3) center at (6,6)*32
+      aurora: { x: 448, y: 192 },     // area (11,3) center at (14,6)*32
+      fork: { x: 704, y: 192 },       // area (19,3) center at (22,6)*32
+      sentinel: { x: 1152, y: 192 },  // area (33,3) center at (36,6)*32
+      grok: { x: 1408, y: 192 },      // area (41,3) center at (44,6)*32
+      rex: { x: 192, y: 896 },        // area (3,25) center at (6,28)*32
+      pixel: { x: 448, y: 896 },      // area (11,25) center at (14,28)*32
+      alpha: { x: 240, y: 240 },      // Near Vera
     };
 
     return fallbackPositions[agent.id] ?? { x: 100, y: 100 };

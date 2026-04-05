@@ -58,6 +58,7 @@ export class AgentSprite {
 
     this.sprite = scene.add.sprite(config.x, config.y, config.spriteKey);
     this.sprite.setOrigin(0.5, 1);
+    this.sprite.setDepth(2); // Render above furniture (depth 1)
 
     // Name label below sprite
     this.nameLabel = scene.add.text(config.x, config.y + 4, config.name, {
@@ -69,6 +70,7 @@ export class AgentSprite {
       strokeThickness: 2,
     });
     this.nameLabel.setOrigin(0.5, 0);
+    this.nameLabel.setDepth(3);
 
     // Status indicator above sprite
     this.statusLabel = scene.add.text(
@@ -81,7 +83,11 @@ export class AgentSprite {
       },
     );
     this.statusLabel.setOrigin(0.5, 1);
+    this.statusLabel.setDepth(3);
     this.statusLabel.setVisible(false);
+
+    // Auto-play idle animation if it exists
+    this.playAnimation("idle");
   }
 
   playAnimation(name: string): void {
