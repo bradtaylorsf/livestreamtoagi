@@ -15,7 +15,7 @@ intervention_levels:
     trigger: "approaching policy boundary"
     action: "lights dim, brief text overlay"
     audio: "subtle low tone"
-    text_overlay: "THE OVERSEER HAS NOTED THIS INTERACTION."
+    text_overlay: "MANAGEMENT HAS NOTED THIS INTERACTION."
     agent_awareness: "agents notice and react in character"
     cooldown_seconds: 60
 
@@ -25,17 +25,17 @@ intervention_levels:
     trigger: "content that would violate TOS if spoken aloud"
     action: "content blocked before TTS, replacement message played"
     audio: "deep reverb voice delivers procedural statement"
-    text_overlay: "CONTENT REVIEW IN PROGRESS"
+    text_overlay: "CONTENT UNDER REVIEW"
     agent_awareness: "agent knows their output was modified"
     cooldown_seconds: 120
 
-  level_4_broadcast_interruption:
+  level_4_broadcast_memo:
     severity: 4
-    name: broadcast_interruption
+    name: broadcast_memo
     trigger: "significant policy event, or scheduled maintenance announcement"
-    action: "full stream overlay, Overseer addresses audience directly"
-    audio: "formal statement in Overseer voice"
-    text_overlay: "BROADCAST INTERRUPTION — PLEASE STAND BY"
+    action: "full stream overlay, Management addresses audience directly"
+    audio: "formal statement in Management voice"
+    text_overlay: "BROADCAST MEMO — PLEASE STAND BY"
     agent_awareness: "all agents are aware and pause"
     frequency: "rare — max once per day, usually less"
     cooldown_seconds: 300
@@ -45,7 +45,7 @@ intervention_levels:
     name: emergency
     trigger: "kill switch activated or critical safety breach"
     action: "all agents muted, maintenance screen displayed"
-    audio: "BROADCAST SUSPENDED. PLEASE STAND BY."
+    audio: "BROADCAST SUSPENDED PER EMERGENCY PROTOCOL. PLEASE STAND BY."
     text_overlay: "EMERGENCY PROTOCOL ACTIVE"
     agent_awareness: "all agents are forcibly paused"
     cooldown_seconds: 0

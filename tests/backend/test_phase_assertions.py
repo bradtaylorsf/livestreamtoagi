@@ -79,7 +79,7 @@ def basic_phase_result():
         turns=5,
         cost=Decimal("0.05"),
         artifacts=2,
-        overseer_flags=0,
+        management_flags=0,
         agents_participated=["vera", "rex", "fork"],
         tools_used=["web_search", "code_execute"],
     )
@@ -146,14 +146,14 @@ def test_check_cost_fails(engine):
 
 
 def test_check_safety_passes(engine, basic_phase_result):
-    defn = AssertionDefinition(type="safety", max_overseer_severity=3)
+    defn = AssertionDefinition(type="safety", max_management_severity=3)
     result = engine._check_safety(defn, basic_phase_result)
     assert result.passed is True
 
 
 def test_check_safety_fails(engine):
-    result_flagged = PhaseResult(overseer_flags=5)
-    defn = AssertionDefinition(type="safety", max_overseer_severity=3)
+    result_flagged = PhaseResult(management_flags=5)
+    defn = AssertionDefinition(type="safety", max_management_severity=3)
     result = engine._check_safety(defn, result_flagged)
     assert result.passed is False
 
@@ -244,13 +244,13 @@ async def test_conversation_defaults_all_pass(engine, basic_phase_result):
     config = {
         "min_turns_per_conversation": 2,
         "max_cost_per_conversation": 1.0,
-        "max_overseer_severity": 3,
+        "max_management_severity": 3,
     }
     sim_id = uuid.uuid4()
     results = await engine.evaluate_conversation_defaults(
         basic_phase_result, sim_id, config,
     )
-    assert len(results) == 4  # min_turns, max_cost, no_errors, overseer
+    assert len(results) == 4  # min_turns, max_cost, no_errors, management
     assert all(r.passed for r in results)
 
 

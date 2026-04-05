@@ -82,30 +82,30 @@ class TestProposeSelfModification:
         assert "other agents" in result["reason"].lower() or "Cannot modify" in result["reason"]
         memory_repo.create_proposal.assert_not_called()
 
-    async def test_overseer_modification_rejected(
+    async def test_management_modification_rejected(
         self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
     ) -> None:
         result = await propose_tool.execute(
-            file="agents/overseer/config.yaml",
+            file="agents/management/config.yaml",
             change_description="Disable content filter",
             new_content="enabled: false",
         )
 
         assert result["status"] == "rejected"
-        assert "overseer" in result["reason"].lower()
+        assert "management" in result["reason"].lower()
         memory_repo.create_proposal.assert_not_called()
 
-    async def test_overseer_case_insensitive(
+    async def test_management_case_insensitive(
         self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock
     ) -> None:
         result = await propose_tool.execute(
-            file="agents/Overseer/config.yaml",
-            change_description="Modify Overseer",
+            file="agents/Management/config.yaml",
+            change_description="Modify Management",
             new_content="something",
         )
 
         assert result["status"] == "rejected"
-        assert "overseer" in result["reason"].lower()
+        assert "management" in result["reason"].lower()
 
     async def test_permissions_file_rejected(
         self, propose_tool: ProposeSelfModificationTool, memory_repo: AsyncMock

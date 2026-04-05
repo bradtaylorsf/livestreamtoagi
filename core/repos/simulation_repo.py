@@ -111,7 +111,7 @@ class SimulationRepo:
         tokens: int = 0,
         cost: Decimal = Decimal("0"),
         artifacts: int = 0,
-        overseer_flags: int = 0,
+        management_flags: int = 0,
     ) -> Simulation | None:
         row = await self.db.fetchrow(
             """UPDATE simulations SET
@@ -120,7 +120,7 @@ class SimulationRepo:
                  total_tokens = total_tokens + $3,
                  total_cost = total_cost + $4,
                  total_artifacts = total_artifacts + $5,
-                 total_overseer_flags = total_overseer_flags + $6
+                 total_management_flags = total_management_flags + $6
                WHERE id = $7
                RETURNING *""",
             conversations,
@@ -128,7 +128,7 @@ class SimulationRepo:
             tokens,
             cost,
             artifacts,
-            overseer_flags,
+            management_flags,
             simulation_id,
         )
         if row is None:
@@ -217,7 +217,7 @@ class SimulationRepo:
     ) -> list[dict]:
         """Return a chronological timeline of events for a simulation.
 
-        Unions conversations (start/end), artifacts, and overseer flags.
+        Unions conversations (start/end), artifacts, and management flags.
         """
         events: list[dict] = []
 
@@ -294,18 +294,18 @@ class SimulationRepo:
         events.sort(key=lambda e: e["timestamp"] or "")
         return events
 
-    async def get_overseer_log(
+    async def get_management_log(
         self,
         simulation_id: uuid.UUID,
         *,
         severity_min: int = 1,
     ) -> list[dict]:
-        """Return overseer shadow flags for a simulation filtered by severity."""
+        """Return management shadow flags for a simulation filtered by severity."""
         rows = await self.db.fetch(
             """SELECT id, agent_id, original_content, filter_layer,
                       severity, action_would_take, reason,
                       flagged_keywords, created_at
-               FROM overseer_shadow_log
+               FROM management_shadow_log
                WHERE simulation_id = $1
                  AND severity >= $2
                ORDER BY created_at""",

@@ -65,15 +65,15 @@ class ProposeSelfModificationTool(BaseTool):
 
         file_lower = file.lower()
 
-        # Cannot modify Overseer
-        if "overseer" in file_lower:
+        # Cannot modify Management
+        if "management" in file_lower:
             logger.warning(
-                "Agent %s attempted to modify Overseer file: %s",
+                "Agent %s attempted to modify Management file: %s",
                 self.agent_id, file,
             )
             return {
                 "status": "rejected",
-                "reason": "Cannot modify Overseer configuration",
+                "reason": "Cannot modify Management configuration",
             }
 
         # Cannot modify permissions files

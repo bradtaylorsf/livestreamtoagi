@@ -26,7 +26,7 @@ AGENT_COLORS: dict[str, str] = {
     "fork": "bright_red",
     "sentinel": "blue",
     "grok": "dark_orange",
-    "overseer": "bright_white",
+    "management": "bright_white",
     "alpha": "grey70",
 }
 
@@ -176,7 +176,7 @@ class SimulationDisplay:
         table.add_row("Total tokens", f"{sim.total_tokens:,}")
         table.add_row("Total cost", f"${sim.total_cost:.4f}")
         table.add_row("Total artifacts", str(sim.total_artifacts))
-        table.add_row("Overseer flags", str(sim.total_overseer_flags))
+        table.add_row("Management flags", str(sim.total_management_flags))
         table.add_row("Agents", ", ".join(sim.agents_participated))
         table.add_row("Real duration", f"{real_duration.total_seconds():.1f}s")
         if sim.simulated_duration:

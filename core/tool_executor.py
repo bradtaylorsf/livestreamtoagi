@@ -40,7 +40,7 @@ def build_agent_tools(
         event_bus=services.event_bus,
         redis_client=services.redis,
         agent_id=agent_id,
-        overseer=services.overseer,
+        management=services.management,
         world_repo=services.world_repo,
         cost_repo=services.cost_repo,
         llm_client=services.llm_client,

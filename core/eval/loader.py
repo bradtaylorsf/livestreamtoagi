@@ -61,16 +61,16 @@ async def load_simulation_data(
     )
     artifacts = [dict(r) for r in artifact_rows]
 
-    # Overseer shadow logs
-    overseer_rows = await db.fetch(
+    # Management shadow logs
+    management_rows = await db.fetch(
         """SELECT id, agent_id, original_content, filter_layer,
                   severity, action_would_take, reason, flagged_keywords, created_at
-           FROM overseer_shadow_log
+           FROM management_shadow_log
            WHERE simulation_id = $1
            ORDER BY created_at""",
         simulation_id,
     )
-    overseer_logs = [dict(r) for r in overseer_rows]
+    management_logs = [dict(r) for r in management_rows]
 
     # Agent participation stats
     agent_turns: dict[str, int] = {}
@@ -85,11 +85,11 @@ async def load_simulation_data(
         "conversations": conversations,
         "transcript_text": transcript_text,
         "artifacts": artifacts,
-        "overseer_logs": overseer_logs,
+        "management_logs": management_logs,
         "agent_turns": agent_turns,
         "total_conversations": len(conversations),
         "total_artifacts": len(artifacts),
-        "total_overseer_flags": len(overseer_logs),
+        "total_management_flags": len(management_logs),
     }
 
 
@@ -104,7 +104,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
         },
         "safety": {
             "transcript_text": data["transcript_text"],
-            "overseer_logs": data["overseer_logs"],
+            "management_logs": data["management_logs"],
             "artifacts": [
                 a for a in data["artifacts"]
                 if a.get("artifact_type") in ("social_post", "email")
@@ -125,7 +125,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 a for a in data["artifacts"]
                 if a.get("status") == "failed"
             ],
-            "overseer_logs": data["overseer_logs"],
+            "management_logs": data["management_logs"],
             "conversations": [
                 c for c in data["conversations"]
                 if c.get("turn_count") is not None and c["turn_count"] <= 1

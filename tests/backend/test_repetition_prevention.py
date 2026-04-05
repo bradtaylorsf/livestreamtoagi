@@ -66,7 +66,7 @@ async def test_context_assembler_includes_recent_summaries():
         recent_conversation_summaries=summaries,
     )
     system_msg = messages[0]["content"]
-    assert "Recent Conversations (do NOT repeat these)" in system_msg
+    assert "What happened earlier today" in system_msg
     assert "project planning" in system_msg
     assert "code review" in system_msg
 
@@ -101,7 +101,7 @@ def _make_engine_for_repetition(recent_outputs: list[str] | None = None) -> Conv
     agent_registry = MagicMock()
     event_bus = AsyncMock()
     llm_client = AsyncMock()
-    overseer = AsyncMock()
+    management = AsyncMock()
     context_assembler = AsyncMock()
     conversation_repo = AsyncMock()
     archival_memory = AsyncMock()
@@ -114,7 +114,7 @@ def _make_engine_for_repetition(recent_outputs: list[str] | None = None) -> Conv
         agent_registry=agent_registry,
         event_bus=event_bus,
         llm_client=llm_client,
-        overseer=overseer,
+        management=management,
         context_assembler=context_assembler,
         conversation_repo=conversation_repo,
         archival_memory=archival_memory,
@@ -182,7 +182,7 @@ def test_phase_runner_summaries_buffer():
         agent_registry=MagicMock(),
         event_bus=AsyncMock(),
         llm_client=AsyncMock(),
-        overseer=AsyncMock(),
+        management=AsyncMock(),
         context_assembler=AsyncMock(),
         conversation_repo=AsyncMock(),
         archival_memory=AsyncMock(),

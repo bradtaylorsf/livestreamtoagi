@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.compaction import MemoryCompactor
     from core.memory.reflection import ReflectionManager
-    from core.overseer import Overseer
+    from core.management import Management
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
@@ -48,7 +48,7 @@ _AGENT_STYLES: dict[str, str] = {
     "fork": "bright_red",
     "sentinel": "blue",
     "grok": "dark_orange",
-    "overseer": "bright_white",
+    "management": "bright_white",
     "alpha": "grey70",
 }
 
@@ -80,8 +80,8 @@ def _display_agent_speak(agent_id: str, data: dict) -> None:
     )
 
 
-def _display_overseer_flag(data: dict) -> None:
-    """Print overseer flag event."""
+def _display_management_flag(data: dict) -> None:
+    """Print management flag event."""
     from core.simulation.display import console
 
     agent = data.get("agent_id", "?")
@@ -143,7 +143,7 @@ class PhaseResult:
     tokens: int = 0
     cost: Decimal = field(default_factory=lambda: Decimal("0"))
     artifacts: int = 0
-    overseer_flags: int = 0
+    management_flags: int = 0
     errors: list[str] = field(default_factory=list)
     agents_participated: list[str] = field(default_factory=list)
     assertions: list[Any] = field(default_factory=list)
@@ -160,7 +160,7 @@ class PhaseRunner:
         agent_registry: AgentRegistry,
         event_bus: EventBus,
         llm_client: OpenRouterClient,
-        overseer: Overseer,
+        management: Management,
         context_assembler: ContextAssembler,
         conversation_repo: ConversationRepo,
         archival_memory: ArchivalMemoryManager,
@@ -181,7 +181,7 @@ class PhaseRunner:
         self._agents = agent_registry
         self._event_bus = event_bus
         self._llm = llm_client
-        self._overseer = overseer
+        self._management = management
         self._context = context_assembler
         self._conversation_repo = conversation_repo
         self._archival = archival_memory
@@ -207,7 +207,7 @@ class PhaseRunner:
         self._phase_turns = 0
         self._phase_cost = Decimal("0")
         self._phase_tokens = 0
-        self._phase_overseer_flags = 0
+        self._phase_management_flags = 0
         self._phase_artifacts = 0
         self._phase_agents: set[str] = set()
         self._phase_tools_used: set[str] = set()
@@ -246,7 +246,7 @@ class PhaseRunner:
         result.turns = self._phase_turns
         result.cost = self._phase_cost
         result.tokens = self._phase_tokens
-        result.overseer_flags = self._phase_overseer_flags
+        result.management_flags = self._phase_management_flags
         result.artifacts = self._phase_artifacts
         result.agents_participated = list(self._phase_agents)
         result.tools_used = sorted(self._phase_tools_used)
@@ -257,7 +257,7 @@ class PhaseRunner:
         self._phase_turns = 0
         self._phase_cost = Decimal("0")
         self._phase_tokens = 0
-        self._phase_overseer_flags = 0
+        self._phase_management_flags = 0
         self._phase_artifacts = 0
         self._phase_agents.clear()
         self._phase_tools_used.clear()
@@ -447,10 +447,10 @@ class PhaseRunner:
             # Live display of agent dialogue
             _display_agent_speak(agent_id or "?", data)
 
-        async def _on_overseer(event: dict) -> None:
-            self._phase_overseer_flags += 1
+        async def _on_management(event: dict) -> None:
+            self._phase_management_flags += 1
             data = event.get("data", event)
-            _display_overseer_flag(data)
+            _display_management_flag(data)
 
         async def _on_artifact(event: dict) -> None:
             self._phase_artifacts += 1
@@ -461,8 +461,8 @@ class PhaseRunner:
             _display_artifact(data)
 
         self._event_bus.on("agent_speak", _on_speak)
-        self._event_bus.on("overseer_shadow", _on_overseer)
-        self._event_bus.on("overseer_warning", _on_overseer)
+        self._event_bus.on("management_shadow", _on_management)
+        self._event_bus.on("management_warning", _on_management)
         self._event_bus.on("artifact_created", _on_artifact)
 
         try:
@@ -471,7 +471,7 @@ class PhaseRunner:
                 agent_registry=self._agents,
                 event_bus=self._event_bus,
                 llm_client=self._llm,
-                overseer=self._overseer,
+                management=self._management,
                 context_assembler=self._context,
                 conversation_repo=self._conversation_repo,
                 archival_memory=self._archival,
@@ -481,7 +481,7 @@ class PhaseRunner:
                 compactor=self._compactor,
                 memory_repo=self._memory_repo,
                 speed_multiplier=0,  # No delays in simulation
-                overseer_enabled=True,
+                management_enabled=True,
                 simulation_id=self._simulation_id,
                 services=self._services,
                 clock=self._clock,
@@ -511,8 +511,8 @@ class PhaseRunner:
 
         finally:
             self._event_bus.off("agent_speak", _on_speak)
-            self._event_bus.off("overseer_shadow", _on_overseer)
-            self._event_bus.off("overseer_warning", _on_overseer)
+            self._event_bus.off("management_shadow", _on_management)
+            self._event_bus.off("management_warning", _on_management)
             self._event_bus.off("artifact_created", _on_artifact)
 
         # Collect conversation summary for cross-phase context

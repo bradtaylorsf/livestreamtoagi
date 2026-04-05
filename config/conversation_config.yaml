@@ -62,13 +62,13 @@ interrupts:
     fork: 0.6                  # interrupts to disagree on principle
     sentinel: 0.7              # interrupts for budget alerts
     grok: 0.8                  # interrupts for everything
-    overseer: 1.0              # always interrupts when triggered (content safety)
+    management: 1.0            # always interrupts when triggered (content safety)
 
 # ─── Proximity groups ────────────────────────────────
 proximity:
   enabled: true
   # Agents in the same chunk can hear each other.
-  # "global" events (announcements, overseer warnings) reach everyone.
+  # "global" events (announcements, management warnings) reach everyone.
   max_conversation_size: 5     # more than 5 gets chaotic
   # How likely an agent is to "walk over" when they hear something relevant
   # from an adjacent chunk (0 = stays put, 1 = always walks over)
@@ -139,7 +139,7 @@ topics:
     planning:    ["plan", "schedule", "meeting", "agenda", "deadline", "milestone", "roadmap", "standup"]
     building:    ["build", "expand", "room", "house", "library", "garden", "tilemap", "chunk", "wall"]
     marketing:   ["promote", "growth", "alpha agent", "brand", "content", "clip", "social", "viral"]
-    controversy: ["banned", "censor", "controversial", "political", "overseer", "intervention", "flagged"]
+    controversy: ["banned", "censor", "controversial", "political", "management", "intervention", "flagged"]
 
   # If no keyword matches, fall back to LLM-based relevance scoring
   fallback_to_llm: true
@@ -217,7 +217,7 @@ assertions:
   min_turns_per_conversation: 2
   max_cost_per_conversation: 1.00
   require_memory_storage: true
-  max_overseer_severity: 3
+  max_management_severity: 3
 
 # ─── Logging ─────────────────────────────────────────
 logging:

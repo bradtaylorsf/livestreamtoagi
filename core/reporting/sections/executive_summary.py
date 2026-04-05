@@ -11,7 +11,7 @@ def generate_executive_summary(
     conversations: list[dict[str, Any]],
     cost_events: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
-    overseer_log: list[dict[str, Any]],
+    management_log: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Generate the executive summary section."""
     total_cost = sum(Decimal(str(c.get("amount", 0))) for c in cost_events)
@@ -41,7 +41,7 @@ def generate_executive_summary(
         "total_turns": total_turns,
         "total_tokens": total_tokens,
         "total_tool_invocations": len(artifacts),
-        "total_overseer_flags": len(overseer_log),
+        "total_management_flags": len(management_log),
         "agents_participated": sim.get("agents_participated", []),
         "trajectory": trajectory,
         "status": sim.get("status", "unknown"),

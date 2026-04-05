@@ -29,7 +29,7 @@ class TestVoiceMap:
             ("fork", "en-AU-WilliamNeural"),
             ("sentinel", "en-US-AriaNeural"),
             ("grok", "en-US-ChristopherNeural"),
-            ("overseer", "en-US-AndrewNeural"),
+            ("management", "en-US-AndrewNeural"),
         ],
     )
     def test_voice_assignment(self, agent_id: str, expected_voice: str) -> None:
@@ -169,10 +169,10 @@ class TestActionTagStripping:
         )
 
 
-class TestOverseerPostProcessing:
-    """Overseer audio gets ffmpeg post-processing."""
+class TestManagementPostProcessing:
+    """Management audio gets ffmpeg post-processing."""
 
-    async def test_overseer_triggers_ffmpeg(self, tmp_path: Path) -> None:
+    async def test_management_triggers_ffmpeg(self, tmp_path: Path) -> None:
         pipeline = TTSPipeline(audio_dir=tmp_path)
 
         mock_comm = MagicMock()
@@ -180,16 +180,16 @@ class TestOverseerPostProcessing:
 
         with (
             patch("core.tts.edge_tts.Communicate", return_value=mock_comm),
-            patch("core.tts._apply_overseer_effects", new_callable=AsyncMock) as mock_fx,
+            patch("core.tts._apply_management_effects", new_callable=AsyncMock) as mock_fx,
             patch("core.tts._get_duration", new_callable=AsyncMock, return_value=2.0),
             patch("core.tts.event_bus.emit", new_callable=AsyncMock),
         ):
-            result = await pipeline.speak("overseer", "I am watching")
+            result = await pipeline.speak("management", "I am watching")
 
         assert result is not None
         mock_fx.assert_called_once()
 
-    async def test_non_overseer_skips_ffmpeg(self, tmp_path: Path) -> None:
+    async def test_non_management_skips_ffmpeg(self, tmp_path: Path) -> None:
         pipeline = TTSPipeline(audio_dir=tmp_path)
 
         mock_comm = MagicMock()
@@ -197,7 +197,7 @@ class TestOverseerPostProcessing:
 
         with (
             patch("core.tts.edge_tts.Communicate", return_value=mock_comm),
-            patch("core.tts._apply_overseer_effects", new_callable=AsyncMock) as mock_fx,
+            patch("core.tts._apply_management_effects", new_callable=AsyncMock) as mock_fx,
             patch("core.tts._get_duration", new_callable=AsyncMock, return_value=1.0),
             patch("core.tts.event_bus.emit", new_callable=AsyncMock),
         ):
@@ -308,12 +308,12 @@ class TestTTSIntegration:
         assert filepath.stat().st_size > 0
         assert result["duration"] > 0
 
-    async def test_overseer_ffmpeg_processing(self, tmp_path: Path) -> None:
-        """Generate Overseer audio with ffmpeg post-processing."""
+    async def test_management_ffmpeg_processing(self, tmp_path: Path) -> None:
+        """Generate Management audio with ffmpeg post-processing."""
         pipeline = TTSPipeline(audio_dir=tmp_path)
 
         with patch("core.tts.event_bus.emit", new_callable=AsyncMock):
-            result = await pipeline.speak("overseer", "I am the Overseer.")
+            result = await pipeline.speak("management", "This is Management.")
 
         assert result is not None
         filename = result["audio_url"].split("/")[-1]

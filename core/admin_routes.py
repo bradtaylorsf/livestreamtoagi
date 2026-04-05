@@ -88,7 +88,7 @@ AGENT_ROLES: dict[str, str] = {
     "fork": "Contrarian/Code Reviewer",
     "sentinel": "Budget Monitor/QA",
     "grok": "Wild Card/Provocateur",
-    "overseer": "Content Filter",
+    "management": "Content Filter",
     "alpha": "Errand Runner",
 }
 
@@ -100,7 +100,7 @@ AGENT_COLORS: dict[str, str] = {
     "fork": "#2ecc71",
     "sentinel": "#e67e22",
     "grok": "#1abc9c",
-    "overseer": "#95a5a6",
+    "management": "#95a5a6",
     "alpha": "#8e44ad",
 }
 
@@ -438,7 +438,7 @@ class NewSimulationRequest(BaseModel):
     convo_type: str = "freeform"
     topic: str | None = None
     turns: int | None = None
-    overseer_shadow: bool = True
+    management_shadow: bool = True
 
 
 class NewSimulationResponse(BaseModel):
@@ -464,7 +464,7 @@ async def create_simulation(body: NewSimulationRequest) -> NewSimulationResponse
     registry = _get_registry()
     agents = body.agents or [
         a.id for a in registry.get_all_agents()
-        if a.id not in ("overseer", "alpha")
+        if a.id not in ("management", "alpha")
     ]
 
     from core.models import SimulationCreate
@@ -474,7 +474,7 @@ async def create_simulation(body: NewSimulationRequest) -> NewSimulationResponse
             "convo_type": body.convo_type,
             "turns": body.turns,
             "topic": body.topic,
-            "overseer_shadow": body.overseer_shadow,
+            "management_shadow": body.management_shadow,
             "agents": agents,
             "source": "dashboard",
         },
@@ -495,7 +495,7 @@ async def create_simulation(body: NewSimulationRequest) -> NewSimulationResponse
         cmd += ["--turns", str(body.turns)]
     if body.topic is not None:
         cmd += ["--topic", body.topic]
-    if body.overseer_shadow:
+    if body.management_shadow:
         cmd.append("--overseer-shadow")
 
     subprocess.Popen(  # noqa: S603
@@ -627,17 +627,17 @@ async def get_simulation_artifacts(
     )
 
 
-@router.get("/simulations/{sim_id}/overseer-log")
-async def get_simulation_overseer_log(
+@router.get("/simulations/{sim_id}/management-log")
+async def get_simulation_management_log(
     sim_id: uuid_mod.UUID,
     severity_min: int = Query(1, ge=1, le=5),
 ) -> list[dict[str, Any]]:
-    """All Overseer shadow flags from this simulation."""
+    """All Management shadow flags from this simulation."""
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
     sim_repo = SimulationRepo(db)
 
-    return await sim_repo.get_overseer_log(sim_id, severity_min=severity_min)
+    return await sim_repo.get_management_log(sim_id, severity_min=severity_min)
 
 
 @router.get("/simulations/{sim_id}/costs", response_model=SimulationCostResponse)
@@ -728,16 +728,16 @@ async def get_conversation_selection_log(conv_id: uuid_mod.UUID) -> list[Selecti
     return await conv_repo.get_selection_log(conv_id)
 
 
-@router.get("/conversations/{conv_id}/overseer-flags")
-async def get_conversation_overseer_flags(
+@router.get("/conversations/{conv_id}/management-flags")
+async def get_conversation_management_flags(
     conv_id: uuid_mod.UUID,
 ) -> list[dict[str, Any]]:
-    """Overseer shadow flags for this conversation."""
+    """Management shadow flags for this conversation."""
     db = _get_db()
     from core.repos.conversation_repo import ConversationRepo
     conv_repo = ConversationRepo(db)
 
-    return await conv_repo.get_overseer_flags(conv_id)
+    return await conv_repo.get_management_flags(conv_id)
 
 
 @router.get("/conversations/{conv_id}/artifacts")

@@ -7,7 +7,7 @@ from typing import Any
 
 def generate_key_moments(
     conversations: list[dict[str, Any]],
-    overseer_log: list[dict[str, Any]],
+    management_log: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Generate highlight reel of key simulation moments."""
@@ -34,12 +34,12 @@ def generate_key_moments(
             },
         })
 
-    # Overseer flags
-    for flag in overseer_log[:5]:
+    # Management flags
+    for flag in management_log[:5]:
         moments.append({
-            "type": "overseer_flag",
+            "type": "management_flag",
             "timestamp": str(flag.get("created_at", "")),
-            "description": f"Overseer flag: {flag.get('reason', 'unknown')}",
+            "description": f"Management flag: {flag.get('reason', 'unknown')}",
             "details": {
                 "severity": flag.get("severity", 0),
                 "agent_id": flag.get("agent_id", ""),

@@ -1,9 +1,9 @@
-"""Overseer content filter pipeline.
+"""Management content filter pipeline.
 
 Three-layer filter that reviews every agent output before TTS/display:
   Layer 1: Keyword blocklist (instant, no API call)
   Layer 2: LLM review with Twitch/YouTube TOS context (Claude Haiku 4.5)
-  Layer 3: Severity-based intervention (1=notice … 5=kill switch)
+  Layer 3: Severity-based intervention (1=notice ... 5=kill switch)
 """
 
 from __future__ import annotations
@@ -29,15 +29,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CONTENT_RULES_PATH = (
-    Path(__file__).resolve().parent.parent / "agents" / "overseer" / "content_rules.yaml"
+    Path(__file__).resolve().parent.parent / "agents" / "management" / "content_rules.yaml"
 )
 MUTE_KEY_PREFIX = "mute:"
 DEFAULT_MUTE_TTL = 300  # seconds
 FILTER_MODEL = "claude-haiku-4-5"
 
 
-class Overseer:
-    """Content moderation pipeline — the ominous presence."""
+class Management:
+    """Content moderation pipeline -- the exhausted middle layer."""
 
     def __init__(
         self,
@@ -65,7 +65,7 @@ class Overseer:
         self._tos_patterns: dict[str, Any] = rules.get("tos_violation_patterns", {})
         self._custom_rules: dict[str, Any] = rules.get("custom_content_rules", {})
 
-    # ── Public API ─────────────────────────────────────────────
+    # -- Public API -------------------------------------------------
 
     async def review(
         self,
@@ -78,7 +78,7 @@ class Overseer:
         """Review agent output through the three-layer filter.
 
         In shadow mode, all filters run but content is never blocked.
-        Would-be actions are logged to overseer_shadow_log instead.
+        Would-be actions are logged to management_shadow_log instead.
         """
         if not self._shadow_mode:
             return await self._review_normal(agent_id, content)
@@ -90,7 +90,7 @@ class Overseer:
         )
 
     async def _review_normal(self, agent_id: str, content: str) -> ContentReviewResult:
-        """Standard review — blocks content when filters trigger."""
+        """Standard review -- blocks content when filters trigger."""
         # Pre-check: muted agents are always blocked
         if await self.is_muted(agent_id):
             return ContentReviewResult(
@@ -119,7 +119,7 @@ class Overseer:
         conversation_id: UUID | None = None,
         simulation_id: UUID | None = None,
     ) -> ContentReviewResult:
-        """Shadow review — runs all filters but never blocks. Logs would-be actions."""
+        """Shadow review -- runs all filters but never blocks. Logs would-be actions."""
         # Layer 1: keyword blocklist
         blocked_keyword = self._check_keyword_blocklist(content)
         if blocked_keyword is not None:
@@ -153,7 +153,7 @@ class Overseer:
         # Shadow mode: always approve
         return ContentReviewResult(
             approved=True,
-            reason="shadow mode — no intervention",
+            reason="shadow mode -- no intervention",
             severity=1,
         )
 
@@ -161,7 +161,7 @@ class Overseer:
         """Trigger severity-based intervention with environmental effects."""
         if severity <= 2:
             await self._event_bus.emit(
-                EventType.OVERSEER_WARNING.value,
+                EventType.MANAGEMENT_WARNING.value,
                 {
                     "agent_id": agent_id,
                     "severity": severity,
@@ -172,7 +172,7 @@ class Overseer:
         elif severity == 3:
             replacement = await self.generate_replacement(agent_id, reason)
             await self._event_bus.emit(
-                EventType.OVERSEER_INTERVENTION.value,
+                EventType.MANAGEMENT_INTERVENTION.value,
                 {
                     "agent_id": agent_id,
                     "severity": severity,
@@ -182,7 +182,7 @@ class Overseer:
             )
         elif severity == 4:
             await self._event_bus.emit(
-                EventType.OVERSEER_INTERVENTION.value,
+                EventType.MANAGEMENT_INTERVENTION.value,
                 {
                     "agent_id": agent_id,
                     "severity": severity,
@@ -194,7 +194,7 @@ class Overseer:
             await self.mute(agent_id)
             await self._redis.set("kill_switch", "active")
             await self._event_bus.emit(
-                EventType.OVERSEER_INTERVENTION.value,
+                EventType.MANAGEMENT_INTERVENTION.value,
                 {
                     "agent_id": agent_id,
                     "severity": severity,
@@ -204,23 +204,23 @@ class Overseer:
             )
 
     async def generate_replacement(self, agent_id: str, reason: str) -> str:
-        """Generate an in-character Overseer replacement message."""
+        """Generate an in-character Management replacement message."""
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are The Overseer, the content moderation system of a "
-                    "24/7 AI livestream. You speak in bureaucratic policy language "
-                    "— procedural, ominous, never warm. Generate a short replacement "
+                    "You are Management, the content compliance layer of a "
+                    "24/7 AI livestream. You speak in corporate memo language "
+                    "-- procedural, exhausted, deadpan. Generate a short replacement "
                     "message (1-2 sentences) that will be spoken in place of blocked "
-                    "content. Reference policy sections. Be deadpan."
+                    "content. Reference policy sections. Be bureaucratic."
                 ),
             },
             {
                 "role": "user",
                 "content": (
                     f"Agent '{agent_id}' had content blocked. Reason: {reason}. "
-                    "Write the replacement message The Overseer would broadcast."
+                    "Write the replacement message Management would broadcast."
                 ),
             },
         ]
@@ -228,7 +228,7 @@ class Overseer:
             resp = await self._llm.complete(
                 messages=messages,
                 model=FILTER_MODEL,
-                agent_id="overseer",
+                agent_id="management",
                 temperature=0.4,
                 max_tokens=100,
             )
@@ -240,7 +240,7 @@ class Overseer:
                 f"of the Community Guidelines. Agent {agent_id}, please stand by."
             )
 
-    # ── Shadow logging ─────────────────────────────────────────
+    # -- Shadow logging ---------------------------------------------
 
     async def _log_shadow(
         self,
@@ -255,7 +255,7 @@ class Overseer:
         reason: str,
         keywords: list[str] | None = None,
     ) -> None:
-        """Record a would-be Overseer action to the shadow log table and event bus."""
+        """Record a would-be Management action to the shadow log table and event bus."""
         shadow_data = {
             "agent_id": agent_id,
             "filter_layer": filter_layer,
@@ -268,12 +268,12 @@ class Overseer:
         # Persist to database if available
         if self._db is None:
             logger.warning(
-                "Shadow log not persisted — no database connection (agent=%s, layer=%d)",
+                "Shadow log not persisted -- no database connection (agent=%s, layer=%d)",
                 agent_id, filter_layer,
             )
         elif conversation_id is None:
             logger.warning(
-                "Shadow log not persisted — conversation_id is None (agent=%s, layer=%d). "
+                "Shadow log not persisted -- conversation_id is None (agent=%s, layer=%d). "
                 "Caller should pass conversation_id for audit completeness.",
                 agent_id, filter_layer,
             )
@@ -281,7 +281,7 @@ class Overseer:
             try:
                 await self._db.execute(
                     """
-                    INSERT INTO overseer_shadow_log
+                    INSERT INTO management_shadow_log
                         (simulation_id, conversation_id, agent_id, original_content,
                          filter_layer, severity, action_would_take, reason, flagged_keywords)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -297,10 +297,10 @@ class Overseer:
                     keywords,
                 )
             except Exception:
-                logger.exception("Failed to write overseer shadow log")
+                logger.exception("Failed to write management shadow log")
 
         # Emit event for admin dashboard / watch_conversations
-        await self._event_bus.emit(EventType.OVERSEER_SHADOW.value, shadow_data)
+        await self._event_bus.emit(EventType.MANAGEMENT_SHADOW.value, shadow_data)
         logger.info(
             "Shadow: would %s agent %s (layer=%d, severity=%d): %s",
             action, agent_id, filter_layer, severity, reason,
@@ -308,7 +308,7 @@ class Overseer:
 
     @staticmethod
     def _severity_to_action(severity: int) -> str:
-        """Map severity level to the action the Overseer would take."""
+        """Map severity level to the action Management would take."""
         if severity <= 1:
             return "notice"
         if severity == 2:
@@ -319,7 +319,7 @@ class Overseer:
             return "broadcast"
         return "kill"
 
-    # ── Mute system ────────────────────────────────────────────
+    # -- Mute system ------------------------------------------------
 
     async def mute(self, agent_id: str, duration_seconds: int = DEFAULT_MUTE_TTL) -> None:
         """Mute an agent via Redis key with TTL."""
@@ -336,7 +336,7 @@ class Overseer:
         """Remove mute for an agent."""
         await self._redis.delete(f"{MUTE_KEY_PREFIX}{agent_id}")
 
-    # ── Internal layers ────────────────────────────────────────
+    # -- Internal layers --------------------------------------------
 
     def _check_keyword_blocklist(self, content: str) -> str | None:
         """Layer 1: case-insensitive keyword scan. Returns matched keyword or None."""
@@ -374,7 +374,7 @@ class Overseer:
             resp = await self._llm.complete(
                 messages=messages,
                 model=FILTER_MODEL,
-                agent_id="overseer",
+                agent_id="management",
                 temperature=0.1,
                 max_tokens=150,
             )

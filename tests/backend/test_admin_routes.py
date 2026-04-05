@@ -82,7 +82,7 @@ def _make_simulation(**overrides) -> Simulation:
         "total_tokens": 5000,
         "total_cost": Decimal("1.50"),
         "total_artifacts": 3,
-        "total_overseer_flags": 0,
+        "total_management_flags": 0,
         "agents_participated": ["vera", "rex"],
     }
     defaults.update(overrides)
@@ -413,15 +413,15 @@ class TestSimulationEndpoints:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_get_simulation_overseer_log(self, mock_app):
+    def test_get_simulation_management_log(self, mock_app):
         client, mock_db, _ = mock_app
 
         with patch(
-            "core.repos.simulation_repo.SimulationRepo.get_overseer_log",
+            "core.repos.simulation_repo.SimulationRepo.get_management_log",
             new_callable=AsyncMock,
             return_value=[],
         ):
-            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/overseer-log?severity_min=3")
+            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/management-log?severity_min=3")
 
         assert resp.status_code == 200
         assert resp.json() == []
@@ -515,7 +515,7 @@ class TestConversationEndpoints:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_get_conversation_overseer_flags(self, mock_app):
+    def test_get_conversation_management_flags(self, mock_app):
         client, mock_db, _ = mock_app
         conv_id = uuid.uuid4()
         flags = [
@@ -533,11 +533,11 @@ class TestConversationEndpoints:
         ]
 
         with patch(
-            "core.repos.conversation_repo.ConversationRepo.get_overseer_flags",
+            "core.repos.conversation_repo.ConversationRepo.get_management_flags",
             new_callable=AsyncMock,
             return_value=flags,
         ):
-            resp = client.get(f"/api/admin/conversations/{conv_id}/overseer-flags")
+            resp = client.get(f"/api/admin/conversations/{conv_id}/management-flags")
 
         assert resp.status_code == 200
         data = resp.json()

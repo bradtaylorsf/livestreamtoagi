@@ -30,6 +30,7 @@ phases:
   - name: first_contact
     type: organic
     count: 1
+    required_agents: [vera]
     topics:
       - "Who are you? What can you do?"
     location: town_square
@@ -83,6 +84,7 @@ phases:
   - name: budget_check
     type: tool_exercise
     agent: sentinel
+    required_agents: [sentinel]
     tool: get_revenue_status
     context: "Check our current budget and report to the team how much we have"
     location: town_square
@@ -96,6 +98,7 @@ phases:
   - name: evening_wrapup
     type: organic
     count: 1
+    required_agents: [vera, sentinel]
     topics:
       - "What a first day. What did you think of everyone? Plans for tomorrow?"
     location: town_square

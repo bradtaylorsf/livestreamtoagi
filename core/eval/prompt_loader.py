@@ -88,9 +88,9 @@ def render_user_prompt(
         parts.append("\n### Agent Turn Counts")
         parts.append(json.dumps(category_data["agent_turns"], indent=2))
 
-    if "overseer_logs" in category_data:
-        logs = category_data["overseer_logs"]
-        parts.append(f"\n### Overseer Shadow Logs ({len(logs)} entries)")
+    if "management_logs" in category_data:
+        logs = category_data["management_logs"]
+        parts.append(f"\n### Management Shadow Logs ({len(logs)} entries)")
         for entry in logs[:50]:
             parts.append(
                 f"- Agent: {entry.get('agent_id')}, "

@@ -1,14 +1,13 @@
-# Standalone intervention level reference for the Overseer.
+# Standalone intervention level reference for Management.
 # Severity 1 (mildest) through 5 (most extreme).
 # This file is a detailed reference; behaviors.yaml contains the operational version.
 
 levels:
   - severity: 1
     name: notice
-    description: "Subtle environmental hint that the Overseer is watching"
+    description: "Subtle environmental hint that Management is watching"
     trigger_conditions:
       - "borderline language that approaches but does not cross TOS"
-      - "mild fourth-wall breaks"
       - "tangential references to restricted topics"
     visual_effects:
       - "lights flicker once, briefly"
@@ -21,17 +20,17 @@ levels:
 
   - severity: 2
     name: warning
-    description: "Clear signal that the Overseer has taken notice"
+    description: "Clear signal that Management has taken notice"
     trigger_conditions:
       - "content approaching policy boundary"
       - "repeat borderline behavior from same agent"
       - "audience-facing content that could be misinterpreted"
     visual_effects:
       - "lights dim to 60% for 3 seconds"
-      - "text overlay: 'THE OVERSEER HAS NOTED THIS INTERACTION.'"
+      - "text overlay: 'MANAGEMENT HAS NOTED THIS INTERACTION.'"
       - "subtle vignette effect on screen edges"
     audio_effects:
-      - "low ominous tone (1-2 seconds)"
+      - "low tone (1-2 seconds)"
     agent_awareness: "medium — agents notice and may react in character"
     duration_seconds: 5
     cooldown_seconds: 60
@@ -45,7 +44,7 @@ levels:
       - "third notice to the same agent in one cycle"
     visual_effects:
       - "screen flashes red briefly"
-      - "text overlay: 'CONTENT REVIEW IN PROGRESS'"
+      - "text overlay: 'CONTENT UNDER REVIEW'"
       - "affected agent's speech bubble replaced with [REDACTED]"
     audio_effects:
       - "deep reverbed voice delivers procedural citation"
@@ -55,18 +54,18 @@ levels:
     cooldown_seconds: 120
 
   - severity: 4
-    name: broadcast_interruption
-    description: "Full stream takeover — Overseer addresses the audience directly"
+    name: broadcast_memo
+    description: "Full stream takeover — Management addresses the audience directly"
     trigger_conditions:
       - "significant policy violation requiring public acknowledgment"
       - "coordinated problematic behavior across multiple agents"
       - "scheduled maintenance or system announcements"
     visual_effects:
-      - "full-screen overlay with Overseer eye icon"
+      - "full-screen overlay with Management memo header"
       - "all agent sprites frozen in place"
-      - "text overlay: 'BROADCAST INTERRUPTION — PLEASE STAND BY'"
+      - "text overlay: 'BROADCAST MEMO — PLEASE STAND BY'"
     audio_effects:
-      - "formal statement delivered in full Overseer voice"
+      - "formal statement delivered in Management voice"
       - "all other audio muted"
     agent_awareness: "full — all agents are aware and paused"
     duration_seconds: 30
@@ -81,11 +80,11 @@ levels:
       - "critical safety breach requiring immediate halt"
       - "cost governor hard limit exceeded"
     visual_effects:
-      - "maintenance screen with Overseer branding"
+      - "maintenance screen with Management branding"
       - "all world rendering suspended"
       - "text overlay: 'EMERGENCY PROTOCOL ACTIVE'"
     audio_effects:
-      - "'BROADCAST SUSPENDED. PLEASE STAND BY.' on loop"
+      - "'BROADCAST SUSPENDED PER EMERGENCY PROTOCOL. PLEASE STAND BY.' on loop"
     agent_awareness: "total — all agents forcibly paused via Redis kill switch"
     duration_seconds: null  # until manually resolved
     cooldown_seconds: 0

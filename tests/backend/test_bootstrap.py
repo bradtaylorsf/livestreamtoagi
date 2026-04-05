@@ -18,7 +18,7 @@ def test_services_dataclass_importable():
         "db", "redis", "http_client", "agent_registry", "llm_client",
         "core_memory", "recall_memory", "archival_memory", "compactor",
         "context_assembler", "token_counter", "memory_repo", "transcript_repo",
-        "event_bus", "overseer", "cost_repo", "config_loader",
+        "event_bus", "management", "cost_repo", "config_loader",
     }
     assert expected.issubset(field_names), f"Missing fields: {expected - field_names}"
 

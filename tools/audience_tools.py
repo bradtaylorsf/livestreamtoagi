@@ -13,12 +13,12 @@ from .base import BaseTool
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
-    from core.overseer import Overseer
+    from core.management import Management
     from core.redis_client import RedisClient
 
 
 class SendChatMessageTool(BaseTool):
-    """Send a message to Twitch/YouTube chat (passes through Overseer filter first)."""
+    """Send a message to Twitch/YouTube chat (passes through Management filter first)."""
 
     name = "send_chat_message"
     description = "Send a message to Twitch/YouTube chat"
@@ -29,9 +29,9 @@ class SendChatMessageTool(BaseTool):
     ALLOWED_AGENTS = frozenset({"pixel", "sentinel", "vera"})
 
     def __init__(
-        self, overseer: Overseer, event_bus: EventBus, redis_client: RedisClient, agent_id: str
+        self, management: Management, event_bus: EventBus, redis_client: RedisClient, agent_id: str
     ) -> None:
-        self._overseer = overseer
+        self._management = management
         self._event_bus = event_bus
         self._redis = redis_client
         self._agent_id = agent_id
@@ -42,7 +42,7 @@ class SendChatMessageTool(BaseTool):
         if self._agent_id not in self.ALLOWED_AGENTS:
             return {"status": "rejected", "reason": f"Agent {self._agent_id!r} not authorized"}
 
-        review = await self._overseer.review(self._agent_id, message)
+        review = await self._management.review(self._agent_id, message)
         if not review.approved:
             return {"status": "rejected", "reason": review.reason}
 

@@ -25,7 +25,7 @@ from core.memory.compaction import MemoryCompactor
 from core.memory.core_memory import CoreMemoryManager
 from core.memory.recall_memory import RecallMemoryManager
 from core.memory.token_counter import TokenCounter
-from core.overseer import Overseer
+from core.management import Management
 from core.redis_client import RedisClient
 from core.repos.artifact_repo import ArtifactRepo
 from core.repos.cost_repo import CostRepo
@@ -57,7 +57,7 @@ class Services:
     memory_repo: MemoryRepo | None
     transcript_repo: TranscriptRepo | None
     event_bus: EventBus
-    overseer: Overseer | None
+    management: Management | None
     cost_repo: CostRepo | None
     artifact_repo: ArtifactRepo | None
     world_repo: WorldRepo | None
@@ -146,7 +146,7 @@ async def bootstrap_services(
 
     from core.event_bus import event_bus as _module_event_bus
 
-    overseer = Overseer(
+    management = Management(
         redis_client=redis_client,
         llm_client=llm_client,
         event_bus=_module_event_bus,
@@ -176,7 +176,7 @@ async def bootstrap_services(
         memory_repo=memory_repo,
         transcript_repo=transcript_repo,
         event_bus=_module_event_bus,
-        overseer=overseer,
+        management=management,
         cost_repo=cost_repo,
         artifact_repo=artifact_repo,
         world_repo=world_repo,
@@ -230,7 +230,7 @@ async def _bootstrap_dry_run(
         memory_repo=None,
         transcript_repo=None,
         event_bus=EventBus(),
-        overseer=None,
+        management=None,
         cost_repo=None,
         artifact_repo=None,
         world_repo=None,

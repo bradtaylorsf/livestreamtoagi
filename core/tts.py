@@ -1,4 +1,4 @@
-"""Edge TTS pipeline with per-agent voices and Overseer post-processing."""
+"""Edge TTS pipeline with per-agent voices and Management post-processing."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ VOICE_MAP: dict[str, str] = {
     "fork": "en-AU-WilliamNeural",
     "sentinel": "en-US-AriaNeural",
     "grok": "en-US-ChristopherNeural",
-    "overseer": "en-US-AndrewNeural",
+    "management": "en-US-AndrewNeural",
     # alpha has no voice (text-only)
 }
 
@@ -76,16 +76,16 @@ class TTSPipeline:
                 )
                 return None
 
-        # Overseer post-processing: reverb + pitch-down
-        if agent_id == "overseer":
+        # Management post-processing: reverb + pitch-down
+        if agent_id == "management":
             processed_path = self.audio_dir / f"{uuid.uuid4()}.mp3"
             try:
-                await _apply_overseer_effects(filepath, processed_path)
+                await _apply_management_effects(filepath, processed_path)
                 filepath.unlink(missing_ok=True)
                 filepath = processed_path
                 filename = processed_path.name
             except Exception:
-                logger.warning("Overseer ffmpeg post-processing failed, using raw audio")
+                logger.warning("Management ffmpeg post-processing failed, using raw audio")
                 processed_path.unlink(missing_ok=True)
 
         # Get duration
@@ -136,8 +136,8 @@ async def _get_duration(filepath: Path) -> float:
         return 0.0
 
 
-async def _apply_overseer_effects(input_path: Path, output_path: Path) -> None:
-    """Apply reverb + pitch-down via ffmpeg for the Overseer's ominous voice."""
+async def _apply_management_effects(input_path: Path, output_path: Path) -> None:
+    """Apply reverb + pitch-down via ffmpeg for Management's deadpan voice."""
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg",
         "-y",

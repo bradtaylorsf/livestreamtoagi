@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.recall_memory import RecallMemoryManager
-    from core.overseer import Overseer
+    from core.management import Management
     from core.redis_client import RedisClient
     from core.repos.artifact_repo import ArtifactRepo
     from core.repos.cost_repo import CostRepo
@@ -81,7 +81,7 @@ def get_core_tools(
     event_bus: EventBus,
     redis_client: RedisClient,
     agent_id: str = "unknown",
-    overseer: Overseer | None = None,
+    management: Management | None = None,
     docker_client: docker.DockerClient | None = None,
     world_repo: WorldRepo | None = None,
     cost_repo: CostRepo | None = None,
@@ -102,15 +102,15 @@ def get_core_tools(
         GetPollResultsTool(redis_client=redis_client, event_bus=event_bus),
     ]
 
-    # Audience tools that require Overseer
-    if overseer is not None:
+    # Audience tools that require Management
+    if management is not None:
         tools.append(
             SendChatMessageTool(
-                overseer=overseer, event_bus=event_bus, redis_client=redis_client, agent_id=agent_id
+                management=management, event_bus=event_bus, redis_client=redis_client, agent_id=agent_id
             )
         )
 
-    # Poll creation (no Overseer needed)
+    # Poll creation (no Management needed)
     tools.append(
         CreatePollTool(redis_client=redis_client, event_bus=event_bus, agent_id=agent_id)
     )

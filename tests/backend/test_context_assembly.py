@@ -607,3 +607,71 @@ class TestEdgeCases:
             assert "role" in msg
             assert "content" in msg
             assert msg["role"] in ("system", "user", "assistant")
+
+
+# ── Conversation continuity tests ───────────────────────────────
+
+
+class TestConversationContinuity:
+    """Verify conversation continuity enhancements (#221)."""
+
+    @pytest.mark.asyncio
+    async def test_recent_summaries_section_reframed(
+        self, assembler: ContextAssembler
+    ) -> None:
+        """Summaries section uses 'What happened earlier today' framing."""
+        messages = await assembler.assemble_context(
+            "rex",
+            _make_history(3),
+            recent_conversation_summaries=["Vera and Rex decided to build a dashboard."],
+        )
+        system = messages[0]["content"]
+        assert "What happened earlier today" in system
+        assert "Build on these conversations" in system
+        assert "do NOT repeat these" not in system
+
+    @pytest.mark.asyncio
+    async def test_relationship_context_section_appears(
+        self, assembler: ContextAssembler
+    ) -> None:
+        """Relationship context is injected when provided."""
+        rel_ctx = "- rex: positive sentiment, high trust (5 prior interactions)"
+        messages = await assembler.assemble_context(
+            "vera",
+            _make_history(3),
+            relationship_context=rel_ctx,
+        )
+        system = messages[0]["content"]
+        assert "Your relationships with other agents" in system
+        assert "positive sentiment" in system
+
+    @pytest.mark.asyncio
+    async def test_relationship_context_omitted_when_none(
+        self, assembler: ContextAssembler
+    ) -> None:
+        messages = await assembler.assemble_context("rex", _make_history(3))
+        system = messages[0]["content"]
+        assert "Your relationships with other agents" not in system
+
+    @pytest.mark.asyncio
+    async def test_shared_state_context_section_appears(
+        self, assembler: ContextAssembler
+    ) -> None:
+        """Shared state context is injected when provided."""
+        state_ctx = "**Active tasks:**\n  [pending] Build API (owner: rex)"
+        messages = await assembler.assemble_context(
+            "rex",
+            _make_history(3),
+            shared_state_context=state_ctx,
+        )
+        system = messages[0]["content"]
+        assert "Current project status" in system
+        assert "Build API" in system
+
+    @pytest.mark.asyncio
+    async def test_shared_state_context_omitted_when_none(
+        self, assembler: ContextAssembler
+    ) -> None:
+        messages = await assembler.assemble_context("rex", _make_history(3))
+        system = messages[0]["content"]
+        assert "Current project status" not in system

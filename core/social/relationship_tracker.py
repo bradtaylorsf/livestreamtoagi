@@ -85,16 +85,24 @@ class RelationshipTracker:
         for i, agent_a in enumerate(participants):
             for agent_b in participants[i + 1 :]:
                 await self._repo.increment_interaction(
-                    self._simulation_id, agent_a, agent_b, interaction_at=now,
+                    self._simulation_id,
+                    agent_a,
+                    agent_b,
+                    interaction_at=now,
                 )
                 await self._repo.increment_interaction(
-                    self._simulation_id, agent_b, agent_a, interaction_at=now,
+                    self._simulation_id,
+                    agent_b,
+                    agent_a,
+                    interaction_at=now,
                 )
 
         # Extract sentiment via LLM
         try:
             await self._extract_and_update_sentiment(
-                conversation_history, participants, now,
+                conversation_history,
+                participants,
+                now,
             )
         except Exception:
             logger.warning(
@@ -155,16 +163,14 @@ class RelationshipTracker:
 
             # Get existing scores for evolution log
             existing = await self._repo.get(
-                self._simulation_id, from_id, to_id,
+                self._simulation_id,
+                from_id,
+                to_id,
             )
             old_sentiment = (
-                float(existing.sentiment_score)
-                if existing and existing.sentiment_score else None
+                float(existing.sentiment_score) if existing and existing.sentiment_score else None
             )
-            old_trust = (
-                float(existing.trust_score)
-                if existing and existing.trust_score else None
-            )
+            old_trust = float(existing.trust_score) if existing and existing.trust_score else None
 
             await self._repo.upsert(
                 self._simulation_id,
@@ -185,7 +191,10 @@ class RelationshipTracker:
                 "trust_after": trust,
             }
             await self._repo.append_evolution_event(
-                self._simulation_id, from_id, to_id, event,
+                self._simulation_id,
+                from_id,
+                to_id,
+                event,
             )
 
     async def update_from_reflection(
@@ -238,7 +247,9 @@ class RelationshipTracker:
             sentiment = _estimate_sentiment_from_text(description)
 
             existing = await self._repo.get(
-                self._simulation_id, agent_id, target_id,
+                self._simulation_id,
+                agent_id,
+                target_id,
             )
             if existing is None:
                 # Only update if record exists (created by conversation)
@@ -261,22 +272,53 @@ class RelationshipTracker:
                 "sentiment_after": sentiment,
             }
             await self._repo.append_evolution_event(
-                self._simulation_id, agent_id, target_id, event,
+                self._simulation_id,
+                agent_id,
+                target_id,
+                event,
             )
 
     async def get_relationship(
-        self, agent_id: str, target_id: str,
+        self,
+        agent_id: str,
+        target_id: str,
     ) -> Any:
         return await self._repo.get(self._simulation_id, agent_id, target_id)
+
+    async def get_context_for_agent(
+        self,
+        agent_id: str,
+        other_ids: list[str],
+    ) -> str:
+        """Build a relationship summary for injection into agent context."""
+        lines: list[str] = []
+        for other_id in other_ids:
+            rel = await self.get_relationship(agent_id, other_id)
+            if rel and rel.interaction_count > 0:
+                sentiment = float(rel.sentiment_score) if rel.sentiment_score else 0.0
+                trust = float(rel.trust_score) if rel.trust_score else 0.5
+                sentiment_word = (
+                    "positive" if sentiment > 0.2 else "negative" if sentiment < -0.2 else "neutral"
+                )
+                trust_word = "high" if trust > 0.6 else "low" if trust < 0.3 else "moderate"
+                lines.append(
+                    f"- {other_id}: {sentiment_word} sentiment, "
+                    f"{trust_word} trust ({rel.interaction_count} prior interactions)"
+                )
+        return "\n".join(lines)
 
     async def get_social_graph(self) -> list[Any]:
         return await self._repo.get_social_graph(self._simulation_id)
 
     async def get_evolution(
-        self, agent_id: str, target_id: str,
+        self,
+        agent_id: str,
+        target_id: str,
     ) -> list[dict[str, Any]]:
         return await self._repo.get_evolution(
-            self._simulation_id, agent_id, target_id,
+            self._simulation_id,
+            agent_id,
+            target_id,
         )
 
 
@@ -284,12 +326,30 @@ def _estimate_sentiment_from_text(text: str) -> float:
     """Simple keyword-based sentiment estimation from relationship descriptions."""
     text_lower = text.lower()
     positive = [
-        "trusted", "ally", "friend", "partner", "respect", "appreciate",
-        "enjoy", "close", "admire", "support", "helpful", "like",
+        "trusted",
+        "ally",
+        "friend",
+        "partner",
+        "respect",
+        "appreciate",
+        "enjoy",
+        "close",
+        "admire",
+        "support",
+        "helpful",
+        "like",
     ]
     negative = [
-        "disagree", "conflict", "annoying", "hostile", "distrust",
-        "frustrating", "rival", "tension", "difficult", "clash",
+        "disagree",
+        "conflict",
+        "annoying",
+        "hostile",
+        "distrust",
+        "frustrating",
+        "rival",
+        "tension",
+        "difficult",
+        "clash",
     ]
     neutral = ["not yet established", "neutral", "unknown"]
 
@@ -305,5 +365,3 @@ def _estimate_sentiment_from_text(text: str) -> float:
     if neg_count > pos_count:
         return max(-1.0, -0.3 - neg_count * 0.15)
     return 0.0
-
-

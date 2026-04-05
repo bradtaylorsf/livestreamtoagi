@@ -7,6 +7,7 @@ duration/cost/kill-switch limits are reached.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 import re
@@ -35,10 +36,10 @@ if TYPE_CHECKING:
     from core.database import Database
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
+    from core.management import Management
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.compaction import MemoryCompactor
     from core.memory.reflection import ReflectionManager
-    from core.overseer import Overseer
     from core.redis_client import RedisClient
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
@@ -86,7 +87,7 @@ class SimulationConfig:
         duration: timedelta | None = None,
         dry_run: bool = False,
         verbose: bool = False,
-        overseer_shadow: bool = True,
+        management_shadow: bool = True,
     ) -> None:
         self.name = name
         self.description = description
@@ -98,7 +99,7 @@ class SimulationConfig:
         self.duration = duration
         self.dry_run = dry_run
         self.verbose = verbose
-        self.overseer_shadow = overseer_shadow
+        self.management_shadow = management_shadow
         self.phases: list[Phase] = []
         self.audience_config: dict[str, Any] | None = None
 
@@ -149,7 +150,7 @@ class SimulationConfig:
             "speed_multiplier": self.speed_multiplier,
             "mode": self.mode,
             "dry_run": self.dry_run,
-            "overseer_shadow": self.overseer_shadow,
+            "management_shadow": self.management_shadow,
         }
         if self.duration is not None:
             d["duration_seconds"] = self.duration.total_seconds()
@@ -173,7 +174,7 @@ class SimulationOrchestrator:
         agent_registry: AgentRegistry,
         event_bus: EventBus,
         llm_client: OpenRouterClient,
-        overseer: Overseer,
+        management: Management,
         context_assembler: ContextAssembler,
         conversation_repo: ConversationRepo,
         archival_memory: ArchivalMemoryManager,
@@ -196,7 +197,7 @@ class SimulationOrchestrator:
         self._agents = agent_registry
         self._event_bus = event_bus
         self._llm = llm_client
-        self._overseer = overseer
+        self._management = management
         self._context = context_assembler
         self._conversation_repo = conversation_repo
         self._archival = archival_memory
@@ -248,7 +249,7 @@ class SimulationOrchestrator:
             agent_registry=self._agents,
             event_bus=self._event_bus,
             llm_client=self._llm,
-            overseer=self._overseer,
+            management=self._management,
             context_assembler=self._context,
             conversation_repo=self._conversation_repo,
             archival_memory=self._archival,
@@ -282,6 +283,12 @@ class SimulationOrchestrator:
         gap = random.uniform(mean * (1 - jitter), mean * (1 + jitter))
         return timedelta(seconds=gap)
 
+    def _seed_rng(self, simulation_id: object) -> None:
+        """Seed the global RNG from the simulation ID for reproducibility."""
+        seed = int(hashlib.sha256(str(simulation_id).encode()).hexdigest()[:8], 16)
+        random.seed(seed)
+        logger.info("RNG seeded with %d (from simulation %s)", seed, simulation_id)
+
     async def run(self) -> None:
         """Execute the seeded simulation — create record, run phases, finalize."""
         self._start_time = time.monotonic()
@@ -296,6 +303,7 @@ class SimulationOrchestrator:
             agents_participated=self._config.agents,
         ))
         self._simulation_id = sim.id
+        self._seed_rng(sim.id)
         logger.info("Created simulation %s (%s)", sim.id, sim.name)
 
         self._display.show_simulation_start(sim, self._config)
@@ -348,7 +356,7 @@ class SimulationOrchestrator:
                         tokens=result.tokens,
                         cost=result.cost,
                         artifacts=result.artifacts,
-                        overseer_flags=result.overseer_flags,
+                        management_flags=result.management_flags,
                     )
                     if result.agents_participated:
                         await self._sim_repo.update_agents_participated(
@@ -431,6 +439,7 @@ class SimulationOrchestrator:
             agents_participated=self._config.agents,
         ))
         self._simulation_id = sim.id
+        self._seed_rng(sim.id)
         logger.info(
             "Created autonomous simulation %s (%s)", sim.id, sim.name
         )
@@ -504,7 +513,7 @@ class SimulationOrchestrator:
                         tokens=result.tokens,
                         cost=result.cost,
                         artifacts=result.artifacts,
-                        overseer_flags=result.overseer_flags,
+                        management_flags=result.management_flags,
                     )
                     if result.agents_participated:
                         await self._sim_repo.update_agents_participated(

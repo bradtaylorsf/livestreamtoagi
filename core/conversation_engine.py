@@ -1,7 +1,7 @@
 """Main conversation engine orchestrator.
 
 Ties together all conversation subsystems: triggers, speaker selection,
-energy model, proximity groups, interrupts, Overseer review, TTS, and
+energy model, proximity groups, interrupts, Management review, TTS, and
 event emission. This is the central runtime loop of the show.
 """
 
@@ -39,10 +39,10 @@ if TYPE_CHECKING:
     from core.conversation.triggers import TriggerSystem
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
+    from core.management import Management
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.compaction import MemoryCompactor
     from core.models import AgentConfig, ConversationConfig
-    from core.overseer import Overseer
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
@@ -104,7 +104,7 @@ class ConversationEngine:
         agent_registry: AgentRegistry,
         event_bus: EventBus,
         llm_client: OpenRouterClient,
-        overseer: Overseer,
+        management: Management,
         context_assembler: ContextAssembler,
         conversation_repo: ConversationRepo,
         archival_memory: ArchivalMemoryManager,
@@ -114,7 +114,7 @@ class ConversationEngine:
         compactor: MemoryCompactor | None = None,
         memory_repo: MemoryRepo | None = None,
         speed_multiplier: float = 1.0,
-        overseer_enabled: bool = True,
+        management_enabled: bool = True,
         simulation_id: uuid.UUID | None = None,
         services: Services | None = None,
         clock: SimulationClock | None = None,
@@ -128,8 +128,8 @@ class ConversationEngine:
         self._agents = agent_registry
         self._event_bus = event_bus
         self._llm = llm_client
-        self._overseer_enabled = overseer_enabled
-        self._overseer = overseer
+        self._management_enabled = management_enabled
+        self._management = management
         self._simulation_id = simulation_id
         self._context = context_assembler
         self._repo = conversation_repo
@@ -523,15 +523,21 @@ class ConversationEngine:
         # then create journal entries separately
         await self._compact_and_journal(conv)
 
-        # Build a brief summary for cross-phase context
-        speakers = list(dict.fromkeys(
-            msg.get("speaker", "unknown") for msg in conv.history
-        ))
+        # Build a rich summary for cross-phase context
+        speakers = list(dict.fromkeys(msg.get("speaker", "unknown") for msg in conv.history))
         topics_str = ", ".join(conv.topics[:3]) if conv.topics else "general"
-        self._last_conversation_summary = (
+        metadata_stub = (
             f"Conversation between {', '.join(speakers)} about {topics_str} "
             f"({conv.turn_number} turns)."
         )
+        self._last_conversation_summary = await self._generate_rich_summary(
+            conv,
+            metadata_stub,
+        )
+
+        # Record that each participant spoke (for weighted speaker selection)
+        for agent_id in set(msg.get("speaker", "") for msg in conv.history if msg.get("speaker")):
+            self._proximity.record_spoke(agent_id)
 
         # Update relationship data after conversation
         if self._relationship_tracker and len(conv.participants) >= 2:
@@ -558,6 +564,52 @@ class ConversationEngine:
         )
 
         self._active = None
+
+    # ── Rich summary generation ─────────────────────────────────
+
+    async def _generate_rich_summary(
+        self,
+        conv: _ActiveConversation,
+        fallback: str,
+    ) -> str:
+        """Generate a rich LLM summary of the conversation.
+
+        Falls back to *fallback* (a simple metadata stub) on any failure.
+        """
+        try:
+            transcript = "\n".join(
+                f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
+                for msg in conv.history
+            )
+            prompt = (
+                "Summarize this conversation in 2-4 sentences covering:\n"
+                "- Decisions made\n"
+                "- Commitments (who will do what)\n"
+                "- Unresolved tensions or disagreements\n"
+                "- Open questions\n"
+                "- Notable emotional moments\n\n"
+                f"Conversation:\n{transcript}"
+            )
+            response = await self._llm.complete(
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": "Summarize now."},
+                ],
+                model="anthropic/claude-haiku-4.5",
+                agent_id="system",
+                temperature=0.3,
+                max_tokens=300,
+            )
+            summary = response.content.strip()
+            if summary:
+                return summary
+        except Exception:
+            logger.warning(
+                "Rich summary generation failed for conversation %s, falling back to metadata stub",
+                conv.id,
+                exc_info=True,
+            )
+        return fallback
 
     # ── Post-conversation memory creation ─────────────────────
 
@@ -683,7 +735,7 @@ class ConversationEngine:
         prompt_hint: str | None = None,
         history: list[dict[str, str]] | None = None,
     ) -> str | None:
-        """Assemble context, call LLM, pass through Overseer.
+        """Assemble context, call LLM, pass through Management.
 
         Returns the final approved content, or None on total failure.
         """
@@ -693,6 +745,23 @@ class ConversationEngine:
         agent_tools = self._get_tools_for_agent(agent.id)
         openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
 
+        # Build relationship context if tracker is available
+        relationship_context: str | None = None
+        if self._relationship_tracker and self._active:
+            try:
+                other_ids = [pid for pid in self._active.participants if pid != agent.id]
+                if other_ids:
+                    relationship_context = (
+                        await self._relationship_tracker.get_context_for_agent(
+                            agent.id,
+                            other_ids,
+                        )
+                    ) or None
+            except Exception:
+                logger.warning(
+                    "Failed to build relationship context for %s", agent.id, exc_info=True
+                )
+
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
@@ -701,6 +770,7 @@ class ConversationEngine:
                     conversation_history=conv_history,
                     prompt_hint=prompt_hint,
                     recent_conversation_summaries=self._recent_summaries or None,
+                    relationship_context=relationship_context,
                 )
 
                 # Call LLM (with tool-call loop)
@@ -721,6 +791,7 @@ class ConversationEngine:
                         agent_id=agent.id,
                         tools=openai_tools,
                         tool_choice=tc,
+                        temperature=0.9,
                     )
 
                     total_input_tokens += response.input_tokens
@@ -828,11 +899,11 @@ class ConversationEngine:
                 # Track output for cross-phase repetition detection
                 self._recent_outputs.append(content)
 
-                # Overseer review (can be disabled for testing)
-                if not self._overseer_enabled:
+                # Management review (can be disabled for testing)
+                if not self._management_enabled:
                     return content
                 conv_id = self._active.id if self._active else None
-                review = await self._overseer.review(
+                review = await self._management.review(
                     agent.id, content,
                     conversation_id=conv_id,
                     simulation_id=self._simulation_id,
@@ -840,14 +911,14 @@ class ConversationEngine:
                 if review.approved:
                     return content
 
-                # Rejected — intervene and retry with modified hint
+                # Rejected -- intervene and retry with modified hint
                 logger.info(
-                    "Overseer rejected %s output (severity=%d): %s",
+                    "Management rejected %s output (severity=%d): %s",
                     agent.id,
                     review.severity,
                     review.reason,
                 )
-                await self._overseer.intervene(review.severity, agent.id, review.reason)
+                await self._management.intervene(review.severity, agent.id, review.reason)
 
                 # If severity is high, don't retry
                 if review.severity >= 4:

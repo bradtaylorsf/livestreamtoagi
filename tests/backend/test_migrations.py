@@ -37,14 +37,14 @@ ALL_TABLES = [
     "conversation_selection_log",
     "interrupt_log",
     "energy_change_log",
-    "overseer_shadow_log",
+    "management_shadow_log",
     "artifacts",
     "simulations",
     "eval_runs",
     "eval_results",
 ]
 
-AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "overseer", "alpha"]
+AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "management", "alpha"]
 
 
 @pytest.fixture()
@@ -60,7 +60,7 @@ async def conn():
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,
             cost_events, revenue_events, challenges, world_events, world_chunks,
-            artifacts, overseer_shadow_log,
+            artifacts, management_shadow_log,
             simulations, conversations, transcripts, agents, schema_migrations
         CASCADE
     """)

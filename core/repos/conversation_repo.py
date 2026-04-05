@@ -246,12 +246,12 @@ class ConversationRepo:
             result.append(d)
         return result
 
-    async def get_overseer_flags(
+    async def get_management_flags(
         self, conversation_id: uuid.UUID
     ) -> list[dict[str, object]]:
-        """Return overseer shadow flags for a conversation."""
+        """Return management shadow flags for a conversation."""
         rows = await self.db.fetch(
-            """SELECT * FROM overseer_shadow_log
+            """SELECT * FROM management_shadow_log
                WHERE conversation_id = $1
                ORDER BY created_at""",
             conversation_id,

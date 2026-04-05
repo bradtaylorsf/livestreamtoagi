@@ -105,7 +105,7 @@ class TimelineReporter:
         conversations = await self._load_conversations()
         cost_events = await self._load_cost_events()
         artifacts = await self._load_artifacts()
-        overseer_log = await self._load_overseer_log()
+        management_log = await self._load_management_log()
 
         # Filter by requested days
         if days:
@@ -117,7 +117,7 @@ class TimelineReporter:
         report.sections.append(ReportSection(
             title="Executive Summary",
             data=generate_executive_summary(
-                sim, conversations, cost_events, artifacts, overseer_log,
+                sim, conversations, cost_events, artifacts, management_log,
             ),
         ))
 
@@ -173,7 +173,7 @@ class TimelineReporter:
         # 7. Key Moments
         report.sections.append(ReportSection(
             title="Key Moments",
-            data=generate_key_moments(conversations, overseer_log, artifacts),
+            data=generate_key_moments(conversations, management_log, artifacts),
         ))
 
         return report
@@ -274,9 +274,9 @@ class TimelineReporter:
         )
         return [dict(r) for r in rows]
 
-    async def _load_overseer_log(self) -> list[dict[str, Any]]:
+    async def _load_management_log(self) -> list[dict[str, Any]]:
         rows = await self._db.fetch(
-            """SELECT * FROM overseer_shadow_log
+            """SELECT * FROM management_shadow_log
                WHERE simulation_id = $1
                ORDER BY created_at""",
             self._simulation_uuid,

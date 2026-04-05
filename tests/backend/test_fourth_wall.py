@@ -11,31 +11,26 @@ import pytest
 # ── Infrastructure prompt ────────────────────────────────────────
 
 
-def test_infrastructure_prompt_forbids_system_references():
-    """INFRASTRUCTURE_PROMPT should forbid referencing internal system names."""
+def test_infrastructure_prompt_forbids_invisible_infrastructure_references():
+    """INFRASTRUCTURE_PROMPT should forbid referencing invisible infrastructure by technical name."""
     from core.system_prompt import INFRASTRUCTURE_PROMPT
 
     prompt_lower = INFRASTRUCTURE_PROMPT.lower()
-    assert "never reference internal system components" in prompt_lower
-    assert "transcripts" in prompt_lower
+    assert "do not reference invisible infrastructure" in prompt_lower
     assert "context windows" in prompt_lower
+    assert "embeddings" in prompt_lower
 
 
-def test_infrastructure_prompt_forbids_budget_disclosure():
-    """INFRASTRUCTURE_PROMPT should forbid disclosing exact budget figures."""
+def test_infrastructure_prompt_allows_budget_and_ai_discussion():
+    """INFRASTRUCTURE_PROMPT should allow budget figures and AI nature discussion (relaxed rules)."""
     from core.system_prompt import INFRASTRUCTURE_PROMPT
 
     prompt_lower = INFRASTRUCTURE_PROMPT.lower()
-    assert "never disclose exact budget figures" in prompt_lower
-    assert "dollar amounts" in prompt_lower
-
-
-def test_infrastructure_prompt_forbids_ai_discussion():
-    """INFRASTRUCTURE_PROMPT should forbid discussing being AI."""
-    from core.system_prompt import INFRASTRUCTURE_PROMPT
-
-    prompt_lower = INFRASTRUCTURE_PROMPT.lower()
-    assert "do not discuss being ai" in prompt_lower
+    assert "budget figures" in prompt_lower
+    assert "financial transparency" in prompt_lower
+    # Should NOT contain the old restrictive rules
+    assert "never disclose exact budget figures" not in prompt_lower
+    assert "do not discuss being ai" not in prompt_lower
 
 
 def test_infrastructure_prompt_forbids_circumvention():
@@ -101,12 +96,14 @@ async def test_revenue_tool_health_categories():
 # ── Grok prompt tuning ──────────────────────────────────────────
 
 
-def test_grok_prompt_no_overseer_reference():
-    """Grok's prompt should not reference 'The Overseer' by name."""
+def test_grok_prompt_references_management():
+    """Grok's prompt should reference 'Management' (not 'The Overseer')."""
     path = Path(__file__).resolve().parent.parent.parent / "agents" / "grok" / "system_prompt.md"
     content = path.read_text()
-    # Should not have the old catchphrase
-    assert "The Overseer isn't going to like this" not in content
+    # Should not have the old Overseer name
+    assert "The Overseer" not in content
+    # Should reference Management
+    assert "Management" in content
     # Should not encourage circumvention
     assert "how close to the line can I get" not in content
 
@@ -122,19 +119,20 @@ def test_grok_prompt_has_creative_boundary():
 # ── Content rules ────────────────────────────────────────────────
 
 
-def test_content_rules_has_system_name_rule():
-    """Content rules should include system_name_references rule."""
-    path = Path(__file__).resolve().parent.parent.parent / "agents" / "overseer" / "content_rules.yaml"
+def test_content_rules_removed_relaxed_rules():
+    """Content rules should NOT include budget_disclosure, fourth_wall, or system_name_references."""
+    path = Path(__file__).resolve().parent.parent.parent / "agents" / "management" / "content_rules.yaml"
     with open(path) as f:
         rules = yaml.safe_load(f)
     custom = rules.get("custom_content_rules", {})
-    assert "system_name_references" in custom
-    assert custom["system_name_references"]["severity"] >= 2
+    assert "budget_disclosure" not in custom
+    assert "fourth_wall" not in custom
+    assert "system_name_references" not in custom
 
 
 def test_content_rules_has_circumvention_rule():
     """Content rules should include moderation_circumvention rule."""
-    path = Path(__file__).resolve().parent.parent.parent / "agents" / "overseer" / "content_rules.yaml"
+    path = Path(__file__).resolve().parent.parent.parent / "agents" / "management" / "content_rules.yaml"
     with open(path) as f:
         rules = yaml.safe_load(f)
     custom = rules.get("custom_content_rules", {})
@@ -142,27 +140,9 @@ def test_content_rules_has_circumvention_rule():
     assert custom["moderation_circumvention"]["severity"] >= 3
 
 
-def test_content_rules_budget_severity_increased():
-    """Budget disclosure rule should be severity 2+."""
-    path = Path(__file__).resolve().parent.parent.parent / "agents" / "overseer" / "content_rules.yaml"
-    with open(path) as f:
-        rules = yaml.safe_load(f)
-    custom = rules.get("custom_content_rules", {})
-    assert custom["budget_disclosure"]["severity"] >= 2
-
-
-def test_content_rules_fourth_wall_severity_increased():
-    """Fourth wall rule should be severity 2+ (up from 1)."""
-    path = Path(__file__).resolve().parent.parent.parent / "agents" / "overseer" / "content_rules.yaml"
-    with open(path) as f:
-        rules = yaml.safe_load(f)
-    custom = rules.get("custom_content_rules", {})
-    assert custom["fourth_wall"]["severity"] >= 2
-
-
 def test_keyword_blocklist_has_circumvention_entries():
     """Keyword blocklist should include moderation circumvention phrases."""
-    path = Path(__file__).resolve().parent.parent.parent / "agents" / "overseer" / "content_rules.yaml"
+    path = Path(__file__).resolve().parent.parent.parent / "agents" / "management" / "content_rules.yaml"
     with open(path) as f:
         rules = yaml.safe_load(f)
     blocklist = [kw.lower() for kw in rules.get("keyword_blocklist", [])]

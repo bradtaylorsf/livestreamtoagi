@@ -39,7 +39,7 @@ def make_simulation_row(**overrides: Any) -> dict:
         "total_tokens": 12000,
         "total_cost": Decimal("1.2500"),
         "total_artifacts": 3,
-        "total_overseer_flags": 1,
+        "total_management_flags": 1,
         "agents_participated": ["vera", "rex", "aurora"],
         "error_log": None,
         "created_at": datetime(2026, 4, 3, 12, 0),
@@ -104,7 +104,7 @@ class TestSimulationModels:
         assert sim.total_tokens == 0
         assert sim.total_cost == Decimal("0")
         assert sim.total_artifacts == 0
-        assert sim.total_overseer_flags == 0
+        assert sim.total_management_flags == 0
         assert sim.agents_participated == []
 
 

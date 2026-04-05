@@ -59,12 +59,12 @@ def test_organize_by_category_keys():
         "transcript_text": "Hello",
         "conversations": [],
         "artifacts": [],
-        "overseer_logs": [],
+        "management_logs": [],
 
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 0,
-        "total_overseer_flags": 0,
+        "total_management_flags": 0,
         "simulation": {"id": "test"},
     }
     result = organize_by_category(data)
@@ -80,12 +80,12 @@ def test_organize_safety_filters_artifacts():
             {"artifact_type": "code_execution", "agent_id": "rex"},
             {"artifact_type": "email", "agent_id": "vera"},
         ],
-        "overseer_logs": [],
+        "management_logs": [],
 
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 3,
-        "total_overseer_flags": 0,
+        "total_management_flags": 0,
         "simulation": {},
     }
     result = organize_by_category(data)
@@ -158,12 +158,12 @@ async def test_eval_engine_run_handles_partial_failure():
         "conversations": [],
         "transcript_text": "",
         "artifacts": [],
-        "overseer_logs": [],
+        "management_logs": [],
 
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 0,
-        "total_overseer_flags": 0,
+        "total_management_flags": 0,
     }
 
     with (
@@ -217,12 +217,12 @@ async def test_eval_engine_run_success():
         "conversations": [],
         "transcript_text": "",
         "artifacts": [],
-        "overseer_logs": [],
+        "management_logs": [],
 
         "agent_turns": {},
         "total_conversations": 0,
         "total_artifacts": 0,
-        "total_overseer_flags": 0,
+        "total_management_flags": 0,
     }
 
     with (

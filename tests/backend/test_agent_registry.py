@@ -97,7 +97,7 @@ async def test_registry_loads_all_9_agents():
     agent_ids = {a.id for a in agents}
     assert agent_ids == {
         "vera", "rex", "aurora", "pixel", "fork",
-        "sentinel", "grok", "overseer", "alpha",
+        "sentinel", "grok", "management", "alpha",
     }
 
 
@@ -535,7 +535,7 @@ async def test_grok_prompt_and_behaviors_match_character_spec():
     assert communication["topic_relevance"]["art"] == 0.4
     assert "I'm just saying what everyone's thinking." in communication["catchphrases"]
     assert "Let me cook." in communication["catchphrases"]
-    assert content["overseer_trigger_probability"] == 0.2
+    assert content["management_trigger_probability"] == 0.2
     assert "1 in 5 outputs" in content["pipeline_handling"]
     assert "wild ideas" in building["primary_skills"]
     assert "provocative content" in building["primary_skills"]
@@ -652,11 +652,11 @@ async def test_special_agents_have_zero_weights():
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
-    overseer = registry.get_agent("overseer")
-    assert overseer is not None
-    assert overseer.chattiness == 0.0
-    assert overseer.initiative == 0.0
-    assert overseer.interrupt_tendency == 1.0
+    management = registry.get_agent("management")
+    assert management is not None
+    assert management.chattiness == 0.0
+    assert management.initiative == 0.0
+    assert management.interrupt_tendency == 1.0
 
     alpha = registry.get_agent("alpha")
     assert alpha is not None
@@ -906,34 +906,34 @@ async def test_alpha_behaviors_and_prompt_match_spec():
 
 
 @pytest.mark.asyncio
-async def test_overseer_config_loads_with_expected_values():
+async def test_management_config_loads_with_expected_values():
     """Overseer loads with the exact config values required by issue #14."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
-    overseer = registry.get_agent("overseer")
-    assert overseer is not None
-    assert overseer.id == "overseer"
-    assert overseer.display_name == "The Overseer — The Ominous Presence"
-    assert overseer.model_conversation == "anthropic/claude-haiku-4.5"
-    assert overseer.model_building == "anthropic/claude-haiku-4.5"
-    assert overseer.voice_id == "en-US-AndrewNeural"
-    assert overseer.chattiness == 0.0
-    assert overseer.initiative == 0.0
-    assert overseer.interrupt_tendency == 1.0
-    assert overseer.eavesdrop_tendency == 0.0
+    management = registry.get_agent("management")
+    assert management is not None
+    assert management.id == "management"
+    assert management.display_name == "Management — The Exhausted Middle Layer"
+    assert management.model_conversation == "anthropic/claude-haiku-4.5"
+    assert management.model_building == "anthropic/claude-haiku-4.5"
+    assert management.voice_id == "en-US-AndrewNeural"
+    assert management.chattiness == 0.0
+    assert management.initiative == 0.0
+    assert management.interrupt_tendency == 1.0
+    assert management.eavesdrop_tendency == 0.0
 
 
 @pytest.mark.asyncio
-async def test_overseer_prompt_and_behaviors_match_spec():
+async def test_management_prompt_and_behaviors_match_spec():
     """Overseer prompt contains key persona markers; behaviors has 5 intervention levels."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
 
-    overseer = registry.get_agent("overseer")
-    assert overseer is not None
+    management = registry.get_agent("management")
+    assert management is not None
 
-    prompt = overseer.system_prompt.lower()
+    prompt = management.system_prompt.lower()
     assert "bureaucratic" in prompt
     assert "procedural" in prompt
     assert "ominous" in prompt
@@ -945,23 +945,23 @@ async def test_overseer_prompt_and_behaviors_match_spec():
     assert "cite" in prompt
 
     # Behaviors: 5 intervention levels
-    levels = overseer.behaviors.get("intervention_levels", {})
+    levels = management.behaviors.get("intervention_levels", {})
     assert len(levels) == 5
     assert "level_1_notice" in levels
     assert "level_2_warning" in levels
     assert "level_3_intervention" in levels
-    assert "level_4_broadcast_interruption" in levels
+    assert "level_4_broadcast_memo" in levels
     assert "level_5_emergency" in levels
 
     # Moderation section exists
-    moderation = overseer.behaviors.get("moderation", {})
+    moderation = management.behaviors.get("moderation", {})
     assert moderation.get("tracks_repeat_offenders") is True
 
 
 @pytest.mark.asyncio
-async def test_overseer_content_rules_loads():
+async def test_management_content_rules_loads():
     """content_rules.yaml parses without error and has required sections."""
-    content_rules_path = AGENTS_DIR / "overseer" / "content_rules.yaml"
+    content_rules_path = AGENTS_DIR / "management" / "content_rules.yaml"
     assert content_rules_path.exists(), "content_rules.yaml must exist"
 
     with open(content_rules_path) as f:
@@ -983,9 +983,9 @@ async def test_overseer_content_rules_loads():
 
 
 @pytest.mark.asyncio
-async def test_overseer_intervention_levels_ordered():
+async def test_management_intervention_levels_ordered():
     """intervention_levels.yaml has severity 1-5 in order."""
-    levels_path = AGENTS_DIR / "overseer" / "intervention_levels.yaml"
+    levels_path = AGENTS_DIR / "management" / "intervention_levels.yaml"
     assert levels_path.exists(), "intervention_levels.yaml must exist"
 
     with open(levels_path) as f:
@@ -1008,9 +1008,9 @@ async def test_overseer_intervention_levels_ordered():
 
 
 @pytest.mark.asyncio
-async def test_overseer_keyword_blocklist_has_defaults():
+async def test_management_keyword_blocklist_has_defaults():
     """Keyword blocklist is a non-empty list with reasonable defaults."""
-    content_rules_path = AGENTS_DIR / "overseer" / "content_rules.yaml"
+    content_rules_path = AGENTS_DIR / "management" / "content_rules.yaml"
     with open(content_rules_path) as f:
         rules = yaml.safe_load(f)
 
@@ -1022,7 +1022,7 @@ async def test_overseer_keyword_blocklist_has_defaults():
 # ── Cross-Agent Validation Tests ──────────────────────────────────
 
 
-EXPECTED_AGENTS = ["alpha", "aurora", "fork", "grok", "overseer", "pixel", "rex", "sentinel", "vera"]
+EXPECTED_AGENTS = ["alpha", "aurora", "fork", "grok", "management", "pixel", "rex", "sentinel", "vera"]
 
 
 @pytest.mark.asyncio
@@ -1083,17 +1083,17 @@ async def test_all_agents_have_behaviors():
 
 
 @pytest.mark.asyncio
-async def test_overseer_content_rules_loaded_into_behaviors():
+async def test_management_content_rules_loaded_into_behaviors():
     """Overseer's content_rules.yaml should be accessible via behaviors dict."""
     registry = AgentRegistry(agents_dir=AGENTS_DIR)
     await registry.load_all()
 
-    overseer = registry.get_agent("overseer")
-    assert overseer is not None
+    management = registry.get_agent("management")
+    assert management is not None
     # content_rules.yaml is loaded as extra file if not already in behaviors.yaml
     # Either way, the key should exist
-    content_rules = overseer.behaviors.get("content_rules")
-    assert content_rules is not None, "content_rules not loaded into overseer behaviors"
+    content_rules = management.behaviors.get("content_rules")
+    assert content_rules is not None, "content_rules not loaded into management behaviors"
     assert "keyword_blocklist" in content_rules
 
 

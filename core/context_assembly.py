@@ -64,13 +64,9 @@ PROMPT_HINTS: dict[str, str] = {
         "whatever is on your mind. Look around — who's nearby?]"
     ),
     "memory": (
-        "[SYSTEM: You just remembered something relevant. "
-        "Bring it up naturally if you want to.]"
+        "[SYSTEM: You just remembered something relevant. Bring it up naturally if you want to.]"
     ),
-    "closing": (
-        "[SYSTEM: This conversation is winding down. "
-        "Wrap it up naturally in your style.]"
-    ),
+    "closing": ("[SYSTEM: This conversation is winding down. Wrap it up naturally in your style.]"),
 }
 
 # Pixel is the audience liaison agent
@@ -108,6 +104,8 @@ class ContextAssembler:
         prompt_hint: str | None = None,
         transcript_id: int | None = None,
         recent_conversation_summaries: list[str] | None = None,
+        relationship_context: str | None = None,
+        shared_state_context: str | None = None,
     ) -> list[dict[str, str]]:
         """Assemble the complete context window for an agent turn.
 
@@ -150,21 +148,15 @@ class ContextAssembler:
                     agent_id, query_text, limit=3
                 )
             except Exception:
-                logger.warning(
-                    "Failed to retrieve recall memories for %s", agent_id
-                )
+                logger.warning("Failed to retrieve recall memories for %s", agent_id)
 
         # Optional transcript (Tier 3)
         transcript_text = ""
         if transcript_id is not None:
             try:
-                transcript = await self._archival_memory.retrieve_full_transcript(
-                    transcript_id
-                )
+                transcript = await self._archival_memory.retrieve_full_transcript(transcript_id)
                 if transcript:
-                    transcript_text = (
-                        f"\n## Full Transcript\n{transcript.content}"
-                    )
+                    transcript_text = f"\n## Full Transcript\n{transcript.content}"
             except Exception:
                 logger.warning(
                     "Failed to retrieve transcript %d for %s",
@@ -181,7 +173,7 @@ class ContextAssembler:
         # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint.startswith("topic:"):
-            seeded_topic = prompt_hint[len("topic:"):]
+            seeded_topic = prompt_hint[len("topic:") :]
             hint_text = (
                 f"[SYSTEM: The group wants to discuss: {seeded_topic}. "
                 f"Open the conversation on this topic in your style.]"
@@ -209,8 +201,22 @@ class ContextAssembler:
                 f"{i + 1}. {s}" for i, s in enumerate(recent_conversation_summaries)
             )
             system_sections.append(
-                "## Recent Conversations (do NOT repeat these)\n" + numbered
+                "## What happened earlier today\n"
+                "Build on these conversations. Reference decisions, hold people accountable, "
+                "advance ongoing discussions, and react to what others said or committed to.\n\n"
+                + numbered
             )
+
+        # Relationship context
+        if relationship_context:
+            system_sections.append(
+                "## Your relationships with other agents in this conversation\n"
+                + relationship_context
+            )
+
+        # Shared working state
+        if shared_state_context:
+            system_sections.append("## Current project status\n" + shared_state_context)
 
         if transcript_text:
             system_sections.append(transcript_text)
@@ -233,9 +239,7 @@ class ContextAssembler:
             buffer = self._truncate_buffer(buffer, available_for_buffer)
 
         # --- Assemble final messages list ---
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": system_content}
-        ]
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
         messages.extend(buffer)
 
         if hint_text:
@@ -243,23 +247,16 @@ class ContextAssembler:
 
         return messages
 
-    def _derive_query(
-        self, conversation_history: list[dict[str, str]]
-    ) -> str:
+    def _derive_query(self, conversation_history: list[dict[str, str]]) -> str:
         """Derive a search query from the last few conversation messages."""
         recent = conversation_history[-3:]
         if not recent:
             return ""
         return " ".join(msg.get("content", "") for msg in recent)
 
-    def _count_buffer_tokens(
-        self, buffer: list[dict[str, str]]
-    ) -> int:
+    def _count_buffer_tokens(self, buffer: list[dict[str, str]]) -> int:
         """Count total tokens across all buffer messages."""
-        return sum(
-            self._token_counter.count_tokens(msg.get("content", ""))
-            for msg in buffer
-        )
+        return sum(self._token_counter.count_tokens(msg.get("content", "")) for msg in buffer)
 
     def _truncate_buffer(
         self,
@@ -277,9 +274,7 @@ class ContextAssembler:
         kept: list[dict[str, str]] = []
         running_tokens = 0
         for msg in reversed(buffer):
-            msg_tokens = self._token_counter.count_tokens(
-                msg.get("content", "")
-            )
+            msg_tokens = self._token_counter.count_tokens(msg.get("content", ""))
             if running_tokens + msg_tokens > available_tokens:
                 if len(kept) >= BUFFER_MIN_MESSAGES:
                     break

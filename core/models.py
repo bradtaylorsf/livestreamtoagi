@@ -714,7 +714,7 @@ class Simulation(BaseModel):
     total_tokens: int = 0
     total_cost: Decimal = Decimal("0")
     total_artifacts: int = 0
-    total_overseer_flags: int = 0
+    total_management_flags: int = 0
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
     created_at: datetime | None = None
@@ -1017,5 +1017,5 @@ class AssertionDefinition(BaseModel):
     recall_created: bool | None = None
     core_memory_updated: bool | None = None
     max_cost: float | None = None
-    max_overseer_severity: int | None = None
+    max_management_severity: int | None = None
     interaction_count_increased: bool | None = None

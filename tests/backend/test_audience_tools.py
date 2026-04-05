@@ -34,7 +34,7 @@ def redis_client() -> AsyncMock:
 
 
 @pytest.fixture
-def overseer() -> AsyncMock:
+def management_mock() -> AsyncMock:
     mock = AsyncMock()
     mock.review = AsyncMock(
         return_value=ContentReviewResult(approved=True, reason="OK", severity=1)
@@ -44,10 +44,10 @@ def overseer() -> AsyncMock:
 
 @pytest.fixture
 def send_chat(
-    overseer: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
+    management_mock: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
 ) -> SendChatMessageTool:
     return SendChatMessageTool(
-        overseer=overseer, event_bus=event_bus, redis_client=redis_client, agent_id="pixel"
+        management=management_mock, event_bus=event_bus, redis_client=redis_client, agent_id="pixel"
     )
 
 
@@ -65,21 +65,21 @@ def get_poll_results(redis_client: AsyncMock, event_bus: AsyncMock) -> GetPollRe
 
 
 class TestSendChatMessage:
-    async def test_passes_through_overseer_filter(
-        self, send_chat: SendChatMessageTool, overseer: AsyncMock
+    async def test_passes_through_management_filter(
+        self, send_chat: SendChatMessageTool, management_mock: AsyncMock
     ) -> None:
         await send_chat.execute(message="Hello chat!")
 
-        overseer.review.assert_called_once_with("pixel", "Hello chat!")
+        management_mock.review.assert_called_once_with("pixel", "Hello chat!")
 
-    async def test_rejected_by_overseer_returns_error(
-        self, overseer: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
+    async def test_rejected_by_management_returns_error(
+        self, management_mock: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
-        overseer.review = AsyncMock(
+        management_mock.review = AsyncMock(
             return_value=ContentReviewResult(approved=False, reason="Blocked content", severity=3)
         )
         tool = SendChatMessageTool(
-            overseer=overseer, event_bus=event_bus, redis_client=redis_client, agent_id="pixel"
+            management=management_mock, event_bus=event_bus, redis_client=redis_client, agent_id="pixel"
         )
 
         result = await tool.execute(message="bad message")
@@ -89,17 +89,17 @@ class TestSendChatMessage:
         redis_client.rpush.assert_not_called()
 
     async def test_unauthorized_agent_rejected(
-        self, overseer: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
+        self, management_mock: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
         tool = SendChatMessageTool(
-            overseer=overseer, event_bus=event_bus, redis_client=redis_client, agent_id="rex"
+            management=management_mock, event_bus=event_bus, redis_client=redis_client, agent_id="rex"
         )
 
         result = await tool.execute(message="Hello!")
 
         assert result["status"] == "rejected"
         assert "not authorized" in result["reason"]
-        overseer.review.assert_not_called()
+        management_mock.review.assert_not_called()
 
     async def test_successful_send(
         self, send_chat: SendChatMessageTool, redis_client: AsyncMock, event_bus: AsyncMock

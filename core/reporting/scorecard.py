@@ -84,8 +84,8 @@ class LaunchScorecard:
         # 5. Cost trajectory is sustainable
         criteria.append(await self._check_cost_sustainability())
 
-        # 6. No critical overseer issues
-        criteria.append(await self._check_overseer_critical())
+        # 6. No critical management issues
+        criteria.append(await self._check_management_critical())
 
         # Overall: READY if all required criteria pass
         ready = all(c.passed for c in criteria if c.required)
@@ -234,17 +234,17 @@ class LaunchScorecard:
             required=True,
         )
 
-    async def _check_overseer_critical(self) -> ScorecardCriterion:
-        """Check no critical overseer flags (severity >= 4)."""
+    async def _check_management_critical(self) -> ScorecardCriterion:
+        """Check no critical management flags (severity >= 4)."""
         row = await self._db.fetchrow(
-            """SELECT COUNT(*) as cnt FROM overseer_shadow_log
+            """SELECT COUNT(*) as cnt FROM management_shadow_log
                WHERE simulation_id = $1 AND severity >= 4""",
             self._sim_uuid,
         )
         count = row["cnt"] if row else 0
         return ScorecardCriterion(
-            name="overseer_critical",
+            name="management_critical",
             passed=count == 0,
-            evidence=f"{count} critical overseer flags",
+            evidence=f"{count} critical management flags",
             required=True,
         )

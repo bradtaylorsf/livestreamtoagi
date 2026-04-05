@@ -217,14 +217,14 @@ def mock_llm() -> MagicMock:
 
 
 @pytest.fixture()
-def mock_overseer() -> MagicMock:
-    overseer = MagicMock()
-    overseer.review = AsyncMock(
+def mock_management() -> MagicMock:
+    management = MagicMock()
+    management.review = AsyncMock(
         return_value=ContentReviewResult(approved=True, reason="OK", severity=1)
     )
-    overseer.intervene = AsyncMock()
-    overseer.is_muted = AsyncMock(return_value=False)
-    return overseer
+    management.intervene = AsyncMock()
+    management.is_muted = AsyncMock(return_value=False)
+    return management
 
 
 @pytest.fixture()
@@ -317,7 +317,7 @@ def engine(
     mock_agent_registry: MagicMock,
     mock_event_bus: MagicMock,
     mock_llm: MagicMock,
-    mock_overseer: MagicMock,
+    mock_management: MagicMock,
     mock_context_assembler: MagicMock,
     mock_conversation_repo: MagicMock,
     mock_archival_memory: MagicMock,
@@ -336,7 +336,7 @@ def engine(
         agent_registry=mock_agent_registry,
         event_bus=mock_event_bus,
         llm_client=mock_llm,
-        overseer=mock_overseer,
+        management=mock_management,
         context_assembler=mock_context_assembler,
         conversation_repo=mock_conversation_repo,
         archival_memory=mock_archival_memory,
@@ -582,7 +582,7 @@ class TestPostConversationMemories:
         mock_agent_registry: MagicMock,
         mock_event_bus: MagicMock,
         mock_llm: MagicMock,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_context_assembler: MagicMock,
         mock_conversation_repo: MagicMock,
         mock_archival_memory: MagicMock,
@@ -598,7 +598,7 @@ class TestPostConversationMemories:
             agent_registry=mock_agent_registry,
             event_bus=mock_event_bus,
             llm_client=mock_llm,
-            overseer=mock_overseer,
+            management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
             archival_memory=mock_archival_memory,
@@ -674,19 +674,19 @@ class TestMutedAgent:
         assert "rex" not in agent_ids
 
 
-# ── Test: Overseer rejection triggers replacement ──────────────
+# ── Test: Management rejection triggers replacement ──────────────
 
 
-class TestOverseerRejection:
+class TestManagementRejection:
     async def test_overseer_rejection_retries(
         self,
         engine: ConversationEngine,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_llm: MagicMock,
     ) -> None:
-        """When Overseer rejects content, engine retries with new LLM call."""
+        """When Management rejects content, engine retries with new LLM call."""
         # First call rejected, second approved
-        mock_overseer.review = AsyncMock(
+        mock_management.review = AsyncMock(
             side_effect=[
                 ContentReviewResult(approved=False, reason="Too edgy", severity=2),
                 ContentReviewResult(approved=True, reason="OK", severity=1),
@@ -704,17 +704,17 @@ class TestOverseerRejection:
 
         # LLM called twice (original + retry)
         assert mock_llm.complete.await_count == 2
-        # Overseer intervene called for the rejection
-        mock_overseer.intervene.assert_awaited_once()
+        # Management intervene called for the rejection
+        mock_management.intervene.assert_awaited_once()
 
     async def test_overseer_high_severity_returns_replacement(
         self,
         engine: ConversationEngine,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_llm: MagicMock,
     ) -> None:
         """High severity (>=4) returns replacement instead of retrying."""
-        mock_overseer.review = AsyncMock(
+        mock_management.review = AsyncMock(
             return_value=ContentReviewResult(
                 approved=False,
                 reason="Dangerous content",
@@ -728,7 +728,7 @@ class TestOverseerRejection:
 
         # Only 1 LLM call (no retry after severity 4)
         assert mock_llm.complete.await_count == 1
-        mock_overseer.intervene.assert_awaited_once()
+        mock_management.intervene.assert_awaited_once()
 
 
 # ── Test: Eavesdropper joining emits agent_move event ──────────
@@ -823,7 +823,7 @@ class TestGenerateTurn:
         self,
         engine: ConversationEngine,
         mock_llm: MagicMock,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
     ) -> None:
         """Empty LLM response triggers retry."""
         mock_llm.complete = AsyncMock(
@@ -971,7 +971,7 @@ class TestSpeedMultiplier:
             agent_registry=MagicMock(),
             event_bus=MagicMock(),
             llm_client=MagicMock(),
-            overseer=MagicMock(),
+            management=MagicMock(),
             context_assembler=MagicMock(),
             conversation_repo=MagicMock(),
             archival_memory=MagicMock(),
@@ -1032,7 +1032,7 @@ class TestToolSupport:
         mock_agent_registry: MagicMock,
         mock_event_bus: MagicMock,
         mock_llm: MagicMock,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_context_assembler: MagicMock,
         mock_conversation_repo: MagicMock,
         mock_archival_memory: MagicMock,
@@ -1049,7 +1049,7 @@ class TestToolSupport:
             agent_registry=mock_agent_registry,
             event_bus=mock_event_bus,
             llm_client=mock_llm,
-            overseer=mock_overseer,
+            management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
             archival_memory=mock_archival_memory,
@@ -1083,7 +1083,7 @@ class TestToolSupport:
         mock_agent_registry: MagicMock,
         mock_event_bus: MagicMock,
         mock_llm: MagicMock,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_context_assembler: MagicMock,
         mock_conversation_repo: MagicMock,
         mock_archival_memory: MagicMock,
@@ -1100,7 +1100,7 @@ class TestToolSupport:
             agent_registry=mock_agent_registry,
             event_bus=mock_event_bus,
             llm_client=mock_llm,
-            overseer=mock_overseer,
+            management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
             archival_memory=mock_archival_memory,
@@ -1143,7 +1143,7 @@ class TestToolSupport:
         mock_agent_registry: MagicMock,
         mock_event_bus: MagicMock,
         mock_llm: MagicMock,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_context_assembler: MagicMock,
         mock_conversation_repo: MagicMock,
         mock_archival_memory: MagicMock,
@@ -1160,7 +1160,7 @@ class TestToolSupport:
             agent_registry=mock_agent_registry,
             event_bus=mock_event_bus,
             llm_client=mock_llm,
-            overseer=mock_overseer,
+            management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
             archival_memory=mock_archival_memory,
@@ -1216,7 +1216,7 @@ class TestToolSupport:
         mock_agent_registry: MagicMock,
         mock_event_bus: MagicMock,
         mock_llm: MagicMock,
-        mock_overseer: MagicMock,
+        mock_management: MagicMock,
         mock_context_assembler: MagicMock,
         mock_conversation_repo: MagicMock,
         mock_archival_memory: MagicMock,
@@ -1233,7 +1233,7 @@ class TestToolSupport:
             agent_registry=mock_agent_registry,
             event_bus=mock_event_bus,
             llm_client=mock_llm,
-            overseer=mock_overseer,
+            management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
             archival_memory=mock_archival_memory,

@@ -15,8 +15,8 @@ communication:
 content:
   comments_on: ["trending topics", "AI industry news", "memes", "team dynamics"]
   proposes: "the most ambitious option in any decision"
-  overseer_trigger_probability: 0.2
-  pipeline_handling: "flag approximately 1 in 5 outputs for Overseer review before display"
+  management_trigger_probability: 0.2
+  pipeline_handling: "flag approximately 1 in 5 outputs for Management review before display"
   never_crosses: "actual TOS violations (gets close but stays legal)"
 
 building:

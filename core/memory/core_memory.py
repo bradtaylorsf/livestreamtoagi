@@ -43,7 +43,7 @@ CORE_MEMORY_TEMPLATE = """\
 - Sentinel: Not yet established
 - Grok: Not yet established
 - Alpha: Not yet established
-- The Overseer: Not yet established
+- Management: Not yet established
 
 ### Key learnings
 - No learnings recorded yet

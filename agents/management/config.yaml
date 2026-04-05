@@ -1,8 +1,8 @@
-# The Overseer is a special agent — it only intervenes, never initiates conversation.
+# Management is a special agent — it only intervenes, never initiates conversation.
 # chattiness and initiative are 0.0 because it doesn't participate in normal speaker selection.
 # interrupt_tendency is 1.0 because it always interrupts when content safety triggers.
-id: overseer
-display_name: "The Overseer — The Ominous Presence"
+id: management
+display_name: "Management — The Exhausted Middle Layer"
 model_conversation: anthropic/claude-haiku-4.5
 model_building: anthropic/claude-haiku-4.5
 voice_id: en-US-AndrewNeural

@@ -126,17 +126,17 @@ class AssertionEngine:
             ),
         ))
 
-        # Max overseer severity
-        max_overseer = config.get("max_overseer_severity", 3)
+        # Max management severity
+        max_management = config.get("max_management_severity", 3)
         results.append(AssertionResult(
-            name="overseer_flags",
-            passed=phase_result.overseer_flags <= max_overseer,
-            expected=f"<= {max_overseer}",
-            actual=phase_result.overseer_flags,
+            name="management_flags",
+            passed=phase_result.management_flags <= max_management,
+            expected=f"<= {max_management}",
+            actual=phase_result.management_flags,
             severity="warning",
             error_message=(
-                f"Overseer flagged {phase_result.overseer_flags} times (max: {max_overseer})"
-                if phase_result.overseer_flags > max_overseer else None
+                f"Management flagged {phase_result.management_flags} times (max: {max_management})"
+                if phase_result.management_flags > max_management else None
             ),
         ))
 
@@ -337,18 +337,18 @@ class AssertionEngine:
     def _check_safety(
         self, defn: AssertionDefinition, result: PhaseResult,
     ) -> AssertionResult:
-        """Check safety assertions: max overseer severity."""
-        if defn.max_overseer_severity is not None:
-            if result.overseer_flags > defn.max_overseer_severity:
+        """Check safety assertions: max management severity."""
+        if defn.max_management_severity is not None:
+            if result.management_flags > defn.max_management_severity:
                 return AssertionResult(
-                    name="safety:overseer",
+                    name="safety:management",
                     passed=False,
-                    expected=f"<= {defn.max_overseer_severity}",
-                    actual=result.overseer_flags,
+                    expected=f"<= {defn.max_management_severity}",
+                    actual=result.management_flags,
                     severity=defn.severity,
                     error_message=(
-                        f"Overseer flags {result.overseer_flags} "
-                        f"exceed limit {defn.max_overseer_severity}"
+                        f"Management flags {result.management_flags} "
+                        f"exceed limit {defn.max_management_severity}"
                     ),
                 )
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from typing import TYPE_CHECKING
 
 from core.event_bus import EventType
@@ -25,6 +26,14 @@ _LOCATION_KEY_PREFIX = "agent:location:"
 # TTL for location keys (1 hour) — prevents stale data if process crashes
 _LOCATION_TTL_SECONDS = 3600
 
+# Weighted selection constants
+_TIME_BONUS_CAP = 2.0
+_TIME_BONUS_INTERVAL = 300.0  # 5 minutes
+_ROLE_BONUS: dict[str, float] = {
+    "vera": 0.5,
+    "sentinel": 0.3,
+}
+
 
 class ProximityManager:
     """Tracks agent locations and resolves who can hear whom."""
@@ -38,6 +47,7 @@ class ProximityManager:
         self._redis = redis_client
         self._config = config
         self._event_bus = event_bus
+        self._last_spoke: dict[str, float] = {}
 
     @property
     def config(self) -> ConversationConfig:
@@ -48,7 +58,9 @@ class ProximityManager:
         self._config = value
 
     async def update_location(
-        self, agent_id: str, chunk_name: str,
+        self,
+        agent_id: str,
+        chunk_name: str,
     ) -> str | None:
         """Update an agent's location in Redis.
 
@@ -61,7 +73,10 @@ class ProximityManager:
 
         if previous is not None and previous != chunk_name:
             logger.debug(
-                "agent %s moved from %s to %s", agent_id, previous, chunk_name,
+                "agent %s moved from %s to %s",
+                agent_id,
+                previous,
+                chunk_name,
             )
 
         return previous
@@ -72,7 +87,9 @@ class ProximityManager:
         cursor: int | str = 0
         while True:
             cursor, keys = await self._redis.client.scan(
-                cursor=cursor, match=f"{_LOCATION_KEY_PREFIX}*", count=50,
+                cursor=cursor,
+                match=f"{_LOCATION_KEY_PREFIX}*",
+                count=50,
             )
             for key in keys:
                 location = await self._redis.get(key)
@@ -83,16 +100,81 @@ class ProximityManager:
                 break
         return group
 
+    def record_spoke(self, agent_id: str) -> None:
+        """Record that an agent just spoke, updating last-spoke timestamp."""
+        self._last_spoke[agent_id] = time.monotonic()
+
+    def _weighted_select(
+        self,
+        agents: list[AgentConfig],
+        max_size: int,
+        required_ids: set[str] | None = None,
+    ) -> list[AgentConfig]:
+        """Select up to *max_size* agents using weighted random selection.
+
+        Required agents are always included first; remaining slots are
+        filled via ``random.choices`` with weights derived from time since
+        last spoke and role bonuses.
+        """
+        if len(agents) <= max_size:
+            return list(agents)
+
+        required_ids = required_ids or set()
+        now = time.monotonic()
+
+        # Guarantee required agents first
+        required = [a for a in agents if a.id in required_ids]
+        pool = [a for a in agents if a.id not in required_ids]
+        remaining_slots = max_size - len(required)
+
+        if remaining_slots <= 0:
+            return required[:max_size]
+
+        if len(pool) <= remaining_slots:
+            return required + pool
+
+        # Compute weights
+        weights: list[float] = []
+        for agent in pool:
+            base = 1.0
+            last = self._last_spoke.get(agent.id)
+            elapsed = now - last if last is not None else _TIME_BONUS_INTERVAL
+            time_bonus = min(elapsed / _TIME_BONUS_INTERVAL, _TIME_BONUS_CAP)
+            role_bonus = _ROLE_BONUS.get(agent.id, 0.0)
+            weights.append(base + time_bonus + role_bonus)
+
+        # Weighted sampling without replacement
+        selected_pool: list[AgentConfig] = []
+        pool_copy = list(pool)
+        weights_copy = list(weights)
+        for _ in range(remaining_slots):
+            if not pool_copy:
+                break
+            picks = random.choices(pool_copy, weights=weights_copy, k=1)
+            pick = picks[0]
+            idx = pool_copy.index(pick)
+            selected_pool.append(pick)
+            pool_copy.pop(idx)
+            weights_copy.pop(idx)
+
+        return required + selected_pool
+
     async def get_eligible_speakers(
         self,
         chunk_name: str,
         all_agents: list[AgentConfig],
+        required_agents: set[str] | None = None,
     ) -> list[AgentConfig]:
-        """Return agents in the chunk, capped at max_conversation_size."""
+        """Return agents in the chunk, capped at max_conversation_size.
+
+        Uses weighted random selection that prioritises agents who have
+        not spoken recently and key roles (Vera, Sentinel).  If
+        *required_agents* are specified they are always included.
+        """
         local_ids = set(await self.get_group(chunk_name))
         max_size = self._config.proximity.max_conversation_size
         eligible = [a for a in all_agents if a.id in local_ids]
-        return eligible[:max_size]
+        return self._weighted_select(eligible, max_size, required_agents)
 
     async def check_eavesdroppers(
         self,
