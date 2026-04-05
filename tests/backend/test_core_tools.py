@@ -265,29 +265,28 @@ class TestToolRegistry:
         assert registry.get("send_message") is tool  # original unaffected
 
     def test_names(self, event_bus: AsyncMock, redis_client: AsyncMock) -> None:
+        # Rex only sees tools he's authorized for (filtering removes
+        # create_poll, draft_social_post, draft_email, web_search, fetch_url)
         registry = ToolRegistry()
         for tool in get_core_tools(event_bus, redis_client, agent_id="rex"):
             registry.register(tool)
 
         names = registry.names()
         assert sorted(names) == [
-            "create_poll",
-            "draft_email",
-            "draft_social_post",
             "execute_code",
-            "fetch_url",
             "get_audience_status",
             "get_poll_results",
             "get_world_state",
             "send_message",
-            "web_search",
         ]
 
     def test_get_core_tools_returns_all_three(
         self, event_bus: AsyncMock, redis_client: AsyncMock
     ) -> None:
+        # Vera sees tools she's authorized for (filtering removes
+        # execute_code, draft_social_post, fetch_url)
         tools = get_core_tools(event_bus, redis_client, agent_id="vera")
-        assert len(tools) == 10
+        assert len(tools) == 7
 
         tool_names = {t.name for t in tools}
         assert tool_names == {
@@ -296,11 +295,8 @@ class TestToolRegistry:
             "get_audience_status",
             "get_poll_results",
             "create_poll",
-            "execute_code",
-            "draft_social_post",
             "draft_email",
             "web_search",
-            "fetch_url",
         }
 
         for tool in tools:
