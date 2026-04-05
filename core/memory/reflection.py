@@ -194,6 +194,9 @@ class ReflectionManager:
             # LLM sometimes returns a list of bullet points instead of a string
             if isinstance(content, list):
                 content = "\n".join(str(item) for item in content)
+            # LLM sometimes returns a dict (e.g. structured JSON) instead of a string
+            if isinstance(content, dict):
+                content = "\n".join(f"- {k}: {v}" for k, v in content.items())
             if section not in VALID_SECTIONS:
                 continue
             if not content:

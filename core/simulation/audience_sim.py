@@ -137,7 +137,12 @@ class AudienceSimulator:
 
         try:
             while self._running:
-                await self._tick()
+                try:
+                    await self._tick()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("AudienceSimulator tick failed")
                 await asyncio.sleep(tick_interval)
         except asyncio.CancelledError:
             pass
@@ -200,6 +205,8 @@ class AudienceSimulator:
         options = poll_data.get("options", [])
         if not options:
             return
+        # Coerce options to strings (agents sometimes store dicts)
+        options = [str(o) if not isinstance(o, str) else o for o in options]
 
         votes = poll_data.get("votes", {})
         num_votes = random.randint(1, 3)
