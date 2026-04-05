@@ -10,8 +10,12 @@ import type {
   AgentDetail,
   AgentSummary,
   ArtifactFilters,
+  AssertionResult,
+  AssertionSummary,
+  ComparisonResult,
   ConversationDetail,
   CoreMemoryResponse,
+  CurrentMemoryState,
   DashboardStats,
   EvalHistoryPoint,
   EvalRun,
@@ -20,9 +24,14 @@ import type {
   OverseerFlag,
   PaginatedResponse,
   RecallMemory,
+  Relationship,
+  RelationshipDetail,
   SelectionLog,
   Simulation,
   SimulationCostResponse,
+  SimulationReport,
+  SnapshotData,
+  SnapshotSummary,
   SystemPromptResponse,
   TimelineEvent,
   TurnDetail,
@@ -415,6 +424,119 @@ export async function compareEvals(
 
 export async function exportEval(evalId: string): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/api/admin/evals/${evalId}/export`);
+}
+
+// ── Relationships ─────────────────────────────────────────────
+
+export async function fetchSocialGraph(simId: string): Promise<Relationship[]> {
+  return request<Relationship[]>(`/api/admin/simulations/${simId}/social-graph`);
+}
+
+export async function fetchRelationshipDetail(
+  agentId: string,
+  targetId: string,
+  simId: string,
+): Promise<RelationshipDetail> {
+  return request<RelationshipDetail>(
+    `/api/admin/agents/${agentId}/relationships/${targetId}?simulation_id=${simId}`,
+  );
+}
+
+// ── Assertions ────────────────────────────────────────────────
+
+export async function fetchSimulationAssertions(
+  simId: string,
+): Promise<AssertionResult[]> {
+  return request<AssertionResult[]>(
+    `/api/admin/simulations/${simId}/assertions`,
+  );
+}
+
+export async function fetchSimulationAssertionsSummary(
+  simId: string,
+): Promise<AssertionSummary> {
+  return request<AssertionSummary>(
+    `/api/admin/simulations/${simId}/assertions/summary`,
+  );
+}
+
+// ── Reports ───────────────────────────────────────────────────
+
+export async function fetchSimulationReport(
+  simId: string,
+  days?: string,
+): Promise<SimulationReport> {
+  const params = new URLSearchParams();
+  if (days) params.set("days", days);
+  const qs = params.toString();
+  return request<SimulationReport>(
+    `/api/admin/simulations/${simId}/report${qs ? `?${qs}` : ""}`,
+  );
+}
+
+// ── Snapshots ─────────────────────────────────────────────────
+
+export async function fetchSnapshots(simId: string): Promise<SnapshotSummary[]> {
+  return request<SnapshotSummary[]>(`/api/admin/simulations/${simId}/snapshots`);
+}
+
+export async function fetchSnapshot(
+  simId: string,
+  filename: string,
+): Promise<SnapshotData> {
+  return request<SnapshotData>(
+    `/api/admin/simulations/${simId}/snapshots/${encodeURIComponent(filename)}`,
+  );
+}
+
+export async function triggerSnapshotExport(
+  simId: string,
+): Promise<SnapshotSummary> {
+  return request<SnapshotSummary>(`/api/admin/simulations/${simId}/snapshots`, {
+    method: "POST",
+  });
+}
+
+export async function fetchCurrentMemoryState(
+  simId: string,
+): Promise<CurrentMemoryState> {
+  return request<CurrentMemoryState>(
+    `/api/admin/simulations/${simId}/memory-current`,
+  );
+}
+
+// ── Comparison ────────────────────────────────────────────────
+
+export async function compareSimulations(
+  simA: string,
+  simB: string,
+): Promise<ComparisonResult> {
+  return request<ComparisonResult>(
+    `/api/admin/simulations/compare?sim_a=${simA}&sim_b=${simB}`,
+  );
+}
+
+// ── Eval Issues ───────────────────────────────────────────────
+
+export interface EvalIssueResult {
+  category: string;
+  title: string;
+  url: string | null;
+  status: string;
+  reason?: string;
+}
+
+export async function createIssuesFromEval(
+  evalId: string,
+  threshold: number = 60,
+): Promise<EvalIssueResult[]> {
+  const params = new URLSearchParams();
+  if (threshold !== 60) params.set("threshold", String(threshold));
+  const qs = params.toString();
+  return request<EvalIssueResult[]>(
+    `/api/admin/evals/${evalId}/create-issues${qs ? `?${qs}` : ""}`,
+    { method: "POST" },
+  );
 }
 
 export { AdminApiError };

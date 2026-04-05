@@ -88,12 +88,20 @@ export default function SimulationsPage() {
     <div className="max-w-6xl">
       <div className="flex items-center justify-between mb-6">
         <h1 className="font-pixel text-lg text-foreground">Simulations</h1>
-        <button
-          onClick={() => setShowNewDialog(true)}
-          className="rounded bg-neon-cyan/20 px-4 py-2 text-sm text-neon-cyan border border-neon-cyan/40 hover:bg-neon-cyan/30 transition-colors"
-        >
-          + New Simulation
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/admin/simulations/compare"
+            className="rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+          >
+            Compare Simulations
+          </Link>
+          <button
+            onClick={() => setShowNewDialog(true)}
+            className="rounded bg-neon-cyan/20 px-4 py-2 text-sm text-neon-cyan border border-neon-cyan/40 hover:bg-neon-cyan/30 transition-colors"
+          >
+            + New Simulation
+          </button>
+        </div>
       </div>
 
       {showNewDialog && (
