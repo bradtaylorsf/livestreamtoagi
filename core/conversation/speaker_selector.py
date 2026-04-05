@@ -145,6 +145,13 @@ class SpeakerSelector:
         _required = required_agents or set()
         _spoke = agents_who_spoke or set()
 
+        # Count per-agent turns in this conversation for participation balancing
+        turn_counts: dict[str, int] = {}
+        for msg in conversation_history:
+            spk = msg.get("speaker")
+            if spk:
+                turn_counts[spk] = turn_counts.get(spk, 0) + 1
+
         for agent in candidates:
             factors = self._score_agent(
                 agent, previous_speaker_id, detected_topic,
@@ -159,6 +166,14 @@ class SpeakerSelector:
                 else:
                     total = max(0.0, total - 0.4)
 
+            # Per-conversation participation balancing
+            agent_turns = turn_counts.get(agent.id, 0)
+            if agent_turns == 0:
+                total += 0.3  # Bonus for agents who haven't spoken yet
+            elif agent_turns >= 3:
+                # Fatigue penalty: -0.2 per extra turn beyond 2
+                total = max(0.0, total - 0.2 * (agent_turns - 2))
+
             # Required-agent boost: if agent is required but hasn't spoken
             if agent.id in _required and agent.id not in _spoke:
                 if turn_number >= 3:
@@ -166,6 +181,13 @@ class SpeakerSelector:
 
             scores[agent.id] = total
             breakdown[agent.id] = factors
+
+        # Minimum-participation guarantee: if agent is in participants and
+        # hasn't spoken after 50% of max turns, boost them significantly
+        if turn_number >= (max_turns // 2):
+            for agent in candidates:
+                if agent.id not in turn_counts and agent.id not in _spoke:
+                    scores[agent.id] = scores.get(agent.id, 0) + 0.4
 
         # Force-select a silent required agent past mid-conversation
         selected_id: str | None = None
@@ -190,8 +212,13 @@ class SpeakerSelector:
             interrupt_state is not None
             and self._config.interrupts.enabled
         ):
+            # Prevent the previous speaker from interrupting their own
+            # successor — this eliminates the "double-turn" artifact
             interrupt_attempts = self._check_interrupts(
-                eligible_agents, selected_id, detected_topic, interrupt_state,
+                [a for a in eligible_agents if a.id != previous_speaker_id],
+                selected_id,
+                detected_topic,
+                interrupt_state,
             )
             # Find successful interrupt (highest score wins)
             for attempt in interrupt_attempts:
