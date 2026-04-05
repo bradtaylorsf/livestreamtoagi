@@ -204,7 +204,7 @@ class PhaseRunner:
 
         # Cross-phase conversation context to prevent repetition
         self._conversation_summaries: deque[str] = deque(maxlen=5)
-        self._recent_outputs: deque[str] = deque(maxlen=15)  # Last 15 agent outputs
+        self._recent_outputs: deque[str] = deque(maxlen=50)  # Last 50 agent outputs
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0

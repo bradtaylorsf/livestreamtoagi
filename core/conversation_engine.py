@@ -160,7 +160,7 @@ class ConversationEngine:
 
         # Cross-phase repetition prevention
         self._recent_summaries = recent_conversation_summaries or []
-        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=15)
+        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=50)
         self._last_conversation_summary: str | None = None
 
         # Required-agent participation tracking
@@ -289,6 +289,15 @@ class ConversationEngine:
         if seeded_topic:
             hint = f"topic:{seeded_topic}"
 
+        # Inject topic avoidance if recent topics are being rehashed
+        avoided = self._topic_detector.get_recently_discussed_topics()
+        if avoided:
+            avoidance_note = (
+                f"[SYSTEM: The group recently discussed: {', '.join(avoided)}. "
+                "Choose a different angle or topic.]"
+            )
+            trigger["topic_avoidance"] = avoidance_note
+
         # Generate opening line
         content = await self._generate_turn(opening_agent, prompt_hint=hint)
         if content is None:
@@ -343,6 +352,7 @@ class ConversationEngine:
         topic = await self._topic_detector.detect_topic(conv.history[-5:])
         if topic not in conv.topics:
             conv.topics.append(topic)
+            self._topic_detector.record_topic(topic)
 
         # Check for eavesdroppers joining
         all_agents = self._agents.get_all_agents()
@@ -831,7 +841,14 @@ class ConversationEngine:
 
         Returns the final approved content, or None on total failure.
         """
-        conv_history = history or []
+        conv_history = list(history or [])
+
+        # Inject topic avoidance hint into conversation history if present
+        if self._active and self._active.trigger.get("topic_avoidance"):
+            conv_history.append({
+                "role": "user",
+                "content": self._active.trigger["topic_avoidance"],
+            })
 
         # Build tool schemas if tools are available for this agent
         agent_tools = self._get_tools_for_agent(agent.id)

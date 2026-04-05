@@ -1,12 +1,14 @@
 """Topic detection for conversation messages.
 
 Classifies conversation content into predefined topics using keyword matching,
-with optional LLM fallback for ambiguous cases.
+with optional LLM fallback for ambiguous cases. Tracks topic history to
+prevent the same topic from being discussed repeatedly.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,6 +16,9 @@ if TYPE_CHECKING:
     from core.models import TopicConfig
 
 logger = logging.getLogger(__name__)
+
+# Default window for topic deduplication (30 minutes)
+TOPIC_DEDUP_WINDOW_SECONDS = 1800.0
 
 
 class TopicDetector:
@@ -28,6 +33,43 @@ class TopicDetector:
         self._config = config
         self._llm_client = llm_client
         self._simulation_id = simulation_id
+        # Topic history: {topic: [timestamp, ...]}
+        self._topic_history: dict[str, list[float]] = {}
+
+    def record_topic(self, topic: str) -> None:
+        """Record that a topic was discussed at the current time."""
+        now = time.monotonic()
+        if topic not in self._topic_history:
+            self._topic_history[topic] = []
+        self._topic_history[topic].append(now)
+
+    def was_recently_discussed(
+        self,
+        topic: str,
+        window_seconds: float = TOPIC_DEDUP_WINDOW_SECONDS,
+    ) -> bool:
+        """Check if a topic was discussed within the given time window.
+
+        Returns True if the topic was discussed 2+ times within the window.
+        """
+        if topic == "general" or topic not in self._topic_history:
+            return False
+        now = time.monotonic()
+        recent = [t for t in self._topic_history[topic] if now - t < window_seconds]
+        return len(recent) >= 2
+
+    def get_recently_discussed_topics(
+        self,
+        window_seconds: float = TOPIC_DEDUP_WINDOW_SECONDS,
+    ) -> list[str]:
+        """Return topics discussed 2+ times within the window."""
+        now = time.monotonic()
+        result = []
+        for topic, timestamps in self._topic_history.items():
+            recent = [t for t in timestamps if now - t < window_seconds]
+            if len(recent) >= 2:
+                result.append(topic)
+        return result
 
     async def detect_topic(self, recent_messages: list[dict]) -> str:
         """Classify recent messages into a single topic string.
