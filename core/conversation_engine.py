@@ -123,6 +123,8 @@ class ConversationEngine:
         recent_outputs: list[str] | None = None,
         required_agents: set[str] | None = None,
         max_turns: int = 15,
+        debug_prompts: bool = False,
+        prompt_log_repo: object | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -139,6 +141,8 @@ class ConversationEngine:
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
+        self._debug_prompts = debug_prompts
+        self._prompt_log_repo = prompt_log_repo
         self._speed_multiplier = speed_multiplier
         self._services = services
         self._clock = clock
@@ -872,7 +876,7 @@ class ConversationEngine:
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
-                messages = await self._context.assemble_context(
+                context_result = await self._context.assemble_context(
                     agent_id=agent.id,
                     conversation_history=conv_history,
                     prompt_hint=prompt_hint,
@@ -881,6 +885,28 @@ class ConversationEngine:
                     shared_state_context=shared_state_context,
                     agent_goals_context=agent_goals_context,
                 )
+                messages = context_result.messages
+
+                # Store prompt log when debug flag is enabled
+                if self._debug_prompts and self._prompt_log_repo and self._active:
+                    try:
+                        from core.models import PromptLogCreate
+
+                        await self._prompt_log_repo.create(PromptLogCreate(
+                            conversation_id=self._active.id,
+                            simulation_id=self._simulation_id,
+                            agent_id=agent.id,
+                            turn_number=self._active.turn_number,
+                            full_prompt=messages[0]["content"] if messages else "",
+                            sections_included=context_result.sections_included,
+                            total_tokens=context_result.total_tokens,
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "Failed to store prompt log for %s turn %d",
+                            agent.id, self._active.turn_number,
+                            exc_info=True,
+                        )
 
                 # Call LLM (with tool-call loop)
                 total_input_tokens = 0

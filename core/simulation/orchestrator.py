@@ -88,6 +88,7 @@ class SimulationConfig:
         dry_run: bool = False,
         verbose: bool = False,
         management_shadow: bool = True,
+        debug_prompts: bool = False,
     ) -> None:
         self.name = name
         self.description = description
@@ -100,6 +101,7 @@ class SimulationConfig:
         self.dry_run = dry_run
         self.verbose = verbose
         self.management_shadow = management_shadow
+        self.debug_prompts = debug_prompts
         self.phases: list[Phase] = []
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
@@ -215,6 +217,7 @@ class SimulationOrchestrator:
         self._services = services
         self._relationship_repo = relationship_repo
 
+        self._prompt_log_repo: object | None = None
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
         self._total_cost = Decimal("0")
@@ -269,6 +272,8 @@ class SimulationOrchestrator:
             services=self._services,
             clock=self.clock,
             relationship_tracker=relationship_tracker,
+            debug_prompts=self._config.debug_prompts,
+            prompt_log_repo=self._prompt_log_repo,
         )
 
     def _idle_gap(self) -> timedelta:
