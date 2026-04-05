@@ -304,9 +304,10 @@ class OpenRouterClient:
         latency_ms = int((time.monotonic() - start) * 1000)
 
         if resp.status_code != 200:
-            logger.debug("OpenRouter error body: %s", resp.text)
+            body = resp.text[:500]
+            logger.warning("OpenRouter error %d: %s", resp.status_code, body)
             raise LLMError(
-                f"OpenRouter returned {resp.status_code}",
+                f"OpenRouter returned {resp.status_code}: {body}",
                 status_code=resp.status_code,
             )
 
@@ -385,9 +386,10 @@ class OpenRouterClient:
         if resp.status_code != 200:
             body = await resp.aread()
             await resp.aclose()
-            logger.debug("OpenRouter stream error body: %s", body.decode(errors="replace"))
+            body_str = body.decode(errors="replace")[:500]
+            logger.warning("OpenRouter stream error %d: %s", resp.status_code, body_str)
             raise LLMError(
-                f"OpenRouter returned {resp.status_code}",
+                f"OpenRouter returned {resp.status_code}: {body_str}",
                 status_code=resp.status_code,
             )
 

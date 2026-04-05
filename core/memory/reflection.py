@@ -428,6 +428,59 @@ class ReflectionManager:
 # ── Utility ────────────────────────────────────────────────────────
 
 
+def _repair_truncated_json(text: str) -> str:
+    """Attempt to close a truncated JSON string so it can be parsed.
+
+    Walks through the string tracking open braces/brackets and whether we're
+    inside a quoted string, then appends closing tokens so json.loads can
+    succeed on the *complete* prefix of the object.
+    """
+    in_string = False
+    escape = False
+    stack: list[str] = []  # tracks open { and [
+    last_valid = 0
+
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ("{", "["):
+            stack.append(ch)
+        elif ch == "}":
+            if stack and stack[-1] == "{":
+                stack.pop()
+                last_valid = i
+        elif ch == "]":
+            if stack and stack[-1] == "[":
+                stack.pop()
+                last_valid = i
+
+    if not stack:
+        return text  # nothing to repair
+
+    # Truncate to last cleanly-closed position + trailing content,
+    # then close remaining open brackets/braces.
+    # First, strip any trailing partial value (e.g. a truncated string or number)
+    repaired = text.rstrip()
+    if in_string:
+        repaired += '"'
+    # Remove trailing comma or colon that would make JSON invalid
+    repaired = repaired.rstrip(",:")
+    # Close remaining open structures in reverse order
+    for bracket in reversed(stack):
+        repaired += "}" if bracket == "{" else "]"
+    return repaired
+
+
 def _parse_json_response(content: str) -> dict:
     """Extract JSON from LLM response, handling markdown code fences.
 
@@ -455,6 +508,18 @@ def _parse_json_response(content: str) -> dict:
         try:
             result, _ = decoder.raw_decode(text)
             if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Attempt to repair truncated JSON (e.g. from max_tokens cutoff)
+        try:
+            repaired = _repair_truncated_json(text)
+            result = json.loads(repaired)
+            if isinstance(result, dict):
+                logger.info(
+                    "Recovered truncated JSON response (repaired %d chars)",
+                    len(repaired) - len(text),
+                )
                 return result
         except (json.JSONDecodeError, ValueError):
             pass

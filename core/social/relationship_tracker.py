@@ -7,9 +7,10 @@ to extract relationship updates from core memory changes.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
+
+from core.memory.reflection import _parse_json_response
 
 if TYPE_CHECKING:
     import uuid
@@ -306,24 +307,3 @@ def _estimate_sentiment_from_text(text: str) -> float:
     return 0.0
 
 
-def _parse_json_response(content: str) -> dict:
-    """Extract JSON from LLM response, handling markdown code fences."""
-    text = content.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        text = "\n".join(lines)
-    try:
-        result = json.loads(text)
-        if isinstance(result, dict):
-            return result
-    except json.JSONDecodeError:
-        decoder = json.JSONDecoder()
-        try:
-            result, _ = decoder.raw_decode(text)
-            if isinstance(result, dict):
-                return result
-        except (json.JSONDecodeError, ValueError):
-            pass
-    logger.warning("Failed to parse sentiment JSON: %.200s", content)
-    return {}
