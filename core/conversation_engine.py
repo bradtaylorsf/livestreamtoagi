@@ -641,14 +641,25 @@ class ConversationEngine:
         # Compaction: archival + summarization + embedding + recall
         if self._compactor:
             try:
-                for agent_id in participants:
-                    await self._compactor.compact_interaction(
-                        agent_id=agent_id,
-                        interaction=transcript_content,
-                        event_type=event_type,
-                        participants=participants,
-                        conversation_id=conv.id,
-                    )
+                # Store transcript ONCE for the conversation (not per-agent)
+                first_agent = participants[0]
+                result = await self._compactor.compact_interaction(
+                    agent_id=first_agent,
+                    interaction=transcript_content,
+                    event_type=event_type,
+                    participants=participants,
+                    conversation_id=conv.id,
+                )
+                # Create per-agent recall memories for remaining participants
+                if result is not None:
+                    for agent_id in participants[1:]:
+                        await self._compactor.compact_recall_only(
+                            agent_id=agent_id,
+                            interaction=transcript_content,
+                            event_type=event_type,
+                            transcript_id=result.transcript.id,
+                            participants=participants,
+                        )
                 logger.info(
                     "Compacted memories for %d participants", len(participants),
                 )

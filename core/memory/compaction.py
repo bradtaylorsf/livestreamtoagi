@@ -107,6 +107,37 @@ class MemoryCompactor:
 
         return CompactionResult(transcript=transcript, recall_memory=recall_memory)
 
+    async def compact_recall_only(
+        self,
+        agent_id: str,
+        interaction: str,
+        event_type: str,
+        transcript_id: int,
+        participants: list[str] | None = None,
+    ) -> RecallMemory | None:
+        """Create per-agent recall memory without storing a duplicate transcript.
+
+        Used when the transcript has already been stored once for the conversation
+        and we only need per-agent recall memories for the remaining participants.
+        """
+        if not interaction or not interaction.strip():
+            return None
+
+        if participants is None:
+            participants = [agent_id]
+
+        summary = await self._generate_summary(agent_id, interaction, event_type)
+        embedding = await generate_embedding(summary, self._http, self._api_key)
+
+        return await self._recall.store_recall_memory(
+            agent_id=agent_id,
+            summary=summary,
+            embedding=embedding,
+            transcript_id=transcript_id,
+            event_type=event_type,
+            participants=participants,
+        )
+
     async def manage_conversation_buffer(
         self,
         agent_id: str,
