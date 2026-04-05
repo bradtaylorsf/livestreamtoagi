@@ -1260,3 +1260,46 @@ async def rollback_conversation_config(body: RollbackRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"status": "ok", "version": body.version}
+
+
+# ── Evolution Loop Endpoints ─────────────────────────────────────
+
+
+@router.get("/evolution/history")
+async def get_evolution_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """List all evolution loop runs."""
+    db = _get_db()
+    from core.repos.evolution_repo import EvolutionRepo
+
+    repo = EvolutionRepo(db)
+    return await repo.get_all_loops(limit=limit, offset=offset)
+
+
+@router.get("/evolution/{loop_run_id}")
+async def get_evolution_loop(loop_run_id: uuid_mod.UUID) -> list[dict]:
+    """Get cycle details for a specific loop run."""
+    db = _get_db()
+    from core.repos.evolution_repo import EvolutionRepo
+
+    repo = EvolutionRepo(db)
+    cycles = await repo.get_loop_history(loop_run_id)
+    return [c.model_dump(mode="json") for c in cycles]
+
+
+@router.get("/evolution/compare")
+async def compare_evolution_cycles(
+    cycle_a: uuid_mod.UUID = Query(...),
+    cycle_b: uuid_mod.UUID = Query(...),
+) -> dict:
+    """Compare two evolution cycles side by side."""
+    db = _get_db()
+    from core.repos.evolution_repo import EvolutionRepo
+
+    repo = EvolutionRepo(db)
+    try:
+        return await repo.compare_cycles(cycle_a, cycle_b)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

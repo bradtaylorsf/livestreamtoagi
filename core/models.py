@@ -1093,6 +1093,65 @@ class EvalAnalysis(BaseModel):
     created_at: datetime | None = None
 
 
+# ── Evolution Loop ─────────────────────────────────────────────
+
+
+class EvolutionConfig(BaseModel):
+    """Configuration for an evolution loop run."""
+
+    max_cycles: int = 5
+    auto_apply: bool = False
+    cost_cap_per_cycle: float = 5.0
+    convergence_threshold: float = 2.0
+    convergence_window: int = 3
+    regression_threshold: float = 10.0
+
+
+class EvolutionCycle(BaseModel):
+    """A single cycle in an evolution loop run."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    loop_run_id: uuid.UUID
+    cycle_number: int
+    simulation_id: uuid.UUID | None = None
+    eval_run_id: uuid.UUID | None = None
+    overall_score: Decimal | None = None
+    score_delta: Decimal | None = None
+    changes_applied: int = 0
+    issues_filed: int = 0
+    config_version_before: int | None = None
+    config_version_after: int | None = None
+    status: str = "running"
+    cost: Decimal = Decimal("0")
+    created_at: datetime | None = None
+
+
+class CycleResult(BaseModel):
+    """In-memory result of a single evolution cycle."""
+
+    cycle_number: int
+    simulation_id: uuid.UUID | None = None
+    eval_run_id: uuid.UUID | None = None
+    overall_score: float | None = None
+    changes_applied: int = 0
+    issues_filed: int = 0
+    cost: float = 0.0
+    status: str = "completed"
+
+
+class EvolutionReport(BaseModel):
+    """Final report of an evolution loop run."""
+
+    loop_run_id: uuid.UUID
+    cycles: list[CycleResult] = Field(default_factory=list)
+    baseline_score: float | None = None
+    final_score: float | None = None
+    total_cost: float = 0.0
+    total_cycles: int = 0
+    stop_reason: str = ""  # completed, converged, regressed, cost_cap
+
+
 # ── Phase Assertions ───────────────────────────────────────────
 
 
