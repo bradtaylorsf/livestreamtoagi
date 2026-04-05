@@ -44,7 +44,7 @@ async def services():
     # Clean up data created during integration tests so we don't pollute
     # the shared test database for subsequent test runs.
     if svc.db:
-        await svc.db.execute("DELETE FROM overseer_shadow_log")
+        await svc.db.execute("DELETE FROM management_shadow_log")
         await svc.db.execute("DELETE FROM journal_entries WHERE reflection_type = 'conversation'")
         await svc.db.execute("DELETE FROM recall_memory")
         await svc.db.execute("DELETE FROM artifacts")
@@ -111,7 +111,7 @@ async def simulation_result(services, start_time):
         speed="fast",
         dry_run=False,
         verbose=False,
-        overseer_shadow=True,
+        management_shadow=True,
     )
     sim_config.load_seed_file()
 
@@ -120,9 +120,9 @@ async def simulation_result(services, start_time):
     conversation_repo = ConversationRepo(svc.db)
     simulation_repo = SimulationRepo(svc.db)
 
-    from core.overseer import Overseer
+    from core.management import Management
 
-    overseer = Overseer(
+    management = Management(
         redis_client=svc.redis,
         llm_client=svc.llm_client,
         event_bus=event_bus,
@@ -153,7 +153,7 @@ async def simulation_result(services, start_time):
         agent_registry=svc.agent_registry,
         event_bus=event_bus,
         llm_client=svc.llm_client,
-        overseer=overseer,
+        management=management,
         context_assembler=svc.context_assembler,
         conversation_repo=conversation_repo,
         archival_memory=svc.archival_memory,

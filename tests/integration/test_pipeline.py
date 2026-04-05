@@ -59,7 +59,7 @@ class TestPreConversation:
         agents = services.agent_registry.get_all_agents()
         assert len(agents) >= 9, f"Expected >= 9 agents, got {len(agents)}"
         agent_ids = {a.id for a in agents}
-        for expected in ("vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "overseer", "alpha"):
+        for expected in ("vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "management", "alpha"):
             assert expected in agent_ids, f"Agent '{expected}' not found in registry"
 
     async def test_redis_connected(self, services):
