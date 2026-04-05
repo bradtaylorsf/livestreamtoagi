@@ -1104,6 +1104,25 @@ async def get_simulation_report(
         except ValueError:
             pass
     report = await reporter.generate(days=day_list, format="json")
+
+    # Append launch-readiness scorecard
+    from core.reporting.scorecard import LaunchScorecard
+    from core.reporting.timeline_reporter import ReportSection
+    from core.repos.assertion_repo import AssertionRepo
+
+    assertion_repo = AssertionRepo(db)
+    scorecard = LaunchScorecard(
+        db=db,
+        simulation_id=str(sim_id),
+        assertion_repo=assertion_repo,
+        relationship_repo=relationship_repo,
+    )
+    scorecard_result = await scorecard.evaluate()
+    report.sections.append(ReportSection(
+        title="Launch Readiness Scorecard",
+        data=scorecard_result.to_dict(),
+    ))
+
     return report.to_dict()
 
 

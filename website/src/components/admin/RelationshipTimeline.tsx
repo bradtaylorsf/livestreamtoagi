@@ -69,11 +69,6 @@ export default function RelationshipTimeline({ agentA, agentB, simulationId }: P
       score: p.sentiment_score,
     }));
 
-    // Line path
-    const linePath = points
-      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x},${p.y}`)
-      .join(" ");
-
     // Positive area (above zero)
     positivePath = [
       `M ${points[0].x},${zeroY}`,
@@ -98,7 +93,6 @@ export default function RelationshipTimeline({ agentA, agentB, simulationId }: P
       return { x: points[idx].x, label: new Date(evolution[idx].timestamp).toLocaleDateString() };
     });
 
-    const _ = linePath; // referenced below
     void ticks;
   }
 

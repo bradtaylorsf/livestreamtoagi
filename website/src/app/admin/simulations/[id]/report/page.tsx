@@ -311,10 +311,90 @@ function KeyMomentsSection({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+// ── Scorecard section ────────────────────────────────────────
+
+interface ScorecardCriterion {
+  name?: string;
+  passed?: boolean;
+  evidence?: string;
+  required?: boolean;
+}
+
+function ScorecardSection({ data }: { data: Record<string, unknown> }) {
+  const ready = data.ready as boolean | undefined;
+  const status = data.status as string | undefined;
+  const criteria = (data.criteria as ScorecardCriterion[] | undefined) ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div
+        className={`rounded-lg border p-4 text-center ${
+          ready
+            ? "border-green-500/40 bg-green-500/10"
+            : "border-red-500/40 bg-red-500/10"
+        }`}
+      >
+        <p
+          className={`text-lg font-mono font-bold ${
+            ready ? "text-green-400" : "text-red-400"
+          }`}
+        >
+          {status ?? (ready ? "READY" : "NOT READY")}
+        </p>
+      </div>
+
+      {criteria.length > 0 && (
+        <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-foreground/50">
+                <th className="px-4 py-2 font-medium">Criterion</th>
+                <th className="px-4 py-2 font-medium text-center">Status</th>
+                <th className="px-4 py-2 font-medium text-center">Required</th>
+                <th className="px-4 py-2 font-medium">Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {criteria.map((c, idx) => (
+                <tr
+                  key={idx}
+                  className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
+                >
+                  <td className="px-4 py-2 text-foreground">{c.name ?? "—"}</td>
+                  <td className="px-4 py-2 text-center">
+                    <span
+                      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${
+                        c.passed
+                          ? "bg-green-500/20 text-green-400 border-green-500/40"
+                          : "bg-red-500/20 text-red-400 border-red-500/40"
+                      }`}
+                    >
+                      {c.passed ? "Pass" : "Fail"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-center text-xs text-foreground/50">
+                    {c.required ? "Yes" : "No"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-foreground/60">
+                    {c.evidence ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Section dispatcher ────────────────────────────────────────
 
 function renderSection(section: ReportSection) {
   const title = section.title.toLowerCase();
+  if (title.includes("scorecard") || title.includes("readiness")) {
+    return <ScorecardSection data={section.data} />;
+  }
   if (title.includes("executive") || title.includes("summary")) {
     return <ExecutiveSummarySection data={section.data} />;
   }
