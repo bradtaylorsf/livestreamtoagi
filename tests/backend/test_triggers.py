@@ -311,7 +311,7 @@ async def test_scheduled_event_does_not_fire_twice():
 
 @pytest.mark.asyncio
 async def test_scheduled_event_resets_on_new_day():
-    """Scheduled events reset when the date changes."""
+    """Scheduled events reset when the date changes (after dedup window)."""
     clock = FakeClock()
     now_fn = FakeDatetime(hour=9, day=2)
     system = _make_system(clock=clock, now_fn=now_fn)
@@ -319,8 +319,9 @@ async def test_scheduled_event_resets_on_new_day():
     r1 = await system.check()
     assert r1["type"] == "scheduled"
 
-    # Move to next day, same hour
+    # Move to next day, same hour, advance past 30-min dedup window
     now_fn.set_day(3)
+    clock.advance(1801)
     system.notify_speech()  # reset idle timer so idle doesn't fire
     r2 = await system.check()
     assert r2 is not None
@@ -440,8 +441,8 @@ async def test_memory_trigger_skipped_when_recall_returns_empty():
 
 
 @pytest.mark.asyncio
-async def test_reset_clears_state():
-    """reset() clears pending events and resets timers."""
+async def test_reset_preserves_fired_today():
+    """reset() clears pending events but preserves _fired_today."""
     clock = FakeClock()
     now_fn = FakeDatetime(hour=9)
     system = _make_system(clock=clock, now_fn=now_fn)
@@ -453,10 +454,111 @@ async def test_reset_clears_state():
 
     system.reset()
 
-    # Scheduled should fire again (fired_today cleared)
+    # Scheduled should NOT fire again (_fired_today preserved)
+    r = await system.check()
+    # Should be None (no pending events, scheduled already fired, idle not elapsed)
+    assert r is None
+
+
+@pytest.mark.asyncio
+async def test_reset_full_clears_all_state():
+    """reset_full() clears everything including _fired_today."""
+    clock = FakeClock()
+    now_fn = FakeDatetime(hour=9)
+    system = _make_system(clock=clock, now_fn=now_fn)
+
+    # Fire scheduled trigger
+    await system.check()
+
+    system.reset_full()
+
+    # Scheduled should fire again (_fired_today cleared)
     r = await system.check()
     assert r is not None
-    assert r["type"] == "scheduled"  # not the queued event (it was cleared)
+    assert r["type"] == "scheduled"
+
+
+# ── Pending event dedup ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_duplicate_pending_events_collapsed():
+    """Identical pending events are collapsed — only one fires."""
+    system = _make_system()
+
+    system.queue_event("poll_result", {"id": 1})
+    system.queue_event("poll_result", {"id": 2})  # duplicate type, should be dropped
+
+    r1 = await system.check()
+    assert r1["event_type"] == "poll_result"
+    assert r1["event_data"]["id"] == 1  # first event kept
+
+    # Second check should NOT return another poll_result
+    r2 = await system.check()
+    assert r2 is None or r2.get("event_type") != "poll_result"
+
+
+@pytest.mark.asyncio
+async def test_different_event_types_not_collapsed():
+    """Different event types are NOT collapsed."""
+    system = _make_system()
+
+    system.queue_event("poll_result", {"id": 1})
+    system.queue_event("budget_update", {"id": 2})
+
+    r1 = await system.check()
+    r2 = await system.check()
+
+    assert r1["event_type"] == "poll_result"
+    assert r2["event_type"] == "budget_update"
+
+
+# ── Cross-conversation dedup ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_cross_conversation_dedup_blocks_repeat():
+    """A scheduled trigger that ran recently is blocked by cross-conversation dedup."""
+    clock = FakeClock()
+    now_fn = FakeDatetime(hour=9)
+    system = _make_system(clock=clock, now_fn=now_fn)
+
+    # First check fires the standup
+    r1 = await system.check()
+    assert r1 is not None
+    assert r1["type"] == "scheduled"
+    assert r1["event_name"] == "standup"
+
+    # Simulate a new day (so _fired_today would normally allow it)
+    now_fn.set_day(3)
+    system.reset()
+
+    # But cross-conversation dedup should block it (within 30 min)
+    r2 = await system.check()
+    assert r2 is None or r2.get("event_name") != "standup"
+
+
+@pytest.mark.asyncio
+async def test_cross_conversation_dedup_expires():
+    """After 30 minutes, the cross-conversation dedup entry expires."""
+    clock = FakeClock()
+    now_fn = FakeDatetime(hour=9, day=2)
+    system = _make_system(clock=clock, now_fn=now_fn)
+
+    # Fire standup
+    r1 = await system.check()
+    assert r1["event_name"] == "standup"
+
+    # Advance past 30 min dedup window, new day
+    clock.advance(1801)
+    now_fn.set_day(3)
+    system.reset()
+
+    # Should fire again
+    r2 = await system.check()
+    assert r2 is not None
+    assert r2["type"] == "scheduled"
+    assert r2["event_name"] == "standup"
 
 
 # ── Trigger dict shape ───────────────────────────────────────

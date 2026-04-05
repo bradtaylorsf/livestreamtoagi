@@ -153,6 +153,34 @@ class TestPriorities:
         assert await state.get_priorities() is None
 
 
+class TestSeedInitialTasks:
+    """SharedWorkingState.seed_initial_tasks()."""
+
+    @pytest.mark.asyncio
+    async def test_seed_initial_tasks_populates_board(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+
+        await state.seed_initial_tasks()
+        tasks = await state.get_tasks()
+
+        assert len(tasks) == 7
+        owners = {t.owner for t in tasks}
+        assert owners == {"vera", "rex", "pixel", "fork", "sentinel", "aurora", "grok"}
+        assert all(t.status == "pending" for t in tasks)
+
+    @pytest.mark.asyncio
+    async def test_seed_initial_tasks_idempotent(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+
+        await state.seed_initial_tasks()
+        await state.seed_initial_tasks()  # second call should be a no-op
+
+        tasks = await state.get_tasks()
+        assert len(tasks) == 7
+
+
 class TestGetSummaryForContext:
     """get_summary_for_context formatting."""
 

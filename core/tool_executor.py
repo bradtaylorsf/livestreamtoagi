@@ -47,6 +47,7 @@ def build_agent_tools(
         memory_repo=services.memory_repo,
         artifact_repo=services.artifact_repo,
         simulation_mode=simulation_mode,
+        shared_working_state=services.shared_working_state,
     )
     for tool in core_tools:
         registry.register(tool)

@@ -13,6 +13,7 @@ from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMe
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
+from .task_management import ManageTaskTool
 from .tilemap_gen import GenerateTilemapTool
 from .web_tools import FetchUrlTool, WebSearchTool
 from .world_state import GetWorldStateTool
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from core.repos.cost_repo import CostRepo
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
+    from core.shared_state import SharedWorkingState
 
 __all__ = [
     "BaseTool",
@@ -44,6 +46,7 @@ __all__ = [
     "GetPollResultsTool",
     "GetRevenueStatusTool",
     "GetWorldStateTool",
+    "ManageTaskTool",
     "ProposeSelfModificationTool",
     "RecallMemoryTool",
     "RetrieveTranscriptTool",
@@ -89,6 +92,7 @@ def get_core_tools(
     memory_repo: MemoryRepo | None = None,
     artifact_repo: ArtifactRepo | None = None,
     simulation_mode: bool = False,
+    shared_working_state: SharedWorkingState | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -169,6 +173,12 @@ def get_core_tools(
                 llm_client=llm_client,
                 cost_repo=cost_repo,
             )
+        )
+
+    # Task management tool
+    if shared_working_state is not None:
+        tools.append(
+            ManageTaskTool(shared_state=shared_working_state, agent_id=agent_id)
         )
 
     # Self-modification tools (available to all agents)
