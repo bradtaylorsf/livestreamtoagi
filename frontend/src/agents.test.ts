@@ -21,6 +21,26 @@ describe("AGENTS", () => {
       expect(agent.interruptTendency).toBeLessThanOrEqual(1);
     }
   });
+
+  it("all agents have valid sprite sizes", () => {
+    for (const agent of AGENTS) {
+      expect([0, 24, 32]).toContain(agent.spriteSize);
+    }
+  });
+
+  it("alpha has 24x24 sprite size", () => {
+    const alpha = AGENTS.find((a) => a.id === "alpha");
+    expect(alpha?.spriteSize).toBe(24);
+  });
+
+  it("main agents have 32x32 sprite size", () => {
+    const mainAgents = AGENTS.filter(
+      (a) => a.id !== "alpha" && a.id !== "overseer",
+    );
+    for (const agent of mainAgents) {
+      expect(agent.spriteSize).toBe(32);
+    }
+  });
 });
 
 describe("getAgentById", () => {
