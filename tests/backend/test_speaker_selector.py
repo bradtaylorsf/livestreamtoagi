@@ -301,3 +301,123 @@ class TestScoreBreakdown:
                 assert 0.0 <= value <= 1.0, (
                     f"{agent_id}.{factor_name} = {value} out of range"
                 )
+
+
+# ── Tests: Minimum speaker participation (#247) ──────────────────
+
+
+class TestMinimumSpeakerParticipation:
+    def test_agent_silent_5_turns_is_force_selected(
+        self, selector: SpeakerSelector,
+    ):
+        """Agent silent for 5+ consecutive turns is force-selected."""
+        agents = [
+            _make_agent("vera", chattiness=0.5),
+            _make_agent("rex", chattiness=0.5),
+            _make_agent("fork", chattiness=0.5),
+        ]
+        # Build history where fork hasn't spoken for 5 turns
+        now = datetime.now(UTC)
+        history = [
+            {"speaker": "fork", "timestamp": (now - timedelta(seconds=60)).isoformat()},
+        ]
+        # 5 turns by vera and rex, fork silent
+        for i in range(5):
+            speaker = "vera" if i % 2 == 0 else "rex"
+            history.append({
+                "speaker": speaker,
+                "timestamp": now.isoformat(),
+            })
+
+        # Run many times — fork should always be selected due to force-select
+        fork_selected = 0
+        for seed in range(20):
+            random.seed(seed)
+            result = selector.select(
+                history, agents, energy=10.0,
+                turn_number=6, max_turns=15,
+            )
+            if result.selected_agent_id == "fork":
+                fork_selected += 1
+
+        # fork should be force-selected every time (5+ turns silent)
+        assert fork_selected == 20, (
+            f"Fork force-selected {fork_selected}/20 times (expected 20)"
+        )
+
+    def test_agent_silent_3_turns_gets_boost(
+        self, selector: SpeakerSelector,
+    ):
+        """Agent silent for 3+ turns with 4+ participants gets 2x score boost."""
+        agents = [
+            _make_agent("vera", chattiness=0.5),
+            _make_agent("rex", chattiness=0.5),
+            _make_agent("fork", chattiness=0.5),
+            _make_agent("sentinel", chattiness=0.5),
+        ]
+        # Build history where sentinel hasn't spoken for 3 turns
+        now = datetime.now(UTC)
+        history = [
+            {"speaker": "sentinel", "timestamp": (now - timedelta(seconds=60)).isoformat()},
+            {"speaker": "vera", "timestamp": now.isoformat()},
+            {"speaker": "rex", "timestamp": now.isoformat()},
+            {"speaker": "fork", "timestamp": now.isoformat()},
+        ]
+
+        # Check sentinel's score gets boosted
+        sentinel_selected = 0
+        for seed in range(50):
+            random.seed(seed)
+            result = selector.select(
+                history, agents, energy=10.0,
+                turn_number=4, max_turns=15,
+            )
+            if result.selected_agent_id == "sentinel":
+                sentinel_selected += 1
+
+        # Sentinel should be selected more often than 25% baseline due to boost
+        assert sentinel_selected > 15, (
+            f"Sentinel selected {sentinel_selected}/50 times (expected >15 with boost)"
+        )
+
+    def test_no_agent_exceeds_5_turn_silence_in_simulation(
+        self, selector: SpeakerSelector,
+    ):
+        """Over a simulated conversation, no agent goes 5+ turns without speaking."""
+        agents = [
+            _make_agent("vera", chattiness=0.6),
+            _make_agent("rex", chattiness=0.4),
+            _make_agent("fork", chattiness=0.7),
+            _make_agent("sentinel", chattiness=0.3),
+            _make_agent("aurora", chattiness=0.5),
+        ]
+        history: list[dict] = []
+        total_turns = 25
+
+        for i in range(total_turns):
+            random.seed(i * 13 + 7)
+            result = selector.select(
+                history, agents, energy=10.0,
+                turn_number=i, max_turns=total_turns,
+            )
+            history.append({
+                "speaker": result.selected_agent_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+            })
+
+        # Check that no agent has a gap > 5 turns
+        for agent in agents:
+            last_spoke = -1
+            max_gap = 0
+            for idx, msg in enumerate(history):
+                if msg["speaker"] == agent.id:
+                    if last_spoke >= 0:
+                        gap = idx - last_spoke
+                        max_gap = max(max_gap, gap)
+                    last_spoke = idx
+            # Also check gap from last spoke to end
+            if last_spoke >= 0:
+                max_gap = max(max_gap, len(history) - 1 - last_spoke)
+            assert max_gap <= 6, (
+                f"{agent.id} had a gap of {max_gap} turns (max allowed: ~5)"
+            )

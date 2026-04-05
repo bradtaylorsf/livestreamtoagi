@@ -241,3 +241,54 @@ class TestParseCommitments:
         result = parse_commitments(output)
         assert len(result) == 1
         assert result[0]["commitment"] == "Real commitment"
+
+    def test_parse_failure_logs_warning(self, caplog) -> None:
+        """Parse failures should log a warning with the raw output (#249)."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="core.agent_goals"):
+            result = parse_commitments("not json at all")
+        assert result == []
+        assert any("Commitment parse failed" in r.message for r in caplog.records)
+
+
+# ── Commitment reminders (#249) ──────────────────────────────────
+
+
+class TestCommitmentReminders:
+    @pytest.mark.asyncio
+    async def test_no_reminders_when_no_assigned_goals(self) -> None:
+        redis = _make_mock_redis()
+        mgr = AgentGoalManager(redis)
+
+        result = await mgr.get_commitment_reminders("vera")
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_reminders_for_assigned_goals(self) -> None:
+        redis = _make_mock_redis()
+        mgr = AgentGoalManager(redis)
+
+        # Add a goal with related_agent (simulates cross-agent commitment)
+        await mgr.add_goal(
+            "vera", "Follow up with rex on: Build API",
+            priority=3, related_agent="rex",
+        )
+
+        result = await mgr.get_commitment_reminders("vera")
+        assert "rex committed to" in result
+        assert "Build API" in result
+
+    @pytest.mark.asyncio
+    async def test_reminders_exclude_done_goals(self) -> None:
+        redis = _make_mock_redis()
+        mgr = AgentGoalManager(redis)
+
+        goal = await mgr.add_goal(
+            "vera", "Follow up with rex on: Build API",
+            priority=3, related_agent="rex",
+        )
+        await mgr.complete_goal("vera", goal.id)
+
+        result = await mgr.get_commitment_reminders("vera")
+        assert result == ""

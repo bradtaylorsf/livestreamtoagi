@@ -30,6 +30,11 @@ system: |
   - Whether previous changes helped or hurt
   - Convergence detection (scores stable across 3+ runs → fewer/no changes needed)
 
+  If no previous run data is provided (first run), skip trend analysis entirely.
+  Analyze the current results on their absolute merits. Propose changes based on
+  the most impactful score improvements possible. Set confidence based on how
+  clear the evidence is, not on having trend data.
+
   ## Output Format
   Respond with valid JSON matching the schema below. Be specific and actionable.
 

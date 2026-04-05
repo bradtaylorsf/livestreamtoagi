@@ -262,6 +262,28 @@ class AgentGoalManager:
 
         return "\n".join(lines)
 
+    async def get_commitment_reminders(self, agent_id: str) -> str:
+        """Get formatted reminders for commitments assigned to this agent.
+
+        Returns text listing active goals from other agents (source='assigned'),
+        or empty string if none.
+        """
+        goals = await self.get_goals(agent_id)
+        assigned = [
+            g for g in goals
+            if g.related_agent and g.status not in ("done", "completed")
+        ]
+        if not assigned:
+            return ""
+
+        lines = ["## Pending commitments from others"]
+        for g in assigned[:5]:
+            lines.append(
+                f"- {g.related_agent} committed to: {g.goal}. "
+                "Follow up if not done."
+            )
+        return "\n".join(lines)
+
     async def seed_story_goals(self) -> None:
         """Seed initial story-arc goals for agents.
 
@@ -347,5 +369,7 @@ def parse_commitments(llm_output: str) -> list[dict[str, str]]:
                 if item.get("agent_id") and item.get("commitment")
             ]
     except (json.JSONDecodeError, TypeError, AttributeError):
-        pass
+        logger.warning(
+            "Commitment parse failed. Raw output: %s", llm_output[:500],
+        )
     return []

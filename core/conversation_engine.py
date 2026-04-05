@@ -171,6 +171,12 @@ class ConversationEngine:
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
 
+        # Conversation progression tracking (#248)
+        self._dialogue_only_streak: int = 0
+        self._productive_turns: int = 0
+        self._total_turns: int = 0
+        self._last_turn_had_tools: bool = False
+
     # ── Properties ─────────────────────────────────────────────
 
     @property
@@ -305,6 +311,13 @@ class ConversationEngine:
             self._active = None
             return
 
+        # Track opening turn productivity (#248)
+        self._total_turns += 1
+        if self._last_turn_had_tools:
+            self._productive_turns += 1
+        else:
+            self._dialogue_only_streak += 1
+
         self._active.turn_number = 1
         self._agents_who_spoke.add(opening_agent.id)
         self._active.history.append(
@@ -435,6 +448,29 @@ class ConversationEngine:
 
         self._agents_who_spoke.add(selected_agent.id)
         conv.history.append({"role": "assistant", "speaker": selected_agent.id, "content": content})
+
+        # Track conversation progression (#248)
+        self._total_turns += 1
+        if self._last_turn_had_tools:
+            self._productive_turns += 1
+            self._dialogue_only_streak = 0
+        else:
+            self._dialogue_only_streak += 1
+
+        # Inject action nudge after 4 consecutive dialogue-only turns
+        if self._dialogue_only_streak >= 4 and self._dialogue_only_streak % 4 == 0:
+            conv.history.append({
+                "role": "user",
+                "content": (
+                    "[SYSTEM: You've been discussing for several turns without "
+                    "taking action. Use a tool: write code, create a task, "
+                    "check status, or propose something specific.]"
+                ),
+            })
+            logger.info(
+                "Action nudge injected after %d dialogue-only turns in conversation %s",
+                self._dialogue_only_streak, conv.id,
+            )
 
         # Emit speak event
         _parsed = parse_speech(content)
@@ -577,6 +613,44 @@ class ConversationEngine:
 
         # Reset triggers (preserves _fired_today and _recent_conversations)
         self._triggers.reset()
+
+        # Log participation distribution (#247)
+        turn_counts: dict[str, int] = {}
+        for msg in conv.history:
+            spk = msg.get("speaker")
+            if spk:
+                turn_counts[spk] = turn_counts.get(spk, 0) + 1
+        total = conv.turn_number or 1
+        participation_parts = [
+            f"{aid}: {cnt}/{total} ({cnt * 100 // total}%)"
+            for aid, cnt in sorted(turn_counts.items())
+        ]
+        logger.info("Participation: %s", ", ".join(participation_parts))
+
+        # Log conversation productivity (#248)
+        productivity_ratio = (
+            self._productive_turns / self._total_turns
+            if self._total_turns > 0 else 0.0
+        )
+        logger.info(
+            "Conversation productivity: %d/%d turns productive (%.0f%%) in %s",
+            self._productive_turns,
+            self._total_turns,
+            productivity_ratio * 100,
+            conv.id,
+        )
+
+        # Emit productivity event for phase-level tracking
+        await self._event_bus.emit(
+            "conversation_productivity",
+            {
+                "conversation_id": str(conv.id),
+                "productive_turns": self._productive_turns,
+                "total_turns": self._total_turns,
+                "ratio": productivity_ratio,
+                "participants": conv.participants,
+            },
+        )
 
         logger.info(
             "Ended conversation %s (turns=%d, final_energy=%.1f, closer=%s)",
@@ -788,12 +862,50 @@ class ConversationEngine:
             commitments = parse_commitments(response.content)
             goal_mgr = self._services.goal_manager
             for c in commitments:
-                await goal_mgr.add_goal(
+                goal = await goal_mgr.add_goal(
                     agent_id=c["agent_id"],
                     goal_text=c["commitment"],
                     priority=2,
                     related_agent=c.get("related_to_agent") or None,
                 )
+
+                # Create shared task from commitment (#249)
+                sws = self._services.shared_working_state
+                if sws is not None:
+                    try:
+                        from core.shared_state import SharedTask
+
+                        await sws.add_task(SharedTask(
+                            id=goal.id,
+                            title=c["commitment"],
+                            owner=c["agent_id"],
+                            status="pending",
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "Failed to create shared task for commitment: %s",
+                            c["commitment"][:100],
+                        )
+
+                # Cross-agent accountability (#249): create follow-up goal
+                related = c.get("related_to_agent")
+                if related and related != c["agent_id"]:
+                    try:
+                        await goal_mgr.add_goal(
+                            agent_id=related,
+                            goal_text=(
+                                f"Follow up with {c['agent_id']} on: "
+                                f"{c['commitment']}"
+                            ),
+                            priority=3,
+                            related_agent=c["agent_id"],
+                            source="assigned",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to create cross-agent goal for %s → %s",
+                            c["agent_id"], related,
+                        )
 
             if commitments:
                 logger.info(
@@ -873,6 +985,7 @@ class ConversationEngine:
 
         # Build agent goals context if available
         agent_goals_context: str | None = None
+        commitment_reminders: str | None = None
         if self._services and self._services.goal_manager:
             try:
                 agent_goals_context = (
@@ -880,6 +993,12 @@ class ConversationEngine:
                 ) or None
             except Exception:
                 logger.warning("Failed to get agent goals for %s", agent.id, exc_info=True)
+            try:
+                commitment_reminders = (
+                    await self._services.goal_manager.get_commitment_reminders(agent.id)
+                ) or None
+            except Exception:
+                logger.warning("Failed to get commitment reminders for %s", agent.id, exc_info=True)
 
         # Build shared working state context if available
         shared_state_context: str | None = None
@@ -901,6 +1020,7 @@ class ConversationEngine:
                     relationship_context=relationship_context,
                     shared_state_context=shared_state_context,
                     agent_goals_context=agent_goals_context,
+                    commitment_reminders=commitment_reminders,
                 )
                 messages = context_result.messages
 
@@ -930,6 +1050,7 @@ class ConversationEngine:
                 total_output_tokens = 0
                 total_cost = 0.0
                 total_latency_ms = 0
+                turn_used_tools = False
 
                 for _tool_round in range(MAX_TOOL_ROUNDS + 1):
                     # Check if trigger requests a specific tool (first round only)
@@ -968,6 +1089,7 @@ class ConversationEngine:
                         break
 
                     # Execute tool calls
+                    turn_used_tools = True
                     logger.info(
                         "Agent %s requested %d tool call(s): %s",
                         agent.id,
@@ -1072,6 +1194,9 @@ class ConversationEngine:
 
                 # Track output for cross-phase repetition detection
                 self._recent_outputs.append(content)
+
+                # Track tool usage for conversation progression (#248)
+                self._last_turn_had_tools = turn_used_tools
 
                 # Management review (can be disabled for testing)
                 if not self._management_enabled:

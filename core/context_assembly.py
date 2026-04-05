@@ -68,6 +68,10 @@ PROMPT_HINTS: dict[str, str] = {
         "[SYSTEM: You just remembered something relevant. Bring it up naturally if you want to.]"
     ),
     "closing": ("[SYSTEM: This conversation is winding down. Wrap it up naturally in your style.]"),
+    "action_nudge": (
+        "[SYSTEM: You've been discussing for several turns without taking action. "
+        "Use a tool: write code, create a task, check status, or propose something specific.]"
+    ),
 }
 
 # Pixel is the audience liaison agent
@@ -117,6 +121,7 @@ class ContextAssembler:
         relationship_context: str | None = None,
         shared_state_context: str | None = None,
         agent_goals_context: str | None = None,
+        commitment_reminders: str | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -212,6 +217,9 @@ class ContextAssembler:
         # Shared state
         _track("shared_state", shared_state_context or "", bool(shared_state_context))
 
+        # Commitment reminders (#249)
+        _track("commitment_reminders", commitment_reminders or "", bool(commitment_reminders))
+
         # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint.startswith("topic:"):
@@ -261,6 +269,10 @@ class ContextAssembler:
                 "Work toward them and honor your promises.\n\n"
                 + agent_goals_context
             )
+
+        # Commitment reminders (#249)
+        if commitment_reminders:
+            system_sections.append(commitment_reminders)
 
         # Shared working state
         if shared_state_context:

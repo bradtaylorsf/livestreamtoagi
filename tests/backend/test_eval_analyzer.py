@@ -283,3 +283,118 @@ class TestEvalAnalyzerUnit:
         analyzer = EvalAnalyzer(db=mock_db, eval_repo=mock_eval_repo, llm_client=mock_llm)
         with pytest.raises(ValueError, match="not found"):
             await analyzer.analyze(uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_first_run_no_previous_data(self) -> None:
+        """First run (no previous results) should succeed with is_first_run flag (#256)."""
+        from core.eval.analyzer import EvalAnalyzer
+        from core.models import EvalResult, EvalRun
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock()
+
+        mock_eval_repo = AsyncMock()
+        run_id = uuid.uuid4()
+        sim_id = uuid.uuid4()
+
+        mock_eval_repo.get_eval_run.return_value = EvalRun(
+            id=run_id,
+            simulation_id=sim_id,
+            eval_suite="quick",
+            status="completed",
+            started_at=datetime.now(UTC),
+            overall_score=Decimal("50"),
+        )
+        mock_eval_repo.get_eval_results.return_value = [
+            EvalResult(
+                id=uuid.uuid4(),
+                eval_run_id=run_id,
+                category="productivity",
+                score=Decimal("38"),
+                reasoning="Low productivity",
+                sub_scores={"task_completion": 30},
+            ),
+        ]
+        # No previous runs
+        mock_eval_repo.get_eval_runs.return_value = []
+
+        mock_llm = AsyncMock()
+        mock_llm.complete.return_value = MagicMock(
+            content=json.dumps({
+                "summary": "First run — productivity is low",
+                "confidence": 0.6,
+                "proposals": [
+                    {
+                        "type": "prompt_change",
+                        "agent_id": "vera",
+                        "section": "drive",
+                        "proposed_text": "Be more action-oriented",
+                        "reasoning": "Low task completion",
+                    }
+                ],
+            }),
+            input_tokens=800,
+            output_tokens=400,
+            estimated_cost=Decimal("0.008"),
+        )
+
+        analyzer = EvalAnalyzer(db=mock_db, eval_repo=mock_eval_repo, llm_client=mock_llm)
+        result = await analyzer.analyze(run_id)
+
+        # Should succeed without errors
+        assert result.confidence == 0.6
+        assert len(result.proposals) == 1
+        # trend_data should indicate first run
+        assert result.trend_data is not None
+        assert result.trend_data["is_first_run"] is True
+        assert result.trend_data["previous_runs"] == 0
+
+
+class TestBuildUserPromptFirstRun:
+    def test_first_run_includes_no_previous_data_section(self) -> None:
+        """When no previous results, user prompt includes first-run guidance (#256)."""
+        from core.eval.analyzer import _build_user_prompt
+        from core.models import EvalResult, EvalRun
+
+        run = MagicMock()
+        run.overall_score = Decimal("50")
+        run.eval_suite = "quick"
+
+        result = MagicMock()
+        result.category = "productivity"
+        result.score = Decimal("38")
+        result.reasoning = "Low productivity"
+        result.sub_scores = {"task_completion": 30}
+        result.evidence = None
+
+        prompt = _build_user_prompt(run, [result], previous_results=[])
+
+        assert "First Run" in prompt
+        assert "No Previous Data" in prompt
+        assert "absolute quality" in prompt
+
+    def test_with_previous_results_no_first_run_section(self) -> None:
+        """When previous results exist, no first-run section appears."""
+        from core.eval.analyzer import _build_user_prompt
+
+        run = MagicMock()
+        run.overall_score = Decimal("65")
+        run.eval_suite = "quick"
+
+        result = MagicMock()
+        result.category = "entertainment"
+        result.score = Decimal("70")
+        result.reasoning = "Good"
+        result.sub_scores = {}
+        result.evidence = None
+
+        prev = [{
+            "run_id": "abcd1234-5678",
+            "overall_score": 60.0,
+            "results": [{"category": "entertainment", "score": 65}],
+        }]
+
+        prompt = _build_user_prompt(run, [result], previous_results=prev)
+
+        assert "First Run" not in prompt
+        assert "Previous Run Comparison" in prompt

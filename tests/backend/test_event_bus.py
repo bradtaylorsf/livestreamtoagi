@@ -324,6 +324,7 @@ class TestEventTypeEnum:
             "budget_update", "viewer_count",
             "tts_play", "tool_executed", "config_reloaded",
             "artifact_created",
+            "conversation_productivity",
         }
         actual = {e.value for e in EventType}
         assert actual == expected
