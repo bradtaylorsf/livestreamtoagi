@@ -516,4 +516,27 @@ export async function compareSimulations(
   );
 }
 
+// ── Eval Issues ───────────────────────────────────────────────
+
+export interface EvalIssueResult {
+  category: string;
+  title: string;
+  url: string | null;
+  status: string;
+  reason?: string;
+}
+
+export async function createIssuesFromEval(
+  evalId: string,
+  threshold: number = 60,
+): Promise<EvalIssueResult[]> {
+  const params = new URLSearchParams();
+  if (threshold !== 60) params.set("threshold", String(threshold));
+  const qs = params.toString();
+  return request<EvalIssueResult[]>(
+    `/api/admin/evals/${evalId}/create-issues${qs ? `?${qs}` : ""}`,
+    { method: "POST" },
+  );
+}
+
 export { AdminApiError };

@@ -6,8 +6,9 @@ import Link from "next/link";
 import ScoreCard from "@/components/admin/ScoreCard";
 import RadarChart from "@/components/admin/RadarChart";
 import EvalCategoryDetail from "@/components/admin/EvalCategoryDetail";
-import { fetchSimulation, fetchSimulationEvals, triggerEvalRun } from "@/lib/admin-api";
+import { fetchSimulation, fetchSimulationEvals, triggerEvalRun, createIssuesFromEval } from "@/lib/admin-api";
 import type { EvalRun, Simulation } from "@/types/admin";
+import type { EvalIssueResult } from "@/lib/admin-api";
 
 export default function SimulationEvalsPage() {
   const params = useParams();
@@ -16,6 +17,8 @@ export default function SimulationEvalsPage() {
   const [evalRuns, setEvalRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [creatingIssues, setCreatingIssues] = useState(false);
+  const [issueResults, setIssueResults] = useState<EvalIssueResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadData = () => {
@@ -47,6 +50,24 @@ export default function SimulationEvalsPage() {
     }
   };
 
+  const handleCreateIssues = async () => {
+    if (!latestRun) return;
+    setCreatingIssues(true);
+    setIssueResults(null);
+    setError(null);
+    try {
+      const results = await createIssuesFromEval(latestRun.id);
+      setIssueResults(results);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create issues");
+    } finally {
+      setCreatingIssues(false);
+    }
+  };
+
+  // Move latestRun declaration before early returns so handleCreateIssues can use it
+  const latestRun = evalRuns.length > 0 ? evalRuns[0] : null;
+
   if (error) {
     return (
       <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-red-400">
@@ -59,7 +80,6 @@ export default function SimulationEvalsPage() {
     return <p className="text-sm text-foreground/50">Loading...</p>;
   }
 
-  const latestRun = evalRuns.length > 0 ? evalRuns[0] : null;
   const latestResults = latestRun?.results ?? [];
   const previousRun = evalRuns.length > 1 ? evalRuns[1] : null;
 
@@ -98,14 +118,55 @@ export default function SimulationEvalsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="font-pixel text-lg text-foreground">Eval Results</h1>
-        <button
-          onClick={handleRerun}
-          disabled={running}
-          className="rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors disabled:opacity-50"
-        >
-          {running ? "Running..." : "Re-run Evals"}
-        </button>
+        <div className="flex items-center gap-2">
+          {latestRun && (
+            <button
+              onClick={handleCreateIssues}
+              disabled={creatingIssues}
+              className="rounded border border-yellow-500/60 px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+            >
+              {creatingIssues ? "Creating..." : "Create Issues from Findings"}
+            </button>
+          )}
+          <button
+            onClick={handleRerun}
+            disabled={running}
+            className="rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors disabled:opacity-50"
+          >
+            {running ? "Running..." : "Re-run Evals"}
+          </button>
+        </div>
       </div>
+
+      {/* Issue creation results */}
+      {issueResults && (
+        <div className="rounded-lg border border-border bg-surface p-4 space-y-2">
+          <h3 className="text-sm font-medium text-foreground/70">Issue Creation Results</h3>
+          {issueResults.length === 0 ? (
+            <p className="text-xs text-foreground/50">All categories scored above threshold — no issues created.</p>
+          ) : (
+            <div className="space-y-1">
+              {issueResults.map((r, i) => (
+                <div key={i} className="text-xs flex items-center gap-2">
+                  <span className={
+                    r.status === "created" ? "text-green-400" :
+                    r.status === "skipped" ? "text-yellow-400" : "text-red-400"
+                  }>
+                    {r.status === "created" ? "Created" : r.status === "skipped" ? "Skipped" : "Error"}:
+                  </span>
+                  <span className="text-foreground/70">{r.title}</span>
+                  {r.url && (
+                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-neon-cyan hover:underline">
+                      View
+                    </a>
+                  )}
+                  {r.reason && <span className="text-foreground/40">({r.reason})</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {!latestRun ? (
         <div className="text-center py-12 text-foreground/40">

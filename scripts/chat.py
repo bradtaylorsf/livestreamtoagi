@@ -588,6 +588,74 @@ def run_eval_cli(
         console.print("\n[dim]Eval interrupted.[/dim]")
 
 
+def _create_issues_from_eval(
+    *,
+    simulation_name: str | None = None,
+    simulation_id: str | None = None,
+    threshold: int = 60,
+) -> None:
+    """Create GitHub issues from the latest eval run's low-scoring categories."""
+    import asyncio
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.eval_repo import EvalRepo
+        from core.repos.simulation_repo import SimulationRepo
+        from core.eval.issue_generator import EvalIssueGenerator
+
+        svc = await bootstrap_services()
+        try:
+            # Resolve simulation ID
+            sim_repo = SimulationRepo(svc.db)
+            resolved_id = simulation_id
+            if not resolved_id and simulation_name:
+                sims = await sim_repo.list(limit=100)
+                for s in sims:
+                    if s.name == simulation_name:
+                        resolved_id = str(s.id)
+                        break
+            if not resolved_id:
+                console.print("[red]Could not resolve simulation for issue creation[/red]")
+                return
+
+            import uuid as uuid_mod
+            eval_repo = EvalRepo(svc.db)
+            latest_run = await eval_repo.get_latest_eval_run(uuid_mod.UUID(resolved_id))
+            if not latest_run:
+                console.print("[red]No eval runs found for this simulation[/red]")
+                return
+
+            console.print(f"\n[bold bright_cyan]Creating issues from eval {str(latest_run.id)[:8]}[/bold bright_cyan]")
+            console.print(f"[dim]Threshold: {threshold}/100 (categories scoring below will get issues)[/dim]\n")
+
+            generator = EvalIssueGenerator(
+                db=svc.db,
+                eval_repo=eval_repo,
+                eval_run_id=latest_run.id,
+                score_threshold=threshold,
+            )
+            issues = await generator.generate_and_create()
+
+            if not issues:
+                console.print("[green]All categories scored above threshold — no issues created.[/green]")
+                return
+
+            for issue in issues:
+                if issue["status"] == "created":
+                    console.print(f"  [green]Created:[/green] {issue['title']} → {issue['url']}")
+                elif issue["status"] == "skipped":
+                    console.print(f"  [yellow]Skipped:[/yellow] {issue['title']} ({issue.get('reason', '')})")
+                else:
+                    console.print(f"  [red]Error:[/red] {issue['title']} ({issue.get('reason', '')})")
+
+            created = sum(1 for i in issues if i["status"] == "created")
+            console.print(f"\n[bold]{created} issue(s) created, {len(issues) - created} skipped/errored.[/bold]")
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
 def run_coverage_check(
     simulation_name: str | None = None,
     simulation_id: str | None = None,
@@ -875,6 +943,8 @@ def main() -> None:
         categories = None
         view_last = False
         sim_id = None
+        create_issues = False
+        issue_threshold = 60
         positional_args: list[str] = []
         i = 0
         while i < len(eval_args):
@@ -887,6 +957,10 @@ def main() -> None:
                 sim_id = eval_args[i + 1]; i += 2
             elif arg == "--view-last":
                 view_last = True; i += 1
+            elif arg == "--create-issues":
+                create_issues = True; i += 1
+            elif arg == "--threshold" and i + 1 < len(eval_args):
+                issue_threshold = int(eval_args[i + 1]); i += 2
             elif arg in ("-v", "--verbose"):
                 i += 1
             elif not arg.startswith("-"):
@@ -910,6 +984,14 @@ def main() -> None:
             view_last=view_last,
             verbose=verbose,
         )
+
+        # After eval run, optionally create GitHub issues from findings
+        if create_issues:
+            _create_issues_from_eval(
+                simulation_name=sim_name,
+                simulation_id=sim_id,
+                threshold=issue_threshold,
+            )
         return
 
     # ── Quick-launch: pnpm chat coverage <name> | --id <uuid> ──

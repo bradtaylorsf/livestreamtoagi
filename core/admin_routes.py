@@ -1107,6 +1107,26 @@ async def get_simulation_report(
     return report.to_dict()
 
 
+@router.post("/evals/{eval_id}/create-issues")
+async def create_issues_from_eval(
+    eval_id: uuid_mod.UUID,
+    threshold: int = Query(default=60),
+) -> list[dict[str, Any]]:
+    """Generate GitHub issues from low-scoring eval categories."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+    from core.eval.issue_generator import EvalIssueGenerator
+
+    eval_repo = EvalRepo(db)
+    generator = EvalIssueGenerator(
+        db=db,
+        eval_repo=eval_repo,
+        eval_run_id=eval_id,
+        score_threshold=threshold,
+    )
+    return await generator.generate_and_create()
+
+
 @router.get("/evals/{eval_id}/export", response_model=EvalExportResponse)
 async def export_eval(eval_id: uuid_mod.UUID) -> EvalExportResponse:
     """Export full eval results as JSON."""
