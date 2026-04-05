@@ -44,8 +44,6 @@ async def test_stub_execute_code_rejects_bad_language():
 async def test_stub_execute_code_varies_responses():
     """Stub should rotate through different response fixtures."""
     tool = StubExecuteCodeTool(agent_id="rex")
-    # Reset class counter
-    StubExecuteCodeTool._call_index = 0
     results = []
     for _ in range(3):
         r = await tool.execute(language="python", code="x")

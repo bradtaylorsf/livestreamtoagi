@@ -194,15 +194,15 @@ def test_phase_runner_summaries_buffer():
         agents=["vera", "rex"],
     )
 
-    assert runner._conversation_summaries == []
+    assert len(runner._conversation_summaries) == 0
+    assert isinstance(runner._conversation_summaries, deque)
+    assert runner._conversation_summaries.maxlen == 5
     assert isinstance(runner._recent_outputs, deque)
     assert runner._recent_outputs.maxlen == 15
 
-    # Simulate adding summaries
+    # Simulate adding summaries — deque(maxlen=5) handles trimming automatically
     for i in range(7):
         runner._conversation_summaries.append(f"Summary {i}")
-        if len(runner._conversation_summaries) > 5:
-            runner._conversation_summaries = runner._conversation_summaries[-5:]
 
     assert len(runner._conversation_summaries) == 5
     assert runner._conversation_summaries[0] == "Summary 2"

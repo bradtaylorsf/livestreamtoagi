@@ -7,7 +7,6 @@ Artifacts are recorded with status="simulated" for eval differentiation.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from .base import BaseTool
@@ -75,11 +74,10 @@ class StubExecuteCodeTool(BaseTool):
 
     ALLOWED_AGENTS = frozenset({"rex", "fork", "sentinel"})
 
-    _call_index: int = 0
-
     def __init__(self, event_bus: Any = None, agent_id: str = "unknown") -> None:
         self._event_bus = event_bus
         self._agent_id = agent_id
+        self._call_index = 0
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         if self._agent_id not in self.ALLOWED_AGENTS:
@@ -90,8 +88,8 @@ class StubExecuteCodeTool(BaseTool):
             return {"status": "rejected", "reason": f"Unsupported language {language!r}"}
 
         # Rotate through varied responses
-        response = _EXEC_RESPONSES[StubExecuteCodeTool._call_index % len(_EXEC_RESPONSES)]
-        StubExecuteCodeTool._call_index += 1
+        response = _EXEC_RESPONSES[self._call_index % len(_EXEC_RESPONSES)]
+        self._call_index += 1
 
         return {
             "status": "ok",
@@ -116,11 +114,10 @@ class StubGenerateTilemapTool(BaseTool):
 
     ALLOWED_AGENTS = frozenset({"rex", "fork"})
 
-    _call_index: int = 0
-
     def __init__(self, event_bus: Any = None, agent_id: str = "unknown") -> None:
         self._event_bus = event_bus
         self._agent_id = agent_id
+        self._call_index = 0
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         if self._agent_id not in self.ALLOWED_AGENTS:
@@ -131,13 +128,13 @@ class StubGenerateTilemapTool(BaseTool):
             return {"status": "rejected", "reason": "Parameter 'name' is required"}
 
         # Rotate through pre-built chunks
-        chunk = _TILEMAP_RESPONSES[StubGenerateTilemapTool._call_index % len(_TILEMAP_RESPONSES)]
-        StubGenerateTilemapTool._call_index += 1
+        chunk = _TILEMAP_RESPONSES[self._call_index % len(_TILEMAP_RESPONSES)]
+        self._call_index += 1
 
         return {
             "status": "ok",
             "simulated": True,
-            "chunk_id": StubGenerateTilemapTool._call_index,
+            "chunk_id": self._call_index,
             "preview": {
                 "name": name,
                 "width": chunk["size"]["width"],

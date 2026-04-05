@@ -121,6 +121,8 @@ class ConversationEngine:
         relationship_tracker: RelationshipTracker | None = None,
         recent_conversation_summaries: list[str] | None = None,
         recent_outputs: list[str] | None = None,
+        required_agents: set[str] | None = None,
+        max_turns: int = 15,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -158,9 +160,9 @@ class ConversationEngine:
         self._last_conversation_summary: str | None = None
 
         # Required-agent participation tracking
-        self._required_agents: set[str] = set()
+        self._required_agents: set[str] = required_agents or set()
         self._agents_who_spoke: set[str] = set()
-        self._max_turns: int = 15
+        self._max_turns: int = max_turns
 
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
@@ -872,7 +874,16 @@ class ConversationEngine:
 
     def _is_repetitive(self, content: str, threshold: float = 0.80) -> bool:
         """Check if content is >threshold similar to any recent output."""
+        if len(content) < 20:
+            return False
         for prev in self._recent_outputs:
+            if len(prev) < 20:
+                continue
+            # Quick length-based short-circuit: strings with very different
+            # lengths cannot have a high similarity ratio.
+            len_ratio = min(len(content), len(prev)) / max(len(content), len(prev))
+            if len_ratio < threshold:
+                continue
             ratio = SequenceMatcher(None, content, prev).ratio()
             if ratio > threshold:
                 return True

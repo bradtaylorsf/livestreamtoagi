@@ -199,7 +199,7 @@ class PhaseRunner:
         self._relationship_tracker = relationship_tracker
 
         # Cross-phase conversation context to prevent repetition
-        self._conversation_summaries: list[str] = []  # Rolling buffer (max 5)
+        self._conversation_summaries: deque[str] = deque(maxlen=5)
         self._recent_outputs: deque[str] = deque(maxlen=15)  # Last 15 agent outputs
 
         # Stats accumulated during a phase run via event listeners
@@ -488,12 +488,9 @@ class PhaseRunner:
                 relationship_tracker=self._relationship_tracker,
                 recent_conversation_summaries=list(self._conversation_summaries),
                 recent_outputs=list(self._recent_outputs),
+                required_agents=set(phase.required_agents) if phase.required_agents else None,
+                max_turns=max_turns,
             )
-
-            # Set required_agents for participation guarantee
-            if phase.required_agents:
-                engine._required_agents = set(phase.required_agents)
-            engine._max_turns = max_turns
 
             engine._running = True
             await engine._start_conversation(trigger)
@@ -521,8 +518,6 @@ class PhaseRunner:
         # Collect conversation summary for cross-phase context
         if engine.active_conversation is None and engine.last_conversation_summary:
             self._conversation_summaries.append(engine.last_conversation_summary)
-            if len(self._conversation_summaries) > 5:
-                self._conversation_summaries = self._conversation_summaries[-5:]
 
         # Collect recent outputs for repetition detection
         self._recent_outputs.extend(engine.recent_outputs)

@@ -154,7 +154,8 @@ class AudienceSimulator:
         # Maybe inject a chat message
         chat_interval = _CHAT_INTERVALS.get(self._chat_frequency, 30.0)
         # Probabilistic: inject roughly once per chat_interval
-        if random.random() < (5.0 / chat_interval):
+        tick_interval = max(5.0, chat_interval / 2)
+        if random.random() < (tick_interval / chat_interval):
             await self._inject_chat_message()
 
         # Vote on active polls

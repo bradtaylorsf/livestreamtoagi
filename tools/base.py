@@ -78,6 +78,14 @@ class BaseTool(ABC):
                         for key in ("stdout", "stderr", "exit_code"):
                             if key in tool_output:
                                 meta[key] = tool_output[key]
+                    # Move _internal data to artifact metadata only —
+                    # strip it from the LLM-visible tool result
+                    if isinstance(tool_output, dict) and "_internal" in tool_output:
+                        meta["_internal"] = tool_output["_internal"]
+                        tool_output = {
+                            k: v for k, v in tool_output.items() if k != "_internal"
+                        }
+                        result = tool_output  # type: ignore[possibly-undefined]
 
                 artifact = ArtifactCreate(
                     simulation_id=simulation_id,

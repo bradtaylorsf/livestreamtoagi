@@ -37,7 +37,12 @@ def _make_redis_mock() -> AsyncMock:
 
     async def _ltrim(key, start, end):
         if key in redis._lists:
-            redis._lists[key] = redis._lists[key][start:]
+            # Match real Redis LTRIM semantics: keep elements [start..end]
+            lst = redis._lists[key]
+            length = len(lst)
+            s = start if start >= 0 else max(0, length + start)
+            e = end if end >= 0 else length + end
+            redis._lists[key] = lst[s : e + 1]
 
     async def _delete(key):
         redis._store.pop(key, None)
