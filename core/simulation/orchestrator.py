@@ -217,7 +217,12 @@ class SimulationOrchestrator:
         self._services = services
         self._relationship_repo = relationship_repo
 
+        # Instantiate prompt log repo when debug_prompts is enabled
         self._prompt_log_repo: object | None = None
+        if self._config.debug_prompts:
+            from core.repos.prompt_log_repo import PromptLogRepo
+
+            self._prompt_log_repo = PromptLogRepo(db)
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
         self._total_cost = Decimal("0")
