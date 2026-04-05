@@ -47,7 +47,7 @@ AGENT_COLORS: dict[str, str] = {
     "fork": "bright_red",
     "sentinel": "blue",
     "grok": "dark_orange",
-    "overseer": "bright_white",
+    "management": "bright_white",
     "alpha": "grey70",
 }
 
@@ -59,7 +59,7 @@ AGENT_ROLES: dict[str, str] = {
     "fork": "Contrarian",
     "sentinel": "Budget Monitor",
     "grok": "Wild Card",
-    "overseer": "Content Filter",
+    "management": "Content Filter",
     "alpha": "Errand Runner",
 }
 
@@ -465,7 +465,7 @@ async def run_reflect(agent_id: str | None, services: Services, run_all: bool = 
         agents = [a for a in agent_registry.get_all_agents() if a.chattiness > 0]
         console.print(Panel(
             f"[bold]Running reflection on {len(agents)} agents[/bold]\n"
-            f"[dim]Skipping agents with chattiness=0 (overseer, alpha)[/dim]",
+            f"[dim]Skipping agents with chattiness=0 (management, alpha)[/dim]",
             border_style="cyan",
         ))
     else:

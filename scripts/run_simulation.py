@@ -84,7 +84,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         duration=duration,
         dry_run=args.dry_run,
         verbose=verbose,
-        overseer_shadow=args.overseer_shadow,
+        management_shadow=args.management_shadow,
     )
     sim_config.load_seed_file()
 
@@ -95,10 +95,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
     conversation_repo = ConversationRepo(svc.db)
     simulation_repo = SimulationRepo(svc.db)
 
-    if sim_config.overseer_shadow:
-        from core.overseer import Overseer
+    if sim_config.management_shadow:
+        from core.management import Management
 
-        overseer = Overseer(
+        management = Management(
             redis_client=svc.redis,
             llm_client=svc.llm_client,
             event_bus=event_bus,
@@ -106,7 +106,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
             db=svc.db,
         )
     else:
-        overseer = svc.overseer
+        management = svc.management
 
     proximity = ProximityManager(svc.redis, cfg, event_bus)
     sim_clock = SimulationClock(speed_multiplier=sim_config.speed_multiplier)
@@ -136,7 +136,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         agent_registry=svc.agent_registry,
         event_bus=event_bus,
         llm_client=svc.llm_client,
-        overseer=overseer,
+        management=management,
         context_assembler=svc.context_assembler,
         conversation_repo=conversation_repo,
         archival_memory=svc.archival_memory,
@@ -261,16 +261,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--overseer-shadow",
+        "--management-shadow",
         action="store_true",
         default=True,
-        help="Run Overseer in shadow/log-only mode (default: True)",
+        help="Run Management in shadow/log-only mode (default: True)",
     )
     parser.add_argument(
-        "--no-overseer-shadow",
+        "--no-management-shadow",
         action="store_false",
-        dest="overseer_shadow",
-        help="Run Overseer in full enforcement mode",
+        dest="management_shadow",
+        help="Run Management in full enforcement mode",
     )
     parser.add_argument(
         "--restore-snapshot",

@@ -57,7 +57,7 @@ AGENTS = [
     ("fork", "Fork — The Contrarian", "bright_red", "Code reviewer, open-source evangelist"),
     ("sentinel", "Sentinel — The Accountant", "blue", "Budget monitor, cost hawk"),
     ("grok", "Grok — The Wild Card", "dark_orange", "Provocateur, chaotic insights"),
-    ("overseer", "The Overseer", "bright_white", "Content filter, ominous presence"),
+    ("management", "Management", "bright_white", "Content filter, corporate middle management"),
     ("alpha", "Alpha — The Wolf", "grey70", "Errand runner, non-verbal"),
 ]
 
@@ -182,8 +182,8 @@ def pick_convo_agents() -> list[str] | None:
     table.add_column("#", style="bold", width=3)
     table.add_column("Agent", width=30)
 
-    # Exclude overseer and alpha from default conversation participants
-    conversational = [(i, a) for i, a in enumerate(AGENTS, 1) if a[0] not in ("overseer", "alpha")]
+    # Exclude management and alpha from default conversation participants
+    conversational = [(i, a) for i, a in enumerate(AGENTS, 1) if a[0] not in ("management", "alpha")]
     for i, (agent_id, name, color, _) in conversational:
         table.add_row(str(i), f"[{color}]{name}[/{color}]")
 
@@ -297,7 +297,7 @@ def run_convo(
     speed: float = 1.0,
     quiet: bool = False,
     verbose: bool = False,
-    no_overseer: bool = False,
+    no_management: bool = False,
 ) -> None:
     """Launch a multi-agent conversation using the same pipeline as single-agent chat."""
     import asyncio
@@ -330,7 +330,7 @@ def run_simulation(
     turns: int | None = None,
     speed: float = 1.0,
     verbose: bool = False,
-    overseer_shadow: bool = True,
+    management_shadow: bool = True,
     sim_name: str | None = None,
 ) -> None:
     """Launch a tracked simulation via watch_conversations.py --test --simulate (legacy)."""
@@ -349,14 +349,14 @@ def run_simulation(
         cmd += ["--topic", topic]
     if verbose:
         cmd.append("--verbose")
-    if overseer_shadow:
-        cmd.append("--overseer-shadow")
+    if management_shadow:
+        cmd.append("--management-shadow")
     if sim_name:
         cmd += ["--sim-name", sim_name]
 
     console.print(f"\n[bold bright_cyan]Starting simulation...[/bold bright_cyan]")
     console.print(f"[dim]Agents: {', '.join(agents)}[/dim]")
-    console.print(f"[dim]Type: {convo_type} | Turns: {turns or 'default'} | Overseer shadow: {overseer_shadow}[/dim]\n")
+    console.print(f"[dim]Type: {convo_type} | Turns: {turns or 'default'} | Management shadow: {management_shadow}[/dim]\n")
 
     try:
         subprocess.run(cmd, check=False)
@@ -733,7 +733,7 @@ def main() -> None:
         speed = 1.0
         quiet = False
         verbose = False
-        no_overseer = False
+        no_management = False
         i = 0
         while i < len(convo_args):
             arg = convo_args[i]
@@ -758,8 +758,8 @@ def main() -> None:
             elif arg in ("--verbose", "-v"):
                 verbose = True
                 i += 1
-            elif arg == "--no-overseer":
-                no_overseer = True
+            elif arg == "--no-management":
+                no_management = True
                 i += 1
             else:
                 i += 1
@@ -778,7 +778,7 @@ def main() -> None:
             if turns is None:
                 turns = pick_turns()
 
-        run_convo(agents, convo_type, topic, turns, speed, quiet, verbose, no_overseer)
+        run_convo(agents, convo_type, topic, turns, speed, quiet, verbose, no_management)
         return
 
     # ── Quick-launch: pnpm chat sim ... ──
@@ -1057,16 +1057,16 @@ def main() -> None:
     console.print()
     console.print("  [bold bright_cyan]Options:[/bold bright_cyan]")
     verbose = False
-    no_overseer = False
+    no_management = False
     tts = False
     try:
         opts = console.input(
             "[bold]Options (v=verbose, t=TTS voice, "
-            "n=no-overseer, Enter=skip): [/bold]"
+            "n=no-management, Enter=skip): [/bold]"
         ).strip().lower()
         verbose = "v" in opts
         tts = "t" in opts
-        no_overseer = "n" in opts
+        no_management = "n" in opts
     except (EOFError, KeyboardInterrupt):
         pass
 
@@ -1078,7 +1078,7 @@ def main() -> None:
         convo_type = pick_convo_type()
         topic = pick_topic()
         turns = pick_turns()
-        run_convo(agents, convo_type, topic, turns, verbose=verbose, no_overseer=no_overseer)
+        run_convo(agents, convo_type, topic, turns, verbose=verbose, no_management=no_management)
         return
 
     if mode == "simulate":

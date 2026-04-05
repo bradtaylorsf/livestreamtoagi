@@ -3,7 +3,7 @@
 
 Uses `rich` for colorized, formatted output. Subscribes to the EventBus
 to render agent messages, speaker selection scores, memory operations,
-energy levels, Overseer actions, and token/cost stats in real time.
+energy levels, Management actions, and token/cost stats in real time.
 
 Usage:
     python scripts/watch_conversations.py
@@ -47,7 +47,7 @@ AGENT_COLORS: dict[str, str] = {
     "fork": "bright_red",
     "sentinel": "blue",
     "grok": "dark_orange",
-    "overseer": "bright_white",
+    "management": "bright_white",
     "alpha": "grey70",
 }
 
@@ -59,7 +59,7 @@ AGENT_ROLES: dict[str, str] = {
     "fork": "Contrarian",
     "sentinel": "Budget Monitor",
     "grok": "Wild Card",
-    "overseer": "Content Filter",
+    "management": "Content Filter",
     "alpha": "Errand Runner",
 }
 
@@ -78,7 +78,7 @@ class SessionStats:
     memories_created: int = 0
     memories_recalled: int = 0
     interrupts: int = 0
-    overseer_actions: int = 0
+    management_actions: int = 0
     total_cost: Decimal = field(default_factory=lambda: Decimal("0"))
     conversations_completed: int = 0
     start_time: float = field(default_factory=time.monotonic)
@@ -174,7 +174,7 @@ def print_energy_bar(energy: float, max_energy: float, *, quiet: bool = False) -
     console.print(f"  Energy: [{bar}] {energy:.1f}/{max_energy:.0f}")
 
 
-def print_overseer_action(agent_id: str, severity: int, reason: str) -> None:
+def print_management_action(agent_id: str, severity: int, reason: str) -> None:
     style = "yellow" if severity <= 2 else "red" if severity <= 4 else "bold red"
     label = "WARNING" if severity <= 2 else "BLOCKED" if severity <= 4 else "KILL SWITCH"
     console.print(
@@ -184,7 +184,7 @@ def print_overseer_action(agent_id: str, severity: int, reason: str) -> None:
     )
 
 
-def print_overseer_shadow(agent_id: str, severity: int, action: str, reason: str) -> None:
+def print_management_shadow(agent_id: str, severity: int, action: str, reason: str) -> None:
     console.print(
         f"  [dim][bright_white]OVERSEER[/bright_white] "
         f"SHADOW would-{action} (sev={severity}) "
@@ -207,7 +207,7 @@ def print_summary(stats: SessionStats) -> None:
     table.add_row("Memories created", str(stats.memories_created))
     table.add_row("Memories recalled", str(stats.memories_recalled))
     table.add_row("Interrupts", str(stats.interrupts))
-    table.add_row("Overseer actions", str(stats.overseer_actions))
+    table.add_row("Management actions", str(stats.management_actions))
     table.add_row("Total cost", f"${stats.total_cost:.4f}")
     table.add_row("Duration", f"{elapsed:.1f}s")
     console.print(table)
@@ -245,28 +245,28 @@ def make_event_handlers(
             latency_ms=data.get("latency_ms", 0),
         )
 
-    async def on_overseer_warning(event: dict) -> None:
+    async def on_management_warning(event: dict) -> None:
         data = event.get("data", event)
-        stats.overseer_actions += 1
-        print_overseer_action(
+        stats.management_actions += 1
+        print_management_action(
             data.get("agent_id", "unknown"),
             data.get("severity", 1),
             data.get("reason", ""),
         )
 
-    async def on_overseer_intervention(event: dict) -> None:
+    async def on_management_intervention(event: dict) -> None:
         data = event.get("data", event)
-        stats.overseer_actions += 1
-        print_overseer_action(
+        stats.management_actions += 1
+        print_management_action(
             data.get("agent_id", "unknown"),
             data.get("severity", 3),
             data.get("reason", ""),
         )
 
-    async def on_overseer_shadow(event: dict) -> None:
+    async def on_management_shadow(event: dict) -> None:
         data = event.get("data", event)
-        stats.overseer_actions += 1
-        print_overseer_shadow(
+        stats.management_actions += 1
+        print_management_shadow(
             data.get("agent_id", "unknown"),
             data.get("severity", 1),
             data.get("action_would_take", "flag"),
@@ -275,9 +275,9 @@ def make_event_handlers(
 
     return {
         "agent_speak": on_agent_speak,
-        "overseer_warning": on_overseer_warning,
-        "overseer_intervention": on_overseer_intervention,
-        "overseer_shadow": on_overseer_shadow,
+        "management_warning": on_management_warning,
+        "management_intervention": on_management_intervention,
+        "management_shadow": on_management_shadow,
     }
 
 
@@ -350,11 +350,11 @@ async def run_watch(args: argparse.Namespace) -> None:
     cfg = svc.config_loader.config
 
     conversation_repo = ConversationRepo(svc.db)
-    overseer_shadow = getattr(args, "overseer_shadow", False)
-    if overseer_shadow:
-        from core.overseer import Overseer
+    management_shadow = getattr(args, "management_shadow", False)
+    if management_shadow:
+        from core.management import Management
 
-        overseer = Overseer(
+        management = Management(
             redis_client=svc.redis,
             llm_client=svc.llm_client,
             event_bus=event_bus,
@@ -362,7 +362,7 @@ async def run_watch(args: argparse.Namespace) -> None:
             db=svc.db,
         )
     else:
-        overseer = svc.overseer
+        management = svc.management
 
     proximity = ProximityManager(svc.redis, cfg, event_bus)
     trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
@@ -370,20 +370,20 @@ async def run_watch(args: argparse.Namespace) -> None:
 
     speed = float(args.speed) if hasattr(args, "speed") and args.speed is not None else 1.0
 
-    overseer_enabled = not getattr(args, "no_overseer", False)
-    if overseer_shadow:
-        # Shadow mode: keep overseer enabled but in log-only mode
-        overseer_enabled = True
-        console.print("[dim]Overseer in shadow/log-only mode[/dim]")
-    elif not overseer_enabled:
-        console.print("[yellow]Overseer disabled for testing[/yellow]")
+    management_enabled = not getattr(args, "no_management", False)
+    if management_shadow:
+        # Shadow mode: keep management enabled but in log-only mode
+        management_enabled = True
+        console.print("[dim]Management in shadow/log-only mode[/dim]")
+    elif not management_enabled:
+        console.print("[yellow]Management disabled for testing[/yellow]")
 
     engine = ConversationEngine(
         config_loader=svc.config_loader,
         agent_registry=svc.agent_registry,
         event_bus=event_bus,
         llm_client=svc.llm_client,
-        overseer=overseer,
+        management=management,
         context_assembler=svc.context_assembler,
         conversation_repo=conversation_repo,
         archival_memory=svc.archival_memory,
@@ -393,7 +393,7 @@ async def run_watch(args: argparse.Namespace) -> None:
         compactor=svc.compactor,
         memory_repo=svc.memory_repo,
         speed_multiplier=speed,
-        overseer_enabled=overseer_enabled,
+        management_enabled=management_enabled,
         services=svc,
         # simulation_id is set later after sim record is created/attached
     )
@@ -444,7 +444,7 @@ async def run_watch(args: argparse.Namespace) -> None:
             [a.strip() for a in args.agents.split(",")]
             if args.agents
             else [a.id for a in svc.agent_registry.get_all_agents()
-                  if a.id not in ("overseer", "alpha")]
+                  if a.id not in ("management", "alpha")]
         )
         sim = await sim_repo.create(SimulationCreate(
             name=sim_name,
@@ -452,7 +452,7 @@ async def run_watch(args: argparse.Namespace) -> None:
                 "test_type": args.test_type or "freeform",
                 "turns": args.turns,
                 "speed": args.speed,
-                "overseer_shadow": overseer_shadow,
+                "management_shadow": management_shadow,
                 "agents": requested,
                 "topic": getattr(args, "topic", None),
             },
@@ -490,7 +490,7 @@ async def run_watch(args: argparse.Namespace) -> None:
                 [a.strip() for a in args.agents.split(",")]
                 if args.agents
                 else [a.id for a in svc.agent_registry.get_all_agents()
-                      if a.id not in ("overseer", "alpha")]
+                      if a.id not in ("management", "alpha")]
             )
             # Clear all agent locations so stale Redis data doesn't pull in extras
             for agent in svc.agent_registry.get_all_agents():
@@ -715,14 +715,14 @@ def main() -> None:
         help="Enable debug logging",
     )
     parser.add_argument(
-        "--no-overseer",
+        "--no-management",
         action="store_true",
-        help="Disable Overseer content filter entirely (for testing)",
+        help="Disable Management content filter entirely (for testing)",
     )
     parser.add_argument(
-        "--overseer-shadow",
+        "--management-shadow",
         action="store_true",
-        help="Run Overseer in shadow/log-only mode (filters run but never block)",
+        help="Run Management in shadow/log-only mode (filters run but never block)",
     )
     parser.add_argument(
         "--simulate",
