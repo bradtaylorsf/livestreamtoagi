@@ -48,6 +48,7 @@ class SharedWorkingState:
         task_id: str,
         status: str,
         blocked_reason: str | None = None,
+        owner: str | None = None,
     ) -> None:
         raw = await self._redis.hget(TASK_KEY, task_id)
         if raw:
@@ -55,6 +56,8 @@ class SharedWorkingState:
             data["status"] = status
             if blocked_reason:
                 data["blocked_reason"] = blocked_reason
+            if owner:
+                data["owner"] = owner
             await self._redis.hset(TASK_KEY, task_id, json.dumps(data))
 
     async def get_tasks(self) -> list[SharedTask]:
