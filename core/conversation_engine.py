@@ -855,12 +855,50 @@ class ConversationEngine:
             commitments = parse_commitments(response.content)
             goal_mgr = self._services.goal_manager
             for c in commitments:
-                await goal_mgr.add_goal(
+                goal = await goal_mgr.add_goal(
                     agent_id=c["agent_id"],
                     goal_text=c["commitment"],
                     priority=2,
                     related_agent=c.get("related_to_agent") or None,
                 )
+
+                # Create shared task from commitment (#249)
+                sws = self._services.shared_working_state
+                if sws is not None:
+                    try:
+                        from core.shared_state import SharedTask
+
+                        await sws.add_task(SharedTask(
+                            id=goal.id,
+                            title=c["commitment"],
+                            owner=c["agent_id"],
+                            status="pending",
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "Failed to create shared task for commitment: %s",
+                            c["commitment"][:100],
+                        )
+
+                # Cross-agent accountability (#249): create follow-up goal
+                related = c.get("related_to_agent")
+                if related and related != c["agent_id"]:
+                    try:
+                        await goal_mgr.add_goal(
+                            agent_id=related,
+                            goal_text=(
+                                f"Follow up with {c['agent_id']} on: "
+                                f"{c['commitment']}"
+                            ),
+                            priority=3,
+                            related_agent=c["agent_id"],
+                            source="assigned",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to create cross-agent goal for %s → %s",
+                            c["agent_id"], related,
+                        )
 
             if commitments:
                 logger.info(
@@ -940,6 +978,7 @@ class ConversationEngine:
 
         # Build agent goals context if available
         agent_goals_context: str | None = None
+        commitment_reminders: str | None = None
         if self._services and self._services.goal_manager:
             try:
                 agent_goals_context = (
@@ -947,6 +986,12 @@ class ConversationEngine:
                 ) or None
             except Exception:
                 logger.warning("Failed to get agent goals for %s", agent.id, exc_info=True)
+            try:
+                commitment_reminders = (
+                    await self._services.goal_manager.get_commitment_reminders(agent.id)
+                ) or None
+            except Exception:
+                logger.warning("Failed to get commitment reminders for %s", agent.id, exc_info=True)
 
         # Build shared working state context if available
         shared_state_context: str | None = None
@@ -968,6 +1013,7 @@ class ConversationEngine:
                     relationship_context=relationship_context,
                     shared_state_context=shared_state_context,
                     agent_goals_context=agent_goals_context,
+                    commitment_reminders=commitment_reminders,
                 )
                 messages = context_result.messages
 

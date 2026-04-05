@@ -121,6 +121,7 @@ class ContextAssembler:
         relationship_context: str | None = None,
         shared_state_context: str | None = None,
         agent_goals_context: str | None = None,
+        commitment_reminders: str | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -216,6 +217,9 @@ class ContextAssembler:
         # Shared state
         _track("shared_state", shared_state_context or "", bool(shared_state_context))
 
+        # Commitment reminders (#249)
+        _track("commitment_reminders", commitment_reminders or "", bool(commitment_reminders))
+
         # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint.startswith("topic:"):
@@ -265,6 +269,10 @@ class ContextAssembler:
                 "Work toward them and honor your promises.\n\n"
                 + agent_goals_context
             )
+
+        # Commitment reminders (#249)
+        if commitment_reminders:
+            system_sections.append(commitment_reminders)
 
         # Shared working state
         if shared_state_context:
