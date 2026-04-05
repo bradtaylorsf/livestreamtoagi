@@ -1,0 +1,83 @@
+{
+  "grid": {
+    "width": 40,
+    "height": 22,
+    "tile_size": 32
+  },
+  "tile_types": {
+    "floor": {
+      "id": 1,
+      "prompt": "Wooden office floor tile, warm brown tones, subtle plank grain pattern",
+      "collision": false
+    },
+    "wall": {
+      "id": 2,
+      "prompt": "Office wall tile, light grey with subtle texture, clean interior look",
+      "collision": true
+    },
+    "desk": {
+      "id": 3,
+      "prompt": "Wooden office desk, top-down view, warm brown wood with subtle shadow",
+      "collision": true
+    },
+    "chair": {
+      "id": 4,
+      "prompt": "Small office chair, top-down view, dark grey cushion, swivel base",
+      "collision": false
+    },
+    "whiteboard": {
+      "id": 5,
+      "prompt": "Wall-mounted whiteboard with colorful sticky notes and marker scribbles",
+      "collision": true
+    },
+    "coffee_machine": {
+      "id": 6,
+      "prompt": "Office coffee machine on a small counter, top-down view, dark metal with red light",
+      "collision": true
+    },
+    "workshop_bench": {
+      "id": 7,
+      "prompt": "Workshop workbench with tools, soldering station, circuit boards, top-down view",
+      "collision": true
+    },
+    "meeting_table": {
+      "id": 8,
+      "prompt": "Large oval meeting table, top-down view, dark wood, polished surface",
+      "collision": true
+    },
+    "plant": {
+      "id": 9,
+      "prompt": "Small potted office plant, green leaves, terracotta pot, top-down view",
+      "collision": true
+    },
+    "rug": {
+      "id": 10,
+      "prompt": "Cozy area rug, warm red and gold pattern, soft texture",
+      "collision": false
+    },
+    "bookshelf": {
+      "id": 11,
+      "prompt": "Tall bookshelf packed with colorful books, top-down view, wooden frame",
+      "collision": true
+    }
+  },
+  "areas": {
+    "desk_vera": { "x": 4, "y": 4, "width": 3, "height": 2 },
+    "desk_rex": { "x": 4, "y": 8, "width": 3, "height": 2 },
+    "desk_aurora": { "x": 4, "y": 12, "width": 3, "height": 2 },
+    "desk_pixel": { "x": 4, "y": 16, "width": 3, "height": 2 },
+    "desk_fork": { "x": 14, "y": 4, "width": 3, "height": 2 },
+    "desk_sentinel": { "x": 14, "y": 8, "width": 3, "height": 2 },
+    "desk_grok": { "x": 14, "y": 12, "width": 3, "height": 2 },
+    "meeting_area": { "x": 24, "y": 3, "width": 6, "height": 5 },
+    "whiteboard": { "x": 24, "y": 9, "width": 4, "height": 2 },
+    "coffee_machine": { "x": 35, "y": 3, "width": 2, "height": 2 },
+    "workshop": { "x": 24, "y": 14, "width": 6, "height": 5 }
+  },
+  "layers": {
+    "ground": "Floor tiles covering the entire grid interior",
+    "walls": "Walls around the perimeter (row 0, row 21, col 0, col 39)",
+    "furniture": "Desks, chairs, tables, and other objects placed per area definitions",
+    "collision": "Generated from tile_types collision property"
+  }
+}
