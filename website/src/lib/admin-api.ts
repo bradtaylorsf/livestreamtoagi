@@ -10,6 +10,8 @@ import type {
   AgentDetail,
   AgentSummary,
   ArtifactFilters,
+  AssertionResult,
+  AssertionSummary,
   ConversationDetail,
   CoreMemoryResponse,
   DashboardStats,
@@ -20,6 +22,8 @@ import type {
   OverseerFlag,
   PaginatedResponse,
   RecallMemory,
+  Relationship,
+  RelationshipDetail,
   SelectionLog,
   Simulation,
   SimulationCostResponse,
@@ -415,6 +419,40 @@ export async function compareEvals(
 
 export async function exportEval(evalId: string): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/api/admin/evals/${evalId}/export`);
+}
+
+// ── Relationships ─────────────────────────────────────────────
+
+export async function fetchSocialGraph(simId: string): Promise<Relationship[]> {
+  return request<Relationship[]>(`/api/admin/simulations/${simId}/social-graph`);
+}
+
+export async function fetchRelationshipDetail(
+  agentId: string,
+  targetId: string,
+  simId: string,
+): Promise<RelationshipDetail> {
+  return request<RelationshipDetail>(
+    `/api/admin/agents/${agentId}/relationships/${targetId}?simulation_id=${simId}`,
+  );
+}
+
+// ── Assertions ────────────────────────────────────────────────
+
+export async function fetchSimulationAssertions(
+  simId: string,
+): Promise<AssertionResult[]> {
+  return request<AssertionResult[]>(
+    `/api/admin/simulations/${simId}/assertions`,
+  );
+}
+
+export async function fetchSimulationAssertionsSummary(
+  simId: string,
+): Promise<AssertionSummary> {
+  return request<AssertionSummary>(
+    `/api/admin/simulations/${simId}/assertions/summary`,
+  );
 }
 
 export { AdminApiError };

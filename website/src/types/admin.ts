@@ -304,3 +304,46 @@ export interface EvalHistoryPoint {
   simulation_id: string;
   eval_run_id: string;
 }
+
+// ── Relationship types ────────────────────────────────────────
+
+export interface Relationship {
+  agent_id: string;
+  target_agent_id: string;
+  sentiment_score: number;
+  trust_score: number;
+  interaction_count: number;
+  relationship_summary: string | null;
+  simulation_id: string | null;
+}
+
+export interface RelationshipEvolution {
+  timestamp: string;
+  sentiment_score: number;
+  event: string | null;
+}
+
+export interface RelationshipDetail extends Relationship {
+  evolution: RelationshipEvolution[];
+}
+
+// ── Assertion types ───────────────────────────────────────────
+
+export interface AssertionResult {
+  id: string;
+  simulation_id: string;
+  phase_name: string;
+  assertion_name: string;
+  status: "pass" | "fail" | "warning";
+  severity: "error" | "warning";
+  expected: string | null;
+  actual: string | null;
+  message: string | null;
+  created_at: string | null;
+}
+
+export interface AssertionSummary {
+  passed: number;
+  failed: number;
+  warnings: number;
+}
