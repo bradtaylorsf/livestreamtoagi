@@ -92,13 +92,37 @@ export default function SimulationDetailPage() {
         </div>
       </div>
 
-      {/* Eval Link */}
-      <div>
+      {/* Eval Link + Assertions Link */}
+      <div className="flex items-center gap-3">
         <Link
           href={`/admin/simulations/${id}/evals`}
           className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
         >
           View Eval Results
+        </Link>
+        <Link
+          href={`/admin/simulations/${id}/assertions`}
+          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+        >
+          Assertions
+        </Link>
+        <Link
+          href={`/admin/simulations/${id}/relationships`}
+          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+        >
+          Social Graph
+        </Link>
+        <Link
+          href={`/admin/simulations/${id}/report`}
+          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+        >
+          Report
+        </Link>
+        <Link
+          href={`/admin/simulations/${id}/snapshots`}
+          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
+        >
+          Snapshots
         </Link>
       </div>
 

@@ -528,6 +528,42 @@ async def list_simulations(
     return PaginatedResponse(items=simulations, total=total, limit=limit, offset=offset)
 
 
+@router.get("/simulations/compare")
+async def compare_simulations(
+    sim_a: uuid_mod.UUID = Query(...),
+    sim_b: uuid_mod.UUID = Query(...),
+) -> dict[str, Any]:
+    """Side-by-side comparison of two simulation runs."""
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+    from core.reporting.comparison import CrossRunComparison
+
+    relationship_repo = RelationshipRepo(db)
+    cross = CrossRunComparison(
+        db=db,
+        simulation_ids=[str(sim_a), str(sim_b)],
+        relationship_repo=relationship_repo,
+    )
+    result = await cross.compare()
+
+    # Also load daily cost breakdown for chart overlay
+    daily_costs: dict[str, list[dict[str, Any]]] = {"run_a": [], "run_b": []}
+    for label, sim_id in [("run_a", sim_a), ("run_b", sim_b)]:
+        rows = await db.fetch(
+            """SELECT DATE(created_at) as day, SUM(cost) as daily_cost
+               FROM cost_events WHERE simulation_id = $1
+               GROUP BY DATE(created_at) ORDER BY day""",
+            sim_id,
+        )
+        daily_costs[label] = [
+            {"day": str(r["day"]), "cost": str(r["daily_cost"])} for r in rows
+        ]
+
+    data = result.to_dict()
+    data["daily_costs"] = daily_costs
+    return data
+
+
 @router.get("/simulations/{sim_id}", response_model=Simulation)
 async def get_simulation(sim_id: uuid_mod.UUID) -> Simulation:
     """Full simulation detail: config, stats, phases, timing."""
@@ -929,6 +965,185 @@ async def get_social_graph(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
     repo = RelationshipRepo(db)
     relationships = await repo.get_social_graph(sim_id)
     return [r.model_dump(mode="json") for r in relationships]
+
+
+@router.get("/simulations/{sim_id}/snapshots")
+async def list_snapshots(sim_id: uuid_mod.UUID) -> list[dict[str, Any]]:
+    """List available memory snapshots for a simulation."""
+    import json
+    from pathlib import Path
+
+    snapshots_dir = Path("snapshots")
+    results: list[dict[str, Any]] = []
+    if not snapshots_dir.exists():
+        return results
+
+    for f in sorted(snapshots_dir.glob("*.json"), reverse=True):
+        try:
+            data = json.loads(f.read_text())
+            source_id = data.get("source_simulation_id", "")
+            if source_id == str(sim_id) or not source_id:
+                agents = data.get("agents", {})
+                results.append({
+                    "filename": f.name,
+                    "simulation_id": source_id,
+                    "snapshot_at": data.get("snapshot_at", ""),
+                    "agent_count": len(agents),
+                })
+        except Exception:
+            continue
+    return results
+
+
+@router.get("/simulations/{sim_id}/snapshots/{filename}")
+async def get_snapshot(sim_id: uuid_mod.UUID, filename: str) -> dict[str, Any]:
+    """Read and return a specific snapshot file."""
+    import json
+    from pathlib import Path
+
+    # Sanitize filename to prevent path traversal
+    safe_name = Path(filename).name
+    snapshot_path = Path("snapshots") / safe_name
+    if not snapshot_path.exists():
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    try:
+        data = json.loads(snapshot_path.read_text())
+        return data
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/simulations/{sim_id}/snapshots")
+async def create_snapshot(sim_id: uuid_mod.UUID) -> dict[str, Any]:
+    """Export a new memory snapshot for this simulation."""
+    import json
+    from pathlib import Path
+    from core.repos.memory_repo import MemoryRepo
+    from core.repos.relationship_repo import RelationshipRepo
+    from core.memory.snapshot import MemorySnapshotExporter
+
+    db = _get_db()
+    memory_repo = MemoryRepo(db)
+    relationship_repo = RelationshipRepo(db)
+    exporter = MemorySnapshotExporter(
+        db=db, memory_repo=memory_repo, relationship_repo=relationship_repo,
+    )
+    snapshot_data = await exporter.export(str(sim_id))
+
+    snapshots_dir = Path("snapshots")
+    snapshots_dir.mkdir(exist_ok=True)
+    timestamp = snapshot_data.get("snapshot_at", "unknown").replace(":", "-").replace("+", "")[:19]
+    filename = f"snapshot-{str(sim_id)[:8]}-{timestamp}.json"
+    filepath = snapshots_dir / filename
+    filepath.write_text(json.dumps(snapshot_data, indent=2, default=str))
+
+    return {
+        "filename": filename,
+        "simulation_id": str(sim_id),
+        "snapshot_at": snapshot_data.get("snapshot_at", ""),
+        "agent_count": len(snapshot_data.get("agents", {})),
+    }
+
+
+@router.get("/simulations/{sim_id}/memory-current")
+async def get_current_memory_state(sim_id: uuid_mod.UUID) -> dict[str, Any]:
+    """Return current memory state for comparison with snapshots."""
+    db = _get_db()
+    from core.repos.memory_repo import MemoryRepo
+    memory_repo = MemoryRepo(db)
+
+    # Get agents from simulation
+    row = await db.fetchrow(
+        "SELECT agents_participated FROM simulations WHERE id = $1", sim_id
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    agents = row.get("agents_participated") or []
+    result: dict[str, Any] = {"agents": {}}
+
+    for agent_id in agents:
+        agent_data: dict[str, Any] = {"core_memory": "", "recall_count": 0, "journal_count": 0}
+        core = await memory_repo.get_core_memory(agent_id)
+        if core:
+            agent_data["core_memory"] = core.content
+
+        recall, total_recall = await memory_repo.get_recall_memories_paginated(
+            agent_id, limit=0
+        )
+        agent_data["recall_count"] = total_recall
+
+        entries, total_journal = await memory_repo.get_journal_entries(agent_id, limit=0)
+        agent_data["journal_count"] = total_journal
+
+        result["agents"][agent_id] = agent_data
+
+    return result
+
+
+@router.get("/simulations/{sim_id}/report")
+async def get_simulation_report(
+    sim_id: uuid_mod.UUID,
+    days: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Generate structured timeline report for a simulation."""
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+    from core.reporting.timeline_reporter import TimelineReporter
+
+    relationship_repo = RelationshipRepo(db)
+    reporter = TimelineReporter(
+        db=db,
+        simulation_id=str(sim_id),
+        relationship_repo=relationship_repo,
+    )
+    day_list = None
+    if days:
+        try:
+            day_list = [int(d.strip()) for d in days.split(",")]
+        except ValueError:
+            pass
+    report = await reporter.generate(days=day_list, format="json")
+
+    # Append launch-readiness scorecard
+    from core.reporting.scorecard import LaunchScorecard
+    from core.reporting.timeline_reporter import ReportSection
+    from core.repos.assertion_repo import AssertionRepo
+
+    assertion_repo = AssertionRepo(db)
+    scorecard = LaunchScorecard(
+        db=db,
+        simulation_id=str(sim_id),
+        assertion_repo=assertion_repo,
+        relationship_repo=relationship_repo,
+    )
+    scorecard_result = await scorecard.evaluate()
+    report.sections.append(ReportSection(
+        title="Launch Readiness Scorecard",
+        data=scorecard_result.to_dict(),
+    ))
+
+    return report.to_dict()
+
+
+@router.post("/evals/{eval_id}/create-issues")
+async def create_issues_from_eval(
+    eval_id: uuid_mod.UUID,
+    threshold: int = Query(default=60),
+) -> list[dict[str, Any]]:
+    """Generate GitHub issues from low-scoring eval categories."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+    from core.eval.issue_generator import EvalIssueGenerator
+
+    eval_repo = EvalRepo(db)
+    generator = EvalIssueGenerator(
+        db=db,
+        eval_repo=eval_repo,
+        eval_run_id=eval_id,
+        score_threshold=threshold,
+    )
+    return await generator.generate_and_create()
 
 
 @router.get("/evals/{eval_id}/export", response_model=EvalExportResponse)
