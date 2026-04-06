@@ -89,7 +89,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
     sim_config.load_seed_file()
 
     # ── Connect services ──────────────────────────────────
-    svc = await bootstrap_services()
+    svc = await bootstrap_services(auto_migrate=True)
     cfg = svc.config_loader.config
 
     conversation_repo = ConversationRepo(svc.db)

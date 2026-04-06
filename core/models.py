@@ -145,6 +145,32 @@ class TranscriptCreate(BaseModel):
     conversation_id: uuid.UUID | None = None
 
 
+# ── Prompt Logs ────────────────────────────────────────────────
+
+
+class PromptLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    conversation_id: uuid.UUID | None = None
+    simulation_id: uuid.UUID | None = None
+    agent_id: str
+    turn_number: int = 0
+    full_prompt: str
+    sections_included: dict[str, Any] = Field(default_factory=dict)
+    total_tokens: int = 0
+    created_at: datetime | None = None
+
+
+class PromptLogCreate(BaseModel):
+    conversation_id: uuid.UUID | None = None
+    simulation_id: uuid.UUID | None = None
+    agent_id: str
+    turn_number: int = 0
+    full_prompt: str
+    sections_included: dict[str, Any] = Field(default_factory=dict)
+    total_tokens: int = 0
+
+
 # ── Journal Entries ─────────────────────────────────────────────
 
 class JournalEntry(BaseModel):

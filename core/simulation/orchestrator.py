@@ -88,6 +88,7 @@ class SimulationConfig:
         dry_run: bool = False,
         verbose: bool = False,
         management_shadow: bool = True,
+        debug_prompts: bool = False,
     ) -> None:
         self.name = name
         self.description = description
@@ -100,6 +101,7 @@ class SimulationConfig:
         self.dry_run = dry_run
         self.verbose = verbose
         self.management_shadow = management_shadow
+        self.debug_prompts = debug_prompts
         self.phases: list[Phase] = []
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
@@ -215,6 +217,12 @@ class SimulationOrchestrator:
         self._services = services
         self._relationship_repo = relationship_repo
 
+        # Instantiate prompt log repo when debug_prompts is enabled
+        self._prompt_log_repo: object | None = None
+        if self._config.debug_prompts:
+            from core.repos.prompt_log_repo import PromptLogRepo
+
+            self._prompt_log_repo = PromptLogRepo(db)
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
         self._total_cost = Decimal("0")
@@ -269,6 +277,8 @@ class SimulationOrchestrator:
             services=self._services,
             clock=self.clock,
             relationship_tracker=relationship_tracker,
+            debug_prompts=self._config.debug_prompts,
+            prompt_log_repo=self._prompt_log_repo,
         )
 
     def _idle_gap(self) -> timedelta:
@@ -307,6 +317,7 @@ class SimulationOrchestrator:
             agents_participated=self._config.agents,
         ))
         self._simulation_id = sim.id
+        self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._seed_rng(sim.id)
         logger.info("Created simulation %s (%s)", sim.id, sim.name)
 
@@ -452,6 +463,7 @@ class SimulationOrchestrator:
             agents_participated=self._config.agents,
         ))
         self._simulation_id = sim.id
+        self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._seed_rng(sim.id)
         logger.info(
             "Created autonomous simulation %s (%s)", sim.id, sim.name
@@ -704,6 +716,24 @@ class SimulationOrchestrator:
             simulated_duration=simulated_duration,
             real_duration=real_duration,
         )
+
+        # Reconcile total_cost from cost_events (authoritative source)
+        try:
+            actual_cost = await self._sim_repo.get_total_cost_from_events(
+                self._simulation_id
+            )
+            if actual_cost > 0:
+                await self._sim_repo.increment_stats(
+                    self._simulation_id,
+                    cost=actual_cost - self._total_cost,
+                )
+                self._total_cost = actual_cost
+        except Exception:
+            logger.warning(
+                "Failed to reconcile cost from cost_events for %s",
+                self._simulation_id,
+                exc_info=True,
+            )
 
         # Persist final clock state into config
         final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}

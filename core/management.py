@@ -48,12 +48,14 @@ class Management:
         rules_path: Path | None = None,
         shadow_mode: bool = False,
         db: Database | None = None,
+        simulation_id: object | None = None,
     ) -> None:
         self._redis = redis_client
         self._llm = llm_client
         self._event_bus = event_bus
         self._shadow_mode = shadow_mode
         self._db = db
+        self._simulation_id = simulation_id
 
         rules_file = rules_path or CONTENT_RULES_PATH
         with open(rules_file) as f:
@@ -231,6 +233,7 @@ class Management:
                 agent_id="management",
                 temperature=0.4,
                 max_tokens=100,
+                simulation_id=self._simulation_id,
             )
             return resp.content.strip()
         except Exception:
@@ -377,6 +380,7 @@ class Management:
                 agent_id="management",
                 temperature=0.1,
                 max_tokens=150,
+                simulation_id=self._simulation_id,
             )
             return self._parse_llm_response(resp.content)
         except Exception:
@@ -404,6 +408,8 @@ class Management:
     @staticmethod
     def _parse_llm_response(raw: str) -> ContentReviewResult:
         """Parse LLM JSON response into ContentReviewResult."""
+        import re
+
         # Strip markdown code fences if present
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -415,6 +421,19 @@ class Management:
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
+            # Fallback: extract first JSON object via regex
+            match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    return ContentReviewResult(
+                        approved=bool(data.get("approved", True)),
+                        reason=str(data.get("reason", "No reason provided")),
+                        severity=max(1, min(5, int(data.get("severity", 1)))),
+                    )
             logger.warning("Failed to parse LLM review response: %s", raw[:200])
             return ContentReviewResult(
                 approved=True, reason="Unparseable LLM response, defaulting to approved", severity=1

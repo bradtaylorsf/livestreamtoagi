@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ANALYZER_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "evals" / "prompts" / "analyzer.yaml"
+    Path(__file__).resolve().parent.parent.parent / "evals" / "prompts" / "_analyzer.yaml"
 )
 
 # Safety rails
@@ -43,10 +43,12 @@ class EvalAnalyzer:
         db: Database,
         eval_repo: EvalRepo,
         llm_client: OpenRouterClient,
+        simulation_id: object | None = None,
     ) -> None:
         self._db = db
         self._eval_repo = eval_repo
         self._llm = llm_client
+        self._simulation_id = simulation_id
 
     async def analyze(self, eval_run_id: uuid.UUID) -> AnalysisResult:
         """Analyze eval results and return classified change proposals.
@@ -107,6 +109,7 @@ class EvalAnalyzer:
             agent_id="eval_analyzer",
             temperature=prompt_config.get("temperature", 0.3),
             max_tokens=prompt_config.get("max_tokens", 8192),
+            simulation_id=self._simulation_id,
         )
 
         # Parse response
@@ -122,6 +125,7 @@ class EvalAnalyzer:
             trend_data={
                 "previous_runs": len(previous_results),
                 "current_overall": float(current_run.overall_score) if current_run.overall_score else None,
+                "is_first_run": len(previous_results) == 0,
             },
         )
 
@@ -206,6 +210,16 @@ def _build_user_prompt(
             for pr in prev["results"]:
                 parts.append(f"  {pr['category']}: {pr['score']}")
             parts.append("")
+    else:
+        parts.append("## First Run — No Previous Data")
+        parts.append(
+            "This is the first eval run. There is no prior data for trend analysis."
+        )
+        parts.append(
+            "Score based on absolute quality of current results only. "
+            "Focus on identifying the most impactful improvements rather than trends."
+        )
+        parts.append("")
 
     parts.append("## Instructions")
     parts.append("Analyze these results and propose specific, actionable changes.")

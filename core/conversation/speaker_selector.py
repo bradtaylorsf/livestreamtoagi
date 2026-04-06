@@ -152,6 +152,20 @@ class SpeakerSelector:
             if spk:
                 turn_counts[spk] = turn_counts.get(spk, 0) + 1
 
+        # Compute turns since each agent last spoke (#247)
+        _turns_since_last_spoke: dict[str, int] = {}
+        total_msgs = len(conversation_history)
+        for agent in candidates:
+            last_spoke_idx = -1
+            for idx in range(total_msgs - 1, -1, -1):
+                if conversation_history[idx].get("speaker") == agent.id:
+                    last_spoke_idx = idx
+                    break
+            if last_spoke_idx == -1:
+                _turns_since_last_spoke[agent.id] = turn_number
+            else:
+                _turns_since_last_spoke[agent.id] = total_msgs - 1 - last_spoke_idx
+
         for agent in candidates:
             factors = self._score_agent(
                 agent, previous_speaker_id, detected_topic,
@@ -174,6 +188,12 @@ class SpeakerSelector:
                 # Fatigue penalty: -0.2 per extra turn beyond 2
                 total = max(0.0, total - 0.2 * (agent_turns - 2))
 
+            # Minimum speaker participation (#247): boost agents who have
+            # been skipped for 3+ consecutive turns (with 4+ participants)
+            turns_silent = _turns_since_last_spoke.get(agent.id, turn_number)
+            if turns_silent >= 3 and len(candidates) >= 4:
+                total *= 2.0
+
             # Required-agent boost: if agent is required but hasn't spoken
             if agent.id in _required and agent.id not in _spoke:
                 if turn_number >= 3:
@@ -182,16 +202,26 @@ class SpeakerSelector:
             scores[agent.id] = total
             breakdown[agent.id] = factors
 
+        # Hard floor (#247): force-select any agent silent for 5+ turns
+        selected_id: str | None = None
+        force_candidates = [
+            a for a in candidates
+            if _turns_since_last_spoke.get(a.id, turn_number) >= 5
+        ]
+        if force_candidates:
+            selected_id = max(
+                force_candidates, key=lambda a: scores.get(a.id, 0),
+            ).id
+
         # Minimum-participation guarantee: if agent is in participants and
         # hasn't spoken after 50% of max turns, boost them significantly
-        if turn_number >= (max_turns // 2):
+        if selected_id is None and turn_number >= (max_turns // 2):
             for agent in candidates:
                 if agent.id not in turn_counts and agent.id not in _spoke:
                     scores[agent.id] = scores.get(agent.id, 0) + 0.4
 
         # Force-select a silent required agent past mid-conversation
-        selected_id: str | None = None
-        if _required and turn_number >= (max_turns // 2):
+        if selected_id is None and _required and turn_number >= (max_turns // 2):
             silent_required = [
                 a for a in candidates
                 if a.id in _required and a.id not in _spoke

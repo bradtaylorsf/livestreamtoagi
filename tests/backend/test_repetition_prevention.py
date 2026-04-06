@@ -61,12 +61,12 @@ async def test_context_assembler_includes_recent_summaries():
         "Conversation between vera, rex about project planning (5 turns).",
         "Conversation between grok, fork about code review (3 turns).",
     ]
-    messages = await assembler.assemble_context(
+    result = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=[],
         recent_conversation_summaries=summaries,
     )
-    system_msg = messages[0]["content"]
+    system_msg = result.messages[0]["content"]
     assert "What happened earlier today" in system_msg
     assert "project planning" in system_msg
     assert "code review" in system_msg
@@ -76,18 +76,18 @@ async def test_context_assembler_includes_recent_summaries():
 async def test_context_assembler_no_summaries_when_none():
     """No recent summaries section when list is empty or None."""
     assembler = _make_assembler()
-    messages_none = await assembler.assemble_context(
+    result_none = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=[],
         recent_conversation_summaries=None,
     )
-    messages_empty = await assembler.assemble_context(
+    result_empty = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=[],
         recent_conversation_summaries=[],
     )
-    for msgs in (messages_none, messages_empty):
-        assert "Recent Conversations" not in msgs[0]["content"]
+    for result in (result_none, result_empty):
+        assert "Recent Conversations" not in result.messages[0]["content"]
 
 
 # ── ConversationEngine: repetition detection ────────────────────
@@ -161,14 +161,14 @@ def test_recent_outputs_tracked():
 
 
 def test_recent_outputs_maxlen():
-    """Deque should cap at 15 items."""
+    """Deque should cap at 50 items to cover full simulation length."""
     engine = _make_engine_for_repetition(
-        recent_outputs=[f"output {i}" for i in range(15)]
+        recent_outputs=[f"output {i}" for i in range(50)]
     )
-    engine._recent_outputs.append("output 15")
-    assert len(engine._recent_outputs) == 15
+    engine._recent_outputs.append("output 50")
+    assert len(engine._recent_outputs) == 50
     assert "output 0" not in engine._recent_outputs
-    assert "output 15" in engine._recent_outputs
+    assert "output 50" in engine._recent_outputs
 
 
 # ── PhaseRunner: conversation summaries buffer ──────────────────
@@ -199,7 +199,7 @@ def test_phase_runner_summaries_buffer():
     assert isinstance(runner._conversation_summaries, deque)
     assert runner._conversation_summaries.maxlen == 5
     assert isinstance(runner._recent_outputs, deque)
-    assert runner._recent_outputs.maxlen == 15
+    assert runner._recent_outputs.maxlen == 50
 
     # Simulate adding summaries — deque(maxlen=5) handles trimming automatically
     for i in range(7):
@@ -230,12 +230,12 @@ async def test_context_assembler_labels_buffer_messages():
         {"role": "assistant", "speaker": "vera", "content": "We need to manage our budget."},
         {"role": "assistant", "speaker": "fork", "content": "I disagree with that approach."},
     ]
-    messages = await assembler.assemble_context(
+    result = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=history,
     )
     # Find assistant messages in the output
-    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    assistant_msgs = [m for m in result.messages if m.get("role") == "assistant"]
     assert len(assistant_msgs) == 2
     assert assistant_msgs[0]["content"].startswith("[Vera]:")
     assert assistant_msgs[1]["content"].startswith("[Fork]:")
@@ -251,14 +251,14 @@ async def test_context_assembler_labels_buffer_messages():
 async def test_context_assembler_identity_reinforcement():
     """An identity reinforcement message should appear before the hint."""
     assembler = _make_assembler()
-    messages = await assembler.assemble_context(
+    result = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=[],
         prompt_hint="idle",
     )
     # Find identity reinforcement message
     identity_msgs = [
-        m for m in messages
+        m for m in result.messages
         if m.get("role") == "user" and "You are Rex" in m.get("content", "")
     ]
     assert len(identity_msgs) == 1
@@ -272,11 +272,11 @@ async def test_context_assembler_no_double_label():
     history = [
         {"role": "assistant", "speaker": "vera", "content": "[Vera]: Already labeled."},
     ]
-    messages = await assembler.assemble_context(
+    result = await assembler.assemble_context(
         agent_id="rex",
         conversation_history=history,
     )
-    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    assistant_msgs = [m for m in result.messages if m.get("role") == "assistant"]
     assert assistant_msgs[0]["content"] == "[Vera]: Already labeled."
 
 

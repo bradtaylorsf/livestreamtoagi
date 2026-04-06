@@ -81,44 +81,54 @@ class EvalEngine:
         for cat in to_run:
             try:
                 result = await self._run_category(
-                    run_id, cat, category_data.get(cat, {}), data
+                    run_id, cat, category_data.get(cat, {}), data,
+                    simulation_id=simulation_id,
                 )
                 if result["score"] is not None:
                     total_scores.append(result["score"])
                 total_cost += result["cost"]
-            except Exception:
+            except Exception as exc:
                 logger.exception("Eval category '%s' failed", cat)
                 had_failure = True
-                # Save a failed result so it's visible
-                await self._eval_repo.save_eval_result(
-                    eval_run_id=run_id,
-                    category=cat,
-                    score=Decimal("0"),
-                    reasoning="Eval failed — see logs for details",
-                    evidence=None,
-                    sub_scores=None,
-                    tokens_used=0,
-                    cost=Decimal("0"),
-                )
+                # Save a failed result so it's visible — wrap in try/except
+                # to prevent a DB error here from killing the entire run.
+                try:
+                    await self._eval_repo.save_eval_result(
+                        eval_run_id=run_id,
+                        category=cat,
+                        score=Decimal("0"),
+                        reasoning=f"Eval failed: {type(exc).__name__}: {exc}",
+                        evidence=None,
+                        sub_scores=None,
+                        tokens_used=0,
+                        cost=Decimal("0"),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to save error result for category '%s'", cat,
+                    )
 
-        # Compute overall score
-        overall = (
-            sum(total_scores) / len(total_scores)
-            if total_scores
-            else None
-        )
+        # Compute overall score — always update run status even on failure
+        try:
+            overall = (
+                sum(total_scores) / len(total_scores)
+                if total_scores
+                else None
+            )
 
-        status = "completed" if not had_failure else (
-            "completed" if total_scores else "failed"
-        )
+            status = "completed" if not had_failure else (
+                "completed" if total_scores else "failed"
+            )
 
-        await self._eval_repo.update_eval_run(
-            run_id,
-            status=status,
-            overall_score=overall,
-            cost=total_cost,
-            completed_at=datetime.now(UTC),
-        )
+            await self._eval_repo.update_eval_run(
+                run_id,
+                status=status,
+                overall_score=overall,
+                cost=total_cost,
+                completed_at=datetime.now(UTC),
+            )
+        except Exception:
+            logger.exception("Failed to update eval run %s status", run_id)
 
         return run_id
 
@@ -128,6 +138,8 @@ class EvalEngine:
         category: str,
         cat_data: dict[str, Any],
         full_data: dict[str, Any],
+        *,
+        simulation_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Run a single eval category and store the result."""
         prompt_config = load_prompt(category)
@@ -151,6 +163,7 @@ class EvalEngine:
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=120.0,
+            simulation_id=simulation_id,
         )
 
         # Capture cost immediately so it's never lost on parse failure

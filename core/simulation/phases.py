@@ -176,6 +176,8 @@ class PhaseRunner:
         services: Services | None = None,
         clock: SimulationClock | None = None,
         relationship_tracker: RelationshipTracker | None = None,
+        debug_prompts: bool = False,
+        prompt_log_repo: object | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -197,10 +199,13 @@ class PhaseRunner:
         self._services = services
         self._clock = clock
         self._relationship_tracker = relationship_tracker
+        self._debug_prompts = debug_prompts
+        self._prompt_log_repo = prompt_log_repo
 
         # Cross-phase conversation context to prevent repetition
         self._conversation_summaries: deque[str] = deque(maxlen=5)
-        self._recent_outputs: deque[str] = deque(maxlen=15)  # Last 15 agent outputs
+        self._recent_outputs: deque[str] = deque(maxlen=50)  # Last 50 agent outputs
+        self._topic_history: dict[str, list[float]] = {}  # Persists across conversations
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0
@@ -460,10 +465,34 @@ class PhaseRunner:
                 self._phase_tools_used.add(tool_name)
             _display_artifact(data)
 
+        async def _on_productivity(event: dict) -> None:
+            """Boost proactivity for agents in low-productivity conversations (#248)."""
+            data = event.get("data", event)
+            ratio = data.get("ratio", 1.0)
+            participants = data.get("participants", [])
+            if ratio < 0.25 and self._services and self._services.goal_manager:
+                for agent_id in participants:
+                    try:
+                        await self._services.goal_manager.add_goal(
+                            agent_id=agent_id,
+                            goal_text=(
+                                "Be more proactive — use tools, write code, "
+                                "create tasks, or take concrete actions"
+                            ),
+                            priority=1,
+                            source="assigned",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to add proactivity goal for %s", agent_id,
+                            exc_info=True,
+                        )
+
         self._event_bus.on("agent_speak", _on_speak)
         self._event_bus.on("management_shadow", _on_management)
         self._event_bus.on("management_warning", _on_management)
         self._event_bus.on("artifact_created", _on_artifact)
+        self._event_bus.on("conversation_productivity", _on_productivity)
 
         try:
             engine = ConversationEngine(
@@ -490,6 +519,9 @@ class PhaseRunner:
                 recent_outputs=list(self._recent_outputs),
                 required_agents=set(phase.required_agents) if phase.required_agents else None,
                 max_turns=max_turns,
+                debug_prompts=self._debug_prompts,
+                prompt_log_repo=self._prompt_log_repo,
+                topic_history=dict(self._topic_history),
             )
 
             engine._running = True
@@ -514,6 +546,7 @@ class PhaseRunner:
             self._event_bus.off("management_shadow", _on_management)
             self._event_bus.off("management_warning", _on_management)
             self._event_bus.off("artifact_created", _on_artifact)
+            self._event_bus.off("conversation_productivity", _on_productivity)
 
         # Collect conversation summary for cross-phase context
         if engine.active_conversation is None and engine.last_conversation_summary:
@@ -521,6 +554,12 @@ class PhaseRunner:
 
         # Collect recent outputs for repetition detection
         self._recent_outputs.extend(engine.recent_outputs)
+
+        # Merge topic history so future conversations know what was discussed
+        for topic, timestamps in engine.topic_history.items():
+            if topic not in self._topic_history:
+                self._topic_history[topic] = []
+            self._topic_history[topic].extend(timestamps)
 
         # Accumulate stats
         self._phase_conversations += 1

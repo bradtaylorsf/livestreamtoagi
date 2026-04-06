@@ -142,6 +142,7 @@ class RelationshipTracker:
             agent_id="system",
             temperature=0.2,
             max_tokens=500,
+            simulation_id=self._simulation_id,
         )
 
         analysis = _parse_json_response(response.content)

@@ -123,6 +123,9 @@ class ConversationEngine:
         recent_outputs: list[str] | None = None,
         required_agents: set[str] | None = None,
         max_turns: int = 15,
+        debug_prompts: bool = False,
+        prompt_log_repo: object | None = None,
+        topic_history: dict[str, list[float]] | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -139,6 +142,8 @@ class ConversationEngine:
         self._proximity = proximity
         self._triggers = trigger_system
         self._selection_logger = selection_logger
+        self._debug_prompts = debug_prompts
+        self._prompt_log_repo = prompt_log_repo
         self._speed_multiplier = speed_multiplier
         self._services = services
         self._clock = clock
@@ -148,7 +153,10 @@ class ConversationEngine:
         # Subsystems that depend on config
         cfg = config_loader.config
         self._selector = SpeakerSelector(cfg)
-        self._topic_detector = TopicDetector(cfg.topics, llm_client)
+        self._topic_detector = TopicDetector(
+            cfg.topics, llm_client, simulation_id=simulation_id,
+            topic_history=topic_history,
+        )
 
         self._active: _ActiveConversation | None = None
         self._running = False
@@ -156,7 +164,7 @@ class ConversationEngine:
 
         # Cross-phase repetition prevention
         self._recent_summaries = recent_conversation_summaries or []
-        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=15)
+        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=50)
         self._last_conversation_summary: str | None = None
 
         # Required-agent participation tracking
@@ -166,6 +174,12 @@ class ConversationEngine:
 
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
+
+        # Conversation progression tracking (#248)
+        self._dialogue_only_streak: int = 0
+        self._productive_turns: int = 0
+        self._total_turns: int = 0
+        self._last_turn_had_tools: bool = False
 
     # ── Properties ─────────────────────────────────────────────
 
@@ -188,6 +202,11 @@ class ConversationEngine:
     @property
     def recent_outputs(self) -> list[str]:
         return list(self._recent_outputs)
+
+    @property
+    def topic_history(self) -> dict[str, list[float]]:
+        """Accumulated topic history for cross-conversation persistence."""
+        return self._topic_detector.topic_history
 
     # ── Main loop ──────────────────────────────────────────────
 
@@ -285,12 +304,31 @@ class ConversationEngine:
         if seeded_topic:
             hint = f"topic:{seeded_topic}"
 
+        # Inject topic avoidance if recent topics are being rehashed
+        avoided = self._topic_detector.get_recently_discussed_topics()
+        if avoided:
+            avoidance_note = (
+                f"[SYSTEM DIRECTIVE: These topics have already been discussed "
+                f"multiple times and the audience is getting bored: {', '.join(avoided)}. "
+                "You MUST NOT rehash these topics. Instead, advance the narrative — "
+                "report progress on existing tasks, start new work, or explore "
+                "a completely different subject. The show needs forward momentum.]"
+            )
+            trigger["topic_avoidance"] = avoidance_note
+
         # Generate opening line
         content = await self._generate_turn(opening_agent, prompt_hint=hint)
         if content is None:
             logger.warning("Failed to generate opening line, aborting conversation")
             self._active = None
             return
+
+        # Track opening turn productivity (#248)
+        self._total_turns += 1
+        if self._last_turn_had_tools:
+            self._productive_turns += 1
+        else:
+            self._dialogue_only_streak += 1
 
         self._active.turn_number = 1
         self._agents_who_spoke.add(opening_agent.id)
@@ -339,6 +377,7 @@ class ConversationEngine:
         topic = await self._topic_detector.detect_topic(conv.history[-5:])
         if topic not in conv.topics:
             conv.topics.append(topic)
+            self._topic_detector.record_topic(topic)
 
         # Check for eavesdroppers joining
         all_agents = self._agents.get_all_agents()
@@ -421,6 +460,29 @@ class ConversationEngine:
 
         self._agents_who_spoke.add(selected_agent.id)
         conv.history.append({"role": "assistant", "speaker": selected_agent.id, "content": content})
+
+        # Track conversation progression (#248)
+        self._total_turns += 1
+        if self._last_turn_had_tools:
+            self._productive_turns += 1
+            self._dialogue_only_streak = 0
+        else:
+            self._dialogue_only_streak += 1
+
+        # Inject action nudge after 4 consecutive dialogue-only turns
+        if self._dialogue_only_streak >= 4 and self._dialogue_only_streak % 4 == 0:
+            conv.history.append({
+                "role": "user",
+                "content": (
+                    "[SYSTEM: You've been discussing for several turns without "
+                    "taking action. Use a tool: write code, create a task, "
+                    "check status, or propose something specific.]"
+                ),
+            })
+            logger.info(
+                "Action nudge injected after %d dialogue-only turns in conversation %s",
+                self._dialogue_only_streak, conv.id,
+            )
 
         # Emit speak event
         _parsed = parse_speech(content)
@@ -564,6 +626,44 @@ class ConversationEngine:
         # Reset triggers (preserves _fired_today and _recent_conversations)
         self._triggers.reset()
 
+        # Log participation distribution (#247)
+        turn_counts: dict[str, int] = {}
+        for msg in conv.history:
+            spk = msg.get("speaker")
+            if spk:
+                turn_counts[spk] = turn_counts.get(spk, 0) + 1
+        total = conv.turn_number or 1
+        participation_parts = [
+            f"{aid}: {cnt}/{total} ({cnt * 100 // total}%)"
+            for aid, cnt in sorted(turn_counts.items())
+        ]
+        logger.info("Participation: %s", ", ".join(participation_parts))
+
+        # Log conversation productivity (#248)
+        productivity_ratio = (
+            self._productive_turns / self._total_turns
+            if self._total_turns > 0 else 0.0
+        )
+        logger.info(
+            "Conversation productivity: %d/%d turns productive (%.0f%%) in %s",
+            self._productive_turns,
+            self._total_turns,
+            productivity_ratio * 100,
+            conv.id,
+        )
+
+        # Emit productivity event for phase-level tracking
+        await self._event_bus.emit(
+            "conversation_productivity",
+            {
+                "conversation_id": str(conv.id),
+                "productive_turns": self._productive_turns,
+                "total_turns": self._total_turns,
+                "ratio": productivity_ratio,
+                "participants": conv.participants,
+            },
+        )
+
         logger.info(
             "Ended conversation %s (turns=%d, final_energy=%.1f, closer=%s)",
             conv.id,
@@ -607,6 +707,7 @@ class ConversationEngine:
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.3,
+                simulation_id=self._simulation_id,
                 max_tokens=300,
             )
             summary = response.content.strip()
@@ -641,14 +742,25 @@ class ConversationEngine:
         # Compaction: archival + summarization + embedding + recall
         if self._compactor:
             try:
-                for agent_id in participants:
-                    await self._compactor.compact_interaction(
-                        agent_id=agent_id,
-                        interaction=transcript_content,
-                        event_type=event_type,
-                        participants=participants,
-                        conversation_id=conv.id,
-                    )
+                # Store transcript ONCE for the conversation (not per-agent)
+                first_agent = participants[0]
+                result = await self._compactor.compact_interaction(
+                    agent_id=first_agent,
+                    interaction=transcript_content,
+                    event_type=event_type,
+                    participants=participants,
+                    conversation_id=conv.id,
+                )
+                # Create per-agent recall memories for remaining participants
+                if result is not None:
+                    for agent_id in participants[1:]:
+                        await self._compactor.compact_recall_only(
+                            agent_id=agent_id,
+                            interaction=transcript_content,
+                            event_type=event_type,
+                            transcript_id=result.transcript.id,
+                            participants=participants,
+                        )
                 logger.info(
                     "Compacted memories for %d participants", len(participants),
                 )
@@ -753,7 +865,8 @@ class ConversationEngine:
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.1,
-                max_tokens=300,
+                max_tokens=800,
+                simulation_id=self._simulation_id,
             )
 
             from core.agent_goals import parse_commitments
@@ -761,12 +874,60 @@ class ConversationEngine:
             commitments = parse_commitments(response.content)
             goal_mgr = self._services.goal_manager
             for c in commitments:
-                await goal_mgr.add_goal(
+                goal = await goal_mgr.add_goal(
                     agent_id=c["agent_id"],
                     goal_text=c["commitment"],
                     priority=2,
                     related_agent=c.get("related_to_agent") or None,
                 )
+
+                # Create shared task from commitment (#249)
+                sws = self._services.shared_working_state
+                if sws is not None:
+                    try:
+                        from core.shared_state import SharedTask
+
+                        await sws.add_task(SharedTask(
+                            id=goal.id,
+                            title=c["commitment"],
+                            owner=c["agent_id"],
+                            status="pending",
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "Failed to create shared task for commitment: %s",
+                            c["commitment"][:100],
+                        )
+
+                # Cross-agent accountability (#249): create follow-up goal
+                related = c.get("related_to_agent", "")
+                # LLM sometimes returns comma-separated agents or
+                # meta-values like "team" / "all" — split and filter.
+                related_ids = [
+                    r.strip() for r in related.split(",")
+                ] if related else []
+                valid_agents = {a.id for a in self._agents.get_all_agents()} if self._agents else set()
+                for rel_id in related_ids:
+                    if not rel_id or rel_id == c["agent_id"]:
+                        continue
+                    if valid_agents and rel_id not in valid_agents:
+                        continue
+                    try:
+                        await goal_mgr.add_goal(
+                            agent_id=rel_id,
+                            goal_text=(
+                                f"Follow up with {c['agent_id']} on: "
+                                f"{c['commitment']}"
+                            ),
+                            priority=3,
+                            related_agent=c["agent_id"],
+                            source="assigned",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to create cross-agent goal for %s → %s",
+                            c["agent_id"], rel_id,
+                        )
 
             if commitments:
                 logger.info(
@@ -814,7 +975,14 @@ class ConversationEngine:
 
         Returns the final approved content, or None on total failure.
         """
-        conv_history = history or []
+        conv_history = list(history or [])
+
+        # Inject topic avoidance hint into conversation history if present
+        if self._active and self._active.trigger.get("topic_avoidance"):
+            conv_history.append({
+                "role": "user",
+                "content": self._active.trigger["topic_avoidance"],
+            })
 
         # Build tool schemas if tools are available for this agent
         agent_tools = self._get_tools_for_agent(agent.id)
@@ -839,6 +1007,7 @@ class ConversationEngine:
 
         # Build agent goals context if available
         agent_goals_context: str | None = None
+        commitment_reminders: str | None = None
         if self._services and self._services.goal_manager:
             try:
                 agent_goals_context = (
@@ -846,6 +1015,12 @@ class ConversationEngine:
                 ) or None
             except Exception:
                 logger.warning("Failed to get agent goals for %s", agent.id, exc_info=True)
+            try:
+                commitment_reminders = (
+                    await self._services.goal_manager.get_commitment_reminders(agent.id)
+                ) or None
+            except Exception:
+                logger.warning("Failed to get commitment reminders for %s", agent.id, exc_info=True)
 
         # Build shared working state context if available
         shared_state_context: str | None = None
@@ -859,7 +1034,7 @@ class ConversationEngine:
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
                 # Assemble context
-                messages = await self._context.assemble_context(
+                context_result = await self._context.assemble_context(
                     agent_id=agent.id,
                     conversation_history=conv_history,
                     prompt_hint=prompt_hint,
@@ -867,13 +1042,37 @@ class ConversationEngine:
                     relationship_context=relationship_context,
                     shared_state_context=shared_state_context,
                     agent_goals_context=agent_goals_context,
+                    commitment_reminders=commitment_reminders,
                 )
+                messages = context_result.messages
+
+                # Store prompt log when debug flag is enabled
+                if self._debug_prompts and self._prompt_log_repo and self._active:
+                    try:
+                        from core.models import PromptLogCreate
+
+                        await self._prompt_log_repo.create(PromptLogCreate(
+                            conversation_id=self._active.id,
+                            simulation_id=self._simulation_id,
+                            agent_id=agent.id,
+                            turn_number=self._active.turn_number,
+                            full_prompt=messages[0]["content"] if messages else "",
+                            sections_included=context_result.sections_included,
+                            total_tokens=context_result.total_tokens,
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "Failed to store prompt log for %s turn %d",
+                            agent.id, self._active.turn_number,
+                            exc_info=True,
+                        )
 
                 # Call LLM (with tool-call loop)
                 total_input_tokens = 0
                 total_output_tokens = 0
                 total_cost = 0.0
                 total_latency_ms = 0
+                turn_used_tools = False
 
                 for _tool_round in range(MAX_TOOL_ROUNDS + 1):
                     # Check if trigger requests a specific tool (first round only)
@@ -899,6 +1098,7 @@ class ConversationEngine:
                         tools=openai_tools,
                         tool_choice=tc,
                         temperature=0.9,
+                        simulation_id=self._simulation_id,
                     )
 
                     total_input_tokens += response.input_tokens
@@ -911,6 +1111,7 @@ class ConversationEngine:
                         break
 
                     # Execute tool calls
+                    turn_used_tools = True
                     logger.info(
                         "Agent %s requested %d tool call(s): %s",
                         agent.id,
@@ -976,6 +1177,7 @@ class ConversationEngine:
                         model=agent.model_conversation,
                         agent_id=agent.id,
                         tools=openai_tools,
+                        simulation_id=self._simulation_id,
                     )
                     total_input_tokens += retry_resp.input_tokens
                     total_output_tokens += retry_resp.output_tokens
@@ -1014,6 +1216,9 @@ class ConversationEngine:
 
                 # Track output for cross-phase repetition detection
                 self._recent_outputs.append(content)
+
+                # Track tool usage for conversation progression (#248)
+                self._last_turn_had_tools = turn_used_tools
 
                 # Management review (can be disabled for testing)
                 if not self._management_enabled:
@@ -1120,7 +1325,7 @@ class ConversationEngine:
     def on_config_reloaded(self, new_config: ConversationConfig) -> None:
         """Update subsystem configs when the config file changes."""
         self._selector.config = new_config
-        self._topic_detector = TopicDetector(new_config.topics, self._llm)
+        self._topic_detector = TopicDetector(new_config.topics, self._llm, simulation_id=self._simulation_id)
         self._proximity.config = new_config
         self._selection_logger.config = new_config.logging
         logger.info("ConversationEngine config hot-reloaded")

@@ -262,6 +262,28 @@ class AgentGoalManager:
 
         return "\n".join(lines)
 
+    async def get_commitment_reminders(self, agent_id: str) -> str:
+        """Get formatted reminders for commitments assigned to this agent.
+
+        Returns text listing active goals from other agents (source='assigned'),
+        or empty string if none.
+        """
+        goals = await self.get_goals(agent_id)
+        assigned = [
+            g for g in goals
+            if g.related_agent and g.status not in ("done", "completed")
+        ]
+        if not assigned:
+            return ""
+
+        lines = ["## Pending commitments from others"]
+        for g in assigned[:5]:
+            lines.append(
+                f"- {g.related_agent} committed to: {g.goal}. "
+                "Follow up if not done."
+            )
+        return "\n".join(lines)
+
     async def seed_story_goals(self) -> None:
         """Seed initial story-arc goals for agents.
 
@@ -328,8 +350,20 @@ def parse_commitments(llm_output: str) -> list[dict[str, str]]:
     Expected format: [{"agent_id": "...", "commitment": "...", "related_to_agent": "..."}]
     Returns empty list on parse failure.
     """
+    def _extract_items(data: list) -> list[dict[str, str]]:
+        return [
+            {
+                "agent_id": item.get("agent_id", ""),
+                "commitment": item.get("commitment", ""),
+                "related_to_agent": item.get("related_to_agent", ""),
+            }
+            for item in data
+            if isinstance(item, dict) and item.get("agent_id") and item.get("commitment")
+        ]
+
     try:
         text = llm_output.strip()
+        # Strip markdown code fences
         if "```" in text:
             start = text.find("[")
             end = text.rfind("]") + 1
@@ -337,15 +371,31 @@ def parse_commitments(llm_output: str) -> list[dict[str, str]]:
                 text = text[start:end]
         data = json.loads(text)
         if isinstance(data, list):
-            return [
-                {
-                    "agent_id": item.get("agent_id", ""),
-                    "commitment": item.get("commitment", ""),
-                    "related_to_agent": item.get("related_to_agent", ""),
-                }
-                for item in data
-                if item.get("agent_id") and item.get("commitment")
-            ]
+            return _extract_items(data)
     except (json.JSONDecodeError, TypeError, AttributeError):
-        pass
+        # Fallback: JSON may be truncated (max_tokens hit).
+        # Try to salvage complete objects from the partial array.
+        import re
+
+        objects = re.findall(
+            r'\{\s*"agent_id"\s*:\s*"[^"]+"\s*,\s*"commitment"\s*:\s*"[^"]+?"'
+            r'(?:\s*,\s*"related_to_agent"\s*:\s*"[^"]*?")?\s*\}',
+            llm_output,
+        )
+        if objects:
+            salvaged = []
+            for obj_str in objects:
+                try:
+                    salvaged.append(json.loads(obj_str))
+                except json.JSONDecodeError:
+                    continue
+            if salvaged:
+                logger.info(
+                    "Salvaged %d commitments from truncated JSON", len(salvaged),
+                )
+                return _extract_items(salvaged)
+
+        logger.warning(
+            "Commitment parse failed. Raw output: %s", llm_output[:500],
+        )
     return []

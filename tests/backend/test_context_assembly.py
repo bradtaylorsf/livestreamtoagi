@@ -144,7 +144,7 @@ class TestAssemblyOrder:
         self, assembler: ContextAssembler
     ) -> None:
         history = _make_history(5)
-        messages = await assembler.assemble_context("rex", history)
+        messages = (await assembler.assemble_context("rex", history)).messages
 
         system = messages[0]
         assert system["role"] == "system"
@@ -171,7 +171,7 @@ class TestAssemblyOrder:
         self, assembler: ContextAssembler
     ) -> None:
         history = _make_history(5)
-        messages = await assembler.assemble_context("rex", history)
+        messages = (await assembler.assemble_context("rex", history)).messages
 
         assert messages[0]["role"] == "system"
         # Buffer messages follow (last non-hint user msg is identity reinforcement)
@@ -183,7 +183,7 @@ class TestAssemblyOrder:
     async def test_infrastructure_prompt_is_included(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", [])
+        messages = (await assembler.assemble_context("rex", [])).messages
         content = messages[0]["content"]
         assert "SURVIVE" in content
         assert "BUILD" in content
@@ -210,15 +210,15 @@ class TestTokenBudget:
     ) -> None:
         """When system content uses most of the budget, buffer gets truncated."""
         counter = MagicMock()
-        # System content uses 7000 tokens, leaving 1000 for buffer
-        call_count = [0]
+        # System content uses 7000 tokens, leaving 1000 for buffer.
+        # Section tracking calls count_tokens for each section first,
+        # then the assembled system content is counted. We detect the
+        # full system content by its length (it's the longest text).
 
         def count_tokens(text: str) -> int:
-            call_count[0] += 1
-            # First call is for the assembled system content
-            if call_count[0] == 1:
+            # The assembled system content is much longer than individual sections
+            if len(text) > 500:
                 return 7000
-            # Individual message token counts
             return 200
 
         counter.count_tokens = MagicMock(side_effect=count_tokens)
@@ -232,7 +232,7 @@ class TestTokenBudget:
             redis_client=mock_redis,
         )
         history = _make_history(20)
-        messages = await asm.assemble_context("rex", history)
+        messages = (await asm.assemble_context("rex", history)).messages
 
         # Buffer should be truncated: 1000 budget / 200 per msg = 5 messages
         buffer_msgs = [m for m in messages if m["role"] != "system"]
@@ -244,7 +244,7 @@ class TestTokenBudget:
         self, assembler: ContextAssembler
     ) -> None:
         """Without transcript, TYPICAL_BUDGET is used."""
-        messages = await assembler.assemble_context("rex", _make_history(5))
+        messages = (await assembler.assemble_context("rex", _make_history(5))).messages
         # Should succeed without errors (budget not exceeded with mock returning 10)
         assert len(messages) > 0
 
@@ -253,9 +253,9 @@ class TestTokenBudget:
         self, assembler: ContextAssembler
     ) -> None:
         """With transcript_id, MAX_BUDGET is used and transcript is included."""
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(5), transcript_id=1
-        )
+        )).messages
         system = messages[0]["content"]
         assert "Full Transcript" in system
         assert "Rex: Let's build" in system
@@ -273,7 +273,7 @@ class TestBufferTruncation:
     ) -> None:
         """Buffer is capped at 20 messages before token check."""
         history = _make_history(30)
-        messages = await assembler.assemble_context("rex", history)
+        messages = (await assembler.assemble_context("rex", history)).messages
 
         buffer_msgs = [m for m in messages if m["role"] != "system"]
         # +1 for identity reinforcement message
@@ -310,7 +310,7 @@ class TestBufferTruncation:
         )
 
         history = _make_history(15)
-        messages = await asm.assemble_context("rex", history)
+        messages = (await asm.assemble_context("rex", history)).messages
 
         buffer_msgs = [m for m in messages if m["role"] != "system"]
         if buffer_msgs:
@@ -323,7 +323,7 @@ class TestBufferTruncation:
     async def test_empty_history_produces_only_system_message(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", [])
+        messages = (await assembler.assemble_context("rex", [])).messages
         # system + identity reinforcement
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -343,7 +343,7 @@ class TestChatHighlights:
         mock_registry.get_agent = MagicMock(
             return_value=_make_agent(PIXEL_AGENT_ID, "You are Pixel.")
         )
-        messages = await assembler.assemble_context(PIXEL_AGENT_ID, [])
+        messages = (await assembler.assemble_context(PIXEL_AGENT_ID, [])).messages
         system = messages[0]["content"]
         assert "Recent Chat Messages" in system
         assert "viewer1: cool!" in system
@@ -352,7 +352,7 @@ class TestChatHighlights:
     async def test_non_pixel_agent_has_no_chat_highlights(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", [])
+        messages = (await assembler.assemble_context("rex", [])).messages
         system = messages[0]["content"]
         assert "Recent Chat Messages" not in system
 
@@ -377,7 +377,7 @@ class TestChatHighlights:
             token_counter=mock_token_counter,
             redis_client=None,
         )
-        messages = await asm.assemble_context(PIXEL_AGENT_ID, [])
+        messages = (await asm.assemble_context(PIXEL_AGENT_ID, [])).messages
         system = messages[0]["content"]
         assert "Recent Chat Messages" not in system
 
@@ -392,9 +392,9 @@ class TestPromptHints:
     async def test_interrupt_hint_appended(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), prompt_hint="interrupt"
-        )
+        )).messages
         last = messages[-1]
         assert last["role"] == "user"
         assert "jump in right now" in last["content"]
@@ -403,9 +403,9 @@ class TestPromptHints:
     async def test_idle_hint_appended(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), prompt_hint="idle"
-        )
+        )).messages
         last = messages[-1]
         assert "been quiet" in last["content"]
 
@@ -413,9 +413,9 @@ class TestPromptHints:
     async def test_memory_hint_appended(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), prompt_hint="memory"
-        )
+        )).messages
         last = messages[-1]
         assert "remembered something" in last["content"]
 
@@ -423,9 +423,9 @@ class TestPromptHints:
     async def test_closing_hint_appended(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), prompt_hint="closing"
-        )
+        )).messages
         last = messages[-1]
         assert "winding down" in last["content"]
 
@@ -433,7 +433,7 @@ class TestPromptHints:
     async def test_no_hint_when_none(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", _make_history(3))
+        messages = (await assembler.assemble_context("rex", _make_history(3))).messages
         # Last message is identity reinforcement (no prompt hint added)
         # No prompt hint should appear
         hint_msgs = [
@@ -448,9 +448,9 @@ class TestPromptHints:
     async def test_unknown_hint_ignored(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), prompt_hint="nonexistent"
-        )
+        )).messages
         # Unknown hint should not produce a hint message
         hint_msgs = [
             m for m in messages
@@ -471,7 +471,7 @@ class TestWorldState:
     async def test_world_state_included(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", [])
+        messages = (await assembler.assemble_context("rex", [])).messages
         system = messages[0]["content"]
         assert "World State" in system
         assert "The Workshop" in system
@@ -496,7 +496,7 @@ class TestWorldState:
             token_counter=mock_token_counter,
             redis_client=None,
         )
-        messages = await asm.assemble_context("rex", [])
+        messages = (await asm.assemble_context("rex", [])).messages
         system = messages[0]["content"]
         assert "World State" not in system
 
@@ -506,7 +506,7 @@ class TestWorldState:
     ) -> None:
         """Redis errors don't crash assembly."""
         mock_redis.get = AsyncMock(side_effect=ConnectionError("offline"))
-        messages = await assembler.assemble_context("rex", [])
+        messages = (await assembler.assemble_context("rex", [])).messages
         system = messages[0]["content"]
         assert "World State" not in system
 
@@ -521,9 +521,9 @@ class TestTranscriptInjection:
     async def test_transcript_injected_when_requested(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), transcript_id=1
-        )
+        )).messages
         system = messages[0]["content"]
         assert "Full Transcript" in system
         assert "Rex: Let's build. Vera: Agreed." in system
@@ -532,7 +532,7 @@ class TestTranscriptInjection:
     async def test_no_transcript_without_id(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", _make_history(3))
+        messages = (await assembler.assemble_context("rex", _make_history(3))).messages
         system = messages[0]["content"]
         assert "Full Transcript" not in system
 
@@ -543,9 +543,9 @@ class TestTranscriptInjection:
         mock_archival_memory.retrieve_full_transcript = AsyncMock(
             side_effect=Exception("DB error")
         )
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", _make_history(3), transcript_id=99
-        )
+        )).messages
         system = messages[0]["content"]
         assert "Full Transcript" not in system
 
@@ -560,7 +560,7 @@ class TestRecallMemory:
     async def test_recall_memories_included(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", _make_history(5))
+        messages = (await assembler.assemble_context("rex", _make_history(5))).messages
         system = messages[0]["content"]
         assert "Relevant memories" in system
 
@@ -584,7 +584,7 @@ class TestRecallMemory:
         mock_recall_memory.retrieve_recall_memories = AsyncMock(
             side_effect=Exception("vector search failed")
         )
-        messages = await assembler.assemble_context("rex", _make_history(3))
+        messages = (await assembler.assemble_context("rex", _make_history(3))).messages
         system = messages[0]["content"]
         # The recall section header should not appear (infrastructure mention is OK)
         assert "## Relevant memories" not in system
@@ -601,7 +601,7 @@ class TestEdgeCases:
         self, assembler: ContextAssembler, mock_core_memory: AsyncMock
     ) -> None:
         mock_core_memory.get_core_memory = AsyncMock(return_value=None)
-        messages = await assembler.assemble_context("rex", [])
+        messages = (await assembler.assemble_context("rex", [])).messages
         assert messages[0]["role"] == "system"
         assert "Livestream to AGI" in messages[0]["content"]
 
@@ -609,9 +609,9 @@ class TestEdgeCases:
     async def test_empty_history_with_hint(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex", [], prompt_hint="idle"
-        )
+        )).messages
         assert len(messages) == 3  # system + identity reinforcement + hint
         assert "been quiet" in messages[-1]["content"]
 
@@ -619,7 +619,7 @@ class TestEdgeCases:
     async def test_returns_list_of_dicts_with_role_and_content(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", _make_history(3))
+        messages = (await assembler.assemble_context("rex", _make_history(3))).messages
         for msg in messages:
             assert "role" in msg
             assert "content" in msg
@@ -637,11 +637,11 @@ class TestConversationContinuity:
         self, assembler: ContextAssembler
     ) -> None:
         """Summaries section uses 'What happened earlier today' framing."""
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex",
             _make_history(3),
             recent_conversation_summaries=["Vera and Rex decided to build a dashboard."],
-        )
+        )).messages
         system = messages[0]["content"]
         assert "What happened earlier today" in system
         assert "Build on these conversations" in system
@@ -653,11 +653,11 @@ class TestConversationContinuity:
     ) -> None:
         """Relationship context is injected when provided."""
         rel_ctx = "- rex: positive sentiment, high trust (5 prior interactions)"
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "vera",
             _make_history(3),
             relationship_context=rel_ctx,
-        )
+        )).messages
         system = messages[0]["content"]
         assert "Your relationships with other agents" in system
         assert "positive sentiment" in system
@@ -666,7 +666,7 @@ class TestConversationContinuity:
     async def test_relationship_context_omitted_when_none(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", _make_history(3))
+        messages = (await assembler.assemble_context("rex", _make_history(3))).messages
         system = messages[0]["content"]
         assert "Your relationships with other agents" not in system
 
@@ -676,11 +676,11 @@ class TestConversationContinuity:
     ) -> None:
         """Shared state context is injected when provided."""
         state_ctx = "**Active tasks:**\n  [pending] Build API (owner: rex)"
-        messages = await assembler.assemble_context(
+        messages = (await assembler.assemble_context(
             "rex",
             _make_history(3),
             shared_state_context=state_ctx,
-        )
+        )).messages
         system = messages[0]["content"]
         assert "Current project status" in system
         assert "Build API" in system
@@ -689,6 +689,54 @@ class TestConversationContinuity:
     async def test_shared_state_context_omitted_when_none(
         self, assembler: ContextAssembler
     ) -> None:
-        messages = await assembler.assemble_context("rex", _make_history(3))
+        messages = (await assembler.assemble_context("rex", _make_history(3))).messages
         system = messages[0]["content"]
         assert "Current project status" not in system
+
+
+# ── ContextResult section metadata tests ─────────────────────────
+
+
+class TestContextResultMetadata:
+    """Verify ContextResult includes correct section metadata."""
+
+    @pytest.mark.asyncio
+    async def test_sections_included_has_expected_keys(
+        self, assembler: ContextAssembler
+    ) -> None:
+        result = await assembler.assemble_context("rex", _make_history(3))
+        expected_sections = {
+            "infrastructure", "character", "core_memory", "recall",
+            "transcript", "world_state", "chat_highlights", "summaries",
+            "relationships", "goals", "shared_state", "commitment_reminders",
+        }
+        assert set(result.sections_included.keys()) == expected_sections
+
+    @pytest.mark.asyncio
+    async def test_included_sections_marked_true(
+        self, assembler: ContextAssembler
+    ) -> None:
+        result = await assembler.assemble_context("rex", _make_history(3))
+        # Infrastructure is always included
+        assert result.sections_included["infrastructure"]["included"] is True
+        # Character prompt is included (mock returns non-empty)
+        assert result.sections_included["character"]["included"] is True
+        # Core memory is included (mock returns non-empty)
+        assert result.sections_included["core_memory"]["included"] is True
+
+    @pytest.mark.asyncio
+    async def test_excluded_sections_marked_false(
+        self, assembler: ContextAssembler
+    ) -> None:
+        result = await assembler.assemble_context("rex", _make_history(3))
+        # No summaries or goals provided
+        assert result.sections_included["summaries"]["included"] is False
+        assert result.sections_included["relationships"]["included"] is False
+        assert result.sections_included["goals"]["included"] is False
+
+    @pytest.mark.asyncio
+    async def test_total_tokens_populated(
+        self, assembler: ContextAssembler
+    ) -> None:
+        result = await assembler.assemble_context("rex", _make_history(3))
+        assert result.total_tokens > 0

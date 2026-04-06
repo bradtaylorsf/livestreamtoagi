@@ -12,8 +12,9 @@ Assembles the complete context window using a three-layer prompt architecture:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from core.memory.validation import validate_agent_id
 from core.system_prompt import INFRASTRUCTURE_PROMPT
@@ -67,10 +68,23 @@ PROMPT_HINTS: dict[str, str] = {
         "[SYSTEM: You just remembered something relevant. Bring it up naturally if you want to.]"
     ),
     "closing": ("[SYSTEM: This conversation is winding down. Wrap it up naturally in your style.]"),
+    "action_nudge": (
+        "[SYSTEM: You've been discussing for several turns without taking action. "
+        "Use a tool: write code, create a task, check status, or propose something specific.]"
+    ),
 }
 
 # Pixel is the audience liaison agent
 PIXEL_AGENT_ID = "pixel"
+
+
+@dataclasses.dataclass
+class ContextResult:
+    """Return type for assemble_context with section metadata for debugging."""
+
+    messages: list[dict[str, str]]
+    sections_included: dict[str, dict[str, Any]]
+    total_tokens: int
 
 
 class ContextAssembler:
@@ -107,7 +121,8 @@ class ContextAssembler:
         relationship_context: str | None = None,
         shared_state_context: str | None = None,
         agent_goals_context: str | None = None,
-    ) -> list[dict[str, str]]:
+        commitment_reminders: str | None = None,
+    ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
         Args:
@@ -120,25 +135,35 @@ class ContextAssembler:
                 expanding budget to MAX_BUDGET.
 
         Returns:
-            List of message dicts [{role, content}] ready for LLM.
+            ContextResult with messages list and section metadata.
         """
         validate_agent_id(agent_id)
         budget = MAX_BUDGET if transcript_id is not None else TYPICAL_BUDGET
 
+        # Track which sections are included and their token counts
+        sections_meta: dict[str, dict[str, Any]] = {}
+
+        def _track(name: str, text: str, included: bool) -> None:
+            tokens = self._token_counter.count_tokens(text) if text else 0
+            sections_meta[name] = {"included": included, "token_count": tokens}
+
         # ── Layer 1: Infrastructure (immutable) ──
         infrastructure = INFRASTRUCTURE_PROMPT
+        _track("infrastructure", infrastructure, True)
 
         # ── Layer 2: Character (from agent config, not modifiable at runtime) ──
         agent = self._agent_registry.get_agent(agent_id)
         if agent is None:
             logger.warning("Agent %s not found in registry, using empty system prompt", agent_id)
         character_prompt = agent.system_prompt if agent else ""
+        _track("character", character_prompt, bool(character_prompt))
 
         # ── Layer 3: Memory + Context (mutable) ──
 
         # Core memory (Tier 1)
         core_mem = await self._core_memory.get_core_memory(agent_id)
         core_memory_text = core_mem or ""
+        _track("core_memory", core_memory_text, bool(core_memory_text))
 
         # Recall memories (Tier 2)
         query_text = self._derive_query(conversation_history)
@@ -150,6 +175,7 @@ class ContextAssembler:
                 )
             except Exception:
                 logger.warning("Failed to retrieve recall memories for %s", agent_id)
+        _track("recall", recall_text, bool(recall_text))
 
         # Optional transcript (Tier 3)
         transcript_text = ""
@@ -164,12 +190,35 @@ class ContextAssembler:
                     transcript_id,
                     agent_id,
                 )
+        _track("transcript", transcript_text, bool(transcript_text))
 
         # World state
         world_state_text = await self._get_world_state(agent_id)
+        _track("world_state", world_state_text, bool(world_state_text))
 
         # Chat highlights (Pixel only)
         chat_highlights_text = await self._get_chat_highlights(agent_id)
+        _track("chat_highlights", chat_highlights_text, bool(chat_highlights_text))
+
+        # Summaries
+        summaries_text = ""
+        if recent_conversation_summaries:
+            summaries_text = "\n".join(
+                f"{i + 1}. {s}" for i, s in enumerate(recent_conversation_summaries)
+            )
+        _track("summaries", summaries_text, bool(recent_conversation_summaries))
+
+        # Relationships
+        _track("relationships", relationship_context or "", bool(relationship_context))
+
+        # Goals
+        _track("goals", agent_goals_context or "", bool(agent_goals_context))
+
+        # Shared state
+        _track("shared_state", shared_state_context or "", bool(shared_state_context))
+
+        # Commitment reminders (#249)
+        _track("commitment_reminders", commitment_reminders or "", bool(commitment_reminders))
 
         # Prompt hint
         hint_text = ""
@@ -198,14 +247,11 @@ class ContextAssembler:
 
         # Recent conversation summaries (cross-phase repetition prevention)
         if recent_conversation_summaries:
-            numbered = "\n".join(
-                f"{i + 1}. {s}" for i, s in enumerate(recent_conversation_summaries)
-            )
             system_sections.append(
                 "## What happened earlier today\n"
                 "Build on these conversations. Reference decisions, hold people accountable, "
                 "advance ongoing discussions, and react to what others said or committed to.\n\n"
-                + numbered
+                + summaries_text
             )
 
         # Relationship context
@@ -223,6 +269,10 @@ class ContextAssembler:
                 "Work toward them and honor your promises.\n\n"
                 + agent_goals_context
             )
+
+        # Commitment reminders (#249)
+        if commitment_reminders:
+            system_sections.append(commitment_reminders)
 
         # Shared working state
         if shared_state_context:
@@ -271,7 +321,12 @@ class ContextAssembler:
         if hint_text:
             messages.append({"role": "user", "content": hint_text})
 
-        return messages
+        total_tokens = used_tokens + self._count_buffer_tokens(buffer)
+        return ContextResult(
+            messages=messages,
+            sections_included=sections_meta,
+            total_tokens=total_tokens,
+        )
 
     def _label_buffer_messages(
         self, buffer: list[dict[str, str]],
