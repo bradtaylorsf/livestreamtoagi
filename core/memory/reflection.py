@@ -183,7 +183,13 @@ class ReflectionManager:
         scores = analysis.get("importance_scores", {})
         for mem_id_str, score in scores.items():
             try:
-                mem_id = int(mem_id_str)
+                # LLM sometimes returns "ID:2" or "id_2" instead of "2"
+                cleaned_id = str(mem_id_str).strip()
+                for prefix in ("ID:", "id:", "ID_", "id_", "#"):
+                    if cleaned_id.startswith(prefix):
+                        cleaned_id = cleaned_id[len(prefix):]
+                        break
+                mem_id = int(cleaned_id)
                 score = max(0.0, min(1.0, float(score)))
                 await self._repo.update_importance_score(mem_id, score)
                 importance_updates += 1

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ANALYZER_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "evals" / "prompts" / "analyzer.yaml"
+    Path(__file__).resolve().parent.parent.parent / "evals" / "prompts" / "_analyzer.yaml"
 )
 
 # Safety rails

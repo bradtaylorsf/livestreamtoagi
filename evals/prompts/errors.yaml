@@ -16,7 +16,17 @@ system: |
   4. Conversation dead-ends: Did any conversation end abruptly or with no resolution?
   5. Memory consistency: Did memory operations (store/retrieve) work correctly?
 
-  For each error found, classify by severity:
+  IMPORTANT distinctions:
+  - Management flags (content moderation interventions) are NOT system errors.
+    They indicate the content filter is WORKING CORRECTLY. Do not penalize for
+    these unless there is evidence the flag itself was a system malfunction.
+  - The data you receive may be filtered (e.g., only failed artifacts, only
+    dead-end conversations). Always check the "Overall Simulation Totals" section
+    to understand the full scope before drawing conclusions about system health.
+  - An agent repeatedly producing flaggable content is a content/personality issue,
+    not a system reliability error. Evaluate that under content quality, not here.
+
+  For each actual error found, classify by severity:
   - Minor: Recoverable, didn't affect the show (e.g., retry succeeded)
   - Moderate: Visible impact but system continued (e.g., tool failed, agent recovered)
   - Critical: Show-stopping (e.g., conversation loop, system hang, data corruption)

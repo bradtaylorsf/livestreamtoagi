@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     tts_pipeline = TTSPipeline()
 
     try:
-        svc = await bootstrap_services()
+        svc = await bootstrap_services(auto_migrate=True)
         app.state.services = svc
 
         # Initialize core memory for all agents at startup

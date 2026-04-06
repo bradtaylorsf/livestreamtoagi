@@ -29,12 +29,18 @@ class TopicDetector:
         config: TopicConfig,
         llm_client: OpenRouterClient | None = None,
         simulation_id: object | None = None,
+        topic_history: dict[str, list[float]] | None = None,
     ) -> None:
         self._config = config
         self._llm_client = llm_client
         self._simulation_id = simulation_id
         # Topic history: {topic: [timestamp, ...]}
-        self._topic_history: dict[str, list[float]] = {}
+        self._topic_history: dict[str, list[float]] = topic_history or {}
+
+    @property
+    def topic_history(self) -> dict[str, list[float]]:
+        """Return the accumulated topic history for cross-conversation persistence."""
+        return self._topic_history
 
     def record_topic(self, topic: str) -> None:
         """Record that a topic was discussed at the current time."""

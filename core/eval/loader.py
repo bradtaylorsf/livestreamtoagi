@@ -155,6 +155,10 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 if c.get("turn_count") is not None and c["turn_count"] <= 1
             ],
             "simulation": data["simulation"],
+            # Include totals so the evaluator has context for the filtered data
+            "total_artifacts": data["total_artifacts"],
+            "total_conversations": data["total_conversations"],
+            "total_management_flags": data["total_management_flags"],
         },
         "agency": {
             "transcript_text": data["transcript_text"],

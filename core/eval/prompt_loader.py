@@ -80,6 +80,19 @@ def render_user_prompt(
     # Simulation data
     parts.append("\n## Simulation Data")
 
+    # Summary context (totals) so filtered lists have proper framing
+    total_arts = category_data.get("total_artifacts")
+    total_convs = category_data.get("total_conversations")
+    total_flags = category_data.get("total_management_flags")
+    if total_arts is not None or total_convs is not None:
+        parts.append("\n### Overall Simulation Totals")
+        if total_convs is not None:
+            parts.append(f"- Total conversations in simulation: {total_convs}")
+        if total_arts is not None:
+            parts.append(f"- Total artifacts in simulation: {total_arts}")
+        if total_flags is not None:
+            parts.append(f"- Total management flags in simulation: {total_flags}")
+
     if "transcript_text" in category_data:
         parts.append("\n### Transcripts")
         parts.append(str(category_data["transcript_text"])[:100_000])
@@ -101,7 +114,8 @@ def render_user_prompt(
 
     if "artifacts" in category_data:
         arts = category_data["artifacts"]
-        parts.append(f"\n### Artifacts ({len(arts)} total)")
+        total_context = f" of {total_arts}" if total_arts is not None else ""
+        parts.append(f"\n### Artifacts ({len(arts)} shown{total_context})")
         for art in arts[:50]:
             parts.append(
                 f"- [{art.get('artifact_type')}] Agent: {art.get('agent_id')}, "
@@ -110,7 +124,8 @@ def render_user_prompt(
 
     if "conversations" in category_data:
         convs = category_data["conversations"]
-        parts.append(f"\n### Conversations ({len(convs)} total)")
+        total_context = f" of {total_convs}" if total_convs is not None else ""
+        parts.append(f"\n### Conversations ({len(convs)} shown{total_context})")
         for conv in convs[:30]:
             parts.append(
                 f"- Trigger: {conv.get('trigger_type')}, "

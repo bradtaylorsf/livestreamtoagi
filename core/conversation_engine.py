@@ -125,6 +125,7 @@ class ConversationEngine:
         max_turns: int = 15,
         debug_prompts: bool = False,
         prompt_log_repo: object | None = None,
+        topic_history: dict[str, list[float]] | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -152,7 +153,10 @@ class ConversationEngine:
         # Subsystems that depend on config
         cfg = config_loader.config
         self._selector = SpeakerSelector(cfg)
-        self._topic_detector = TopicDetector(cfg.topics, llm_client, simulation_id=simulation_id)
+        self._topic_detector = TopicDetector(
+            cfg.topics, llm_client, simulation_id=simulation_id,
+            topic_history=topic_history,
+        )
 
         self._active: _ActiveConversation | None = None
         self._running = False
@@ -198,6 +202,11 @@ class ConversationEngine:
     @property
     def recent_outputs(self) -> list[str]:
         return list(self._recent_outputs)
+
+    @property
+    def topic_history(self) -> dict[str, list[float]]:
+        """Accumulated topic history for cross-conversation persistence."""
+        return self._topic_detector.topic_history
 
     # ── Main loop ──────────────────────────────────────────────
 
@@ -299,8 +308,11 @@ class ConversationEngine:
         avoided = self._topic_detector.get_recently_discussed_topics()
         if avoided:
             avoidance_note = (
-                f"[SYSTEM: The group recently discussed: {', '.join(avoided)}. "
-                "Choose a different angle or topic.]"
+                f"[SYSTEM DIRECTIVE: These topics have already been discussed "
+                f"multiple times and the audience is getting bored: {', '.join(avoided)}. "
+                "You MUST NOT rehash these topics. Instead, advance the narrative — "
+                "report progress on existing tasks, start new work, or explore "
+                "a completely different subject. The show needs forward momentum.]"
             )
             trigger["topic_avoidance"] = avoidance_note
 
@@ -853,7 +865,7 @@ class ConversationEngine:
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.1,
-                max_tokens=300,
+                max_tokens=800,
                 simulation_id=self._simulation_id,
             )
 
@@ -888,11 +900,21 @@ class ConversationEngine:
                         )
 
                 # Cross-agent accountability (#249): create follow-up goal
-                related = c.get("related_to_agent")
-                if related and related != c["agent_id"]:
+                related = c.get("related_to_agent", "")
+                # LLM sometimes returns comma-separated agents or
+                # meta-values like "team" / "all" — split and filter.
+                related_ids = [
+                    r.strip() for r in related.split(",")
+                ] if related else []
+                valid_agents = {a.id for a in self._agents.get_all_agents()} if self._agents else set()
+                for rel_id in related_ids:
+                    if not rel_id or rel_id == c["agent_id"]:
+                        continue
+                    if valid_agents and rel_id not in valid_agents:
+                        continue
                     try:
                         await goal_mgr.add_goal(
-                            agent_id=related,
+                            agent_id=rel_id,
                             goal_text=(
                                 f"Follow up with {c['agent_id']} on: "
                                 f"{c['commitment']}"
@@ -904,7 +926,7 @@ class ConversationEngine:
                     except Exception:
                         logger.warning(
                             "Failed to create cross-agent goal for %s → %s",
-                            c["agent_id"], related,
+                            c["agent_id"], rel_id,
                         )
 
             if commitments:

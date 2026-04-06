@@ -205,6 +205,7 @@ class PhaseRunner:
         # Cross-phase conversation context to prevent repetition
         self._conversation_summaries: deque[str] = deque(maxlen=5)
         self._recent_outputs: deque[str] = deque(maxlen=50)  # Last 50 agent outputs
+        self._topic_history: dict[str, list[float]] = {}  # Persists across conversations
 
         # Stats accumulated during a phase run via event listeners
         self._phase_conversations = 0
@@ -479,11 +480,12 @@ class PhaseRunner:
                                 "create tasks, or take concrete actions"
                             ),
                             priority=1,
-                            source="system",
+                            source="assigned",
                         )
                     except Exception:
                         logger.warning(
                             "Failed to add proactivity goal for %s", agent_id,
+                            exc_info=True,
                         )
 
         self._event_bus.on("agent_speak", _on_speak)
@@ -519,6 +521,7 @@ class PhaseRunner:
                 max_turns=max_turns,
                 debug_prompts=self._debug_prompts,
                 prompt_log_repo=self._prompt_log_repo,
+                topic_history=dict(self._topic_history),
             )
 
             engine._running = True
@@ -551,6 +554,12 @@ class PhaseRunner:
 
         # Collect recent outputs for repetition detection
         self._recent_outputs.extend(engine.recent_outputs)
+
+        # Merge topic history so future conversations know what was discussed
+        for topic, timestamps in engine.topic_history.items():
+            if topic not in self._topic_history:
+                self._topic_history[topic] = []
+            self._topic_history[topic].extend(timestamps)
 
         # Accumulate stats
         self._phase_conversations += 1

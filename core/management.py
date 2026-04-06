@@ -408,6 +408,8 @@ class Management:
     @staticmethod
     def _parse_llm_response(raw: str) -> ContentReviewResult:
         """Parse LLM JSON response into ContentReviewResult."""
+        import re
+
         # Strip markdown code fences if present
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -419,6 +421,19 @@ class Management:
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
+            # Fallback: extract first JSON object via regex
+            match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    return ContentReviewResult(
+                        approved=bool(data.get("approved", True)),
+                        reason=str(data.get("reason", "No reason provided")),
+                        severity=max(1, min(5, int(data.get("severity", 1)))),
+                    )
             logger.warning("Failed to parse LLM review response: %s", raw[:200])
             return ContentReviewResult(
                 approved=True, reason="Unparseable LLM response, defaulting to approved", severity=1
