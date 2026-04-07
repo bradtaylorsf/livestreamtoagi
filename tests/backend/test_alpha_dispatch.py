@@ -11,7 +11,6 @@ import pytest
 from core.models import LLMResponse
 from tools.alpha_dispatch import (
     ALLOWED_AGENTS,
-    ALPHA_FALLBACK_COST,
     ALPHA_MODEL,
     DispatchAlphaTool,
 )
@@ -237,44 +236,28 @@ class TestAccessControl:
 
 
 class TestCostTracking:
-    async def test_cost_is_logged_on_success(
+    """Cost is tracked automatically by LLMClient.complete() — no manual cost_repo needed."""
+
+    async def test_cost_tracked_via_llm_client(
+        self,
+        event_bus: AsyncMock,
+        llm_client: AsyncMock,
+    ) -> None:
+        """LLM client complete() is called on success, which auto-tracks cost."""
+        tool = _make_tool(event_bus, llm_client)
+        result = await tool.execute(task="search for info")
+
+        assert result["status"] == "success"
+        llm_client.complete.assert_called_once()
+
+    async def test_no_duplicate_cost_tracking(
         self,
         event_bus: AsyncMock,
         llm_client: AsyncMock,
         cost_repo: AsyncMock,
     ) -> None:
+        """Passing cost_repo should NOT result in any manual add_cost calls."""
         tool = _make_tool(event_bus, llm_client, cost_repo=cost_repo)
         await tool.execute(task="search for info")
 
-        cost_repo.add_cost.assert_called_once()
-        cost_event = cost_repo.add_cost.call_args[0][0]
-        assert cost_event.agent_id == "alpha"
-        assert cost_event.cost_type == "alpha_dispatch"
-        assert cost_event.amount == Decimal("0.001")
-        assert cost_event.details["dispatched_by"] == "vera"
-        assert cost_event.details["status"] == "success"
-
-    async def test_cost_is_logged_on_timeout(
-        self,
-        event_bus: AsyncMock,
-        llm_client: AsyncMock,
-        cost_repo: AsyncMock,
-    ) -> None:
-        llm_client.complete = AsyncMock(side_effect=asyncio.TimeoutError)
-        tool = _make_tool(event_bus, llm_client, cost_repo=cost_repo)
-        await tool.execute(task="slow task")
-
-        cost_repo.add_cost.assert_called_once()
-        cost_event = cost_repo.add_cost.call_args[0][0]
-        assert cost_event.amount == ALPHA_FALLBACK_COST
-        assert cost_event.details["status"] == "confused"
-
-    async def test_no_cost_logged_without_repo(
-        self,
-        event_bus: AsyncMock,
-        llm_client: AsyncMock,
-    ) -> None:
-        tool = _make_tool(event_bus, llm_client, cost_repo=None)
-        result = await tool.execute(task="search for info")
-        # Should succeed without error even without cost_repo
-        assert result["status"] == "success"
+        cost_repo.add_cost.assert_not_called()

@@ -5,18 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from core.event_bus import EventType
-from core.models import CostEventCreate
 
 from .base import BaseTool
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
-    from core.repos.cost_repo import CostRepo
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +22,6 @@ ALPHA_MODEL = "deepseek/deepseek-v3.2"
 
 # Hard timeout for Alpha tasks
 ALPHA_TIMEOUT_SECONDS = 60
-
-# Fallback cost estimate when Alpha times out or errors before LLM responds
-ALPHA_FALLBACK_COST = Decimal("0.005")
 
 # System prompt constraining Alpha's capabilities
 ALPHA_SYSTEM_PROMPT = (
@@ -62,12 +56,11 @@ class DispatchAlphaTool(BaseTool):
         event_bus: EventBus,
         agent_id: str,
         llm_client: LLMClient,
-        cost_repo: CostRepo | None = None,
+        cost_repo: object | None = None,  # Kept for backward compat, unused
     ) -> None:
         self._event_bus = event_bus
         self._agent_id = agent_id
         self._llm_client = llm_client
-        self._cost_repo = cost_repo
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         task: str = kwargs.get("task", "")
@@ -112,16 +105,13 @@ class DispatchAlphaTool(BaseTool):
                 timeout=ALPHA_TIMEOUT_SECONDS,
             )
             result = response.content
-            cost = response.estimated_cost
             status = "success"
         except TimeoutError:
             result = "Alpha took too long and came back confused"
-            cost = ALPHA_FALLBACK_COST
             status = "confused"
             logger.warning("Alpha dispatch timed out for task: %s", task[:100])
         except Exception as exc:
             result = f"Alpha got confused: {exc}"
-            cost = ALPHA_FALLBACK_COST
             status = "confused"
             logger.error("Alpha dispatch failed: %s", exc)
 
@@ -130,21 +120,6 @@ class DispatchAlphaTool(BaseTool):
             EventType.ALPHA_RETURN,
             {"result": result, "status": status, "task_id": task_id},
         )
-
-        # Track cost
-        if self._cost_repo is not None:
-            await self._cost_repo.add_cost(
-                CostEventCreate(
-                    agent_id="alpha",
-                    cost_type="alpha_dispatch",
-                    amount=cost,
-                    details={
-                        "dispatched_by": self._agent_id,
-                        "task": task[:200],
-                        "status": status,
-                    },
-                )
-            )
 
         return {
             "task_id": task_id,

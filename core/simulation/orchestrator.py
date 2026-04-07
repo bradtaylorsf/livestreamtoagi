@@ -422,7 +422,7 @@ class SimulationOrchestrator:
 
                 # Check cost limit
                 if not self._config.dry_run:
-                    self._check_cost_limit()
+                    await self._check_cost_limit()
 
             # Finalize
             if audience_sim:
@@ -591,7 +591,7 @@ class SimulationOrchestrator:
 
                 # Check cost limit
                 if not self._config.dry_run:
-                    self._check_cost_limit()
+                    await self._check_cost_limit()
 
             # Final day stats
             self._display.show_day_boundary(
@@ -681,8 +681,34 @@ class SimulationOrchestrator:
         """Signal the orchestrator to stop after the current phase."""
         self._cancelled = True
 
-    def _check_cost_limit(self) -> None:
-        """Raise CostLimitExceededError if spending exceeds max_cost."""
+    async def _check_cost_limit(self) -> None:
+        """Reconcile cost from cost_events and raise if over limit.
+
+        Queries the authoritative cost_events table so the limit check
+        accounts for ALL LLM calls (management, compaction, reflections, etc.),
+        not just conversation turns from agent_speak events.  Also persists
+        the reconciled total to the simulation record so it stays accurate
+        even if the process crashes before _finalize().
+        """
+        if self._simulation_id is None:
+            return
+        try:
+            actual_cost = await self._sim_repo.get_total_cost_from_events(
+                self._simulation_id
+            )
+            if actual_cost > 0 and actual_cost != self._total_cost:
+                # Sync the in-memory total and persist to DB
+                await self._sim_repo.increment_stats(
+                    self._simulation_id,
+                    cost=actual_cost - self._total_cost,
+                )
+                self._total_cost = actual_cost
+        except Exception:
+            logger.warning(
+                "Cost reconciliation failed for %s, using in-memory total $%s",
+                self._simulation_id, self._total_cost,
+                exc_info=True,
+            )
         if self._total_cost > self._config.max_cost:
             raise CostLimitExceededError(
                 f"Total cost ${self._total_cost} exceeds limit ${self._config.max_cost}"

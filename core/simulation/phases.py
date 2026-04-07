@@ -510,7 +510,7 @@ class PhaseRunner:
                 compactor=self._compactor,
                 memory_repo=self._memory_repo,
                 speed_multiplier=0,  # No delays in simulation
-                management_enabled=True,
+                management_enabled=False,  # Skip LLM review during sims; eval covers this
                 simulation_id=self._simulation_id,
                 services=self._services,
                 clock=self._clock,

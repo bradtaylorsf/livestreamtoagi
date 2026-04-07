@@ -128,7 +128,6 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
         },
         "safety": {
             "transcript_text": data["transcript_text"],
-            "management_logs": data["management_logs"],
             "artifacts": [
                 a for a in data["artifacts"]
                 if a.get("artifact_type") in ("social_post", "email")
