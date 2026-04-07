@@ -12,8 +12,10 @@ import pytest
 from core.llm_client import (
     MODEL_REGISTRY,
     LLMError,
+    ModelConfig,
     OpenRouterClient,
     estimate_cost,
+    refresh_pricing,
 )
 from core.models import CostEventCreate
 
@@ -552,3 +554,135 @@ def make_mock_http_client():
     client = MagicMock(spec=httpx.AsyncClient)
     client.aclose = AsyncMock()
     return client
+
+
+# ── refresh_pricing tests ────────────────────────────────────────
+
+
+def _make_openrouter_models_response(overrides: dict[str, tuple[str, str]] | None = None) -> dict:
+    """Build a fake /api/v1/models response.
+
+    overrides: mapping of openrouter_id -> (prompt_per_token, completion_per_token)
+    """
+    defaults = {
+        "anthropic/claude-haiku-4.5": ("0.000001", "0.000005"),
+        "anthropic/claude-sonnet-4.6": ("0.000003", "0.000015"),
+        "google/gemini-2.5-flash": ("0.0000003", "0.0000025"),
+        "google/gemini-2.5-pro": ("0.00000125", "0.00001"),
+        "openai/gpt-4o-mini": ("0.00000015", "0.0000006"),
+        "openai/gpt-5.2": ("0.00000175", "0.000014"),
+        "deepseek/deepseek-chat-v3-0324": ("0.0000002", "0.00000077"),
+        "x-ai/grok-3-mini": ("0.0000003", "0.0000005"),
+        "x-ai/grok-3": ("0.000003", "0.000015"),
+    }
+    if overrides:
+        defaults.update(overrides)
+
+    return {
+        "data": [
+            {
+                "id": model_id,
+                "pricing": {"prompt": prompt, "completion": completion},
+            }
+            for model_id, (prompt, completion) in defaults.items()
+        ]
+    }
+
+
+def _save_registry() -> dict[str, tuple[Decimal, Decimal]]:
+    """Snapshot current MODEL_REGISTRY prices for restoration."""
+    return {
+        name: (cfg.input_price_per_1m, cfg.output_price_per_1m)
+        for name, cfg in MODEL_REGISTRY.items()
+    }
+
+
+def _restore_registry(snapshot: dict[str, tuple[Decimal, Decimal]]) -> None:
+    for name, (inp, out) in snapshot.items():
+        MODEL_REGISTRY[name].input_price_per_1m = inp
+        MODEL_REGISTRY[name].output_price_per_1m = out
+
+
+@pytest.fixture(autouse=False)
+def _registry_snapshot():
+    """Save and restore MODEL_REGISTRY around tests that mutate it."""
+    snap = _save_registry()
+    yield
+    _restore_registry(snap)
+
+
+@pytest.mark.asyncio
+async def test_refresh_pricing_updates_registry(_registry_snapshot):
+    """Live prices from OpenRouter should update MODEL_REGISTRY."""
+    # Set a known stale price
+    MODEL_REGISTRY["claude-haiku-4-5"].input_price_per_1m = Decimal("0.50")
+    MODEL_REGISTRY["claude-haiku-4-5"].output_price_per_1m = Decimal("2.00")
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        return_value=FakeResponse(200, _make_openrouter_models_response())
+    )
+
+    changes = await refresh_pricing(http_client=mock_client)
+
+    assert "claude-haiku-4-5" in changes
+    # Should now match the API response ($1.00 / $5.00)
+    assert MODEL_REGISTRY["claude-haiku-4-5"].input_price_per_1m == Decimal("1.00")
+    assert MODEL_REGISTRY["claude-haiku-4-5"].output_price_per_1m == Decimal("5.00")
+
+
+@pytest.mark.asyncio
+async def test_refresh_pricing_no_changes_when_current(_registry_snapshot):
+    """No changes dict when prices already match."""
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        return_value=FakeResponse(200, _make_openrouter_models_response())
+    )
+
+    changes = await refresh_pricing(http_client=mock_client)
+
+    assert changes == {}
+
+
+@pytest.mark.asyncio
+async def test_refresh_pricing_survives_api_failure(_registry_snapshot):
+    """Fallback to hardcoded prices if OpenRouter is unreachable."""
+    snap_before = _save_registry()
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+
+    changes = await refresh_pricing(http_client=mock_client)
+
+    assert changes == {}
+    # Prices unchanged
+    for name, (inp, out) in snap_before.items():
+        assert MODEL_REGISTRY[name].input_price_per_1m == inp
+        assert MODEL_REGISTRY[name].output_price_per_1m == out
+
+
+@pytest.mark.asyncio
+async def test_refresh_pricing_survives_bad_status(_registry_snapshot):
+    """Non-200 from OpenRouter should fall back silently."""
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=FakeResponse(500, text="Internal Server Error"))
+
+    changes = await refresh_pricing(http_client=mock_client)
+
+    assert changes == {}
+
+
+@pytest.mark.asyncio
+async def test_refresh_pricing_skips_bad_pricing_data(_registry_snapshot):
+    """Models with invalid pricing data should be skipped without crashing."""
+    resp_data = _make_openrouter_models_response(
+        overrides={"anthropic/claude-haiku-4.5": ("not-a-number", "0.000005")}
+    )
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=FakeResponse(200, resp_data))
+
+    changes = await refresh_pricing(http_client=mock_client)
+
+    # haiku should not have been updated (bad data), others should be fine
+    assert "claude-haiku-4-5" not in changes

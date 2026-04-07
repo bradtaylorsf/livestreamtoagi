@@ -19,7 +19,7 @@ from core.config_loader import ConfigLoader
 from core.context_assembly import ContextAssembler
 from core.database import Database
 from core.event_bus import EventBus
-from core.llm_client import OpenRouterClient
+from core.llm_client import OpenRouterClient, refresh_pricing
 from core.memory.archival_memory import ArchivalMemoryManager
 from core.memory.compaction import MemoryCompactor
 from core.memory.core_memory import CoreMemoryManager
@@ -139,6 +139,7 @@ async def bootstrap_services(
     transcript_repo = TranscriptRepo(db)
     http_client = httpx.AsyncClient()
 
+    await refresh_pricing(http_client)
     llm_client = OpenRouterClient(api_key=api_key, cost_repo=cost_repo)
     core_memory = CoreMemoryManager(memory_repo=memory_repo, token_counter=token_counter)
     recall_memory = RecallMemoryManager(

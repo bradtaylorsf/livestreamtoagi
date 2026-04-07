@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -28,7 +28,9 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 1  # seconds
 MAX_RETRY_AFTER = 60  # cap Retry-After header
 MODEL_NAME_ALIASES = {
+    "anthropic/claude-haiku-4-5": "claude-haiku-4-5",
     "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
+    "anthropic/claude-sonnet-4-6": "claude-sonnet-4-6",
     "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
     "google/gemini-flash": "gemini-flash",
     "google/gemini-2.5-pro": "gemini-2.5-pro",
@@ -47,22 +49,23 @@ class ModelConfig:
     output_price_per_1m: Decimal
 
 
-# Prices in USD per 1M tokens — update as OpenRouter pricing changes.
+# Fallback prices in USD per 1M tokens — used when OpenRouter API is unreachable.
+# Updated 2026-04-07 from https://openrouter.ai/api/v1/models
 MODEL_REGISTRY: dict[str, ModelConfig] = {
     "claude-haiku-4-5": ModelConfig(
-        openrouter_id="anthropic/claude-haiku-4-5",
-        input_price_per_1m=Decimal("0.80"),
-        output_price_per_1m=Decimal("4.00"),
+        openrouter_id="anthropic/claude-haiku-4.5",
+        input_price_per_1m=Decimal("1.00"),
+        output_price_per_1m=Decimal("5.00"),
     ),
     "claude-sonnet-4-6": ModelConfig(
-        openrouter_id="anthropic/claude-sonnet-4-6",
+        openrouter_id="anthropic/claude-sonnet-4.6",
         input_price_per_1m=Decimal("3.00"),
         output_price_per_1m=Decimal("15.00"),
     ),
     "gemini-flash": ModelConfig(
         openrouter_id="google/gemini-2.5-flash",
-        input_price_per_1m=Decimal("0.15"),
-        output_price_per_1m=Decimal("0.60"),
+        input_price_per_1m=Decimal("0.30"),
+        output_price_per_1m=Decimal("2.50"),
     ),
     "gemini-2.5-pro": ModelConfig(
         openrouter_id="google/gemini-2.5-pro",
@@ -76,17 +79,13 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     ),
     "gpt-5.2": ModelConfig(
         openrouter_id="openai/gpt-5.2",
-        input_price_per_1m=Decimal("2.00"),
-        output_price_per_1m=Decimal("8.00"),
+        input_price_per_1m=Decimal("1.75"),
+        output_price_per_1m=Decimal("14.00"),
     ),
-    # OpenRouter lists DeepSeek V3 as "deepseek/deepseek-chat-v3-0324";
-    # agent configs use alias "deepseek/deepseek-v3.2" which resolves here.
-    # Verify ID at https://openrouter.ai/models if pricing or routing changes.
-    # last_verified: 2026-04-02
     "deepseek-v3.2": ModelConfig(
         openrouter_id="deepseek/deepseek-chat-v3-0324",
-        input_price_per_1m=Decimal("0.27"),
-        output_price_per_1m=Decimal("1.10"),
+        input_price_per_1m=Decimal("0.20"),
+        output_price_per_1m=Decimal("0.77"),
     ),
     "grok-3-mini": ModelConfig(
         openrouter_id="x-ai/grok-3-mini",
@@ -99,6 +98,86 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         output_price_per_1m=Decimal("15.00"),
     ),
 }
+
+# Reverse lookup: openrouter_id -> canonical name
+_OPENROUTER_ID_TO_CANONICAL: dict[str, str] = {
+    cfg.openrouter_id: name for name, cfg in MODEL_REGISTRY.items()
+}
+
+
+async def refresh_pricing(
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, tuple[Decimal, Decimal]]:
+    """Fetch live model pricing from OpenRouter and update MODEL_REGISTRY.
+
+    Returns a dict of canonical_name -> (old_input, old_output) for models
+    whose prices changed, so callers can log the diff.  Falls back silently
+    to hardcoded prices on any error.
+    """
+    owns_client = http_client is None
+    client = http_client or httpx.AsyncClient()
+    changes: dict[str, tuple[Decimal, Decimal]] = {}
+    try:
+        resp = await client.get(
+            f"{OPENROUTER_BASE_URL}/models", timeout=10.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "OpenRouter /models returned %d — using fallback prices",
+                resp.status_code,
+            )
+            return changes
+
+        data = resp.json()
+        models_list = data.get("data", [])
+
+        for model_data in models_list:
+            model_id = model_data.get("id", "")
+            canonical = _OPENROUTER_ID_TO_CANONICAL.get(model_id)
+            if canonical is None:
+                continue
+
+            pricing = model_data.get("pricing", {})
+            prompt_raw = pricing.get("prompt")
+            completion_raw = pricing.get("completion")
+            if prompt_raw is None or completion_raw is None:
+                continue
+
+            try:
+                # OpenRouter returns price per token; convert to per 1M
+                input_per_1m = Decimal(str(prompt_raw)) * Decimal("1000000")
+                output_per_1m = Decimal(str(completion_raw)) * Decimal("1000000")
+            except (InvalidOperation, TypeError):
+                logger.warning(
+                    "Bad pricing data for %s: prompt=%r completion=%r",
+                    model_id, prompt_raw, completion_raw,
+                )
+                continue
+
+            cfg = MODEL_REGISTRY[canonical]
+            if cfg.input_price_per_1m != input_per_1m or cfg.output_price_per_1m != output_per_1m:
+                changes[canonical] = (cfg.input_price_per_1m, cfg.output_price_per_1m)
+                cfg.input_price_per_1m = input_per_1m
+                cfg.output_price_per_1m = output_per_1m
+
+        if changes:
+            for name, (old_in, old_out) in changes.items():
+                new = MODEL_REGISTRY[name]
+                logger.info(
+                    "Price updated %s: $%s/$%s -> $%s/$%s per 1M tokens",
+                    name, old_in, old_out,
+                    new.input_price_per_1m, new.output_price_per_1m,
+                )
+        else:
+            logger.info("All model prices match OpenRouter — no updates needed")
+
+    except Exception:
+        logger.warning("Failed to fetch OpenRouter pricing — using fallback prices", exc_info=True)
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    return changes
 
 
 class LLMError(Exception):
