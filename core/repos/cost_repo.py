@@ -135,12 +135,13 @@ class CostRepo:
     ) -> dict[str, object]:
         """Return cost breakdown by agent for a simulation using direct FK."""
         by_agent_rows = await self.db.fetch(
-            """SELECT agent_id, SUM(amount) as total,
+            """SELECT COALESCE(agent_id, 'system') as agent_id,
+                      SUM(amount) as total,
                       SUM(COALESCE((details->>'input_tokens')::int, 0)) as input_tokens,
                       SUM(COALESCE((details->>'output_tokens')::int, 0)) as output_tokens
                FROM cost_events
                WHERE simulation_id = $1
-               GROUP BY agent_id ORDER BY total DESC""",
+               GROUP BY COALESCE(agent_id, 'system') ORDER BY total DESC""",
             simulation_id,
         )
         total = sum(r["total"] for r in by_agent_rows) if by_agent_rows else Decimal("0")
