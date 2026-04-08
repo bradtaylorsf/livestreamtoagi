@@ -65,11 +65,16 @@ class ProposeCharacterTool(BaseTool):
             source="agent",
         )
 
+        saved = await self._spawner.submit_application(application)
+        if saved is None:
+            return {"status": "error", "reason": "Failed to save character application"}
+
         return {
             "status": "proposed",
-            "character_name": application.name,
-            "role": application.role,
-            "message": f"Character '{application.name}' has been proposed. "
+            "application_id": saved.id,
+            "character_name": saved.name,
+            "role": saved.role,
+            "message": f"Character '{saved.name}' has been proposed. "
                        f"The team will deliberate and vote.",
         }
 

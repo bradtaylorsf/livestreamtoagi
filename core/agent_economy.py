@@ -105,26 +105,28 @@ class AgentEconomyManager:
         if amount <= 0:
             return True
 
-        # Atomic deduction — only succeeds if balance >= amount
-        result = await self._db.execute(
-            """UPDATE agent_accounts
-               SET balance = balance - $2,
-                   total_spent = total_spent + $2,
-                   updated_at = now()
-               WHERE agent_id = $1 AND balance >= $2""",
-            agent_id,
-            amount,
-        )
-        if "UPDATE 0" in result:
-            return False
+        async with self._db.acquire() as conn:
+            async with conn.transaction():
+                # Atomic deduction — only succeeds if balance >= amount
+                result = await conn.execute(
+                    """UPDATE agent_accounts
+                       SET balance = balance - $2,
+                           total_spent = total_spent + $2,
+                           updated_at = now()
+                       WHERE agent_id = $1 AND balance >= $2""",
+                    agent_id,
+                    amount,
+                )
+                if "UPDATE 0" in result:
+                    return False
 
-        await self._db.execute(
-            """INSERT INTO agent_transactions (agent_id, type, amount, description)
-               VALUES ($1, 'tool_cost', $2, $3)""",
-            agent_id,
-            amount,
-            description,
-        )
+                await conn.execute(
+                    """INSERT INTO agent_transactions (agent_id, type, amount, description)
+                       VALUES ($1, 'tool_cost', $2, $3)""",
+                    agent_id,
+                    amount,
+                    description,
+                )
         return True
 
     async def transfer(

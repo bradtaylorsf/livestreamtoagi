@@ -176,6 +176,38 @@ class CharacterSpawner:
         """Check if a new character can be added (cast size < MAX)."""
         return self.get_active_count() < MAX_CAST_SIZE
 
+    async def submit_application(
+        self,
+        application: CharacterApplication,
+        simulation_id: UUID | None = None,
+    ) -> CharacterApplication | None:
+        """Persist an agent-submitted character application to the database.
+
+        Returns the application with its assigned ID, or None if DB unavailable.
+        """
+        if self._db is None:
+            logger.warning("No database available, cannot persist application")
+            return None
+
+        row = await self._db.fetchrow(
+            """INSERT INTO character_applications
+               (simulation_id, name, display_name, role, personality_sketch, proposed_by, source,
+                model_conversation, model_building, status)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'proposed')
+               RETURNING id""",
+            simulation_id,
+            application.name,
+            application.display_name,
+            application.role,
+            application.personality_sketch,
+            application.proposed_by,
+            application.source,
+            application.model_conversation,
+            application.model_building,
+        )
+        application.id = str(row["id"])
+        return application
+
     async def generate_concept(
         self,
         simulation_id: UUID | None = None,

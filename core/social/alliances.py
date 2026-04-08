@@ -276,6 +276,15 @@ class AllianceManager:
         if self._repo is None:
             return False
 
+        # Deduct from agent's economy account first
+        if self._economy is not None:
+            from decimal import Decimal
+            deducted = await self._economy.deduct_cost(
+                agent_id, Decimal(str(amount)), f"alliance treasury contribution: {alliance_id}",
+            )
+            if not deducted:
+                return False
+
         aid = UUID(alliance_id)
         await self._repo.update_treasury(aid, amount)
         return True
