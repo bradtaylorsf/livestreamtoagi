@@ -7,12 +7,12 @@ This repo is a monorepo for a 24/7 AI reality show set in a pixel-art world. The
 
 The live codebase includes:
 - a FastAPI backend with a health route, WebSocket event bus, admin API (53 endpoints), and lifespan hooks that initialize database, Redis, agent registry, memory managers, LLM client, TTS pipeline, config watcher, and a reflection scheduler
-- async PostgreSQL and Redis clients with a typed repository layer (15 repo classes including artifact, simulation, eval, assertion, relationship, goal, config_version, and evolution repos)
+- async PostgreSQL and Redis clients with a typed repository layer (15 repo classes including artifact, simulation, eval, assertion, relationship, goal, config_version, evolution, and prompt_log repos)
 - a multi-tier memory system: core memory (persistent identity), recall memory (pgvector semantic search), archival memory (long-term storage), and reflection (LLM-driven 6-hour + weekly cycles with journaling and self-modification proposals)
 - a conversation engine orchestrator with speaker selection, energy model, interrupts, topic detection, pacing, proximity groups, Management safety review, and TTS output
 - a context assembly pipeline that builds three-layer prompts: infrastructure rules → character identity → mutable memory state
-- a tool registry with 15 tool modules exporting 23+ tool instances: messaging, audience interaction, memory operations, code execution (Docker sandbox), tilemap generation, revenue/social drafts, web search, Alpha dispatch, self-modification, task management, and world state
-- raw SQL migrations (20 pairs, up to `020_evolution_cycles`) and typed repository classes
+- a tool registry with 13 tool modules exporting 20 tool classes: messaging, audience interaction, memory operations, code execution (Docker sandbox), tilemap generation, revenue/social drafts, web search, Alpha dispatch, self-modification, task management, world state, and evolution log viewer
+- raw SQL migrations (21 pairs, up to `021_prompt_logs`) and typed repository classes
 - YAML-backed agent config loading from `agents/*`, including `config.yaml`, `behaviors.yaml`, `system_prompt.md`, and optional extra YAML files (e.g., management's `content_rules.yaml` and `intervention_levels.yaml`)
 - an OpenRouter LLM client with a 9-model registry, cost tracking, retry logic, and optional Langfuse hooks
 - an admin dashboard backend (`core/admin_routes.py`) with 53 endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, evolution tracking — protected by `ADMIN_PASSWORD` Bearer auth
@@ -34,14 +34,14 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 - Python: local development is pinned to Python `3.13` via `.python-version`; project metadata allows `>=3.12,<3.14`
 - Backend: FastAPI, asyncpg, redis.asyncio, httpx, pydantic v2, pydantic-settings
 - LLM integration: OpenRouter client in `core/llm_client.py` with a fixed 9-model `MODEL_REGISTRY`; Langfuse hooks are present; CrewAI is installed but not wired into the running app
-- Memory: `core/memory/` — CoreMemoryManager, RecallMemoryManager, ArchivalMemoryManager, ReflectionManager, MemoryCompactor, MemorySnapshot; embeddings via pgvector; token counting via tiktoken
+- Memory: `core/memory/` — CoreMemoryManager, RecallMemoryManager, ArchivalMemoryManager, ReflectionManager, ReflectionScheduler, MemoryCompactor, MemorySnapshot; embeddings via pgvector; token counting via tiktoken
 - Conversation: `core/conversation_engine.py` orchestrates speaker selection, energy, interrupts, Management review, TTS, and event emission; subsystems in `core/conversation/` (energy, pacing, proximity, speaker_selector, topic_detector, triggers, selection_logger)
 - TTS: Edge TTS pipeline in `core/tts.py` with per-agent voice support; `core/speech_parser.py` for structured dialogue/action parsing
 - Management: `core/management.py` reviews all agent output before broadcast (content filter with intervention levels)
 - Scheduling: APScheduler runs reflection cycles (6-hour at 2/8/14/20 UTC, weekly Sunday 20 UTC) via `core/scheduler.py`
-- Tools: `tools/` package with 15 tool modules and a `ToolRegistry`; includes code execution via Docker sandbox with gVisor
-- Data layer: PostgreSQL 16 with `pgvector` and `pg_trgm`, plus 20 raw SQL migration pairs under `db/migrations`
-- Realtime: WebSocket event bus in `core/event_bus.py` (17 event types, 50-message history buffer, max 100 connections)
+- Tools: `tools/` package with 13 tool modules and a `ToolRegistry`; includes code execution via Docker sandbox with gVisor
+- Data layer: PostgreSQL 16 with `pgvector` and `pg_trgm`, plus 21 raw SQL migration pairs under `db/migrations`
+- Realtime: WebSocket event bus in `core/event_bus.py` (18 event types, 50-message history buffer, max 100 connections)
 - Support services: Redis 7 and Langfuse via `docker-compose.yaml`; Docker sandbox service for code execution
 - Frontend package: Vite 6 + TypeScript 5 + Phaser 3.87 in `frontend/`
 - Website: Next.js 16 + React 19 + Tailwind CSS 4 + Recharts 3 in `website/`
@@ -60,22 +60,22 @@ agents/                 YAML agent configs, behaviors, system prompts, and optio
 config/                 Shared configuration: conversation_config.yaml, office_layout.json, pixellab_assets.json, pixellab_style_guide.txt
 core/                   FastAPI app, bootstrap, database/redis clients, event bus, LLM client, context assembly, admin routes, scheduler, models, config watcher, tool executor, agent goals, system prompt, shared state
 core/conversation/      Conversation subsystems: energy, pacing, proximity, speaker_selector, topic_detector, triggers, selection_logger
-core/memory/            Memory subsystem: core, recall, archival, reflection, compaction, embeddings, snapshot, token counting, validation
-core/repos/             Typed repository layer (15 repos): agents, conversations, memory, costs, transcripts, world, artifacts, simulations, evals, assertions, relationships, goals, config_version, evolution
+core/memory/            Memory subsystem: core, recall, archival, reflection, reflection_scheduler, compaction, embeddings, snapshot, token counting, validation
+core/repos/             Typed repository layer (15 repos): agents, conversations, memory, costs, transcripts, world, artifacts, simulations, evals, assertions, relationships, goals, config_version, evolution, prompt_log
 core/simulation/        Simulation orchestrator: clock, phases, assertions, audience_sim, display, orchestrator
 core/eval/              Evaluation engine: loader, prompt_loader, engine, analyzer, evolution_loop, change_applier, issue_generator
 core/social/            Social subsystem: relationship_tracker
 core/reporting/         Reporting subsystem: timeline_reporter, scorecard, comparison, cost_projection, formatters, sectioned reports (executive_summary, cost_analysis, daily_breakdown, key_moments, memory_evolution, relationship_evolution, tool_usage)
 core/world/             World generation: office_generator, pixellab_client, sprite_generator
-db/                     Raw SQL migration runner, init SQL, and numbered up/down migrations (001–020)
+db/                     Raw SQL migration runner, init SQL, and numbered up/down migrations (001–021)
 evals/                  Evaluation framework: prompts and results
 frontend/               Phaser.js world renderer: main scene, chunk-based world loading, agent sprite rendering/management, WebSocket client, typed events
 website/                Next.js app router site with public pages and admin dashboard (agent inspector, conversation viewer, artifact browser, simulation timeline, eval dashboard)
 scripts/                Utility scripts: chat.py, test_agent.py, watch_conversations.py, run_simulation.py, run_eval.py, run_evolution.py, report_simulation.py, snapshot_memory.py, restore_memory.py, seed_config.py, check_tool_coverage.py, check-services.sh
 skills/                 Skill definitions for code-review, git-workflow, implementation-planning, playwright-cli, security-analysis, test-robustness, testing-patterns
 specs/                  Product and architecture reference docs; useful context, not the runtime source of truth
-tools/                  Agent tool implementations: 15 tool modules + ToolRegistry (messaging, audience, memory, code execution, tilemap, revenue, web, Alpha dispatch, self-modification, task management, world state, stubs)
-tests/                  ~80 test files: backend/ (unit + integration), frontend/ (vitest), website/ (vitest + playwright e2e)
+tools/                  Agent tool implementations: 13 tool modules + ToolRegistry (messaging, audience, memory, code execution, tilemap, revenue, web, Alpha dispatch, self-modification, task management, world state, evolution log)
+tests/                  ~76 test files: backend/ (unit + integration), frontend/ (vitest), website/ (vitest + playwright e2e)
 ```
 
 Important files:
@@ -84,7 +84,7 @@ Important files:
 - `core/admin_routes.py` provides 53 admin endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, evolution tracking
 - `core/agent_registry.py` loads agent configs from disk, validates model names via aliases, and syncs status through Redis
 - `core/llm_client.py` defines 9 allowed models with aliases and per-token cost metadata
-- `core/models.py` is the source of backend Pydantic schemas (~100 model classes: agents, memory tiers, conversations, transcripts, journal entries, self-modification proposals, LLM responses, cost events, goals, relationships)
+- `core/models.py` is the source of backend Pydantic schemas (~102 model classes: agents, memory tiers, conversations, transcripts, journal entries, self-modification proposals, LLM responses, cost events, goals, relationships, prompt logs)
 - `core/conversation_engine.py` is the central runtime loop — ties together triggers, speaker selection, energy, interrupts, Management review, TTS, and event emission
 - `core/context_assembly.py` builds three-layer prompts: infrastructure → character → memory
 - `core/memory/reflection.py` drives 6-hour and weekly reflection cycles with journaling and self-modification proposals
@@ -96,7 +96,7 @@ Important files:
 - `core/social/relationship_tracker.py` tracks agent-to-agent relationship dynamics
 - `core/reporting/timeline_reporter.py` generates structured simulation reports with sectioned output
 - `tools/__init__.py` exports all tools and the `ToolRegistry` with `get_core_tools()` and `get_memory_tools()` factories
-- `db/migrate.py` is the raw SQL migration entry point for `python -m db`; migrations go up to `020_evolution_cycles`
+- `db/migrate.py` is the raw SQL migration entry point for `python -m db`; migrations go up to `021_prompt_logs`
 - `website/src/lib/api.ts` calls planned REST endpoints (`/api/agents`, `/api/agents/{id}/journal`, `/api/agents/{id}/chat`, `/api/world/chunks`, `/api/challenges`, `/api/stats`, `/api/lore`) that the backend does not currently expose as public routes (admin equivalents exist under `/api/admin`)
 
 ## Code Style
