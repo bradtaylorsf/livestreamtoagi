@@ -429,13 +429,21 @@ class WorldSimulator:
             except (ValueError, TypeError):
                 pass
 
-        # Store as world budget info
+        # Store as world budget info — write to both keys so
+        # GetWorldStateTool ("world:budget") and any direct reader
+        # ("world:revenue_status") both get updated data.
         budget_data = {
             "estimated_daily_revenue": round(revenue, 2),
             "approved_posts_today": approved_count,
             "updated_at": time.time(),
         }
         await self._redis.set("world:revenue_status", json.dumps(budget_data))
+        # GetWorldStateTool reads "world:budget" — mirror the data there
+        # in the format that tool expects.
+        await self._redis.set("world:budget", json.dumps({
+            "estimated_daily_revenue": round(revenue, 2),
+            "approved_posts_today": approved_count,
+        }))
 
     # ── Recurring Characters ─────────────────────────────────
 
@@ -476,6 +484,6 @@ class WorldSimulator:
         # Emit via event bus if available
         if self._event_bus is not None:
             with contextlib.suppress(Exception):
-                asyncio.get_event_loop().create_task(
+                asyncio.create_task(
                     self._event_bus.emit(event_type, event)
                 )

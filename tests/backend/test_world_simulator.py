@@ -233,6 +233,13 @@ async def test_world_simulator_revenue_update():
     ]
     assert len(revenue_calls) > 0
 
+    # Should also mirror data to world:budget (read by GetWorldStateTool)
+    budget_calls = [
+        c for c in redis.set.call_args_list
+        if "world:budget" in str(c) and "world:revenue" not in str(c)
+    ]
+    assert len(budget_calls) > 0
+
 
 async def test_world_simulator_world_state_update():
     """World state update should write recent events to Redis."""

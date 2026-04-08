@@ -54,6 +54,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BaseTool",
+    "CheckEmailResponsesTool",
+    "CheckPostPerformanceTool",
     "CreatePollTool",
     "ProposeAllianceTool",
     "ProposeCharacterTool",
