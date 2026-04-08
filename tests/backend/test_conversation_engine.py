@@ -1022,6 +1022,7 @@ def _make_mock_services() -> MagicMock:
     svc.core_memory = MagicMock()
     svc.recall_memory = MagicMock()
     svc.archival_memory = MagicMock()
+    svc.economy_manager = None  # Prevent await errors on MagicMock
     return svc
 
 

@@ -222,8 +222,10 @@ class TestGoalTrigger:
 
         result = await trigger_system.check()
         assert result is not None
-        assert result["type"] == "goal"
-        assert "Ship code now" in result["prompt_hint"]
+        # May fire as "initiative" (higher priority) or "goal" depending on
+        # the random seed — both are valid for agents with active goals (#268)
+        assert result["type"] in ("goal", "initiative")
+        assert "Ship code now" in result["prompt_hint"] or "Ship code now" in result.get("goal_text", "")
 
     @pytest.mark.asyncio
     async def test_goal_trigger_skips_low_priority(self) -> None:
