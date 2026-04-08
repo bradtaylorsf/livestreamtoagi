@@ -1104,6 +1104,18 @@ class ConversationEngine:
             except Exception:
                 logger.warning("Failed to get balance for %s", agent.id, exc_info=True)
 
+        # Fetch most recent dream for context injection (#272)
+        recent_dream: str | None = None
+        if self._services and self._services.memory_repo:
+            try:
+                entries = await self._services.memory_repo.get_recent_journal_entries(agent.id, limit=1)
+                for entry in entries:
+                    if entry.reflection_type == "dream":
+                        recent_dream = entry.content
+                        break
+            except Exception:
+                logger.warning("Failed to get recent dream for %s", agent.id, exc_info=True)
+
         # Build shared working state context if available
         shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
@@ -1127,6 +1139,7 @@ class ConversationEngine:
                     commitment_reminders=commitment_reminders,
                     internal_state_context=internal_state_context,
                     balance_context=balance_context,
+                    recent_dream=recent_dream,
                 )
                 messages = context_result.messages
 

@@ -174,6 +174,16 @@ def get_core_tools(
         tools.append(TransferBudgetTool(economy_manager=economy_manager, agent_id=agent_id))
         tools.append(ViewAccountTool(economy_manager=economy_manager, agent_id=agent_id))
 
+    # Character proposal/voting tools (#275)
+    tools.append(ProposeCharacterTool(agent_id=agent_id))
+    tools.append(VoteCharacterTool(agent_id=agent_id))
+
+    # Alliance/social tools (#274)
+    tools.append(ProposeAllianceTool(agent_id=agent_id))
+    tools.append(VoteAllianceTool(agent_id=agent_id))
+    tools.append(LeaveAllianceTool(agent_id=agent_id))
+    tools.append(ViewAlliancesTool(agent_id=agent_id))
+
     # Web search and URL fetch tools
     tools.append(
         WebSearchTool(

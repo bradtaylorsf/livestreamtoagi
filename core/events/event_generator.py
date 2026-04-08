@@ -271,20 +271,13 @@ class EventGenerator:
         if event.affected_agents:
             agent_ids = event.affected_agents
         else:
-            # All agents — but we don't have the full list here,
-            # so we rely on the caller to pass specific agents
-            return
+            # All agents — get IDs from state manager's known agents
+            agent_ids = list(self._state_mgr._states.keys()) if hasattr(self._state_mgr, '_states') else []
+            if not agent_ids:
+                return
 
-        severity_effects: dict[str, dict[str, float]] = {
-            "crisis": {"frustration": 0.15, "energy": 0.1},
-            "major": {"boredom": -0.2, "energy": 0.05},
-            "moderate": {"boredom": -0.15},
-            "minor": {"boredom": -0.1},
-        }
-
-        effects = severity_effects.get(event.severity, {})
         for agent_id in agent_ids:
             try:
-                await self._state_mgr.on_novel_event(agent_id)
+                await self._state_mgr.on_novel_event(agent_id, severity=event.severity)
             except Exception:
                 logger.warning("Failed to update state for %s", agent_id)
