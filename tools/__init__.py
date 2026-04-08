@@ -8,6 +8,7 @@ from .alpha_dispatch import DispatchAlphaTool
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
+from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "ProposeCharacterTool",
+    "VoteCharacterTool",
     "DispatchAlphaTool",
     "DraftEmailTool",
     "DraftSocialPostTool",
