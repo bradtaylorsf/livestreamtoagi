@@ -21,6 +21,7 @@ EVAL_SUITES: dict[str, list[str]] = {
     "autonomy": ["internal_state", "agency", "entertainment", "dialogue_quality"],
     "economy": ["economic_behavior", "entertainment", "social_dynamics"],
     "creative": ["creativity", "world_evolution", "entertainment"],
+    "narrative": ["simulation_narrative", "entertainment", "dialogue_quality"],
     "full": [],  # Empty means "all available" — resolved at runtime
 }
 

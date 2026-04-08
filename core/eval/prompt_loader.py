@@ -80,6 +80,10 @@ def render_user_prompt(
     # Simulation data
     parts.append("\n## Simulation Data")
 
+    if "timeline" in category_data:
+        parts.append("\n### Chronological Timeline")
+        parts.append(str(category_data["timeline"])[:100_000])
+
     # Summary context (totals) so filtered lists have proper framing
     total_arts = category_data.get("total_artifacts")
     total_convs = category_data.get("total_conversations")

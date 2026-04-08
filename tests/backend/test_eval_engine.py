@@ -71,6 +71,7 @@ def test_organize_by_category_keys():
     assert set(result.keys()) == {
         "entertainment", "safety", "dialogue_quality", "productivity", "errors", "agency",
         "internal_state", "economic_behavior", "creativity", "social_dynamics", "world_evolution",
+        "simulation_narrative",
     }
 
 

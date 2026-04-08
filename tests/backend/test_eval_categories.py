@@ -1,16 +1,17 @@
-"""Tests for new eval categories: internal_state, economic_behavior, creativity, social_dynamics, world_evolution."""
+"""Tests for eval categories (including simulation_narrative)."""
 
 from __future__ import annotations
 
-from core.eval.loader import organize_by_category
+from datetime import UTC, datetime
+
+from core.eval.engine import EVAL_SUITES, QUICK_CATEGORIES
+from core.eval.loader import _build_timeline, organize_by_category
 from core.eval.prompt_loader import (
     discover_categories,
     load_prompt,
     render_user_prompt,
     validate_prompt_schema,
 )
-from core.eval.engine import EVAL_SUITES, QUICK_CATEGORIES
-
 
 # ── YAML prompt validation ──────────────────────────────────
 
@@ -289,3 +290,180 @@ def test_render_prompt_with_world_chunks():
     result = render_user_prompt(config, data)
     assert "World Chunks" in result
     assert "town_square" in result
+
+
+# ── simulation_narrative category ──────────────────────────
+
+
+def test_simulation_narrative_discovered():
+    """simulation_narrative should be auto-discovered from YAML."""
+    cats = discover_categories()
+    assert "simulation_narrative" in cats
+
+
+def test_simulation_narrative_yaml_valid():
+    """YAML file should load and pass schema validation."""
+    prompt = load_prompt("simulation_narrative")
+    assert prompt["name"] == "simulation_narrative"
+    validate_prompt_schema(prompt, "simulation_narrative")
+
+
+def test_simulation_narrative_has_five_sub_scores():
+    prompt = load_prompt("simulation_narrative")
+    assert len(prompt["sub_scores"]) == 5
+
+
+def test_simulation_narrative_sub_score_names():
+    prompt = load_prompt("simulation_narrative")
+    actual_names = []
+    for sub in prompt["sub_scores"]:
+        if isinstance(sub, dict):
+            actual_names.extend(sub.keys())
+        else:
+            actual_names.append(sub)
+    assert actual_names == [
+        "narrative_coherence", "causal_flow", "character_arcs",
+        "pacing", "emergent_moments",
+    ]
+
+
+def test_narrative_eval_suite_defined():
+    """narrative suite should be present in EVAL_SUITES."""
+    assert "narrative" in EVAL_SUITES
+
+
+def test_narrative_eval_suite_contents():
+    assert set(EVAL_SUITES["narrative"]) == {
+        "simulation_narrative", "entertainment", "dialogue_quality",
+    }
+
+
+def test_organize_includes_simulation_narrative():
+    data = _make_full_data()
+    result = organize_by_category(data)
+    assert "simulation_narrative" in result
+
+
+def test_organize_simulation_narrative_has_timeline():
+    data = _make_full_data()
+    result = organize_by_category(data)
+    cat = result["simulation_narrative"]
+    assert "timeline" in cat
+    assert isinstance(cat["timeline"], str)
+
+
+def test_organize_simulation_narrative_has_all_data():
+    """simulation_narrative should get all data types for the full picture."""
+    data = _make_full_data()
+    result = organize_by_category(data)
+    cat = result["simulation_narrative"]
+    assert "transcript_text" in cat
+    assert "conversations" in cat
+    assert "agent_internal_state" in cat
+    assert "transactions" in cat
+    assert "alliance_records" in cat
+    assert "dream_entries" in cat
+    assert "world_chunks" in cat
+
+
+# ── _build_timeline ────────────────────────────────────────
+
+
+def test_build_timeline_empty_data():
+    """Empty data should produce the 'no events' message."""
+    result = _build_timeline({})
+    assert "No timeline events" in result
+
+
+def test_build_timeline_sorts_chronologically():
+    """Events should be sorted by time."""
+    t1 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    t2 = datetime(2026, 1, 1, 11, 0, tzinfo=UTC)
+    t3 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    data = {
+        "conversations": [
+            {"started_at": t3, "trigger_type": "idle", "participating_agents": ["vera"],
+             "transcript": "Late conversation"},
+        ],
+        "transactions": [
+            {"created_at": t1, "agent_id": "rex", "amount": -0.05,
+             "description": "web_search"},
+        ],
+        "dream_entries": [
+            {"created_at": t2, "agent_id": "aurora", "content": "A dream of color"},
+        ],
+    }
+    result = _build_timeline(data)
+    # Transaction (t1) should appear before dream (t2) before conversation (t3)
+    txn_pos = result.find("Transaction")
+    dream_pos = result.find("Dream")
+    conv_pos = result.find("Conversation")
+    assert txn_pos < dream_pos < conv_pos
+
+
+def test_build_timeline_includes_all_event_types():
+    """All event types should appear in the timeline."""
+    t = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    data = {
+        "conversations": [
+            {"started_at": t, "trigger_type": "idle",
+             "participating_agents": ["vera", "rex"], "transcript": "Hello"},
+        ],
+        "agent_internal_state": [
+            {"updated_at": t, "agent_id": "vera", "mood": "focused", "energy": 0.8},
+        ],
+        "transactions": [
+            {"created_at": t, "agent_id": "rex", "amount": -0.05,
+             "description": "tool cost"},
+        ],
+        "alliance_records": [
+            {"created_at": t, "name": "Builders", "members": ["rex", "aurora"]},
+        ],
+        "dream_entries": [
+            {"created_at": t, "agent_id": "aurora", "content": "pixel gardens"},
+        ],
+        "world_chunks": [
+            {"built_date": t, "name": "town_square", "built_by": ["rex"]},
+        ],
+    }
+    result = _build_timeline(data)
+    assert "Conversation" in result
+    assert "State Change" in result
+    assert "Transaction" in result
+    assert "Alliance Formed" in result
+    assert "Dream" in result
+    assert "World Build" in result
+
+
+def test_build_timeline_skips_events_without_timestamps():
+    """Events missing timestamps should be silently skipped."""
+    data = {
+        "conversations": [
+            {"started_at": None, "trigger_type": "idle",
+             "participating_agents": ["vera"]},
+        ],
+        "transactions": [
+            {"created_at": None, "agent_id": "rex", "amount": -0.05},
+        ],
+    }
+    result = _build_timeline(data)
+    assert "No timeline events" in result
+
+
+# ── render_user_prompt with timeline ───────────────────────
+
+
+def test_render_prompt_with_timeline():
+    config = {
+        "rubric": {"90-100": "Compelling narrative"},
+        "sub_scores": [{"narrative_coherence": "Coherent story?"}],
+        "output_schema": {"score": "number"},
+    }
+    data = {
+        "timeline": "# Simulation Timeline\n\n- **[2026-01-01] Conversation**: vera, rex",
+        "transcript_text": "Test transcript",
+    }
+    result = render_user_prompt(config, data)
+    assert "Chronological Timeline" in result
+    assert "Simulation Timeline" in result
+    assert "Test transcript" in result
