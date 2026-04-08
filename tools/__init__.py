@@ -15,6 +15,12 @@ from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMe
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
+from .social_tools import (
+    LeaveAllianceTool,
+    ProposeAllianceTool,
+    ViewAlliancesTool,
+    VoteAllianceTool,
+)
 from .task_management import ManageTaskTool
 from .tilemap_gen import GenerateTilemapTool
 from .web_tools import FetchUrlTool, WebSearchTool
@@ -40,6 +46,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "ProposeAllianceTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
     "DispatchAlphaTool",
@@ -52,6 +59,7 @@ __all__ = [
     "GetPollResultsTool",
     "GetRevenueStatusTool",
     "GetWorldStateTool",
+    "LeaveAllianceTool",
     "ManageTaskTool",
     "ProposeSelfModificationTool",
     "RecallMemoryTool",
@@ -62,7 +70,9 @@ __all__ = [
     "TransferBudgetTool",
     "UpdateCoreMemoryTool",
     "ViewAccountTool",
+    "ViewAlliancesTool",
     "ViewEvolutionLogTool",
+    "VoteAllianceTool",
     "WebSearchTool",
     "get_core_tools",
     "get_memory_tools",

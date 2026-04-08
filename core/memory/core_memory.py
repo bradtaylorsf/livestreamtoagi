@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 TOKEN_LIMIT = 3000
 
 VALID_SECTIONS = frozenset(
-    {"relationships", "key_learnings", "goals", "running_jokes"}
+    {"relationships", "key_learnings", "goals", "running_jokes", "alliances"}
 )
 
 # Maps update section names → markdown heading text
@@ -26,6 +26,7 @@ _SECTION_HEADINGS: dict[str, str] = {
     "key_learnings": "Key learnings",
     "goals": "Current goals",
     "running_jokes": "Running jokes / lore",
+    "alliances": "My alliances",
 }
 
 CORE_MEMORY_TEMPLATE = """\
@@ -53,6 +54,9 @@ CORE_MEMORY_TEMPLATE = """\
 
 ### Running jokes / lore
 - No running jokes yet
+
+### My alliances
+- No alliances formed yet
 """
 
 
