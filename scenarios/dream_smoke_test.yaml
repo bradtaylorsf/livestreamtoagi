@@ -1,0 +1,62 @@
+# Dream Smoke Test — minimal scenario to verify dream system works end-to-end
+#
+# What this tests:
+#   1. Journal entries are created for each agent (memory seeding)
+#   2. Dream cycle fires and produces narratives for each agent
+#   3. Dream-generated goals are persisted to agent_goals (source='dream')
+#   4. Dream journal entries appear in journal_entries (reflection_type='dream')
+#   5. Mood shifts are applied to agent_internal_state
+#
+# If bug 030 (source check constraint) is still present, all agents will log:
+#   "Failed to add dream goal for <agent_id>: ..."
+# After the migration runs, goals should be created successfully.
+#
+# After running, verify with:
+#   pnpm chat sim dream-smoke-test
+#
+# Then check DB:
+#   SELECT agent_id, source, goal FROM agent_goals WHERE source = 'dream';
+#   SELECT agent_id, reflection_type, LEFT(content,80) FROM journal_entries
+#     WHERE reflection_type = 'dream';
+#
+# Run with:
+#   pnpm chat sim dream-smoke-test --max-cost 3
+
+audience:
+  initial_viewers: 0
+  growth_rate: none
+  chat_frequency: silent
+
+seed_tasks: false
+seed_goals: false
+
+phases:
+  # Phase 1: seed memories via a real reflection cycle so each agent
+  # has journal entries to recombine in their dreams.
+  - name: seed_memories
+    type: organic
+    count: 2
+    agents: [vera, rex, aurora, fork, sentinel, pixel, grok]
+    topics:
+      - "Quick check-in — what's on your mind today?"
+    location: town_square
+
+  - name: first_reflection
+    type: reflection
+    reflection_type: 6hour
+    agents: [vera, rex, aurora, fork, sentinel, pixel, grok]
+
+  # Phase 2: the dream cycle itself — this is what we're testing
+  - name: dream_cycle
+    type: reflection
+    reflection_type: dream
+    agents: [vera, rex, aurora, fork, sentinel, pixel, grok]
+
+  # Phase 3: one conversation to see dream influence
+  - name: post_dream_check
+    type: organic
+    count: 1
+    agents: [vera, rex, aurora]
+    topics:
+      - "I had the strangest dream last night..."
+    location: town_square

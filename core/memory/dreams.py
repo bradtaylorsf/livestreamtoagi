@@ -164,7 +164,7 @@ class DreamManager:
                 model=agent_model,
                 agent_id=agent_id,
                 temperature=DREAM_TEMPERATURE,
-                max_tokens=800,
+                max_tokens=1200,
                 simulation_id=self._simulation_id,
             )
         except Exception:
@@ -302,8 +302,8 @@ class DreamManager:
                         source="dream",
                         category=goal.category,
                     )
-                except Exception:
-                    logger.warning("Failed to add dream goal for %s", agent_id)
+                except Exception as exc:
+                    logger.warning("Failed to add dream goal for %s: %s", agent_id, exc)
 
         # Store dream narrative as journal entry
         if self._repo is not None:

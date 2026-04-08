@@ -381,10 +381,12 @@ SCENARIO_PRESETS: list[tuple[str, str, str]] = [
     ("budget-crisis", "Test economic behavior under budget pressure", "scenarios/budget_crisis.yaml"),
     ("topic-exhaustion-test", "Test cross-conversation memory & topic exhaustion", "scenarios/topic_exhaustion_test.yaml"),
     ("novelty-injection-test", "Test random event generation & reactions", "scenarios/novelty_injection_test.yaml"),
+    ("dream-smoke-test", "Minimal dream smoke test — verify goals+journal are created", "scenarios/dream_smoke_test.yaml"),
     ("dream-cycle-test", "Test dream system & creative output", "scenarios/dream_cycle_test.yaml"),
     ("faction-emergence-test", "Test alliance formation over 48h", "scenarios/faction_emergence_test.yaml"),
     ("full-evolution-7d", "7-day full integration — all features", "scenarios/full_evolution_7d.yaml"),
     ("dress-rehearsal", "24h real-time streaming readiness test", "scenarios/dress_rehearsal.yaml"),
+    ("first-48h", "Awakening + dress rehearsal — full first 2 days", "scenarios/first_48h.yaml"),
     ("ab-test", "Standardized baseline for A/B feature comparison", "scenarios/ab_test.yaml"),
 ]
 

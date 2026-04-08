@@ -184,15 +184,21 @@ class MemoryRepo:
     # ── Recall Memory (time-based) ─────────────────────────────
 
     async def get_recent_recall_memories(
-        self, agent_id: str, since: datetime
+        self, agent_id: str, since: datetime, *, limit: int = 20
     ) -> list[RecallMemory]:
-        """Fetch Tier 2 recall memories created after `since`."""
+        """Fetch Tier 2 recall memories created after `since`.
+
+        Capped at `limit` (default 20) most recent to prevent reflection
+        prompts from growing unboundedly and truncating LLM responses.
+        """
         rows = await self.db.fetch(
             """SELECT * FROM recall_memory
                WHERE agent_id = $1 AND timestamp >= $2
-               ORDER BY timestamp DESC""",
+               ORDER BY timestamp DESC
+               LIMIT $3""",
             agent_id,
             since,
+            limit,
         )
         return [_row_to_recall(r) for r in rows]
 

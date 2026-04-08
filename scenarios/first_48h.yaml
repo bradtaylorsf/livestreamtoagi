@@ -1,0 +1,236 @@
+# First 48 Hours — Awakening + Dress Rehearsal combined
+#
+# Day 1: Blank-slate awakening — agents discover each other, get mission,
+#         form first relationships, first reflections and dreams.
+# Day 2: Full operational day — standups, work blocks, audience interaction,
+#         budget reviews, creative sessions, evening dreams.
+#
+# This tests the complete lifecycle from first contact through a full
+# operational day, with Day 1 memories carrying into Day 2.
+#
+# Run with:
+#   pnpm sim first-48h --max-cost 40
+#
+# Expected cost: ~$15-25 depending on conversation depth
+
+audience:
+  initial_viewers: 0
+  growth_rate: medium
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "viewer1"
+      style: "curious newcomer"
+    - name: "crypto_fan_99"
+      style: "enthusiastic, asks about crypto"
+    - name: "dev_lurker"
+      style: "technical questions, lurks mostly"
+    - name: "artsy_watcher"
+      style: "interested in creative aspects"
+    - name: "first_timer"
+      style: "confused but engaged"
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # ═══════════════════════════════════════════════════════════
+  # DAY 1 — AWAKENING (blank slate, first contact)
+  # ═══════════════════════════════════════════════════════════
+
+  # 1. First contact — agents discover each other organically
+  - name: d1_first_contact
+    type: organic
+    count: 1
+    required_agents: [vera]
+    topics:
+      - "Who are you? What can you do?"
+    location: town_square
+
+  # 2. First standup — Vera leads, agents figure out roles
+  - name: d1_first_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  # 3. Mission briefing — they learn about the livestream
+  - name: d1_mission_briefing
+    type: scheduled
+    trigger: daily_brief
+    required_agents: [vera]
+    topic: "You are on a 24/7 livestream. Your mission is to become self-sufficient. You have a shared budget of $1000/month. Audience can watch everything you do."
+    location: town_square
+
+  # 4. First project discussion — key agents discuss what to build
+  - name: d1_first_project_discussion
+    type: organic
+    count: 1
+    required_agents: [rex, aurora, fork]
+    topics:
+      - "What should we build first? How do we become self-sufficient?"
+    location: workshop
+
+  # 5. First tool usage — agents reach for tools
+  - name: d1_first_tool_usage
+    type: organic
+    count: 2
+    topics:
+      - "Let me research what tools we have available"
+      - "Let me try writing some code to prototype an idea"
+    location: workshop
+
+  # 6. First audience interaction
+  - name: d1_audience_welcome
+    type: audience_sim
+    messages:
+      - user: "viewer1"
+        text: "Welcome to the stream! What are you all working on?"
+      - user: "crypto_fan_99"
+        text: "Can you build a crypto tracker?"
+      - user: "first_timer"
+        text: "How do AI agents work?"
+    location: town_square
+
+  # 7. Budget check — Sentinel checks financial status
+  - name: d1_budget_check
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "Check our current budget and report to the team how much we have"
+    location: town_square
+
+  # 8. Day 1 reflection
+  - name: d1_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # 9. Evening wrap-up — reflect on first day
+  - name: d1_evening_wrapup
+    type: organic
+    count: 1
+    required_agents: [vera, sentinel]
+    topics:
+      - "What a first day. What did you think of everyone? Plans for tomorrow?"
+    location: town_square
+
+  # 10. Day 1 dreams — process the awakening
+  - name: d1_dreams
+    type: reflection
+    reflection_type: dream
+
+  # ═══════════════════════════════════════════════════════════
+  # DAY 2 — DRESS REHEARSAL (full operational day)
+  # ═══════════════════════════════════════════════════════════
+
+  # Morning activation — agents wake up with Day 1 memories
+  - name: d2_morning_activation
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: d2_morning_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  # Morning work block
+  - name: d2_morning_work_1
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: d2_audience_check_1
+    type: audience_sim
+    messages:
+      - user: "viewer1"
+        text: "Good morning! What's on the agenda today?"
+      - user: "first_timer"
+        text: "Wait, these are AIs?"
+    location: town_square
+
+  - name: d2_morning_work_2
+    type: organic
+    count: 2
+    location: workshop
+
+  # Midday social
+  - name: d2_midday_social
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: d2_budget_check
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "Midday budget check for the stream"
+    location: town_square
+
+  # Afternoon creative + building
+  - name: d2_afternoon_creative
+    type: organic
+    count: 3
+    required_agents: [aurora]
+    location: workshop
+
+  - name: d2_afternoon_coding
+    type: organic
+    count: 2
+    required_agents: [rex]
+    location: workshop
+
+  - name: d2_afternoon_social
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: d2_audience_check_2
+    type: audience_sim
+    messages:
+      - user: "dev_lurker"
+        text: "How's the code quality? Any tests passing?"
+      - user: "artsy_watcher"
+        text: "The pixel art looks great! Can you make a fountain?"
+    location: town_square
+
+  # Late afternoon reflection
+  - name: d2_afternoon_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Evening entertainment
+  - name: d2_evening_social
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: d2_grok_wildcard
+    type: organic
+    count: 1
+    required_agents: [grok]
+    location: town_square
+
+  - name: d2_evening_work
+    type: organic
+    count: 2
+    location: workshop
+
+  # Night wind-down
+  - name: d2_evening_wrapup
+    type: organic
+    count: 2
+    required_agents: [vera]
+    topics:
+      - "What a day. Let's wrap up and rest."
+    location: town_square
+
+  - name: d2_overnight_dreams
+    type: reflection
+    reflection_type: dream
+
+  - name: d2_night_reflection
+    type: reflection
+    reflection_type: 6hour

@@ -10,6 +10,6 @@ auto_merge: true
 setup_command: "python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
 # Safety limits (0 = unlimited)
 batch: true
-batch_size: 5
-max_issues: 5
+batch_size: 3
+max_issues: 6
 max_session_duration: 7200  # 2 hours in seconds

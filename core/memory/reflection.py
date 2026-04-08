@@ -48,8 +48,7 @@ Recent recall memories (last 6 hours):
 Analyze these memories and respond with valid JSON:
 {{
   "importance_scores": {{
-    "<memory_id>": <float 0.0-1.0>,
-    ...
+    "<memory_id>": <float 0.0-1.0>
   }},
   "promotions": [
     {{
@@ -61,7 +60,8 @@ Analyze these memories and respond with valid JSON:
 }}
 
 Guidelines:
-- Rate each recall memory's importance from 0.0 (trivial) to 1.0 (critical).
+- Only include memories with importance > 0.3 in importance_scores. Skip trivial ones entirely.
+- Aim for 5-10 scored memories maximum — only what's genuinely worth tracking.
 - Only promote truly significant learnings to core memory.
 - When updating a section, include ALL existing items you want to keep plus new ones.
 - Keep key_learnings to 10 items max.
@@ -213,7 +213,7 @@ class ReflectionManager:
             model=model,
             agent_id=agent_id,
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=3000,
             simulation_id=self._simulation_id,
         )
 
@@ -695,11 +695,14 @@ def _repair_truncated_json(text: str) -> str:
     Walks through the string tracking open braces/brackets and whether we're
     inside a quoted string, then appends closing tokens so json.loads can
     succeed on the *complete* prefix of the object.
+
+    Falls back to truncating at the last safe comma when simple closure
+    would produce invalid JSON (e.g. a partial number like ``0.``).
     """
     in_string = False
     escape = False
     stack: list[str] = []  # tracks open { and [
-    last_valid = 0
+    last_comma_pos = 0      # position after the last top-level comma (safe rollback)
 
     for i, ch in enumerate(text):
         if escape:
@@ -719,31 +722,50 @@ def _repair_truncated_json(text: str) -> str:
         elif ch == "}":
             if stack and stack[-1] == "{":
                 stack.pop()
-                last_valid = i
         elif ch == "]":
             if stack and stack[-1] == "[":
                 stack.pop()
-                last_valid = i
+        elif ch == "," and stack:
+            last_comma_pos = i + 1  # one past the comma — safe rollback point
 
     if not stack:
         return text  # nothing to repair
 
-    # Truncate to last cleanly-closed position + trailing content,
-    # then close remaining open brackets/braces.
-    # First, strip any trailing partial value (e.g. a truncated string or number)
-    repaired = text.rstrip()
-    if in_string:
-        repaired += '"'
-    # Handle trailing colon (truncated key-value pair) — add null as placeholder
-    stripped = repaired.rstrip()
-    if stripped.endswith(":"):
-        repaired = stripped + " null"
-    # Remove trailing commas that would make JSON invalid
-    repaired = repaired.rstrip().rstrip(",")
-    # Close remaining open structures in reverse order
-    for bracket in reversed(stack):
-        repaired += "}" if bracket == "{" else "]"
-    return repaired
+    def _close(s: str) -> str:
+        s = s.rstrip()
+        if in_string:
+            s += '"'
+        stripped = s.rstrip()
+        if stripped.endswith(":"):
+            s = stripped + " null"
+        s = s.rstrip().rstrip(",")
+        for bracket in reversed(stack):
+            s += "}" if bracket == "{" else "]"
+        return s
+
+    # Primary attempt: close from the current end.
+    # Handles truncation after ":" (adds null) and trailing commas.
+    primary = _close(text)
+    try:
+        json.loads(primary)
+        return primary
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: primary can fail when truncation lands mid-primitive, e.g.
+    #   "ID:481": 0.   ← partial float — 0. is not valid JSON
+    #   "ID:481": tru  ← partial literal
+    # Roll back to the last safe comma (after the previous complete entry)
+    # and close from there, discarding only the one incomplete entry.
+    if last_comma_pos > 0:
+        fallback = _close(text[:last_comma_pos])
+        try:
+            json.loads(fallback)
+            return fallback
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return primary  # caller will handle remaining parse failure
 
 
 def _parse_json_response(content: str) -> dict:
