@@ -93,6 +93,24 @@ class WorldRepo:
         )
         return WorldEvent(**dict(row))
 
+    async def get_recent_events(self, hours: int = 24) -> list[WorldEvent]:
+        """Get events from the last N hours for cooldown and history checks."""
+        rows = await self.db.fetch(
+            """SELECT * FROM world_events
+               WHERE created_at > NOW() - make_interval(hours => $1)
+               ORDER BY created_at DESC""",
+            hours,
+        )
+        return [WorldEvent(**dict(r)) for r in rows]
+
+    async def get_event_count_since(self, since: str) -> int:
+        """Count events since a given timestamp (ISO format or interval)."""
+        count = await self.db.fetchval(
+            "SELECT COUNT(*) FROM world_events WHERE created_at > $1::timestamptz",
+            since,
+        )
+        return count or 0
+
     # ── Expansion Proposals ─────────────────────────────────
 
     async def create_proposal(self, proposal: ExpansionProposalCreate) -> ExpansionProposal:

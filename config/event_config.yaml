@@ -1,0 +1,15 @@
+probability_per_hour:
+  minor: 0.15
+  moderate: 0.05
+  major: 0.01
+  crisis: 0.005
+
+max_events_per_day: 4
+min_hours_between_events: 2.0
+
+category_weights:
+  environmental: 0.25
+  social: 0.20
+  economic: 0.20
+  world: 0.20
+  challenge: 0.15

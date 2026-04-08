@@ -1,0 +1,31 @@
+id: "{agent_id}"
+display_name: "{display_name}"
+role: "{role}"
+model_conversation: "{model_conversation}"
+model_building: "{model_building}"
+voice_id: "{voice_id}"
+color_hex: "{color_hex}"
+color_rich: "{color_rich}"
+chattiness: 0.5
+initiative: 0.4
+interrupt_tendency: 0.3
+eavesdrop_tendency: 0.4
+closing_weight: 0.2
+role_priority_bonus: 0.0
+cross_agent_writer: false
+
+tools:
+  - web_search
+  - send_chat_message
+
+topic_relevance:
+  code: 0.3
+  art: 0.3
+  budget: 0.3
+  philosophy: 0.3
+  audience: 0.3
+  drama: 0.3
+  planning: 0.3
+  building: 0.3
+
+adjacency: {}

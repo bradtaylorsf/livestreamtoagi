@@ -52,6 +52,27 @@ class AgentEconomyManager:
                 per_agent,
             )
 
+    async def create_account(
+        self,
+        agent_id: str,
+        simulation_id: object = None,
+        initial_balance: Decimal | None = None,
+    ) -> AgentAccount:
+        """Create a single agent account (used for new character onboarding).
+
+        If account already exists, returns the existing one.
+        """
+        alloc = initial_balance or (DEFAULT_WEEKLY_TOTAL * INDIVIDUAL_SHARE / 9)
+        await self._db.execute(
+            """INSERT INTO agent_accounts (agent_id, balance, weekly_allocation)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (agent_id) DO NOTHING""",
+            agent_id,
+            alloc,
+            alloc,
+        )
+        return await self.get_account(agent_id)
+
     async def get_account(self, agent_id: str) -> AgentAccount:
         """Get the full account for an agent."""
         row = await self._db.fetchrow(

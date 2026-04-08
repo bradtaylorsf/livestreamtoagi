@@ -241,6 +241,20 @@ class MemoryRepo:
         )
         return [JournalEntry(**dict(r)) for r in rows], count or 0
 
+    async def get_recent_journal_entries(
+        self, agent_id: str, limit: int = 10,
+    ) -> list[JournalEntry]:
+        """Return most recent journal entries (for dream recombination)."""
+        rows = await self.db.fetch(
+            """SELECT * FROM journal_entries
+               WHERE agent_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            agent_id,
+            limit,
+        )
+        return [JournalEntry(**dict(r)) for r in rows]
+
     async def search_recall_memories_by_keyword(
         self,
         agent_id: str,

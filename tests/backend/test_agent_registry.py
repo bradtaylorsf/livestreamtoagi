@@ -91,7 +91,7 @@ def _discover_agent_ids() -> set[str]:
     """Discover expected agent IDs from the agents/ directory."""
     return {
         d.name for d in AGENTS_DIR.iterdir()
-        if d.is_dir() and (d / "config.yaml").exists()
+        if d.is_dir() and (d / "config.yaml").exists() and d.name != "template"
     }
 
 

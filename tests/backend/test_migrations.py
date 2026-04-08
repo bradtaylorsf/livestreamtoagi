@@ -51,7 +51,7 @@ def _discover_agent_ids() -> list[str]:
     agents_dir = Path(__file__).resolve().parent.parent.parent / "agents"
     return sorted(
         d.name for d in agents_dir.iterdir()
-        if d.is_dir() and (d / "config.yaml").exists()
+        if d.is_dir() and (d / "config.yaml").exists() and d.name != "template"
     )
 
 

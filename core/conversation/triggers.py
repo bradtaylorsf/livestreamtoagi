@@ -44,6 +44,15 @@ ENVIRONMENTAL_EVENTS = frozenset({
     "world_expansion",
     "budget_update",
     "viewer_milestone",
+    "random_event",
+    "morning_briefing",
+    "challenge_event",
+})
+
+# Character lifecycle event types
+CHARACTER_EVENTS = frozenset({
+    "character_deliberation",
+    "character_welcome",
 })
 
 # Audience event types
@@ -103,6 +112,8 @@ class TriggerSystem:
             category = "tension"
         elif event_type in AUDIENCE_EVENTS:
             category = "audience"
+        elif event_type in CHARACTER_EVENTS:
+            category = "character"
         else:
             category = "environmental"
         # Dedup: reject if an event with the same type is already pending
@@ -222,6 +233,8 @@ class TriggerSystem:
         # Pixel gets first crack at audience events
         if category == "audience":
             starter = "pixel"
+        elif category == "character":
+            starter = "vera"  # Vera coordinates new character discussions
         elif category == "tension":
             # For tensions, pick from the original participants if available
             participants = event["data"].get("from_participants", [])

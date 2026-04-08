@@ -8,12 +8,19 @@ from .alpha_dispatch import DispatchAlphaTool
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
+from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
+from .social_tools import (
+    LeaveAllianceTool,
+    ProposeAllianceTool,
+    ViewAlliancesTool,
+    VoteAllianceTool,
+)
 from .task_management import ManageTaskTool
 from .tilemap_gen import GenerateTilemapTool
 from .web_tools import FetchUrlTool, WebSearchTool
@@ -39,6 +46,9 @@ if TYPE_CHECKING:
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "ProposeAllianceTool",
+    "ProposeCharacterTool",
+    "VoteCharacterTool",
     "DispatchAlphaTool",
     "DraftEmailTool",
     "DraftSocialPostTool",
@@ -49,6 +59,7 @@ __all__ = [
     "GetPollResultsTool",
     "GetRevenueStatusTool",
     "GetWorldStateTool",
+    "LeaveAllianceTool",
     "ManageTaskTool",
     "ProposeSelfModificationTool",
     "RecallMemoryTool",
@@ -59,7 +70,9 @@ __all__ = [
     "TransferBudgetTool",
     "UpdateCoreMemoryTool",
     "ViewAccountTool",
+    "ViewAlliancesTool",
     "ViewEvolutionLogTool",
+    "VoteAllianceTool",
     "WebSearchTool",
     "get_core_tools",
     "get_memory_tools",
@@ -160,6 +173,16 @@ def get_core_tools(
     if economy_manager is not None:
         tools.append(TransferBudgetTool(economy_manager=economy_manager, agent_id=agent_id))
         tools.append(ViewAccountTool(economy_manager=economy_manager, agent_id=agent_id))
+
+    # Character proposal/voting tools (#275)
+    tools.append(ProposeCharacterTool(agent_id=agent_id))
+    tools.append(VoteCharacterTool(agent_id=agent_id))
+
+    # Alliance/social tools (#274)
+    tools.append(ProposeAllianceTool(agent_id=agent_id))
+    tools.append(VoteAllianceTool(agent_id=agent_id))
+    tools.append(LeaveAllianceTool(agent_id=agent_id))
+    tools.append(ViewAlliancesTool(agent_id=agent_id))
 
     # Web search and URL fetch tools
     tools.append(
