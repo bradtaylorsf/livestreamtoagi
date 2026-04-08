@@ -52,6 +52,11 @@ AUDIENCE_EVENTS = frozenset({
     "chat_highlight",
 })
 
+# Tension events seeded from unresolved conversation topics (#271)
+TENSION_EVENTS = frozenset({
+    "tension",
+})
+
 
 class TriggerSystem:
     """Checks each tick whether a new conversation should start."""
@@ -89,12 +94,17 @@ class TriggerSystem:
         self._last_speech_time = self._clock.monotonic()
 
     def queue_event(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
-        """Push an environmental or audience event for processing on the next tick.
+        """Push an environmental, audience, or tension event for processing on the next tick.
 
         Duplicate events (same event_type) are collapsed to prevent
         identical conversations from being triggered multiple times.
         """
-        category = "audience" if event_type in AUDIENCE_EVENTS else "environmental"
+        if event_type in TENSION_EVENTS:
+            category = "tension"
+        elif event_type in AUDIENCE_EVENTS:
+            category = "audience"
+        else:
+            category = "environmental"
         # Dedup: reject if an event with the same type is already pending
         for existing in self._pending_events:
             if existing["event_type"] == event_type:
@@ -210,16 +220,33 @@ class TriggerSystem:
         category = event["category"]
 
         # Pixel gets first crack at audience events
-        starter = "pixel" if category == "audience" else self._select_by_initiative()
+        if category == "audience":
+            starter = "pixel"
+        elif category == "tension":
+            # For tensions, pick from the original participants if available
+            participants = event["data"].get("from_participants", [])
+            starter = self._rng.choice(participants) if participants else self._select_by_initiative()
+        else:
+            starter = self._select_by_initiative()
 
         # Sanitize event data for prompt — stringify and truncate to prevent
         # prompt injection from external sources (chat messages, donations)
         sanitized_data = str(event["data"])[:500]
 
+        # Tension events get a special prompt hint to continue the discussion
+        if category == "tension":
+            tension_text = event["data"].get("text", "an unresolved topic")
+            prompt_hint = (
+                f"There's an unresolved issue from earlier: {tension_text}. "
+                "Bring this up and try to make progress on it."
+            )
+        else:
+            prompt_hint = f"Respond to {event_type}: {sanitized_data}"
+
         return {
             "type": category,
             "starter_agent_id": starter,
-            "prompt_hint": f"Respond to {event_type}: {sanitized_data}",
+            "prompt_hint": prompt_hint,
             "event_type": event_type,
             "event_data": event["data"],
         }

@@ -1034,6 +1034,36 @@ class AgentTransaction(BaseModel):
     created_at: datetime | None = None
 
 
+# ── Conversation Record (structured cross-conversation memory) ────
+
+
+class ConversationRecord(BaseModel):
+    """Structured record of a completed conversation for cross-conversation memory.
+
+    Captures structured details beyond a plain text summary so the system
+    can seed future conversations with unresolved tensions and avoid
+    rehashing exhausted topics.
+    """
+
+    summary: str
+    topics: list[str] = Field(default_factory=list)
+    outcome: str = ""
+    key_decisions: list[str] = Field(default_factory=list)
+    unresolved_tensions: list[str] = Field(default_factory=list)
+    novel_information: list[str] = Field(default_factory=list)
+    participants: list[str] = Field(default_factory=list)
+    turn_count: int = 0
+
+    def format_for_context(self) -> str:
+        """Format this record into a concise string for the agent context window."""
+        parts = [self.summary]
+        if self.key_decisions:
+            parts.append(f"Decisions: {'; '.join(self.key_decisions)}")
+        if self.unresolved_tensions:
+            parts.append(f"Unresolved: {'; '.join(self.unresolved_tensions)}")
+        return " ".join(parts)
+
+
 # ── Versioned Agent Config ─────────────────────────────────────────
 
 

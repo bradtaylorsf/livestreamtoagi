@@ -77,16 +77,50 @@ class TopicDetector:
                 result.append(topic)
         return result
 
+    def get_topic_exhaustion(self, topic: str) -> str:
+        """Return exhaustion status for a topic based on recent mention count.
+
+        Returns:
+            "available" (0-2 mentions), "cooling_down" (3-4), or "exhausted" (5+).
+        """
+        if topic == "general" or topic not in self._topic_history:
+            return "available"
+        now = time.monotonic()
+        recent = [t for t in self._topic_history[topic] if now - t < TOPIC_DEDUP_WINDOW_SECONDS]
+        count = len(recent)
+        if count >= 5:
+            return "exhausted"
+        if count >= 3:
+            return "cooling_down"
+        return "available"
+
+    def get_all_exhaustion(self) -> dict[str, str]:
+        """Return exhaustion status for all tracked topics."""
+        result: dict[str, str] = {}
+        for topic in self._topic_history:
+            status = self.get_topic_exhaustion(topic)
+            if status != "available":
+                result[topic] = status
+        return result
+
     async def detect_topic(self, recent_messages: list[dict]) -> str:
         """Classify recent messages into a single topic string.
 
-        1. Concatenate message contents, lowercase.
-        2. Count keyword hits per topic.
-        3. Return highest-scoring topic, or fall back to LLM / "general".
+        When an LLM client is available, uses LLM classification first for
+        higher accuracy. Falls back to keyword matching when LLM is unavailable
+        or on LLM failure.
         """
         if not recent_messages:
             return "general"
 
+        # LLM-first when available
+        if self._llm_client is not None:
+            try:
+                return await self._llm_classify_topic(recent_messages)
+            except Exception:
+                logger.warning("LLM topic classification failed, falling back to keywords")
+
+        # Keyword matching fallback
         text = " ".join(m.get("content", "") for m in recent_messages).lower()
 
         topic_scores: dict[str, int] = {}
@@ -97,9 +131,6 @@ class TopicDetector:
 
         if topic_scores:
             return max(topic_scores, key=topic_scores.get)  # type: ignore[arg-type]
-
-        if self._config.fallback_to_llm and self._llm_client is not None:
-            return await self._llm_classify_topic(recent_messages)
 
         return "general"
 

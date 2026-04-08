@@ -197,16 +197,16 @@ def test_phase_runner_summaries_buffer():
 
     assert len(runner._conversation_summaries) == 0
     assert isinstance(runner._conversation_summaries, deque)
-    assert runner._conversation_summaries.maxlen == 5
+    assert runner._conversation_summaries.maxlen == 25
     assert isinstance(runner._recent_outputs, deque)
     assert runner._recent_outputs.maxlen == 50
 
-    # Simulate adding summaries — deque(maxlen=5) handles trimming automatically
-    for i in range(7):
+    # Simulate adding summaries — deque(maxlen=25) handles trimming automatically
+    for i in range(30):
         runner._conversation_summaries.append(f"Summary {i}")
 
-    assert len(runner._conversation_summaries) == 5
-    assert runner._conversation_summaries[0] == "Summary 2"
+    assert len(runner._conversation_summaries) == 25
+    assert runner._conversation_summaries[0] == "Summary 5"
 
 
 def test_is_repetitive_blocks_after_retry():

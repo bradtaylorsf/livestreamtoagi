@@ -20,7 +20,7 @@ from core.conversation.pacing import calculate_pause
 from core.conversation.speaker_selector import InterruptState, SpeakerSelector
 from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
-from core.models import ConversationCreate
+from core.models import ConversationCreate, ConversationRecord
 from core.speech_parser import parse_speech
 from core.tool_executor import (
     MAX_TOOL_ROUNDS,
@@ -166,6 +166,7 @@ class ConversationEngine:
         self._recent_summaries = recent_conversation_summaries or []
         self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=50)
         self._last_conversation_summary: str | None = None
+        self._last_conversation_record: ConversationRecord | None = None
 
         # Required-agent participation tracking
         self._required_agents: set[str] = required_agents or set()
@@ -202,6 +203,10 @@ class ConversationEngine:
     @property
     def recent_outputs(self) -> list[str]:
         return list(self._recent_outputs)
+
+    @property
+    def last_conversation_record(self) -> ConversationRecord | None:
+        return self._last_conversation_record
 
     @property
     def topic_history(self) -> dict[str, list[float]]:
@@ -620,17 +625,16 @@ class ConversationEngine:
         # Extract commitments and create goals
         await self._extract_commitments(conv)
 
-        # Build a rich summary for cross-phase context
+        # Build a structured conversation record for cross-phase context (#271)
         speakers = list(dict.fromkeys(msg.get("speaker", "unknown") for msg in conv.history))
         topics_str = ", ".join(conv.topics[:3]) if conv.topics else "general"
         metadata_stub = (
             f"Conversation between {', '.join(speakers)} about {topics_str} "
             f"({conv.turn_number} turns)."
         )
-        self._last_conversation_summary = await self._generate_rich_summary(
-            conv,
-            metadata_stub,
-        )
+        record = await self._generate_conversation_record(conv, metadata_stub)
+        self._last_conversation_record = record
+        self._last_conversation_summary = record.format_for_context()
 
         # Record that each participant spoke (for weighted speaker selection)
         for agent_id in set(msg.get("speaker", "") for msg in conv.history if msg.get("speaker")):
@@ -706,48 +710,71 @@ class ConversationEngine:
 
         self._active = None
 
-    # ── Rich summary generation ─────────────────────────────────
+    # ── Structured conversation record generation ──────────────────
 
-    async def _generate_rich_summary(
+    async def _generate_conversation_record(
         self,
         conv: _ActiveConversation,
-        fallback: str,
-    ) -> str:
-        """Generate a rich LLM summary of the conversation.
+        fallback_summary: str,
+    ) -> ConversationRecord:
+        """Generate a structured ConversationRecord via LLM.
 
-        Falls back to *fallback* (a simple metadata stub) on any failure.
+        Falls back to a minimal record with *fallback_summary* on any failure.
         """
+        speakers = list(dict.fromkeys(
+            msg.get("speaker", "unknown") for msg in conv.history
+        ))
+        fallback = ConversationRecord(
+            summary=fallback_summary,
+            topics=list(conv.topics),
+            participants=speakers,
+            turn_count=conv.turn_number,
+        )
+
         try:
             transcript = "\n".join(
                 f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
                 for msg in conv.history
             )
             prompt = (
-                "Summarize this conversation in 2-4 sentences covering:\n"
-                "- Decisions made\n"
-                "- Commitments (who will do what)\n"
-                "- Unresolved tensions or disagreements\n"
-                "- Open questions\n"
-                "- Notable emotional moments\n\n"
+                "Analyze this conversation and return a JSON object with:\n"
+                '- "summary": 2-3 sentence summary\n'
+                '- "outcome": one-line outcome (e.g. "agreed to build dashboard")\n'
+                '- "key_decisions": array of decisions made\n'
+                '- "unresolved_tensions": array of disagreements or open questions\n'
+                '- "novel_information": array of new facts or ideas introduced\n\n'
+                "Return ONLY valid JSON, no markdown.\n\n"
                 f"Conversation:\n{transcript}"
             )
             response = await self._llm.complete(
                 messages=[
                     {"role": "system", "content": prompt},
-                    {"role": "user", "content": "Summarize now."},
+                    {"role": "user", "content": "Analyze now."},
                 ],
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.3,
                 simulation_id=self._simulation_id,
-                max_tokens=300,
+                max_tokens=500,
             )
-            summary = response.content.strip()
-            if summary:
-                return summary
+            raw = response.content.strip()
+            if raw:
+                import json as _json
+
+                data = _json.loads(raw)
+                return ConversationRecord(
+                    summary=data.get("summary", fallback_summary),
+                    topics=list(conv.topics),
+                    outcome=data.get("outcome", ""),
+                    key_decisions=data.get("key_decisions", []),
+                    unresolved_tensions=data.get("unresolved_tensions", []),
+                    novel_information=data.get("novel_information", []),
+                    participants=speakers,
+                    turn_count=conv.turn_number,
+                )
         except Exception:
             logger.warning(
-                "Rich summary generation failed for conversation %s, falling back to metadata stub",
+                "Conversation record generation failed for %s, using fallback",
                 conv.id,
                 exc_info=True,
             )
