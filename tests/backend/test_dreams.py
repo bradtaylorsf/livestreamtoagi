@@ -155,8 +155,8 @@ class TestDreamManager:
 
         await mgr.run_dream("vera")
 
-        repo.create_recall_memory.assert_called_once()
-        memory = repo.create_recall_memory.call_args[0][0]
+        repo.add_recall.assert_called_once()
+        memory = repo.add_recall.call_args[0][0]
         assert "[Dream insight]" in memory.summary
         assert memory.importance_score == 0.8
 

@@ -84,6 +84,7 @@ Respond with valid JSON only:
 }}
 
 Valid mood_shift values: "inspired", "anxious", "determined", "melancholy", "energized"
+Valid category values for goals: "creative", "social", "economic", "personal", "competitive"
 The dream narrative should be 2-3 paragraphs, surreal but anchored in your personality.
 Generate 1-2 goals that are creative and actionable.
 """
@@ -253,12 +254,16 @@ class DreamManager:
             return None
 
         try:
+            _valid_categories = {"creative", "social", "economic", "personal", "competitive"}
             goals = []
             for g in data.get("new_goals", []):
                 if isinstance(g, dict) and "description" in g:
+                    category = g.get("category", "creative")
+                    if category not in _valid_categories:
+                        category = "creative"
                     goals.append(DreamGoal(
                         description=g["description"],
-                        category=g.get("category", "creative"),
+                        category=category,
                         priority=min(5, max(1, int(g.get("priority", 3)))),
                     ))
 
@@ -324,7 +329,7 @@ class DreamManager:
                     from core.models import RecallMemoryCreate
                     text = f"[Dream insight] {insight}"
                     embedding = await self._embedding_fn(text)
-                    await self._repo.create_recall_memory(RecallMemoryCreate(
+                    await self._repo.add_recall(RecallMemoryCreate(
                         agent_id=agent_id,
                         summary=text,
                         embedding=embedding,

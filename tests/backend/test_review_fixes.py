@@ -154,8 +154,8 @@ class TestDreamEmbeddings:
         # embedding_fn should be called once per insight
         assert embedding_fn.call_count == 2
         # recall memories should be created with real embeddings
-        assert repo.create_recall_memory.call_count == 2
-        memory = repo.create_recall_memory.call_args_list[0][0][0]
+        assert repo.add_recall.call_count == 2
+        memory = repo.add_recall.call_args_list[0][0][0]
         assert memory.embedding == [0.1] * 1536  # Not zero vector
 
     @pytest.mark.asyncio
@@ -181,7 +181,7 @@ class TestDreamEmbeddings:
         # Journal should still be stored
         repo.create_journal_entry.assert_called_once()
         # But recall memories should NOT be created (no embedding_fn)
-        repo.create_recall_memory.assert_not_called()
+        repo.add_recall.assert_not_called()
 
 
 # ── MAJOR: Dream uses agent's building model ─────────────────────
