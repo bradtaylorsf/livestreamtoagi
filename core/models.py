@@ -46,14 +46,23 @@ class AgentConfig(BaseModel):
     model_config = ConfigDict(from_attributes=True, frozen=True)
     id: str
     display_name: str
+    role: str = ""
     model_conversation: str
     model_building: str
     voice_id: str | None = None
+    color_hex: str = "#888888"
+    color_rich: str = "white"
+    audio_effects: str | None = None
     chattiness: float = Field(ge=0.0, le=1.0)
     initiative: float = Field(ge=0.0, le=1.0)
     interrupt_tendency: float = Field(ge=0.0, le=1.0)
     eavesdrop_tendency: float = Field(ge=0.0, le=1.0, default=0.0)
     closing_weight: float = Field(ge=0.0, le=1.0, default=0.0)
+    role_priority_bonus: float = Field(ge=0.0, default=0.0)
+    cross_agent_writer: bool = False
+    tools: list[str] = Field(default_factory=list)
+    topic_relevance: dict[str, float] = Field(default_factory=dict)
+    adjacency: dict[str, float] = Field(default_factory=dict)
     status: AgentStatus = AgentStatus.active
     system_prompt: str = ""
     behaviors: dict[str, Any] = {}  # YAML-defined structure, varies per agent

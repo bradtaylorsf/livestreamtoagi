@@ -29,11 +29,7 @@ _LOCATION_TTL_SECONDS = 3600
 # Weighted selection constants
 _TIME_BONUS_CAP = 2.0
 _TIME_BONUS_INTERVAL = 300.0  # 5 minutes
-_ROLE_BONUS: dict[str, float] = {
-    "vera": 0.5,
-    "sentinel": 0.15,
-    "rex": 0.1,
-}
+_ROLE_BONUS: dict[str, float] = {}  # Populated from agent registry at startup
 
 
 class ProximityManager:
@@ -44,11 +40,13 @@ class ProximityManager:
         redis_client: RedisClient,
         config: ConversationConfig,
         event_bus: EventBus,
+        role_bonuses: dict[str, float] | None = None,
     ) -> None:
         self._redis = redis_client
         self._config = config
         self._event_bus = event_bus
         self._last_spoke: dict[str, float] = {}
+        self._role_bonuses = role_bonuses or _ROLE_BONUS
 
     @property
     def config(self) -> ConversationConfig:
@@ -141,7 +139,7 @@ class ProximityManager:
             last = self._last_spoke.get(agent.id)
             elapsed = now - last if last is not None else _TIME_BONUS_INTERVAL
             time_bonus = min(elapsed / _TIME_BONUS_INTERVAL, _TIME_BONUS_CAP)
-            role_bonus = _ROLE_BONUS.get(agent.id, 0.0)
+            role_bonus = self._role_bonuses.get(agent.id, 0.0)
             weights.append(base + time_bonus + role_bonus)
 
         # Weighted sampling without replacement

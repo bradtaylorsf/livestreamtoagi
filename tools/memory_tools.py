@@ -128,8 +128,10 @@ class UpdateCoreMemoryTool(BaseTool):
         self._core_manager = core_manager
         self._agent_id = agent_id
 
-    # Only these agents are allowed to update other agents' core memory
-    CROSS_AGENT_WRITERS = frozenset({"vera", "management"})
+    # Only agents with cross_agent_writer=true in their config can update
+    # other agents' core memory. This frozenset is overridden at runtime
+    # by tools/__init__.py when agent_registry is available.
+    CROSS_AGENT_WRITERS = frozenset({"vera", "management"})  # fallback default
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         section: str = kwargs["section"]

@@ -44,7 +44,17 @@ ALL_TABLES = [
     "eval_results",
 ]
 
-AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "management", "alpha"]
+def _discover_agent_ids() -> list[str]:
+    """Discover agent IDs from the agents/ directory."""
+    from pathlib import Path
+    agents_dir = Path(__file__).resolve().parent.parent.parent / "agents"
+    return sorted(
+        d.name for d in agents_dir.iterdir()
+        if d.is_dir() and (d / "config.yaml").exists()
+    )
+
+
+AGENT_IDS = _discover_agent_ids()
 
 
 @pytest.fixture()

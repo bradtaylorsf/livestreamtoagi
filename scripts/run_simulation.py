@@ -30,7 +30,19 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-DEFAULT_AGENTS = "vera,rex,aurora,pixel,fork,sentinel,grok"
+def _default_agents() -> str:
+    """Build default agent list from registry (conversation participants only)."""
+    from core.agent_registry import AgentRegistry
+
+    registry = AgentRegistry(redis_client=None)
+    agents = registry._load_all_from_yaml()
+    return ",".join(
+        a.id for a in agents.values()
+        if a.chattiness > 0 or a.initiative > 0
+    )
+
+
+DEFAULT_AGENTS = _default_agents()
 
 
 async def run_simulation(args: argparse.Namespace) -> None:

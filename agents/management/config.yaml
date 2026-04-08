@@ -3,10 +3,15 @@
 # interrupt_tendency is 1.0 because it always interrupts when content safety triggers.
 id: management
 display_name: "Management — The Exhausted Middle Layer"
+role: "Content Filter"
 model_conversation: anthropic/claude-haiku-4.5
 model_building: anthropic/claude-haiku-4.5
 voice_id: en-US-AndrewNeural
+color_hex: "#95a5a6"
+color_rich: "bright_white"
+audio_effects: "reverb_pitch_down"
 chattiness: 0.0
 initiative: 0.0
 interrupt_tendency: 1.0
 eavesdrop_tendency: 0.0
+cross_agent_writer: true

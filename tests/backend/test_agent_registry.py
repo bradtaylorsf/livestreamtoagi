@@ -87,18 +87,24 @@ def test_config_validation_valid():
 # ── Registry loading ─────────────────────────────────────────────
 
 
+def _discover_agent_ids() -> set[str]:
+    """Discover expected agent IDs from the agents/ directory."""
+    return {
+        d.name for d in AGENTS_DIR.iterdir()
+        if d.is_dir() and (d / "config.yaml").exists()
+    }
+
+
 @pytest.mark.asyncio
-async def test_registry_loads_all_9_agents():
-    """Registry loads all 9 agents from the agents/ directory."""
+async def test_registry_loads_all_agents():
+    """Registry loads all agents from the agents/ directory."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
     await registry.load_all()
     agents = registry.get_all_agents()
-    assert len(agents) == 9
+    expected_ids = _discover_agent_ids()
+    assert len(agents) == len(expected_ids)
     agent_ids = {a.id for a in agents}
-    assert agent_ids == {
-        "vera", "rex", "aurora", "pixel", "fork",
-        "sentinel", "grok", "management", "alpha",
-    }
+    assert agent_ids == expected_ids
 
 
 @pytest.mark.asyncio
@@ -1132,3 +1138,83 @@ async def test_yaml_validation_rejects_missing_required_keys(tmp_path):
     registry = AgentRegistry(agents_dir=tmp_path)
     await registry.load_all()
     assert registry.get_agent("partial") is None
+
+
+# ── Centralized config tests (#228) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_centralized_config_fields_loaded():
+    """All new centralized config fields load correctly from agent YAMLs."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    vera = registry.get_agent("vera")
+    assert vera is not None
+    assert vera.role == "Showrunner/Coordinator"
+    assert vera.color_hex == "#9b59b6"
+    assert vera.color_rich == "bright_magenta"
+    assert vera.audio_effects is None
+    assert vera.role_priority_bonus == 0.5
+    assert vera.cross_agent_writer is True
+    assert "web_search" in vera.tools
+    assert "dispatch_alpha" in vera.tools
+    assert vera.topic_relevance.get("planning") == 0.9
+    assert vera.adjacency.get("sentinel") == 0.8
+
+    management = registry.get_agent("management")
+    assert management is not None
+    assert management.audio_effects == "reverb_pitch_down"
+    assert management.cross_agent_writer is True
+
+    alpha = registry.get_agent("alpha")
+    assert alpha is not None
+    assert alpha.tools == []
+    assert alpha.cross_agent_writer is False
+
+
+@pytest.mark.asyncio
+async def test_registry_helper_methods():
+    """Registry helper methods build correct derived dicts."""
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    voice_map = registry.get_voice_map()
+    assert voice_map["vera"] == "en-GB-SoniaNeural"
+    assert "alpha" not in voice_map  # alpha has no voice
+
+    roles = registry.get_agent_roles()
+    assert roles["rex"] == "Engineer/Builder"
+
+    colors = registry.get_agent_colors()
+    assert colors["aurora"] == "#f1c40f"
+
+    rich_colors = registry.get_rich_colors()
+    assert rich_colors["fork"] == "bright_red"
+
+    bonuses = registry.get_role_bonuses()
+    assert bonuses["vera"] == 0.5
+    assert "alpha" not in bonuses  # no bonus
+
+    writers = registry.get_cross_agent_writers()
+    assert "vera" in writers
+    assert "management" in writers
+    assert "rex" not in writers
+
+    tool_agents = registry.get_allowed_agents_for_tool("execute_code")
+    assert "rex" in tool_agents
+    assert "fork" in tool_agents
+    assert "aurora" not in tool_agents
+
+    closer_weights = registry.build_closer_weights()
+    assert closer_weights["vera"] == 0.35
+
+    initiative = registry.build_initiative()
+    assert initiative["vera"] == 0.8
+    assert "alpha" not in initiative  # 0.0 initiative
+
+    relevance = registry.build_relevance_map()
+    assert relevance["code"]["rex"] == 0.9
+
+    adjacency = registry.build_adjacency()
+    assert adjacency["vera"]["rex"] == 0.7

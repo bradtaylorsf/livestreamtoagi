@@ -131,6 +131,10 @@ async def bootstrap_services(
     )
     await agent_registry.load_all()
 
+    # Populate per-agent conversation config from agent registry
+    if load_config:
+        config_loader.populate_from_registry(agent_registry)
+
     cost_repo = CostRepo(db)
     artifact_repo = ArtifactRepo(db)
     world_repo = WorldRepo(db)

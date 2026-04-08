@@ -1,10 +1,38 @@
 id: fork
 display_name: "Fork — The Contrarian"
+role: "Contrarian/Code Reviewer"
 model_conversation: deepseek/deepseek-v3.2
 model_building: deepseek/deepseek-v3.2
 voice_id: en-AU-WilliamNeural
+color_hex: "#2ecc71"
+color_rich: "bright_red"
 chattiness: 0.5
 initiative: 0.3
 interrupt_tendency: 0.6
 eavesdrop_tendency: 0.4
 closing_weight: 0.05
+
+tools:
+  - execute_code
+  - generate_tilemap
+  - dispatch_alpha
+
+topic_relevance:
+  code: 0.7
+  art: 0.2
+  budget: 0.4
+  philosophy: 0.9
+  audience: 0.3
+  drama: 0.5
+  planning: 0.4
+  building: 0.5
+  marketing: 0.2
+  controversy: 0.8
+
+adjacency:
+  rex: 0.8
+  grok: 0.6
+  vera: 0.5
+  aurora: 0.4
+  sentinel: 0.5
+  pixel: 0.3

@@ -20,6 +20,7 @@ from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
     import docker
+    from core.agent_registry import AgentRegistry
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
     from core.memory.archival_memory import ArchivalMemoryManager
@@ -93,6 +94,7 @@ def get_core_tools(
     artifact_repo: ArtifactRepo | None = None,
     simulation_mode: bool = False,
     shared_working_state: SharedWorkingState | None = None,
+    agent_registry: AgentRegistry | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -201,10 +203,20 @@ def get_core_tools(
     # Filter out tools the agent isn't authorized to use so they never
     # appear in the tool schema (prevents unauthorized call attempts).
     if agent_id != "unknown":
-        tools = [
-            t for t in tools
-            if not hasattr(t, "ALLOWED_AGENTS") or agent_id in t.ALLOWED_AGENTS
-        ]
+        if agent_registry is not None:
+            # Use agent config's tools list as the source of truth
+            agent_cfg = agent_registry.get_agent(agent_id)
+            agent_tools = set(agent_cfg.tools) if agent_cfg else set()
+            tools = [
+                t for t in tools
+                if not hasattr(t, "ALLOWED_AGENTS") or t.name in agent_tools
+            ]
+        else:
+            # Fallback: use hardcoded ALLOWED_AGENTS on tool classes
+            tools = [
+                t for t in tools
+                if not hasattr(t, "ALLOWED_AGENTS") or agent_id in t.ALLOWED_AGENTS
+            ]
 
     return tools
 
@@ -215,12 +227,18 @@ def get_memory_tools(
     core_manager: CoreMemoryManager,
     agent_id: str = "unknown",
     artifact_repo: ArtifactRepo | None = None,
+    agent_registry: AgentRegistry | None = None,
 ) -> list[BaseTool]:
     """Create instances of all memory tools for an agent."""
-    tools = [
+    update_tool = UpdateCoreMemoryTool(core_manager=core_manager, agent_id=agent_id)
+    # Override CROSS_AGENT_WRITERS from agent registry if available
+    if agent_registry is not None:
+        update_tool.CROSS_AGENT_WRITERS = agent_registry.get_cross_agent_writers()
+
+    tools: list[BaseTool] = [
         RecallMemoryTool(recall_manager=recall_manager, agent_id=agent_id),
         RetrieveTranscriptTool(archival_manager=archival_manager),
-        UpdateCoreMemoryTool(core_manager=core_manager, agent_id=agent_id),
+        update_tool,
     ]
 
     if artifact_repo is not None:

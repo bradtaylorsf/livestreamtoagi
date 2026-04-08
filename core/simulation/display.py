@@ -17,19 +17,6 @@ if TYPE_CHECKING:
     from core.simulation.orchestrator import SimulationConfig
     from core.simulation.phases import PhaseResult
 
-# Same color scheme as watch_conversations.py
-AGENT_COLORS: dict[str, str] = {
-    "vera": "bright_magenta",
-    "rex": "bright_green",
-    "aurora": "bright_cyan",
-    "pixel": "bright_yellow",
-    "fork": "bright_red",
-    "sentinel": "blue",
-    "grok": "dark_orange",
-    "management": "bright_white",
-    "alpha": "grey70",
-}
-
 PHASE_ICONS: dict[str, str] = {
     "scheduled": ">>",
     "organic": "..",
@@ -39,17 +26,33 @@ PHASE_ICONS: dict[str, str] = {
     "audience_sim": "<<",
 }
 
-custom_theme = Theme({
-    f"agent.{name}": color for name, color in AGENT_COLORS.items()
-})
-console = Console(theme=custom_theme)
+# Default colors used when registry is not available
+_DEFAULT_AGENT_COLORS: dict[str, str] = {"management": "bright_white"}
+
+
+def _build_agent_colors(agent_registry: Any = None) -> dict[str, str]:
+    """Build agent colors from registry, falling back to defaults."""
+    if agent_registry is not None:
+        return agent_registry.get_rich_colors()
+    return dict(_DEFAULT_AGENT_COLORS)
+
+
+def make_console(agent_registry: Any = None) -> Console:
+    """Create a Rich Console with agent color theme from registry."""
+    colors = _build_agent_colors(agent_registry)
+    theme = Theme({f"agent.{name}": color for name, color in colors.items()})
+    return Console(theme=theme)
+
+
+console = Console()
 
 
 class SimulationDisplay:
     """Rich-based terminal display for simulation progress."""
 
-    def __init__(self, *, verbose: bool = False) -> None:
+    def __init__(self, *, verbose: bool = False, agent_registry: Any = None) -> None:
         self._verbose = verbose
+        self._agent_colors = _build_agent_colors(agent_registry)
 
     def show_simulation_start(self, sim: Any, config: SimulationConfig) -> None:
         """Display simulation header."""
@@ -86,7 +89,7 @@ class SimulationDisplay:
         )
         if result.agents_participated:
             agents_str = ", ".join(
-                f"[{AGENT_COLORS.get(a, 'white')}]{a}[/{AGENT_COLORS.get(a, 'white')}]"
+                f"[{self._agent_colors.get(a, 'white')}]{a}[/{self._agent_colors.get(a, 'white')}]"
                 for a in result.agents_participated
             )
             stats += f" | agents: {agents_str}"
@@ -123,7 +126,7 @@ class SimulationDisplay:
         self, agent_id: str, reflection_type: str, simulated_time: datetime
     ) -> None:
         """Display auto-triggered reflection event."""
-        color = AGENT_COLORS.get(agent_id, "white")
+        color = self._agent_colors.get(agent_id, "white")
         time_str = simulated_time.strftime("%H:%M")
         console.print(
             f"  [dim]~~[/dim] [{color}]{agent_id}[/{color}] "
