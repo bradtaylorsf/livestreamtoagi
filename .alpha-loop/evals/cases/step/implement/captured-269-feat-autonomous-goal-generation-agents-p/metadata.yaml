@@ -1,0 +1,9 @@
+id: captured-269-feat-autonomous-goal-generation-agents-p
+description: "feat: autonomous goal generation — agents propose their own goals
+  during reflection"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 269
+  session: session/7-10-agent-autonomy-internal-economy
+  date: 2026-04-08

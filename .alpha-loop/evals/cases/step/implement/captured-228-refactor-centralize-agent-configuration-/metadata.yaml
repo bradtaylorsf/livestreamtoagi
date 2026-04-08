@@ -1,0 +1,9 @@
+id: captured-228-refactor-centralize-agent-configuration-
+description: "refactor: centralize agent configuration to eliminate hardcoded
+  agent IDs across codebase"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 228
+  session: session/7-10-agent-autonomy-internal-economy
+  date: 2026-04-08
