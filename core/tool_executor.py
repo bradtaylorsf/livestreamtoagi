@@ -36,6 +36,8 @@ def build_agent_tools(
 
     registry = ToolRegistry()
 
+    economy_manager = getattr(services, "economy_manager", None)
+
     core_tools = get_core_tools(
         event_bus=services.event_bus,
         redis_client=services.redis,
@@ -48,6 +50,8 @@ def build_agent_tools(
         artifact_repo=services.artifact_repo,
         simulation_mode=simulation_mode,
         shared_working_state=services.shared_working_state,
+        agent_registry=services.agent_registry,
+        economy_manager=economy_manager,
     )
     for tool in core_tools:
         registry.register(tool)

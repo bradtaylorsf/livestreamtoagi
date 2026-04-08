@@ -564,6 +564,8 @@ async def run_watch(args: argparse.Namespace) -> None:
                 core_memory_mgr=svc.core_memory,
                 token_counter=svc.token_counter,
                 agent_registry=svc.agent_registry,
+                goal_manager=svc.goal_manager,
+                agent_state_manager=svc.agent_state_manager,
             )
 
             reflect_type = getattr(args, "reflect_type", "6hour")

@@ -1094,7 +1094,7 @@ class ConversationEngine:
 
         # Build balance context if economy manager is available (#270)
         balance_context: str | None = None
-        if self._services and hasattr(self._services, "economy_manager") and self._services.economy_manager:
+        if self._services and self._services.economy_manager:
             try:
                 balance = await self._services.economy_manager.get_balance(agent.id)
                 balance_context = f"Your current balance: ${balance:.2f}"

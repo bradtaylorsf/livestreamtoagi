@@ -406,6 +406,8 @@ async def end_session(
             core_memory_mgr=core_memory_mgr,
             token_counter=token_counter,
             agent_registry=agent_registry,
+            goal_manager=services.goal_manager,
+            agent_state_manager=services.agent_state_manager,
         )
 
         try:
@@ -450,6 +452,8 @@ async def run_reflect(agent_id: str | None, services: Services, run_all: bool = 
         core_memory_mgr=core_memory_mgr,
         token_counter=token_counter,
         agent_registry=agent_registry,
+        goal_manager=services.goal_manager,
+        agent_state_manager=services.agent_state_manager,
     )
 
     if run_all:
@@ -527,6 +531,8 @@ async def run_reflect_interactive(agent_id: str, services: Services) -> None:
         core_memory_mgr=core_memory_mgr,
         token_counter=token_counter,
         agent_registry=agent_registry,
+        goal_manager=services.goal_manager,
+        agent_state_manager=services.agent_state_manager,
     )
 
     console.print("  [dim]Running reflection...[/dim]")
