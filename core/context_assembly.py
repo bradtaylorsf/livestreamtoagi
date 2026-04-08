@@ -124,6 +124,7 @@ class ContextAssembler:
         commitment_reminders: str | None = None,
         internal_state_context: str | None = None,
         balance_context: str | None = None,
+        recent_dream: str | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -228,6 +229,9 @@ class ContextAssembler:
         # Balance (#270)
         _track("balance", balance_context or "", bool(balance_context))
 
+        # Recent dream (#272)
+        _track("recent_dream", recent_dream or "", bool(recent_dream))
+
         # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint.startswith("topic:"):
@@ -290,6 +294,14 @@ class ContextAssembler:
         # Balance (#270)
         if balance_context:
             system_sections.append("## Your budget\n" + balance_context)
+
+        # Recent dream (#272) — injected so agents can reference dreams
+        if recent_dream:
+            system_sections.append(
+                "## Recent dream\n"
+                "You recently had a vivid dream. You can reference it naturally "
+                "if it feels relevant.\n\n" + recent_dream
+            )
 
         # Shared working state
         if shared_state_context:
