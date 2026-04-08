@@ -62,17 +62,61 @@ class DepartureManager:
     async def check_departure_conditions(self, agent_id: str) -> bool:
         """Check if an agent meets departure conditions.
 
-        Returns True if satisfaction < threshold AND frustration > threshold.
-        In production, would also check consecutive snapshots from DB history.
+        Returns True if satisfaction < threshold AND frustration > threshold
+        for CONSECUTIVE_SNAPSHOTS_REQUIRED consecutive DB snapshots.
         """
         if self._state_mgr is None:
             return False
 
+        # Check current state first (fast path)
         state = await self._state_mgr.get_state(agent_id)
-        return (
+        if not (
             state.satisfaction < SATISFACTION_THRESHOLD
             and state.frustration > FRUSTRATION_THRESHOLD
-        )
+        ):
+            return False
+
+        # Verify consecutive snapshots from DB history
+        if self._db is not None:
+            try:
+                rows = await self._db.fetch(
+                    """SELECT satisfaction, frustration
+                       FROM agent_internal_state_history
+                       WHERE agent_id = $1
+                       ORDER BY updated_at DESC
+                       LIMIT $2""",
+                    agent_id,
+                    CONSECUTIVE_SNAPSHOTS_REQUIRED,
+                )
+                # If we don't have enough history, use the agent_internal_state table
+                if len(rows) < CONSECUTIVE_SNAPSHOTS_REQUIRED:
+                    rows = await self._db.fetch(
+                        """SELECT satisfaction, frustration
+                           FROM agent_internal_state
+                           WHERE agent_id = $1""",
+                        agent_id,
+                    )
+                # Check all returned snapshots meet thresholds
+                if len(rows) < CONSECUTIVE_SNAPSHOTS_REQUIRED:
+                    logger.info(
+                        "Not enough state snapshots for %s (%d/%d), skipping departure",
+                        agent_id, len(rows), CONSECUTIVE_SNAPSHOTS_REQUIRED,
+                    )
+                    return False
+                for row in rows:
+                    if not (
+                        float(row["satisfaction"]) < SATISFACTION_THRESHOLD
+                        and float(row["frustration"]) > FRUSTRATION_THRESHOLD
+                    ):
+                        return False
+            except Exception:
+                # If history table doesn't exist, fall through to single-check
+                logger.debug(
+                    "State history check failed for %s, using current state only",
+                    agent_id, exc_info=True,
+                )
+
+        return True
 
     async def process_departure(
         self,
@@ -112,6 +156,18 @@ class DepartureManager:
                 reason,
                 narrative,
             )
+
+        # Deactivate the agent in the registry so they stop participating
+        if self._registry is not None:
+            try:
+                from core.models import AgentStatus
+                await self._registry.set_status(agent_id, AgentStatus.paused)
+                logger.info("Deactivated agent %s after departure", agent_id)
+            except Exception:
+                logger.warning(
+                    "Failed to deactivate agent %s after departure",
+                    agent_id, exc_info=True,
+                )
 
         # Emit departure event
         if self._event_bus is not None:

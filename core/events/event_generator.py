@@ -271,8 +271,8 @@ class EventGenerator:
         if event.affected_agents:
             agent_ids = event.affected_agents
         else:
-            # All agents — get IDs from state manager's known agents
-            agent_ids = list(self._state_mgr._states.keys()) if hasattr(self._state_mgr, '_states') else []
+            # All agents — get IDs from state manager's cache
+            agent_ids = list(self._state_mgr._cache.keys()) if hasattr(self._state_mgr, '_cache') else []
             if not agent_ids:
                 return
 

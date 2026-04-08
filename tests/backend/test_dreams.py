@@ -150,7 +150,8 @@ class TestDreamManager:
         llm = self._make_llm(self._default_dream_response())
         repo = AsyncMock()
         repo.get_recent_journal_entries.return_value = []
-        mgr = DreamManager(llm_client=llm, memory_repo=repo)
+        embedding_fn = AsyncMock(return_value=[0.1] * 1536)
+        mgr = DreamManager(llm_client=llm, memory_repo=repo, embedding_fn=embedding_fn)
 
         await mgr.run_dream("vera")
 

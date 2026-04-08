@@ -62,7 +62,15 @@ class AgentEconomyManager:
 
         If account already exists, returns the existing one.
         """
-        alloc = initial_balance or (DEFAULT_WEEKLY_TOTAL * INDIVIDUAL_SHARE / 9)
+        if initial_balance is not None:
+            alloc = initial_balance
+        else:
+            # Determine per-agent share based on current account count
+            count = await self._db.fetchval(
+                "SELECT COUNT(*) FROM agent_accounts"
+            )
+            divisor = max(count or 1, 1)
+            alloc = DEFAULT_WEEKLY_TOTAL * INDIVIDUAL_SHARE / divisor
         await self._db.execute(
             """INSERT INTO agent_accounts (agent_id, balance, weekly_allocation)
                VALUES ($1, $2, $3)
@@ -157,8 +165,8 @@ class AgentEconomyManager:
                 if "UPDATE 0" in result:
                     return False
 
-                # Credit to receiver
-                await conn.execute(
+                # Credit to receiver — must also succeed
+                result2 = await conn.execute(
                     """UPDATE agent_accounts
                        SET balance = balance + $2,
                            total_earned = total_earned + $2,
@@ -167,6 +175,10 @@ class AgentEconomyManager:
                     to_agent,
                     amount,
                 )
+                if "UPDATE 0" in result2:
+                    raise ValueError(
+                        f"Transfer failed: receiver {to_agent} has no account"
+                    )
 
                 # Record both sides
                 await conn.execute(
@@ -191,36 +203,38 @@ class AgentEconomyManager:
         self,
         agent_ids: list[str] | None = None,
     ) -> None:
-        """Deposit weekly allocation to all active agents."""
-        if agent_ids:
-            rows = await self._db.fetch(
-                """SELECT agent_id, weekly_allocation FROM agent_accounts
-                   WHERE agent_id = ANY($1)""",
-                agent_ids,
-            )
-        else:
-            rows = await self._db.fetch(
-                "SELECT agent_id, weekly_allocation FROM agent_accounts"
-            )
+        """Deposit weekly allocation to all active agents atomically."""
+        async with self._db.acquire() as conn:
+            async with conn.transaction():
+                if agent_ids:
+                    rows = await conn.fetch(
+                        """SELECT agent_id, weekly_allocation FROM agent_accounts
+                           WHERE agent_id = ANY($1)""",
+                        agent_ids,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT agent_id, weekly_allocation FROM agent_accounts"
+                    )
 
-        for row in rows:
-            aid = row["agent_id"]
-            alloc = Decimal(str(row["weekly_allocation"]))
-            await self._db.execute(
-                """UPDATE agent_accounts
-                   SET balance = balance + $2,
-                       total_earned = total_earned + $2,
-                       updated_at = now()
-                   WHERE agent_id = $1""",
-                aid,
-                alloc,
-            )
-            await self._db.execute(
-                """INSERT INTO agent_transactions (agent_id, type, amount, description)
-                   VALUES ($1, 'allocation', $2, 'Weekly allocation')""",
-                aid,
-                alloc,
-            )
+                for row in rows:
+                    aid = row["agent_id"]
+                    alloc = Decimal(str(row["weekly_allocation"]))
+                    await conn.execute(
+                        """UPDATE agent_accounts
+                           SET balance = balance + $2,
+                               total_earned = total_earned + $2,
+                               updated_at = now()
+                           WHERE agent_id = $1""",
+                        aid,
+                        alloc,
+                    )
+                    await conn.execute(
+                        """INSERT INTO agent_transactions (agent_id, type, amount, description)
+                           VALUES ($1, 'allocation', $2, 'Weekly allocation')""",
+                        aid,
+                        alloc,
+                    )
 
     async def get_transactions(
         self, agent_id: str, limit: int = 20,

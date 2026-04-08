@@ -12,17 +12,21 @@ from __future__ import annotations
 
 import logging
 import random
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from core.agent_goals import AgentGoalManager
+    from core.agent_registry import AgentRegistry
     from core.agent_state import AgentStateManager
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
+
+EmbeddingFn = Callable[[str], Coroutine[Any, Any, list[float]]]
 
 logger = logging.getLogger(__name__)
 
@@ -96,16 +100,20 @@ class DreamManager:
         core_memory_mgr: CoreMemoryManager | None = None,
         goal_manager: AgentGoalManager | None = None,
         agent_state_manager: AgentStateManager | None = None,
+        agent_registry: AgentRegistry | None = None,
         token_counter: Any = None,
         simulation_id: Any = None,
+        embedding_fn: EmbeddingFn | None = None,
     ) -> None:
         self._repo = memory_repo
         self._llm = llm_client
         self._core = core_memory_mgr
         self._goals = goal_manager
         self._state_mgr = agent_state_manager
+        self._registry = agent_registry
         self._tc = token_counter
         self._simulation_id = simulation_id
+        self._embedding_fn = embedding_fn
         self._rng = random.Random()
 
     async def run_dream(self, agent_id: str) -> DreamResult | None:
@@ -135,8 +143,11 @@ class DreamManager:
         )
 
         # 3. Get the agent's building model for dreaming
-        from core.agent_registry import AgentRegistry
-        agent_model = "anthropic/claude-haiku-4.5"  # Default
+        agent_model = "anthropic/claude-haiku-4.5"  # Fallback
+        if self._registry is not None:
+            agent_cfg = self._registry.get_agent(agent_id)
+            if agent_cfg is not None:
+                agent_model = agent_cfg.model_building
 
         # 4. Call LLM at high temperature
         system_content = prompt
@@ -306,15 +317,17 @@ class DreamManager:
             except Exception:
                 logger.warning("Failed to store dream journal for %s", agent_id)
 
-        # Store insights as high-importance recall memories
-        if self._repo is not None:
+        # Store insights as high-importance recall memories (only if we can embed)
+        if self._repo is not None and self._embedding_fn is not None:
             for insight in dream.insights:
                 try:
                     from core.models import RecallMemoryCreate
+                    text = f"[Dream insight] {insight}"
+                    embedding = await self._embedding_fn(text)
                     await self._repo.create_recall_memory(RecallMemoryCreate(
                         agent_id=agent_id,
-                        summary=f"[Dream insight] {insight}",
-                        embedding=[0.0] * 1536,  # Placeholder — real embedding would be generated
+                        summary=text,
+                        embedding=embedding,
                         event_type="dream",
                         importance_score=0.8,
                     ))

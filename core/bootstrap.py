@@ -203,8 +203,12 @@ async def bootstrap_services(
 
     economy_manager = AgentEconomyManager(db)
 
-    # Initialize economy accounts for all agents (best-effort — table may not exist yet)
-    agent_ids = [a.id for a in agent_registry.get_all_agents()]
+    # Initialize economy accounts — exclude management and alpha (non-participant agents)
+    _ECONOMY_EXCLUDED = {"management", "alpha"}
+    agent_ids = [
+        a.id for a in agent_registry.get_all_agents()
+        if a.id not in _ECONOMY_EXCLUDED
+    ]
     if agent_ids:
         try:
             await economy_manager.initialize_accounts(agent_ids)
@@ -244,7 +248,9 @@ async def bootstrap_services(
         core_memory_mgr=core_memory,
         goal_manager=goal_manager,
         agent_state_manager=agent_state_manager,
+        agent_registry=agent_registry,
         token_counter=token_counter,
+        embedding_fn=make_embedding_fn(http_client, api_key),
     )
 
     # Event/novelty injection (#273)

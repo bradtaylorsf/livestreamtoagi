@@ -181,22 +181,29 @@ class AllianceRepo:
         agent_id: str,
         accept: bool,
     ) -> dict[str, Any] | None:
-        """Record a vote on an alliance proposal. Returns updated proposal."""
-        row = await self.db.fetchrow(
-            "SELECT votes FROM alliance_proposals WHERE id = $1", proposal_id,
-        )
-        if row is None:
-            return None
+        """Record a vote on an alliance proposal. Returns updated proposal.
 
-        votes = row["votes"] or {}
-        if isinstance(votes, str):
-            votes = json.loads(votes)
-        votes[agent_id] = accept
+        Uses SELECT FOR UPDATE inside a transaction to prevent lost votes
+        when multiple agents vote concurrently.
+        """
+        async with self.db.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT votes FROM alliance_proposals WHERE id = $1 FOR UPDATE",
+                    proposal_id,
+                )
+                if row is None:
+                    return None
 
-        await self.db.execute(
-            "UPDATE alliance_proposals SET votes = $1::jsonb WHERE id = $2",
-            json.dumps(votes),
-            proposal_id,
-        )
+                votes = row["votes"] or {}
+                if isinstance(votes, str):
+                    votes = json.loads(votes)
+                votes[agent_id] = accept
+
+                await conn.execute(
+                    "UPDATE alliance_proposals SET votes = $1::jsonb WHERE id = $2",
+                    json.dumps(votes),
+                    proposal_id,
+                )
 
         return await self.get_proposal(proposal_id)

@@ -400,6 +400,9 @@ class CharacterSpawner:
         agent_dir = await self.create_agent_config(application)
         agent_id = application.name.lower().replace(" ", "_")
 
+        # Reload registry so the new agent is immediately available
+        await self._registry.load_all()
+
         await self.assign_desk(agent_id)
 
         # Set initial budget allocation

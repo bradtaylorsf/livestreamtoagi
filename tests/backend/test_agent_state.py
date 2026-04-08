@@ -94,8 +94,15 @@ class TestMoodDerivation:
         assert _derive_mood(state) == "competitive"
 
     def test_neutral_default(self) -> None:
-        state = AgentState(agent_id="a")
+        # Default state: energy=0.7, boredom=0.2 → "focused" (energy>=0.6, boredom<=0.2)
+        # To get "neutral", push boredom above 0.2 and satisfaction below 0.6
+        state = AgentState(agent_id="a", boredom=0.3)
         assert _derive_mood(state) == "neutral"
+
+    def test_focused_with_defaults(self) -> None:
+        # Default energy=0.7, boredom=0.2 → "focused"
+        state = AgentState(agent_id="a")
+        assert _derive_mood(state) == "focused"
 
 
 # ── Clamp ─────────────────────────────────────────────────────────

@@ -592,7 +592,7 @@ class ReflectionManager:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": f"Generate up to {max_goals} new goals now."},
                 ],
-                model="anthropic/claude-haiku-4.5",  # cheap model for goal generation
+                model=model,
                 agent_id=agent_id,
                 temperature=0.7,
                 max_tokens=500,

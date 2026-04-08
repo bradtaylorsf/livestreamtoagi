@@ -24,6 +24,15 @@ class _FakeConnection:
     async def execute(self, query: str, *args) -> str:
         return await self._db.execute(query, *args)
 
+    async def fetch(self, query: str, *args):
+        return await self._db.fetch(query, *args)
+
+    async def fetchrow(self, query: str, *args):
+        return await self._db.fetchrow(query, *args)
+
+    async def fetchval(self, query: str, *args):
+        return await self._db.fetchval(query, *args) if hasattr(self._db, 'fetchval') else None
+
     @asynccontextmanager
     async def transaction(self):
         yield  # no-op for in-memory fake
