@@ -102,6 +102,7 @@ class SimulationConfig:
         self.verbose = verbose
         self.management_shadow = management_shadow
         self.debug_prompts = debug_prompts
+        self.world_sim: bool = False
         self.phases: list[Phase] = []
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
@@ -157,6 +158,7 @@ class SimulationConfig:
             "mode": self.mode,
             "dry_run": self.dry_run,
             "management_shadow": self.management_shadow,
+            "world_sim": self.world_sim,
         }
         if self.duration is not None:
             d["duration_seconds"] = self.duration.total_seconds()
@@ -343,6 +345,23 @@ class SimulationOrchestrator:
             await audience_sim.seed_initial_state()
             audience_sim.start()
 
+        # Start world simulator if enabled
+        world_sim = None
+        if self._config.world_sim and not self._config.dry_run:
+            from core.simulation.recurring_personas import PersonaManager
+            from core.simulation.world_simulator import WorldSimulator
+
+            persona_mgr = PersonaManager(llm_client=self._llm, clock=self.clock)
+            persona_mgr.load_personas()
+            world_sim = WorldSimulator(
+                redis_client=self._redis,
+                llm_client=self._llm,
+                clock=self.clock,
+                event_bus=self._event_bus,
+                persona_manager=persona_mgr,
+            )
+            world_sim.start()
+
         # Seed shared task board and agent goals if configured
         if not self._config.dry_run:
             if self._config.seed_tasks and self._services and self._services.shared_working_state:
@@ -427,12 +446,16 @@ class SimulationOrchestrator:
             # Finalize
             if audience_sim:
                 await audience_sim.stop()
+            if world_sim:
+                await world_sim.stop()
             status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
             await self._finalize(status)
 
         except CostLimitExceededError:
             if audience_sim:
                 await audience_sim.stop()
+            if world_sim:
+                await world_sim.stop()
             logger.warning("Cost limit exceeded ($%s), stopping simulation", self._total_cost)
             self._display.show_cost_exceeded(self._total_cost, self._config.max_cost)
             await self._finalize(
@@ -443,6 +466,8 @@ class SimulationOrchestrator:
         except Exception as exc:
             if audience_sim:
                 await audience_sim.stop()
+            if world_sim:
+                await world_sim.stop()
             logger.exception("Simulation failed")
             await self._finalize(
                 SimulationStatus.failed,
@@ -480,6 +505,23 @@ class SimulationOrchestrator:
 
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
+
+        # Start world simulator if enabled
+        world_sim = None
+        if self._config.world_sim and not self._config.dry_run:
+            from core.simulation.recurring_personas import PersonaManager
+            from core.simulation.world_simulator import WorldSimulator
+
+            persona_mgr = PersonaManager(llm_client=self._llm, clock=self.clock)
+            persona_mgr.load_personas()
+            world_sim = WorldSimulator(
+                redis_client=self._redis,
+                llm_client=self._llm,
+                clock=self.clock,
+                event_bus=self._event_bus,
+                persona_manager=persona_mgr,
+            )
+            world_sim.start()
 
         conversation_num = 0
         current_day = self.clock.simulated_day()
@@ -597,6 +639,8 @@ class SimulationOrchestrator:
             self._display.show_day_boundary(
                 self.clock.simulated_day(), day_stats
             )
+            if world_sim:
+                await world_sim.stop()
             status = (
                 SimulationStatus.cancelled
                 if self._cancelled
@@ -605,6 +649,8 @@ class SimulationOrchestrator:
             await self._finalize(status)
 
         except CostLimitExceededError:
+            if world_sim:
+                await world_sim.stop()
             logger.warning(
                 "Cost limit exceeded ($%s), stopping simulation",
                 self._total_cost,
@@ -621,6 +667,8 @@ class SimulationOrchestrator:
             )
 
         except Exception as exc:
+            if world_sim:
+                await world_sim.stop()
             logger.exception("Autonomous simulation failed")
             await self._finalize(
                 SimulationStatus.failed,

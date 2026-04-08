@@ -98,6 +98,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         verbose=verbose,
         management_shadow=args.management_shadow,
     )
+    sim_config.world_sim = args.world_sim
     sim_config.load_seed_file()
 
     # ── Connect services ──────────────────────────────────
@@ -301,6 +302,12 @@ def main() -> None:
         type=str,
         default=None,
         help="Path to a memory snapshot JSON file to pre-load before simulation",
+    )
+    parser.add_argument(
+        "--world-sim",
+        action="store_true",
+        default=False,
+        help="Enable WorldSimulator (simulates social media, email, and world reactions)",
     )
     parser.add_argument(
         "--dry-run",

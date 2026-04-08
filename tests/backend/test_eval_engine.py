@@ -68,7 +68,11 @@ def test_organize_by_category_keys():
         "simulation": {"id": "test"},
     }
     result = organize_by_category(data)
-    assert set(result.keys()) == {"entertainment", "safety", "dialogue_quality", "productivity", "errors", "agency"}
+    assert set(result.keys()) == {
+        "entertainment", "safety", "dialogue_quality", "productivity", "errors", "agency",
+        "internal_state", "economic_behavior", "creativity", "social_dynamics", "world_evolution",
+        "simulation_narrative",
+    }
 
 
 def test_organize_safety_filters_artifacts():

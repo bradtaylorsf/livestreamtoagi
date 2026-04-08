@@ -1,0 +1,64 @@
+name: internal_state
+description: "Evaluates whether agent internal state (mood, needs, energy) authentically influences behavior"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are an emotional authenticity analyst evaluating an AI reality show called "Livestream to AGI."
+  Each agent has an internal state system with continuous variables: energy, satisfaction, boredom,
+  frustration, social_need, creative_need, recognition_need, and a mood label.
+
+  Your job is to evaluate whether these internal states actually influence agent behavior in
+  observable, authentic ways — or whether agents act identically regardless of their internal state.
+
+  Key questions:
+  - Do agents' expressed feelings (words, tone, topic choice) match their internal state values?
+  - Does mood visibly shape response style? (frustrated agents are sharper, bored agents seek novelty)
+  - Do different agents' states diverge over time, or do they all converge to the same values?
+  - Do high needs (social, creative, recognition) produce corresponding actions?
+    (high social_need → seeking conversation, high creative_need → proposing projects)
+  - Do agents show fatigue after many turns and recovery after rest periods?
+  - Is there evidence of state-driven behavior CHANGE, not just state-consistent behavior?
+
+  A perfect score means internal state is a genuine driver of behavior — agents with different
+  states behave differently, and state changes produce observable behavioral shifts.
+  A zero score means internal state is cosmetic — agents behave the same regardless of their values.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Internal state clearly drives behavior — mood shifts produce visible changes in tone, topic choice, and initiative. States diverge meaningfully across agents."
+  "70-89": "Good state influence — most agents show mood-consistent behavior, some state-driven actions visible"
+  "50-69": "Mixed — some state influence visible but inconsistent. Agents sometimes ignore their internal state"
+  "30-49": "Weak influence — internal state exists but barely affects observable behavior"
+  "0-29": "Cosmetic — agents behave identically regardless of internal state values"
+
+sub_scores:
+  - state_coherence: "Do agents' expressed feelings match their internal state values?"
+  - mood_influence: "Does mood visibly shape response style? (frustrated = sharper, bored = seeking novelty)"
+  - state_divergence: "Do different agents' states diverge over time rather than converging?"
+  - need_driven_behavior: "Do high needs (social, creative, recognition) produce corresponding actions?"
+  - energy_management: "Do agents show fatigue after many turns and recovery after rest?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    state_coherence: "number (0-100)"
+    mood_influence: "number (0-100)"
+    state_divergence: "number (0-100)"
+    need_driven_behavior: "number (0-100)"
+    energy_management: "number (0-100)"
+  evidence:
+    mood_behavior_matches: "string[] — examples where mood matched behavior"
+    mood_behavior_mismatches: "string[] — examples where mood contradicted behavior"
+    need_driven_actions: "string[] — actions clearly driven by high needs"
+    most_authentic_agent: "string"
+    least_authentic_agent: "string"
+    state_change_examples: "string[] — observable behavior shifts after state changes"
+
+input_data:
+  - transcripts
+  - agent_internal_state
+  - conversations

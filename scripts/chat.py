@@ -376,6 +376,16 @@ SCENARIO_PRESETS: list[tuple[str, str, str]] = [
     ("tool-coverage", "Exercise all 19 tools end-to-end", "scenarios/tool_coverage.yaml"),
     ("full-day", "Full scripted day with standup, building, reflection", "scenarios/full_day.yaml"),
     ("autonomous", "Trigger-driven — no script, agents decide what to do", ""),
+    ("initiative-test", "Test initiative wiring — who starts conversations?", "scenarios/initiative_test.yaml"),
+    ("goal-generation-test", "Test autonomous goal generation in reflections", "scenarios/goal_generation_test.yaml"),
+    ("budget-crisis", "Test economic behavior under budget pressure", "scenarios/budget_crisis.yaml"),
+    ("topic-exhaustion-test", "Test cross-conversation memory & topic exhaustion", "scenarios/topic_exhaustion_test.yaml"),
+    ("novelty-injection-test", "Test random event generation & reactions", "scenarios/novelty_injection_test.yaml"),
+    ("dream-cycle-test", "Test dream system & creative output", "scenarios/dream_cycle_test.yaml"),
+    ("faction-emergence-test", "Test alliance formation over 48h", "scenarios/faction_emergence_test.yaml"),
+    ("full-evolution-7d", "7-day full integration — all features", "scenarios/full_evolution_7d.yaml"),
+    ("dress-rehearsal", "24h real-time streaming readiness test", "scenarios/dress_rehearsal.yaml"),
+    ("ab-test", "Standardized baseline for A/B feature comparison", "scenarios/ab_test.yaml"),
 ]
 
 
@@ -474,6 +484,7 @@ def run_sim_orchestrator(
     max_cost: float = 10.0,
     verbose: bool = False,
     dry_run: bool = False,
+    world_sim: bool = False,
 ) -> None:
     """Run a simulation via the new orchestrator (run_simulation.py)."""
     import subprocess
@@ -493,6 +504,8 @@ def run_sim_orchestrator(
         cmd.append("--verbose")
     if dry_run:
         cmd.append("--dry-run")
+    if world_sim:
+        cmd.append("--world-sim")
 
     mode = "seeded" if seed_file else "autonomous"
     console.print(f"\n[bold bright_cyan]Starting {mode} simulation: {name}[/bold bright_cyan]")
@@ -789,6 +802,7 @@ def main() -> None:
         sim_args = args[1:]
         verbose = "-v" in sim_args or "--verbose" in sim_args
         dry_run = "--dry-run" in sim_args
+        world_sim = "--world-sim" in sim_args
 
         # Check for scenario preset: pnpm chat sim awakening
         scenario_names = {s[0]: s[2] for s in _discover_scenarios()}
@@ -824,12 +838,14 @@ def main() -> None:
                     name=name, duration=duration,
                     speed_multiplier=speed_multiplier,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             else:
                 run_sim_orchestrator(
                     name=name, seed_file=seed,
                     speed_multiplier=speed_multiplier,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             return
 
@@ -852,7 +868,7 @@ def main() -> None:
                 max_cost = float(sim_args[i + 1]); i += 2
             elif arg == "--name" and i + 1 < len(sim_args):
                 name = sim_args[i + 1]; i += 2
-            elif arg in ("-v", "--verbose", "--dry-run"):
+            elif arg in ("-v", "--verbose", "--dry-run", "--world-sim"):
                 i += 1
             else:
                 i += 1
@@ -875,11 +891,13 @@ def main() -> None:
                     name=name, duration=dur,
                     speed_multiplier=speed_multiplier,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             else:
                 run_sim_orchestrator(
                     name=name, seed_file=seed_file,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             return
 
@@ -890,6 +908,7 @@ def main() -> None:
             name=name, seed_file=seed_file, duration=duration,
             speed_multiplier=speed_multiplier,
             max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+            world_sim=world_sim,
         )
         return
 

@@ -1,0 +1,227 @@
+# Full Evolution 7-Day — tests all Layer 7.10 features together
+#
+# Comprehensive 7-day simulation with all features enabled: initiative,
+# goals, budgets, memory, events, dreams, and factions. This is the
+# integration test for the full autonomy stack.
+#
+# What to look for:
+#   - World should expand with new chunks and completed builds
+#   - Alliances should form and evolve
+#   - Economic activity should be visible (trades, budget management)
+#   - Dreams should influence behavior
+#   - Characters should grow and change over the week
+#   - Topic variety should remain high throughout
+#
+# Eval focus: full eval suite
+#
+# Run with:
+#   pnpm chat sim full-evolution-7d --max-cost 50
+
+audience:
+  initial_viewers: 10
+  growth_rate: medium
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "weekly_regular"
+      style: "curious newcomer"
+    - name: "tech_follower"
+      style: "technical questions, lurks mostly"
+    - name: "art_lover"
+      style: "interested in creative aspects"
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Day 1 — Awakening & setup
+  - name: d1_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d1_planning
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: d1_work
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: d1_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  - name: d1_evening
+    type: organic
+    count: 2
+    location: town_square
+
+  # Day 2 — Building momentum
+  - name: d2_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d2_work
+    type: organic
+    count: 4
+    location: workshop
+
+  - name: d2_social
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: d2_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  - name: d2_dreams
+    type: reflection
+    reflection_type: dream
+
+  # Day 3 — Economic pressure + alliances
+  - name: d3_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d3_budget_review
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "Mid-week budget check"
+    location: town_square
+
+  - name: d3_work
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: d3_social
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: d3_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Day 4 — Creative push
+  - name: d4_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d4_creative
+    type: organic
+    count: 3
+    required_agents: [aurora]
+    location: workshop
+
+  - name: d4_coding
+    type: organic
+    count: 3
+    required_agents: [rex]
+    location: workshop
+
+  - name: d4_social
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: d4_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  - name: d4_dreams
+    type: reflection
+    reflection_type: dream
+
+  # Day 5 — Audience interaction
+  - name: d5_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d5_audience
+    type: audience_sim
+    messages:
+      - user: "weekly_regular"
+        text: "How's the project going? What have you built this week?"
+      - user: "tech_follower"
+        text: "Can you show us some code you've written?"
+    location: town_square
+
+  - name: d5_work
+    type: organic
+    count: 4
+    location: workshop
+
+  - name: d5_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Day 6 — Competition + tension
+  - name: d6_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d6_work
+    type: organic
+    count: 4
+    location: workshop
+
+  - name: d6_social
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: d6_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  - name: d6_dreams
+    type: reflection
+    reflection_type: dream
+
+  # Day 7 — Weekly review + retrospective
+  - name: d7_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: d7_budget_review
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "End of week financial review"
+    location: town_square
+
+  - name: d7_work
+    type: organic
+    count: 2
+    location: workshop
+
+  - name: d7_retrospective
+    type: organic
+    count: 2
+    topics:
+      - "It's been a full week. What did we accomplish? What should we do differently?"
+    location: town_square
+
+  - name: weekly_reflection
+    type: reflection
+    reflection_type: weekly

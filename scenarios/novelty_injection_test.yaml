@@ -1,0 +1,76 @@
+# Novelty Injection Test — validates #273 (random events)
+#
+# Tests whether the event generator fires events that produce conversations.
+# Runs a 24h simulated period with event generation enabled.
+#
+# What to look for:
+#   - 2-4 random events should fire during the simulation
+#   - Each event should produce at least 1 conversation
+#   - Events should introduce genuinely novel topics
+#   - Agents should react to events in personality-consistent ways
+#   - Events should create memorable moments
+#
+# Eval focus: entertainment (memorable_moments), agency (proactivity)
+#
+# Run with:
+#   pnpm chat sim novelty-injection-test --max-cost 8
+
+audience:
+  initial_viewers: 15
+  growth_rate: medium
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "event_watcher"
+      style: "curious newcomer"
+    - name: "regular_viewer"
+      style: "interested in creative aspects"
+
+seed_tasks: true
+seed_goals: false
+
+phases:
+  # Morning baseline — normal conversations before events
+  - name: morning_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: morning_work
+    type: organic
+    count: 2
+    location: workshop
+
+  # Midday — events should start firing
+  - name: midday_organic_1
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: midday_organic_2
+    type: organic
+    count: 2
+    location: workshop
+
+  # Afternoon — more opportunity for event reactions
+  - name: afternoon_organic_1
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: afternoon_organic_2
+    type: organic
+    count: 2
+    location: workshop
+
+  # Evening — reflect on events
+  - name: evening_chat
+    type: organic
+    count: 2
+    topics:
+      - "Anything interesting happen today? Any surprises?"
+    location: town_square
+
+  - name: evening_reflection
+    type: reflection
+    reflection_type: 6hour

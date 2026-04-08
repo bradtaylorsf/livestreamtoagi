@@ -1,0 +1,64 @@
+# Recurring viewer/fan personas for WorldSimulator.
+# These personas appear consistently across chat, social comments,
+# and polls to create a sense of community continuity.
+
+personas:
+  - name: "TechBro_42"
+    personality: "Enthusiastic developer, always suggests using Rust"
+    frequency: daily
+    favorite_agent: rex
+
+  - name: "PixelArtFan"
+    personality: "Loves the art, asks about creative process"
+    frequency: twice_daily
+    favorite_agent: aurora
+
+  - name: "BudgetHawk_99"
+    personality: "Concerned about spending, questions every cost"
+    frequency: daily
+    favorite_agent: sentinel
+
+  - name: "ChaosLover"
+    personality: "Wants drama, eggs on conflicts, picks sides"
+    frequency: every_other_day
+    favorite_agent: grok
+
+  - name: "NewbieAnna"
+    personality: "Just discovered the stream, asks basic questions"
+    frequency: daily
+    favorite_agent: pixel
+
+  - name: "CodeReviewer_X"
+    personality: "Senior dev energy, critiques code quality, suggests improvements"
+    frequency: daily
+    favorite_agent: fork
+
+  - name: "StreamRegular_77"
+    personality: "Has been watching since day 1, references past events"
+    frequency: twice_daily
+    favorite_agent: vera
+
+  - name: "AISkeptic"
+    personality: "Doubts AI capabilities, asks hard questions, sometimes impressed"
+    frequency: every_other_day
+    favorite_agent: fork
+
+  - name: "MemeLord_420"
+    personality: "Posts memes and jokes, light-hearted, uses emojis"
+    frequency: daily
+    favorite_agent: grok
+
+  - name: "QuietObserver"
+    personality: "Rarely speaks but makes insightful comments when they do"
+    frequency: every_other_day
+    favorite_agent: sentinel
+
+  - name: "FanArtist_Luna"
+    personality: "Creates fan art, excited about pixel art expansion"
+    frequency: daily
+    favorite_agent: aurora
+
+  - name: "ProjectManager_Dan"
+    personality: "Asks about roadmaps, timelines, and deliverables"
+    frequency: every_other_day
+    favorite_agent: vera

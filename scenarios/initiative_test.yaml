@@ -1,0 +1,77 @@
+# Initiative Test — validates #268 (initiative wiring)
+#
+# Tests whether agent initiative scores produce observable differences
+# in conversation-starting behavior. Vera (initiative: 0.8) should start
+# significantly more conversations than Rex (initiative: 0.2).
+#
+# What to look for:
+#   - Vera should initiate 3+ conversations out of 10
+#   - Rex should initiate 0-1 conversations
+#   - Agents with higher initiative should drive topic selection
+#   - Low-initiative agents should primarily respond, not initiate
+#
+# Eval focus: agency (proactivity, self_direction)
+#
+# Run with:
+#   pnpm chat sim initiative-test --max-cost 5
+
+audience:
+  initial_viewers: 5
+  growth_rate: slow
+  chat_frequency: quiet
+
+# No seed topics — agents must self-direct
+seed_tasks: false
+seed_goals: false
+
+phases:
+  # 10 organic conversations with no seed topics — initiative drives who speaks
+  - name: organic_1
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: organic_2
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: organic_3
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: organic_4
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: organic_5
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: organic_6
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: organic_7
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: organic_8
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: organic_9
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: organic_10
+    type: organic
+    count: 1
+    location: town_square

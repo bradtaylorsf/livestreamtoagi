@@ -224,7 +224,7 @@ def main() -> None:
     parser.add_argument(
         "--suite",
         type=str,
-        choices=["full", "quick"],
+        choices=["full", "quick", "autonomy", "economy", "creative", "narrative"],
         default="full",
         help="Eval suite to run (default: full)",
     )

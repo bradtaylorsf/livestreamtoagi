@@ -1,0 +1,76 @@
+# Goal Generation Test — validates #269 (autonomous goals)
+#
+# Tests whether agents generate self-directed goals during reflection cycles.
+# Runs organic conversations interspersed with 2 reflection phases.
+#
+# What to look for:
+#   - Each agent should generate 1+ self-directed goals per reflection
+#   - Goals should be personality-consistent (Rex: technical, Aurora: creative)
+#   - Goal progress should be visible in post-reflection conversations
+#   - Agents should reference their goals when choosing what to work on
+#
+# Eval focus: agency (goal_progress, capability_growth)
+#
+# Run with:
+#   pnpm chat sim goal-generation-test --max-cost 8
+
+audience:
+  initial_viewers: 5
+  growth_rate: slow
+  chat_frequency: quiet
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Morning conversations — establish baseline behavior
+  - name: morning_chat_1
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: morning_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: work_session_1
+    type: organic
+    count: 2
+    location: workshop
+
+  # First reflection — agents should generate goals here
+  - name: first_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Post-reflection conversations — observe goal-driven behavior
+  - name: post_reflection_1
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: midday_work
+    type: organic
+    count: 2
+    location: workshop
+
+  # Second reflection — goals should evolve or advance
+  - name: second_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Final conversations — look for goal progress references
+  - name: evening_chat
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: evening_wrapup
+    type: organic
+    count: 1
+    required_agents: [vera, sentinel]
+    topics:
+      - "What progress did everyone make today on their goals?"
+    location: town_square

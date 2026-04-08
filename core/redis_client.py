@@ -86,6 +86,11 @@ class RedisClient:
     async def lrange(self, key: str, start: int, stop: int) -> list[str]:
         return await self.client.lrange(key, start, stop)
 
+    async def scan(
+        self, cursor: int = 0, *, match: str | None = None, count: int | None = None
+    ) -> tuple[int, list[str]]:
+        return await self.client.scan(cursor, match=match, count=count)
+
     async def publish(self, channel: str, message: str) -> int:
         return await self.client.publish(channel, message)
 

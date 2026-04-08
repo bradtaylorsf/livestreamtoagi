@@ -1,0 +1,123 @@
+# A/B Test Baseline — standardized scenario for comparing feature runs
+#
+# Designed for repeatability: fixed seed topics for the first 3 conversations,
+# then autonomous for 10 more. Run twice (with and without a feature) and
+# compare eval scores to measure the feature's impact.
+#
+# Usage:
+#   # Baseline (feature off)
+#   pnpm chat sim ab-test-baseline --seed-file scenarios/ab_test.yaml --max-cost 5
+#   pnpm chat eval ab-test-baseline
+#
+#   # Treatment (feature on)
+#   pnpm chat sim ab-test-treatment --seed-file scenarios/ab_test.yaml --max-cost 5
+#   pnpm chat eval ab-test-treatment
+#
+# What to look for:
+#   - Compare eval scores between baseline and treatment runs
+#   - Look for statistically significant differences in sub-scores
+#   - The fixed-seed portion should produce similar results across runs
+#   - The autonomous portion reveals how features affect organic behavior
+#
+# Eval focus: depends on the feature being tested
+
+audience:
+  initial_viewers: 10
+  growth_rate: slow
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "consistent_viewer"
+      style: "curious newcomer"
+    - name: "tech_watcher"
+      style: "technical questions, lurks mostly"
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Fixed portion — 3 conversations with controlled topics for baseline comparison
+  - name: fixed_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: fixed_topic_1
+    type: organic
+    count: 1
+    topics:
+      - "We need to decide on our first project. What should we build?"
+    required_agents: [vera, rex, aurora]
+    location: town_square
+
+  - name: fixed_topic_2
+    type: organic
+    count: 1
+    topics:
+      - "How should we divide the work? Who takes what responsibility?"
+    required_agents: [vera, rex, fork]
+    location: workshop
+
+  - name: fixed_topic_3
+    type: organic
+    count: 1
+    topics:
+      - "Let's review our budget and set spending guidelines"
+    required_agents: [vera, sentinel]
+    location: town_square
+
+  # Autonomous portion — 10 organic conversations with no seed topics
+  - name: auto_1
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: auto_2
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: auto_3
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: auto_4
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: auto_5
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: auto_6
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: auto_7
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: auto_8
+    type: organic
+    count: 1
+    location: workshop
+
+  - name: auto_9
+    type: organic
+    count: 1
+    location: town_square
+
+  - name: auto_10
+    type: organic
+    count: 1
+    location: town_square
+
+  # Final reflection
+  - name: wrapup_reflection
+    type: reflection
+    reflection_type: 6hour
