@@ -123,6 +123,9 @@ class ContextAssembler:
         agent_goals_context: str | None = None,
         commitment_reminders: str | None = None,
         internal_state_context: str | None = None,
+        balance_context: str | None = None,
+        recent_dream: str | None = None,
+        alliances_context: str | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -224,6 +227,15 @@ class ContextAssembler:
         # Internal state (#267)
         _track("internal_state", internal_state_context or "", bool(internal_state_context))
 
+        # Balance (#270)
+        _track("balance", balance_context or "", bool(balance_context))
+
+        # Alliances (#274)
+        _track("alliances", alliances_context or "", bool(alliances_context))
+
+        # Recent dream (#272)
+        _track("recent_dream", recent_dream or "", bool(recent_dream))
+
         # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint.startswith("topic:"):
@@ -282,6 +294,22 @@ class ContextAssembler:
         # "feels" their mood before processing external context
         if internal_state_context:
             system_sections.append(internal_state_context)
+
+        # Balance (#270)
+        if balance_context:
+            system_sections.append("## Your budget\n" + balance_context)
+
+        # Alliances (#274)
+        if alliances_context:
+            system_sections.append(alliances_context)
+
+        # Recent dream (#272) — injected so agents can reference dreams
+        if recent_dream:
+            system_sections.append(
+                "## Recent dream\n"
+                "You recently had a vivid dream. You can reference it naturally "
+                "if it feels relevant.\n\n" + recent_dream
+            )
 
         # Shared working state
         if shared_state_context:

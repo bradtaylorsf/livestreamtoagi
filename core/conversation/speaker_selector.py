@@ -51,6 +51,8 @@ class SpeakerSelector:
         self._config = config
         # Optional state scores injected per-conversation by the engine
         self._state_scores: dict[str, float] = {}
+        # Alliance pairs: set of frozenset({agent_a, agent_b}) for allies
+        self._alliance_pairs: set[frozenset[str]] = set()
 
     @property
     def config(self) -> ConversationConfig:
@@ -69,6 +71,13 @@ class SpeakerSelector:
         """
         self._state_scores = scores
 
+    def set_alliance_pairs(self, pairs: set[frozenset[str]]) -> None:
+        """Inject alliance pair data for alliance-aware selection.
+
+        Each pair is a frozenset of two agent IDs that are in the same alliance.
+        """
+        self._alliance_pairs = pairs
+
     def select(
         self,
         conversation_history: list[dict[str, Any]],
@@ -80,6 +89,7 @@ class SpeakerSelector:
         agents_who_spoke: set[str] | None = None,
         turn_number: int = 0,
         max_turns: int = 15,
+        agent_goals: dict[str, list[str]] | None = None,
     ) -> SelectionResult:
         """Pick the next speaker from *eligible_agents*.
 
@@ -215,6 +225,27 @@ class SpeakerSelector:
             state_boost = self._state_scores.get(agent.id, 0.0)
             total += state_boost
 
+            # Alliance dynamics (#274): allies of previous speaker get a
+            # supportive follow-up boost; keeps alliance influence small
+            if previous_speaker_id and self._alliance_pairs:
+                pair = frozenset({agent.id, previous_speaker_id})
+                if pair in self._alliance_pairs:
+                    total += 0.1  # Small ally boost
+
+            # Initiative + goal boost (#268): agents with high initiative
+            # and active goals relevant to the current topic get a boost
+            if agent_goals and detected_topic and agent.id in agent_goals:
+                goal_texts = agent_goals[agent.id]
+                topic_lower = detected_topic.lower()
+                for goal_text in goal_texts:
+                    if topic_lower in goal_text.lower() or any(
+                        word in goal_text.lower()
+                        for word in topic_lower.split("_")
+                        if len(word) > 2
+                    ):
+                        total += agent.initiative * 0.15
+                        break
+
             scores[agent.id] = total
             breakdown[agent.id] = factors
 
@@ -319,6 +350,19 @@ class SpeakerSelector:
             # Additive weighted score: tendency drives willingness,
             # topic relevance gates appropriateness
             score = tendency * 0.6 + topic_rel * 0.4
+
+            # Alliance interrupt boost (#274): opposing agents (not allies
+            # of selected speaker) get a small interrupt boost for drama
+            if self._alliance_pairs:
+                pair = frozenset({agent.id, selected_agent_id})
+                if pair not in self._alliance_pairs:
+                    # Check if agent is in ANY alliance (i.e., has faction loyalty)
+                    agent_in_alliance = any(
+                        agent.id in p for p in self._alliance_pairs
+                    )
+                    if agent_in_alliance:
+                        score += 0.15  # Opposing faction interrupt boost
+
             scored.append((agent, score, tendency))
 
         # Sort by score descending so highest scorer gets first chance

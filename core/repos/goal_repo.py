@@ -58,18 +58,20 @@ class GoalRepo:
         priority: int = 5,
         source: str = "self",
         parent_goal_id: uuid.UUID | None = None,
+        category: str | None = None,
     ) -> AgentGoal:
         """Add a new goal for an agent."""
         row = await self.db.fetchrow(
             """INSERT INTO agent_goals
-               (agent_id, goal, priority, source, parent_goal_id)
-               VALUES ($1, $2, $3, $4, $5)
+               (agent_id, goal, priority, source, parent_goal_id, category)
+               VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING *""",
             agent_id,
             goal,
             priority,
             source,
             parent_goal_id,
+            category,
         )
         return AgentGoal(**dict(row))
 

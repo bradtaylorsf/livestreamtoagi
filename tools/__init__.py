@@ -8,11 +8,19 @@ from .alpha_dispatch import DispatchAlphaTool
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
+from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .code_execution import ExecuteCodeTool
+from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
 from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
+from .social_tools import (
+    LeaveAllianceTool,
+    ProposeAllianceTool,
+    ViewAlliancesTool,
+    VoteAllianceTool,
+)
 from .task_management import ManageTaskTool
 from .tilemap_gen import GenerateTilemapTool
 from .web_tools import FetchUrlTool, WebSearchTool
@@ -20,7 +28,10 @@ from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
     import docker
+    from core.agent_economy import AgentEconomyManager
     from core.agent_registry import AgentRegistry
+    from core.characters.spawner import CharacterSpawner
+    from core.characters.voting import VotingManager
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
     from core.memory.archival_memory import ArchivalMemoryManager
@@ -33,10 +44,14 @@ if TYPE_CHECKING:
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
     from core.shared_state import SharedWorkingState
+    from core.social.alliances import AllianceManager
 
 __all__ = [
     "BaseTool",
     "CreatePollTool",
+    "ProposeAllianceTool",
+    "ProposeCharacterTool",
+    "VoteCharacterTool",
     "DispatchAlphaTool",
     "DraftEmailTool",
     "DraftSocialPostTool",
@@ -47,6 +62,7 @@ __all__ = [
     "GetPollResultsTool",
     "GetRevenueStatusTool",
     "GetWorldStateTool",
+    "LeaveAllianceTool",
     "ManageTaskTool",
     "ProposeSelfModificationTool",
     "RecallMemoryTool",
@@ -54,8 +70,12 @@ __all__ = [
     "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
+    "TransferBudgetTool",
     "UpdateCoreMemoryTool",
+    "ViewAccountTool",
+    "ViewAlliancesTool",
     "ViewEvolutionLogTool",
+    "VoteAllianceTool",
     "WebSearchTool",
     "get_core_tools",
     "get_memory_tools",
@@ -95,6 +115,10 @@ def get_core_tools(
     simulation_mode: bool = False,
     shared_working_state: SharedWorkingState | None = None,
     agent_registry: AgentRegistry | None = None,
+    economy_manager: AgentEconomyManager | None = None,
+    alliance_manager: AllianceManager | None = None,
+    character_spawner: CharacterSpawner | None = None,
+    voting_manager: VotingManager | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -144,9 +168,30 @@ def get_core_tools(
 
     # Revenue and marketing tools
     if cost_repo is not None:
-        tools.append(GetRevenueStatusTool(cost_repo=cost_repo, agent_id=agent_id))
+        tools.append(GetRevenueStatusTool(
+            cost_repo=cost_repo, agent_id=agent_id,
+            economy_manager=economy_manager,
+        ))
     tools.append(DraftSocialPostTool(redis_client=redis_client, agent_id=agent_id))
     tools.append(DraftEmailTool(redis_client=redis_client, agent_id=agent_id))
+
+    # Economy tools — available to all agents
+    if economy_manager is not None:
+        tools.append(TransferBudgetTool(economy_manager=economy_manager, agent_id=agent_id))
+        tools.append(ViewAccountTool(economy_manager=economy_manager, agent_id=agent_id))
+
+    # Character proposal/voting tools (#275)
+    if character_spawner is not None:
+        tools.append(ProposeCharacterTool(spawner=character_spawner, agent_id=agent_id))
+    if voting_manager is not None:
+        tools.append(VoteCharacterTool(voting_manager=voting_manager, agent_id=agent_id))
+
+    # Alliance/social tools (#274)
+    if alliance_manager is not None:
+        tools.append(ProposeAllianceTool(alliance_manager=alliance_manager, agent_id=agent_id))
+        tools.append(VoteAllianceTool(alliance_manager=alliance_manager, agent_id=agent_id))
+        tools.append(LeaveAllianceTool(alliance_manager=alliance_manager, agent_id=agent_id))
+        tools.append(ViewAlliancesTool(alliance_manager=alliance_manager, agent_id=agent_id))
 
     # Web search and URL fetch tools
     tools.append(

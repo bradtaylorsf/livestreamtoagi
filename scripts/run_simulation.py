@@ -133,12 +133,19 @@ async def run_simulation(args: argparse.Namespace) -> None:
     )
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
+    # Wire trigger system into event generator (#273)
+    if svc.event_generator is not None:
+        svc.event_generator._triggers = trigger_system
+
     reflection_manager = ReflectionManager(
         memory_repo=svc.memory_repo,
         llm_client=svc.llm_client,
         core_memory_mgr=svc.core_memory,
         token_counter=svc.token_counter,
         agent_registry=svc.agent_registry,
+        goal_manager=svc.goal_manager,
+        agent_state_manager=svc.agent_state_manager,
+        dream_manager=svc.dream_manager,
     )
 
     display = SimulationDisplay(verbose=verbose, agent_registry=svc.agent_registry)

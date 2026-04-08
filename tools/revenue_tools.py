@@ -24,9 +24,15 @@ class GetRevenueStatusTool(BaseTool):
 
     ALLOWED_AGENTS = frozenset({"sentinel", "vera"})
 
-    def __init__(self, cost_repo: CostRepo, agent_id: str) -> None:
+    def __init__(
+        self,
+        cost_repo: CostRepo,
+        agent_id: str,
+        economy_manager: object | None = None,
+    ) -> None:
         self._cost_repo = cost_repo
         self._agent_id = agent_id
+        self._economy = economy_manager
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         if self._agent_id not in self.ALLOWED_AGENTS:
@@ -78,6 +84,15 @@ class GetRevenueStatusTool(BaseTool):
         else:
             health = "critical"
 
+        # Include individual balance if economy manager is available
+        balance_note = ""
+        if self._economy is not None:
+            try:
+                agent_balance = await self._economy.get_balance(self._agent_id)
+                balance_note = f" Your personal balance: ${agent_balance:.2f}."
+            except Exception:
+                pass
+
         # Return summary for agent-visible output (no raw dollar amounts).
         # Raw numbers are persisted in the artifact metadata for Brad's dashboard.
         return {
@@ -87,6 +102,7 @@ class GetRevenueStatusTool(BaseTool):
             "summary": (
                 f"Budget is {health}. Trend is {trend}. "
                 f"Runway: {'plenty of' if health == 'healthy' else 'limited'} time remaining."
+                f"{balance_note}"
             ),
             "_internal": {
                 "monthly_revenue": float(monthly_revenue),

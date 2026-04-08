@@ -118,26 +118,29 @@ class AgentGoalManager:
         priority: int = 3,
         related_agent: str | None = None,
         source: str = "self",
+        category: str | None = None,
     ) -> AgentGoalLegacy:
         """Add a new goal to an agent's queue."""
         if self._use_db:
-            return await self._add_goal_db(agent_id, goal_text, priority, source)
+            return await self._add_goal_db(agent_id, goal_text, priority, source, category)
         return await self._add_goal_redis(agent_id, goal_text, priority, related_agent)
 
     async def _add_goal_db(
         self, agent_id: str, goal_text: str, priority: int, source: str,
+        category: str | None = None,
     ) -> AgentGoalLegacy:
         assert self._goal_repo is not None
-        # Deduplicate
+        # Deduplicate — exact match or high similarity
         existing = await self._goal_repo.get_active_goals(agent_id)
         for g in existing:
-            if g.goal.lower() == goal_text.lower():
+            if _is_similar_goal(g.goal, goal_text):
                 return AgentGoalLegacy(
                     id=str(g.id), goal=g.goal, priority=g.priority,
                     status=_db_status_to_legacy(g.status),
                 )
         db_goal = await self._goal_repo.add_goal(
             agent_id, goal_text, priority=priority, source=source,
+            category=category,
         )
         return AgentGoalLegacy(
             id=str(db_goal.id), goal=db_goal.goal, priority=db_goal.priority,
@@ -342,6 +345,23 @@ def _legacy_status_to_db(status: str) -> str:
     """Convert legacy status to DB status."""
     mapping = {"pending": "active", "in_progress": "active", "done": "completed"}
     return mapping.get(status, status)
+
+
+def _is_similar_goal(existing: str, new: str, threshold: float = 0.8) -> bool:
+    """Check if two goal texts are similar enough to be considered duplicates.
+
+    Uses lowercase comparison first, then substring check, then
+    SequenceMatcher for fuzzy matching.
+    """
+    a, b = existing.lower().strip(), new.lower().strip()
+    if a == b:
+        return True
+    # Substring containment
+    if a in b or b in a:
+        return True
+    from difflib import SequenceMatcher
+
+    return SequenceMatcher(None, a, b).ratio() >= threshold
 
 
 def parse_commitments(llm_output: str) -> list[dict[str, str]]:

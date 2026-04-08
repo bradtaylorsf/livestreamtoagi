@@ -15,6 +15,7 @@ State transitions:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -59,7 +60,7 @@ def _derive_mood(state: AgentState) -> str:
         return "happy"
     if state.boredom >= 0.5 and state.energy <= 0.4:
         return "listless"
-    if state.energy >= 0.6 and state.satisfaction >= 0.6:
+    if state.energy >= 0.6 and state.boredom <= 0.2:
         return "focused"
     return "neutral"
 
@@ -111,6 +112,14 @@ class AgentStateManager:
         self._repo = state_repo
         # In-memory cache for simulation mode (no Redis)
         self._cache: dict[str, AgentState] = {}
+        # Per-agent locks to serialize concurrent state modifications
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, agent_id: str) -> asyncio.Lock:
+        """Get or create a per-agent asyncio lock."""
+        if agent_id not in self._locks:
+            self._locks[agent_id] = asyncio.Lock()
+        return self._locks[agent_id]
 
     async def get_state(self, agent_id: str) -> AgentState:
         """Get current state, loading from Redis → DB → defaults."""
@@ -144,6 +153,7 @@ class AgentStateManager:
 
     async def save_state(self, state: AgentState) -> None:
         """Persist state to Redis and update in-memory cache."""
+        state.version += 1
         state.updated_at = datetime.now(UTC)
         state.refresh_mood()
         self._cache[state.agent_id] = state
@@ -177,70 +187,94 @@ class AgentStateManager:
         - Social need decreases
         - Boredom increases if same topic, decreases if novel
         """
-        state = await self.get_state(agent_id)
-        state.energy = _clamp(state.energy - 0.05)
-        state.social_need = _clamp(state.social_need - 0.1)
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            state.energy = _clamp(state.energy - 0.05)
+            state.social_need = _clamp(state.social_need - 0.1)
 
-        # Topic novelty
-        if topic and previous_topics and topic in previous_topics:
-            state.boredom = _clamp(state.boredom + 0.05)
-        elif topic:
-            state.boredom = _clamp(state.boredom - 0.1)
+            # Topic novelty
+            if topic and previous_topics and topic in previous_topics:
+                state.boredom = _clamp(state.boredom + 0.05)
+            elif topic:
+                state.boredom = _clamp(state.boredom - 0.1)
 
-        await self.save_state(state)
-        return state
+            await self.save_state(state)
+            return state
 
     async def on_idle_tick(self, agent_id: str) -> AgentState:
         """Update state during idle periods (no active conversation)."""
-        state = await self.get_state(agent_id)
-        state.energy = _clamp(state.energy + 0.1)
-        state.social_need = _clamp(state.social_need + 0.03)
-        state.creative_need = _clamp(state.creative_need + 0.02)
-        state.boredom = _clamp(state.boredom + 0.02)
-        await self.save_state(state)
-        return state
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            state.energy = _clamp(state.energy + 0.1)
+            state.social_need = _clamp(state.social_need + 0.03)
+            state.creative_need = _clamp(state.creative_need + 0.02)
+            state.boredom = _clamp(state.boredom + 0.02)
+            await self.save_state(state)
+            return state
 
     async def on_goal_progress(self, agent_id: str) -> AgentState:
         """Update state when an agent makes progress on a goal."""
-        state = await self.get_state(agent_id)
-        state.frustration = _clamp(state.frustration - 0.15)
-        state.satisfaction = _clamp(state.satisfaction + 0.1)
-        state.recognition_need = _clamp(state.recognition_need - 0.05)
-        await self.save_state(state)
-        return state
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            state.frustration = _clamp(state.frustration - 0.15)
+            state.satisfaction = _clamp(state.satisfaction + 0.1)
+            state.recognition_need = _clamp(state.recognition_need - 0.05)
+            await self.save_state(state)
+            return state
 
     async def on_goal_blocked(self, agent_id: str) -> AgentState:
         """Update state when an agent's goal is blocked."""
-        state = await self.get_state(agent_id)
-        state.frustration = _clamp(state.frustration + 0.1)
-        state.satisfaction = _clamp(state.satisfaction - 0.05)
-        await self.save_state(state)
-        return state
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            state.frustration = _clamp(state.frustration + 0.1)
+            state.satisfaction = _clamp(state.satisfaction - 0.05)
+            await self.save_state(state)
+            return state
 
     async def on_building_activity(self, agent_id: str) -> AgentState:
         """Update state when an agent builds/codes something."""
-        state = await self.get_state(agent_id)
-        state.creative_need = _clamp(state.creative_need - 0.3)
-        state.satisfaction = _clamp(state.satisfaction + 0.1)
-        state.energy = _clamp(state.energy - 0.05)
-        await self.save_state(state)
-        return state
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            state.creative_need = _clamp(state.creative_need - 0.3)
+            state.satisfaction = _clamp(state.satisfaction + 0.1)
+            state.energy = _clamp(state.energy - 0.05)
+            await self.save_state(state)
+            return state
 
     async def on_recognition(self, agent_id: str) -> AgentState:
         """Update state when an agent receives recognition/acknowledgment."""
-        state = await self.get_state(agent_id)
-        state.recognition_need = _clamp(state.recognition_need - 0.2)
-        state.satisfaction = _clamp(state.satisfaction + 0.15)
-        await self.save_state(state)
-        return state
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            state.recognition_need = _clamp(state.recognition_need - 0.2)
+            state.satisfaction = _clamp(state.satisfaction + 0.15)
+            await self.save_state(state)
+            return state
 
-    async def on_novel_event(self, agent_id: str) -> AgentState:
-        """Update state when something novel/unexpected happens."""
-        state = await self.get_state(agent_id)
-        state.boredom = _clamp(state.boredom - 0.2)
-        state.energy = _clamp(state.energy + 0.05)
-        await self.save_state(state)
-        return state
+    async def on_novel_event(
+        self, agent_id: str, *, severity: str | None = None,
+    ) -> AgentState:
+        """Update state when something novel/unexpected happens.
+
+        Severity modulates the effect: crisis events cause more disruption,
+        minor events just reduce boredom slightly.
+        """
+        async with self._get_lock(agent_id):
+            state = await self.get_state(agent_id)
+            if severity == "crisis":
+                state.boredom = _clamp(state.boredom - 0.3)
+                state.frustration = _clamp(state.frustration + 0.15)
+                state.energy = _clamp(state.energy + 0.1)
+            elif severity == "major":
+                state.boredom = _clamp(state.boredom - 0.2)
+                state.energy = _clamp(state.energy + 0.05)
+            elif severity == "moderate":
+                state.boredom = _clamp(state.boredom - 0.15)
+                state.energy = _clamp(state.energy + 0.03)
+            else:
+                state.boredom = _clamp(state.boredom - 0.2)
+                state.energy = _clamp(state.energy + 0.05)
+            await self.save_state(state)
+            return state
 
     # ── Context formatting ────────────────────────────────────
 

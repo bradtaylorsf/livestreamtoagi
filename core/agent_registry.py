@@ -133,6 +133,8 @@ class AgentRegistry:
         for agent_dir in sorted(self._agents_dir.iterdir()):
             if not agent_dir.is_dir():
                 continue
+            if agent_dir.name == "template":
+                continue
             config_path = agent_dir / "config.yaml"
             if not config_path.exists():
                 logger.warning("Missing config.yaml in %s, skipping", agent_dir.name)

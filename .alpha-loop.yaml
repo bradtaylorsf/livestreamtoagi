@@ -9,5 +9,7 @@ dev_command: pnpm dev
 auto_merge: true
 setup_command: "python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
 # Safety limits (0 = unlimited)
-max_issues: 0
+batch: true
+batch_size: 5
+max_issues: 5
 max_session_duration: 7200  # 2 hours in seconds

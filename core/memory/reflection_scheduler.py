@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from core.agent_state import AgentStateManager
+    from core.memory.dreams import DreamManager, DreamResult
     from core.memory.reflection import ReflectionManager
     from core.models import ReflectionResult
     from core.simulation.clock import SimulationClock
@@ -30,6 +32,9 @@ class ReflectionScheduler:
         six_hour_interval_hours: int = 6,
         daily_hour: int = 23,
         weekly_day: int = 7,
+        dream_interval_hours: int = 14,
+        dream_manager: DreamManager | None = None,
+        agent_state_manager: AgentStateManager | None = None,
     ) -> None:
         self._clock = clock
         self._reflection = reflection_manager
@@ -37,17 +42,25 @@ class ReflectionScheduler:
         self._daily_hour = daily_hour
         self._weekly_day = weekly_day
 
+        # Dream system integration (#272)
+        self._dream_manager = dream_manager
+        self._dream_interval = timedelta(hours=dream_interval_hours)
+        self._agent_state_manager = agent_state_manager
+
         # Per-agent tracking: last reflection simulated time
         # Initialize to clock start so first reflection fires after the interval
         self._init_time = clock.now()
         self._last_6hour: dict[str, datetime] = {}
         self._last_daily: dict[str, str] = {}  # agent_id -> "YYYY-MM-DD"
         self._last_weekly: dict[str, int] = {}  # agent_id -> simulated_day
+        self._last_dream: dict[str, datetime] = {}  # agent_id -> simulated_time
 
     def _ensure_tracking(self, agent_id: str) -> None:
         """Initialize tracking for an agent on first encounter."""
         if agent_id not in self._last_6hour:
             self._last_6hour[agent_id] = self._init_time
+        if agent_id not in self._last_dream:
+            self._last_dream[agent_id] = self._init_time
 
     async def check_and_run(self, agent_id: str) -> list[ReflectionResult]:
         """Check if any reflection is due for this agent and run if so."""
@@ -111,6 +124,9 @@ class ReflectionScheduler:
             except Exception:
                 logger.exception("6-hour reflection failed for %s", agent_id)
 
+        # Dream cycle (#272): check if dream is due
+        await self._check_and_run_dream(agent_id, now)
+
         return results
 
     async def check_and_run_all(
@@ -126,6 +142,42 @@ class ReflectionScheduler:
             else:
                 results.extend(item)
         return results
+
+    async def _check_and_run_dream(
+        self, agent_id: str, now: datetime,
+    ) -> None:
+        """Check if a dream cycle is due and run it.
+
+        Dreams trigger every dream_interval_hours (default 14h), or when
+        boredom is very high (>0.8) as an override.
+        """
+        if self._dream_manager is None:
+            return
+
+        dream_elapsed = now - self._last_dream.get(agent_id, self._init_time)
+        should_dream = dream_elapsed >= self._dream_interval
+
+        # Boredom override: dream when very bored (>0.8)
+        if not should_dream and self._agent_state_manager is not None:
+            try:
+                state = await self._agent_state_manager.get_state(agent_id)
+                if state.boredom > 0.8:
+                    should_dream = True
+                    logger.info("Boredom-triggered dream for %s (boredom=%.2f)",
+                                agent_id, state.boredom)
+            except Exception:
+                pass
+
+        if should_dream:
+            logger.info(
+                "Dream cycle due for %s (%.1fh since last dream)",
+                agent_id, dream_elapsed.total_seconds() / 3600,
+            )
+            try:
+                await self._dream_manager.run_dream(agent_id)
+                self._last_dream[agent_id] = now
+            except Exception:
+                logger.exception("Dream cycle failed for %s", agent_id)
 
     def mark_recently_reflected(self, agent_id: str) -> None:
         """Mark an agent as having just reflected (prevents duplicate from scheduler).

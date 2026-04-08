@@ -1022,6 +1022,8 @@ def _make_mock_services() -> MagicMock:
     svc.core_memory = MagicMock()
     svc.recall_memory = MagicMock()
     svc.archival_memory = MagicMock()
+    svc.economy_manager = None  # Prevent await errors on MagicMock
+    svc.agent_state_manager = AsyncMock()  # Must be AsyncMock for await calls
     return svc
 
 
@@ -1327,10 +1329,13 @@ class TestConversationProgression:
         )
 
         # Set up a turn that uses tools
+        # Note: _continue_conversation calls detect_topic() which uses the LLM
+        # when available, so we need a topic classification response in between.
         tool_call = ToolCall(id="call_1", name="web_search", arguments={"query": "test"})
         mock_llm.complete = AsyncMock(
             side_effect=[
                 _make_llm_response("Opening line"),  # start conv
+                _make_llm_response("general"),  # topic detection in _continue_conversation
                 _make_llm_response_with_tool_calls("", [tool_call]),  # tool call
                 _make_llm_response("Found results!"),  # after tool
             ]

@@ -1,0 +1,10 @@
+type: step
+step: implement
+eval_method: pending
+status: needs-annotation
+source: auto-captured
+captured_from:
+  issue: 270
+  session: session/7-10-agent-autonomy-internal-economy
+  date: 2026-04-08
+checks: []

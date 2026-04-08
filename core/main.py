@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
 
     tts_pipeline = TTSPipeline()
 
+    svc = None
     try:
         svc = await bootstrap_services(auto_migrate=True)
         app.state.services = svc
@@ -50,6 +51,9 @@ async def lifespan(app: FastAPI):
             core_memory_mgr=svc.core_memory,
             token_counter=svc.token_counter,
             agent_registry=svc.agent_registry,
+            goal_manager=svc.goal_manager,
+            agent_state_manager=svc.agent_state_manager,
+            dream_manager=svc.dream_manager,
         )
 
         if api_key:
@@ -67,10 +71,12 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(*_background_tasks, return_exceptions=True)
 
         await tts_pipeline.shutdown()
-        await svc.config_loader.stop_watching()
+        if svc is not None:
+            await svc.config_loader.stop_watching()
         stop_scheduler()
         await event_bus.shutdown()
-        await shutdown_services(svc)
+        if svc is not None:
+            await shutdown_services(svc)
 
 
 app = FastAPI(title="Livestream AGI", version="0.1.0", lifespan=lifespan)

@@ -1,7 +1,8 @@
-"""Tests for rich conversation summary generation."""
+"""Tests for structured conversation record generation (#271)."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +10,7 @@ import pytest
 
 from core.conversation_engine import ConversationEngine, _ActiveConversation
 from core.conversation.energy import ConversationEnergy
+from core.models import ConversationRecord
 from tests.backend.conversation_helpers import make_conversation_config
 
 
@@ -42,7 +44,13 @@ def _make_engine(llm_response_content: str | None = None, llm_error: bool = Fals
         mock_llm.complete = AsyncMock(side_effect=Exception("LLM failed"))
     else:
         response = MagicMock()
-        response.content = llm_response_content or "Summary text"
+        response.content = llm_response_content or json.dumps({
+            "summary": "Summary text",
+            "outcome": "Decided on dashboard",
+            "key_decisions": ["Build dashboard"],
+            "unresolved_tensions": [],
+            "novel_information": [],
+        })
         response.input_tokens = 10
         response.output_tokens = 20
         response.estimated_cost = "0.001"
@@ -74,20 +82,24 @@ def _make_engine(llm_response_content: str | None = None, llm_error: bool = Fals
 
 
 class TestGenerateRichSummary:
-    """_generate_rich_summary produces LLM-based summaries with fallback."""
+    """_generate_conversation_record produces structured records with fallback."""
 
     @pytest.mark.asyncio
     async def test_produces_rich_summary_from_llm(self) -> None:
-        rich_text = (
-            "Vera and Rex decided to build a dashboard. "
-            "Rex committed to the implementation. "
-            "No unresolved tensions."
-        )
-        engine = _make_engine(llm_response_content=rich_text)
+        llm_json = json.dumps({
+            "summary": "Vera and Rex decided to build a dashboard.",
+            "outcome": "Dashboard project approved",
+            "key_decisions": ["Rex leads implementation"],
+            "unresolved_tensions": ["Timeline unclear"],
+            "novel_information": [],
+        })
+        engine = _make_engine(llm_response_content=llm_json)
         conv = _make_active_conversation()
 
-        summary = await engine._generate_rich_summary(conv, "fallback stub")
-        assert summary == rich_text
+        record = await engine._generate_conversation_record(conv, "fallback stub")
+        assert isinstance(record, ConversationRecord)
+        assert "dashboard" in record.summary.lower()
+        assert record.key_decisions == ["Rex leads implementation"]
         engine._llm.complete.assert_called_once()
 
     @pytest.mark.asyncio
@@ -95,37 +107,38 @@ class TestGenerateRichSummary:
         engine = _make_engine(llm_error=True)
         conv = _make_active_conversation()
 
-        summary = await engine._generate_rich_summary(conv, "metadata fallback")
-        assert summary == "metadata fallback"
+        record = await engine._generate_conversation_record(conv, "metadata fallback")
+        assert record.summary == "metadata fallback"
+        assert record.topics == ["projects", "planning"]
 
     @pytest.mark.asyncio
     async def test_falls_back_to_stub_on_empty_response(self) -> None:
         engine = _make_engine(llm_response_content="   ")
         conv = _make_active_conversation()
 
-        summary = await engine._generate_rich_summary(conv, "metadata fallback")
-        assert summary == "metadata fallback"
+        record = await engine._generate_conversation_record(conv, "metadata fallback")
+        assert record.summary == "metadata fallback"
 
     @pytest.mark.asyncio
     async def test_prompt_contains_transcript(self) -> None:
-        engine = _make_engine(llm_response_content="A summary.")
+        engine = _make_engine()
         conv = _make_active_conversation()
 
-        await engine._generate_rich_summary(conv, "fallback")
+        await engine._generate_conversation_record(conv, "fallback")
 
         call_args = engine._llm.complete.call_args
         messages = call_args.kwargs.get("messages") or call_args[1].get("messages") or call_args[0][0]
         system_msg = messages[0]["content"]
-        assert "Decisions made" in system_msg
-        assert "Commitments" in system_msg
+        assert "key_decisions" in system_msg
+        assert "unresolved_tensions" in system_msg
         assert "[vera]:" in system_msg or "vera" in system_msg
 
     @pytest.mark.asyncio
     async def test_uses_cheap_model(self) -> None:
-        engine = _make_engine(llm_response_content="A summary.")
+        engine = _make_engine()
         conv = _make_active_conversation()
 
-        await engine._generate_rich_summary(conv, "fallback")
+        await engine._generate_conversation_record(conv, "fallback")
 
         call_args = engine._llm.complete.call_args
         model = call_args.kwargs.get("model") or call_args[1].get("model")

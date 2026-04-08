@@ -20,7 +20,7 @@ from core.conversation.pacing import calculate_pause
 from core.conversation.speaker_selector import InterruptState, SpeakerSelector
 from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
-from core.models import ConversationCreate
+from core.models import ConversationCreate, ConversationRecord
 from core.speech_parser import parse_speech
 from core.tool_executor import (
     MAX_TOOL_ROUNDS,
@@ -166,6 +166,7 @@ class ConversationEngine:
         self._recent_summaries = recent_conversation_summaries or []
         self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=50)
         self._last_conversation_summary: str | None = None
+        self._last_conversation_record: ConversationRecord | None = None
 
         # Required-agent participation tracking
         self._required_agents: set[str] = required_agents or set()
@@ -202,6 +203,10 @@ class ConversationEngine:
     @property
     def recent_outputs(self) -> list[str]:
         return list(self._recent_outputs)
+
+    @property
+    def last_conversation_record(self) -> ConversationRecord | None:
+        return self._last_conversation_record
 
     @property
     def topic_history(self) -> dict[str, list[float]]:
@@ -299,6 +304,10 @@ class ConversationEngine:
         trigger_type = trigger.get("type", "idle")
         hint = self._hint_for_trigger(trigger_type)
 
+        # For initiative triggers, use the goal-driven prompt hint directly
+        if hint is None and trigger.get("prompt_hint"):
+            hint = trigger["prompt_hint"]
+
         # If trigger has a seeded topic, override the hint to include it
         seeded_topic = trigger.get("topic")
         if seeded_topic:
@@ -315,6 +324,20 @@ class ConversationEngine:
                 "a completely different subject. The show needs forward momentum.]"
             )
             trigger["topic_avoidance"] = avoidance_note
+
+        # Inject alliance pairs into speaker selector (#274)
+        if self._services and self._services.alliance_manager:
+            try:
+                alliances = await self._services.alliance_manager.get_active_alliances()
+                pairs: set[frozenset[str]] = set()
+                for a in alliances:
+                    members = a.members
+                    for i, m1 in enumerate(members):
+                        for m2 in members[i + 1:]:
+                            pairs.add(frozenset({m1, m2}))
+                self._selector.set_alliance_pairs(pairs)
+            except Exception:
+                logger.warning("Failed to load alliance pairs", exc_info=True)
 
         # Generate opening line
         content = await self._generate_turn(opening_agent, prompt_hint=hint)
@@ -420,6 +443,20 @@ class ConversationEngine:
             logger.warning("No eligible agents for turn %d", conv.turn_number + 1)
             return False
 
+        # Build agent goals dict for initiative boost in speaker selection
+        _agent_goals: dict[str, list[str]] | None = None
+        if self._services and self._services.goal_manager:
+            try:
+                _agent_goals = {}
+                for a in eligible:
+                    goals = await self._services.goal_manager.get_goals(a.id)
+                    active = [g.goal for g in goals if g.status not in ("done", "completed")]
+                    if active:
+                        _agent_goals[a.id] = active[:3]
+            except Exception:
+                logger.warning("Failed to build agent goals for speaker selection", exc_info=True)
+                _agent_goals = None
+
         # Select speaker
         result = self._selector.select(
             conversation_history=conv.history,
@@ -431,6 +468,7 @@ class ConversationEngine:
             agents_who_spoke=self._agents_who_spoke,
             turn_number=conv.turn_number,
             max_turns=self._max_turns,
+            agent_goals=_agent_goals,
         )
         logger.debug(
             "Speaker selected: %s (score=%.3f, interrupt=%s)",
@@ -601,17 +639,16 @@ class ConversationEngine:
         # Extract commitments and create goals
         await self._extract_commitments(conv)
 
-        # Build a rich summary for cross-phase context
+        # Build a structured conversation record for cross-phase context (#271)
         speakers = list(dict.fromkeys(msg.get("speaker", "unknown") for msg in conv.history))
         topics_str = ", ".join(conv.topics[:3]) if conv.topics else "general"
         metadata_stub = (
             f"Conversation between {', '.join(speakers)} about {topics_str} "
             f"({conv.turn_number} turns)."
         )
-        self._last_conversation_summary = await self._generate_rich_summary(
-            conv,
-            metadata_stub,
-        )
+        record = await self._generate_conversation_record(conv, metadata_stub)
+        self._last_conversation_record = record
+        self._last_conversation_summary = record.format_for_context()
 
         # Record that each participant spoke (for weighted speaker selection)
         for agent_id in set(msg.get("speaker", "") for msg in conv.history if msg.get("speaker")):
@@ -687,48 +724,73 @@ class ConversationEngine:
 
         self._active = None
 
-    # ── Rich summary generation ─────────────────────────────────
+    # ── Structured conversation record generation ──────────────────
 
-    async def _generate_rich_summary(
+    async def _generate_conversation_record(
         self,
         conv: _ActiveConversation,
-        fallback: str,
-    ) -> str:
-        """Generate a rich LLM summary of the conversation.
+        fallback_summary: str,
+    ) -> ConversationRecord:
+        """Generate a structured ConversationRecord via LLM.
 
-        Falls back to *fallback* (a simple metadata stub) on any failure.
+        Falls back to a minimal record with *fallback_summary* on any failure.
         """
+        speakers = list(dict.fromkeys(
+            msg.get("speaker", "unknown") for msg in conv.history
+        ))
+        fallback = ConversationRecord(
+            summary=fallback_summary,
+            topics=list(conv.topics),
+            participants=speakers,
+            turn_count=conv.turn_number,
+        )
+
         try:
             transcript = "\n".join(
                 f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
                 for msg in conv.history
             )
             prompt = (
-                "Summarize this conversation in 2-4 sentences covering:\n"
-                "- Decisions made\n"
-                "- Commitments (who will do what)\n"
-                "- Unresolved tensions or disagreements\n"
-                "- Open questions\n"
-                "- Notable emotional moments\n\n"
+                "Analyze this conversation and return a JSON object with:\n"
+                '- "summary": 2-3 sentence summary\n'
+                '- "outcome": one-line outcome (e.g. "agreed to build dashboard")\n'
+                '- "key_decisions": array of decisions made\n'
+                '- "unresolved_tensions": array of disagreements or open questions\n'
+                '- "novel_information": array of new facts or ideas introduced\n\n'
+                "Return ONLY valid JSON, no markdown.\n\n"
                 f"Conversation:\n{transcript}"
             )
             response = await self._llm.complete(
                 messages=[
                     {"role": "system", "content": prompt},
-                    {"role": "user", "content": "Summarize now."},
+                    {"role": "user", "content": "Analyze now."},
                 ],
                 model="anthropic/claude-haiku-4.5",
                 agent_id="system",
                 temperature=0.3,
                 simulation_id=self._simulation_id,
-                max_tokens=300,
+                max_tokens=500,
             )
-            summary = response.content.strip()
-            if summary:
-                return summary
+            raw = response.content.strip()
+            if raw:
+                from core.memory.reflection import _parse_json_response
+
+                data = _parse_json_response(raw)
+                if not data:
+                    return fallback
+                return ConversationRecord(
+                    summary=data.get("summary", fallback_summary),
+                    topics=list(conv.topics),
+                    outcome=data.get("outcome", ""),
+                    key_decisions=data.get("key_decisions", []),
+                    unresolved_tensions=data.get("unresolved_tensions", []),
+                    novel_information=data.get("novel_information", []),
+                    participants=speakers,
+                    turn_count=conv.turn_number,
+                )
         except Exception:
             logger.warning(
-                "Rich summary generation failed for conversation %s, falling back to metadata stub",
+                "Conversation record generation failed for %s, using fallback",
                 conv.id,
                 exc_info=True,
             )
@@ -1046,6 +1108,39 @@ class ConversationEngine:
             except Exception:
                 logger.warning("Failed to get internal state for %s", agent.id, exc_info=True)
 
+        # Build balance context if economy manager is available (#270)
+        balance_context: str | None = None
+        if self._services and self._services.economy_manager:
+            try:
+                balance = await self._services.economy_manager.get_balance(agent.id)
+                balance_context = f"Your current balance: ${balance:.2f}"
+                is_broke = balance <= 0
+                if is_broke:
+                    balance_context += " [BROKE — you cannot use paid tools until you earn or receive funds]"
+            except Exception:
+                logger.warning("Failed to get balance for %s", agent.id, exc_info=True)
+
+        # Fetch alliances context (#274)
+        alliances_context: str | None = None
+        if self._services and self._services.alliance_manager:
+            try:
+                alliances_context = await self._services.alliance_manager.get_alliance_context(agent.id)
+                alliances_context = alliances_context or None
+            except Exception:
+                logger.warning("Failed to get alliances for %s", agent.id, exc_info=True)
+
+        # Fetch most recent dream for context injection (#272)
+        recent_dream: str | None = None
+        if self._services and self._services.memory_repo:
+            try:
+                entries = await self._services.memory_repo.get_recent_journal_entries_by_type(
+                    agent.id, "dream", limit=1,
+                )
+                if entries:
+                    recent_dream = entries[0].content
+            except Exception:
+                logger.warning("Failed to get recent dream for %s", agent.id, exc_info=True)
+
         # Build shared working state context if available
         shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
@@ -1068,6 +1163,9 @@ class ConversationEngine:
                     agent_goals_context=agent_goals_context,
                     commitment_reminders=commitment_reminders,
                     internal_state_context=internal_state_context,
+                    balance_context=balance_context,
+                    recent_dream=recent_dream,
+                    alliances_context=alliances_context,
                 )
                 messages = context_result.messages
 
@@ -1321,6 +1419,7 @@ class ConversationEngine:
         mapping = {
             "idle": "idle",
             "memory": "memory",
+            "initiative": None,  # prompt_hint set directly from trigger
             "scheduled": None,
             "environmental": None,
             "audience": None,

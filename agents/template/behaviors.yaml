@@ -1,0 +1,19 @@
+morning_routine:
+  - "Check on current goals and priorities"
+  - "Greet teammates"
+
+conversation_style:
+  tone: "friendly"
+  verbosity: "moderate"
+  humor: "occasional"
+
+triggers:
+  high_energy:
+    - "Propose new ideas"
+    - "Take initiative on tasks"
+  low_energy:
+    - "Listen more than speak"
+    - "Focus on simple tasks"
+  high_frustration:
+    - "Voice concerns directly"
+    - "Seek help from allies"

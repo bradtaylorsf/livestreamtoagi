@@ -48,6 +48,11 @@ def build_agent_tools(
         artifact_repo=services.artifact_repo,
         simulation_mode=simulation_mode,
         shared_working_state=services.shared_working_state,
+        agent_registry=services.agent_registry,
+        economy_manager=services.economy_manager,
+        alliance_manager=services.alliance_manager,
+        character_spawner=services.character_spawner,
+        voting_manager=services.voting_manager,
     )
     for tool in core_tools:
         registry.register(tool)
