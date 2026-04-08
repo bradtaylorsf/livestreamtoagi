@@ -484,6 +484,7 @@ def run_sim_orchestrator(
     max_cost: float = 10.0,
     verbose: bool = False,
     dry_run: bool = False,
+    world_sim: bool = False,
 ) -> None:
     """Run a simulation via the new orchestrator (run_simulation.py)."""
     import subprocess
@@ -503,6 +504,8 @@ def run_sim_orchestrator(
         cmd.append("--verbose")
     if dry_run:
         cmd.append("--dry-run")
+    if world_sim:
+        cmd.append("--world-sim")
 
     mode = "seeded" if seed_file else "autonomous"
     console.print(f"\n[bold bright_cyan]Starting {mode} simulation: {name}[/bold bright_cyan]")
@@ -799,6 +802,7 @@ def main() -> None:
         sim_args = args[1:]
         verbose = "-v" in sim_args or "--verbose" in sim_args
         dry_run = "--dry-run" in sim_args
+        world_sim = "--world-sim" in sim_args
 
         # Check for scenario preset: pnpm chat sim awakening
         scenario_names = {s[0]: s[2] for s in _discover_scenarios()}
@@ -834,12 +838,14 @@ def main() -> None:
                     name=name, duration=duration,
                     speed_multiplier=speed_multiplier,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             else:
                 run_sim_orchestrator(
                     name=name, seed_file=seed,
                     speed_multiplier=speed_multiplier,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             return
 
@@ -862,7 +868,7 @@ def main() -> None:
                 max_cost = float(sim_args[i + 1]); i += 2
             elif arg == "--name" and i + 1 < len(sim_args):
                 name = sim_args[i + 1]; i += 2
-            elif arg in ("-v", "--verbose", "--dry-run"):
+            elif arg in ("-v", "--verbose", "--dry-run", "--world-sim"):
                 i += 1
             else:
                 i += 1
@@ -885,11 +891,13 @@ def main() -> None:
                     name=name, duration=dur,
                     speed_multiplier=speed_multiplier,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             else:
                 run_sim_orchestrator(
                     name=name, seed_file=seed_file,
                     max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+                    world_sim=world_sim,
                 )
             return
 
@@ -900,6 +908,7 @@ def main() -> None:
             name=name, seed_file=seed_file, duration=duration,
             speed_multiplier=speed_multiplier,
             max_cost=max_cost, verbose=verbose, dry_run=dry_run,
+            world_sim=world_sim,
         )
         return
 

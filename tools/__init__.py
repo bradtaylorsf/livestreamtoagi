@@ -13,7 +13,13 @@ from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
-from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
+from .revenue_tools import (
+    CheckEmailResponsesTool,
+    CheckPostPerformanceTool,
+    DraftEmailTool,
+    DraftSocialPostTool,
+    GetRevenueStatusTool,
+)
 from .self_modification import ProposeSelfModificationTool, ViewEvolutionLogTool
 from .social_tools import (
     LeaveAllianceTool,
@@ -174,6 +180,8 @@ def get_core_tools(
         ))
     tools.append(DraftSocialPostTool(redis_client=redis_client, agent_id=agent_id))
     tools.append(DraftEmailTool(redis_client=redis_client, agent_id=agent_id))
+    tools.append(CheckPostPerformanceTool(redis_client=redis_client, agent_id=agent_id))
+    tools.append(CheckEmailResponsesTool(redis_client=redis_client, agent_id=agent_id))
 
     # Economy tools — available to all agents
     if economy_manager is not None:
