@@ -254,8 +254,8 @@ class AgentStateManager:
             state.boredom = _clamp(state.boredom - 0.15)
             state.energy = _clamp(state.energy + 0.03)
         else:
-            state.boredom = _clamp(state.boredom - 0.1)
-            state.energy = _clamp(state.energy + 0.02)
+            state.boredom = _clamp(state.boredom - 0.2)
+            state.energy = _clamp(state.energy + 0.05)
         await self.save_state(state)
         return state
 
