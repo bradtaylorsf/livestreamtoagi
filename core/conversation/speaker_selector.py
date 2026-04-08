@@ -80,6 +80,7 @@ class SpeakerSelector:
         agents_who_spoke: set[str] | None = None,
         turn_number: int = 0,
         max_turns: int = 15,
+        agent_goals: dict[str, list[str]] | None = None,
     ) -> SelectionResult:
         """Pick the next speaker from *eligible_agents*.
 
@@ -214,6 +215,20 @@ class SpeakerSelector:
             # likely to speak up
             state_boost = self._state_scores.get(agent.id, 0.0)
             total += state_boost
+
+            # Initiative + goal boost (#268): agents with high initiative
+            # and active goals relevant to the current topic get a boost
+            if agent_goals and detected_topic and agent.id in agent_goals:
+                goal_texts = agent_goals[agent.id]
+                topic_lower = detected_topic.lower()
+                for goal_text in goal_texts:
+                    if topic_lower in goal_text.lower() or any(
+                        word in goal_text.lower()
+                        for word in topic_lower.split("_")
+                        if len(word) > 2
+                    ):
+                        total += agent.initiative * 0.15
+                        break
 
             scores[agent.id] = total
             breakdown[agent.id] = factors

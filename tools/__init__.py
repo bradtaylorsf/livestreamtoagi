@@ -9,6 +9,7 @@ from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
 from .code_execution import ExecuteCodeTool
+from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
 from .messaging import SendMessageTool
 from .revenue_tools import DraftEmailTool, DraftSocialPostTool, GetRevenueStatusTool
@@ -20,6 +21,7 @@ from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
     import docker
+    from core.agent_economy import AgentEconomyManager
     from core.agent_registry import AgentRegistry
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
@@ -54,7 +56,9 @@ __all__ = [
     "SendChatMessageTool",
     "SendMessageTool",
     "ToolRegistry",
+    "TransferBudgetTool",
     "UpdateCoreMemoryTool",
+    "ViewAccountTool",
     "ViewEvolutionLogTool",
     "WebSearchTool",
     "get_core_tools",
@@ -95,6 +99,7 @@ def get_core_tools(
     simulation_mode: bool = False,
     shared_working_state: SharedWorkingState | None = None,
     agent_registry: AgentRegistry | None = None,
+    economy_manager: AgentEconomyManager | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -144,9 +149,17 @@ def get_core_tools(
 
     # Revenue and marketing tools
     if cost_repo is not None:
-        tools.append(GetRevenueStatusTool(cost_repo=cost_repo, agent_id=agent_id))
+        tools.append(GetRevenueStatusTool(
+            cost_repo=cost_repo, agent_id=agent_id,
+            economy_manager=economy_manager,
+        ))
     tools.append(DraftSocialPostTool(redis_client=redis_client, agent_id=agent_id))
     tools.append(DraftEmailTool(redis_client=redis_client, agent_id=agent_id))
+
+    # Economy tools — available to all agents
+    if economy_manager is not None:
+        tools.append(TransferBudgetTool(economy_manager=economy_manager, agent_id=agent_id))
+        tools.append(ViewAccountTool(economy_manager=economy_manager, agent_id=agent_id))
 
     # Web search and URL fetch tools
     tools.append(

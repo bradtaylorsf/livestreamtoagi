@@ -143,14 +143,15 @@ async def test_llm_fallback_returns_general_for_invalid(config_with_llm: TopicCo
 
 
 @pytest.mark.asyncio
-async def test_llm_not_called_when_keywords_match(config_with_llm: TopicConfig) -> None:
-    """Even with fallback enabled, LLM is skipped when keywords match."""
+async def test_llm_called_first_when_keywords_also_match(config_with_llm: TopicConfig) -> None:
+    """LLM is called first even when keywords would match (#271)."""
     mock_llm = AsyncMock()
+    mock_llm.complete.return_value = AsyncMock(content="code")
     detector = TopicDetector(config_with_llm, llm_client=mock_llm)
 
     result = await detector.detect_topic([{"content": "Let's review the code"}])
     assert result == "code"
-    mock_llm.complete.assert_not_called()
+    mock_llm.complete.assert_called_once()
 
 
 # ── Topic history tracking tests ─────────────────────────────

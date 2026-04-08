@@ -35,6 +35,7 @@ from core.repos.memory_repo import MemoryRepo
 from core.repos.relationship_repo import RelationshipRepo
 from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
+from core.agent_economy import AgentEconomyManager
 from core.agent_goals import AgentGoalManager
 from core.agent_state import AgentStateManager
 from core.shared_state import SharedWorkingState
@@ -70,6 +71,7 @@ class Services:
     shared_working_state: SharedWorkingState | None
     goal_manager: AgentGoalManager | None
     agent_state_manager: AgentStateManager | None
+    economy_manager: AgentEconomyManager | None
     config_loader: ConfigLoader
     config_version_repo: ConfigVersionRepo | None
 
@@ -186,6 +188,8 @@ async def bootstrap_services(
         state_repo=agent_state_repo,
     )
 
+    economy_manager = AgentEconomyManager(db)
+
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
         core_memory=core_memory,
@@ -218,6 +222,7 @@ async def bootstrap_services(
         shared_working_state=shared_working_state,
         goal_manager=goal_manager,
         agent_state_manager=agent_state_manager,
+        economy_manager=economy_manager,
         config_loader=config_loader,
         config_version_repo=config_version_repo,
     )
@@ -276,6 +281,7 @@ async def _bootstrap_dry_run(
         shared_working_state=None,
         goal_manager=None,
         agent_state_manager=AgentStateManager(),
+        economy_manager=None,
         config_loader=config_loader,
         config_version_repo=None,
     )

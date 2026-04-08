@@ -1,14 +1,15 @@
 """Conversation trigger system — determines when new conversations start.
 
-Six trigger types:
+Seven trigger types:
 - idle: nobody talking for idle_timeout_seconds
 - scheduled: daily schedule events (standup, lunch, challenge hour, etc.)
 - environmental: external events (poll result, world expansion, budget update, viewer milestone)
+- initiative: high-initiative agents self-start conversations about their goals
 - goal: agent has active high-priority goals to pursue (priority <= 3)
 - memory: random agent recalls a high-importance memory (2% chance per tick)
 - audience: chat highlight or donation events (Pixel gets first crack)
 
-Priority order: pending events > scheduled > goal > idle > memory
+Priority order: pending events > scheduled > initiative > goal > state > idle > memory
 """
 
 from __future__ import annotations
@@ -51,6 +52,11 @@ AUDIENCE_EVENTS = frozenset({
     "chat_highlight",
 })
 
+# Tension events seeded from unresolved conversation topics (#271)
+TENSION_EVENTS = frozenset({
+    "tension",
+})
+
 
 class TriggerSystem:
     """Checks each tick whether a new conversation should start."""
@@ -88,12 +94,17 @@ class TriggerSystem:
         self._last_speech_time = self._clock.monotonic()
 
     def queue_event(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
-        """Push an environmental or audience event for processing on the next tick.
+        """Push an environmental, audience, or tension event for processing on the next tick.
 
         Duplicate events (same event_type) are collapsed to prevent
         identical conversations from being triggered multiple times.
         """
-        category = "audience" if event_type in AUDIENCE_EVENTS else "environmental"
+        if event_type in TENSION_EVENTS:
+            category = "tension"
+        elif event_type in AUDIENCE_EVENTS:
+            category = "audience"
+        else:
+            category = "environmental"
         # Dedup: reject if an event with the same type is already pending
         for existing in self._pending_events:
             if existing["event_type"] == event_type:
@@ -140,7 +151,7 @@ class TriggerSystem:
     async def check(self) -> dict[str, Any] | None:
         """Check triggers in priority order. Returns trigger dict or None.
 
-        Priority: pending events > scheduled > idle > memory
+        Priority: pending events > scheduled > initiative > goal > state > idle > memory
         """
         # Expire old entries from recent conversations (>30 min)
         self._expire_recent_conversations()
@@ -152,6 +163,11 @@ class TriggerSystem:
 
         # 2. Scheduled
         trigger = self._check_scheduled()
+        if trigger is not None:
+            return trigger
+
+        # 2.5 Initiative-driven (high-initiative agents self-start about goals)
+        trigger = await self._check_initiative()
         if trigger is not None:
             return trigger
 
@@ -204,16 +220,33 @@ class TriggerSystem:
         category = event["category"]
 
         # Pixel gets first crack at audience events
-        starter = "pixel" if category == "audience" else self._select_by_initiative()
+        if category == "audience":
+            starter = "pixel"
+        elif category == "tension":
+            # For tensions, pick from the original participants if available
+            participants = event["data"].get("from_participants", [])
+            starter = self._rng.choice(participants) if participants else self._select_by_initiative()
+        else:
+            starter = self._select_by_initiative()
 
         # Sanitize event data for prompt — stringify and truncate to prevent
         # prompt injection from external sources (chat messages, donations)
         sanitized_data = str(event["data"])[:500]
 
+        # Tension events get a special prompt hint to continue the discussion
+        if category == "tension":
+            tension_text = event["data"].get("text", "an unresolved topic")
+            prompt_hint = (
+                f"There's an unresolved issue from earlier: {tension_text}. "
+                "Bring this up and try to make progress on it."
+            )
+        else:
+            prompt_hint = f"Respond to {event_type}: {sanitized_data}"
+
         return {
             "type": category,
             "starter_agent_id": starter,
-            "prompt_hint": f"Respond to {event_type}: {sanitized_data}",
+            "prompt_hint": prompt_hint,
             "event_type": event_type,
             "event_data": event["data"],
         }
@@ -262,6 +295,62 @@ class TriggerSystem:
 
         return None
 
+    async def _check_initiative(self) -> dict[str, Any] | None:
+        """High-initiative agents with active goals can self-start conversations.
+
+        Probability of firing = initiative_score * (1.0 / goal.priority).
+        High-initiative agents (Vera 0.8) with urgent goals (priority 1)
+        fire frequently; low-initiative agents (Rex 0.2) rarely self-trigger.
+        """
+        if self._goal_manager is None:
+            return None
+
+        agents = list(self._config.agent_initiative.keys())
+        if not agents:
+            return None
+
+        shuffled = list(agents)
+        self._rng.shuffle(shuffled)
+
+        for agent_id in shuffled:
+            if self._is_recent_duplicate("initiative", agent_id):
+                continue
+
+            initiative = self._config.agent_initiative.get(agent_id, 0.0)
+            if initiative < 0.1:
+                continue  # Skip very low-initiative agents
+
+            try:
+                goals = await self._goal_manager.get_goals(agent_id)
+            except Exception:
+                logger.warning("Failed to check goals for initiative trigger: %s", agent_id, exc_info=True)
+                continue
+
+            active_goals = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
+            if not active_goals:
+                continue
+
+            top_goal = active_goals[0]
+            # Probability = initiative * (1.0 / priority)
+            # Priority 1 → full initiative, priority 3 → 1/3 of initiative
+            probability = initiative * (1.0 / top_goal.priority)
+            if self._rng.random() >= probability:
+                continue
+
+            self.record_conversation("initiative", agent_id)
+            return {
+                "type": "initiative",
+                "starter_agent_id": agent_id,
+                "prompt_hint": (
+                    f"You want to make progress on: {top_goal.goal}. "
+                    "Bring this up naturally and drive the conversation toward action."
+                ),
+                "goal_text": top_goal.goal,
+                "goal_id": top_goal.id,
+            }
+
+        return None
+
     async def _check_goals(self) -> dict[str, Any] | None:
         """Check if any agent has high-priority active goals to pursue."""
         if self._goal_manager is None:
@@ -290,6 +379,11 @@ class TriggerSystem:
             # Only trigger for high-priority goals (priority <= 3)
             high_priority = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
             if not high_priority:
+                continue
+
+            # Weight by initiative — low-initiative agents rarely fire goal triggers
+            initiative = self._config.agent_initiative.get(agent_id, 0.5)
+            if self._rng.random() >= initiative:
                 continue
 
             top_goal = high_priority[0]

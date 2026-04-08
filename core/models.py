@@ -989,10 +989,79 @@ class AgentGoal(BaseModel):
     priority: int = 5
     status: str = "active"  # active, completed, abandoned, blocked
     source: str | None = "self"  # self, assigned, eval_loop, reflection
+    category: str | None = None  # creative, social, economic, personal, competitive
     progress_notes: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
     parent_goal_id: uuid.UUID | None = None
+
+
+# ── Agent Economy ─────────────────────────────────────────────────────
+
+
+class TransactionType(str, enum.Enum):
+    allocation = "allocation"
+    tool_cost = "tool_cost"
+    transfer = "transfer"
+    bonus = "bonus"
+    investment = "investment"
+    penalty = "penalty"
+
+
+class AgentAccount(BaseModel):
+    """Individual agent economy account."""
+
+    model_config = ConfigDict(from_attributes=True)
+    agent_id: str
+    balance: Decimal = Decimal("0")
+    weekly_allocation: Decimal = Decimal("3.0")
+    total_earned: Decimal = Decimal("0")
+    total_spent: Decimal = Decimal("0")
+    total_transferred: Decimal = Decimal("0")
+    updated_at: datetime | None = None
+
+
+class AgentTransaction(BaseModel):
+    """A single transaction in an agent's account."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    agent_id: str
+    type: str
+    amount: Decimal
+    counterparty_agent_id: str | None = None
+    description: str | None = None
+    created_at: datetime | None = None
+
+
+# ── Conversation Record (structured cross-conversation memory) ────
+
+
+class ConversationRecord(BaseModel):
+    """Structured record of a completed conversation for cross-conversation memory.
+
+    Captures structured details beyond a plain text summary so the system
+    can seed future conversations with unresolved tensions and avoid
+    rehashing exhausted topics.
+    """
+
+    summary: str
+    topics: list[str] = Field(default_factory=list)
+    outcome: str = ""
+    key_decisions: list[str] = Field(default_factory=list)
+    unresolved_tensions: list[str] = Field(default_factory=list)
+    novel_information: list[str] = Field(default_factory=list)
+    participants: list[str] = Field(default_factory=list)
+    turn_count: int = 0
+
+    def format_for_context(self) -> str:
+        """Format this record into a concise string for the agent context window."""
+        parts = [self.summary]
+        if self.key_decisions:
+            parts.append(f"Decisions: {'; '.join(self.key_decisions)}")
+        if self.unresolved_tensions:
+            parts.append(f"Unresolved: {'; '.join(self.unresolved_tensions)}")
+        return " ".join(parts)
 
 
 # ── Versioned Agent Config ─────────────────────────────────────────

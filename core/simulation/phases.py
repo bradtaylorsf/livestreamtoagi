@@ -202,8 +202,11 @@ class PhaseRunner:
         self._debug_prompts = debug_prompts
         self._prompt_log_repo = prompt_log_repo
 
-        # Cross-phase conversation context to prevent repetition
-        self._conversation_summaries: deque[str] = deque(maxlen=5)
+        # Cross-phase conversation context to prevent repetition (#271)
+        from core.models import ConversationRecord
+
+        self._conversation_records: deque[ConversationRecord] = deque(maxlen=25)
+        self._conversation_summaries: deque[str] = deque(maxlen=25)
         self._recent_outputs: deque[str] = deque(maxlen=50)  # Last 50 agent outputs
         self._topic_history: dict[str, list[float]] = {}  # Persists across conversations
 
@@ -548,8 +551,19 @@ class PhaseRunner:
             self._event_bus.off("artifact_created", _on_artifact)
             self._event_bus.off("conversation_productivity", _on_productivity)
 
-        # Collect conversation summary for cross-phase context
-        if engine.active_conversation is None and engine.last_conversation_summary:
+        # Collect structured conversation record for cross-phase context (#271)
+        if engine.active_conversation is None and engine.last_conversation_record:
+            record = engine.last_conversation_record
+            self._conversation_records.append(record)
+            self._conversation_summaries.append(record.format_for_context())
+
+            # Seed unresolved tensions as trigger events for future conversations
+            for tension in record.unresolved_tensions[:2]:
+                self._triggers.queue_event("tension", {
+                    "text": tension,
+                    "from_participants": record.participants,
+                })
+        elif engine.active_conversation is None and engine.last_conversation_summary:
             self._conversation_summaries.append(engine.last_conversation_summary)
 
         # Collect recent outputs for repetition detection
