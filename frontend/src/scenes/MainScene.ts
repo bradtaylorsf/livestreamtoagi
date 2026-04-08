@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { WorldManager } from "../world/WorldManager";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
+import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import type { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
@@ -76,6 +77,7 @@ const FURNITURE: FurniturePlacement[] = [
 export class MainScene extends Phaser.Scene {
   private worldManager: WorldManager | null = null;
   private agentSpriteManager: AgentSpriteManager | null = null;
+  private speechBubbleManager: SpeechBubbleManager | null = null;
   private wsClient: WebSocketClient | null = null;
 
   constructor() {
@@ -175,6 +177,13 @@ export class MainScene extends Phaser.Scene {
       this.wsClient,
       this.worldManager,
     );
+
+    // ── Speech bubbles (DOM overlay above canvas) ──────────────
+    this.speechBubbleManager = new SpeechBubbleManager(
+      this,
+      this.wsClient,
+      this.agentSpriteManager,
+    );
   }
 
   getWorldManager(): WorldManager | null {
@@ -186,7 +195,12 @@ export class MainScene extends Phaser.Scene {
   }
 
   update(): void {
-    // Game loop logic will be added as features are implemented.
+    this.speechBubbleManager?.update();
+  }
+
+  shutdown(): void {
+    this.speechBubbleManager?.destroy();
+    this.speechBubbleManager = null;
   }
 
   /**
