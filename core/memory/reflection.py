@@ -24,6 +24,7 @@ from core.models import (
 if TYPE_CHECKING:
     from core.agent_goals import AgentGoalManager
     from core.agent_registry import AgentRegistry
+    from core.agent_state import AgentStateManager
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.token_counter import TokenCounter
@@ -121,6 +122,7 @@ class ReflectionManager:
         token_counter: TokenCounter,
         agent_registry: AgentRegistry,
         goal_manager: AgentGoalManager | None = None,
+        agent_state_manager: AgentStateManager | None = None,
         simulation_id: object | None = None,
     ) -> None:
         self._repo = memory_repo
@@ -130,6 +132,7 @@ class ReflectionManager:
         self._registry = agent_registry
         self._relationship_tracker: RelationshipTracker | None = None
         self._goal_manager = goal_manager
+        self._agent_state_manager = agent_state_manager
         self._simulation_id = simulation_id
 
     def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
@@ -249,6 +252,16 @@ class ReflectionManager:
             except Exception:
                 logger.warning(
                     "Failed to review goals during 6h reflection for %s",
+                    agent_id, exc_info=True,
+                )
+
+        # Snapshot internal state to DB during reflection (#267)
+        if self._agent_state_manager is not None:
+            try:
+                await self._agent_state_manager.snapshot_to_db(agent_id)
+            except Exception:
+                logger.warning(
+                    "Failed to snapshot internal state for %s during 6h reflection",
                     agent_id, exc_info=True,
                 )
 

@@ -7,26 +7,17 @@ import logging
 import tempfile
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import edge_tts
 
 from core.event_bus import EventType, event_bus
 from core.speech_parser import parse_speech
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from core.agent_registry import AgentRegistry
 
-# Voice assignments per spec (ENGINEERING-SPECS.md Task 2.2)
-VOICE_MAP: dict[str, str] = {
-    "vera": "en-GB-SoniaNeural",
-    "rex": "en-US-GuyNeural",
-    "aurora": "en-US-JennyNeural",
-    "pixel": "en-US-DavisNeural",
-    "fork": "en-AU-WilliamNeural",
-    "sentinel": "en-US-AriaNeural",
-    "grok": "en-US-ChristopherNeural",
-    "management": "en-US-AndrewNeural",
-    # alpha has no voice (text-only)
-}
+logger = logging.getLogger(__name__)
 
 
 class TTSPipeline:
@@ -34,14 +25,32 @@ class TTSPipeline:
 
     def __init__(
         self,
+        agent_registry: AgentRegistry | None = None,
         audio_dir: Path | None = None,
         cleanup_ttl: int = 60,
         base_url: str = "/audio",
     ) -> None:
+        self._agent_registry = agent_registry
         self.audio_dir = audio_dir or Path(tempfile.mkdtemp(prefix="tts_"))
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self.cleanup_ttl = cleanup_ttl
         self.base_url = base_url.rstrip("/")
+
+    def _get_voice_id(self, agent_id: str) -> str | None:
+        """Look up voice ID from agent registry."""
+        if self._agent_registry is not None:
+            agent = self._agent_registry.get_agent(agent_id)
+            if agent is not None:
+                return agent.voice_id
+        return None
+
+    def _get_audio_effects(self, agent_id: str) -> str | None:
+        """Look up audio effects from agent registry."""
+        if self._agent_registry is not None:
+            agent = self._agent_registry.get_agent(agent_id)
+            if agent is not None:
+                return agent.audio_effects
+        return None
 
     async def speak(self, agent_id: str, text: str) -> dict[str, str | float] | None:
         """Generate TTS audio for an agent's speech.
@@ -49,7 +58,7 @@ class TTSPipeline:
         Returns None for Alpha (no voice) or on failure after retry.
         Returns dict with agent_id, audio_url, and duration on success.
         """
-        voice_id = VOICE_MAP.get(agent_id)
+        voice_id = self._get_voice_id(agent_id)
         if voice_id is None:
             return None
 
@@ -76,8 +85,8 @@ class TTSPipeline:
                 )
                 return None
 
-        # Management post-processing: reverb + pitch-down
-        if agent_id == "management":
+        # Post-processing audio effects (e.g., Management's reverb + pitch-down)
+        if self._get_audio_effects(agent_id) == "reverb_pitch_down":
             processed_path = self.audio_dir / f"{uuid.uuid4()}.mp3"
             try:
                 await _apply_management_effects(filepath, processed_path)

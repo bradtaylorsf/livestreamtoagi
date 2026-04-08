@@ -79,30 +79,16 @@ router = APIRouter(
     dependencies=[Depends(_require_admin)],
 )
 
-# Agent metadata not stored in YAML configs — derived from character sheets.
-AGENT_ROLES: dict[str, str] = {
-    "vera": "Showrunner/Coordinator",
-    "rex": "Engineer/Builder",
-    "aurora": "Creative Director",
-    "pixel": "Researcher/Audience Liaison",
-    "fork": "Contrarian/Code Reviewer",
-    "sentinel": "Budget Monitor/QA",
-    "grok": "Wild Card/Provocateur",
-    "management": "Content Filter",
-    "alpha": "Errand Runner",
-}
+def _get_agent_roles() -> dict[str, str]:
+    """Load agent roles from agent registry."""
+    registry = _get_registry()
+    return registry.get_agent_roles()
 
-AGENT_COLORS: dict[str, str] = {
-    "vera": "#9b59b6",
-    "rex": "#e74c3c",
-    "aurora": "#f1c40f",
-    "pixel": "#3498db",
-    "fork": "#2ecc71",
-    "sentinel": "#e67e22",
-    "grok": "#1abc9c",
-    "management": "#95a5a6",
-    "alpha": "#8e44ad",
-}
+
+def _get_agent_colors() -> dict[str, str]:
+    """Load agent colors from agent registry."""
+    registry = _get_registry()
+    return registry.get_agent_colors()
 
 
 def _get_db():
@@ -128,8 +114,8 @@ def _agent_summary_from_config(a, *, total_cost: float = 0, message_count: int =
     return AgentSummary(
         id=a.id,
         display_name=a.display_name,
-        role=AGENT_ROLES.get(a.id, ""),
-        color=AGENT_COLORS.get(a.id, "#888888"),
+        role=a.role,
+        color=a.color_hex,
         status=status,
         conversation_model=a.model_conversation,
         building_model=a.model_building,

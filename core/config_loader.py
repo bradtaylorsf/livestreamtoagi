@@ -20,6 +20,7 @@ from core.event_bus import event_bus
 from core.models import ConversationConfig
 
 if TYPE_CHECKING:
+    from core.agent_registry import AgentRegistry
     from core.repos.config_version_repo import ConfigVersionRepo
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,65 @@ class ConfigLoader:
                 exc_info=True,
             )
             return None
+
+    def populate_from_registry(self, agent_registry: AgentRegistry) -> ConversationConfig:
+        """Rebuild ConversationConfig with per-agent data from the agent registry.
+
+        Fills in closer_weights, agent_interrupt_tendency, eavesdrop_tendency,
+        agent_initiative, relevance_map, and adjacency from agent configs.
+        Called after both YAML config and agent registry are loaded.
+        """
+        if self._config is None:
+            raise RuntimeError("Config not loaded — call load() first")
+
+        cfg = self._config
+
+        # Build per-agent dicts from registry
+        closer_weights = agent_registry.build_closer_weights()
+        interrupt_tendency = agent_registry.build_interrupt_tendency()
+        eavesdrop_tendency = agent_registry.build_eavesdrop_tendency()
+        initiative = agent_registry.build_initiative()
+        relevance_map = agent_registry.build_relevance_map()
+        adjacency = agent_registry.build_adjacency()
+
+        # Rebuild with agent-derived data (ConversationConfig is frozen,
+        # so we reconstruct from dicts)
+        energy_data = cfg.energy.model_dump()
+        energy_data["closer_weights"] = closer_weights
+
+        interrupts_data = cfg.interrupts.model_dump()
+        interrupts_data["agent_interrupt_tendency"] = interrupt_tendency
+
+        proximity_data = cfg.proximity.model_dump()
+        proximity_data["eavesdrop_tendency"] = eavesdrop_tendency
+
+        triggers_data = cfg.triggers.model_dump()
+        triggers_data["agent_initiative"] = initiative
+
+        topics_data = cfg.topics.model_dump()
+        # Merge: keep existing relevance_map entries, overlay from registry
+        merged_relevance = dict(topics_data["relevance_map"])
+        for topic, agent_scores in relevance_map.items():
+            if topic not in merged_relevance:
+                merged_relevance[topic] = {}
+            merged_relevance[topic].update(agent_scores)
+        topics_data["relevance_map"] = merged_relevance
+
+        new_config = ConversationConfig(
+            selection_weights=cfg.selection_weights,
+            timing=cfg.timing,
+            energy=energy_data,
+            interrupts=interrupts_data,
+            proximity=proximity_data,
+            triggers=triggers_data,
+            topics=topics_data,
+            adjacency=adjacency,
+            logging=cfg.logging,
+            reflection=cfg.reflection,
+        )
+        self._config = new_config
+        logger.info("Populated conversation config with agent registry data")
+        return new_config
 
     async def start_watching(self) -> None:
         """Start an async background task that watches for file changes."""

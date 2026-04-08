@@ -49,6 +49,8 @@ class SpeakerSelector:
 
     def __init__(self, config: ConversationConfig) -> None:
         self._config = config
+        # Optional state scores injected per-conversation by the engine
+        self._state_scores: dict[str, float] = {}
 
     @property
     def config(self) -> ConversationConfig:
@@ -57,6 +59,15 @@ class SpeakerSelector:
     @config.setter
     def config(self, value: ConversationConfig) -> None:
         self._config = value
+
+    def set_state_scores(self, scores: dict[str, float]) -> None:
+        """Inject per-agent state-derived score adjustments.
+
+        Called by the conversation engine before each conversation using
+        agent internal state values. Frustrated agents get an interrupt
+        boost; bored agents get a topic-change boost.
+        """
+        self._state_scores = scores
 
     def select(
         self,
@@ -198,6 +209,11 @@ class SpeakerSelector:
             if agent.id in _required and agent.id not in _spoke:
                 if turn_number >= 3:
                     total += 0.5
+
+            # State-driven boost (#267): frustrated/bored agents are more
+            # likely to speak up
+            state_boost = self._state_scores.get(agent.id, 0.0)
+            total += state_boost
 
             scores[agent.id] = total
             breakdown[agent.id] = factors

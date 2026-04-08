@@ -42,9 +42,20 @@ ALL_TABLES = [
     "simulations",
     "eval_runs",
     "eval_results",
+    "agent_internal_state",
 ]
 
-AGENT_IDS = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok", "management", "alpha"]
+def _discover_agent_ids() -> list[str]:
+    """Discover agent IDs from the agents/ directory."""
+    from pathlib import Path
+    agents_dir = Path(__file__).resolve().parent.parent.parent / "agents"
+    return sorted(
+        d.name for d in agents_dir.iterdir()
+        if d.is_dir() and (d / "config.yaml").exists()
+    )
+
+
+AGENT_IDS = _discover_agent_ids()
 
 
 @pytest.fixture()
@@ -55,7 +66,7 @@ async def conn():
     # Drop all tables directly (faster and avoids FK ordering issues from test data)
     await c.execute("""
         DROP TABLE IF EXISTS
-            eval_results, eval_runs,
+            eval_results, eval_runs, agent_internal_state,
             energy_change_log, self_modification_proposals, journal_entries,
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,

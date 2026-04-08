@@ -122,6 +122,7 @@ class ContextAssembler:
         shared_state_context: str | None = None,
         agent_goals_context: str | None = None,
         commitment_reminders: str | None = None,
+        internal_state_context: str | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -220,6 +221,9 @@ class ContextAssembler:
         # Commitment reminders (#249)
         _track("commitment_reminders", commitment_reminders or "", bool(commitment_reminders))
 
+        # Internal state (#267)
+        _track("internal_state", internal_state_context or "", bool(internal_state_context))
+
         # Prompt hint
         hint_text = ""
         if prompt_hint and prompt_hint.startswith("topic:"):
@@ -273,6 +277,11 @@ class ContextAssembler:
         # Commitment reminders (#249)
         if commitment_reminders:
             system_sections.append(commitment_reminders)
+
+        # Internal state (#267) — injected before shared state so agent
+        # "feels" their mood before processing external context
+        if internal_state_context:
+            system_sections.append(internal_state_context)
 
         # Shared working state
         if shared_state_context:

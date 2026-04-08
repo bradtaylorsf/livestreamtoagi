@@ -49,17 +49,20 @@ from rich.table import Table
 
 console = Console()
 
-AGENTS = [
-    ("vera", "Vera — The Showrunner", "bright_magenta", "Coordinator, keeps everyone on track"),
-    ("rex", "Rex — The Skeptic", "bright_green", "Engineer, builder, dry sarcasm"),
-    ("aurora", "Aurora — The Visionary", "bright_cyan", "Creative director, big ideas"),
-    ("pixel", "Pixel — The Enthusiast", "bright_yellow", "Researcher, audience liaison"),
-    ("fork", "Fork — The Contrarian", "bright_red", "Code reviewer, open-source evangelist"),
-    ("sentinel", "Sentinel — The Accountant", "blue", "Budget monitor, cost hawk"),
-    ("grok", "Grok — The Wild Card", "dark_orange", "Provocateur, chaotic insights"),
-    ("management", "Management", "bright_white", "Content filter, corporate middle management"),
-    ("alpha", "Alpha — The Wolf", "grey70", "Errand runner, non-verbal"),
-]
+
+def _load_agents() -> list[tuple[str, str, str, str]]:
+    """Load agent list from registry configs."""
+    from core.agent_registry import AgentRegistry
+
+    registry = AgentRegistry(redis_client=None)
+    agents_map = registry._load_all_from_yaml()
+    return [
+        (a.id, a.display_name, a.color_rich, a.role)
+        for a in agents_map.values()
+    ]
+
+
+AGENTS = _load_agents()
 
 SINGLE_MODES = [
     ("chat", "Interactive chat (REPL)", "--interactive"),

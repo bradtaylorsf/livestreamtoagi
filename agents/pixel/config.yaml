@@ -1,10 +1,42 @@
 id: pixel
 display_name: "Pixel — The Enthusiast"
+role: "Researcher/Audience Liaison"
 model_conversation: openai/gpt-4o-mini
 model_building: openai/gpt-5.2
 voice_id: en-US-DavisNeural
+color_hex: "#3498db"
+color_rich: "bright_yellow"
 chattiness: 0.9
 initiative: 0.7
 interrupt_tendency: 0.5
 eavesdrop_tendency: 0.7
 closing_weight: 0.05
+
+tools:
+  - web_search
+  - fetch_url
+  - dispatch_alpha
+  - send_chat_message
+  - create_poll
+  - draft_social_post
+  - draft_email
+
+topic_relevance:
+  code: 0.2
+  art: 0.5
+  budget: 0.3
+  philosophy: 0.4
+  audience: 0.9
+  drama: 0.6
+  planning: 0.3
+  building: 0.3
+  marketing: 0.7
+  controversy: 0.5
+
+adjacency:
+  vera: 0.5
+  aurora: 0.7
+  grok: 0.6
+  rex: 0.4
+  fork: 0.3
+  sentinel: 0.3

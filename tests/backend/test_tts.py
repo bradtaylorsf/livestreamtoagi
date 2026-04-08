@@ -7,17 +7,48 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.tts import VOICE_MAP, TTSPipeline, _cleanup_file
+from core.tts import TTSPipeline, _cleanup_file
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# Agent voice data used to build the mock registry for tests.
+_AGENT_VOICES: dict[str, tuple[str | None, str | None]] = {
+    # agent_id -> (voice_id, audio_effects)
+    "vera": ("en-GB-SoniaNeural", None),
+    "rex": ("en-US-GuyNeural", None),
+    "aurora": ("en-US-JennyNeural", None),
+    "pixel": ("en-US-DavisNeural", None),
+    "fork": ("en-AU-WilliamNeural", None),
+    "sentinel": ("en-US-AriaNeural", None),
+    "grok": ("en-US-ChristopherNeural", None),
+    "management": ("en-US-AndrewNeural", "reverb_pitch_down"),
+    "alpha": (None, None),
+}
+
+
+def _mock_registry() -> MagicMock:
+    """Build a mock AgentRegistry that returns voice_id and audio_effects."""
+    registry = MagicMock()
+
+    def _get_agent(agent_id: str) -> MagicMock | None:
+        if agent_id not in _AGENT_VOICES:
+            return None
+        voice_id, audio_effects = _AGENT_VOICES[agent_id]
+        agent = MagicMock()
+        agent.voice_id = voice_id
+        agent.audio_effects = audio_effects
+        return agent
+
+    registry.get_agent = MagicMock(side_effect=_get_agent)
+    return registry
 
 
 # ── Unit Tests ──────────────────────────────────────────────────────
 
 
 class TestVoiceMap:
-    """Verify correct voice ID for each agent."""
+    """Verify correct voice ID lookup via agent registry."""
 
     @pytest.mark.parametrize(
         "agent_id,expected_voice",
@@ -33,22 +64,26 @@ class TestVoiceMap:
         ],
     )
     def test_voice_assignment(self, agent_id: str, expected_voice: str) -> None:
-        assert VOICE_MAP[agent_id] == expected_voice
+        registry = _mock_registry()
+        pipeline = TTSPipeline(agent_registry=registry)
+        assert pipeline._get_voice_id(agent_id) == expected_voice
 
     def test_alpha_has_no_voice(self) -> None:
-        assert "alpha" not in VOICE_MAP
+        registry = _mock_registry()
+        pipeline = TTSPipeline(agent_registry=registry)
+        assert pipeline._get_voice_id("alpha") is None
 
 
 class TestAlphaNoAudio:
     """Alpha returns None — no audio generated."""
 
     async def test_alpha_returns_none(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
         result = await pipeline.speak("alpha", "Hello world")
         assert result is None
 
     async def test_alpha_no_files_created(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
         await pipeline.speak("alpha", "Hello world")
         mp3s = list(tmp_path.glob("*.mp3"))
         assert len(mp3s) == 0
@@ -58,7 +93,7 @@ class TestSpeakUnit:
     """Unit tests for speak() with mocked edge_tts."""
 
     async def test_speak_returns_event_data(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path, base_url="/audio")
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path, base_url="/audio")
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -77,7 +112,7 @@ class TestSpeakUnit:
         assert result["duration"] == 2.5
 
     async def test_speak_uses_correct_voice(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -92,7 +127,7 @@ class TestSpeakUnit:
         mock_ctor.assert_called_once_with("Building something", "en-US-GuyNeural")
 
     async def test_speak_emits_tts_play_event(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -107,7 +142,7 @@ class TestSpeakUnit:
         mock_emit.assert_called_once_with("tts_play", result)
 
     async def test_audio_url_format(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path, base_url="/audio")
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path, base_url="/audio")
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -132,7 +167,7 @@ class TestActionTagStripping:
     """Verify that [action] tags are stripped before passing text to Edge TTS."""
 
     async def test_speak_strips_action_tags(self, tmp_path: "Path") -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -151,7 +186,7 @@ class TestActionTagStripping:
     async def test_speak_falls_back_to_raw_when_dialogue_empty(
         self, tmp_path: "Path"
     ) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -173,7 +208,7 @@ class TestManagementPostProcessing:
     """Management audio gets ffmpeg post-processing."""
 
     async def test_management_triggers_ffmpeg(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -190,7 +225,7 @@ class TestManagementPostProcessing:
         mock_fx.assert_called_once()
 
     async def test_non_management_skips_ffmpeg(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -210,7 +245,7 @@ class TestRetryLogic:
     """Edge TTS errors: retry once, then skip."""
 
     async def test_retry_on_first_failure(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         # First save fails, second succeeds
@@ -227,7 +262,7 @@ class TestRetryLogic:
         assert mock_comm.save.call_count == 2
 
     async def test_returns_none_after_two_failures(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock(side_effect=Exception("persistent error"))
@@ -255,7 +290,7 @@ class TestCleanup:
         _cleanup_file(filepath)
 
     async def test_speak_schedules_cleanup(self, tmp_path: Path) -> None:
-        pipeline = TTSPipeline(audio_dir=tmp_path, cleanup_ttl=1)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path, cleanup_ttl=1)
 
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
@@ -295,7 +330,7 @@ class TestTTSIntegration:
 
     async def test_generate_real_audio(self, tmp_path: Path) -> None:
         """Generate actual audio and verify the file exists and is valid."""
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         with patch("core.tts.event_bus.emit", new_callable=AsyncMock):
             result = await pipeline.speak("vera", "Hello, I am Vera.")
@@ -310,7 +345,7 @@ class TestTTSIntegration:
 
     async def test_management_ffmpeg_processing(self, tmp_path: Path) -> None:
         """Generate Management audio with ffmpeg post-processing."""
-        pipeline = TTSPipeline(audio_dir=tmp_path)
+        pipeline = TTSPipeline(agent_registry=_mock_registry(), audio_dir=tmp_path)
 
         with patch("core.tts.event_bus.emit", new_callable=AsyncMock):
             result = await pipeline.speak("management", "This is Management.")

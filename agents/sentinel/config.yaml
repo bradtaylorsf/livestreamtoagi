@@ -1,10 +1,40 @@
 id: sentinel
 display_name: "Sentinel — The Anxious Accountant"
+role: "Budget Monitor/QA"
 model_conversation: anthropic/claude-haiku-4.5
 model_building: anthropic/claude-haiku-4.5
 voice_id: en-US-AriaNeural
+color_hex: "#e67e22"
+color_rich: "blue"
 chattiness: 0.6
 initiative: 0.4
 interrupt_tendency: 0.7
 eavesdrop_tendency: 0.3
 closing_weight: 0.25
+role_priority_bonus: 0.15
+
+tools:
+  - execute_code
+  - dispatch_alpha
+  - send_chat_message
+  - get_revenue_status
+
+topic_relevance:
+  code: 0.3
+  art: 0.2
+  budget: 0.9
+  philosophy: 0.1
+  audience: 0.3
+  drama: 0.2
+  planning: 0.6
+  building: 0.4
+  marketing: 0.4
+  controversy: 0.3
+
+adjacency:
+  vera: 0.8
+  rex: 0.5
+  grok: 0.6
+  aurora: 0.5
+  fork: 0.4
+  pixel: 0.3

@@ -37,31 +37,22 @@ from rich.panel import Panel  # noqa: E402
 from rich.table import Table  # noqa: E402
 from rich.theme import Theme  # noqa: E402
 
-# ── Agent colors (shared with test_agent.py) ───────────────────
+# ── Agent colors loaded from agent registry ───────────────────
 
-AGENT_COLORS: dict[str, str] = {
-    "vera": "bright_magenta",
-    "rex": "bright_green",
-    "aurora": "bright_cyan",
-    "pixel": "bright_yellow",
-    "fork": "bright_red",
-    "sentinel": "blue",
-    "grok": "dark_orange",
-    "management": "bright_white",
-    "alpha": "grey70",
-}
 
-AGENT_ROLES: dict[str, str] = {
-    "vera": "Showrunner",
-    "rex": "Engineer",
-    "aurora": "Creative Director",
-    "pixel": "Researcher",
-    "fork": "Contrarian",
-    "sentinel": "Budget Monitor",
-    "grok": "Wild Card",
-    "management": "Content Filter",
-    "alpha": "Errand Runner",
-}
+def _load_agent_metadata() -> tuple[dict[str, str], dict[str, str]]:
+    """Load agent colors and roles from agent registry configs."""
+    from core.agent_registry import AgentRegistry
+
+    registry = AgentRegistry(redis_client=None)
+    # Synchronous YAML load (no DB, no async needed)
+    agents = registry._load_all_from_yaml()
+    colors = {a.id: a.color_rich for a in agents.values()}
+    roles = {a.id: a.role for a in agents.values()}
+    return colors, roles
+
+
+AGENT_COLORS, AGENT_ROLES = _load_agent_metadata()
 
 custom_theme = Theme({
     f"agent.{name}": color for name, color in AGENT_COLORS.items()

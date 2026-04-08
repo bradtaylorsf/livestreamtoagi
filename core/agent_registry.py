@@ -97,14 +97,23 @@ class AgentRegistry:
                 agents[ac.agent_id] = AgentConfig(
                     id=ac.agent_id,
                     display_name=params.get("display_name", ac.agent_id),
+                    role=params.get("role", ""),
                     model_conversation=params.get("model_conversation", "claude-haiku-4-5"),
                     model_building=params.get("model_building", "claude-sonnet-4-6"),
                     voice_id=params.get("voice_id"),
+                    color_hex=params.get("color_hex", "#888888"),
+                    color_rich=params.get("color_rich", "white"),
+                    audio_effects=params.get("audio_effects"),
                     chattiness=float(params.get("chattiness", 0.5)),
                     initiative=float(params.get("initiative", 0.5)),
                     interrupt_tendency=float(params.get("interrupt_tendency", 0.0)),
                     eavesdrop_tendency=float(params.get("eavesdrop_tendency", 0.0)),
                     closing_weight=float(params.get("closing_weight", 0.0)),
+                    role_priority_bonus=float(params.get("role_priority_bonus", 0.0)),
+                    cross_agent_writer=bool(params.get("cross_agent_writer", False)),
+                    tools=params.get("tools", []),
+                    topic_relevance=params.get("topic_relevance", {}),
+                    adjacency=params.get("adjacency", {}),
                     system_prompt=prompt_ver.system_prompt,
                     behaviors=prompt_ver.behaviors,
                 )
@@ -137,7 +146,27 @@ class AgentRegistry:
                 raise ValueError(f"Duplicate agent ID: {config.id}")
             agents[config.id] = config
 
+        self._validate_agents(agents)
         return agents
+
+    def _validate_agents(self, agents: dict[str, AgentConfig]) -> None:
+        """Startup validation: warn about misconfigured agents."""
+        agent_ids = set(agents.keys())
+        for agent_id, config in agents.items():
+            # Warn if adjacency references unknown agents
+            for adj_id in config.adjacency:
+                if adj_id not in agent_ids:
+                    logger.warning(
+                        "Agent %s adjacency references unknown agent %s",
+                        agent_id, adj_id,
+                    )
+        tool_counts = {
+            aid: len(cfg.tools) for aid, cfg in agents.items()
+        }
+        logger.info(
+            "Agent roster: %s (tool counts: %s)",
+            sorted(agent_ids), tool_counts,
+        )
 
     async def reload_agent(self, agent_id: str) -> None:
         """Hot-swap a single agent's config from DB after eval loop writes a new version."""
@@ -160,14 +189,23 @@ class AgentRegistry:
             new_config = AgentConfig(
                 id=agent_id,
                 display_name=params.get("display_name", agent_id),
+                role=params.get("role", ""),
                 model_conversation=params.get("model_conversation", "claude-haiku-4-5"),
                 model_building=params.get("model_building", "claude-sonnet-4-6"),
                 voice_id=params.get("voice_id"),
+                color_hex=params.get("color_hex", "#888888"),
+                color_rich=params.get("color_rich", "white"),
+                audio_effects=params.get("audio_effects"),
                 chattiness=float(params.get("chattiness", 0.5)),
                 initiative=float(params.get("initiative", 0.5)),
                 interrupt_tendency=float(params.get("interrupt_tendency", 0.0)),
                 eavesdrop_tendency=float(params.get("eavesdrop_tendency", 0.0)),
                 closing_weight=float(params.get("closing_weight", 0.0)),
+                role_priority_bonus=float(params.get("role_priority_bonus", 0.0)),
+                cross_agent_writer=bool(params.get("cross_agent_writer", False)),
+                tools=params.get("tools", []),
+                topic_relevance=params.get("topic_relevance", {}),
+                adjacency=params.get("adjacency", {}),
                 system_prompt=prompt_ver.system_prompt,
                 behaviors=prompt_ver.behaviors,
             )
@@ -267,6 +305,97 @@ class AgentRegistry:
     def get_active_agents(self) -> list[AgentConfig]:
         """Return agents with status == active."""
         return [a for a in self._agents.values() if a.status == AgentStatus.active]
+
+    # ── Derived lookups (replace hardcoded dicts) ────────────────
+
+    def get_voice_map(self) -> dict[str, str]:
+        """Build VOICE_MAP from agent configs (agent_id -> voice_id)."""
+        return {a.id: a.voice_id for a in self._agents.values() if a.voice_id}
+
+    def get_agent_roles(self) -> dict[str, str]:
+        """Build AGENT_ROLES from agent configs (agent_id -> role)."""
+        return {a.id: a.role for a in self._agents.values()}
+
+    def get_agent_colors(self) -> dict[str, str]:
+        """Build AGENT_COLORS hex map from agent configs."""
+        return {a.id: a.color_hex for a in self._agents.values()}
+
+    def get_rich_colors(self) -> dict[str, str]:
+        """Build AGENT_COLORS rich-terminal map from agent configs."""
+        return {a.id: a.color_rich for a in self._agents.values()}
+
+    def get_role_bonuses(self) -> dict[str, float]:
+        """Build role priority bonus map from agent configs."""
+        return {
+            a.id: a.role_priority_bonus
+            for a in self._agents.values()
+            if a.role_priority_bonus > 0
+        }
+
+    def get_cross_agent_writers(self) -> frozenset[str]:
+        """Build set of agents allowed to write other agents' core memory."""
+        return frozenset(
+            a.id for a in self._agents.values() if a.cross_agent_writer
+        )
+
+    def get_allowed_agents_for_tool(self, tool_name: str) -> frozenset[str]:
+        """Build ALLOWED_AGENTS set for a given tool name."""
+        return frozenset(
+            a.id for a in self._agents.values() if tool_name in a.tools
+        )
+
+    def get_conversation_participants(self) -> list[AgentConfig]:
+        """Return agents that participate in conversations (non-zero chattiness or initiative)."""
+        return [
+            a for a in self._agents.values()
+            if a.chattiness > 0 or a.initiative > 0
+        ]
+
+    def build_closer_weights(self) -> dict[str, float]:
+        """Build closer_weights dict from agent configs."""
+        return {
+            a.id: a.closing_weight
+            for a in self._agents.values()
+            if a.closing_weight > 0
+        }
+
+    def build_interrupt_tendency(self) -> dict[str, float]:
+        """Build agent_interrupt_tendency dict from agent configs."""
+        return {a.id: a.interrupt_tendency for a in self._agents.values()}
+
+    def build_eavesdrop_tendency(self) -> dict[str, float]:
+        """Build eavesdrop_tendency dict from agent configs."""
+        return {
+            a.id: a.eavesdrop_tendency
+            for a in self._agents.values()
+            if a.eavesdrop_tendency > 0
+        }
+
+    def build_initiative(self) -> dict[str, float]:
+        """Build agent_initiative dict from agent configs."""
+        return {
+            a.id: a.initiative
+            for a in self._agents.values()
+            if a.initiative > 0
+        }
+
+    def build_relevance_map(self) -> dict[str, dict[str, float]]:
+        """Build topic relevance_map from agent configs."""
+        result: dict[str, dict[str, float]] = {}
+        for agent in self._agents.values():
+            for topic, score in agent.topic_relevance.items():
+                if topic not in result:
+                    result[topic] = {}
+                result[topic][agent.id] = score
+        return result
+
+    def build_adjacency(self) -> dict[str, dict[str, float]]:
+        """Build adjacency map from agent configs."""
+        return {
+            a.id: dict(a.adjacency)
+            for a in self._agents.values()
+            if a.adjacency
+        }
 
     async def set_status(self, agent_id: str, status: AgentStatus) -> None:
         """Update an agent's status in Redis (if available) then in-memory."""
