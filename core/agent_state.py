@@ -234,11 +234,28 @@ class AgentStateManager:
         await self.save_state(state)
         return state
 
-    async def on_novel_event(self, agent_id: str) -> AgentState:
-        """Update state when something novel/unexpected happens."""
+    async def on_novel_event(
+        self, agent_id: str, *, severity: str | None = None,
+    ) -> AgentState:
+        """Update state when something novel/unexpected happens.
+
+        Severity modulates the effect: crisis events cause more disruption,
+        minor events just reduce boredom slightly.
+        """
         state = await self.get_state(agent_id)
-        state.boredom = _clamp(state.boredom - 0.2)
-        state.energy = _clamp(state.energy + 0.05)
+        if severity == "crisis":
+            state.boredom = _clamp(state.boredom - 0.3)
+            state.frustration = _clamp(state.frustration + 0.15)
+            state.energy = _clamp(state.energy + 0.1)
+        elif severity == "major":
+            state.boredom = _clamp(state.boredom - 0.2)
+            state.energy = _clamp(state.energy + 0.05)
+        elif severity == "moderate":
+            state.boredom = _clamp(state.boredom - 0.15)
+            state.energy = _clamp(state.energy + 0.03)
+        else:
+            state.boredom = _clamp(state.boredom - 0.1)
+            state.energy = _clamp(state.energy + 0.02)
         await self.save_state(state)
         return state
 
