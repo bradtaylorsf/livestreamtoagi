@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.redis_client import RedisClient
-    from core.repos.cost_repo import CostRepo
     from core.simulation.clock import SimulationClock
     from core.simulation.recurring_personas import PersonaManager
 
@@ -61,20 +60,19 @@ class WorldSimulator:
         llm_client: OpenRouterClient | None = None,
         clock: SimulationClock | None = None,
         event_bus: EventBus | None = None,
-        cost_repo: CostRepo | None = None,
         persona_manager: PersonaManager | None = None,
     ) -> None:
         self._redis = redis_client
         self._llm = llm_client
         self._clock = clock
         self._event_bus = event_bus
-        self._cost_repo = cost_repo
         self._persona_manager = persona_manager
 
         self._task: asyncio.Task[None] | None = None
         self._running = False
         self._start_time = 0.0
         self._recent_events: list[dict[str, Any]] = []
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
         # Track pending items with their scheduled action times (monotonic)
         self._pending_socials: dict[str, float] = {}  # draft_id -> approve_at
@@ -483,7 +481,6 @@ class WorldSimulator:
 
         # Emit via event bus if available
         if self._event_bus is not None:
-            with contextlib.suppress(Exception):
-                asyncio.create_task(
-                    self._event_bus.emit(event_type, event)
-                )
+            task = asyncio.create_task(self._event_bus.emit(event_type, event))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)

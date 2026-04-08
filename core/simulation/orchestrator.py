@@ -358,7 +358,6 @@ class SimulationOrchestrator:
                 llm_client=self._llm,
                 clock=self.clock,
                 event_bus=self._event_bus,
-                cost_repo=self._services.cost_repo if self._services else None,
                 persona_manager=persona_mgr,
             )
             world_sim.start()
@@ -520,7 +519,6 @@ class SimulationOrchestrator:
                 llm_client=self._llm,
                 clock=self.clock,
                 event_bus=self._event_bus,
-                cost_repo=self._services.cost_repo if self._services else None,
                 persona_manager=persona_mgr,
             )
             world_sim.start()
