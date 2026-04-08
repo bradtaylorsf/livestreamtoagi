@@ -2,6 +2,7 @@ import { SpeechBubble, type BubbleTone } from "./SpeechBubble";
 import { EventType, type ServerEvent } from "../types/events";
 import type { WebSocketClient } from "../network/WebSocketClient";
 import type { AgentSpriteManager } from "../agents/AgentSpriteManager";
+import type { AudioManager } from "../audio/AudioManager";
 
 const DEFAULT_DURATION_MS = 5000;
 const BUBBLE_OFFSET_Y = -40;
@@ -106,6 +107,7 @@ export function _resetStyles(): void {
 export class SpeechBubbleManager {
   private scene: Phaser.Scene;
   private agentSpriteManager: AgentSpriteManager;
+  private audioManager: AudioManager | null;
   private bubbles: Map<string, SpeechBubble> = new Map();
   private container: HTMLDivElement;
   private unsubscribe: (() => void) | null = null;
@@ -114,9 +116,11 @@ export class SpeechBubbleManager {
     scene: Phaser.Scene,
     wsClient: WebSocketClient | null,
     agentSpriteManager: AgentSpriteManager,
+    audioManager?: AudioManager | null,
   ) {
     this.scene = scene;
     this.agentSpriteManager = agentSpriteManager;
+    this.audioManager = audioManager ?? null;
 
     injectStyles();
 
@@ -203,8 +207,17 @@ export class SpeechBubbleManager {
     const agentId = data.agent_id as string;
     const text = data.text as string;
     const tone = (data.tone as BubbleTone) || "casual";
-    const duration = (data.duration as number) || DEFAULT_DURATION_MS;
-    this.showBubble(agentId, text, tone, duration);
+    const audioUrl = data.audio_url as string | undefined;
+
+    // If AudioManager is available and there's an audio URL, sync bubble with audio duration
+    if (this.audioManager && audioUrl) {
+      this.audioManager.getDuration(agentId, audioUrl, text).then((durationMs) => {
+        this.showBubble(agentId, text, tone, durationMs);
+      });
+    } else {
+      const duration = (data.duration as number) || DEFAULT_DURATION_MS;
+      this.showBubble(agentId, text, tone, duration);
+    }
   }
 
   private updateBubblePosition(agentId: string, bubble: SpeechBubble): void {

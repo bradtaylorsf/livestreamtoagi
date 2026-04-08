@@ -3,6 +3,7 @@ import { WorldManager } from "../world/WorldManager";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
+import { AudioManager } from "../audio/AudioManager";
 import type { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
@@ -80,6 +81,7 @@ export class MainScene extends Phaser.Scene {
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
+  private audioManager: AudioManager | null = null;
   private wsClient: WebSocketClient | null = null;
 
   constructor() {
@@ -180,11 +182,15 @@ export class MainScene extends Phaser.Scene {
       this.worldManager,
     );
 
+    // ── Audio playback (TTS queue) ───────────────────────────────
+    this.audioManager = new AudioManager(this.wsClient);
+
     // ── Speech bubbles (DOM overlay above canvas) ──────────────
     this.speechBubbleManager = new SpeechBubbleManager(
       this,
       this.wsClient,
       this.agentSpriteManager,
+      this.audioManager,
     );
 
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
@@ -208,6 +214,8 @@ export class MainScene extends Phaser.Scene {
     this.speechBubbleManager = null;
     this.streamOverlay?.destroy();
     this.streamOverlay = null;
+    this.audioManager?.destroy();
+    this.audioManager = null;
   }
 
   /**
