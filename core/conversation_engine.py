@@ -1065,6 +1065,18 @@ class ConversationEngine:
             except Exception:
                 logger.warning("Failed to get internal state for %s", agent.id, exc_info=True)
 
+        # Build balance context if economy manager is available (#270)
+        balance_context: str | None = None
+        if self._services and hasattr(self._services, "economy_manager") and self._services.economy_manager:
+            try:
+                balance = await self._services.economy_manager.get_balance(agent.id)
+                balance_context = f"Your current balance: ${balance:.2f}"
+                is_broke = balance <= 0
+                if is_broke:
+                    balance_context += " [BROKE — you cannot use paid tools until you earn or receive funds]"
+            except Exception:
+                logger.warning("Failed to get balance for %s", agent.id, exc_info=True)
+
         # Build shared working state context if available
         shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
@@ -1087,6 +1099,7 @@ class ConversationEngine:
                     agent_goals_context=agent_goals_context,
                     commitment_reminders=commitment_reminders,
                     internal_state_context=internal_state_context,
+                    balance_context=balance_context,
                 )
                 messages = context_result.messages
 

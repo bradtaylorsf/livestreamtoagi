@@ -996,6 +996,44 @@ class AgentGoal(BaseModel):
     parent_goal_id: uuid.UUID | None = None
 
 
+# ── Agent Economy ─────────────────────────────────────────────────────
+
+
+class TransactionType(str, enum.Enum):
+    allocation = "allocation"
+    tool_cost = "tool_cost"
+    transfer = "transfer"
+    bonus = "bonus"
+    investment = "investment"
+    penalty = "penalty"
+
+
+class AgentAccount(BaseModel):
+    """Individual agent economy account."""
+
+    model_config = ConfigDict(from_attributes=True)
+    agent_id: str
+    balance: Decimal = Decimal("0")
+    weekly_allocation: Decimal = Decimal("3.0")
+    total_earned: Decimal = Decimal("0")
+    total_spent: Decimal = Decimal("0")
+    total_transferred: Decimal = Decimal("0")
+    updated_at: datetime | None = None
+
+
+class AgentTransaction(BaseModel):
+    """A single transaction in an agent's account."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    agent_id: str
+    type: str
+    amount: Decimal
+    counterparty_agent_id: str | None = None
+    description: str | None = None
+    created_at: datetime | None = None
+
+
 # ── Versioned Agent Config ─────────────────────────────────────────
 
 
