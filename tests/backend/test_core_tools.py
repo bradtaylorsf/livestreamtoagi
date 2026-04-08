@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -268,7 +268,12 @@ class TestToolRegistry:
         # Rex only sees tools he's authorized for (filtering removes
         # create_poll, draft_social_post, draft_email, web_search, fetch_url)
         registry = ToolRegistry()
-        for tool in get_core_tools(event_bus, redis_client, agent_id="rex"):
+        for tool in get_core_tools(
+            event_bus, redis_client, agent_id="rex",
+            alliance_manager=MagicMock(),
+            character_spawner=MagicMock(),
+            voting_manager=MagicMock(),
+        ):
             registry.register(tool)
 
         names = registry.names()
@@ -291,7 +296,12 @@ class TestToolRegistry:
     ) -> None:
         # Vera sees tools she's authorized for (filtering removes
         # execute_code, draft_social_post, fetch_url)
-        tools = get_core_tools(event_bus, redis_client, agent_id="vera")
+        tools = get_core_tools(
+            event_bus, redis_client, agent_id="vera",
+            alliance_manager=MagicMock(),
+            character_spawner=MagicMock(),
+            voting_manager=MagicMock(),
+        )
         assert len(tools) == 13
 
         tool_names = {t.name for t in tools}

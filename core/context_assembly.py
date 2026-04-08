@@ -125,6 +125,7 @@ class ContextAssembler:
         internal_state_context: str | None = None,
         balance_context: str | None = None,
         recent_dream: str | None = None,
+        alliances_context: str | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -229,6 +230,9 @@ class ContextAssembler:
         # Balance (#270)
         _track("balance", balance_context or "", bool(balance_context))
 
+        # Alliances (#274)
+        _track("alliances", alliances_context or "", bool(alliances_context))
+
         # Recent dream (#272)
         _track("recent_dream", recent_dream or "", bool(recent_dream))
 
@@ -294,6 +298,10 @@ class ContextAssembler:
         # Balance (#270)
         if balance_context:
             system_sections.append("## Your budget\n" + balance_context)
+
+        # Alliances (#274)
+        if alliances_context:
+            system_sections.append(alliances_context)
 
         # Recent dream (#272) — injected so agents can reference dreams
         if recent_dream:

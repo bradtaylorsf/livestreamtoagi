@@ -491,6 +491,15 @@ class PhaseRunner:
                             exc_info=True,
                         )
 
+        # Check for random events before conversation (#273)
+        if self._services and self._services.event_generator:
+            try:
+                events = await self._services.event_generator.check_and_generate()
+                for evt in events:
+                    logger.info("Random event injected: [%s] %s", evt.severity, evt.title)
+            except Exception:
+                logger.warning("Event generation failed", exc_info=True)
+
         self._event_bus.on("agent_speak", _on_speak)
         self._event_bus.on("management_shadow", _on_management)
         self._event_bus.on("management_warning", _on_management)

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from core.agent_state import AgentStateManager
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
+    from core.memory.dreams import DreamManager
     from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
     from core.social.relationship_tracker import RelationshipTracker
@@ -159,6 +160,7 @@ class ReflectionManager:
         agent_registry: AgentRegistry,
         goal_manager: AgentGoalManager | None = None,
         agent_state_manager: AgentStateManager | None = None,
+        dream_manager: DreamManager | None = None,
         simulation_id: object | None = None,
     ) -> None:
         self._repo = memory_repo
@@ -169,6 +171,7 @@ class ReflectionManager:
         self._relationship_tracker: RelationshipTracker | None = None
         self._goal_manager = goal_manager
         self._agent_state_manager = agent_state_manager
+        self._dream_manager = dream_manager
         self._simulation_id = simulation_id
 
     def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
@@ -305,6 +308,22 @@ class ReflectionManager:
         goals_generated = await self._generate_goals(
             agent_id, recall_text, model,
         )
+
+        # Run dream cycle after reflection (#272)
+        dream_result = None
+        if self._dream_manager is not None:
+            try:
+                # Check if agent is bored or idle enough for a dream
+                should_dream = True
+                if self._agent_state_manager is not None:
+                    state = await self._agent_state_manager.get_state(agent_id)
+                    should_dream = state.boredom > 0.4 or state.creative_need > 0.4
+                if should_dream:
+                    dream_result = await self._dream_manager.run_dream(agent_id)
+                    if dream_result:
+                        logger.info("Dream cycle completed for %s during reflection", agent_id)
+            except Exception:
+                logger.warning("Dream cycle failed for %s", agent_id, exc_info=True)
 
         # Generate journal entry
         context = (

@@ -38,7 +38,14 @@ from core.repos.world_repo import WorldRepo
 from core.agent_economy import AgentEconomyManager
 from core.agent_goals import AgentGoalManager
 from core.agent_state import AgentStateManager
+from core.characters.departure import DepartureManager
+from core.characters.spawner import CharacterSpawner
+from core.characters.voting import VotingManager
+from core.events.event_generator import EventGenerator
+from core.memory.dreams import DreamManager
+from core.repos.alliance_repo import AllianceRepo
 from core.shared_state import SharedWorkingState
+from core.social.alliances import AllianceManager
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +79,12 @@ class Services:
     goal_manager: AgentGoalManager | None
     agent_state_manager: AgentStateManager | None
     economy_manager: AgentEconomyManager | None
+    alliance_manager: AllianceManager | None
+    character_spawner: CharacterSpawner | None
+    voting_manager: VotingManager | None
+    departure_manager: DepartureManager | None
+    dream_manager: DreamManager | None
+    event_generator: EventGenerator | None
     config_loader: ConfigLoader
     config_version_repo: ConfigVersionRepo | None
 
@@ -190,6 +203,57 @@ async def bootstrap_services(
 
     economy_manager = AgentEconomyManager(db)
 
+    # Initialize economy accounts for all agents (best-effort — table may not exist yet)
+    agent_ids = [a.id for a in agent_registry.get_all_agents()]
+    if agent_ids:
+        try:
+            await economy_manager.initialize_accounts(agent_ids)
+        except Exception:
+            logger.warning("Could not initialize economy accounts (table may not exist yet)")
+
+    # Alliance system (#274)
+    alliance_repo = AllianceRepo(db)
+    alliance_manager = AllianceManager(
+        alliance_repo=alliance_repo,
+        economy_manager=economy_manager,
+    )
+
+    # Character spawning (#275)
+    character_spawner = CharacterSpawner(
+        llm_client=llm_client,
+        agent_registry=agent_registry,
+        db=db,
+        economy_manager=economy_manager,
+    )
+    voting_manager = VotingManager(
+        db=db,
+        event_bus=_module_event_bus,
+    )
+    departure_manager = DepartureManager(
+        db=db,
+        agent_state_manager=agent_state_manager,
+        agent_registry=agent_registry,
+        llm_client=llm_client,
+        event_bus=_module_event_bus,
+    )
+
+    # Dream system (#272)
+    dream_manager = DreamManager(
+        memory_repo=memory_repo,
+        llm_client=llm_client,
+        core_memory_mgr=core_memory,
+        goal_manager=goal_manager,
+        agent_state_manager=agent_state_manager,
+        token_counter=token_counter,
+    )
+
+    # Event/novelty injection (#273)
+    event_generator = EventGenerator(
+        world_repo=world_repo,
+        event_bus=_module_event_bus,
+        agent_state_manager=agent_state_manager,
+    )
+
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
         core_memory=core_memory,
@@ -223,6 +287,12 @@ async def bootstrap_services(
         goal_manager=goal_manager,
         agent_state_manager=agent_state_manager,
         economy_manager=economy_manager,
+        alliance_manager=alliance_manager,
+        character_spawner=character_spawner,
+        voting_manager=voting_manager,
+        departure_manager=departure_manager,
+        dream_manager=dream_manager,
+        event_generator=event_generator,
         config_loader=config_loader,
         config_version_repo=config_version_repo,
     )
@@ -282,6 +352,12 @@ async def _bootstrap_dry_run(
         goal_manager=None,
         agent_state_manager=AgentStateManager(),
         economy_manager=None,
+        alliance_manager=None,
+        character_spawner=None,
+        voting_manager=None,
+        departure_manager=None,
+        dream_manager=None,
+        event_generator=None,
         config_loader=config_loader,
         config_version_repo=None,
     )

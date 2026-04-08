@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +13,20 @@ from tools.economy_tools import TransferBudgetTool, ViewAccountTool
 
 
 # ── Fake DB for unit testing (no real PostgreSQL needed) ──
+
+
+class _FakeConnection:
+    """Wraps FakeDB to emulate an asyncpg connection with transaction support."""
+
+    def __init__(self, db) -> None:
+        self._db = db
+
+    async def execute(self, query: str, *args) -> str:
+        return await self._db.execute(query, *args)
+
+    @asynccontextmanager
+    async def transaction(self):
+        yield  # no-op for in-memory fake
 
 
 class FakeDB:
@@ -82,6 +97,11 @@ class FakeDB:
             self.transactions.append(tx)
             return "INSERT 1"
         return "OK"
+
+    @asynccontextmanager
+    async def acquire(self, *, timeout: float = 10.0):
+        """Yield a fake connection that delegates to self and supports transaction()."""
+        yield _FakeConnection(self)
 
     async def fetchrow(self, query: str, *args):
         agent_id = args[0]

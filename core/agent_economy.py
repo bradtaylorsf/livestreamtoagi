@@ -132,52 +132,57 @@ class AgentEconomyManager:
     ) -> bool:
         """Transfer funds between two agents atomically.
 
+        All operations run inside a single DB transaction so a partial
+        failure cannot lose money.
+
         Returns True on success, False if from_agent has insufficient funds.
         """
         if amount <= 0:
             return False
 
-        # Deduct from sender
-        result = await self._db.execute(
-            """UPDATE agent_accounts
-               SET balance = balance - $2,
-                   total_transferred = total_transferred + $2,
-                   updated_at = now()
-               WHERE agent_id = $1 AND balance >= $2""",
-            from_agent,
-            amount,
-        )
-        if "UPDATE 0" in result:
-            return False
+        async with self._db.acquire() as conn:
+            async with conn.transaction():
+                # Deduct from sender
+                result = await conn.execute(
+                    """UPDATE agent_accounts
+                       SET balance = balance - $2,
+                           total_transferred = total_transferred + $2,
+                           updated_at = now()
+                       WHERE agent_id = $1 AND balance >= $2""",
+                    from_agent,
+                    amount,
+                )
+                if "UPDATE 0" in result:
+                    return False
 
-        # Credit to receiver
-        await self._db.execute(
-            """UPDATE agent_accounts
-               SET balance = balance + $2,
-                   total_earned = total_earned + $2,
-                   updated_at = now()
-               WHERE agent_id = $1""",
-            to_agent,
-            amount,
-        )
+                # Credit to receiver
+                await conn.execute(
+                    """UPDATE agent_accounts
+                       SET balance = balance + $2,
+                           total_earned = total_earned + $2,
+                           updated_at = now()
+                       WHERE agent_id = $1""",
+                    to_agent,
+                    amount,
+                )
 
-        # Record both sides
-        await self._db.execute(
-            """INSERT INTO agent_transactions (agent_id, type, amount, counterparty_agent_id, description)
-               VALUES ($1, 'transfer', $2, $3, $4)""",
-            from_agent,
-            -amount,
-            to_agent,
-            f"Sent to {to_agent}: {reason}",
-        )
-        await self._db.execute(
-            """INSERT INTO agent_transactions (agent_id, type, amount, counterparty_agent_id, description)
-               VALUES ($1, 'transfer', $2, $3, $4)""",
-            to_agent,
-            amount,
-            from_agent,
-            f"Received from {from_agent}: {reason}",
-        )
+                # Record both sides
+                await conn.execute(
+                    """INSERT INTO agent_transactions (agent_id, type, amount, counterparty_agent_id, description)
+                       VALUES ($1, 'transfer', $2, $3, $4)""",
+                    from_agent,
+                    -amount,
+                    to_agent,
+                    f"Sent to {to_agent}: {reason}",
+                )
+                await conn.execute(
+                    """INSERT INTO agent_transactions (agent_id, type, amount, counterparty_agent_id, description)
+                       VALUES ($1, 'transfer', $2, $3, $4)""",
+                    to_agent,
+                    amount,
+                    from_agent,
+                    f"Received from {from_agent}: {reason}",
+                )
         return True
 
     async def weekly_allocation(

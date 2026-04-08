@@ -325,6 +325,20 @@ class ConversationEngine:
             )
             trigger["topic_avoidance"] = avoidance_note
 
+        # Inject alliance pairs into speaker selector (#274)
+        if self._services and self._services.alliance_manager:
+            try:
+                alliances = await self._services.alliance_manager.get_active_alliances()
+                pairs: set[frozenset[str]] = set()
+                for a in alliances:
+                    members = a.members
+                    for i, m1 in enumerate(members):
+                        for m2 in members[i + 1:]:
+                            pairs.add(frozenset({m1, m2}))
+                self._selector.set_alliance_pairs(pairs)
+            except Exception:
+                logger.warning("Failed to load alliance pairs", exc_info=True)
+
         # Generate opening line
         content = await self._generate_turn(opening_agent, prompt_hint=hint)
         if content is None:
@@ -759,9 +773,11 @@ class ConversationEngine:
             )
             raw = response.content.strip()
             if raw:
-                import json as _json
+                from core.memory.reflection import _parse_json_response
 
-                data = _json.loads(raw)
+                data = _parse_json_response(raw)
+                if not data:
+                    return fallback
                 return ConversationRecord(
                     summary=data.get("summary", fallback_summary),
                     topics=list(conv.topics),
@@ -1104,15 +1120,24 @@ class ConversationEngine:
             except Exception:
                 logger.warning("Failed to get balance for %s", agent.id, exc_info=True)
 
+        # Fetch alliances context (#274)
+        alliances_context: str | None = None
+        if self._services and self._services.alliance_manager:
+            try:
+                alliances_context = await self._services.alliance_manager.get_alliance_context(agent.id)
+                alliances_context = alliances_context or None
+            except Exception:
+                logger.warning("Failed to get alliances for %s", agent.id, exc_info=True)
+
         # Fetch most recent dream for context injection (#272)
         recent_dream: str | None = None
         if self._services and self._services.memory_repo:
             try:
-                entries = await self._services.memory_repo.get_recent_journal_entries(agent.id, limit=1)
-                for entry in entries:
-                    if entry.reflection_type == "dream":
-                        recent_dream = entry.content
-                        break
+                entries = await self._services.memory_repo.get_recent_journal_entries_by_type(
+                    agent.id, "dream", limit=1,
+                )
+                if entries:
+                    recent_dream = entries[0].content
             except Exception:
                 logger.warning("Failed to get recent dream for %s", agent.id, exc_info=True)
 
@@ -1140,6 +1165,7 @@ class ConversationEngine:
                     internal_state_context=internal_state_context,
                     balance_context=balance_context,
                     recent_dream=recent_dream,
+                    alliances_context=alliances_context,
                 )
                 messages = context_result.messages
 

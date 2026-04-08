@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     import docker
     from core.agent_economy import AgentEconomyManager
     from core.agent_registry import AgentRegistry
+    from core.characters.spawner import CharacterSpawner
+    from core.characters.voting import VotingManager
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
     from core.memory.archival_memory import ArchivalMemoryManager
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
     from core.shared_state import SharedWorkingState
+    from core.social.alliances import AllianceManager
 
 __all__ = [
     "BaseTool",
@@ -113,6 +116,9 @@ def get_core_tools(
     shared_working_state: SharedWorkingState | None = None,
     agent_registry: AgentRegistry | None = None,
     economy_manager: AgentEconomyManager | None = None,
+    alliance_manager: AllianceManager | None = None,
+    character_spawner: CharacterSpawner | None = None,
+    voting_manager: VotingManager | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -175,14 +181,17 @@ def get_core_tools(
         tools.append(ViewAccountTool(economy_manager=economy_manager, agent_id=agent_id))
 
     # Character proposal/voting tools (#275)
-    tools.append(ProposeCharacterTool(agent_id=agent_id))
-    tools.append(VoteCharacterTool(agent_id=agent_id))
+    if character_spawner is not None:
+        tools.append(ProposeCharacterTool(spawner=character_spawner, agent_id=agent_id))
+    if voting_manager is not None:
+        tools.append(VoteCharacterTool(voting_manager=voting_manager, agent_id=agent_id))
 
     # Alliance/social tools (#274)
-    tools.append(ProposeAllianceTool(agent_id=agent_id))
-    tools.append(VoteAllianceTool(agent_id=agent_id))
-    tools.append(LeaveAllianceTool(agent_id=agent_id))
-    tools.append(ViewAlliancesTool(agent_id=agent_id))
+    if alliance_manager is not None:
+        tools.append(ProposeAllianceTool(alliance_manager=alliance_manager, agent_id=agent_id))
+        tools.append(VoteAllianceTool(alliance_manager=alliance_manager, agent_id=agent_id))
+        tools.append(LeaveAllianceTool(alliance_manager=alliance_manager, agent_id=agent_id))
+        tools.append(ViewAlliancesTool(alliance_manager=alliance_manager, agent_id=agent_id))
 
     # Web search and URL fetch tools
     tools.append(

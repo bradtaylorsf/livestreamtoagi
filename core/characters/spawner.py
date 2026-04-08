@@ -238,12 +238,13 @@ class CharacterSpawner:
         if self._db is not None:
             row = await self._db.fetchrow(
                 """INSERT INTO character_applications
-                   (simulation_id, name, role, personality_sketch, proposed_by, source,
+                   (simulation_id, name, display_name, role, personality_sketch, proposed_by, source,
                     model_conversation, model_building, status)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'proposed')
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'proposed')
                    RETURNING id""",
                 simulation_id,
                 application.name,
+                application.display_name,
                 application.role,
                 application.personality_sketch,
                 application.proposed_by,

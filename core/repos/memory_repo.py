@@ -255,6 +255,21 @@ class MemoryRepo:
         )
         return [JournalEntry(**dict(r)) for r in rows]
 
+    async def get_recent_journal_entries_by_type(
+        self, agent_id: str, reflection_type: str, limit: int = 1,
+    ) -> list[JournalEntry]:
+        """Return most recent journal entries filtered by reflection_type."""
+        rows = await self.db.fetch(
+            """SELECT * FROM journal_entries
+               WHERE agent_id = $1 AND reflection_type = $2
+               ORDER BY created_at DESC
+               LIMIT $3""",
+            agent_id,
+            reflection_type,
+            limit,
+        )
+        return [JournalEntry(**dict(r)) for r in rows]
+
     async def search_recall_memories_by_keyword(
         self,
         agent_id: str,
