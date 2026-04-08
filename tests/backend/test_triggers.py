@@ -576,3 +576,200 @@ async def test_trigger_dict_has_required_fields():
     assert "type" in result
     assert "starter_agent_id" in result
     assert "prompt_hint" in result
+
+
+# ── Initiative trigger ──────────────────────────────────────────
+
+
+class _FakeGoal:
+    """Simple goal stub for trigger tests."""
+
+    def __init__(
+        self,
+        goal: str = "Build a prototype",
+        priority: int = 1,
+        status: str = "pending",
+    ) -> None:
+        self.id = "goal-123"
+        self.goal = goal
+        self.priority = priority
+        self.status = status
+
+
+def _make_goal(goal: str = "Build a prototype", priority: int = 1, status: str = "pending"):
+    return _FakeGoal(goal=goal, priority=priority, status=status)
+
+
+@pytest.mark.asyncio
+async def test_initiative_trigger_high_initiative_fires():
+    """High-initiative agent (Vera 0.8) with priority 1 goal fires initiative trigger."""
+    clock = FakeClock()
+    now_fn = FakeDatetime(hour=10)  # no scheduled event
+    goal_manager = AsyncMock()
+    goal_manager.get_goals = AsyncMock(return_value=[_make_goal(priority=1)])
+
+    # Use RNG seeded to produce low random values (will pass probability check)
+    system = TriggerSystem(
+        config=_make_trigger_config(),
+        goal_manager=goal_manager,
+        clock=clock,
+        now_fn=now_fn,
+        rng=random.Random(0),  # seed 0: first random() ≈ 0.84, but shuffling matters
+    )
+
+    # Run many checks to verify it fires eventually
+    fired = False
+    for _ in range(50):
+        system.reset_full()
+        system = TriggerSystem(
+            config=_make_trigger_config(),
+            goal_manager=goal_manager,
+            clock=clock,
+            now_fn=now_fn,
+            rng=random.Random(_),
+        )
+        result = await system.check()
+        if result and result.get("type") == "initiative":
+            fired = True
+            assert result["starter_agent_id"] in _make_trigger_config().agent_initiative
+            assert "goal_text" in result
+            assert "goal_id" in result
+            assert "make progress on" in result["prompt_hint"].lower() or "want to" in result["prompt_hint"].lower()
+            break
+    assert fired, "Initiative trigger should fire at least once in 50 tries"
+
+
+@pytest.mark.asyncio
+async def test_initiative_trigger_respects_dedup():
+    """Initiative trigger does not fire for same agent within dedup window."""
+    clock = FakeClock()
+    now_fn = FakeDatetime(hour=10)
+    goal_manager = AsyncMock()
+    goal_manager.get_goals = AsyncMock(return_value=[_make_goal(priority=1)])
+
+    system = TriggerSystem(
+        config=_make_trigger_config(),
+        goal_manager=goal_manager,
+        clock=clock,
+        now_fn=now_fn,
+        rng=random.Random(42),
+    )
+
+    # Record a recent initiative conversation for all agents
+    for agent_id in _make_trigger_config().agent_initiative:
+        system.record_conversation("initiative", agent_id)
+
+    result = await system.check()
+    # Should not fire initiative (all deduped) — may fire idle or None
+    assert result is None or result.get("type") != "initiative"
+
+
+@pytest.mark.asyncio
+async def test_low_initiative_rarely_fires():
+    """Low-initiative agents fire initiative triggers much less often."""
+    # Config with only low-initiative agents
+    config = _make_trigger_config(agent_initiative={"rex": 0.1, "sentinel": 0.1})
+    goal_manager = AsyncMock()
+    goal_manager.get_goals = AsyncMock(return_value=[_make_goal(priority=2)])
+
+    initiative_count = 0
+    trials = 200
+    for i in range(trials):
+        clock = FakeClock()
+        now_fn = FakeDatetime(hour=10)
+        system = TriggerSystem(
+            config=config,
+            goal_manager=goal_manager,
+            clock=clock,
+            now_fn=now_fn,
+            rng=random.Random(i),
+        )
+        result = await system.check()
+        if result and result.get("type") == "initiative":
+            initiative_count += 1
+
+    # With initiative=0.1 and priority=2, probability = 0.1 * 0.5 = 0.05
+    # In 200 trials with 2 agents, expect ~20 fires. Should be well under 50%
+    assert initiative_count < trials * 0.3, (
+        f"Low-initiative agents fired {initiative_count}/{trials} times"
+    )
+
+
+@pytest.mark.asyncio
+async def test_initiative_trigger_probability_scales_with_initiative():
+    """Higher initiative = more initiative triggers over many trials."""
+    goal_manager = AsyncMock()
+    goal_manager.get_goals = AsyncMock(return_value=[_make_goal(priority=1)])
+
+    high_init_config = _make_trigger_config(agent_initiative={"vera": 0.9})
+    low_init_config = _make_trigger_config(agent_initiative={"rex": 0.2})
+
+    high_count = 0
+    low_count = 0
+    trials = 300
+
+    for i in range(trials):
+        clock = FakeClock()
+        now_fn = FakeDatetime(hour=10)
+        system = TriggerSystem(
+            config=high_init_config,
+            goal_manager=goal_manager,
+            clock=clock,
+            now_fn=now_fn,
+            rng=random.Random(i),
+        )
+        result = await system.check()
+        if result and result.get("type") == "initiative":
+            high_count += 1
+
+    for i in range(trials):
+        clock = FakeClock()
+        now_fn = FakeDatetime(hour=10)
+        system = TriggerSystem(
+            config=low_init_config,
+            goal_manager=goal_manager,
+            clock=clock,
+            now_fn=now_fn,
+            rng=random.Random(i),
+        )
+        result = await system.check()
+        if result and result.get("type") == "initiative":
+            low_count += 1
+
+    assert high_count > low_count, (
+        f"High-initiative ({high_count}) should fire more than low ({low_count})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_goal_trigger_weighted_by_initiative():
+    """Goal trigger now weights by initiative — low-initiative agents fire less."""
+    goal_manager = AsyncMock()
+    goal_manager.get_goals = AsyncMock(return_value=[_make_goal(priority=2)])
+
+    # Only low-initiative agents
+    config = _make_trigger_config(agent_initiative={"rex": 0.1})
+
+    # Manually record initiative dedup for all agents to skip initiative trigger
+    goal_count = 0
+    trials = 200
+    for i in range(trials):
+        clock = FakeClock()
+        now_fn = FakeDatetime(hour=10)
+        system = TriggerSystem(
+            config=config,
+            goal_manager=goal_manager,
+            clock=clock,
+            now_fn=now_fn,
+            rng=random.Random(i),
+        )
+        # Record initiative dedup so initiative trigger doesn't fire
+        system.record_conversation("initiative", "rex")
+        result = await system.check()
+        if result and result.get("type") == "goal":
+            goal_count += 1
+
+    # With initiative=0.1, goal trigger should fire ~10% of the time
+    assert goal_count < trials * 0.3, (
+        f"Low-initiative agent fired goal trigger {goal_count}/{trials} times"
+    )

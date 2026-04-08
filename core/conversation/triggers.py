@@ -1,14 +1,15 @@
 """Conversation trigger system — determines when new conversations start.
 
-Six trigger types:
+Seven trigger types:
 - idle: nobody talking for idle_timeout_seconds
 - scheduled: daily schedule events (standup, lunch, challenge hour, etc.)
 - environmental: external events (poll result, world expansion, budget update, viewer milestone)
+- initiative: high-initiative agents self-start conversations about their goals
 - goal: agent has active high-priority goals to pursue (priority <= 3)
 - memory: random agent recalls a high-importance memory (2% chance per tick)
 - audience: chat highlight or donation events (Pixel gets first crack)
 
-Priority order: pending events > scheduled > goal > idle > memory
+Priority order: pending events > scheduled > initiative > goal > state > idle > memory
 """
 
 from __future__ import annotations
@@ -140,7 +141,7 @@ class TriggerSystem:
     async def check(self) -> dict[str, Any] | None:
         """Check triggers in priority order. Returns trigger dict or None.
 
-        Priority: pending events > scheduled > idle > memory
+        Priority: pending events > scheduled > initiative > goal > state > idle > memory
         """
         # Expire old entries from recent conversations (>30 min)
         self._expire_recent_conversations()
@@ -152,6 +153,11 @@ class TriggerSystem:
 
         # 2. Scheduled
         trigger = self._check_scheduled()
+        if trigger is not None:
+            return trigger
+
+        # 2.5 Initiative-driven (high-initiative agents self-start about goals)
+        trigger = await self._check_initiative()
         if trigger is not None:
             return trigger
 
@@ -262,6 +268,62 @@ class TriggerSystem:
 
         return None
 
+    async def _check_initiative(self) -> dict[str, Any] | None:
+        """High-initiative agents with active goals can self-start conversations.
+
+        Probability of firing = initiative_score * (1.0 / goal.priority).
+        High-initiative agents (Vera 0.8) with urgent goals (priority 1)
+        fire frequently; low-initiative agents (Rex 0.2) rarely self-trigger.
+        """
+        if self._goal_manager is None:
+            return None
+
+        agents = list(self._config.agent_initiative.keys())
+        if not agents:
+            return None
+
+        shuffled = list(agents)
+        self._rng.shuffle(shuffled)
+
+        for agent_id in shuffled:
+            if self._is_recent_duplicate("initiative", agent_id):
+                continue
+
+            initiative = self._config.agent_initiative.get(agent_id, 0.0)
+            if initiative < 0.1:
+                continue  # Skip very low-initiative agents
+
+            try:
+                goals = await self._goal_manager.get_goals(agent_id)
+            except Exception:
+                logger.warning("Failed to check goals for initiative trigger: %s", agent_id, exc_info=True)
+                continue
+
+            active_goals = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
+            if not active_goals:
+                continue
+
+            top_goal = active_goals[0]
+            # Probability = initiative * (1.0 / priority)
+            # Priority 1 → full initiative, priority 3 → 1/3 of initiative
+            probability = initiative * (1.0 / top_goal.priority)
+            if self._rng.random() >= probability:
+                continue
+
+            self.record_conversation("initiative", agent_id)
+            return {
+                "type": "initiative",
+                "starter_agent_id": agent_id,
+                "prompt_hint": (
+                    f"You want to make progress on: {top_goal.goal}. "
+                    "Bring this up naturally and drive the conversation toward action."
+                ),
+                "goal_text": top_goal.goal,
+                "goal_id": top_goal.id,
+            }
+
+        return None
+
     async def _check_goals(self) -> dict[str, Any] | None:
         """Check if any agent has high-priority active goals to pursue."""
         if self._goal_manager is None:
@@ -290,6 +352,11 @@ class TriggerSystem:
             # Only trigger for high-priority goals (priority <= 3)
             high_priority = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
             if not high_priority:
+                continue
+
+            # Weight by initiative — low-initiative agents rarely fire goal triggers
+            initiative = self._config.agent_initiative.get(agent_id, 0.5)
+            if self._rng.random() >= initiative:
                 continue
 
             top_goal = high_priority[0]

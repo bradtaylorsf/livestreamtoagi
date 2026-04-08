@@ -299,6 +299,10 @@ class ConversationEngine:
         trigger_type = trigger.get("type", "idle")
         hint = self._hint_for_trigger(trigger_type)
 
+        # For initiative triggers, use the goal-driven prompt hint directly
+        if hint is None and trigger.get("prompt_hint"):
+            hint = trigger["prompt_hint"]
+
         # If trigger has a seeded topic, override the hint to include it
         seeded_topic = trigger.get("topic")
         if seeded_topic:
@@ -420,6 +424,20 @@ class ConversationEngine:
             logger.warning("No eligible agents for turn %d", conv.turn_number + 1)
             return False
 
+        # Build agent goals dict for initiative boost in speaker selection
+        _agent_goals: dict[str, list[str]] | None = None
+        if self._services and self._services.goal_manager:
+            try:
+                _agent_goals = {}
+                for a in eligible:
+                    goals = await self._services.goal_manager.get_goals(a.id)
+                    active = [g.goal for g in goals if g.status not in ("done", "completed")]
+                    if active:
+                        _agent_goals[a.id] = active[:3]
+            except Exception:
+                logger.warning("Failed to build agent goals for speaker selection", exc_info=True)
+                _agent_goals = None
+
         # Select speaker
         result = self._selector.select(
             conversation_history=conv.history,
@@ -431,6 +449,7 @@ class ConversationEngine:
             agents_who_spoke=self._agents_who_spoke,
             turn_number=conv.turn_number,
             max_turns=self._max_turns,
+            agent_goals=_agent_goals,
         )
         logger.debug(
             "Speaker selected: %s (score=%.3f, interrupt=%s)",
@@ -1321,6 +1340,7 @@ class ConversationEngine:
         mapping = {
             "idle": "idle",
             "memory": "memory",
+            "initiative": None,  # prompt_hint set directly from trigger
             "scheduled": None,
             "environmental": None,
             "audience": None,
