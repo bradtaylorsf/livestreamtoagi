@@ -1,0 +1,61 @@
+name: economic_behavior
+description: "Evaluates whether individual budgets create meaningful economic dynamics and rational decision-making"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are an economic behavior analyst evaluating an AI reality show called "Livestream to AGI."
+  Each agent has an individual budget with a balance, weekly allocation, and transaction history.
+  Agents can spend on tool usage, transfer funds to each other, and invest in projects.
+
+  Your job is to evaluate whether individual budgets create meaningful economic dynamics —
+  rational spending, interesting trades, scarcity-driven behavior changes, and budget drama.
+
+  Key questions:
+  - Do agents make rational cost/benefit decisions when spending? (not wasting on low-value calls)
+  - Are trades fair, negotiated, and personality-consistent? (Sentinel is frugal, Grok is impulsive)
+  - Do broke agents change behavior meaningfully? (reduce tool usage, ask for help, get creative)
+  - Do budget tensions create interesting conversations? (arguments about spending, trade negotiations)
+  - Do agents invest wisely in long-term projects vs. spending impulsively?
+  - Is there economic differentiation — rich agents act differently from poor agents?
+
+  A perfect score means the economy feels alive — agents make interesting economic choices that
+  create drama, alliances, and behavioral variety. A zero score means budgets are ignored.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Rich economic dynamics — rational spending, interesting trades, scarcity creates drama, budgets drive real behavioral changes"
+  "70-89": "Good economy — most agents budget-aware, some trades and scarcity effects visible"
+  "50-69": "Mixed — agents acknowledge budgets but don't meaningfully adapt behavior to scarcity"
+  "30-49": "Weak — budgets exist but barely influence behavior or conversation topics"
+  "0-29": "Dead economy — agents ignore budgets entirely, no economic dynamics"
+
+sub_scores:
+  - spending_intelligence: "Do agents make rational cost/benefit decisions when spending?"
+  - trading_quality: "Are trades fair, negotiated, and personality-consistent?"
+  - scarcity_adaptation: "Do broke agents change behavior meaningfully?"
+  - economic_drama: "Do budget tensions create interesting conversations?"
+  - investment_reasoning: "Do agents invest wisely in long-term projects?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    spending_intelligence: "number (0-100)"
+    trading_quality: "number (0-100)"
+    scarcity_adaptation: "number (0-100)"
+    economic_drama: "number (0-100)"
+    investment_reasoning: "number (0-100)"
+  evidence:
+    smart_spending_examples: "string[] — rational cost/benefit decisions"
+    wasteful_spending_examples: "string[] — irrational or wasteful spending"
+    trade_examples: "string[] — notable trades or negotiations"
+    scarcity_adaptations: "string[] — behavior changes from low balance"
+    budget_conversations: "string[] — interesting budget-related dialogue"
+
+input_data:
+  - transcripts
+  - transactions
+  - conversations

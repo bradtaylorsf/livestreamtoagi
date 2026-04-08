@@ -209,3 +209,123 @@ class DraftEmailTool(BaseTool):
         await self._redis.set(f"drafts:email:{draft_id}", json.dumps(draft_data))
 
         return {"draft_id": draft_id, "status": "pending_human_review"}
+
+
+class CheckPostPerformanceTool(BaseTool):
+    """Check how a social post is performing — likes, comments, shares."""
+
+    name = "check_post_performance"
+    description = "Check engagement metrics for a previously drafted social post"
+    parameters = {
+        "draft_id": {"type": "string", "description": "The draft_id returned by draft_social_post"},
+    }
+
+    ALLOWED_AGENTS = frozenset({"aurora", "pixel", "grok", "vera", "sentinel"})
+
+    def __init__(self, redis_client: RedisClient, agent_id: str) -> None:
+        self._redis = redis_client
+        self._agent_id = agent_id
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        draft_id: str = kwargs["draft_id"]
+
+        # Check draft status
+        draft_raw = await self._redis.get(f"drafts:social:{draft_id}")
+        if not draft_raw:
+            return {"status": "not_found", "reason": f"No social post found with id {draft_id}"}
+
+        try:
+            draft = json.loads(draft_raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "error", "reason": "Could not read draft data"}
+
+        draft_status = draft.get("status", "unknown")
+
+        # Check engagement data
+        engagement_raw = await self._redis.get(f"social:post:{draft_id}:engagement")
+        if not engagement_raw:
+            return {
+                "status": "ok",
+                "draft_status": draft_status,
+                "engagement": None,
+                "summary": f"Post is {draft_status}. No engagement data yet.",
+            }
+
+        try:
+            engagement = json.loads(engagement_raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "ok", "draft_status": draft_status, "engagement": None}
+
+        likes = engagement.get("likes", 0)
+        comments = engagement.get("comments", [])
+        shares = engagement.get("shares", 0)
+
+        return {
+            "status": "ok",
+            "draft_status": draft_status,
+            "likes": likes,
+            "comments_count": len(comments),
+            "shares": shares,
+            "top_comments": [c.get("text", "") for c in comments[:5]],
+            "summary": (
+                f"Post has {likes} likes, {len(comments)} comments, {shares} shares. "
+                f"{'Going well!' if likes > 100 else 'Modest engagement.'}"
+            ),
+        }
+
+
+class CheckEmailResponsesTool(BaseTool):
+    """Check if there are responses to previously drafted emails."""
+
+    name = "check_email_responses"
+    description = "Check for responses to a previously drafted email"
+    parameters = {
+        "draft_id": {"type": "string", "description": "The draft_id returned by draft_email"},
+    }
+
+    ALLOWED_AGENTS = frozenset({"aurora", "vera", "pixel"})
+
+    def __init__(self, redis_client: RedisClient, agent_id: str) -> None:
+        self._redis = redis_client
+        self._agent_id = agent_id
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        draft_id: str = kwargs["draft_id"]
+
+        # Check draft status
+        draft_raw = await self._redis.get(f"drafts:email:{draft_id}")
+        if not draft_raw:
+            return {"status": "not_found", "reason": f"No email found with id {draft_id}"}
+
+        try:
+            draft = json.loads(draft_raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "error", "reason": "Could not read draft data"}
+
+        draft_status = draft.get("status", "unknown")
+
+        # Check for response
+        response_raw = await self._redis.get(f"email:response:{draft_id}")
+        if not response_raw:
+            return {
+                "status": "ok",
+                "draft_status": draft_status,
+                "response": None,
+                "summary": f"Email is {draft_status}. No response yet.",
+            }
+
+        try:
+            response_data = json.loads(response_raw)
+        except (json.JSONDecodeError, TypeError):
+            return {"status": "ok", "draft_status": draft_status, "response": None}
+
+        return {
+            "status": "ok",
+            "draft_status": draft_status,
+            "sentiment": response_data.get("sentiment", "unknown"),
+            "response_text": response_data.get("response", ""),
+            "summary": (
+                f"Received a {response_data.get('sentiment', 'unknown')} response: "
+                f"{response_data.get('response', '')[:200]}"
+            ),
+        }

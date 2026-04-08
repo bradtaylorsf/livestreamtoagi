@@ -1,0 +1,89 @@
+# Dream Cycle Test — validates #272 (dreams)
+#
+# Tests whether the dream system produces quality content and influences
+# waking behavior. Runs a 24h simulated period with 1 dream cycle overnight.
+#
+# What to look for:
+#   - Each agent should produce a dream journal entry
+#   - 30%+ of dreams should produce goals or insights
+#   - 20%+ of dreams should be referenced in subsequent conversation
+#   - Dreams should be personality-consistent (Rex: code, Aurora: art)
+#   - Dream content should be surprising, not just rehashing the day
+#
+# Eval focus: creativity, entertainment
+#
+# Run with:
+#   pnpm chat sim dream-cycle-test --max-cost 8
+
+audience:
+  initial_viewers: 5
+  growth_rate: slow
+  chat_frequency: quiet
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Daytime activity — build memories for dreams to process
+  - name: morning_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: morning_work
+    type: organic
+    count: 2
+    topics:
+      - "Let's plan what to build today"
+    location: workshop
+
+  - name: creative_session
+    type: organic
+    count: 2
+    required_agents: [aurora]
+    topics:
+      - "I have an idea for a new art project"
+    location: workshop
+
+  - name: afternoon_coding
+    type: organic
+    count: 2
+    required_agents: [rex]
+    location: workshop
+
+  - name: evening_wrapup
+    type: organic
+    count: 1
+    required_agents: [vera]
+    topics:
+      - "What a day. Time to wind down."
+    location: town_square
+
+  # Overnight dream cycle — the key test phase
+  - name: dream_cycle
+    type: reflection
+    reflection_type: dream
+
+  # Morning after — observe dream influence on waking behavior
+  - name: post_dream_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: post_dream_chat
+    type: organic
+    count: 3
+    topics:
+      - "I had the strangest dream last night..."
+    location: town_square
+
+  - name: dream_inspired_work
+    type: organic
+    count: 2
+    location: workshop
+
+  - name: afternoon_reflection
+    type: reflection
+    reflection_type: 6hour

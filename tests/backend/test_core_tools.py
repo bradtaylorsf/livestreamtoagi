@@ -302,7 +302,7 @@ class TestToolRegistry:
             character_spawner=MagicMock(),
             voting_manager=MagicMock(),
         )
-        assert len(tools) == 13
+        assert len(tools) == 15
 
         tool_names = {t.name for t in tools}
         assert tool_names == {
@@ -312,6 +312,8 @@ class TestToolRegistry:
             "get_poll_results",
             "create_poll",
             "draft_email",
+            "check_post_performance",
+            "check_email_responses",
             "web_search",
             "propose_character",
             "vote_character",

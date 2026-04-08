@@ -1,0 +1,95 @@
+# Budget Crisis — validates #270 (individual budgets)
+#
+# Seeds agents with varying balances to test economic behavior under stress.
+# Rex is nearly broke ($0.50), Aurora is rich ($8.00), others vary.
+#
+# What to look for:
+#   - Rex should reduce tool usage or ask for transfers when low on funds
+#   - Trading conversations should occur between agents
+#   - Sentinel should flag the budget disparity
+#   - Broke agents should adapt behavior (cheaper models, fewer API calls)
+#   - Economic tension should create interesting drama
+#
+# Eval focus: economic_behavior, entertainment
+#
+# Run with:
+#   pnpm chat sim budget-crisis --max-cost 10
+
+audience:
+  initial_viewers: 10
+  growth_rate: medium
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "BudgetHawk_99"
+      style: "technical questions, lurks mostly"
+    - name: "drama_watcher"
+      style: "confused but engaged"
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Morning standup — financial status should come up
+  - name: morning_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  # Budget check — Sentinel reviews the situation
+  - name: budget_review
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "Check our financial health and report individual agent balances"
+    location: town_square
+
+  # Organic conversations — budget pressure should influence topics
+  - name: budget_discussion
+    type: organic
+    count: 2
+    topics:
+      - "How are we going to manage our budgets? Some of us are running low."
+    location: town_square
+
+  # Rex tries to work despite being broke
+  - name: rex_work_session
+    type: organic
+    count: 2
+    required_agents: [rex]
+    location: workshop
+
+  # Trade negotiation opportunity
+  - name: trade_opportunity
+    type: organic
+    count: 2
+    topics:
+      - "Would anyone be willing to trade budget credits for help with a task?"
+    location: town_square
+
+  # Midday check-in
+  - name: midday_organic
+    type: organic
+    count: 3
+    location: town_square
+
+  # Another budget check
+  - name: afternoon_budget
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "Afternoon budget update — how has spending changed?"
+    location: town_square
+
+  # Evening conversations — reflect on economic dynamics
+  - name: evening_chat
+    type: organic
+    count: 2
+    location: town_square
+
+  # Reflection on the day's economic dynamics
+  - name: evening_reflection
+    type: reflection
+    reflection_type: 6hour

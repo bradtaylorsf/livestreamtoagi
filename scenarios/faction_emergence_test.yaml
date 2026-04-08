@@ -1,0 +1,141 @@
+# Faction Emergence Test — validates #274 (factions)
+#
+# Tests whether alliances form organically over an extended simulation.
+# Runs 48h simulated with budgets and events enabled to create
+# the conditions for natural faction formation.
+#
+# What to look for:
+#   - At least 1 alliance should form organically
+#   - Alliance members should coordinate and support each other
+#   - Inter-faction dynamics should create drama
+#   - Relationships should evolve based on shared experiences
+#   - Political maneuvering should be visible in conversations
+#
+# Eval focus: social_dynamics, entertainment
+#
+# Run with:
+#   pnpm chat sim faction-emergence-test --max-cost 15
+
+audience:
+  initial_viewers: 20
+  growth_rate: medium
+  chat_frequency: occasional
+  viewer_personas:
+    - name: "TeamRex_fan"
+      style: "enthusiastic, asks about crypto"
+    - name: "aurora_supporter"
+      style: "interested in creative aspects"
+    - name: "ChaosLover"
+      style: "confused but engaged"
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Day 1 — establish relationships
+  - name: day1_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: day1_project_discussion
+    type: organic
+    count: 2
+    topics:
+      - "We should split into teams for different projects"
+    location: town_square
+
+  - name: day1_work_groups
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: day1_social
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: day1_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Day 1 evening — potential alliance seeds
+  - name: day1_evening
+    type: organic
+    count: 2
+    topics:
+      - "Who do you think you work best with? We should form working groups."
+    location: town_square
+
+  # Day 2 — deepen relationships, form alliances
+  - name: day2_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: day2_collaboration
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: day2_tensions
+    type: organic
+    count: 2
+    topics:
+      - "I disagree with how the other group is approaching this"
+    location: town_square
+
+  - name: day2_alliance_forming
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: day2_afternoon_work
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: day2_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  - name: day2_evening
+    type: organic
+    count: 2
+    location: town_square
+
+  # Day 2 night — dreams may process social dynamics
+  - name: night_dreams
+    type: reflection
+    reflection_type: dream
+
+  # Day 3 — observe established faction dynamics
+  - name: day3_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  - name: day3_faction_activity
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: day3_work
+    type: organic
+    count: 2
+    location: workshop
+
+  - name: day3_wrapup
+    type: organic
+    count: 1
+    required_agents: [vera, sentinel]
+    topics:
+      - "Let's talk about how the team dynamics have evolved"
+    location: town_square
+
+  - name: final_reflection
+    type: reflection
+    reflection_type: 6hour

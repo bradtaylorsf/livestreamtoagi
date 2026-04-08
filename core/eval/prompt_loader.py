@@ -160,4 +160,68 @@ def render_user_prompt(
                 f"Uses: {entry.get('use_count')}"
             )
 
+    if "agent_internal_state" in category_data:
+        states = category_data["agent_internal_state"]
+        parts.append(f"\n### Agent Internal State ({len(states)} agents)")
+        for state in states[:20]:
+            parts.append(
+                f"- Agent: {state.get('agent_id')}, "
+                f"Mood: {state.get('mood')}, "
+                f"Energy: {state.get('energy')}, "
+                f"Satisfaction: {state.get('satisfaction')}, "
+                f"Boredom: {state.get('boredom')}, "
+                f"Frustration: {state.get('frustration')}, "
+                f"Social need: {state.get('social_need')}, "
+                f"Creative need: {state.get('creative_need')}, "
+                f"Recognition need: {state.get('recognition_need')}"
+            )
+
+    if "transactions" in category_data:
+        txns = category_data["transactions"]
+        parts.append(f"\n### Transaction History ({len(txns)} entries)")
+        for txn in txns[:50]:
+            counterparty = txn.get("counterparty_agent_id") or "N/A"
+            parts.append(
+                f"- Agent: {txn.get('agent_id')}, "
+                f"Type: {txn.get('type')}, "
+                f"Amount: {txn.get('amount')}, "
+                f"Counterparty: {counterparty}, "
+                f"Description: {txn.get('description', 'N/A')}"
+            )
+
+    if "dream_entries" in category_data:
+        dreams = category_data["dream_entries"]
+        parts.append(f"\n### Dream Journal Entries ({len(dreams)} entries)")
+        for dream in dreams[:30]:
+            content = str(dream.get("content", ""))[:500]
+            parts.append(
+                f"- Agent: {dream.get('agent_id')}, "
+                f"Type: {dream.get('reflection_type')}, "
+                f"Content: {content}"
+            )
+
+    if "alliance_records" in category_data:
+        alliances = category_data["alliance_records"]
+        parts.append(f"\n### Alliance Records ({len(alliances)} alliances)")
+        for alliance in alliances[:20]:
+            members = alliance.get("members", [])
+            status = "dissolved" if alliance.get("dissolved_at") else "active"
+            parts.append(
+                f"- {alliance.get('name')} ({status}): "
+                f"Founded by {alliance.get('founded_by')}, "
+                f"Purpose: {alliance.get('purpose', 'N/A')}, "
+                f"Members: {members}"
+            )
+
+    if "world_chunks" in category_data:
+        chunks = category_data["world_chunks"]
+        parts.append(f"\n### World Chunks ({len(chunks)} built)")
+        for chunk in chunks[:30]:
+            parts.append(
+                f"- {chunk.get('name')}: "
+                f"Built by {chunk.get('built_by')}, "
+                f"Size: {chunk.get('width')}x{chunk.get('height')}, "
+                f"Description: {chunk.get('description', 'N/A')}"
+            )
+
     return "\n".join(parts)
