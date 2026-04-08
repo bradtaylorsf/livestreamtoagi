@@ -376,6 +376,16 @@ SCENARIO_PRESETS: list[tuple[str, str, str]] = [
     ("tool-coverage", "Exercise all 19 tools end-to-end", "scenarios/tool_coverage.yaml"),
     ("full-day", "Full scripted day with standup, building, reflection", "scenarios/full_day.yaml"),
     ("autonomous", "Trigger-driven — no script, agents decide what to do", ""),
+    ("initiative-test", "Test initiative wiring — who starts conversations?", "scenarios/initiative_test.yaml"),
+    ("goal-generation-test", "Test autonomous goal generation in reflections", "scenarios/goal_generation_test.yaml"),
+    ("budget-crisis", "Test economic behavior under budget pressure", "scenarios/budget_crisis.yaml"),
+    ("topic-exhaustion-test", "Test cross-conversation memory & topic exhaustion", "scenarios/topic_exhaustion_test.yaml"),
+    ("novelty-injection-test", "Test random event generation & reactions", "scenarios/novelty_injection_test.yaml"),
+    ("dream-cycle-test", "Test dream system & creative output", "scenarios/dream_cycle_test.yaml"),
+    ("faction-emergence-test", "Test alliance formation over 48h", "scenarios/faction_emergence_test.yaml"),
+    ("full-evolution-7d", "7-day full integration — all features", "scenarios/full_evolution_7d.yaml"),
+    ("dress-rehearsal", "24h real-time streaming readiness test", "scenarios/dress_rehearsal.yaml"),
+    ("ab-test", "Standardized baseline for A/B feature comparison", "scenarios/ab_test.yaml"),
 ]
 
 

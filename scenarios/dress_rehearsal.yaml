@@ -1,0 +1,149 @@
+# Dress Rehearsal — real-time streaming readiness test
+#
+# 24-hour real-time simulation with WorldSimulator + AudienceSimulator.
+# Tests whether the stream can run continuously without going silent.
+#
+# What to look for:
+#   - Stream should never go silent for >5 minutes
+#   - Visual interest should be maintained (agent movement, builds, events)
+#   - Audience interaction should feel natural
+#   - Budget should be managed within daily limits
+#   - Content should be family-friendly (Management filter working)
+#   - All agent personalities should be distinct and recognizable
+#
+# Eval focus: full suite + manual review
+#
+# Run with:
+#   pnpm chat sim dress-rehearsal --max-cost 30 --speed-multiplier 1
+
+audience:
+  initial_viewers: 50
+  growth_rate: medium
+  chat_frequency: active
+  viewer_personas:
+    - name: "regular_viewer"
+      style: "curious newcomer"
+    - name: "tech_bro"
+      style: "technical questions, lurks mostly"
+    - name: "art_fan"
+      style: "interested in creative aspects"
+    - name: "first_time"
+      style: "confused but engaged"
+    - name: "crypto_guy"
+      style: "enthusiastic, asks about crypto"
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  # Early morning — agents wake up
+  - name: morning_activation
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: morning_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    location: town_square
+
+  # Morning work block
+  - name: morning_work_1
+    type: organic
+    count: 3
+    location: workshop
+
+  - name: audience_check_1
+    type: audience_sim
+    messages:
+      - user: "regular_viewer"
+        text: "Good morning! What's on the agenda today?"
+      - user: "first_time"
+        text: "Wait, these are AIs?"
+    location: town_square
+
+  - name: morning_work_2
+    type: organic
+    count: 2
+    location: workshop
+
+  # Midday social
+  - name: midday_social
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: budget_check
+    type: tool_exercise
+    agent: sentinel
+    required_agents: [sentinel]
+    tool: get_revenue_status
+    context: "Midday budget check for the stream"
+    location: town_square
+
+  # Afternoon creative + building
+  - name: afternoon_creative
+    type: organic
+    count: 3
+    required_agents: [aurora]
+    location: workshop
+
+  - name: afternoon_coding
+    type: organic
+    count: 2
+    required_agents: [rex]
+    location: workshop
+
+  - name: afternoon_social
+    type: organic
+    count: 2
+    location: town_square
+
+  - name: audience_check_2
+    type: audience_sim
+    messages:
+      - user: "tech_bro"
+        text: "How's the code quality? Any tests passing?"
+      - user: "art_fan"
+        text: "The pixel art looks great! Can you make a fountain?"
+    location: town_square
+
+  # Late afternoon reflection
+  - name: afternoon_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # Evening entertainment
+  - name: evening_social
+    type: organic
+    count: 3
+    location: town_square
+
+  - name: grok_wildcard
+    type: organic
+    count: 1
+    required_agents: [grok]
+    location: town_square
+
+  - name: evening_work
+    type: organic
+    count: 2
+    location: workshop
+
+  # Night wind-down
+  - name: evening_wrapup
+    type: organic
+    count: 2
+    required_agents: [vera]
+    topics:
+      - "What a day. Let's wrap up and rest."
+    location: town_square
+
+  - name: overnight_dreams
+    type: reflection
+    reflection_type: dream
+
+  - name: night_reflection
+    type: reflection
+    reflection_type: 6hour
