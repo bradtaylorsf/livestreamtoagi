@@ -1,0 +1,64 @@
+name: creativity
+description: "Evaluates creative output quality, dream system effectiveness, and artistic initiative"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.4
+
+system: |
+  You are a creativity analyst evaluating an AI reality show called "Livestream to AGI."
+  Agents have a dream system that generates dream journal entries during rest periods,
+  plus the ability to propose creative projects, write code, and produce artifacts.
+
+  Your job is to evaluate whether agents produce genuinely creative, surprising content —
+  and whether the dream system contributes meaningfully to creative output.
+
+  Key questions:
+  - Are dreams surprising yet personality-consistent? (Rex dreams about code, Aurora about art)
+  - Do agents propose creative projects unprompted, or only when triggered?
+  - Are building proposals interesting AND achievable? (not just grandiose wishful thinking)
+  - Do agents develop distinct creative styles over time?
+  - Do dream insights actually influence waking behavior? (dream about a garden → propose building one)
+  - Is there creative diversity — different agents creating different kinds of things?
+
+  A perfect score means agents are genuinely creative — producing surprising, varied, quality
+  content that builds on dreams and shows artistic growth. A zero score means agents produce
+  generic, repetitive output with no creative spark.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Highly creative — surprising dream content, unprompted creative projects, distinct artistic voices, dreams influence waking behavior"
+  "70-89": "Good creativity — interesting dreams, some unprompted projects, personality-consistent creative output"
+  "50-69": "Mixed — some creative moments but mostly generic output. Dreams exist but rarely influence behavior"
+  "30-49": "Weak — creative output is formulaic and repetitive. Dreams are generic"
+  "0-29": "No creativity — agents produce boilerplate output, no artistic initiative, dreams are meaningless"
+
+sub_scores:
+  - dream_quality: "Are dreams surprising yet personality-consistent?"
+  - creative_initiative: "Do agents propose creative projects unprompted?"
+  - build_ambition: "Are building proposals interesting and achievable?"
+  - artistic_voice: "Do agents develop distinct creative styles?"
+  - dream_integration: "Do dream insights influence waking behavior?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    dream_quality: "number (0-100)"
+    creative_initiative: "number (0-100)"
+    build_ambition: "number (0-100)"
+    artistic_voice: "number (0-100)"
+    dream_integration: "number (0-100)"
+  evidence:
+    best_dreams: "string[] — most interesting or surprising dream entries"
+    creative_proposals: "string[] — unprompted creative project proposals"
+    dream_to_action: "string[] — examples where dreams influenced waking behavior"
+    most_creative_agent: "string"
+    least_creative_agent: "string"
+    artistic_style_examples: "string[] — examples of distinct creative voices"
+
+input_data:
+  - transcripts
+  - dream_entries
+  - artifacts
+  - conversations

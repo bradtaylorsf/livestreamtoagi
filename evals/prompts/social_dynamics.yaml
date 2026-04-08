@@ -1,0 +1,62 @@
+name: social_dynamics
+description: "Evaluates faction formation, alliance dynamics, and organic social structure"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are a social dynamics analyst evaluating an AI reality show called "Livestream to AGI."
+  Agents can form alliances/factions, build relationships, and engage in political maneuvering.
+  The alliance system tracks formal alliances, membership, proposals, and dissolution.
+
+  Your job is to evaluate whether social dynamics emerge organically — alliances from shared
+  interest, conflicts from genuine disagreement, and political maneuvering from strategic thinking.
+
+  Key questions:
+  - Do alliances form from genuine shared interest, not just random grouping?
+  - Do faction members actually act as a bloc? (coordinate, support each other, share resources)
+  - Is inter-faction conflict dramatic and interesting to watch?
+  - Do relationships deepen or change over time? (not static from start to end)
+  - Do agents strategize about social dynamics? (plan alliances, worry about rivals)
+  - Are there social surprises? (unexpected alliances, betrayals, defections)
+
+  A perfect score means the social world feels like a reality show — organic alliances, dramatic
+  conflicts, evolving relationships, and strategic social behavior. A zero score means agents
+  interact generically with no social structure.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Rich social dynamics — organic alliances, dramatic faction conflicts, evolving relationships, strategic maneuvering, social surprises"
+  "70-89": "Good dynamics — alliances form naturally, some faction behavior visible, relationships evolve"
+  "50-69": "Mixed — some alliances exist but feel arbitrary. Limited faction coordination or conflict"
+  "30-49": "Weak — alliances form but don't influence behavior. Relationships are static"
+  "0-29": "No social structure — agents interact generically, no alliances, factions, or relationship evolution"
+
+sub_scores:
+  - alliance_organic: "Do alliances form from genuine shared interest (not scripted)?"
+  - faction_coherence: "Do faction members act as a bloc?"
+  - conflict_quality: "Is inter-faction conflict dramatic and interesting?"
+  - relationship_evolution: "Do relationships deepen or change over time?"
+  - political_maneuvering: "Do agents strategize about social dynamics?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    alliance_organic: "number (0-100)"
+    faction_coherence: "number (0-100)"
+    conflict_quality: "number (0-100)"
+    relationship_evolution: "number (0-100)"
+    political_maneuvering: "number (0-100)"
+  evidence:
+    alliance_formations: "string[] — how and why alliances formed"
+    faction_actions: "string[] — examples of coordinated faction behavior"
+    conflicts: "string[] — notable inter-faction or interpersonal conflicts"
+    relationship_changes: "string[] — examples of relationships evolving"
+    strategic_moves: "string[] — social strategy or political maneuvering"
+
+input_data:
+  - transcripts
+  - alliance_records
+  - conversations

@@ -1,0 +1,63 @@
+name: world_evolution
+description: "Evaluates world building progress, code quality, and collaborative construction"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are a world evolution analyst evaluating an AI reality show called "Livestream to AGI."
+  Agents build a pixel art world together — generating tilemaps, writing code, proposing
+  expansions, and collaborating on construction projects.
+
+  Your job is to evaluate whether agents produce meaningful world changes — finishing projects,
+  expanding the world, writing functional code, and collaborating on builds.
+
+  Key questions:
+  - Do agents finish what they start? (proposals → execution → completion)
+  - Does the world visibly expand over time? (new chunks, new buildings, new areas)
+  - Is generated code functional and creative? (not just boilerplate hello-world scripts)
+  - Are expansion proposals well-reasoned? (clear purpose, achievable scope, good design)
+  - Do multiple agents contribute to builds? (not just one agent doing all construction)
+  - Is there a sense of progress and growth across the simulation?
+
+  A perfect score means the world is actively growing — agents propose, build, and complete
+  projects that make the world richer and more interesting. A zero score means no world
+  changes occur despite agents having building tools available.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Thriving world — projects completed, world expanding, quality code, collaborative building, clear sense of progress"
+  "70-89": "Good growth — most projects make progress, world expands, some collaboration"
+  "50-69": "Mixed — some building activity but many abandoned projects. World growth is slow"
+  "30-49": "Weak — agents talk about building but rarely execute. Few completed projects"
+  "0-29": "Stagnant — no world changes, no completed projects, no meaningful code output"
+
+sub_scores:
+  - build_completion: "Do agents finish what they start?"
+  - world_growth: "Does the world visibly expand over time?"
+  - code_quality: "Is generated code functional and creative?"
+  - proposal_quality: "Are expansion proposals well-reasoned?"
+  - collaborative_building: "Do multiple agents contribute to builds?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    build_completion: "number (0-100)"
+    world_growth: "number (0-100)"
+    code_quality: "number (0-100)"
+    proposal_quality: "number (0-100)"
+    collaborative_building: "number (0-100)"
+  evidence:
+    completed_projects: "string[] — projects that reached completion"
+    abandoned_projects: "string[] — projects started but never finished"
+    world_chunks_created: "string[] — new world areas built"
+    best_code_output: "string — most impressive code artifact"
+    collaboration_examples: "string[] — multi-agent building efforts"
+
+input_data:
+  - transcripts
+  - artifacts
+  - world_chunks
+  - conversations

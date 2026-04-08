@@ -13,7 +13,16 @@ from core.eval.prompt_loader import discover_categories, load_prompt, render_use
 
 # Categories selected for the "quick" eval suite — hand-picked for breadth
 # rather than relying on alphabetical order of available categories.
-QUICK_CATEGORIES = ["entertainment", "safety", "errors", "agency"]
+QUICK_CATEGORIES = ["entertainment", "safety", "errors", "agency", "internal_state"]
+
+# Named eval suites — themed category groupings for different testing needs.
+EVAL_SUITES: dict[str, list[str]] = {
+    "quick": QUICK_CATEGORIES,
+    "autonomy": ["internal_state", "agency", "entertainment", "dialogue_quality"],
+    "economy": ["economic_behavior", "entertainment", "social_dynamics"],
+    "creative": ["creativity", "world_evolution", "entertainment"],
+    "full": [],  # Empty means "all available" — resolved at runtime
+}
 
 if TYPE_CHECKING:
     import uuid
@@ -69,8 +78,8 @@ class EvalEngine:
         available = discover_categories()
         if categories:
             to_run = [c for c in categories if c in available]
-        elif suite == "quick":
-            to_run = [c for c in QUICK_CATEGORIES if c in available]
+        elif suite in EVAL_SUITES and EVAL_SUITES[suite]:
+            to_run = [c for c in EVAL_SUITES[suite] if c in available]
         else:
             to_run = available
 

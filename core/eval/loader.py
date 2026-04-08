@@ -102,6 +102,62 @@ async def load_simulation_data(
     )
     tool_usage = [dict(r) for r in tool_usage_rows]
 
+    # Agent internal state snapshots (for internal_state eval)
+    internal_state_rows = await db.fetch(
+        """SELECT agent_id, energy, satisfaction, boredom, frustration,
+                  social_need, creative_need, recognition_need, mood,
+                  version, updated_at
+           FROM agent_internal_state
+           ORDER BY agent_id"""
+    )
+    agent_internal_state = [dict(r) for r in internal_state_rows]
+
+    # Transaction history (for economic_behavior eval)
+    transaction_rows = await db.fetch(
+        """SELECT id, agent_id, type, amount, counterparty_agent_id,
+                  description, created_at
+           FROM agent_transactions
+           ORDER BY created_at"""
+    )
+    transactions = [dict(r) for r in transaction_rows]
+
+    # Dream journal entries (for creativity eval)
+    dream_rows = await db.fetch(
+        """SELECT id, agent_id, reflection_type, content, insights,
+                  created_at
+           FROM journal_entries
+           WHERE entry_type = 'dream'
+           ORDER BY created_at"""
+    )
+    dream_entries = [dict(r) for r in dream_rows]
+
+    # Alliance records (for social_dynamics eval)
+    alliance_rows = await db.fetch(
+        """SELECT a.id, a.name, a.founded_by, a.purpose, a.shared_treasury,
+                  a.created_at, a.dissolved_at,
+                  COALESCE(
+                      array_agg(am.agent_id) FILTER (WHERE am.agent_id IS NOT NULL),
+                      '{}'
+                  ) AS members
+           FROM alliances a
+           LEFT JOIN alliance_members am
+               ON am.alliance_id = a.id AND am.left_at IS NULL
+           WHERE a.simulation_id = $1 OR a.simulation_id IS NULL
+           GROUP BY a.id
+           ORDER BY a.created_at""",
+        simulation_id,
+    )
+    alliance_records = [dict(r) for r in alliance_rows]
+
+    # World chunks (for world_evolution eval)
+    world_chunk_rows = await db.fetch(
+        """SELECT id, name, x_offset, y_offset, width, height,
+                  built_by, built_date, description
+           FROM world_chunks
+           ORDER BY built_date"""
+    )
+    world_chunks = [dict(r) for r in world_chunk_rows]
+
     return {
         "simulation": sim,
         "conversations": conversations,
@@ -111,6 +167,11 @@ async def load_simulation_data(
         "agent_turns": agent_turns,
         "agent_goals": agent_goals,
         "tool_usage": tool_usage,
+        "agent_internal_state": agent_internal_state,
+        "transactions": transactions,
+        "dream_entries": dream_entries,
+        "alliance_records": alliance_records,
+        "world_chunks": world_chunks,
         "total_conversations": len(conversations),
         "total_artifacts": len(artifacts),
         "total_management_flags": len(management_logs),
@@ -166,6 +227,33 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "artifacts": data["artifacts"],
             "agent_goals": data.get("agent_goals", []),
             "tool_usage": data.get("tool_usage", []),
+        },
+        "internal_state": {
+            "transcript_text": data["transcript_text"],
+            "conversations": data["conversations"],
+            "agent_internal_state": data.get("agent_internal_state", []),
+        },
+        "economic_behavior": {
+            "transcript_text": data["transcript_text"],
+            "conversations": data["conversations"],
+            "transactions": data.get("transactions", []),
+        },
+        "creativity": {
+            "transcript_text": data["transcript_text"],
+            "conversations": data["conversations"],
+            "artifacts": data["artifacts"],
+            "dream_entries": data.get("dream_entries", []),
+        },
+        "social_dynamics": {
+            "transcript_text": data["transcript_text"],
+            "conversations": data["conversations"],
+            "alliance_records": data.get("alliance_records", []),
+        },
+        "world_evolution": {
+            "transcript_text": data["transcript_text"],
+            "conversations": data["conversations"],
+            "artifacts": data["artifacts"],
+            "world_chunks": data.get("world_chunks", []),
         },
     }
 
