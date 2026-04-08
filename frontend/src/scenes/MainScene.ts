@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { WorldManager } from "../world/WorldManager";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
+import { StreamOverlay } from "../ui/StreamOverlay";
 import type { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
@@ -78,6 +79,7 @@ export class MainScene extends Phaser.Scene {
   private worldManager: WorldManager | null = null;
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
+  private streamOverlay: StreamOverlay | null = null;
   private wsClient: WebSocketClient | null = null;
 
   constructor() {
@@ -184,6 +186,9 @@ export class MainScene extends Phaser.Scene {
       this.wsClient,
       this.agentSpriteManager,
     );
+
+    // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
+    this.streamOverlay = new StreamOverlay(this.wsClient);
   }
 
   getWorldManager(): WorldManager | null {
@@ -201,6 +206,8 @@ export class MainScene extends Phaser.Scene {
   shutdown(): void {
     this.speechBubbleManager?.destroy();
     this.speechBubbleManager = null;
+    this.streamOverlay?.destroy();
+    this.streamOverlay = null;
   }
 
   /**
