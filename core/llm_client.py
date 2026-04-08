@@ -338,13 +338,13 @@ class OpenRouterClient:
                     f"HTTP {resp.status_code}", status_code=resp.status_code
                 )
                 await asyncio.sleep(delay)
-            except httpx.TimeoutException as exc:
+            except (httpx.TimeoutException, httpx.ReadError) as exc:
                 last_exc = exc
                 if attempt < MAX_RETRIES - 1:
                     delay = BACKOFF_BASE * (2**attempt)
                     logger.warning(
-                        "OpenRouter timeout on attempt %d/%d, retrying in %.1fs",
-                        attempt + 1, MAX_RETRIES, delay,
+                        "OpenRouter %s on attempt %d/%d, retrying in %.1fs",
+                        type(exc).__name__, attempt + 1, MAX_RETRIES, delay,
                     )
                     await asyncio.sleep(delay)
         raise LLMError(

@@ -60,6 +60,12 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
+        # Wait for background eval tasks to finish before closing services
+        from core.admin_routes import _background_tasks
+        if _background_tasks:
+            logger.info("Waiting for %d background eval task(s) to finish...", len(_background_tasks))
+            await asyncio.gather(*_background_tasks, return_exceptions=True)
+
         await tts_pipeline.shutdown()
         await svc.config_loader.stop_watching()
         stop_scheduler()

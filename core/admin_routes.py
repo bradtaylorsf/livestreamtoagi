@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
+# Track background eval tasks so shutdown can wait for them
+_background_tasks: set[asyncio.Task] = set()
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -788,7 +791,7 @@ async def run_simulation_evals(
     eval_run = await eval_repo.create_eval_run(sim_id, body.eval_suite or "full")
     run_id = eval_run.id
 
-    # Fire-and-forget — run evals in background task
+    # Run evals in tracked background task so shutdown can wait
     async def _run_eval_background() -> None:
         try:
             await engine.run(
@@ -799,9 +802,14 @@ async def run_simulation_evals(
             )
         except Exception:
             logger.exception("Background eval run %s failed", run_id)
-            await eval_repo.update_eval_run(run_id, status="failed")
+            try:
+                await eval_repo.update_eval_run(run_id, status="failed")
+            except Exception:
+                logger.exception("Failed to mark eval run %s as failed", run_id)
 
-    asyncio.create_task(_run_eval_background())
+    task = asyncio.create_task(_run_eval_background())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return EvalRunResponse(
         eval_run_id=str(run_id),
