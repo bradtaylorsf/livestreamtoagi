@@ -98,6 +98,42 @@ Guidelines:
 - Self-modifications are optional — only propose changes you genuinely believe in.
 """
 
+GOAL_GENERATION_PROMPT = """\
+You are {agent_id}. Based on your personality, current goals, recent experiences, and internal state, \
+propose 1-2 NEW goals that feel authentic to your character.
+
+Think about:
+- What do you WANT to do next? (not what you were told to do)
+- What's bothering you that you want to fix?
+- What creative project excites you?
+- Is there a relationship you want to improve or challenge?
+
+Current internal state: {agent_state}
+Current goals: {current_goals}
+Recent memories: {recent_memories}
+Personality summary: {personality_summary}
+
+Respond with valid JSON:
+{{
+  "goals": [
+    {{
+      "goal": "<specific, achievable goal — not 'be better' but 'build a reading nook'>",
+      "category": "<one of: creative, social, economic, personal, competitive>",
+      "priority": <1-5, where 1 is most urgent>
+    }}
+  ]
+}}
+
+Category guidelines:
+- creative: Build something, design something, create content
+- social: Strengthen/challenge a relationship, form alliance, resolve conflict
+- economic: Earn more, save budget, invest in a project
+- personal: Learn a skill, change a habit, explore the world
+- competitive: Outperform another agent, win a challenge, prove a point
+
+Generate goals that are DIFFERENT from your current goals. Be specific.
+"""
+
 JOURNAL_SYSTEM_PROMPT = """\
 You are {agent_id}. Write a first-person journal entry reflecting on your {reflection_type} \
 reflection. This will be displayed publicly on the website for viewers to read.
@@ -265,6 +301,11 @@ class ReflectionManager:
                     agent_id, exc_info=True,
                 )
 
+        # Generate autonomous goals from reflection (#269)
+        goals_generated = await self._generate_goals(
+            agent_id, recall_text, model,
+        )
+
         # Generate journal entry
         context = (
             f"Reviewed {len(recall_memories)} memories. "
@@ -272,6 +313,8 @@ class ReflectionManager:
             f"Updated {importance_updates} importance scores."
             f"{goal_context}"
         )
+        if goals_generated:
+            context += f" Generated {goals_generated} new goals."
         journal = await self._generate_journal_entry(agent_id, "6hour", context)
 
         return ReflectionResult(
@@ -378,12 +421,19 @@ class ReflectionManager:
                     agent_id, exc_info=True,
                 )
 
+        # Weekly goal generation — broader, more ambitious goals (#269)
+        goals_generated = await self._generate_goals(
+            agent_id, core_memory, model, max_goals=3,
+        )
+
         # Generate journal entry
         context = (
             f"Completed weekly reflection. "
             f"Updated {promoted_count} core memory sections. "
             f"Created {len(proposals)} self-modification proposals."
         )
+        if goals_generated:
+            context += f" Generated {goals_generated} new goals."
         journal = await self._generate_journal_entry(agent_id, "weekly", context)
 
         return ReflectionResult(
@@ -435,6 +485,150 @@ class ReflectionManager:
                 token_count=token_count,
             )
         )
+
+    # ── Goal generation (#269) ──────────────────────────────────
+
+    # Goal cap — leave headroom for commitment-based goals
+    _GOAL_CAP = 8
+
+    # State-to-category priority mapping: high state value → category gets priority 1
+    _STATE_PRIORITY_MAP: dict[str, list[str]] = {
+        "boredom": ["creative", "personal"],
+        "frustration": ["competitive", "personal"],
+        "social_need": ["social"],
+        "creative_need": ["creative"],
+        "recognition_need": ["competitive"],
+    }
+
+    async def _generate_goals(
+        self,
+        agent_id: str,
+        recent_context: str,
+        model: str,
+        max_goals: int = 2,
+    ) -> int:
+        """Generate autonomous goals during reflection.
+
+        Returns the number of goals successfully created.
+        """
+        if self._goal_manager is None:
+            return 0
+
+        # Check goal cap — skip if agent already has enough goals
+        try:
+            existing_goals = await self._goal_manager.get_goals(agent_id)
+            active_goals = [g for g in existing_goals if g.status not in ("done", "completed")]
+            if len(active_goals) >= self._GOAL_CAP:
+                logger.info(
+                    "Skipping goal generation for %s — already has %d active goals",
+                    agent_id, len(active_goals),
+                )
+                return 0
+        except Exception:
+            logger.warning("Failed to check goal count for %s", agent_id, exc_info=True)
+            return 0
+
+        # Build internal state context
+        state_text = "unknown"
+        state_high: dict[str, float] = {}
+        if self._agent_state_manager is not None:
+            try:
+                state = await self._agent_state_manager.get_state(agent_id)
+                state_text = self._agent_state_manager.format_state_for_context(state)
+                # Identify high-value state variables for priority influence
+                for attr in ("boredom", "frustration", "social_need", "creative_need", "recognition_need"):
+                    val = getattr(state, attr, 0.0)
+                    if val >= 0.6:
+                        state_high[attr] = val
+            except Exception:
+                logger.warning("Failed to get state for goal generation: %s", agent_id, exc_info=True)
+
+        # Build personality summary from agent config
+        agent_cfg = self._registry.get_agent(agent_id)
+        personality_summary = "Unknown personality"
+        if agent_cfg is not None:
+            personality_summary = (
+                f"Role: {agent_cfg.role or agent_cfg.display_name}. "
+                f"Chattiness: {agent_cfg.chattiness}, Initiative: {agent_cfg.initiative}."
+            )
+            # Include first 200 chars of system prompt for personality flavor
+            if agent_cfg.system_prompt:
+                personality_summary += f"\n{agent_cfg.system_prompt[:200]}"
+
+        current_goals_text = "\n".join(
+            f"- [{g.status}] {g.goal}" for g in active_goals[:5]
+        ) or "No current goals."
+
+        prompt = GOAL_GENERATION_PROMPT.format(
+            agent_id=agent_id,
+            agent_state=state_text,
+            current_goals=current_goals_text,
+            recent_memories=recent_context[:1000],
+            personality_summary=personality_summary,
+        )
+
+        try:
+            response = await self._llm.complete(
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": f"Generate up to {max_goals} new goals now."},
+                ],
+                model="anthropic/claude-haiku-4.5",  # cheap model for goal generation
+                agent_id=agent_id,
+                temperature=0.7,
+                max_tokens=500,
+                simulation_id=self._simulation_id,
+            )
+        except Exception:
+            logger.warning("Goal generation LLM call failed for %s", agent_id, exc_info=True)
+            return 0
+
+        parsed = _parse_json_response(response.content)
+        goals = parsed.get("goals", [])
+        if not isinstance(goals, list):
+            return 0
+
+        valid_categories = {"creative", "social", "economic", "personal", "competitive"}
+        created = 0
+        for goal_data in goals[:max_goals]:
+            if not isinstance(goal_data, dict):
+                continue
+            goal_text = goal_data.get("goal", "").strip()
+            if not goal_text:
+                continue
+
+            category = goal_data.get("category", "personal")
+            if category not in valid_categories:
+                category = "personal"
+
+            priority = goal_data.get("priority", 3)
+            if not isinstance(priority, int) or priority < 1 or priority > 5:
+                priority = 3
+
+            # State-influenced priority boost (#269)
+            for state_attr, boosted_categories in self._STATE_PRIORITY_MAP.items():
+                if state_attr in state_high and category in boosted_categories:
+                    priority = min(priority, 1)  # Boost to highest priority
+                    break
+
+            try:
+                await self._goal_manager.add_goal(
+                    agent_id=agent_id,
+                    goal_text=goal_text,
+                    priority=priority,
+                    source="reflection",
+                    category=category,
+                )
+                created += 1
+            except Exception:
+                logger.warning(
+                    "Failed to add reflection-generated goal for %s: %s",
+                    agent_id, goal_text[:100], exc_info=True,
+                )
+
+        if created:
+            logger.info("Generated %d new goals for %s during reflection", created, agent_id)
+        return created
 
     async def _trim_core_memory(self, agent_id: str, model: str) -> None:
         """Ask the LLM to trim core memory to fit under the token limit."""

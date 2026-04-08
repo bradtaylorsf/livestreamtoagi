@@ -989,6 +989,7 @@ class AgentGoal(BaseModel):
     priority: int = 5
     status: str = "active"  # active, completed, abandoned, blocked
     source: str | None = "self"  # self, assigned, eval_loop, reflection
+    category: str | None = None  # creative, social, economic, personal, competitive
     progress_notes: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
