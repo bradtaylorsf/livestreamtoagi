@@ -42,6 +42,7 @@ ALL_TABLES = [
     "simulations",
     "eval_runs",
     "eval_results",
+    "agent_internal_state",
 ]
 
 def _discover_agent_ids() -> list[str]:
@@ -65,7 +66,7 @@ async def conn():
     # Drop all tables directly (faster and avoids FK ordering issues from test data)
     await c.execute("""
         DROP TABLE IF EXISTS
-            eval_results, eval_runs,
+            eval_results, eval_runs, agent_internal_state,
             energy_change_log, self_modification_proposals, journal_entries,
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,

@@ -709,6 +709,7 @@ class TestContextResultMetadata:
             "infrastructure", "character", "core_memory", "recall",
             "transcript", "world_state", "chat_highlights", "summaries",
             "relationships", "goals", "shared_state", "commitment_reminders",
+            "internal_state",
         }
         assert set(result.sections_included.keys()) == expected_sections
 

@@ -36,6 +36,7 @@ from core.repos.relationship_repo import RelationshipRepo
 from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
 from core.agent_goals import AgentGoalManager
+from core.agent_state import AgentStateManager
 from core.shared_state import SharedWorkingState
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ class Services:
     relationship_repo: RelationshipRepo | None
     shared_working_state: SharedWorkingState | None
     goal_manager: AgentGoalManager | None
+    agent_state_manager: AgentStateManager | None
     config_loader: ConfigLoader
     config_version_repo: ConfigVersionRepo | None
 
@@ -176,6 +178,14 @@ async def bootstrap_services(
     goal_repo = GoalRepo(db)
     goal_manager = AgentGoalManager(redis=redis_client.client, goal_repo=goal_repo)
 
+    from core.repos.agent_state_repo import AgentStateRepo
+
+    agent_state_repo = AgentStateRepo(db)
+    agent_state_manager = AgentStateManager(
+        redis_client=redis_client,
+        state_repo=agent_state_repo,
+    )
+
     context_assembler = ContextAssembler(
         agent_registry=agent_registry,
         core_memory=core_memory,
@@ -207,6 +217,7 @@ async def bootstrap_services(
         relationship_repo=relationship_repo,
         shared_working_state=shared_working_state,
         goal_manager=goal_manager,
+        agent_state_manager=agent_state_manager,
         config_loader=config_loader,
         config_version_repo=config_version_repo,
     )
@@ -264,6 +275,7 @@ async def _bootstrap_dry_run(
         relationship_repo=None,
         shared_working_state=None,
         goal_manager=None,
+        agent_state_manager=AgentStateManager(),
         config_loader=config_loader,
         config_version_repo=None,
     )

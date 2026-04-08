@@ -503,6 +503,19 @@ class ConversationEngine:
 
         self._triggers.notify_speech()
 
+        # Update agent internal state (#267)
+        if self._services and self._services.agent_state_manager:
+            try:
+                await self._services.agent_state_manager.on_conversation_turn(
+                    selected_agent.id,
+                    topic=topic,
+                    previous_topics=conv.topics if conv.topics else None,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to update internal state for %s", selected_agent.id, exc_info=True
+                )
+
         # Tick energy
         energy_changes = conv.energy.tick(topic, events=events)
         logger.debug(
@@ -1022,6 +1035,17 @@ class ConversationEngine:
             except Exception:
                 logger.warning("Failed to get commitment reminders for %s", agent.id, exc_info=True)
 
+        # Build internal state context if available (#267)
+        internal_state_context: str | None = None
+        if self._services and self._services.agent_state_manager:
+            try:
+                _state = await self._services.agent_state_manager.get_state(agent.id)
+                internal_state_context = (
+                    self._services.agent_state_manager.format_state_for_context(_state)
+                )
+            except Exception:
+                logger.warning("Failed to get internal state for %s", agent.id, exc_info=True)
+
         # Build shared working state context if available
         shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
@@ -1043,6 +1067,7 @@ class ConversationEngine:
                     shared_state_context=shared_state_context,
                     agent_goals_context=agent_goals_context,
                     commitment_reminders=commitment_reminders,
+                    internal_state_context=internal_state_context,
                 )
                 messages = context_result.messages
 

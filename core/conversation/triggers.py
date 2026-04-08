@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core.agent_goals import AgentGoalManager
+    from core.agent_state import AgentStateManager
     from core.memory.recall_memory import RecallMemoryManager
     from core.models import TriggerConfig
 
@@ -59,6 +60,7 @@ class TriggerSystem:
         config: TriggerConfig,
         recall_memory: RecallMemoryManager | None = None,
         goal_manager: AgentGoalManager | None = None,
+        agent_state_manager: AgentStateManager | None = None,
         *,
         clock: Any = None,
         now_fn: Any = None,
@@ -67,6 +69,7 @@ class TriggerSystem:
         self._config = config
         self._recall_memory = recall_memory
         self._goal_manager = goal_manager
+        self._agent_state_manager = agent_state_manager
         self._last_speech_time: float = (clock or time).monotonic()
         self._pending_events: deque[dict[str, Any]] = deque()
         self._fired_today: set[int] = set()
@@ -154,6 +157,11 @@ class TriggerSystem:
 
         # 3. Goal-driven (agents with high-priority active goals)
         trigger = await self._check_goals()
+        if trigger is not None:
+            return trigger
+
+        # 3.5 State-driven (high boredom, creative need, or social need)
+        trigger = await self._check_agent_state()
         if trigger is not None:
             return trigger
 
@@ -294,6 +302,79 @@ class TriggerSystem:
                 "goal_text": top_goal.goal,
                 "goal_id": top_goal.id,
             }
+
+        return None
+
+    async def _check_agent_state(self) -> dict[str, Any] | None:
+        """Check if any agent's internal state warrants starting a conversation.
+
+        Three state-driven trigger conditions:
+        - High boredom (>=0.7): agent seeks novelty / topic change
+        - High creative_need (>=0.7): agent wants to build something
+        - High social_need (>=0.7): agent craves interaction
+        """
+        if self._agent_state_manager is None:
+            return None
+
+        agents = list(self._config.agent_initiative.keys())
+        if not agents:
+            return None
+
+        shuffled = list(agents)
+        self._rng.shuffle(shuffled)
+
+        for agent_id in shuffled:
+            if self._is_recent_duplicate("state", agent_id):
+                continue
+
+            try:
+                state = await self._agent_state_manager.get_state(agent_id)
+            except Exception:
+                logger.warning("Failed to check state for %s", agent_id, exc_info=True)
+                continue
+
+            # High boredom → seek novelty
+            if state.boredom >= 0.7:
+                self.record_conversation("state", agent_id)
+                return {
+                    "type": "state",
+                    "starter_agent_id": agent_id,
+                    "prompt_hint": (
+                        "You're feeling bored and restless. "
+                        "Start a conversation about something completely different — "
+                        "shake things up, propose something new."
+                    ),
+                    "state_trigger": "boredom",
+                    "state_value": state.boredom,
+                }
+
+            # High creative need → build something
+            if state.creative_need >= 0.7:
+                self.record_conversation("state", agent_id)
+                return {
+                    "type": "state",
+                    "starter_agent_id": agent_id,
+                    "prompt_hint": (
+                        "You have a strong urge to create or build something. "
+                        "Propose a project, write some code, or start designing."
+                    ),
+                    "state_trigger": "creative_need",
+                    "state_value": state.creative_need,
+                }
+
+            # High social need → casual chat
+            if state.social_need >= 0.7:
+                self.record_conversation("state", agent_id)
+                return {
+                    "type": "state",
+                    "starter_agent_id": agent_id,
+                    "prompt_hint": (
+                        "You're feeling lonely and want to connect with someone. "
+                        "Start a casual, personal conversation."
+                    ),
+                    "state_trigger": "social_need",
+                    "state_value": state.social_need,
+                }
 
         return None
 

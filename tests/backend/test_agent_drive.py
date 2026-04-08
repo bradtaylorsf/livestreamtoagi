@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import uuid
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -215,6 +216,7 @@ class TestGoalTrigger:
             config=config,
             goal_manager=mock_goal_manager,
             rng=rng,
+            now_fn=lambda: datetime(2026, 4, 7, 15, 0, 0),  # Hour 15: no scheduled event
         )
         trigger_system.notify_speech()  # Reset idle timer
 
