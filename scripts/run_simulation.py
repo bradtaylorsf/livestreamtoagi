@@ -120,10 +120,15 @@ async def run_simulation(args: argparse.Namespace) -> None:
     else:
         management = svc.management
 
-    proximity = ProximityManager(svc.redis, cfg, event_bus)
+    proximity = ProximityManager(
+        svc.redis, cfg, event_bus,
+        role_bonuses=svc.agent_registry.get_role_bonuses(),
+    )
     sim_clock = SimulationClock(speed_multiplier=sim_config.speed_multiplier)
     trigger_system = TriggerSystem(
         cfg.triggers, svc.recall_memory,
+        goal_manager=svc.goal_manager,
+        agent_state_manager=svc.agent_state_manager,
         clock=sim_clock, now_fn=sim_clock.now,
     )
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
@@ -136,7 +141,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         agent_registry=svc.agent_registry,
     )
 
-    display = SimulationDisplay(verbose=verbose)
+    display = SimulationDisplay(verbose=verbose, agent_registry=svc.agent_registry)
 
     # ── Build orchestrator ────────────────────────────────
     orchestrator = SimulationOrchestrator(

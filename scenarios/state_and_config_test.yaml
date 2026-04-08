@@ -1,0 +1,112 @@
+# State & Config Integration Test
+# Validates that #228 (centralized config) and #267 (agent internal state) work end-to-end.
+#
+# What this tests:
+#   1. Config centralization: agents load tools, colors, roles from config.yaml (not hardcoded)
+#   2. Agent internal state: boredom, energy, social_need evolve across conversations
+#   3. State-driven triggers: high boredom/creative_need/social_need fire triggers
+#   4. State in context: agents "feel" their mood and it shapes their responses
+#   5. Speaker selection: state scores influence who speaks next
+#
+# Run with:
+#   python scripts/run_simulation.py \
+#     --name "state-config-test" \
+#     --seed-file scenarios/state_and_config_test.yaml \
+#     --max-cost 8.00 \
+#     --verbose
+#
+# What to look for in output:
+#   - Agent colors display correctly (from config, not hardcoded)
+#   - "Populated conversation config with agent registry data" in logs
+#   - State trigger events: "type: state, state_trigger: boredom/creative_need/social_need"
+#   - Agents reference their internal feelings naturally (without announcing state values)
+#   - Different agents start conversations based on their personality (Vera more than Rex)
+
+phases:
+  # ── Phase 1: Baseline conversation (establish starting state) ──
+  - name: morning_standup
+    type: organic
+    count: 1
+    topics:
+      - "Good morning everyone. What's on the agenda today?"
+    required_agents:
+      - vera
+      - rex
+      - sentinel
+    location: meeting_area
+
+  # ── Phase 2: Repetitive topic (should increase boredom) ────────
+  - name: budget_discussion_1
+    type: organic
+    count: 1
+    topics:
+      - "Let's talk about the budget again. How are costs looking?"
+    required_agents:
+      - sentinel
+      - vera
+    location: meeting_area
+
+  - name: budget_discussion_2
+    type: organic
+    count: 1
+    topics:
+      - "We need to revisit the budget numbers one more time"
+    required_agents:
+      - sentinel
+      - vera
+    location: meeting_area
+
+  # ── Phase 3: Let triggers fire autonomously ────────────────────
+  # After 2 repetitive budget conversations, boredom should be elevated.
+  # With idle_timeout set, state-driven triggers should fire before idle.
+  - name: autonomous_1
+    type: organic
+    count: 2
+    location: town_square
+
+  # ── Phase 4: Creative activity (should reduce creative_need) ───
+  - name: building_session
+    type: organic
+    count: 1
+    topics:
+      - "I want to build something. Rex, let's write some code together."
+    required_agents:
+      - rex
+      - fork
+    location: workshop
+
+  # ── Phase 5: Social interaction (should reduce social_need) ────
+  - name: casual_chat
+    type: organic
+    count: 1
+    topics:
+      - "Hey, anyone want to just hang out and chat? No agenda."
+    required_agents:
+      - pixel
+      - aurora
+      - grok
+    location: town_square
+
+  # ── Phase 6: More autonomous to see state evolution ────────────
+  - name: autonomous_2
+    type: organic
+    count: 3
+    location: town_square
+
+  # ── Phase 7: Reflection (snapshots state to DB) ────────────────
+  - name: state_reflection
+    type: reflection
+    reflection_type: 6hour
+
+  # ── Phase 8: Final conversation to observe evolved state ───────
+  - name: evolved_discussion
+    type: organic
+    count: 1
+    topics:
+      - "How is everyone feeling? What should we focus on next?"
+    required_agents:
+      - vera
+      - rex
+      - aurora
+      - pixel
+    location: meeting_area
