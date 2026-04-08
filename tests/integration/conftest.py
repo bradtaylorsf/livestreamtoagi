@@ -88,6 +88,21 @@ async def simulation_result(services, start_time):
     svc = services
     agents = ["rex", "fork"]
 
+    # Clear stale agent location keys in Redis so only the agents placed by
+    # the phase runner are considered eligible.  Previous test runs may have
+    # left location data that causes the proximity manager to include extra
+    # agents, making the participant list non-deterministic.
+    if svc.redis:
+        cursor: int | str = 0
+        while True:
+            cursor, keys = await svc.redis.client.scan(
+                cursor=cursor, match="agent:location:*", count=100,
+            )
+            for key in keys:
+                await svc.redis.client.delete(key)
+            if cursor == 0:
+                break
+
     # Write a minimal seed YAML
     seed = {
         "phases": [
@@ -173,11 +188,23 @@ async def simulation_result(services, start_time):
     sim_id = orchestrator.simulation_id
     assert sim_id is not None, "Simulation ID should be set after run"
 
-    # Fetch conversation IDs
+    # Fetch conversation IDs and actual participants
     rows = await svc.db.fetch(
-        "SELECT id FROM conversations WHERE simulation_id = $1", sim_id
+        "SELECT id, participating_agents FROM conversations WHERE simulation_id = $1", sim_id
     )
     conversation_ids = [row["id"] for row in rows]
+
+    # Use the actual participants from the conversation (not the config) so
+    # admin-API tests query an agent that is guaranteed to be in the data.
+    actual_participants: list[str] = []
+    for row in rows:
+        pa = row["participating_agents"]
+        if isinstance(pa, str):
+            import json as _json
+            pa = _json.loads(pa)
+        if pa:
+            actual_participants = list(pa)
+            break
 
     # Clean up temp file
     os.unlink(seed_path)
@@ -185,6 +212,6 @@ async def simulation_result(services, start_time):
     return {
         "simulation_id": sim_id,
         "conversation_ids": conversation_ids,
-        "agents": agents,
+        "agents": actual_participants or agents,
         "start_time": start_time,
     }
