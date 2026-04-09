@@ -138,13 +138,17 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
     """
     data = dict(req.data)
 
-    if req.event_type == "agent_speak" and "text" in data and "agent_id" in data:
+    # Generate TTS server-side only when the caller hasn't already done it.
+    # If "duration" is present, the CLI already generated audio and timed the
+    # bubble — skip server-side TTS to avoid double generation and stale timing.
+    if req.event_type == "agent_speak" and "text" in data and "agent_id" in data and "duration" not in data:
         tts: Any = getattr(app.state, "tts_pipeline", None)
         if tts is not None:
             try:
                 result = await tts.speak(data["agent_id"], data["text"])
                 if result and result.get("audio_url"):
                     data["audio_url"] = result["audio_url"]
+                    data["duration"] = int(result["duration"] * 1000)
                     await event_bus.emit(
                         "tts_play",
                         {

@@ -177,28 +177,8 @@ from core.tool_executor import (  # noqa: E402
 # ── TTS playback ─────────────────────────────────────────────────
 
 
-async def play_tts(
-    agent_id: str, text: str, tts_pipeline, verbose: bool = False,
-) -> None:
-    """Generate TTS audio and play it through the system speaker."""
-    if tts_pipeline is None:
-        return
-
-    console.print(f"  [dim]🔊 Generating voice...[/dim]")
-    result = await tts_pipeline.speak(agent_id, text)
-    if result is None:
-        if verbose:
-            console.print("  [dim]No voice for this agent[/dim]")
-        return
-
-    # Play the audio file (macOS: afplay, Linux: aplay/paplay)
-    audio_path = tts_pipeline.audio_dir / Path(result["audio_url"]).name
-    duration = result.get("duration", 0)
-    if verbose:
-        console.print(
-            f"  [dim]🔊 Playing {duration:.1f}s audio[/dim]"
-        )
-
+async def _play_audio_file(audio_path: Path) -> None:
+    """Play an already-generated audio file through the system speaker."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "afplay", str(audio_path),
@@ -335,21 +315,40 @@ async def run_turn(
         model,
     )
 
-    # Broadcast to Phaser frontend via the running backend (no-op if not running)
+    # Generate TTS first so the bubble duration matches the audio length exactly.
+    # The bubble must not appear until we know how long the audio will run.
+    tts_result = None
+    tts_audio_path: Path | None = None
+    if tts_pipeline and response.content:
+        console.print("  [dim]🔊 Generating voice...[/dim]")
+        tts_result = await tts_pipeline.speak(agent_id, response.content)
+        if tts_result is None and verbose:
+            console.print("  [dim]No voice for this agent[/dim]")
+        elif tts_result:
+            tts_audio_path = tts_pipeline.audio_dir / Path(tts_result["audio_url"]).name
+
+    # Broadcast agent_speak to frontend with known duration (if TTS ready) so
+    # the speech bubble times out exactly when the audio ends.
     if response.content:
+        speak_data: dict = {"agent_id": agent_id, "text": response.content}
+        if tts_result:
+            # duration from TTS is in seconds; frontend expects milliseconds
+            speak_data["duration"] = int(tts_result["duration"] * 1000)
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 await client.post(
                     "http://localhost:8010/api/dev/emit",
-                    json={"event_type": "agent_speak", "data": {"agent_id": agent_id, "text": response.content}},
+                    json={"event_type": "agent_speak", "data": speak_data},
                 )
         except Exception:
             pass  # backend not running — safe to ignore
 
-    # Play TTS if enabled
-    if tts_pipeline and response.content:
-        await play_tts(agent_id, response.content, tts_pipeline, verbose)
+    # Play audio — bubble and audio start at nearly the same time
+    if tts_audio_path and tts_audio_path.exists():
+        if verbose:
+            console.print(f"  [dim]🔊 Playing {tts_result['duration']:.1f}s audio[/dim]")
+        await _play_audio_file(tts_audio_path)
 
     # Add assistant response to history
     conversation_history.append({"role": "assistant", "content": response.content})
