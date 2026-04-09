@@ -1,5 +1,5 @@
 import type { WorldManager } from "./WorldManager";
-import { WORKSPACE_DEFINITIONS, type WorkspaceFurnitureItem } from "./workspaces";
+import { WORKSPACE_DEFINITIONS } from "./workspaces";
 import { AGENTS } from "../agents";
 
 export interface PlacedFurnitureItem {
