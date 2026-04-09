@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { WorldManager } from "../world/WorldManager";
+import { WorkspaceManager } from "../world/WorkspaceManager";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
@@ -33,45 +34,14 @@ const DIRECTIONS = [
 const IDLE_FRAME_COUNT = 4;
 const WALK_FRAME_COUNT = 6;
 
-/**
- * Furniture objects placed as sprites on top of the tile layer.
- * Positions are in pixel coordinates (tile * 32).
- */
-interface FurniturePlacement {
-  key: string;
-  x: number;
-  y: number;
-}
-
-// Desk image is 96px wide. Desk x is top-left. Agent stands at desk center x (desk.x + 48).
-// Top row: desks at y=2 tiles, chairs at y=5, agents at y=5 (below desk)
-// Bottom row: desks at y=17 tiles, chairs at y=16, agents at y=16 (above desk)
-const DESK_TOP_Y = 2;     // desk tile row (top)
-const DESK_BOT_Y = 17;    // desk tile row (bottom)
-
-// Top-row desk x positions (in tiles, left edge of 3-tile-wide desk)
-const TOP_DESKS = [2, 10, 24, 33]; // Vera, Aurora, Sentinel, Grok
-// Bottom-row desk x positions
-const BOT_DESKS = [2, 10, 24];     // Rex, Fork, Pixel
-
-const FURNITURE: FurniturePlacement[] = [
-  // Top-row desks + chairs
-  ...TOP_DESKS.map(tx => ({ key: "desk", x: tx * 32, y: DESK_TOP_Y * 32 })),
-  ...TOP_DESKS.map(tx => ({ key: "chair", x: (tx + 1) * 32, y: (DESK_TOP_Y + 3) * 32 })),
-  // Bottom-row desks + chairs
-  ...BOT_DESKS.map(tx => ({ key: "desk", x: tx * 32, y: DESK_BOT_Y * 32 })),
-  ...BOT_DESKS.map(tx => ({ key: "chair", x: (tx + 1) * 32, y: (DESK_BOT_Y - 1) * 32 })),
-  // Center: meeting table + rug
+/** Shared furniture not tied to any agent workspace. */
+const SHARED_FURNITURE: Array<{ key: string; x: number; y: number }> = [
   { key: "rug", x: 16 * 32, y: 7 * 32 },
   { key: "meeting_table", x: 15 * 32, y: 7 * 32 },
-  // Workshop below meeting
   { key: "workshop_bench", x: 15 * 32, y: 13 * 32 },
-  // Coffee machine (top center between Aurora and Sentinel)
   { key: "coffee_machine", x: 19 * 32, y: 2 * 32 },
-  // Bookshelf + whiteboard on right side
   { key: "bookshelf", x: 35 * 32, y: 12 * 32 },
   { key: "whiteboard", x: 33 * 32, y: 17 * 32 },
-  // Plants in corners
   { key: "plant", x: 1 * 32, y: 1 * 32 },
   { key: "plant", x: 38 * 32, y: 1 * 32 },
   { key: "plant", x: 1 * 32, y: 20 * 32 },
@@ -80,6 +50,7 @@ const FURNITURE: FurniturePlacement[] = [
 
 export class MainScene extends Phaser.Scene {
   private worldManager: WorldManager | null = null;
+  private workspaceManager: WorkspaceManager | null = null;
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
@@ -146,18 +117,16 @@ export class MainScene extends Phaser.Scene {
     }
 
     // ── Furniture object images ─────────────────────────────────
-    const furnitureItems = [
-      "desk",
-      "meeting_table",
-      "workshop_bench",
-      "whiteboard",
-      "coffee_machine",
-      "chair",
-      "bookshelf",
-      "plant",
-      "rug",
-    ];
-    for (const item of furnitureItems) {
+    // Collect all unique furniture keys from shared furniture and workspace definitions
+    const furnitureKeys = new Set<string>();
+    for (const item of SHARED_FURNITURE) {
+      furnitureKeys.add(item.key);
+    }
+    // Add workspace personality furniture keys
+    for (const key of WorkspaceManager.getAllFurnitureKeys()) {
+      furnitureKeys.add(key);
+    }
+    for (const item of furnitureKeys) {
       this.load.image(item, `assets/tilesets/office/objects/${item}.png`);
     }
 
@@ -172,6 +141,9 @@ export class MainScene extends Phaser.Scene {
     // ── World (tilemap + collision) ─────────────────────────────
     this.worldManager = new WorldManager(this);
     this.worldManager.create();
+
+    // ── Workspace manager (agent desk areas) ────────────────────
+    this.workspaceManager = new WorkspaceManager(this.worldManager);
 
     // ── Place furniture sprites on top of tiles ─────────────────
     this.placeFurniture();
@@ -214,6 +186,7 @@ export class MainScene extends Phaser.Scene {
       this,
       this.wsClient,
       this.worldManager,
+      this.workspaceManager,
     );
 
     // ── Audio playback (TTS queue) ───────────────────────────────
@@ -271,6 +244,7 @@ export class MainScene extends Phaser.Scene {
     this.behaviorScheduler = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
+    this.workspaceManager = null;
     this.worldManager?.destroy();
     this.worldManager = null;
     this.wsClient?.disconnect();
@@ -352,13 +326,27 @@ export class MainScene extends Phaser.Scene {
 
   /**
    * Place furniture objects as sprites on top of the tile layer.
+   * Includes shared furniture and per-agent workspace personality items.
    */
   private placeFurniture(): void {
-    for (const item of FURNITURE) {
+    // Place shared furniture (not tied to any agent)
+    for (const item of SHARED_FURNITURE) {
       const sprite = this.add.image(item.x, item.y, item.key);
       sprite.setOrigin(0, 0);
-      // Furniture renders above ground tiles but below agents
       sprite.setDepth(1);
+    }
+
+    // Place per-agent workspace furniture
+    if (this.workspaceManager) {
+      for (const agent of AGENTS) {
+        const items = this.workspaceManager.getWorkspaceFurniture(agent.id);
+        for (const item of items) {
+          if (!this.textures.exists(item.key)) continue;
+          const sprite = this.add.image(item.x, item.y, item.key);
+          sprite.setOrigin(0, 0);
+          sprite.setDepth(1);
+        }
+      }
     }
   }
 }
