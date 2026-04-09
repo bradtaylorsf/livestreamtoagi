@@ -335,6 +335,17 @@ async def run_turn(
         model,
     )
 
+    # Broadcast to Phaser frontend (no-op if no WebSocket clients are connected)
+    if response.content:
+        try:
+            from core.event_bus import EventType, event_bus
+            await event_bus.emit(
+                EventType.AGENT_SPEAK.value,
+                {"agent_id": agent_id, "text": response.content},
+            )
+        except Exception:
+            pass  # backend not running — safe to ignore
+
     # Play TTS if enabled
     if tts_pipeline and response.content:
         await play_tts(agent_id, response.content, tts_pipeline, verbose)
