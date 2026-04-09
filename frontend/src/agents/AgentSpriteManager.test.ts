@@ -107,7 +107,7 @@ describe("AgentSpriteManager", () => {
       data: { agent_id: "vera", to: { x: 300, y: 400 } },
     });
 
-    expect(moveToSpy).toHaveBeenCalledWith(300, 400);
+    expect(moveToSpy).toHaveBeenCalledWith(300, 400, undefined);
   });
 
   it("handles agent_speak event", () => {

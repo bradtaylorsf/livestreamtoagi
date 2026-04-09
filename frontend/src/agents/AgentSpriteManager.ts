@@ -14,6 +14,7 @@ const SPRITE_AGENTS = AGENTS.filter((a) => a.id !== "management");
 export class AgentSpriteManager {
   private scene: Phaser.Scene;
   private sprites: Map<string, AgentSprite> = new Map();
+  private worldManager: WorldManager | null;
   private unsubscribe: (() => void) | null = null;
 
   constructor(
@@ -22,6 +23,7 @@ export class AgentSpriteManager {
     worldManager: WorldManager | null,
   ) {
     this.scene = scene;
+    this.worldManager = worldManager;
 
     // Create sprites for each agent
     for (const agent of SPRITE_AGENTS) {
@@ -87,7 +89,7 @@ export class AgentSpriteManager {
     const to = data.to as { x: number; y: number };
     const sprite = this.sprites.get(agentId);
     if (sprite && to) {
-      sprite.moveTo(to.x, to.y);
+      sprite.moveTo(to.x, to.y, this.worldManager ?? undefined);
     }
   }
 
