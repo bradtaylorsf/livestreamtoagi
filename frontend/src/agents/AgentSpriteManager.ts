@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { AgentSprite, StatusType } from "./AgentSprite";
+import { AgentSprite, type StatusType } from "./AgentSprite";
 import { AGENTS, type Agent } from "../agents";
 import { EventType, type ServerEvent } from "../types/events";
 import type { WebSocketClient } from "../network/WebSocketClient";
@@ -95,6 +95,30 @@ export class AgentSpriteManager {
       case EventType.AGENT_ACTION:
         this.handleAction(event.data);
         break;
+      case EventType.TOOL_EXECUTED:
+        this.handleToolExecuted(event.data);
+        break;
+      case EventType.MANAGEMENT_SHADOW:
+        this.handleManagementShadow(event.data);
+        break;
+      case EventType.WORLD_EXPANSION:
+        this.handleWorldExpansion(event.data);
+        break;
+      case EventType.MANAGEMENT_INTERVENTION:
+        this.handleManagementIntervention(event.data);
+        break;
+      case EventType.MANAGEMENT_WARNING:
+        this.handleManagementWarning(event.data);
+        break;
+      case EventType.ALPHA_DISPATCH:
+        this.handleAlphaDispatch(event.data);
+        break;
+      case EventType.ALPHA_RETURN:
+        this.handleAlphaReturn(event.data);
+        break;
+      case EventType.CONFIG_RELOADED:
+        console.log("Config reloaded:", event.data.config_type, event.data.changes);
+        break;
     }
   }
 
@@ -113,11 +137,14 @@ export class AgentSpriteManager {
     if (sprite) {
       sprite.playAnimation("talking");
       sprite.setStatus("speaking");
+      sprite.setBadgeState("conversation");
+      sprite.setPermissionPending(false);
       this.autoStateManager?.onAgentStatusChange(agentId, "speaking");
       // Return to idle after speech duration
       this.scene.time.delayedCall(3000, () => {
         sprite.playAnimation("idle");
         sprite.setStatus("idle");
+        sprite.setBadgeState("idle");
         this.autoStateManager?.onAgentStatusChange(agentId, "idle");
       });
     }
@@ -135,17 +162,198 @@ export class AgentSpriteManager {
     if (action === "building" || action === "coding") {
       anim = "building";
       status = "building";
+      sprite.setBadgeState("active");
     } else if (action === "thinking" || action === "reflecting") {
       anim = "thinking";
       status = "thinking";
+      sprite.setBadgeState("active");
     } else if (action === "getting_coffee" || action === "visiting") {
       anim = "walk_down";
       status = "idle";
+      sprite.setBadgeState("idle");
+    } else {
+      sprite.setBadgeState("idle");
     }
 
     sprite.playAnimation(anim);
     sprite.setStatus(status);
     this.autoStateManager?.onAgentStatusChange(agentId, status);
+  }
+
+  private handleToolExecuted(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const toolName = data.tool_name as string;
+    const success = data.success as boolean | undefined;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    sprite.setActivity(toolName);
+    sprite.setBadgeState("active");
+
+    if (success !== undefined && success !== null) {
+      // Tool completed — show result briefly then clear
+      sprite.setProgress(false);
+      sprite.setBadgeState(success ? "active" : "error");
+      this.scene.time.delayedCall(2000, () => {
+        sprite.setActivity(null);
+        sprite.setBadgeState("idle");
+      });
+    } else {
+      // Tool in progress — show spinner
+      sprite.setProgress(true);
+    }
+  }
+
+  private handleManagementShadow(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    sprite.setPermissionPending(true);
+    sprite.setBadgeState("waiting");
+    // Clear after 3s (matching the content filter delay)
+    this.scene.time.delayedCall(3000, () => {
+      sprite.setPermissionPending(false);
+      // Only reset badge if still waiting
+      if (sprite.getBadgeState() === "waiting") {
+        sprite.setBadgeState("idle");
+      }
+    });
+  }
+
+  private handleWorldExpansion(data: Record<string, unknown>): void {
+    const zone = data.zone as string;
+    const description = data.description as string;
+    if (this.worldManager) {
+      this.worldManager.expandWorld(zone, description);
+    }
+  }
+
+  private handleManagementIntervention(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+
+    // Red camera flash
+    this.scene.cameras.main.flash(500, 255, 50, 50);
+
+    // Warning text overlay
+    const warningText = this.scene.add.text(
+      this.scene.cameras.main.centerX,
+      this.scene.cameras.main.centerY,
+      "MANAGEMENT INTERVENTION",
+      {
+        fontSize: "16px",
+        color: "#ff4444",
+        fontFamily: "monospace",
+        stroke: "#000000",
+        strokeThickness: 3,
+        align: "center",
+      },
+    );
+    warningText.setOrigin(0.5, 0.5);
+    warningText.setScrollFactor(0);
+    warningText.setDepth(100);
+
+    this.scene.tweens.add({
+      targets: warningText,
+      alpha: 0,
+      delay: 1000,
+      duration: 1000,
+      onComplete: () => warningText.destroy(),
+    });
+
+    // Shake the targeted agent sprite
+    if (sprite) {
+      const origX = sprite.sprite.x;
+      sprite.setBadgeState("error");
+      this.scene.tweens.add({
+        targets: sprite.sprite,
+        x: origX + 3,
+        duration: 50,
+        yoyo: true,
+        repeat: 5,
+        onComplete: () => {
+          sprite.sprite.x = origX;
+        },
+      });
+    }
+  }
+
+  private handleManagementWarning(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    // Show a yellow warning via activity label for 3s
+    sprite.setActivity("warning");
+    sprite.setBadgeState("waiting");
+    this.scene.time.delayedCall(3000, () => {
+      sprite.setActivity(null);
+      if (sprite.getBadgeState() === "waiting") {
+        sprite.setBadgeState("idle");
+      }
+    });
+  }
+
+  private handleAlphaDispatch(_data: Record<string, unknown>): void {
+    const alpha = this.sprites.get("alpha");
+    if (!alpha) return;
+
+    alpha.playAnimation("running");
+    alpha.setBadgeState("active");
+
+    // Tween alpha off-screen to the left
+    this.scene.tweens.add({
+      targets: alpha.sprite,
+      x: -50,
+      duration: 1000,
+      ease: "Power2",
+      onComplete: () => {
+        alpha.setVisible(false);
+        alpha.setBadgeState("idle");
+      },
+    });
+  }
+
+  private handleAlphaReturn(data: Record<string, unknown>): void {
+    const alpha = this.sprites.get("alpha");
+    if (!alpha) return;
+
+    const success = data.success as boolean;
+    const result = data.result as string | undefined;
+    const deskPos = this.getDeskPosition(
+      AGENTS.find((a) => a.id === "alpha")!,
+    );
+
+    alpha.setPosition(-50, deskPos.y);
+    alpha.setVisible(true);
+    alpha.playAnimation("running");
+    alpha.setBadgeState("active");
+
+    this.scene.tweens.add({
+      targets: alpha.sprite,
+      x: deskPos.x,
+      y: deskPos.y,
+      duration: 1000,
+      ease: "Power2",
+      onComplete: () => {
+        alpha.setPosition(deskPos.x, deskPos.y);
+        alpha.playAnimation(success ? "celebrate" : "confused");
+        alpha.setBadgeState("idle");
+        if (result) {
+          const truncated = result.length > 20 ? result.slice(0, 19) + "\u2026" : result;
+          alpha.setActivity(truncated);
+          this.scene.time.delayedCall(3000, () => {
+            alpha.setActivity(null);
+            alpha.playAnimation("idle");
+          });
+        } else {
+          this.scene.time.delayedCall(2000, () => {
+            alpha.playAnimation("idle");
+          });
+        }
+      },
+    });
   }
 
   private getDeskPosition(agent: Agent): { x: number; y: number } {

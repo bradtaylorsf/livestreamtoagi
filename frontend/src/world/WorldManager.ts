@@ -125,6 +125,68 @@ export class WorldManager {
     return findPath(this.walkabilityGrid, start, end);
   }
 
+  /**
+   * Dynamically load a new world zone chunk. If the tilemap JSON is already
+   * in the Phaser cache, loads immediately. Otherwise triggers async preload.
+   * After loading, pans camera to reveal the new area.
+   */
+  expandWorld(zone: string, description: string): void {
+    const jsonKey = `tilemap_${zone}`;
+    const cacheEntry = this.scene.cache.tilemap.get(jsonKey);
+
+    if (cacheEntry) {
+      // Tilemap already cached — load chunk directly
+      this.loadExpansionChunk(zone, description);
+    } else {
+      // Dynamic tilemap load: preload then create
+      this.scene.load.tilemapTiledJSON(jsonKey, `assets/tilesets/${zone}/tilemap_${zone}.json`);
+      this.scene.load.once("complete", () => {
+        this.loadExpansionChunk(zone, description);
+      });
+      this.scene.load.start();
+    }
+  }
+
+  private loadExpansionChunk(zone: string, description: string): void {
+    const chunk = this.chunkLoader.loadChunk(zone);
+    if (!chunk) {
+      console.warn(`Failed to load expansion chunk: ${zone}`);
+      return;
+    }
+
+    // Pan camera to center of new chunk
+    const centerX = chunk.tilemap.widthInPixels / 2;
+    const centerY = chunk.tilemap.heightInPixels / 2;
+    this.scene.cameras.main.pan(centerX, centerY, 1000, "Power2");
+
+    // Show expansion notification
+    const notifyText = this.scene.add.text(
+      this.scene.cameras.main.centerX,
+      this.scene.cameras.main.centerY + 60,
+      `World expanded: ${description}`,
+      {
+        fontSize: "12px",
+        color: "#ffffff",
+        fontFamily: "monospace",
+        backgroundColor: "#1a1a2ecc",
+        padding: { x: 8, y: 4 },
+        stroke: "#44cc44",
+        strokeThickness: 1,
+      },
+    );
+    notifyText.setOrigin(0.5, 0.5);
+    notifyText.setScrollFactor(0);
+    notifyText.setDepth(50);
+
+    this.scene.tweens.add({
+      targets: notifyText,
+      alpha: 0,
+      delay: 3000,
+      duration: 1000,
+      onComplete: () => notifyText.destroy(),
+    });
+  }
+
   updateVisibleChunks(_cameraX: number, _cameraY: number): void {
     // For single-chunk office, nothing to load/unload.
     // Future: load/unload chunks based on camera viewport.

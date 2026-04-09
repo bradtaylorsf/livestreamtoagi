@@ -5,6 +5,7 @@ import { FurnitureCatalog, FurnitureInstance, AutoStateManager } from "../world/
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
+import { OverlayManager } from "../ui/OverlayManager";
 import { DevPanel } from "../ui/DevPanel";
 import { AudioManager } from "../audio/AudioManager";
 import { BehaviorScheduler } from "../agents/BehaviorScheduler";
@@ -61,6 +62,7 @@ export class MainScene extends Phaser.Scene {
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
+  private overlayManager: OverlayManager | null = null;
   private devPanel: DevPanel | null = null;
   private audioManager: AudioManager | null = null;
   private behaviorScheduler: BehaviorScheduler | null = null;
@@ -221,6 +223,9 @@ export class MainScene extends Phaser.Scene {
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
     this.streamOverlay = new StreamOverlay(this.wsClient);
 
+    // ── Notification overlay (polls, artifacts) ──────────────
+    this.overlayManager = new OverlayManager(this.wsClient);
+
     // ── Dev panel (test conversation trigger) ──────────────
     this.devPanel = new DevPanel();
 
@@ -254,6 +259,8 @@ export class MainScene extends Phaser.Scene {
     this.speechBubbleManager = null;
     this.streamOverlay?.destroy();
     this.streamOverlay = null;
+    this.overlayManager?.destroy();
+    this.overlayManager = null;
     this.devPanel?.destroy();
     this.devPanel = null;
     this.audioManager?.destroy();
