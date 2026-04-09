@@ -240,3 +240,50 @@ describe("WebSocketClient reconnection", () => {
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 });
+
+describe("WebSocketClient lifecycle callbacks", () => {
+  it("fires onConnect when connection opens", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const onConnect = vi.fn();
+    client.onConnect = onConnect;
+
+    client.connect();
+    expect(onConnect).not.toHaveBeenCalled();
+
+    MockWebSocket.instances[0].simulateOpen();
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    client.disconnect();
+  });
+
+  it("fires onDisconnect when connection closes", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const onDisconnect = vi.fn();
+    client.onDisconnect = onDisconnect;
+
+    client.connect();
+    MockWebSocket.instances[0].simulateOpen();
+    expect(onDisconnect).not.toHaveBeenCalled();
+
+    MockWebSocket.instances[0].simulateClose();
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+    client.disconnect();
+  });
+
+  it("fires onDisconnect before scheduling reconnect", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const callOrder: string[] = [];
+    client.onDisconnect = () => callOrder.push("disconnect");
+
+    client.connect();
+    MockWebSocket.instances[0].simulateOpen();
+    MockWebSocket.instances[0].simulateClose();
+
+    // onDisconnect fires, then reconnect is scheduled (not immediate)
+    expect(callOrder).toEqual(["disconnect"]);
+    expect(MockWebSocket.instances).toHaveLength(1); // reconnect not yet
+
+    vi.advanceTimersByTime(1000);
+    expect(MockWebSocket.instances).toHaveLength(2); // now reconnected
+    client.disconnect();
+  });
+});

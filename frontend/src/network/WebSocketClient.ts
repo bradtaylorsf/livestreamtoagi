@@ -15,6 +15,11 @@ export class WebSocketClient {
   private backoffMs = INITIAL_BACKOFF_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Called when the WebSocket connection opens. */
+  onConnect: (() => void) | null = null;
+  /** Called when the WebSocket connection closes (before reconnect scheduling). */
+  onDisconnect: (() => void) | null = null;
+
   constructor(url: string = DEFAULT_URL) {
     this.url = url;
   }
@@ -81,10 +86,12 @@ export class WebSocketClient {
 
     this.ws.onopen = () => {
       this.backoffMs = INITIAL_BACKOFF_MS;
+      this.onConnect?.();
     };
 
     this.ws.onclose = () => {
       this.ws = null;
+      this.onDisconnect?.();
       this._scheduleReconnect();
     };
 
