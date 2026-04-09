@@ -4,7 +4,7 @@ import type { WebSocketClient } from "../network/WebSocketClient";
 import type { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import type { AudioManager } from "../audio/AudioManager";
 
-const DEFAULT_DURATION_MS = 5000;
+const DEFAULT_DURATION_MS = 8000;
 const BUBBLE_OFFSET_Y = -40;
 
 let stylesInjected = false;
@@ -231,7 +231,7 @@ export class SpeechBubbleManager {
       const typewriterMs = text.length * SpeechBubble.CHAR_DELAY_MS;
       const duration =
         (data.duration as number) ||
-        Math.max(DEFAULT_DURATION_MS, typewriterMs + 2000);
+        Math.max(DEFAULT_DURATION_MS, typewriterMs + 3500);
       this.showBubble(agentId, text, tone, duration);
     }
   }

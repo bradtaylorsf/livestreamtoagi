@@ -631,8 +631,8 @@ async def run_interactive(
     )
     tool_count = len(agent_tools) if agent_tools else 0
 
-    # Initialize TTS pipeline if enabled
-    tts_pipeline = TTSPipeline() if tts_enabled else None
+    # Initialize TTS pipeline if enabled (pass registry so voice_id lookup works)
+    tts_pipeline = TTSPipeline(agent_registry=services.agent_registry) if tts_enabled else None
 
     color = AGENT_COLORS.get(agent_id, "white")
     tools_note = (
@@ -711,7 +711,7 @@ async def run_interactive(
 
         if user_input.lower() == "/tts":
             if tts_pipeline is None:
-                tts_pipeline = TTSPipeline()
+                tts_pipeline = TTSPipeline(agent_registry=services.agent_registry)
                 console.print("  [green]🔊 TTS enabled[/green]")
             else:
                 await tts_pipeline.shutdown()
