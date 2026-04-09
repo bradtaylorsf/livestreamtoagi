@@ -145,18 +145,14 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
         tts: Any = getattr(app.state, "tts_pipeline", None)
         if tts is not None:
             try:
-                result = await tts.speak(data["agent_id"], data["text"])
-                if result and result.get("audio_url"):
-                    data["audio_url"] = result["audio_url"]
-                    data["duration"] = int(result["duration"] * 1000)
-                    await event_bus.emit(
-                        "tts_play",
-                        {
-                            "agent_id": data["agent_id"],
-                            "audio_url": result["audio_url"],
-                            "text": data["text"],
-                        },
-                    )
+                segments = await tts.speak_segmented(data["agent_id"], data["text"])
+                if segments:
+                    data["segments"] = segments
+                    # Backward-compat: set audio_url/duration from the first segment so
+                    # older clients that don't understand segments still get some audio.
+                    first = segments[0]
+                    data["audio_url"] = first["audio_url"]
+                    data["duration"] = int(first["duration"] * 1000)
             except Exception:
                 logger.exception("TTS generation failed in dev_emit")
 

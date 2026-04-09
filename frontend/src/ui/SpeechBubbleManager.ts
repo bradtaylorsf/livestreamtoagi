@@ -6,6 +6,8 @@ import type { AudioManager } from "../audio/AudioManager";
 
 const DEFAULT_DURATION_MS = 8000;
 const BUBBLE_OFFSET_Y = -40;
+/** How long to display an action description in the bubble before the next segment. */
+const ACTION_DISPLAY_MS = 1500;
 
 let stylesInjected = false;
 
@@ -102,6 +104,53 @@ export function _resetStyles(): void {
   stylesInjected = false;
 }
 
+/** Remove common markdown formatting from text before displaying in a bubble. */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/gs, "$1")  // **bold**
+    .replace(/__(.+?)__/gs, "$1")       // __bold__
+    .replace(/\*(.+?)\*/gs, "$1")       // *italic*
+    .replace(/_(.+?)_/gs, "$1")         // _italic_
+    .replace(/`(.+?)`/gs, "$1")         // `code`
+    .replace(/^#{1,6}\s+/gm, "")        // ## headers
+    .replace(/[*_]/g, "")               // stray asterisks/underscores
+    .trim();
+}
+
+/** Remove [action]...[/action] tags from text. */
+function stripActionTags(text: string): string {
+  return text.replace(/\[action\].*?\[\/action\]/gis, "").replace(/\s+/g, " ").trim();
+}
+
+interface SegmentData {
+  text: string;
+  audio_url?: string;
+  duration: number; // seconds
+  action?: string;  // action description preceding this segment
+}
+
+/** Play an audio URL and resolve when it ends (or immediately on failure). */
+function playAudioSegment(url: string, volume: number, fallbackMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const audio = new Audio();
+    audio.volume = Math.max(0, Math.min(1, volume));
+
+    const cleanup = (fallback?: number) => {
+      audio.src = "";
+      if (fallback !== undefined) {
+        setTimeout(resolve, fallback);
+      } else {
+        resolve();
+      }
+    };
+
+    audio.addEventListener("ended", () => cleanup());
+    audio.addEventListener("error", () => cleanup(fallbackMs));
+    audio.src = url;
+    audio.play().catch(() => cleanup(fallbackMs));
+  });
+}
+
 /**
  * Orchestrates speech bubbles for all agents.
  * Creates DOM overlays positioned relative to the Phaser canvas.
@@ -113,7 +162,7 @@ export class SpeechBubbleManager {
   private bubbles: Map<string, SpeechBubble> = new Map();
   private container: HTMLDivElement;
   private unsubscribe: (() => void) | null = null;
-  /** Monotonically increasing sequence number per agent, used to discard stale async getDuration results. */
+  /** Monotonically increasing sequence number per agent, used to discard stale async results. */
   private pendingSeq: Map<string, number> = new Map();
 
   constructor(
@@ -209,31 +258,96 @@ export class SpeechBubbleManager {
 
   private handleSpeakEvent(data: Record<string, unknown>): void {
     const agentId = data.agent_id as string;
-    const text = data.text as string;
     const tone = (data.tone as BubbleTone) || "casual";
+
+    // ── Segmented path ──────────────────────────────────────────
+    // When the backend provides pre-split segments (one TTS file per dialogue
+    // chunk between actions), play them sequentially with action text shown
+    // between segments for visual context.
+    const rawSegments = data.segments as SegmentData[] | undefined;
+    if (rawSegments && rawSegments.length > 0) {
+      const seq = (this.pendingSeq.get(agentId) ?? 0) + 1;
+      this.pendingSeq.set(agentId, seq);
+      void this.processSegments(agentId, rawSegments, tone, seq);
+      return;
+    }
+
+    // ── Non-segmented path (backward compat) ───────────────────
+    const rawText =
+      (data.text as string) ||
+      (data.dialogue as string) ||
+      (data.content as string) ||
+      "";
+    // Strip markdown and action tags so the bubble shows clean readable text
+    const text = stripMarkdown(stripActionTags(rawText));
     const audioUrl = data.audio_url as string | undefined;
 
-    // If AudioManager is available and there's an audio URL, sync bubble with audio duration.
-    // Use a per-agent sequence number so that if two speak events arrive in quick succession
-    // and both trigger async getDuration() calls, only the latest one actually shows a bubble.
     if (this.audioManager && audioUrl) {
       const seq = (this.pendingSeq.get(agentId) ?? 0) + 1;
       this.pendingSeq.set(agentId, seq);
       this.audioManager.getDuration(agentId, audioUrl, text).then((durationMs) => {
-        if (this.pendingSeq.get(agentId) !== seq) return; // superseded by a newer event
+        if (this.pendingSeq.get(agentId) !== seq) return;
         this.showBubble(agentId, text, tone, durationMs);
       });
     } else {
-      // Synchronous path: bump seq so any in-flight async resolves are discarded.
       this.pendingSeq.set(agentId, (this.pendingSeq.get(agentId) ?? 0) + 1);
-      // Ensure the bubble outlives the typewriter animation. Duration must be at
-      // least the full typewriter time plus a reading buffer, or DEFAULT_DURATION_MS.
       const typewriterMs = text.length * SpeechBubble.CHAR_DELAY_MS;
       const duration =
         (data.duration as number) ||
         Math.max(DEFAULT_DURATION_MS, typewriterMs + 3500);
       this.showBubble(agentId, text, tone, duration);
     }
+  }
+
+  /**
+   * Play segments sequentially, showing action text between them.
+   *
+   * Each segment's audio is played directly (bypassing AudioManager's queue)
+   * so we can interleave action-display pauses between segments. Volume
+   * settings are read from AudioManager when available.
+   */
+  private async processSegments(
+    agentId: string,
+    segments: SegmentData[],
+    tone: BubbleTone,
+    seq: number,
+  ): Promise<void> {
+    for (const seg of segments) {
+      // Cancelled — a newer speak event arrived for this agent
+      if (this.pendingSeq.get(agentId) !== seq) return;
+
+      // Show action description briefly before this segment's dialogue
+      if (seg.action) {
+        const actionText = `[${seg.action}]`;
+        this.showBubble(agentId, actionText, "casual", ACTION_DISPLAY_MS);
+        await new Promise<void>((r) => setTimeout(r, ACTION_DISPLAY_MS));
+        if (this.pendingSeq.get(agentId) !== seq) return;
+      }
+
+      // Compute display duration from audio duration (seconds → ms)
+      const durationMs = seg.audio_url
+        ? Math.round(seg.duration * 1000)
+        : Math.max(DEFAULT_DURATION_MS, seg.text.length * SpeechBubble.CHAR_DELAY_MS + 3500);
+
+      // Show the dialogue bubble — keep it up slightly longer than the audio
+      this.showBubble(agentId, seg.text, tone, durationMs + 200);
+
+      // Play audio directly, then advance to next segment
+      if (seg.audio_url) {
+        const vol = this.getSegmentVolume(agentId);
+        await playAudioSegment(seg.audio_url, vol, durationMs);
+      } else {
+        await new Promise<void>((r) => setTimeout(r, durationMs));
+      }
+    }
+  }
+
+  /** Effective volume for direct segment audio playback, matching AudioManager settings. */
+  private getSegmentVolume(agentId: string): number {
+    if (!this.audioManager) return 0.8;
+    const master = this.audioManager.getMasterVolume();
+    const agentVol = this.audioManager.getAgentVolume(agentId);
+    return Math.max(0, Math.min(1, master * agentVol));
   }
 
   private updateBubblePosition(agentId: string, bubble: SpeechBubble): void {

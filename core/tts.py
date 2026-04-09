@@ -7,12 +7,12 @@ import logging
 import tempfile
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import edge_tts
 
 from core.event_bus import EventType, event_bus
-from core.speech_parser import parse_speech
+from core.speech_parser import parse_speech, parse_speech_segments
 
 if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
@@ -115,6 +115,90 @@ class TTSPipeline:
         loop.call_later(self.cleanup_ttl, _cleanup_file, filepath)
 
         return event_data
+
+    async def speak_segmented(
+        self, agent_id: str, text: str
+    ) -> list[dict[str, Any]] | None:
+        """Generate TTS audio per dialogue segment and return segment descriptors.
+
+        Splits *text* on [action] tags so each short dialogue chunk becomes its
+        own audio file, enabling the frontend to start playback immediately after
+        the first (usually short) segment is ready.
+
+        Returns ``None`` for silent agents (Alpha) or when the agent has no voice.
+        Returns a list of segment dicts, each with:
+        - ``text``      – cleaned dialogue text for this segment
+        - ``audio_url`` – URL to the generated MP3
+        - ``duration``  – audio duration in seconds
+        - ``action``    – (optional) action description preceding this segment
+        """
+        voice_id = self._get_voice_id(agent_id)
+        if voice_id is None:
+            return None
+
+        segments = parse_speech_segments(text)
+        if not segments:
+            # Action-only text — nothing to speak
+            return None
+
+        results: list[dict[str, Any]] = []
+
+        for dialogue_text, preceding_action in segments:
+            filename = f"{uuid.uuid4()}.mp3"
+            filepath = self.audio_dir / filename
+
+            success = False
+            for attempt in range(2):
+                try:
+                    communicate = edge_tts.Communicate(dialogue_text, voice_id)
+                    await communicate.save(str(filepath))
+                    success = True
+                    break
+                except Exception:
+                    if attempt == 0:
+                        logger.warning(
+                            "Edge TTS segment failed for %s, retrying", agent_id
+                        )
+                        continue
+                    logger.warning(
+                        "Edge TTS segment failed for %s after retry, skipping segment",
+                        agent_id,
+                    )
+
+            if not success:
+                continue
+
+            # Post-processing (Management only)
+            if self._get_audio_effects(agent_id) == "reverb_pitch_down":
+                processed_path = self.audio_dir / f"{uuid.uuid4()}.mp3"
+                try:
+                    await _apply_management_effects(filepath, processed_path)
+                    filepath.unlink(missing_ok=True)
+                    filepath = processed_path
+                    filename = processed_path.name
+                except Exception:
+                    logger.warning(
+                        "Management ffmpeg post-processing failed for segment, using raw audio"
+                    )
+                    processed_path.unlink(missing_ok=True)
+
+            duration = await _get_duration(filepath)
+            audio_url = f"{self.base_url}/{filename}"
+
+            loop = asyncio.get_running_loop()
+            loop.call_later(self.cleanup_ttl, _cleanup_file, filepath)
+
+            segment: dict[str, Any] = {
+                "text": dialogue_text,
+                "audio_url": audio_url,
+                "duration": duration,
+            }
+            if preceding_action:
+                segment["action"] = preceding_action
+
+            results.append(segment)
+
+        return results if results else None
 
     async def shutdown(self) -> None:
         """Clean up the audio directory on shutdown."""
