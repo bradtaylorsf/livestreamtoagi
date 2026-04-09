@@ -1,7 +1,10 @@
 import Phaser from "phaser";
 import { WorldManager } from "../world/WorldManager";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
-import type { WebSocketClient } from "../network/WebSocketClient";
+import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
+import { StreamOverlay } from "../ui/StreamOverlay";
+import { AudioManager } from "../audio/AudioManager";
+import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
 const TILE_SIZE = 32;
@@ -76,6 +79,9 @@ const FURNITURE: FurniturePlacement[] = [
 export class MainScene extends Phaser.Scene {
   private worldManager: WorldManager | null = null;
   private agentSpriteManager: AgentSpriteManager | null = null;
+  private speechBubbleManager: SpeechBubbleManager | null = null;
+  private streamOverlay: StreamOverlay | null = null;
+  private audioManager: AudioManager | null = null;
   private wsClient: WebSocketClient | null = null;
 
   constructor() {
@@ -159,6 +165,12 @@ export class MainScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor("#1a1a2e");
 
+    // ── WebSocket client (auto-create if not externally provided) ──
+    if (!this.wsClient) {
+      this.wsClient = new WebSocketClient();
+      this.wsClient.connect();
+    }
+
     // ── Register agent animations ───────────────────────────────
     this.registerAnimations();
 
@@ -175,6 +187,20 @@ export class MainScene extends Phaser.Scene {
       this.wsClient,
       this.worldManager,
     );
+
+    // ── Audio playback (TTS queue) ───────────────────────────────
+    this.audioManager = new AudioManager(this.wsClient);
+
+    // ── Speech bubbles (DOM overlay above canvas) ──────────────
+    this.speechBubbleManager = new SpeechBubbleManager(
+      this,
+      this.wsClient,
+      this.agentSpriteManager,
+      this.audioManager,
+    );
+
+    // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
+    this.streamOverlay = new StreamOverlay(this.wsClient);
   }
 
   getWorldManager(): WorldManager | null {
@@ -186,7 +212,18 @@ export class MainScene extends Phaser.Scene {
   }
 
   update(): void {
-    // Game loop logic will be added as features are implemented.
+    this.speechBubbleManager?.update();
+  }
+
+  shutdown(): void {
+    this.speechBubbleManager?.destroy();
+    this.speechBubbleManager = null;
+    this.streamOverlay?.destroy();
+    this.streamOverlay = null;
+    this.audioManager?.destroy();
+    this.audioManager = null;
+    this.wsClient?.disconnect();
+    this.wsClient = null;
   }
 
   /**

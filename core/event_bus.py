@@ -36,6 +36,7 @@ class EventType(str, Enum):
     TTS_PLAY = "tts_play"
     TOOL_EXECUTED = "tool_executed"
     CONFIG_RELOADED = "config_reloaded"
+    AGI_PROGRESS = "agi_progress"
     ARTIFACT_CREATED = "artifact_created"
     CONVERSATION_PRODUCTIVITY = "conversation_productivity"
 

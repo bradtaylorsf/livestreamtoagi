@@ -23,6 +23,7 @@ const BACKEND_EVENT_TYPES = [
   "tts_play",
   "tool_executed",
   "config_reloaded",
+  "agi_progress",
   "artifact_created",
 ] as const;
 
@@ -39,7 +40,7 @@ describe("EventType enum", () => {
     expect(frontendValues).toHaveLength(BACKEND_EVENT_TYPES.length);
   });
 
-  it("has exactly 17 event types", () => {
-    expect(Object.values(EventType)).toHaveLength(17);
+  it("has exactly 18 event types", () => {
+    expect(Object.values(EventType)).toHaveLength(18);
   });
 });
