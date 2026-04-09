@@ -152,7 +152,11 @@ export class AgentSprite {
     // Status badge (colored dot next to name)
     this.statusBadge = scene.add.graphics();
     this.statusBadge.setDepth(3);
-    this.drawBadge(config.x, config.y, "idle");
+    this.drawBadge(
+      config.x + this.nameLabel.width / 2 + 6,
+      config.y + 4 + 5,
+      "idle",
+    );
 
     // Permission indicator (shown during Management content filter review)
     this.permissionIndicator = scene.add.text(
@@ -301,9 +305,18 @@ export class AgentSprite {
       ease: "Power2",
     });
 
+    const nameHalfW = this.nameLabel.width / 2;
+    const badgeTween = this.scene.tweens.add({
+      targets: this.statusBadge,
+      x: x + nameHalfW + 6,
+      y: y + 4 + 5,
+      duration: TWEEN_DURATION_MS,
+      ease: "Power2",
+    });
+
     this.moveTweens = [
       spriteTween, nameTween, statusTween,
-      activityTween, permissionTween, progressTween,
+      activityTween, permissionTween, progressTween, badgeTween,
     ];
   }
 
@@ -372,9 +385,18 @@ export class AgentSprite {
       ease: "Linear",
     });
 
+    const nameHalfW = this.nameLabel.width / 2;
+    const badgeTween = this.scene.tweens.add({
+      targets: this.statusBadge,
+      x: target.x + nameHalfW + 6,
+      y: target.y + 4 + 5,
+      duration: STEP_DURATION_MS,
+      ease: "Linear",
+    });
+
     this.moveTweens = [
       spriteTween, nameTween, statusTween,
-      activityTween, permissionTween, progressTween,
+      activityTween, permissionTween, progressTween, badgeTween,
     ];
   }
 
@@ -395,6 +417,38 @@ export class AgentSprite {
 
   getBadgeState(): BadgeState {
     return this.currentBadgeState;
+  }
+
+  /** Set visibility of all game objects (sprite, labels, badge). */
+  setVisible(visible: boolean): void {
+    this.sprite.setVisible(visible);
+    this.nameLabel.setVisible(visible);
+    this.statusBadge.setVisible(visible);
+    if (!visible) {
+      this.statusLabel.setVisible(false);
+      this.activityLabel.setVisible(false);
+      this.permissionIndicator.setVisible(false);
+      this.progressDots.setVisible(false);
+    }
+  }
+
+  /** Instantly reposition all game objects to a new position. */
+  setPosition(x: number, y: number): void {
+    const h = this.sprite.height;
+    this.sprite.x = x;
+    this.sprite.y = y;
+    this.nameLabel.x = x;
+    this.nameLabel.y = y + 4;
+    this.statusLabel.x = x;
+    this.statusLabel.y = y - h - 4;
+    this.activityLabel.x = x;
+    this.activityLabel.y = y - h - 20;
+    this.permissionIndicator.x = x;
+    this.permissionIndicator.y = y - h - 34;
+    this.progressDots.x = x + 40;
+    this.progressDots.y = y - h - 20;
+    const nameHalfW = this.nameLabel.width / 2;
+    this.drawBadge(x + nameHalfW + 6, y + 4 + 5, this.currentBadgeState);
   }
 
   /** Show or hide activity label above character. Pass null to fade out. */
@@ -475,8 +529,9 @@ export class AgentSprite {
 
   private drawBadge(x: number, y: number, state: BadgeState): void {
     this.statusBadge.clear();
+    this.statusBadge.setPosition(x, y);
     this.statusBadge.fillStyle(BADGE_COLORS[state], 1);
-    this.statusBadge.fillCircle(x, y, BADGE_RADIUS);
+    this.statusBadge.fillCircle(0, 0, BADGE_RADIUS);
   }
 
   getCurrentAnimation(): string {

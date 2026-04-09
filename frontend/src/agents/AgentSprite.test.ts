@@ -34,8 +34,15 @@ function createMockScene() {
         }),
       ),
       graphics: vi.fn(() => ({
+        x: 0,
+        y: 0,
         setDepth: vi.fn(),
         setAlpha: vi.fn(),
+        setPosition: vi.fn(function (this: any, x: number, y: number) {
+          this.x = x;
+          this.y = y;
+        }),
+        setVisible: vi.fn(),
         clear: vi.fn(),
         fillStyle: vi.fn(),
         fillCircle: vi.fn(),

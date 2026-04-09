@@ -309,7 +309,7 @@ export class AgentSpriteManager {
       duration: 1000,
       ease: "Power2",
       onComplete: () => {
-        alpha.sprite.setVisible(false);
+        alpha.setVisible(false);
         alpha.setBadgeState("idle");
       },
     });
@@ -325,8 +325,8 @@ export class AgentSpriteManager {
       AGENTS.find((a) => a.id === "alpha")!,
     );
 
-    alpha.sprite.setVisible(true);
-    alpha.sprite.x = -50;
+    alpha.setPosition(-50, deskPos.y);
+    alpha.setVisible(true);
     alpha.playAnimation("running");
     alpha.setBadgeState("active");
 
@@ -337,6 +337,7 @@ export class AgentSpriteManager {
       duration: 1000,
       ease: "Power2",
       onComplete: () => {
+        alpha.setPosition(deskPos.x, deskPos.y);
         alpha.playAnimation(success ? "celebrate" : "confused");
         alpha.setBadgeState("idle");
         if (result) {
