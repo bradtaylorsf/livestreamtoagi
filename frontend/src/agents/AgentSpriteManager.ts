@@ -5,6 +5,7 @@ import { EventType, type ServerEvent } from "../types/events";
 import type { WebSocketClient } from "../network/WebSocketClient";
 import type { WorldManager } from "../world/WorldManager";
 import type { WorkspaceManager } from "../world/WorkspaceManager";
+import type { AutoStateManager } from "../world/furniture/AutoStateManager";
 
 /** Agents that get sprite representations (excludes management which has no sprite). */
 const SPRITE_AGENTS = AGENTS.filter((a) => a.id !== "management");
@@ -17,6 +18,7 @@ export class AgentSpriteManager {
   private sprites: Map<string, AgentSprite> = new Map();
   private worldManager: WorldManager | null;
   private workspaceManager: WorkspaceManager | null;
+  private autoStateManager: AutoStateManager | null = null;
   private unsubscribe: (() => void) | null = null;
 
   constructor(
@@ -50,6 +52,10 @@ export class AgentSpriteManager {
         this.handleEvent(event),
       );
     }
+  }
+
+  setAutoStateManager(manager: AutoStateManager): void {
+    this.autoStateManager = manager;
   }
 
   getSprite(agentId: string): AgentSprite | undefined {
@@ -107,10 +113,12 @@ export class AgentSpriteManager {
     if (sprite) {
       sprite.playAnimation("talking");
       sprite.setStatus("speaking");
+      this.autoStateManager?.onAgentStatusChange(agentId, "speaking");
       // Return to idle after speech duration
       this.scene.time.delayedCall(3000, () => {
         sprite.playAnimation("idle");
         sprite.setStatus("idle");
+        this.autoStateManager?.onAgentStatusChange(agentId, "idle");
       });
     }
   }
@@ -137,6 +145,7 @@ export class AgentSpriteManager {
 
     sprite.playAnimation(anim);
     sprite.setStatus(status);
+    this.autoStateManager?.onAgentStatusChange(agentId, status);
   }
 
   private getDeskPosition(agent: Agent): { x: number; y: number } {

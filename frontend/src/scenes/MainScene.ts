@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { WorldManager } from "../world/WorldManager";
 import { WorkspaceManager } from "../world/WorkspaceManager";
-import { FurnitureCatalog, FurnitureInstance } from "../world/furniture";
+import { FurnitureCatalog, FurnitureInstance, AutoStateManager } from "../world/furniture";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
@@ -57,6 +57,7 @@ export class MainScene extends Phaser.Scene {
   private furnitureInstances: Map<string, FurnitureInstance> = new Map();
   /** Furniture instances grouped by agent workspace (agentId → instances). */
   private workspaceFurniture: Map<string, FurnitureInstance[]> = new Map();
+  private autoStateManager: AutoStateManager | null = null;
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
@@ -202,6 +203,10 @@ export class MainScene extends Phaser.Scene {
       this.workspaceManager,
     );
 
+    // ── Auto-state electronics (monitors on/off with agent activity) ──
+    this.autoStateManager = new AutoStateManager(this.workspaceFurniture);
+    this.agentSpriteManager.setAutoStateManager(this.autoStateManager);
+
     // ── Audio playback (TTS queue) ───────────────────────────────
     this.audioManager = new AudioManager(this.wsClient);
 
@@ -257,6 +262,8 @@ export class MainScene extends Phaser.Scene {
     this.behaviorScheduler = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
+    this.autoStateManager?.destroy();
+    this.autoStateManager = null;
     for (const instance of this.furnitureInstances.values()) {
       instance.destroy();
     }
