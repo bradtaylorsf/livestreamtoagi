@@ -226,7 +226,12 @@ export class SpeechBubbleManager {
     } else {
       // Synchronous path: bump seq so any in-flight async resolves are discarded.
       this.pendingSeq.set(agentId, (this.pendingSeq.get(agentId) ?? 0) + 1);
-      const duration = (data.duration as number) || DEFAULT_DURATION_MS;
+      // Ensure the bubble outlives the typewriter animation. Duration must be at
+      // least the full typewriter time plus a reading buffer, or DEFAULT_DURATION_MS.
+      const typewriterMs = text.length * SpeechBubble.CHAR_DELAY_MS;
+      const duration =
+        (data.duration as number) ||
+        Math.max(DEFAULT_DURATION_MS, typewriterMs + 2000);
       this.showBubble(agentId, text, tone, duration);
     }
   }
@@ -237,15 +242,27 @@ export class SpeechBubbleManager {
 
     const pos = agentSprite.getPosition();
     const camera = this.scene.cameras.main;
+    const canvas = this.scene.game.canvas;
 
-    // Convert world coordinates to screen coordinates relative to overlay
-    const screenX =
+    // Phaser.Scale.FIT + CENTER_BOTH: the canvas is CSS-scaled and centered
+    // inside the #game div. We must account for both the scale factor and the
+    // canvas offset so the overlay aligns with the rendered sprites.
+    const scaleX = canvas.clientWidth / canvas.width;
+    const scaleY = canvas.clientHeight / canvas.height;
+    const canvasOffsetX = canvas.offsetLeft;
+    const canvasOffsetY = canvas.offsetTop;
+
+    // World → canvas render-pixel
+    const renderX =
       (pos.x - camera.worldView.x) *
       (camera.width / camera.worldView.width);
-    const screenY =
+    const renderY =
       (pos.y - camera.worldView.y) *
-      (camera.height / camera.worldView.height) +
-      BUBBLE_OFFSET_Y;
+      (camera.height / camera.worldView.height);
+
+    // Canvas render-pixel → CSS pixel within the overlay div
+    const screenX = canvasOffsetX + renderX * scaleX;
+    const screenY = canvasOffsetY + renderY * scaleY + BUBBLE_OFFSET_Y;
 
     bubble.updatePosition(screenX, screenY);
   }

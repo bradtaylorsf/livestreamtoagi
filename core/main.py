@@ -131,8 +131,32 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
 
     Called by scripts like pnpm chat so that agent responses are broadcast
     to connected Phaser frontend clients without needing to be in-process.
+
+    When event_type is "agent_speak" and the data includes "text" + "agent_id",
+    TTS is generated automatically and a "tts_play" event is also emitted so the
+    frontend AudioManager plays the voice.
     """
-    event = await event_bus.emit(req.event_type, req.data)
+    data = dict(req.data)
+
+    if req.event_type == "agent_speak" and "text" in data and "agent_id" in data:
+        tts: Any = getattr(app.state, "tts_pipeline", None)
+        if tts is not None:
+            try:
+                result = await tts.speak(data["agent_id"], data["text"])
+                if result and result.get("audio_url"):
+                    data["audio_url"] = result["audio_url"]
+                    await event_bus.emit(
+                        "tts_play",
+                        {
+                            "agent_id": data["agent_id"],
+                            "audio_url": result["audio_url"],
+                            "text": data["text"],
+                        },
+                    )
+            except Exception:
+                logger.exception("TTS generation failed in dev_emit")
+
+    event = await event_bus.emit(req.event_type, data)
     return {"ok": True, "event_id": event["event_id"]}
 
 

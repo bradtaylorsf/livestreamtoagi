@@ -12,6 +12,16 @@ function createMockScene() {
         worldView: { x: 0, y: 0, width: 1280, height: 720 },
       },
     },
+    game: {
+      canvas: {
+        width: 1280,
+        height: 720,
+        clientWidth: 1280,
+        clientHeight: 720,
+        offsetLeft: 0,
+        offsetTop: 0,
+      },
+    },
   };
 }
 
