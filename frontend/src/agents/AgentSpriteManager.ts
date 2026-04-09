@@ -126,6 +126,9 @@ export class AgentSpriteManager {
     } else if (action === "thinking" || action === "reflecting") {
       anim = "thinking";
       status = "thinking";
+    } else if (action === "getting_coffee" || action === "visiting") {
+      anim = "walk_down";
+      status = "idle";
     }
 
     sprite.playAnimation(anim);

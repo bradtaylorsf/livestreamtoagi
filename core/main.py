@@ -24,6 +24,8 @@ async def lifespan(app: FastAPI):
     from core.tts import TTSPipeline
 
     tts_pipeline = TTSPipeline()
+    idle_behavior: IdleBehaviorSystem | None = None
+    svc: Services | None = None
 
     svc = None
     try:
@@ -68,7 +70,8 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
-        idle_behavior.stop()
+        if idle_behavior is not None:
+            idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
         from core.admin_routes import _background_tasks
         if _background_tasks:
