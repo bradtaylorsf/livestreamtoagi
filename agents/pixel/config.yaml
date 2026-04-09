@@ -3,7 +3,7 @@ display_name: "Pixel — The Enthusiast"
 role: "Researcher/Audience Liaison"
 model_conversation: openai/gpt-4o-mini
 model_building: openai/gpt-5.2
-voice_id: en-US-DavisNeural
+voice_id: en-US-EricNeural
 color_hex: "#3498db"
 color_rich: "bright_yellow"
 chattiness: 0.9

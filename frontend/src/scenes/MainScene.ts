@@ -3,6 +3,7 @@ import { WorldManager } from "../world/WorldManager";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
+import { DevPanel } from "../ui/DevPanel";
 import { AudioManager } from "../audio/AudioManager";
 import { BehaviorScheduler } from "../agents/BehaviorScheduler";
 import { WebSocketClient } from "../network/WebSocketClient";
@@ -82,6 +83,7 @@ export class MainScene extends Phaser.Scene {
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
+  private devPanel: DevPanel | null = null;
   private audioManager: AudioManager | null = null;
   private behaviorScheduler: BehaviorScheduler | null = null;
   private wsClient: WebSocketClient | null = null;
@@ -228,6 +230,9 @@ export class MainScene extends Phaser.Scene {
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
     this.streamOverlay = new StreamOverlay(this.wsClient);
 
+    // ── Dev panel (test conversation trigger) ──────────────
+    this.devPanel = new DevPanel();
+
     // ── Idle behavior scheduler (client-side micro-animations) ──
     this.behaviorScheduler = new BehaviorScheduler(
       this.agentSpriteManager.getSpriteMap(),
@@ -258,6 +263,8 @@ export class MainScene extends Phaser.Scene {
     this.speechBubbleManager = null;
     this.streamOverlay?.destroy();
     this.streamOverlay = null;
+    this.devPanel?.destroy();
+    this.devPanel = null;
     this.audioManager?.destroy();
     this.audioManager = null;
     this.behaviorScheduler?.destroy();

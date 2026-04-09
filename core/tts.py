@@ -52,40 +52,39 @@ class TTSPipeline:
                 return agent.audio_effects
         return None
 
-    async def speak(self, agent_id: str, text: str) -> dict[str, str | float] | None:
-        """Generate TTS audio for an agent's speech.
+    async def generate(self, agent_id: str, text: str, *, cleanup_ttl: int | None = None) -> dict[str, Any] | None:
+        """Generate TTS audio and return the result WITHOUT emitting any event.
 
-        Returns None for Alpha (no voice) or on failure after retry.
-        Returns dict with agent_id, audio_url, and duration on success.
+        Use this when you want to pre-generate audio (e.g. batch mode) and will
+        emit the event yourself later. Returns the same payload as speak().
+
+        *cleanup_ttl* overrides the instance default for how long (seconds) to
+        keep the audio file before deleting it.  Pass a larger value when audio
+        won't be played back immediately (e.g. batch pre-generation).
         """
         voice_id = self._get_voice_id(agent_id)
         if voice_id is None:
             return None
 
-        # Strip [action] tags so TTS only speaks dialogue
         parsed = parse_speech(text)
         tts_text = parsed.dialogue or parsed.raw
 
         filename = f"{uuid.uuid4()}.mp3"
         filepath = self.audio_dir / filename
 
-        # Generate audio with one retry on failure
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 communicate = edge_tts.Communicate(tts_text, voice_id)
                 await communicate.save(str(filepath))
                 break
             except Exception:
-                if attempt == 0:
-                    logger.warning("Edge TTS failed for %s, retrying once", agent_id)
+                if attempt < 2:
+                    logger.warning("Edge TTS failed for %s (attempt %d/3), retrying", agent_id, attempt + 1)
+                    await asyncio.sleep(1.0)
                     continue
-                logger.warning(
-                    "Edge TTS failed for %s after retry, skipping TTS",
-                    agent_id,
-                )
+                logger.warning("Edge TTS failed for %s after 3 attempts", agent_id)
                 return None
 
-        # Post-processing audio effects (e.g., Management's reverb + pitch-down)
         if self._get_audio_effects(agent_id) == "reverb_pitch_down":
             processed_path = self.audio_dir / f"{uuid.uuid4()}.mp3"
             try:
@@ -97,24 +96,33 @@ class TTSPipeline:
                 logger.warning("Management ffmpeg post-processing failed, using raw audio")
                 processed_path.unlink(missing_ok=True)
 
-        # Get duration
         duration = await _get_duration(filepath)
-
         audio_url = f"{self.base_url}/{filename}"
-        event_data = {
+
+        ttl = cleanup_ttl if cleanup_ttl is not None else self.cleanup_ttl
+        loop = asyncio.get_running_loop()
+        loop.call_later(ttl, _cleanup_file, filepath)
+
+        return {
             "agent_id": agent_id,
             "audio_url": audio_url,
             "duration": duration,
+            "text": tts_text,
         }
 
-        # Emit TTS_PLAY event
-        await event_bus.emit(EventType.TTS_PLAY.value, event_data)
+    async def speak(self, agent_id: str, text: str) -> dict[str, str | float] | None:
+        """Generate TTS audio and emit a tts_play event.
 
-        # Schedule cleanup
-        loop = asyncio.get_running_loop()
-        loop.call_later(self.cleanup_ttl, _cleanup_file, filepath)
+        Returns None for Alpha (no voice) or on failure after retry.
+        Returns dict with agent_id, audio_url, duration, and text on success.
+        """
+        result = await self.generate(agent_id, text)
+        if result is None:
+            return None
 
-        return event_data
+        # Emit TTS_PLAY event so AudioManager picks it up
+        await event_bus.emit(EventType.TTS_PLAY.value, result)
+        return result
 
     async def speak_segmented(
         self, agent_id: str, text: str
