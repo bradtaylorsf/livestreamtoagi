@@ -56,6 +56,10 @@ export class AgentSpriteManager {
     return Array.from(this.sprites.values());
   }
 
+  getSpriteMap(): Map<string, AgentSprite> {
+    return this.sprites;
+  }
+
   getSpriteCount(): number {
     return this.sprites.size;
   }

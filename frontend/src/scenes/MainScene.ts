@@ -4,6 +4,7 @@ import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
 import { AudioManager } from "../audio/AudioManager";
+import { BehaviorScheduler } from "../agents/BehaviorScheduler";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
@@ -82,6 +83,7 @@ export class MainScene extends Phaser.Scene {
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
   private audioManager: AudioManager | null = null;
+  private behaviorScheduler: BehaviorScheduler | null = null;
   private wsClient: WebSocketClient | null = null;
   private connectionOverlay: Phaser.GameObjects.Text | null = null;
 
@@ -237,6 +239,12 @@ export class MainScene extends Phaser.Scene {
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
     this.streamOverlay = new StreamOverlay(this.wsClient);
 
+    // ── Idle behavior scheduler (client-side micro-animations) ──
+    this.behaviorScheduler = new BehaviorScheduler(
+      this.agentSpriteManager.getSpriteMap(),
+    );
+
+
     // ── Clean up WebSocket on scene shutdown ────────────────────
     this.events.on("shutdown", () => {
       this.wsClient?.disconnect();
@@ -251,8 +259,9 @@ export class MainScene extends Phaser.Scene {
     return this.agentSpriteManager;
   }
 
-  update(): void {
+  update(_time: number, delta: number): void {
     this.speechBubbleManager?.update();
+    this.behaviorScheduler?.update(delta);
   }
 
   shutdown(): void {
@@ -262,6 +271,8 @@ export class MainScene extends Phaser.Scene {
     this.streamOverlay = null;
     this.audioManager?.destroy();
     this.audioManager = null;
+    this.behaviorScheduler?.destroy();
+    this.behaviorScheduler = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
     this.worldManager?.destroy();

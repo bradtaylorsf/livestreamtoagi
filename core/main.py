@@ -19,6 +19,7 @@ HEALTH_CHECK_TIMEOUT = 5.0  # seconds per check
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from core.idle_behavior import IdleBehaviorSystem
     from core.memory.reflection import ReflectionManager
     from core.tts import TTSPipeline
 
@@ -59,16 +60,21 @@ async def lifespan(app: FastAPI):
         if api_key:
             start_scheduler(reflection_mgr, svc.agent_registry)
 
+        idle_behavior = IdleBehaviorSystem(svc.agent_registry)
+        idle_behavior.start()
+
         app.mount("/audio", StaticFiles(directory=str(tts_pipeline.audio_dir)), name="audio")
         app.state.tts_pipeline = tts_pipeline
 
         yield
     finally:
+        idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
         from core.admin_routes import _background_tasks
         if _background_tasks:
             logger.info("Waiting for %d background eval task(s) to finish...", len(_background_tasks))
             await asyncio.gather(*_background_tasks, return_exceptions=True)
+
 
         await tts_pipeline.shutdown()
         if svc is not None:

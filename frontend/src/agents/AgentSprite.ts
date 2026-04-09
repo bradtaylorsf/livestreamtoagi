@@ -252,6 +252,47 @@ export class AgentSprite {
     return this.currentAnimation;
   }
 
+  /**
+   * Play a short idle micro-animation at the agent's desk.
+   * Used by BehaviorScheduler for client-side ambient activity.
+   */
+  playMicroAnimation(type: "typing" | "looking" | "stretching"): void {
+    if (this.isBusy) return;
+
+    this.isBusy = true;
+
+    switch (type) {
+      case "typing":
+        this.playAnimation("building");
+        this.scene.time.delayedCall(2000, () => {
+          this.playAnimation("idle");
+          this.isBusy = false;
+        });
+        break;
+      case "looking":
+        this.playAnimation("thinking");
+        this.scene.time.delayedCall(1500, () => {
+          this.playAnimation("idle");
+          this.isBusy = false;
+        });
+        break;
+      case "stretching":
+        // Brief scale tween for a stretch effect, then return to idle
+        this.scene.tweens.add({
+          targets: this.sprite,
+          scaleY: 1.15,
+          duration: 500,
+          yoyo: true,
+          ease: "Sine.easeInOut",
+          onComplete: () => {
+            this.sprite.setScale(1, 1);
+            this.isBusy = false;
+          },
+        });
+        break;
+    }
+  }
+
   getPosition(): { x: number; y: number } {
     return { x: this.sprite.x, y: this.sprite.y };
   }
