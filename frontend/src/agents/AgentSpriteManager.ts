@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { AgentSprite, StatusType } from "./AgentSprite";
+import { AgentSprite, type StatusType } from "./AgentSprite";
 import { AGENTS, type Agent } from "../agents";
 import { EventType, type ServerEvent } from "../types/events";
 import type { WebSocketClient } from "../network/WebSocketClient";
@@ -95,6 +95,12 @@ export class AgentSpriteManager {
       case EventType.AGENT_ACTION:
         this.handleAction(event.data);
         break;
+      case EventType.TOOL_EXECUTED:
+        this.handleToolExecuted(event.data);
+        break;
+      case EventType.MANAGEMENT_SHADOW:
+        this.handleManagementShadow(event.data);
+        break;
     }
   }
 
@@ -113,11 +119,14 @@ export class AgentSpriteManager {
     if (sprite) {
       sprite.playAnimation("talking");
       sprite.setStatus("speaking");
+      sprite.setBadgeState("conversation");
+      sprite.setPermissionPending(false);
       this.autoStateManager?.onAgentStatusChange(agentId, "speaking");
       // Return to idle after speech duration
       this.scene.time.delayedCall(3000, () => {
         sprite.playAnimation("idle");
         sprite.setStatus("idle");
+        sprite.setBadgeState("idle");
         this.autoStateManager?.onAgentStatusChange(agentId, "idle");
       });
     }
@@ -135,17 +144,63 @@ export class AgentSpriteManager {
     if (action === "building" || action === "coding") {
       anim = "building";
       status = "building";
+      sprite.setBadgeState("active");
     } else if (action === "thinking" || action === "reflecting") {
       anim = "thinking";
       status = "thinking";
+      sprite.setBadgeState("active");
     } else if (action === "getting_coffee" || action === "visiting") {
       anim = "walk_down";
       status = "idle";
+      sprite.setBadgeState("idle");
+    } else {
+      sprite.setBadgeState("idle");
     }
 
     sprite.playAnimation(anim);
     sprite.setStatus(status);
     this.autoStateManager?.onAgentStatusChange(agentId, status);
+  }
+
+  private handleToolExecuted(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const toolName = data.tool_name as string;
+    const success = data.success as boolean | undefined;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    sprite.setActivity(toolName);
+    sprite.setBadgeState("active");
+
+    if (success !== undefined && success !== null) {
+      // Tool completed — show result briefly then clear
+      sprite.setProgress(false);
+      sprite.setBadgeState(success ? "active" : "error");
+      this.scene.time.delayedCall(2000, () => {
+        sprite.setActivity(null);
+        sprite.setBadgeState("idle");
+      });
+    } else {
+      // Tool in progress — show spinner
+      sprite.setProgress(true);
+    }
+  }
+
+  private handleManagementShadow(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    sprite.setPermissionPending(true);
+    sprite.setBadgeState("waiting");
+    // Clear after 3s (matching the content filter delay)
+    this.scene.time.delayedCall(3000, () => {
+      sprite.setPermissionPending(false);
+      // Only reset badge if still waiting
+      if (sprite.getBadgeState() === "waiting") {
+        sprite.setBadgeState("idle");
+      }
+    });
   }
 
   private getDeskPosition(agent: Agent): { x: number; y: number } {

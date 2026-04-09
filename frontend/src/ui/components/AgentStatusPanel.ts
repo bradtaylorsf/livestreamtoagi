@@ -1,6 +1,6 @@
 import { AGENTS } from "../../agents";
 
-export type AgentStatus = "idle" | "talking" | "building" | "sleeping";
+export type AgentStatus = "idle" | "talking" | "building" | "sleeping" | "active" | "waiting" | "error";
 
 interface AgentStatusEntry {
   element: HTMLDivElement;
@@ -13,6 +13,9 @@ const STATUS_COLORS: Record<AgentStatus, string> = {
   talking: "#44cc44",
   building: "#4488ff",
   sleeping: "#666666",
+  active: "#44cc44",
+  waiting: "#ffaa00",
+  error: "#ff4444",
 };
 
 export class AgentStatusPanel {
