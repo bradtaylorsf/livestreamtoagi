@@ -72,16 +72,21 @@ class TestIdleBehaviorSystem:
 
     @pytest.mark.asyncio()
     async def test_emit_move(self) -> None:
+        # Positions are tile coordinates; _emit_move converts to pixels (tile * TILE_SIZE)
+        from core.idle_behavior import TILE_SIZE
         with patch("core.idle_behavior.event_bus") as mock_bus:
             mock_bus.emit = AsyncMock()
-            from_pos = {"x": 100, "y": 200}
-            to_pos = {"x": 300, "y": 400}
+            from_pos: dict[str, float] = {"x": 3.5, "y": 6.0}
+            to_pos: dict[str, float] = {"x": 19.5, "y": 2.5}
             await IdleBehaviorSystem._emit_move("vera", from_pos, to_pos)
             mock_bus.emit.assert_called_once()
             call_args = mock_bus.emit.call_args
             assert call_args[0][0] == "agent_move"
             assert call_args[0][1]["agent_id"] == "vera"
-            assert call_args[0][1]["to"]["x"] == 300
+            # Wire format is pixels
+            assert call_args[0][1]["from"]["x"] == int(3.5 * TILE_SIZE)
+            assert call_args[0][1]["to"]["x"] == int(19.5 * TILE_SIZE)
+            assert call_args[0][1]["to"]["y"] == int(2.5 * TILE_SIZE)
 
     @pytest.mark.asyncio()
     async def test_emit_action(self) -> None:

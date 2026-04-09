@@ -18,14 +18,17 @@ export class BehaviorScheduler {
   private sprites: Map<string, AgentSprite>;
   private timers: Map<string, number> = new Map();
   private nextIntervals: Map<string, number> = new Map();
+  /** Per-agent chattiness cached from AGENTS at construction time. Avoids linear scans each frame. */
+  private chattiness: Map<string, number> = new Map();
 
   constructor(sprites: Map<string, AgentSprite>) {
     this.sprites = sprites;
 
-    // Initialize per-agent timers with randomized initial delays
+    // Cache chattiness and initialize per-agent timers with randomized initial delays.
     for (const [agentId] of sprites) {
-      const agent = AGENTS.find((a) => a.id === agentId);
-      const interval = this.randomInterval(agent?.chattiness ?? 0.5);
+      const chattiness = AGENTS.find((a) => a.id === agentId)?.chattiness ?? 0.5;
+      this.chattiness.set(agentId, chattiness);
+      const interval = this.randomInterval(chattiness);
       // Stagger initial timers so they don't all fire at once
       this.timers.set(agentId, Math.random() * interval);
       this.nextIntervals.set(agentId, interval);
@@ -49,10 +52,9 @@ export class BehaviorScheduler {
         const animType = MICRO_ANIMATIONS[Math.floor(Math.random() * MICRO_ANIMATIONS.length)];
         sprite.playMicroAnimation(animType);
 
-        // Reset timer with new random interval
-        const agent = AGENTS.find((a) => a.id === agentId);
+        // Reset timer with new random interval using cached chattiness
         this.timers.set(agentId, 0);
-        this.nextIntervals.set(agentId, this.randomInterval(agent?.chattiness ?? 0.5));
+        this.nextIntervals.set(agentId, this.randomInterval(this.chattiness.get(agentId) ?? 0.5));
       } else {
         this.timers.set(agentId, elapsed);
       }

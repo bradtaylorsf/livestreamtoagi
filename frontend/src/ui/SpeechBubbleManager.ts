@@ -113,6 +113,8 @@ export class SpeechBubbleManager {
   private bubbles: Map<string, SpeechBubble> = new Map();
   private container: HTMLDivElement;
   private unsubscribe: (() => void) | null = null;
+  /** Monotonically increasing sequence number per agent, used to discard stale async getDuration results. */
+  private pendingSeq: Map<string, number> = new Map();
 
   constructor(
     scene: Phaser.Scene,
@@ -211,12 +213,19 @@ export class SpeechBubbleManager {
     const tone = (data.tone as BubbleTone) || "casual";
     const audioUrl = data.audio_url as string | undefined;
 
-    // If AudioManager is available and there's an audio URL, sync bubble with audio duration
+    // If AudioManager is available and there's an audio URL, sync bubble with audio duration.
+    // Use a per-agent sequence number so that if two speak events arrive in quick succession
+    // and both trigger async getDuration() calls, only the latest one actually shows a bubble.
     if (this.audioManager && audioUrl) {
+      const seq = (this.pendingSeq.get(agentId) ?? 0) + 1;
+      this.pendingSeq.set(agentId, seq);
       this.audioManager.getDuration(agentId, audioUrl, text).then((durationMs) => {
+        if (this.pendingSeq.get(agentId) !== seq) return; // superseded by a newer event
         this.showBubble(agentId, text, tone, durationMs);
       });
     } else {
+      // Synchronous path: bump seq so any in-flight async resolves are discarded.
+      this.pendingSeq.set(agentId, (this.pendingSeq.get(agentId) ?? 0) + 1);
       const duration = (data.duration as number) || DEFAULT_DURATION_MS;
       this.showBubble(agentId, text, tone, duration);
     }

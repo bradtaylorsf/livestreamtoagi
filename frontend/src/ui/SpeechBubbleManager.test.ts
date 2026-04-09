@@ -187,4 +187,96 @@ describe("SpeechBubbleManager", () => {
     expect(manager.getActiveBubbleCount()).toBe(0);
     expect(document.getElementById("speech-bubbles")).toBeNull();
   });
+
+  describe("async getDuration race prevention", () => {
+    it("discards stale async resolve when a newer speak event arrives first", async () => {
+      // Build an AudioManager mock whose getDuration() we control manually
+      let resolveFirst!: (ms: number) => void;
+      let resolveSecond!: (ms: number) => void;
+
+      const audioManager = {
+        getDuration: vi.fn()
+          .mockImplementationOnce(() => new Promise<number>((r) => { resolveFirst = r; }))
+          .mockImplementationOnce(() => new Promise<number>((r) => { resolveSecond = r; })),
+        enqueue: vi.fn(),
+        destroy: vi.fn(),
+      };
+
+      const mgr = new SpeechBubbleManager(
+        scene as any,
+        wsClient as any,
+        agentSpriteManager as any,
+        audioManager as any,
+      );
+
+      // Emit two speak events for vera in rapid succession
+      wsClient.emit({
+        event_type: EventType.AGENT_SPEAK,
+        event_id: "a",
+        timestamp: 1000,
+        data: { agent_id: "vera", text: "First message", audio_url: "http://audio/1.mp3" },
+      });
+      wsClient.emit({
+        event_type: EventType.AGENT_SPEAK,
+        event_id: "b",
+        timestamp: 1001,
+        data: { agent_id: "vera", text: "Second message", audio_url: "http://audio/2.mp3" },
+      });
+
+      // Second event resolves first (faster network/metadata)
+      resolveSecond(3000);
+      await Promise.resolve();
+      expect(mgr.getBubble("vera")?.text).toBe("Second message");
+
+      // First event resolves later — must be discarded
+      resolveFirst(2000);
+      await Promise.resolve();
+      expect(mgr.getBubble("vera")?.text).toBe("Second message");
+
+      mgr.destroy();
+    });
+
+    it("sync speak event cancels an in-flight async resolve", async () => {
+      let resolveAsync!: (ms: number) => void;
+
+      const audioManager = {
+        getDuration: vi.fn().mockImplementationOnce(
+          () => new Promise<number>((r) => { resolveAsync = r; }),
+        ),
+        enqueue: vi.fn(),
+        destroy: vi.fn(),
+      };
+
+      const mgr = new SpeechBubbleManager(
+        scene as any,
+        wsClient as any,
+        agentSpriteManager as any,
+        audioManager as any,
+      );
+
+      // Async event (has audio_url)
+      wsClient.emit({
+        event_type: EventType.AGENT_SPEAK,
+        event_id: "async",
+        timestamp: 1000,
+        data: { agent_id: "vera", text: "Async message", audio_url: "http://audio/1.mp3" },
+      });
+
+      // Sync event arrives before the async one resolves (no audio_url)
+      wsClient.emit({
+        event_type: EventType.AGENT_SPEAK,
+        event_id: "sync",
+        timestamp: 1001,
+        data: { agent_id: "vera", text: "Sync message" },
+      });
+      expect(mgr.getBubble("vera")?.text).toBe("Sync message");
+
+      // The async resolve fires late — must not overwrite the sync bubble
+      resolveAsync(2000);
+      await Promise.resolve();
+      expect(mgr.getBubble("vera")?.text).toBe("Sync message");
+
+      mgr.destroy();
+    });
+  });
 });

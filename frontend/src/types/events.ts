@@ -40,6 +40,7 @@ export interface AgentSpeakPayload {
   conversation_id?: string;
 }
 
+/** Coordinates are in pixels (tile * 32). WorldManager.findPath() accepts pixels directly. */
 export interface AgentMovePayload {
   agent_id: string;
   from: { x: number; y: number };

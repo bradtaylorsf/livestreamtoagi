@@ -82,6 +82,10 @@ export class SpeechBubble {
     return this._dismissed;
   }
 
+  get text(): string {
+    return this.fullText;
+  }
+
   getElement(): HTMLDivElement {
     return this.element;
   }
