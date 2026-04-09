@@ -222,6 +222,10 @@ export class MainScene extends Phaser.Scene {
     this.streamOverlay = null;
     this.audioManager?.destroy();
     this.audioManager = null;
+    this.agentSpriteManager?.destroy();
+    this.agentSpriteManager = null;
+    this.worldManager?.destroy();
+    this.worldManager = null;
     this.wsClient?.disconnect();
     this.wsClient = null;
   }

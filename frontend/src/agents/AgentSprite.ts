@@ -10,14 +10,6 @@ export type AnimationName =
   | "thinking"
   | "building";
 
-export type AlphaAnimationName =
-  | "idle"
-  | "running"
-  | "carrying"
-  | "confused"
-  | "celebrate"
-  | "sleeping";
-
 export type StatusType = "thinking" | "speaking" | "building" | "idle";
 
 const STATUS_ICONS: Record<StatusType, string> = {
