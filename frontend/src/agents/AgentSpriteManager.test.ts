@@ -70,6 +70,9 @@ function createMockScene() {
         centerY: 300,
       },
     },
+    anims: {
+      exists: vi.fn(() => false),
+    },
   };
 }
 

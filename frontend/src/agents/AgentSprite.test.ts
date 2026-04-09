@@ -60,6 +60,9 @@ function createMockScene() {
         destroy: vi.fn(),
       })),
     },
+    anims: {
+      exists: vi.fn(() => false),
+    },
   };
 }
 

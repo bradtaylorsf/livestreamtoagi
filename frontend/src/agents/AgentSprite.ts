@@ -200,7 +200,7 @@ export class AgentSprite {
   playAnimation(name: string): void {
     this.currentAnimation = name;
     const animKey = `${this.agentId}_${name}`;
-    if (this.sprite.anims?.exists?.(animKey)) {
+    if (this.scene.anims.exists(animKey)) {
       this.sprite.play(animKey);
     } else {
       // Set frame directly if animation not loaded

@@ -38,17 +38,172 @@ const IDLE_FRAME_COUNT = 4;
 const WALK_FRAME_COUNT = 6;
 
 /** Shared furniture not tied to any agent workspace. */
+// Continuous brick wall across north side of each room row.
+// Base: solid brick tiles spanning full width. Decorations layered on top.
+// Windows only on exterior wall (row 0). Interior walls (row 11, 17) get decor only.
+const WALL_TILES: Array<{ key: string; x: number; y: number }> = [];
+
+// Helper: fill a row range with brick, then overlay decorations.
+// doorways: columns to skip (2-tile wide openings for walkways)
+// Adds corner tiles at wall ends and doorway edges.
+function addWallRow(
+  row: number,
+  colStart: number,
+  colEnd: number,
+  decorations: Array<{ col: number; key: string }>,
+  doorways: number[] = [],
+) {
+  // Build sets: columns to skip (doorway) and columns that get corner tiles
+  const skip = new Set<number>();
+  const cornerCols = new Map<number, string>(); // col → corner key
+  for (const d of doorways) {
+    skip.add(d);
+    skip.add(d + 1);
+    // Corners replace the brick tiles adjacent to the gap
+    cornerCols.set(d - 1, "wall_corner_right"); // end of left segment
+    cornerCols.set(d + 2, "wall_corner_left");  // start of right segment
+  }
+  // Outer corners
+  cornerCols.set(colStart - 1, "wall_corner_left");
+  cornerCols.set(colEnd + 1, "wall_corner_right");
+
+  // Place outer corners
+  WALL_TILES.push({ key: "wall_corner_left", x: (colStart - 1) * 32, y: row * 32 });
+  WALL_TILES.push({ key: "wall_corner_right", x: (colEnd + 1) * 32, y: row * 32 });
+
+  // Base brick across range, replacing doorway-adjacent tiles with corners
+  for (let c = colStart; c <= colEnd; c++) {
+    if (skip.has(c)) continue;
+    if (cornerCols.has(c)) {
+      WALL_TILES.push({ key: cornerCols.get(c)!, x: c * 32, y: row * 32 });
+    } else {
+      WALL_TILES.push({ key: "wall_brick", x: c * 32, y: row * 32 });
+    }
+  }
+  // Decorations on top of brick positions (skip doorways and corners)
+  for (const d of decorations) {
+    if (skip.has(d.col) || cornerCols.has(d.col)) continue;
+    WALL_TILES.push({ key: d.key, x: d.col * 32, y: row * 32 });
+  }
+}
+
+// ── EXTERIOR north wall (row 0, cols 1-38) — windows allowed ──
+addWallRow(0, 1, 38, [
+  // Vera's Office (cols 1-9)
+  { col: 2, key: "wall_window" },
+  { col: 4, key: "wall_bookshelf" },
+  { col: 5, key: "wall_bookshelf2" },
+  { col: 7, key: "wall_window2" },
+  // Kitchen (cols 10-20)
+  { col: 11, key: "wall_cabinet" },
+  { col: 12, key: "wall_cabinet" },
+  { col: 14, key: "wall_window" },
+  { col: 17, key: "wall_window2" },
+  { col: 18, key: "wall_cabinet" },
+  { col: 19, key: "wall_cabinet" },
+  // Dev Bay (cols 21-38)
+  { col: 22, key: "wall_window" },
+  { col: 24, key: "wall_bookshelf" },
+  { col: 25, key: "wall_whiteboard" },
+  { col: 28, key: "wall_window2" },
+  { col: 30, key: "wall_whiteboard" },
+  { col: 31, key: "wall_bookshelf2" },
+  { col: 33, key: "wall_window" },
+  { col: 35, key: "wall_bookshelf" },
+  { col: 37, key: "wall_window2" },
+]);
+
+// ── INTERIOR wall (row 11, cols 1-38) — no windows, doorways between N/S ──
+// Doorways at: col 5 (Vera↔Rex), col 15 (Kitchen↔Aurora), col 25 (DevBay↔Grok), col 34 (DevBay↔Meeting)
+addWallRow(11, 1, 38, [
+  // Rex's Workshop (cols 1-9)
+  { col: 1, key: "wall_pegboard" },
+  { col: 2, key: "wall_pegboard" },
+  { col: 4, key: "wall_bookshelf" },
+  { col: 7, key: "wall_pegboard" },
+  { col: 8, key: "wall_bookshelf2" },
+  // Aurora's Studio (cols 10-20)
+  { col: 11, key: "wall_bookshelf" },
+  { col: 13, key: "wall_whiteboard" },
+  { col: 14, key: "wall_bookshelf2" },
+  { col: 18, key: "wall_bookshelf" },
+  // Grok's Den (cols 21-30)
+  { col: 23, key: "wall_bookshelf" },
+  { col: 24, key: "wall_bookshelf2" },
+  { col: 27, key: "wall_whiteboard" },
+  { col: 29, key: "wall_bookshelf" },
+  // Meeting Area (cols 31-38)
+  { col: 32, key: "wall_whiteboard" },
+  { col: 33, key: "wall_whiteboard" },
+  { col: 38, key: "wall_bookshelf" },
+], [5, 15, 25, 34]);
+
+// ── INTERIOR wall (row 17, cols 32-38) — Alpha/Management, doorway at col 34 ──
+addWallRow(17, 32, 38, [
+  { col: 33, key: "wall_bookshelf" },
+  { col: 36, key: "wall_bookshelf2" },
+], [34]);
+
+// ── Side wall tiles (thin brick edge along left/right room walls) ──
+// Helper: add side tiles for a column, skipping doorway rows
+function addSideCol(col: number, rowStart: number, rowEnd: number, key: string, skipRows: number[] = []) {
+  const skip = new Set(skipRows);
+  for (let r = rowStart; r <= rowEnd; r++) {
+    if (skip.has(r)) continue;
+    WALL_TILES.push({ key, x: col * 32, y: r * 32 });
+  }
+}
+
+// ── Top rooms (rows 1-10) ──
+// Vera (cols 0-9, hardwood floor)
+addSideCol(0, 1, 10, "side_left_hardwood");                    // left exterior wall
+addSideCol(9, 1, 10, "side_right_hardwood", [4, 5]);           // right wall, doorway rows 4-5
+// Kitchen (cols 10-20, whitetile floor)
+addSideCol(10, 1, 10, "side_left_whitetile", [4, 5]);          // left wall, doorway rows 4-5
+addSideCol(20, 1, 10, "side_right_whitetile", [4, 5]);         // right wall, doorway rows 4-5
+// Dev Bay (cols 21-39, bluegrey floor)
+addSideCol(21, 1, 10, "side_left_bluegrey", [4, 5]);           // left wall, doorway rows 4-5
+addSideCol(39, 1, 10, "side_right_bluegrey");                   // right exterior wall
+
+// ── Bottom rooms (rows 12-20) ──
+// Rex (cols 0-9, concrete floor)
+addSideCol(0, 12, 20, "side_left_concrete", [15, 16]);        // left exterior, skip exterior door
+addSideCol(9, 12, 20, "side_right_concrete", [15, 16]);       // right wall, doorway rows 15-16
+// Aurora (cols 10-20, teal floor)
+addSideCol(10, 12, 20, "side_left_teal", [15, 16]);           // left wall, doorway rows 15-16
+addSideCol(20, 12, 20, "side_right_teal", [15, 16]);          // right wall, doorway rows 15-16
+// Grok (cols 21-30, purple floor)
+addSideCol(21, 12, 20, "side_left_purple", [15, 16]);         // left wall, doorway rows 15-16
+addSideCol(30, 12, 20, "side_right_purple", [15, 16]);        // right wall, doorway rows 15-16
+// Meeting (cols 31-39, bluegrey floor, rows 12-16)
+addSideCol(31, 12, 16, "side_left_bluegrey", [13, 14]);       // left wall, doorway rows 13-14
+addSideCol(39, 12, 16, "side_right_bluegrey", [13, 14]);      // right exterior, skip exterior door
+// Alpha/Management (cols 31-39, olive floor, rows 18-20)
+addSideCol(31, 18, 20, "side_left_olive");                     // left wall
+addSideCol(39, 18, 20, "side_right_olive");                    // right exterior wall
+
+// Freestanding furniture (not against walls)
 const SHARED_FURNITURE: Array<{ key: string; x: number; y: number }> = [
-  { key: "rug", x: 16 * 32, y: 7 * 32 },
-  { key: "meeting_table", x: 15 * 32, y: 7 * 32 },
-  { key: "workshop_bench", x: 15 * 32, y: 13 * 32 },
-  { key: "coffee_machine", x: 19 * 32, y: 2 * 32 },
-  { key: "bookshelf", x: 35 * 32, y: 12 * 32 },
-  { key: "whiteboard", x: 33 * 32, y: 17 * 32 },
-  { key: "plant", x: 1 * 32, y: 1 * 32 },
-  { key: "plant", x: 38 * 32, y: 1 * 32 },
+  // Kitchen area
+  { key: "coffee_machine", x: 15 * 32, y: 2 * 32 },
+  // Meeting area
+  { key: "rug", x: 34 * 32, y: 13 * 32 },
+  { key: "meeting_table", x: 34 * 32, y: 12 * 32 },
+  // Dev Bay
+  { key: "workshop_bench", x: 28 * 32, y: 6 * 32 },
+  // Rex's Workshop — plants
   { key: "plant", x: 1 * 32, y: 20 * 32 },
-  { key: "plant", x: 38 * 32, y: 20 * 32 },
+  { key: "plant", x: 8 * 32, y: 20 * 32 },
+  // Vera's Office — plant
+  { key: "plant", x: 8 * 32, y: 9 * 32 },
+  // Kitchen — plant
+  { key: "plant", x: 19 * 32, y: 9 * 32 },
+  // Aurora's Studio — plants
+  { key: "plant", x: 11 * 32, y: 20 * 32 },
+  { key: "plant", x: 19 * 32, y: 20 * 32 },
+  // Grok's Den — plants
+  { key: "plant", x: 22 * 32, y: 20 * 32 },
+  { key: "plant", x: 29 * 32, y: 20 * 32 },
 ];
 
 export class MainScene extends Phaser.Scene {
@@ -79,11 +234,24 @@ export class MainScene extends Phaser.Scene {
       console.warn(`Skipping missing asset: ${file.key}`);
     });
 
-    // ── Tileset spritesheet + tilemap JSON ────────────────────────
-    this.load.spritesheet("office_tiles", "assets/tilesets/office/tileset.png", {
-      frameWidth: TILE_SIZE,
-      frameHeight: TILE_SIZE,
-    });
+    // ── Tileset spritesheets + tilemap JSON ─────────────────────────
+    // Each room type has its own 128x128 Wang tileset (wall↔floor transitions)
+    const tilesetImages: Array<[string, string]> = [
+      ["tileset",           "assets/tilesets/office/tileset.png"],
+      ["tileset_hardwood",  "assets/tilesets/office/tileset_hardwood.png"],
+      ["tileset_whitetile", "assets/tilesets/office/tileset_whitetile.png"],
+      ["tileset_teal",      "assets/tilesets/office/tileset_teal.png"],
+      ["tileset_purple",    "assets/tilesets/office/tileset_purple.png"],
+      ["tileset_bluegrey",  "assets/tilesets/office/tileset_bluegrey.png"],
+      ["tileset_concrete",  "assets/tilesets/office/tileset_concrete.png"],
+      ["tileset_olive",     "assets/tilesets/office/tileset_olive.png"],
+    ];
+    for (const [key, path] of tilesetImages) {
+      this.load.spritesheet(key, path, {
+        frameWidth: TILE_SIZE,
+        frameHeight: TILE_SIZE,
+      });
+    }
     this.load.tilemapTiledJSON("tilemap_office", "assets/tilesets/office/tilemap_office.json");
 
     // ── Agent rotation sprites (default facing south) ───────────
@@ -128,6 +296,9 @@ export class MainScene extends Phaser.Scene {
     // ── Furniture object images ─────────────────────────────────
     // Collect all unique furniture keys from shared furniture and workspace definitions
     const furnitureKeys = new Set<string>();
+    for (const item of WALL_TILES) {
+      furnitureKeys.add(item.key);
+    }
     for (const item of SHARED_FURNITURE) {
       furnitureKeys.add(item.key);
     }
@@ -160,6 +331,9 @@ export class MainScene extends Phaser.Scene {
 
     // ── Furniture catalog (JSON-driven manifests) ───────────────
     this.furnitureCatalog = FurnitureCatalog.fromArray(furnitureManifestsData as any);
+
+    // ── Draw thin interior walls between rooms ───────────────────
+    this.drawInteriorWalls();
 
     // ── Place furniture sprites on top of tiles ─────────────────
     this.placeFurniture();
@@ -358,11 +532,117 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
+   * Draw thin interior walls between rooms using Phaser Graphics.
+   * Walls are 6px wide dark lines — much thinner than tile-based walls.
+   */
+  private drawInteriorWalls(): void {
+    const WALL_COLOR = 0x2a2a3a;
+    const WALL_WIDTH = 6;
+    const T = TILE_SIZE; // 32
+
+    const walls = this.add.graphics();
+    walls.setDepth(1); // above floor tiles, below furniture/agents
+
+    walls.fillStyle(WALL_COLOR, 1);
+
+    // Horizontal wall between top row and bottom row — doorway gaps match brick wall
+    // Gaps at: cols 5-6 (Vera↔Rex), 15-16 (Kitchen↔Aurora), 25-26 (DevBay↔Grok), 34-35 (DevBay↔Meeting)
+    const hGaps = [5, 15, 25, 34]; // gap starts (2 tiles wide each)
+    let hx = 0;
+    for (const gapStart of hGaps) {
+      const segW = gapStart * T - hx;
+      if (segW > 0) walls.fillRect(hx, 11 * T - WALL_WIDTH / 2, segW, WALL_WIDTH);
+      hx = (gapStart + 2) * T;
+    }
+    if (hx < 40 * T) walls.fillRect(hx, 11 * T - WALL_WIDTH / 2, 40 * T - hx, WALL_WIDTH);
+
+    // Vertical walls — top row with doorway gaps at rows 4-5
+    walls.fillRect(10 * T - WALL_WIDTH / 2, 0, WALL_WIDTH, 4 * T);         // Vera | Kitchen top
+    walls.fillRect(10 * T - WALL_WIDTH / 2, 6 * T, WALL_WIDTH, 5 * T);     // Vera | Kitchen bottom
+    walls.fillRect(21 * T - WALL_WIDTH / 2, 0, WALL_WIDTH, 4 * T);         // Kitchen | Dev Bay top
+    walls.fillRect(21 * T - WALL_WIDTH / 2, 6 * T, WALL_WIDTH, 5 * T);     // Kitchen | Dev Bay bottom
+
+    // Vertical walls — bottom row with doorway gaps at rows 15-16
+    walls.fillRect(10 * T - WALL_WIDTH / 2, 11 * T, WALL_WIDTH, 4 * T);    // Rex | Aurora top
+    walls.fillRect(10 * T - WALL_WIDTH / 2, 17 * T, WALL_WIDTH, 5 * T);    // Rex | Aurora bottom
+    walls.fillRect(21 * T - WALL_WIDTH / 2, 11 * T, WALL_WIDTH, 4 * T);    // Aurora | Grok top
+    walls.fillRect(21 * T - WALL_WIDTH / 2, 17 * T, WALL_WIDTH, 5 * T);    // Aurora | Grok bottom
+    walls.fillRect(31 * T - WALL_WIDTH / 2, 11 * T, WALL_WIDTH, 2 * T);    // Grok | Meeting top
+    walls.fillRect(31 * T - WALL_WIDTH / 2, 15 * T, WALL_WIDTH, 2 * T);    // Grok | Meeting bottom
+    walls.fillRect(31 * T - WALL_WIDTH / 2, 19 * T, WALL_WIDTH, 3 * T);    // Alpha right wall
+
+    // Horizontal wall between Meeting and Alpha — with doorway gap at cols 34-35
+    walls.fillRect(31 * T, 17 * T - WALL_WIDTH / 2, 3 * T, WALL_WIDTH);
+    walls.fillRect(36 * T, 17 * T - WALL_WIDTH / 2, 4 * T, WALL_WIDTH);
+  }
+
+  /**
    * Place furniture objects as sprites on top of the tile layer.
    * Creates FurnitureInstance objects for manifest-backed items (enabling state changes),
    * and falls back to raw sprites for shared furniture without manifests.
    */
   private placeFurniture(): void {
+    // Draw solid background strips behind wall tiles to eliminate sub-pixel gaps.
+    const wallBg = this.add.graphics();
+    wallBg.setDepth(0.5); // above floor, below wall tiles
+    wallBg.fillStyle(0x733c26, 1); // matches average brick tile color
+    const T = TILE_SIZE;
+
+    // ── Horizontal wall backgrounds ──
+    // Row 0: continuous exterior wall
+    wallBg.fillRect(1 * T, 0, 38 * T, T);
+    // Row 11: interior wall with doorway gaps at cols 5-6, 15-16, 25-26, 34-35
+    wallBg.fillRect(1 * T, 11 * T, 4 * T, T);    // cols 1-4
+    wallBg.fillRect(7 * T, 11 * T, 8 * T, T);    // cols 7-14
+    wallBg.fillRect(17 * T, 11 * T, 8 * T, T);   // cols 17-24
+    wallBg.fillRect(27 * T, 11 * T, 7 * T, T);   // cols 27-33
+    wallBg.fillRect(36 * T, 11 * T, 3 * T, T);   // cols 36-38
+    // Row 17: Alpha wall with doorway gap at cols 34-35
+    wallBg.fillRect(32 * T, 17 * T, 2 * T, T);   // cols 32-33
+    wallBg.fillRect(36 * T, 17 * T, 3 * T, T);   // cols 36-38
+
+    // ── Vertical side wall backgrounds (6px wide strips, split at doorways) ──
+    const STRIP = 6;
+    // Top rooms (rows 1-10), doorway gap at rows 4-5 on interior walls
+    wallBg.fillRect(0, 1 * T, STRIP, 10 * T);                           // col 0 left (no doorway)
+    wallBg.fillRect(10 * T - STRIP, 1 * T, STRIP, 3 * T);              // col 9 right top (rows 1-3)
+    wallBg.fillRect(10 * T - STRIP, 6 * T, STRIP, 5 * T);              // col 9 right bottom (rows 6-10)
+    wallBg.fillRect(10 * T, 1 * T, STRIP, 3 * T);                       // col 10 left top
+    wallBg.fillRect(10 * T, 6 * T, STRIP, 5 * T);                       // col 10 left bottom
+    wallBg.fillRect(21 * T - STRIP, 1 * T, STRIP, 3 * T);              // col 20 right top
+    wallBg.fillRect(21 * T - STRIP, 6 * T, STRIP, 5 * T);              // col 20 right bottom
+    wallBg.fillRect(21 * T, 1 * T, STRIP, 3 * T);                       // col 21 left top
+    wallBg.fillRect(21 * T, 6 * T, STRIP, 5 * T);                       // col 21 left bottom
+    wallBg.fillRect(40 * T - STRIP, 1 * T, STRIP, 10 * T);             // col 39 right (no doorway)
+    // Bottom rooms (rows 12-20), doorway gap at rows 15-16 on most walls
+    wallBg.fillRect(0, 12 * T, STRIP, 3 * T);                           // col 0 left top (rows 12-14)
+    wallBg.fillRect(0, 17 * T, STRIP, 4 * T);                           // col 0 left bottom (rows 17-20)
+    wallBg.fillRect(10 * T - STRIP, 12 * T, STRIP, 3 * T);             // col 9 right top
+    wallBg.fillRect(10 * T - STRIP, 17 * T, STRIP, 4 * T);             // col 9 right bottom
+    wallBg.fillRect(10 * T, 12 * T, STRIP, 3 * T);                      // col 10 left top
+    wallBg.fillRect(10 * T, 17 * T, STRIP, 4 * T);                      // col 10 left bottom
+    wallBg.fillRect(21 * T - STRIP, 12 * T, STRIP, 3 * T);             // col 20 right top
+    wallBg.fillRect(21 * T - STRIP, 17 * T, STRIP, 4 * T);             // col 20 right bottom
+    wallBg.fillRect(21 * T, 12 * T, STRIP, 3 * T);                      // col 21 left top
+    wallBg.fillRect(21 * T, 17 * T, STRIP, 4 * T);                      // col 21 left bottom
+    wallBg.fillRect(31 * T - STRIP, 12 * T, STRIP, 3 * T);             // col 30 right top
+    wallBg.fillRect(31 * T - STRIP, 17 * T, STRIP, 4 * T);             // col 30 right bottom
+    wallBg.fillRect(31 * T, 12 * T, STRIP, 1 * T);                      // col 31 left (row 12)
+    wallBg.fillRect(31 * T, 15 * T, STRIP, 2 * T);                      // col 31 left (rows 15-16)
+    wallBg.fillRect(31 * T, 19 * T, STRIP, 2 * T);                      // col 31 left (rows 19-20)
+    wallBg.fillRect(40 * T - STRIP, 12 * T, STRIP, 1 * T);             // col 39 right (row 12)
+    wallBg.fillRect(40 * T - STRIP, 15 * T, STRIP, 2 * T);             // col 39 right (rows 15-16)
+    wallBg.fillRect(40 * T - STRIP, 18 * T, STRIP, 3 * T);             // col 39 right (rows 18-20)
+
+    // Place wall-face tiles (grid-snapped, north wall row of each room)
+    for (const item of WALL_TILES) {
+      if (this.textures.exists(item.key)) {
+        const sprite = this.add.image(item.x, item.y, item.key);
+        sprite.setOrigin(0, 0);
+        sprite.setDepth(1);
+      }
+    }
+
     // Place shared furniture
     for (const item of SHARED_FURNITURE) {
       const manifest = this.furnitureCatalog?.getManifest(item.key.toUpperCase());

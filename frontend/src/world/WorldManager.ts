@@ -49,7 +49,7 @@ export class WorldManager {
 
     // Find collision layer
     for (const layer of chunk.layers) {
-      if (layer.layer.name === "collision") {
+      if (layer.layer.name.toLowerCase() === "collision") {
         this.collisionLayer = layer;
         // Mark any non-zero tile as colliding
         layer.setCollisionByExclusion([-1, 0]);
@@ -67,10 +67,19 @@ export class WorldManager {
       );
     }
 
-    // Load areas from tilemap JSON cache
+    // Load areas from tilemap JSON cache (top-level or Tiled properties)
     const cacheEntry = this.scene.cache.tilemap.get("tilemap_office");
     if (cacheEntry?.data?.areas) {
       this.areas = cacheEntry.data.areas as TilemapAreas;
+    } else if (cacheEntry?.data?.properties) {
+      const areasProp = (cacheEntry.data.properties as any[]).find(
+        (p: any) => p.name === "areas",
+      );
+      if (areasProp?.value) {
+        this.areas = typeof areasProp.value === "string"
+          ? JSON.parse(areasProp.value)
+          : areasProp.value;
+      }
     }
 
     // Configure camera — zoom to fit entire office in viewport with padding

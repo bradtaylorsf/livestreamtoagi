@@ -18,6 +18,15 @@ export interface WorkspaceDefinition {
 /**
  * Per-agent workspace definitions. Each agent gets a named area in the tilemap
  * and a list of personality-reflecting furniture items placed relative to that area.
+ *
+ * Room assignments:
+ *   Top-left:  Vera's Office (hardwood)
+ *   Top-mid:   Kitchen (white tile) — shared
+ *   Top-right: Dev Bay (blue-grey) — Sentinel, Fork, Pixel sub-zones
+ *   Bot-left:  Rex's Workshop (hardwood)
+ *   Bot-mid:   Aurora's Studio (teal)
+ *   Bot-mid2:  Grok's Space (purple)
+ *   Bot-right: Meeting + Alpha/Management (blue-grey)
  */
 export const WORKSPACE_DEFINITIONS: Record<string, WorkspaceDefinition> = {
   vera: {
