@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { WorldManager } from "../world/WorldManager";
 import { WorkspaceManager } from "../world/WorkspaceManager";
+import { FurnitureCatalog, FurnitureInstance } from "../world/furniture";
 import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
@@ -9,6 +10,7 @@ import { AudioManager } from "../audio/AudioManager";
 import { BehaviorScheduler } from "../agents/BehaviorScheduler";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
+import furnitureManifestsData from "../world/furniture/furniture-manifests.json";
 
 const TILE_SIZE = 32;
 
@@ -51,6 +53,10 @@ const SHARED_FURNITURE: Array<{ key: string; x: number; y: number }> = [
 export class MainScene extends Phaser.Scene {
   private worldManager: WorldManager | null = null;
   private workspaceManager: WorkspaceManager | null = null;
+  private furnitureCatalog: FurnitureCatalog | null = null;
+  private furnitureInstances: Map<string, FurnitureInstance> = new Map();
+  /** Furniture instances grouped by agent workspace (agentId → instances). */
+  private workspaceFurniture: Map<string, FurnitureInstance[]> = new Map();
   private agentSpriteManager: AgentSpriteManager | null = null;
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
@@ -122,8 +128,12 @@ export class MainScene extends Phaser.Scene {
     for (const item of SHARED_FURNITURE) {
       furnitureKeys.add(item.key);
     }
-    // Add workspace personality furniture keys
     for (const key of WorkspaceManager.getAllFurnitureKeys()) {
+      furnitureKeys.add(key);
+    }
+    // Add state texture keys from furniture manifests (e.g. monitor_on, monitor_off)
+    const tempCatalog = FurnitureCatalog.fromArray(furnitureManifestsData as any);
+    for (const key of tempCatalog.getAllTextureKeys()) {
       furnitureKeys.add(key);
     }
     for (const item of furnitureKeys) {
@@ -144,6 +154,9 @@ export class MainScene extends Phaser.Scene {
 
     // ── Workspace manager (agent desk areas) ────────────────────
     this.workspaceManager = new WorkspaceManager(this.worldManager);
+
+    // ── Furniture catalog (JSON-driven manifests) ───────────────
+    this.furnitureCatalog = FurnitureCatalog.fromArray(furnitureManifestsData as any);
 
     // ── Place furniture sprites on top of tiles ─────────────────
     this.placeFurniture();
@@ -244,6 +257,12 @@ export class MainScene extends Phaser.Scene {
     this.behaviorScheduler = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
+    for (const instance of this.furnitureInstances.values()) {
+      instance.destroy();
+    }
+    this.furnitureInstances.clear();
+    this.workspaceFurniture.clear();
+    this.furnitureCatalog = null;
     this.workspaceManager = null;
     this.worldManager?.destroy();
     this.worldManager = null;
@@ -326,27 +345,60 @@ export class MainScene extends Phaser.Scene {
 
   /**
    * Place furniture objects as sprites on top of the tile layer.
-   * Includes shared furniture and per-agent workspace personality items.
+   * Creates FurnitureInstance objects for manifest-backed items (enabling state changes),
+   * and falls back to raw sprites for shared furniture without manifests.
    */
   private placeFurniture(): void {
-    // Place shared furniture (not tied to any agent)
+    // Place shared furniture
     for (const item of SHARED_FURNITURE) {
-      const sprite = this.add.image(item.x, item.y, item.key);
-      sprite.setOrigin(0, 0);
-      sprite.setDepth(1);
+      const manifest = this.furnitureCatalog?.getManifest(item.key.toUpperCase());
+      if (manifest && this.textures.exists(this.getFurnitureTextureKey(manifest))) {
+        const instanceKey = `shared_${item.key}_${item.x}_${item.y}`;
+        const instance = new FurnitureInstance(this, manifest, item.x, item.y);
+        this.furnitureInstances.set(instanceKey, instance);
+      } else if (this.textures.exists(item.key)) {
+        const sprite = this.add.image(item.x, item.y, item.key);
+        sprite.setOrigin(0, 0);
+        sprite.setDepth(1);
+      }
     }
 
     // Place per-agent workspace furniture
     if (this.workspaceManager) {
       for (const agent of AGENTS) {
         const items = this.workspaceManager.getWorkspaceFurniture(agent.id);
+        const agentInstances: FurnitureInstance[] = [];
+
         for (const item of items) {
-          if (!this.textures.exists(item.key)) continue;
-          const sprite = this.add.image(item.x, item.y, item.key);
-          sprite.setOrigin(0, 0);
-          sprite.setDepth(1);
+          const manifest = this.furnitureCatalog?.getManifest(item.key.toUpperCase());
+          if (manifest && this.textures.exists(this.getFurnitureTextureKey(manifest))) {
+            const instanceKey = `${agent.id}_${item.key}_${item.x}_${item.y}`;
+            const instance = new FurnitureInstance(this, manifest, item.x, item.y);
+            this.furnitureInstances.set(instanceKey, instance);
+            agentInstances.push(instance);
+          } else if (this.textures.exists(item.key)) {
+            const sprite = this.add.image(item.x, item.y, item.key);
+            sprite.setOrigin(0, 0);
+            sprite.setDepth(1);
+          }
+        }
+
+        if (agentInstances.length > 0) {
+          this.workspaceFurniture.set(agent.id, agentInstances);
         }
       }
     }
+  }
+
+  /**
+   * Resolve the initial texture key for a furniture manifest.
+   */
+  private getFurnitureTextureKey(manifest: import("../world/furniture").FurnitureManifest): string {
+    if (manifest.states) {
+      if (manifest.states["off"]) return manifest.states["off"];
+      const firstKey = Object.values(manifest.states)[0];
+      if (firstKey) return firstKey;
+    }
+    return manifest.id.toLowerCase();
   }
 }
