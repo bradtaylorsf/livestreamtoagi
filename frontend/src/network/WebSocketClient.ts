@@ -14,6 +14,13 @@ export class WebSocketClient {
   private shouldReconnect = false;
   private backoffMs = INITIAL_BACKOFF_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Timestamp of the last event dispatched to subscribers (seconds, matches backend). */
+  private lastEventTimestamp = 0;
+
+  /** Called when the WebSocket connection opens. */
+  onConnect: (() => void) | null = null;
+  /** Called when the WebSocket connection closes (before reconnect scheduling). */
+  onDisconnect: (() => void) | null = null;
 
   constructor(url: string = DEFAULT_URL) {
     this.url = url;
@@ -65,10 +72,16 @@ export class WebSocketClient {
       try {
         const parsed = JSON.parse(event.data);
 
-        // Handle history batch from backend
+        // Handle history batch from backend.
+        // On reconnect the backend replays its full buffer; we skip any events
+        // already seen (timestamp <= lastEventTimestamp) to avoid duplicates.
         if (parsed.type === "history" && Array.isArray(parsed.events)) {
+          const cutoff = this.lastEventTimestamp;
           for (const evt of parsed.events) {
-            this._dispatch(evt as ServerEvent);
+            const e = evt as ServerEvent;
+            if (e.timestamp > cutoff) {
+              this._dispatch(e);
+            }
           }
           return;
         }
@@ -81,10 +94,12 @@ export class WebSocketClient {
 
     this.ws.onopen = () => {
       this.backoffMs = INITIAL_BACKOFF_MS;
+      this.onConnect?.();
     };
 
     this.ws.onclose = () => {
       this.ws = null;
+      this.onDisconnect?.();
       this._scheduleReconnect();
     };
 
@@ -94,6 +109,9 @@ export class WebSocketClient {
   }
 
   private _dispatch(event: ServerEvent): void {
+    if (event.timestamp > this.lastEventTimestamp) {
+      this.lastEventTimestamp = event.timestamp;
+    }
     for (const cb of this.callbacks) {
       cb(event);
     }

@@ -1,0 +1,9 @@
+id: captured-048-implement-stream-overlay-ui-budget-ticke
+description: Implement stream overlay UI — budget ticker, AGI progress, viewer
+  count, topic display
+tags: []
+source: auto-captured
+captured_from:
+  issue: 48
+  session: session/layer-8-phaser-js-frontend
+  date: 2026-04-09

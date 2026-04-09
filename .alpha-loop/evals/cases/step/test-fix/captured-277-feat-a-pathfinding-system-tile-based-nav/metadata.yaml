@@ -1,0 +1,8 @@
+id: captured-277-feat-a-pathfinding-system-tile-based-nav
+description: "feat: A* pathfinding system — tile-based navigation using collision layer"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 277
+  session: session/layer-8-phaser-js-frontend
+  date: 2026-04-09

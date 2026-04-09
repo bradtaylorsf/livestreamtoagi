@@ -133,6 +133,49 @@ describe("WebSocketClient", () => {
     client.disconnect();
   });
 
+  it("deduplicates history on reconnect — skips events already seen", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const received: ServerEvent[] = [];
+    client.onEvent((e) => received.push(e));
+
+    // First connection: receive two live events
+    client.connect();
+    MockWebSocket.instances[0].simulateOpen();
+    MockWebSocket.instances[0].simulateMessage({
+      event_id: "1",
+      event_type: EventType.BUDGET_UPDATE,
+      timestamp: 1000,
+      data: { total_spent: 1.0 },
+    });
+    MockWebSocket.instances[0].simulateMessage({
+      event_id: "2",
+      event_type: EventType.VIEWER_COUNT,
+      timestamp: 1001,
+      data: { count: 10 },
+    });
+    expect(received).toHaveLength(2);
+
+    // Connection drops and reconnects
+    MockWebSocket.instances[0].simulateClose();
+    vi.advanceTimersByTime(1000);
+    MockWebSocket.instances[1].simulateOpen();
+
+    // Backend replays its buffer: events 1 & 2 (already seen) + event 3 (new)
+    MockWebSocket.instances[1].simulateMessage({
+      type: "history",
+      events: [
+        { event_id: "1", event_type: EventType.BUDGET_UPDATE, timestamp: 1000, data: { total_spent: 1.0 } },
+        { event_id: "2", event_type: EventType.VIEWER_COUNT,  timestamp: 1001, data: { count: 10 } },
+        { event_id: "3", event_type: EventType.AGENT_SPEAK,   timestamp: 1002, data: { agent_id: "vera", text: "hi" } },
+      ],
+    });
+
+    // Only event 3 should be dispatched — events 1 & 2 are filtered out
+    expect(received).toHaveLength(3);
+    expect(received[2].event_id).toBe("3");
+    client.disconnect();
+  });
+
   it("unsubscribes callback when dispose function is called", () => {
     const client = new WebSocketClient("ws://test:8000/ws");
     const received: ServerEvent[] = [];
@@ -238,5 +281,52 @@ describe("WebSocketClient reconnection", () => {
     // Even after waiting, no new connection
     vi.advanceTimersByTime(60000);
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("WebSocketClient lifecycle callbacks", () => {
+  it("fires onConnect when connection opens", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const onConnect = vi.fn();
+    client.onConnect = onConnect;
+
+    client.connect();
+    expect(onConnect).not.toHaveBeenCalled();
+
+    MockWebSocket.instances[0].simulateOpen();
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    client.disconnect();
+  });
+
+  it("fires onDisconnect when connection closes", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const onDisconnect = vi.fn();
+    client.onDisconnect = onDisconnect;
+
+    client.connect();
+    MockWebSocket.instances[0].simulateOpen();
+    expect(onDisconnect).not.toHaveBeenCalled();
+
+    MockWebSocket.instances[0].simulateClose();
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+    client.disconnect();
+  });
+
+  it("fires onDisconnect before scheduling reconnect", () => {
+    const client = new WebSocketClient("ws://test:8000/ws");
+    const callOrder: string[] = [];
+    client.onDisconnect = () => callOrder.push("disconnect");
+
+    client.connect();
+    MockWebSocket.instances[0].simulateOpen();
+    MockWebSocket.instances[0].simulateClose();
+
+    // onDisconnect fires, then reconnect is scheduled (not immediate)
+    expect(callOrder).toEqual(["disconnect"]);
+    expect(MockWebSocket.instances).toHaveLength(1); // reconnect not yet
+
+    vi.advanceTimersByTime(1000);
+    expect(MockWebSocket.instances).toHaveLength(2); // now reconnected
+    client.disconnect();
   });
 });

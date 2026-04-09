@@ -312,7 +312,7 @@ class TestShutdown:
 
 
 class TestEventTypeEnum:
-    """EventType enum covers all 14 required types."""
+    """EventType enum covers all required types."""
 
     def test_all_event_types_present(self) -> None:
         expected = {
@@ -325,6 +325,7 @@ class TestEventTypeEnum:
             "tts_play", "tool_executed", "config_reloaded",
             "artifact_created",
             "conversation_productivity",
+            "agi_progress",
         }
         actual = {e.value for e in EventType}
         assert actual == expected

@@ -1,0 +1,9 @@
+id: captured-276-feat-wire-websocket-connection-in-mainsc
+description: "feat: wire WebSocket connection in MainScene — connect frontend to
+  backend event bus"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 276
+  session: session/layer-8-phaser-js-frontend
+  date: 2026-04-09

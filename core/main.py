@@ -2,9 +2,11 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
 from core.admin_routes import router as admin_router
@@ -19,10 +21,13 @@ HEALTH_CHECK_TIMEOUT = 5.0  # seconds per check
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from core.idle_behavior import IdleBehaviorSystem
     from core.memory.reflection import ReflectionManager
     from core.tts import TTSPipeline
 
     tts_pipeline = TTSPipeline()
+    idle_behavior: IdleBehaviorSystem | None = None
+    svc: Services | None = None
 
     svc = None
     try:
@@ -59,16 +64,22 @@ async def lifespan(app: FastAPI):
         if api_key:
             start_scheduler(reflection_mgr, svc.agent_registry)
 
+        idle_behavior = IdleBehaviorSystem(svc.agent_registry)
+        idle_behavior.start()
+
         app.mount("/audio", StaticFiles(directory=str(tts_pipeline.audio_dir)), name="audio")
         app.state.tts_pipeline = tts_pipeline
 
         yield
     finally:
+        if idle_behavior is not None:
+            idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
         from core.admin_routes import _background_tasks
         if _background_tasks:
             logger.info("Waiting for %d background eval task(s) to finish...", len(_background_tasks))
             await asyncio.gather(*_background_tasks, return_exceptions=True)
+
 
         await tts_pipeline.shutdown()
         if svc is not None:
@@ -107,6 +118,50 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         pass
     finally:
         await event_bus.disconnect(client_id)
+
+
+class EmitRequest(BaseModel):
+    event_type: str
+    data: dict[str, Any] = {}
+
+
+@app.post("/api/dev/emit")
+async def dev_emit(req: EmitRequest) -> dict[str, Any]:
+    """Inject an event into the event bus (dev/CLI use only).
+
+    Called by scripts like pnpm chat so that agent responses are broadcast
+    to connected Phaser frontend clients without needing to be in-process.
+
+    When event_type is "agent_speak" and the data includes "text" + "agent_id",
+    TTS is generated automatically and a "tts_play" event is also emitted so the
+    frontend AudioManager plays the voice.
+    """
+    data = dict(req.data)
+
+    # Generate TTS server-side only when the caller hasn't already done it.
+    # If "duration" is present, the CLI already generated audio and timed the
+    # bubble — skip server-side TTS to avoid double generation and stale timing.
+    if req.event_type == "agent_speak" and "text" in data and "agent_id" in data and "duration" not in data:
+        tts: Any = getattr(app.state, "tts_pipeline", None)
+        if tts is not None:
+            try:
+                result = await tts.speak(data["agent_id"], data["text"])
+                if result and result.get("audio_url"):
+                    data["audio_url"] = result["audio_url"]
+                    data["duration"] = int(result["duration"] * 1000)
+                    await event_bus.emit(
+                        "tts_play",
+                        {
+                            "agent_id": data["agent_id"],
+                            "audio_url": result["audio_url"],
+                            "text": data["text"],
+                        },
+                    )
+            except Exception:
+                logger.exception("TTS generation failed in dev_emit")
+
+    event = await event_bus.emit(req.event_type, data)
+    return {"ok": True, "event_id": event["event_id"]}
 
 
 @app.get("/api/health")

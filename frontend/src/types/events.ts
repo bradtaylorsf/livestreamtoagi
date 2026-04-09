@@ -20,6 +20,7 @@ export enum EventType {
   TTS_PLAY = "tts_play",
   TOOL_EXECUTED = "tool_executed",
   CONFIG_RELOADED = "config_reloaded",
+  AGI_PROGRESS = "agi_progress",
   ARTIFACT_CREATED = "artifact_created",
 }
 
@@ -39,6 +40,7 @@ export interface AgentSpeakPayload {
   conversation_id?: string;
 }
 
+/** Coordinates are in pixels (tile * 32). WorldManager.findPath() accepts pixels directly. */
 export interface AgentMovePayload {
   agent_id: string;
   from: { x: number; y: number };
@@ -123,6 +125,11 @@ export interface ToolExecutedPayload {
 export interface ConfigReloadedPayload {
   config_type: string;
   changes: string[];
+}
+
+export interface AgiProgressPayload {
+  percent: number;
+  categories: number;
 }
 
 export interface ArtifactCreatedPayload {

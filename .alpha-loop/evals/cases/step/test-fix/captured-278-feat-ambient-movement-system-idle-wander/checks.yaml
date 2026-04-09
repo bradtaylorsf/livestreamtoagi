@@ -1,0 +1,10 @@
+type: step
+step: test-fix
+eval_method: pending
+status: needs-annotation
+source: auto-captured
+captured_from:
+  issue: 278
+  session: session/layer-8-phaser-js-frontend
+  date: 2026-04-09
+checks: []
