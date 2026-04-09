@@ -4,7 +4,7 @@ import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
 import { AudioManager } from "../audio/AudioManager";
-import type { WebSocketClient } from "../network/WebSocketClient";
+import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
 const TILE_SIZE = 32;
@@ -165,6 +165,12 @@ export class MainScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor("#1a1a2e");
 
+    // ── WebSocket client (auto-create if not externally provided) ──
+    if (!this.wsClient) {
+      this.wsClient = new WebSocketClient();
+      this.wsClient.connect();
+    }
+
     // ── Register agent animations ───────────────────────────────
     this.registerAnimations();
 
@@ -216,6 +222,8 @@ export class MainScene extends Phaser.Scene {
     this.streamOverlay = null;
     this.audioManager?.destroy();
     this.audioManager = null;
+    this.wsClient?.disconnect();
+    this.wsClient = null;
   }
 
   /**

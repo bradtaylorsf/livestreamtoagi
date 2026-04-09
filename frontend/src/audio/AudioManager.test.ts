@@ -138,16 +138,16 @@ describe("AudioManager", () => {
       expect(manager.getMasterVolume()).toBe(0);
     });
 
-    it("defaults agent volume to 1.0", () => {
-      expect(manager.getAgentVolume("vera")).toBe(1.0);
+    it("defaults agent volume to 0.8", () => {
+      expect(manager.getAgentVolume("vera")).toBe(0.8);
     });
 
     it("alpha has 0 volume by default", () => {
       expect(manager.getAgentVolume("alpha")).toBe(0);
     });
 
-    it("management has 1.2 volume by default", () => {
-      expect(manager.getAgentVolume("management")).toBe(1.2);
+    it("management has 1.0 volume by default (louder than 0.8 default)", () => {
+      expect(manager.getAgentVolume("management")).toBe(1.0);
     });
 
     it("allows setting per-agent volume", () => {

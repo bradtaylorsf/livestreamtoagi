@@ -71,6 +71,19 @@ describe("StreamOverlay", () => {
     expect(overlay.getViewerCount().getElement().textContent).toContain("420");
   });
 
+  it("routes AGI_PROGRESS to AGIProgressBar", () => {
+    wsClient.emit({
+      event_id: "agi1",
+      event_type: EventType.AGI_PROGRESS,
+      timestamp: Date.now(),
+      data: { percent: 42.5, categories: 7 },
+    });
+    const fill = overlay.getAGIProgressBar().getElement().querySelector(".agi-fill") as HTMLDivElement;
+    expect(fill.style.width).toBe("42.5%");
+    expect(overlay.getAGIProgressBar().getElement().textContent).toContain("43%");
+    expect(overlay.getAGIProgressBar().getElement().textContent).toContain("7 categories");
+  });
+
   it("routes AGENT_SPEAK to AgentStatusPanel as talking", () => {
     wsClient.emit({
       event_id: "3",

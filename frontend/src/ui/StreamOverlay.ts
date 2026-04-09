@@ -200,6 +200,12 @@ export class StreamOverlay {
       case EventType.VIEWER_COUNT:
         this.viewerCount.update(event.data.count as number);
         break;
+      case EventType.AGI_PROGRESS:
+        this.agiProgressBar.update(
+          event.data.percent as number,
+          event.data.categories as number,
+        );
+        break;
       case EventType.AGENT_SPEAK:
         this.agentStatusPanel.updateStatus(event.data.agent_id as string, "talking");
         if (event.data.topic) {

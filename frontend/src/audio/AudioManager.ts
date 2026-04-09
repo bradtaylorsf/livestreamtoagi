@@ -8,9 +8,11 @@ interface QueueItem {
   resolve: () => void;
 }
 
+const DEFAULT_AGENT_VOLUME = 0.8;
+
 const DEFAULT_AGENT_VOLUMES: Record<string, number> = {
   alpha: 0,
-  management: 1.2,
+  management: 1.0,
 };
 
 /** Fallback duration (ms) when audio metadata cannot be loaded. */
@@ -106,7 +108,7 @@ export class AudioManager {
   }
 
   getAgentVolume(agentId: string): number {
-    return this.agentVolumes.get(agentId) ?? 1.0;
+    return this.agentVolumes.get(agentId) ?? DEFAULT_AGENT_VOLUME;
   }
 
   getQueueLength(): number {
@@ -136,7 +138,7 @@ export class AudioManager {
   }
 
   private getEffectiveVolume(agentId: string): number {
-    const agentVol = this.agentVolumes.get(agentId) ?? 1.0;
+    const agentVol = this.agentVolumes.get(agentId) ?? DEFAULT_AGENT_VOLUME;
     return Math.max(0, Math.min(1, this.masterVolume * agentVol));
   }
 

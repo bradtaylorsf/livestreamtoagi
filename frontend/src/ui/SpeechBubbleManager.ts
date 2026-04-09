@@ -81,6 +81,8 @@ function injectStyles(): void {
       border: 2px solid #888888;
       border-radius: 2px;
     }
+    .bubble-sarcastic .bubble-text::before { content: '\\201C'; }
+    .bubble-sarcastic .bubble-text::after { content: '\\201D'; }
     .bubble-sarcastic .bubble-tail {
       border-top-color: #f0f0f0;
     }
