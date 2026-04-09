@@ -1,25 +1,23 @@
-Here's the project context file:
-
 ## Architecture
-- **Entry point:** `core/main.py` — FastAPI app with WebSocket support, bootstrapped via `core/bootstrap.py` (DB, Redis, agent registry, memory, TTS, scheduler). Admin API mounted from `core/admin_routes.py`.
-- **Database:** PostgreSQL 16 + pgvector (port 5434). Schema in `db/migrations/` (21 numbered up/down pairs). Managed via `pnpm db:migrate` / `pnpm db:rollback`. Uses asyncpg + SQLAlchemy async. Repos in `core/repos/`.
-- **Agent system:** 9 agents defined as YAML configs in `agents/<name>/`. Conversation engine (`core/conversation_engine.py`) drives weighted speaker selection. All output filtered through `core/management.py`.
-- **Three-tier memory:** Core memory (always in prompt), Recall (pgvector search in `core/memory/`), Archival (full transcripts, never deleted).
-- **Frontend:** Phaser.js pixel world in `frontend/` (Vite + TypeScript). Website: Next.js in `website/`. Both connect to FastAPI backend.
+- **Backend entry:** FastAPI app in `core/main.py` — bootstraps services (DB, Redis, TTS, agents), mounts `core/admin_routes.py`, serves WebSocket at `/ws` for frontend, static files for TTS audio
+- **Frontend entry:** Phaser.js app in `frontend/src/main.ts` → `MainScene.ts` — connects via WebSocket to backend, renders pixel art world with agent sprites, speech bubbles, stream overlay
+- **Website:** Next.js app in `website/` — public-facing site, calls backend REST API
+- **Database:** PostgreSQL 16 + pgvector (port 5434). Schema in `db/init.sql`, migrations in `db/migrations/`, run via `pnpm db:migrate`. Repos in `core/repos/` (asyncpg + SQLAlchemy async)
+- **Key directories:** `core/` (orchestrator, conversation engine, memory, eval, LLM client), `tools/` (agent tool implementations), `agents/` (YAML personality configs), `scripts/` (CLI entrypoints like `chat.py`), `evals/` + `scenarios/` (eval configs), `specs/` (read-only design docs)
 
 ## Conventions
-- **Python 3.13**, type hints everywhere, async/await for I/O. Linted with `ruff` (config in `ruff.toml`). Packages: `core`, `tools`, `agents`.
-- **Tests:** `tests/backend/` (pytest, asyncio_mode=auto) + `tests/integration/`. Frontend/website use Vitest. Run all: `pnpm test`. Python only: `pnpm test:python`.
-- **CLI gateway:** `scripts/chat.py` is the unified CLI — all commands (`sim`, `eval`, `coverage`, `chat`) wired through `pnpm` scripts in root `package.json`. New features must be accessible via `pnpm` commands, never raw python.
-- **Config:** YAML-based agent config in `config/`, loaded by `core/config_loader.py` with hot-reload via `watchfiles`.
+- **Python 3.13**, strict type hints, async/await for all I/O, `ruff` for lint/format. Pydantic models for API schemas. All CLI commands wired through `pnpm` scripts in root `package.json` (e.g., `pnpm chat`, `pnpm sim`, `pnpm eval`)
+- **TypeScript** strict mode, ESM, Vite builds. Frontend uses Phaser.js; website uses Next.js + Tailwind + Recharts
+- **Tests:** Python in `tests/backend/` and `tests/integration/` (pytest-asyncio, `pnpm test:python`). Frontend tests co-located as `*.test.ts` (Vitest, `pnpm test:frontend`). Website tests via Vitest + Playwright (`pnpm test:website`)
+- **New features:** Backend routes go in `core/admin_routes.py` or new routers imported in `core/main.py`. New agent tools in `tools/`. New CLI commands must be added to root `package.json` scripts — never require raw `python` commands
 
 ## Critical Rules
-- **Docker services must be healthy** before any integration test or backend run: `docker compose up -d && bash scripts/check-services.sh` (Redis:6381, PG:5434, Langfuse:3100).
-- **Cost tracking must be 100% accurate** — every LLM call tracked via `core/llm_client.py` + Langfuse. Eval integrity depends on this.
-- **`db/migrations/`** — numbered sequential migrations with up/down pairs. Never skip numbers. Schema changes require both files.
-- **Agent configs (`agents/`) + `config/conversation_config.yaml`** — changing personality/weights affects all simulations and evals. The agent formerly called "Overseer" is now "Management" everywhere.
-- **`.env` file** — never committed. Required keys: `OPENROUTER_API_KEY`, `DATABASE_URL`, `REDIS_URL`, and others listed in CLAUDE.md.
+- **`specs/` is read-only** — reference docs, never modify
+- **Agent configs in `agents/`** and character names must use "Management" not "Overseer" — this rename is enforced everywhere
+- **Cost tracking must be 100% accurate** — any change touching `core/repos/cost_repo.py`, `core/llm_client.py`, or eval cost calculations requires verification
+- **Docker services must be healthy before integration tests** — run `docker compose up -d && bash scripts/check-services.sh` (Redis:6381, Postgres:5434, Langfuse:3100)
+- **`.env` is never committed** — contains all API keys, DB URLs. Python 3.14+ is unsupported (native deps won't build)
 
 ## Active State
-- Test status: *(to be filled by loop)*
-- Recent changes: *(to be filled by loop)*
+- Test status: *(will be filled in by the loop)*
+- Recent changes: *(will be filled in by the loop)*

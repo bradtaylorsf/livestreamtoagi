@@ -2,19 +2,28 @@
 Updated AGENTS.md with these changes:
 
 **Numbers corrected:**
-- Tool modules: 15 → 13 modules, 23+ → 20 tool classes
-- Migrations: 20 pairs (up to 020) → 21 pairs (up to `021_prompt_logs`)
-- Test files: ~80 → ~76
-- Event types: 17 → 18
-- Model classes: ~100 → ~102
+- Tool modules: 13 → 15 (added character_tools, economy_tools, social_tools)
+- Tool class exports: 20 → 30 (new alliance, economy, character, and audience tools)
+- Migrations: 21 pairs (up to 021) → 30 pairs (up to `030_goal_source_dream`)
+- Repo classes: 15 → 17 (added agent_state_repo, alliance_repo)
+- Event types: 18 → 19 (added CONVERSATION_PRODUCTIVITY)
+- Model classes: ~102 → 106
+- Test files: ~76 → ~89
 
-**New items added:**
-- `prompt_log_repo` added to repo class listing (count stays at 15)
-- `ReflectionScheduler` added to Memory subsystem in Tech Stack
-- `prompt logs` added to models.py description
-- `evolution log` added to tools directory description (replacing `stubs`)
-- Migration 021_prompt_logs referenced throughout
+**New subsystems added:**
+- `core/characters/` — spawner, voting, departure for dynamic agent creation
+- `core/events/` — event_generator, event_templates for world events
+- `core/social/alliances.py` — alliance formation/dissolution (was just relationship_tracker)
+- `core/agent_economy` referenced in tool dependencies
 
-**Stale info removed/corrected:**
-- Tool module count corrected from 15 to 13 (actual .py files in tools/)
-- Tool class export count corrected from 23+ to 20 (actual exports in `__init__.py`)
+**Config directory updated:**
+- Added event_config.yaml and recurring_personas.yaml (4 → 6 files)
+
+**Scripts updated:**
+- Added run_reflection_test.py to the listing
+
+**Important files expanded:**
+- Added `core/characters/spawner.py`, `core/characters/voting.py`, `core/social/alliances.py`
+
+**Stale info removed:**
+- Old tool category descriptions replaced with current set including alliances, economy, character proposals

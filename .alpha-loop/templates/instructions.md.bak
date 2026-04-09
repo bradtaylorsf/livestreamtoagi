@@ -1,26 +1,20 @@
 <!-- managed by alpha-loop -->
-Updated AGENTS.md with these key changes:
+Updated AGENTS.md with these changes:
 
-**Numbers updated:**
-- Admin endpoints: 32 → 53
-- Repo classes: 9 → 15 (added assertion, relationship, goal, config_version, evolution)
-- Tool modules: "19 tool classes" → "15 tool modules exporting 23+ tool instances"
-- Migrations: 13 (up to 013) → 20 pairs (up to `020_evolution_cycles`)
-- Test files: ~52 → ~80
+**Numbers corrected:**
+- Tool modules: 15 → 13 modules, 23+ → 20 tool classes
+- Migrations: 20 pairs (up to 020) → 21 pairs (up to `021_prompt_logs`)
+- Test files: ~80 → ~76
+- Event types: 17 → 18
+- Model classes: ~100 → ~102
 
-**New subsystems added:**
-- `core/eval/` expanded: analyzer, evolution_loop, change_applier (evolution loop initiative)
-- `core/simulation/assertions.py` and `audience_sim` noted
-- `core/reporting/` with full section list and comparisons
-- `core/world/` directory documented
-- `evals/` top-level directory (prompts and results)
-- `config/` directory (shared YAML/JSON configs)
-- `skills/` directory (7 skill definitions)
+**New items added:**
+- `prompt_log_repo` added to repo class listing (count stays at 15)
+- `ReflectionScheduler` added to Memory subsystem in Tech Stack
+- `prompt logs` added to models.py description
+- `evolution log` added to tools directory description (replacing `stubs`)
+- Migration 021_prompt_logs referenced throughout
 
-**Stale info corrected:**
-- Frontend description upgraded from "small TypeScript package; currently agent constants/tests" to full Phaser.js world renderer
-- Scripts list expanded with `run_evolution.py`, `report_simulation.py`, `snapshot_memory.py`, `restore_memory.py`, `seed_config.py`
-- `bootstrap.py` now notes dry-run mode support
-- `MemorySnapshot` added to Memory managers list
-- `get_memory_tools()` factory noted alongside `get_core_tools()`
-- Evolution loop entry point added to Non-Negotiables
+**Stale info removed/corrected:**
+- Tool module count corrected from 15 to 13 (actual .py files in tools/)
+- Tool class export count corrected from 23+ to 20 (actual exports in `__init__.py`)
