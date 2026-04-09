@@ -1,4 +1,6 @@
 import Phaser from "phaser";
+import type { WorldManager } from "../world/WorldManager";
+import { tileToPixel } from "../world/Pathfinding";
 
 export type AnimationName =
   | "idle"
@@ -20,6 +22,7 @@ const STATUS_ICONS: Record<StatusType, string> = {
 };
 
 const TWEEN_DURATION_MS = 500;
+const STEP_DURATION_MS = 250; // per-tile step for pathfinding (4 tiles/sec)
 
 export interface AgentSpriteConfig {
   agentId: string;
@@ -43,6 +46,9 @@ export class AgentSprite {
   private currentAnimation: string = "idle";
   private currentStatus: StatusType = "idle";
   private moveTweens: Phaser.Tweens.Tween[] = [];
+  private pathStepIndex = -1;
+  private currentPath: Array<{ x: number; y: number }> = [];
+  isBusy = false;
 
   constructor(scene: Phaser.Scene, config: AgentSpriteConfig) {
     this.scene = scene;
@@ -96,14 +102,46 @@ export class AgentSprite {
     }
   }
 
-  moveTo(x: number, y: number): Phaser.Tweens.Tween {
-    // Cancel all existing movement tweens
+  /**
+   * Move to target position. If worldManager is provided, uses A* pathfinding
+   * to navigate around obstacles tile-by-tile. Falls back to direct tween.
+   */
+  moveTo(x: number, y: number, worldManager?: WorldManager): void {
+    this.cancelPath();
+
+    if (worldManager) {
+      const path = worldManager.findPath(this.sprite.x, this.sprite.y, x, y);
+      if (path && path.length > 1) {
+        const tileSize = worldManager.getTileSize();
+        this.currentPath = path.map((t) => tileToPixel(t.tx, t.ty, tileSize));
+        this.pathStepIndex = 1; // skip index 0 (current position)
+        this.isBusy = true;
+        this.stepToNextTile();
+        return;
+      }
+    }
+
+    // Fallback: direct tween (no pathfinding available or no path found)
+    this.isBusy = true;
+    this.directMoveTo(x, y, () => {
+      this.isBusy = false;
+    });
+  }
+
+  /** Cancel any in-progress path following. */
+  cancelPath(): void {
     for (const tween of this.moveTweens) {
       tween.stop();
     }
     this.moveTweens = [];
+    this.currentPath = [];
+    this.pathStepIndex = -1;
+    this.isBusy = false;
+    this.playAnimation("idle");
+  }
 
-    // Determine walk direction animation
+  /** Tween directly to a position (single segment). */
+  private directMoveTo(x: number, y: number, onComplete?: () => void): void {
     const dx = x - this.sprite.x;
     const dy = y - this.sprite.y;
     if (Math.abs(dx) > Math.abs(dy)) {
@@ -112,7 +150,6 @@ export class AgentSprite {
       this.playAnimation(dy > 0 ? "walk_down" : "walk_up");
     }
 
-    // Tween sprite to target
     const spriteTween = this.scene.tweens.add({
       targets: this.sprite,
       x,
@@ -122,10 +159,10 @@ export class AgentSprite {
       onComplete: () => {
         this.moveTweens = [];
         this.playAnimation("idle");
+        onComplete?.();
       },
     });
 
-    // Tween labels to follow
     const nameTween = this.scene.tweens.add({
       targets: this.nameLabel,
       x,
@@ -143,7 +180,57 @@ export class AgentSprite {
     });
 
     this.moveTweens = [spriteTween, nameTween, statusTween];
-    return spriteTween;
+  }
+
+  /** Walk one tile along the current path, then chain to next. */
+  private stepToNextTile(): void {
+    if (this.pathStepIndex < 0 || this.pathStepIndex >= this.currentPath.length) {
+      this.currentPath = [];
+      this.pathStepIndex = -1;
+      this.isBusy = false;
+      this.playAnimation("idle");
+      return;
+    }
+
+    const target = this.currentPath[this.pathStepIndex];
+    const dx = target.x - this.sprite.x;
+    const dy = target.y - this.sprite.y;
+
+    if (Math.abs(dx) > Math.abs(dy)) {
+      this.playAnimation(dx > 0 ? "walk_right" : "walk_left");
+    } else if (dy !== 0) {
+      this.playAnimation(dy > 0 ? "walk_down" : "walk_up");
+    }
+
+    const spriteTween = this.scene.tweens.add({
+      targets: this.sprite,
+      x: target.x,
+      y: target.y,
+      duration: STEP_DURATION_MS,
+      ease: "Linear",
+      onComplete: () => {
+        this.pathStepIndex++;
+        this.stepToNextTile();
+      },
+    });
+
+    const nameTween = this.scene.tweens.add({
+      targets: this.nameLabel,
+      x: target.x,
+      y: target.y + 4,
+      duration: STEP_DURATION_MS,
+      ease: "Linear",
+    });
+
+    const statusTween = this.scene.tweens.add({
+      targets: this.statusLabel,
+      x: target.x,
+      y: target.y - this.sprite.height - 4,
+      duration: STEP_DURATION_MS,
+      ease: "Linear",
+    });
+
+    this.moveTweens = [spriteTween, nameTween, statusTween];
   }
 
   setStatus(status: StatusType): void {
@@ -163,6 +250,47 @@ export class AgentSprite {
 
   getCurrentAnimation(): string {
     return this.currentAnimation;
+  }
+
+  /**
+   * Play a short idle micro-animation at the agent's desk.
+   * Used by BehaviorScheduler for client-side ambient activity.
+   */
+  playMicroAnimation(type: "typing" | "looking" | "stretching"): void {
+    if (this.isBusy) return;
+
+    this.isBusy = true;
+
+    switch (type) {
+      case "typing":
+        this.playAnimation("building");
+        this.scene.time.delayedCall(2000, () => {
+          this.playAnimation("idle");
+          this.isBusy = false;
+        });
+        break;
+      case "looking":
+        this.playAnimation("thinking");
+        this.scene.time.delayedCall(1500, () => {
+          this.playAnimation("idle");
+          this.isBusy = false;
+        });
+        break;
+      case "stretching":
+        // Brief scale tween for a stretch effect, then return to idle
+        this.scene.tweens.add({
+          targets: this.sprite,
+          scaleY: 1.15,
+          duration: 500,
+          yoyo: true,
+          ease: "Sine.easeInOut",
+          onComplete: () => {
+            this.sprite.setScale(1, 1);
+            this.isBusy = false;
+          },
+        });
+        break;
+    }
   }
 
   getPosition(): { x: number; y: number } {

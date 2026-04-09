@@ -94,10 +94,22 @@ describe("AgentSprite", () => {
     expect(agentSprite.getStatus()).toBe("idle");
   });
 
-  it("creates movement tween", () => {
+  it("creates movement tween via direct fallback", () => {
     agentSprite.moveTo(300, 400);
     // Should create tweens for sprite, name label, and status label
     expect(scene.tweens.add).toHaveBeenCalled();
+  });
+
+  it("marks agent as busy during movement", () => {
+    agentSprite.moveTo(300, 400);
+    expect(agentSprite.isBusy).toBe(true);
+  });
+
+  it("cancels path and resets state", () => {
+    agentSprite.moveTo(300, 400);
+    agentSprite.cancelPath();
+    expect(agentSprite.isBusy).toBe(false);
+    expect(agentSprite.getCurrentAnimation()).toBe("idle");
   });
 
   it("determines walk direction animation from movement delta", () => {

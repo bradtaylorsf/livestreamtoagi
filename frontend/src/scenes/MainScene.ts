@@ -4,6 +4,7 @@ import { AgentSpriteManager } from "../agents/AgentSpriteManager";
 import { SpeechBubbleManager } from "../ui/SpeechBubbleManager";
 import { StreamOverlay } from "../ui/StreamOverlay";
 import { AudioManager } from "../audio/AudioManager";
+import { BehaviorScheduler } from "../agents/BehaviorScheduler";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 
@@ -82,14 +83,12 @@ export class MainScene extends Phaser.Scene {
   private speechBubbleManager: SpeechBubbleManager | null = null;
   private streamOverlay: StreamOverlay | null = null;
   private audioManager: AudioManager | null = null;
+  private behaviorScheduler: BehaviorScheduler | null = null;
   private wsClient: WebSocketClient | null = null;
+  private connectionOverlay: Phaser.GameObjects.Text | null = null;
 
   constructor() {
     super({ key: "MainScene" });
-  }
-
-  setWebSocketClient(client: WebSocketClient): void {
-    this.wsClient = client;
   }
 
   preload(): void {
@@ -181,6 +180,44 @@ export class MainScene extends Phaser.Scene {
     // ── Place furniture sprites on top of tiles ─────────────────
     this.placeFurniture();
 
+    // ── WebSocket connection to backend ─────────────────────────
+    const wsUrl =
+      (typeof import.meta !== "undefined" &&
+        (import.meta as Record<string, unknown>).env &&
+        ((import.meta as Record<string, unknown>).env as Record<string, string>)
+          .VITE_WS_URL) ||
+      "ws://localhost:8000/ws";
+    this.wsClient = new WebSocketClient(wsUrl);
+
+    // ── Connection status overlay ───────────────────────────────
+    this.connectionOverlay = this.add.text(
+      this.cameras.main.centerX,
+      this.cameras.main.centerY,
+      "Connecting...",
+      {
+        fontSize: "16px",
+        color: "#ffffff",
+        fontFamily: "monospace",
+        backgroundColor: "#000000aa",
+        padding: { x: 12, y: 8 },
+      },
+    );
+    this.connectionOverlay.setOrigin(0.5, 0.5);
+    this.connectionOverlay.setScrollFactor(0);
+    this.connectionOverlay.setDepth(100);
+
+    this.wsClient.onConnect = () => {
+      this.connectionOverlay?.setVisible(false);
+    };
+    this.wsClient.onDisconnect = () => {
+      if (this.connectionOverlay) {
+        this.connectionOverlay.setText("Reconnecting...");
+        this.connectionOverlay.setVisible(true);
+      }
+    };
+
+    this.wsClient.connect();
+
     // ── Create agent sprites at their desk positions ────────────
     this.agentSpriteManager = new AgentSpriteManager(
       this,
@@ -201,6 +238,17 @@ export class MainScene extends Phaser.Scene {
 
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
     this.streamOverlay = new StreamOverlay(this.wsClient);
+
+    // ── Idle behavior scheduler (client-side micro-animations) ──
+    this.behaviorScheduler = new BehaviorScheduler(
+      this.agentSpriteManager.getSpriteMap(),
+    );
+
+
+    // ── Clean up WebSocket on scene shutdown ────────────────────
+    this.events.on("shutdown", () => {
+      this.wsClient?.disconnect();
+    });
   }
 
   getWorldManager(): WorldManager | null {
@@ -211,8 +259,9 @@ export class MainScene extends Phaser.Scene {
     return this.agentSpriteManager;
   }
 
-  update(): void {
+  update(_time: number, delta: number): void {
     this.speechBubbleManager?.update();
+    this.behaviorScheduler?.update(delta);
   }
 
   shutdown(): void {
@@ -222,6 +271,8 @@ export class MainScene extends Phaser.Scene {
     this.streamOverlay = null;
     this.audioManager?.destroy();
     this.audioManager = null;
+    this.behaviorScheduler?.destroy();
+    this.behaviorScheduler = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
     this.worldManager?.destroy();

@@ -1,5 +1,12 @@
 import Phaser from "phaser";
 import { ChunkLoader } from "./ChunkLoader";
+import {
+  buildWalkabilityGrid,
+  findPath,
+  pixelToTile,
+  type TileCoord,
+  type WalkabilityGrid,
+} from "./Pathfinding";
 
 interface AreaRect {
   x: number;
@@ -23,6 +30,7 @@ export class WorldManager {
   private collisionLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private worldWidth = 0;
   private worldHeight = 0;
+  private walkabilityGrid: WalkabilityGrid | null = null;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -48,6 +56,15 @@ export class WorldManager {
         layer.setVisible(false);
         break;
       }
+    }
+
+    // Build walkability grid from collision layer
+    if (this.collisionLayer) {
+      this.walkabilityGrid = buildWalkabilityGrid(
+        this.collisionLayer,
+        tilemap.width,
+        tilemap.height,
+      );
     }
 
     // Load areas from tilemap JSON cache
@@ -86,6 +103,26 @@ export class WorldManager {
 
   getWorldSize(): { width: number; height: number } {
     return { width: this.worldWidth, height: this.worldHeight };
+  }
+
+  getWalkabilityGrid(): WalkabilityGrid | null {
+    return this.walkabilityGrid;
+  }
+
+  getTileSize(): number {
+    return 32;
+  }
+
+  /**
+   * Find a path between two pixel positions using A*.
+   * Returns tile coordinates array or null if no path exists.
+   */
+  findPath(fromX: number, fromY: number, toX: number, toY: number): TileCoord[] | null {
+    if (!this.walkabilityGrid) return null;
+    const tileSize = this.getTileSize();
+    const start = pixelToTile(fromX, fromY, tileSize);
+    const end = pixelToTile(toX, toY, tileSize);
+    return findPath(this.walkabilityGrid, start, end);
   }
 
   updateVisibleChunks(_cameraX: number, _cameraY: number): void {
