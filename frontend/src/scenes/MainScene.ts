@@ -164,12 +164,6 @@ export class MainScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor("#1a1a2e");
 
-    // ── WebSocket client (auto-create if not externally provided) ──
-    if (!this.wsClient) {
-      this.wsClient = new WebSocketClient();
-      this.wsClient.connect();
-    }
-
     // ── Register agent animations ───────────────────────────────
     this.registerAnimations();
 
@@ -181,12 +175,7 @@ export class MainScene extends Phaser.Scene {
     this.placeFurniture();
 
     // ── WebSocket connection to backend ─────────────────────────
-    const wsUrl =
-      (typeof import.meta !== "undefined" &&
-        (import.meta as Record<string, unknown>).env &&
-        ((import.meta as Record<string, unknown>).env as Record<string, string>)
-          .VITE_WS_URL) ||
-      "ws://localhost:8000/ws";
+    const wsUrl = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws";
     this.wsClient = new WebSocketClient(wsUrl);
 
     // ── Connection status overlay ───────────────────────────────

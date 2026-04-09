@@ -59,6 +59,11 @@ export class BehaviorScheduler {
     }
   }
 
+  destroy(): void {
+    this.timers.clear();
+    this.nextIntervals.clear();
+  }
+
   /**
    * Calculate a random interval, shorter for chattier agents.
    * Higher chattiness → shorter intervals (more fidgety).
