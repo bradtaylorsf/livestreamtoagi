@@ -335,14 +335,15 @@ async def run_turn(
         model,
     )
 
-    # Broadcast to Phaser frontend (no-op if no WebSocket clients are connected)
+    # Broadcast to Phaser frontend via the running backend (no-op if not running)
     if response.content:
         try:
-            from core.event_bus import EventType, event_bus
-            await event_bus.emit(
-                EventType.AGENT_SPEAK.value,
-                {"agent_id": agent_id, "text": response.content},
-            )
+            import httpx
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                await client.post(
+                    "http://localhost:8010/api/dev/emit",
+                    json={"event_type": "agent_speak", "data": {"agent_id": agent_id, "text": response.content}},
+                )
         except Exception:
             pass  # backend not running — safe to ignore
 

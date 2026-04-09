@@ -2,9 +2,11 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
 from core.admin_routes import router as admin_router
@@ -116,6 +118,22 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         pass
     finally:
         await event_bus.disconnect(client_id)
+
+
+class EmitRequest(BaseModel):
+    event_type: str
+    data: dict[str, Any] = {}
+
+
+@app.post("/api/dev/emit")
+async def dev_emit(req: EmitRequest) -> dict[str, Any]:
+    """Inject an event into the event bus (dev/CLI use only).
+
+    Called by scripts like pnpm chat so that agent responses are broadcast
+    to connected Phaser frontend clients without needing to be in-process.
+    """
+    event = await event_bus.emit(req.event_type, req.data)
+    return {"ok": True, "event_id": event["event_id"]}
 
 
 @app.get("/api/health")
