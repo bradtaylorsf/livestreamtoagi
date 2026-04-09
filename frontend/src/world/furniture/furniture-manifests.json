@@ -1,0 +1,38 @@
+[
+  { "id": "DESK", "name": "Standard Desk", "category": "desks", "footprint": [3, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "ENGINEERING_BENCH", "name": "Engineering Bench", "category": "desks", "footprint": [3, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "ART_DESK", "name": "Art Desk", "category": "desks", "footprint": [3, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "RESEARCH_DESK", "name": "Research Desk", "category": "desks", "footprint": [3, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "MINIMAL_DESK", "name": "Minimal Desk", "category": "desks", "footprint": [2, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "ORGANIZED_DESK", "name": "Organized Desk", "category": "desks", "footprint": [3, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "CHAOTIC_DESK", "name": "Chaotic Desk", "category": "desks", "footprint": [3, 2], "isDesk": true, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "MEETING_TABLE", "name": "Meeting Table", "category": "desks", "footprint": [4, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "WORKSHOP_BENCH", "name": "Workshop Bench", "category": "desks", "footprint": [4, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+
+  { "id": "CHAIR", "name": "Office Chair", "category": "chairs", "footprint": [1, 1], "isDesk": false, "rotations": ["front", "back"], "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+
+  { "id": "MONITOR", "name": "Monitor", "category": "electronics", "footprint": [1, 1], "isDesk": false, "states": { "off": "monitor_off", "on": "monitor_on" }, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "CALCULATOR", "name": "Calculator", "category": "electronics", "footprint": [1, 1], "isDesk": false, "states": { "off": "calculator_off", "on": "calculator_on" }, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+
+  { "id": "CLIPBOARD", "name": "Clipboard", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "TOOLS", "name": "Engineering Tools", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "COLOR_PALETTE", "name": "Color Palette", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "EASEL", "name": "Easel", "category": "decor", "footprint": [1, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "BOOKSTACK", "name": "Book Stack", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "MAGNIFYING_GLASS", "name": "Magnifying Glass", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "ANTENNA", "name": "Antenna", "category": "electronics", "footprint": [1, 1], "isDesk": false, "states": { "off": "antenna_off", "on": "antenna_on" }, "canPlaceOnSurfaces": true, "zSortOffset": 0.002 },
+  { "id": "LEDGER", "name": "Ledger", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "NEAT_STACK", "name": "Neat Stack of Papers", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "RANDOM_OBJECTS", "name": "Random Objects", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": true, "zSortOffset": 0.001 },
+  { "id": "DISCO_BALL", "name": "Disco Ball", "category": "decor", "footprint": [1, 1], "isDesk": false, "states": { "off": "disco_ball_off", "on": "disco_ball_on" }, "canPlaceOnSurfaces": false, "zSortOffset": 0.002 },
+  { "id": "DOG_BED", "name": "Dog Bed", "category": "decor", "footprint": [2, 1], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "BONE", "name": "Bone", "category": "decor", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "MOBILE_STATION", "name": "Mobile Station", "category": "desks", "footprint": [2, 1], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "ELEVATED_PLATFORM", "name": "Elevated Platform", "category": "surfaces", "footprint": [4, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": -0.001 },
+
+  { "id": "COFFEE_MACHINE", "name": "Coffee Machine", "category": "electronics", "footprint": [1, 1], "isDesk": false, "states": { "off": "coffee_machine_off", "on": "coffee_machine_on" }, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "BOOKSHELF", "name": "Bookshelf", "category": "decor", "footprint": [2, 3], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "WHITEBOARD", "name": "Whiteboard", "category": "decor", "footprint": [2, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "PLANT", "name": "Plant", "category": "plants", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "RUG", "name": "Rug", "category": "surfaces", "footprint": [4, 3], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": -0.001 }
+]

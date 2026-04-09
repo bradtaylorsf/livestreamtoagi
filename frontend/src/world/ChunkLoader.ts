@@ -11,7 +11,7 @@ interface TilemapJSON {
   height: number;
   tilewidth: number;
   tileheight: number;
-  tilesets: Array<{ name: string; firstgid: number }>;
+  tilesets: Array<{ name: string; firstgid: number; image?: string }>;
   layers: Array<{ name: string; data: number[] }>;
   areas?: Record<string, { x: number; y: number; width: number; height: number }>;
 }
@@ -43,9 +43,9 @@ export class ChunkLoader {
 
     const tilemap = this.scene.make.tilemap({ key: jsonKey });
 
-    // Add tilesets
+    // Add tilesets (image key may differ from tileset name)
     for (const ts of tilemapData.tilesets) {
-      tilemap.addTilesetImage(ts.name, ts.name);
+      tilemap.addTilesetImage(ts.name, ts.image ?? ts.name);
     }
 
     // Create layers

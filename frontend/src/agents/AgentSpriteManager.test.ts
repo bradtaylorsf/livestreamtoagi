@@ -13,6 +13,8 @@ function createMockScene() {
         setDepth: vi.fn(),
         setFrame: vi.fn(),
         play: vi.fn(),
+        setScale: vi.fn(),
+        setVisible: vi.fn(),
         anims: { exists: vi.fn(() => false) },
         destroy: vi.fn(),
       })),
@@ -20,13 +22,35 @@ function createMockScene() {
         (_x: number, _y: number, _text: string, _style?: object) => ({
           x: _x,
           y: _y,
+          width: 40,
+          visible: false,
           setOrigin: vi.fn(),
           setDepth: vi.fn(),
-          setVisible: vi.fn(),
+          setScrollFactor: vi.fn(),
+          setVisible: vi.fn(function (this: any, v: boolean) {
+            this.visible = v;
+            return this;
+          }),
           setText: vi.fn(),
+          setAlpha: vi.fn(),
           destroy: vi.fn(),
         }),
       ),
+      graphics: vi.fn(() => ({
+        x: 0,
+        y: 0,
+        setDepth: vi.fn(),
+        setAlpha: vi.fn(),
+        setPosition: vi.fn(function (this: any, x: number, y: number) {
+          this.x = x;
+          this.y = y;
+        }),
+        setVisible: vi.fn(),
+        clear: vi.fn(),
+        fillStyle: vi.fn(),
+        fillCircle: vi.fn(),
+        destroy: vi.fn(),
+      })),
     },
     tweens: {
       add: vi.fn(() => ({
@@ -35,6 +59,19 @@ function createMockScene() {
     },
     time: {
       delayedCall: vi.fn(),
+      addEvent: vi.fn(() => ({
+        destroy: vi.fn(),
+      })),
+    },
+    cameras: {
+      main: {
+        flash: vi.fn(),
+        centerX: 400,
+        centerY: 300,
+      },
+    },
+    anims: {
+      exists: vi.fn(() => false),
     },
   };
 }
@@ -114,6 +151,7 @@ describe("AgentSpriteManager", () => {
     const vera = manager.getSprite("vera")!;
     const playAnimSpy = vi.spyOn(vera, "playAnimation");
     const setStatusSpy = vi.spyOn(vera, "setStatus");
+    const setBadgeSpy = vi.spyOn(vera, "setBadgeState");
 
     wsClient.emit({
       event_id: "2",
@@ -124,12 +162,28 @@ describe("AgentSpriteManager", () => {
 
     expect(playAnimSpy).toHaveBeenCalledWith("talking");
     expect(setStatusSpy).toHaveBeenCalledWith("speaking");
+    expect(setBadgeSpy).toHaveBeenCalledWith("conversation");
+  });
+
+  it("clears permission pending on speak", () => {
+    const vera = manager.getSprite("vera")!;
+    const setPermSpy = vi.spyOn(vera, "setPermissionPending");
+
+    wsClient.emit({
+      event_id: "2",
+      event_type: EventType.AGENT_SPEAK,
+      timestamp: Date.now(),
+      data: { agent_id: "vera", text: "Hello" },
+    });
+
+    expect(setPermSpy).toHaveBeenCalledWith(false);
   });
 
   it("handles agent_action event for building", () => {
     const rex = manager.getSprite("rex")!;
     const playAnimSpy = vi.spyOn(rex, "playAnimation");
     const setStatusSpy = vi.spyOn(rex, "setStatus");
+    const setBadgeSpy = vi.spyOn(rex, "setBadgeState");
 
     wsClient.emit({
       event_id: "3",
@@ -140,11 +194,13 @@ describe("AgentSpriteManager", () => {
 
     expect(playAnimSpy).toHaveBeenCalledWith("building");
     expect(setStatusSpy).toHaveBeenCalledWith("building");
+    expect(setBadgeSpy).toHaveBeenCalledWith("active");
   });
 
   it("handles agent_action event for thinking", () => {
     const aurora = manager.getSprite("aurora")!;
     const playAnimSpy = vi.spyOn(aurora, "playAnimation");
+    const setBadgeSpy = vi.spyOn(aurora, "setBadgeState");
 
     wsClient.emit({
       event_id: "4",
@@ -154,6 +210,7 @@ describe("AgentSpriteManager", () => {
     });
 
     expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    expect(setBadgeSpy).toHaveBeenCalledWith("active");
   });
 
   it("ignores events for unknown agent IDs", () => {
@@ -180,5 +237,345 @@ describe("AgentSpriteManager", () => {
     const mgr = new AgentSpriteManager(scene as any, null, null);
     expect(mgr.getSpriteCount()).toBe(8);
     mgr.destroy();
+  });
+
+  // ── TOOL_EXECUTED handler tests ────────────────────────────────
+
+  describe("TOOL_EXECUTED", () => {
+    it("sets activity label and active badge on tool execution", () => {
+      const vera = manager.getSprite("vera")!;
+      const setActivitySpy = vi.spyOn(vera, "setActivity");
+      const setBadgeSpy = vi.spyOn(vera, "setBadgeState");
+
+      wsClient.emit({
+        event_id: "10",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "file_read", success: undefined },
+      });
+
+      expect(setActivitySpy).toHaveBeenCalledWith("file_read");
+      expect(setBadgeSpy).toHaveBeenCalledWith("active");
+    });
+
+    it("shows progress dots when tool is in-progress (success undefined)", () => {
+      const vera = manager.getSprite("vera")!;
+      const setProgressSpy = vi.spyOn(vera, "setProgress");
+
+      wsClient.emit({
+        event_id: "11",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "web_search" },
+      });
+
+      expect(setProgressSpy).toHaveBeenCalledWith(true);
+    });
+
+    it("clears progress and schedules cleanup on success", () => {
+      const vera = manager.getSprite("vera")!;
+      const setProgressSpy = vi.spyOn(vera, "setProgress");
+
+      wsClient.emit({
+        event_id: "12",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "file_read", success: true },
+      });
+
+      expect(setProgressSpy).toHaveBeenCalledWith(false);
+      expect(scene.time.delayedCall).toHaveBeenCalledWith(2000, expect.any(Function));
+    });
+
+    it("sets error badge on tool failure", () => {
+      const rex = manager.getSprite("rex")!;
+      const setBadgeSpy = vi.spyOn(rex, "setBadgeState");
+
+      wsClient.emit({
+        event_id: "13",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "rex", tool_name: "run_tests", success: false },
+      });
+
+      expect(setBadgeSpy).toHaveBeenCalledWith("error");
+    });
+
+    it("ignores tool events for unknown agents", () => {
+      wsClient.emit({
+        event_id: "14",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "unknown", tool_name: "test" },
+      });
+      // Should not throw
+    });
+  });
+
+  // ── MANAGEMENT_SHADOW handler tests ────────────────────────────
+
+  describe("MANAGEMENT_SHADOW", () => {
+    it("sets permission pending and waiting badge", () => {
+      const vera = manager.getSprite("vera")!;
+      const setPermSpy = vi.spyOn(vera, "setPermissionPending");
+      const setBadgeSpy = vi.spyOn(vera, "setBadgeState");
+
+      wsClient.emit({
+        event_id: "20",
+        event_type: EventType.MANAGEMENT_SHADOW,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", flagged_content: "test" },
+      });
+
+      expect(setPermSpy).toHaveBeenCalledWith(true);
+      expect(setBadgeSpy).toHaveBeenCalledWith("waiting");
+    });
+
+    it("schedules auto-clear after 3 seconds", () => {
+      wsClient.emit({
+        event_id: "21",
+        event_type: EventType.MANAGEMENT_SHADOW,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", flagged_content: "test" },
+      });
+
+      expect(scene.time.delayedCall).toHaveBeenCalledWith(3000, expect.any(Function));
+    });
+
+    it("ignores shadow events for unknown agents", () => {
+      wsClient.emit({
+        event_id: "22",
+        event_type: EventType.MANAGEMENT_SHADOW,
+        timestamp: Date.now(),
+        data: { agent_id: "unknown", flagged_content: "test" },
+      });
+      // Should not throw
+    });
+  });
+
+  // ── MANAGEMENT_INTERVENTION handler tests ─────────────────────
+
+  describe("MANAGEMENT_INTERVENTION", () => {
+    it("flashes camera red on intervention", () => {
+      wsClient.emit({
+        event_id: "30",
+        event_type: EventType.MANAGEMENT_INTERVENTION,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", action: "filter", original_text: "bad", filtered_text: "good" },
+      });
+
+      expect(scene.cameras.main.flash).toHaveBeenCalledWith(500, 255, 50, 50);
+    });
+
+    it("creates warning text overlay", () => {
+      wsClient.emit({
+        event_id: "31",
+        event_type: EventType.MANAGEMENT_INTERVENTION,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", action: "filter", original_text: "bad", filtered_text: "good" },
+      });
+
+      // Should create a text object for "MANAGEMENT INTERVENTION"
+      const textCalls = scene.add.text.mock.calls;
+      const warningCall = textCalls.find(
+        (call: any[]) => call[2] === "MANAGEMENT INTERVENTION",
+      );
+      expect(warningCall).toBeDefined();
+    });
+
+    it("shakes the targeted agent sprite", () => {
+      wsClient.emit({
+        event_id: "32",
+        event_type: EventType.MANAGEMENT_INTERVENTION,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", action: "filter", original_text: "bad", filtered_text: "good" },
+      });
+
+      const vera = manager.getSprite("vera")!;
+      expect(vera.getBadgeState()).toBe("error");
+    });
+
+    it("handles intervention for unknown agent without crash", () => {
+      wsClient.emit({
+        event_id: "33",
+        event_type: EventType.MANAGEMENT_INTERVENTION,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", action: "filter", original_text: "a", filtered_text: "b" },
+      });
+
+      // Should still flash camera even without sprite
+      expect(scene.cameras.main.flash).toHaveBeenCalled();
+    });
+  });
+
+  // ── MANAGEMENT_WARNING handler tests ──────────────────────────
+
+  describe("MANAGEMENT_WARNING", () => {
+    it("sets activity and waiting badge on warning", () => {
+      const vera = manager.getSprite("vera")!;
+      const setActivitySpy = vi.spyOn(vera, "setActivity");
+      const setBadgeSpy = vi.spyOn(vera, "setBadgeState");
+
+      wsClient.emit({
+        event_id: "40",
+        event_type: EventType.MANAGEMENT_WARNING,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "tone" },
+      });
+
+      expect(setActivitySpy).toHaveBeenCalledWith("warning");
+      expect(setBadgeSpy).toHaveBeenCalledWith("waiting");
+    });
+
+    it("schedules auto-clear after 3 seconds", () => {
+      wsClient.emit({
+        event_id: "41",
+        event_type: EventType.MANAGEMENT_WARNING,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "tone" },
+      });
+
+      expect(scene.time.delayedCall).toHaveBeenCalledWith(3000, expect.any(Function));
+    });
+  });
+
+  // ── ALPHA_DISPATCH handler tests ──────────────────────────────
+
+  describe("ALPHA_DISPATCH", () => {
+    it("plays running animation on alpha", () => {
+      const alpha = manager.getSprite("alpha")!;
+      const playAnimSpy = vi.spyOn(alpha, "playAnimation");
+
+      wsClient.emit({
+        event_id: "50",
+        event_type: EventType.ALPHA_DISPATCH,
+        timestamp: Date.now(),
+        data: { task: "fetch data", dispatched_by: "vera" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("running");
+    });
+
+    it("sets active badge on dispatch", () => {
+      const alpha = manager.getSprite("alpha")!;
+      const setBadgeSpy = vi.spyOn(alpha, "setBadgeState");
+
+      wsClient.emit({
+        event_id: "51",
+        event_type: EventType.ALPHA_DISPATCH,
+        timestamp: Date.now(),
+        data: { task: "fetch data", dispatched_by: "vera" },
+      });
+
+      expect(setBadgeSpy).toHaveBeenCalledWith("active");
+    });
+
+    it("tweens alpha off-screen", () => {
+      wsClient.emit({
+        event_id: "52",
+        event_type: EventType.ALPHA_DISPATCH,
+        timestamp: Date.now(),
+        data: { task: "fetch data", dispatched_by: "vera" },
+      });
+
+      expect(scene.tweens.add).toHaveBeenCalledWith(
+        expect.objectContaining({
+          x: -50,
+          duration: 1000,
+        }),
+      );
+    });
+  });
+
+  // ── ALPHA_RETURN handler tests ────────────────────────────────
+
+  describe("ALPHA_RETURN", () => {
+    it("makes alpha visible and tweens back to desk", () => {
+      const alpha = manager.getSprite("alpha")!;
+
+      wsClient.emit({
+        event_id: "60",
+        event_type: EventType.ALPHA_RETURN,
+        timestamp: Date.now(),
+        data: { task: "fetch data", result: "success", success: true },
+      });
+
+      expect(alpha.sprite.setVisible).toHaveBeenCalledWith(true);
+      expect(scene.tweens.add).toHaveBeenCalledWith(
+        expect.objectContaining({
+          duration: 1000,
+          ease: "Power2",
+        }),
+      );
+    });
+
+    it("plays running animation during return", () => {
+      const alpha = manager.getSprite("alpha")!;
+      const playAnimSpy = vi.spyOn(alpha, "playAnimation");
+
+      wsClient.emit({
+        event_id: "61",
+        event_type: EventType.ALPHA_RETURN,
+        timestamp: Date.now(),
+        data: { task: "fetch data", result: "done", success: true },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("running");
+    });
+  });
+
+  // ── WORLD_EXPANSION handler tests ─────────────────────────────
+
+  describe("WORLD_EXPANSION", () => {
+    it("calls worldManager.expandWorld when worldManager exists", () => {
+      const mockWorldManager = { expandWorld: vi.fn() };
+      const mgr = new AgentSpriteManager(
+        scene as any,
+        wsClient as any,
+        mockWorldManager as any,
+      );
+
+      wsClient.emit({
+        event_id: "70",
+        event_type: EventType.WORLD_EXPANSION,
+        timestamp: Date.now(),
+        data: { zone: "garden", description: "A beautiful garden" },
+      });
+
+      expect(mockWorldManager.expandWorld).toHaveBeenCalledWith("garden", "A beautiful garden");
+      mgr.destroy();
+    });
+
+    it("does not crash when worldManager is null", () => {
+      wsClient.emit({
+        event_id: "71",
+        event_type: EventType.WORLD_EXPANSION,
+        timestamp: Date.now(),
+        data: { zone: "garden", description: "A garden" },
+      });
+      // Should not throw
+    });
+  });
+
+  // ── CONFIG_RELOADED handler tests ─────────────────────────────
+
+  describe("CONFIG_RELOADED", () => {
+    it("logs config reload without crash", () => {
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      wsClient.emit({
+        event_id: "80",
+        event_type: EventType.CONFIG_RELOADED,
+        timestamp: Date.now(),
+        data: { config_type: "agents", changes: ["vera.chattiness"] },
+      });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "Config reloaded:",
+        "agents",
+        ["vera.chattiness"],
+      );
+      consoleSpy.mockRestore();
+    });
   });
 });

@@ -221,6 +221,18 @@ export class StreamOverlay {
         }
         break;
       }
+      case EventType.TOOL_EXECUTED:
+        this.agentStatusPanel.updateStatus(event.data.agent_id as string, "active");
+        break;
+      case EventType.MANAGEMENT_SHADOW:
+        this.agentStatusPanel.updateStatus(event.data.agent_id as string, "waiting");
+        break;
+      case EventType.MANAGEMENT_WARNING:
+        this.agentStatusPanel.updateStatus(event.data.agent_id as string, "waiting");
+        break;
+      case EventType.MANAGEMENT_INTERVENTION:
+        this.agentStatusPanel.updateStatus(event.data.agent_id as string, "error");
+        break;
     }
   }
 }
