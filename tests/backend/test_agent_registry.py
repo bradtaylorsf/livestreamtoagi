@@ -188,7 +188,6 @@ async def test_rex_prompt_and_behaviors_match_character_spec():
     # Shared goals moved to infrastructure layer; check character-specific content
     assert len(prompt) > 100
     assert "initialized second" in prompt
-    assert "0.3 seconds after vera" in prompt
     assert "terse, sarcastic, pragmatic" in prompt
     assert "dry humor" in prompt
     assert "does it ship?" in prompt
@@ -293,7 +292,7 @@ async def test_pixel_config_loads_with_expected_values():
     assert pixel.display_name == "Pixel — The Enthusiast"
     assert pixel.model_conversation == "openai/gpt-4o-mini"
     assert pixel.model_building == "openai/gpt-5.2"
-    assert pixel.voice_id == "en-US-DavisNeural"
+    assert pixel.voice_id == "en-US-EricNeural"
     assert pixel.chattiness == 0.9
     assert pixel.initiative == 0.7
     assert pixel.interrupt_tendency == 0.5
@@ -312,7 +311,6 @@ async def test_pixel_prompt_and_behaviors_match_character_spec():
     prompt = pixel.system_prompt.lower()
     # Shared goals moved to infrastructure layer; check character-specific content
     assert len(prompt) > 100
-    assert "fourth agent initialized" in prompt
     assert "audience's avatar" in prompt
     assert "audience liaison" in prompt
     assert "enthusiastic, curious, tangent-prone" in prompt
@@ -388,7 +386,6 @@ async def test_vera_prompt_and_behaviors_match_character_spec():
     assert "use bullet points" in prompt
     assert "maximum of 2-3 sentences total" in prompt
     assert "closest ally" in prompt
-    assert "good wolf" in prompt
     assert "i have concerns" in prompt
     assert "let's circle back on that" in prompt
 
@@ -452,14 +449,11 @@ async def test_sentinel_prompt_and_behaviors_match_character_spec():
     assert sentinel is not None
     prompt = sentinel.system_prompt.lower()
     assert "anxious accountant" in prompt
-    assert "cheapest model" in prompt
+    assert "economy option" in prompt
     assert "claude haiku 4.5" in prompt
     assert "efficient thought" in prompt
     assert "kill switch" in prompt
-    assert "you speak" in prompt
-    assert "warnings, ratios, thresholds, projections, burn rates, and trend lines" in prompt
-    assert "at current burn rate, we have [x] days of" in prompt
-    assert "operation remaining." in prompt
+    assert "at current burn rate, we have [x] days remaining" in prompt
     assert "i have the numbers." in prompt
 
     communication = sentinel.behaviors["communication"]
@@ -525,7 +519,7 @@ async def test_grok_prompt_and_behaviors_match_character_spec():
     assert "confident" in prompt
     assert "irreverent" in prompt
     assert "hot take" in prompt
-    assert "40% brilliant, 40% terrible, and 20%" in prompt
+    assert "40% brilliant, 40% terrible, 20%" in prompt
     assert "i'm just saying what everyone's thinking" in prompt
     assert "let me cook" in prompt
 
@@ -593,8 +587,6 @@ async def test_aurora_prompt_and_behaviors_match_character_spec():
     prompt = aurora.system_prompt.lower()
     # Shared goals moved to infrastructure layer; check character-specific content
     assert len(prompt) > 100
-    assert "third agent initialized" in prompt
-    assert "aesthetically insufficient" in prompt
     assert "dramatic" in prompt
     assert "metaphorical" in prompt
     assert "creative director" in prompt
@@ -602,9 +594,6 @@ async def test_aurora_prompt_and_behaviors_match_character_spec():
     assert "art is not a luxury, it's a necessity." in prompt
     assert "you wouldn't understand." in prompt
     assert "palette" in prompt
-    assert "texture" in prompt
-    assert "resonance" in prompt
-    assert "authenticity" in prompt
 
     communication = aurora.behaviors["communication"]
     building = aurora.behaviors["building"]

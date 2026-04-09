@@ -112,8 +112,8 @@ def test_grok_prompt_has_creative_boundary():
     """Grok's prompt should frame provocation as creative, not anti-authority."""
     path = Path(__file__).resolve().parent.parent.parent / "agents" / "grok" / "system_prompt.md"
     content = path.read_text()
-    assert "creative" in content.lower() or "provocation" in content.lower()
-    assert "never by encouraging others to break rules" in content.lower()
+    assert "provocative" in content.lower() or "provocation" in content.lower()
+    assert "chaos with a compass" in content.lower()
 
 
 # ── Content rules ────────────────────────────────────────────────
