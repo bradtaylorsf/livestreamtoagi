@@ -165,4 +165,81 @@ export async function getConversationSelections(
   return request<SelectionLogEntry[]>(`/api/conversations/${id}/selections`);
 }
 
+// Evals (public read-only)
+export interface PublicEvalCategory {
+  name: string;
+  score: number | null;
+  trend: "up" | "down" | "flat";
+  description: string;
+}
+
+export interface PublicEvalRun {
+  id: string;
+  simulation_id: string;
+  date: string;
+  overall_score: number | null;
+  cost: number;
+  model_versions: Record<string, string>;
+  category_scores: Record<string, number | null>;
+  results?: { category: string; score: number | null }[];
+}
+
+export interface EvalHistoryPoint {
+  score: number | null;
+  created_at: string | null;
+  simulation_id: string;
+  eval_run_id: string;
+}
+
+export async function getEvalCategories(): Promise<string[]> {
+  return request<string[]>("/api/evals/categories");
+}
+
+export async function getEvalHistory(
+  category: string,
+): Promise<EvalHistoryPoint[]> {
+  return request<EvalHistoryPoint[]>(
+    `/api/evals/history?category=${encodeURIComponent(category)}`,
+  );
+}
+
+export async function getLatestEvalRun(): Promise<PublicEvalRun | null> {
+  try {
+    return await request<PublicEvalRun>("/api/evals/latest");
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvalRuns(
+  limit = 20,
+  offset = 0,
+): Promise<PublicEvalRun[]> {
+  return request<PublicEvalRun[]>(
+    `/api/evals/runs?limit=${limit}&offset=${offset}`,
+  );
+}
+
+export async function getEvalRunDetail(
+  id: string,
+): Promise<PublicEvalRun | null> {
+  try {
+    return await request<PublicEvalRun>(`/api/evals/runs/${id}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvalCategoryDetail(
+  category: string,
+): Promise<PublicEvalCategory | null> {
+  try {
+    return await request<PublicEvalCategory>(
+      `/api/evals/categories/${encodeURIComponent(category)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export { ApiRequestError };

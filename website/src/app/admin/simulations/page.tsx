@@ -189,9 +189,9 @@ export default function SimulationsPage() {
                     ${parseFloat(sim.total_cost || "0").toFixed(4)}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    {sim.total_management_flags > 0 ? (
+                    {sim.total_overseer_flags > 0 ? (
                       <span className="text-red-400 font-mono">
-                        {sim.total_management_flags}
+                        {sim.total_overseer_flags}
                       </span>
                     ) : (
                       <span className="text-foreground/40">0</span>
