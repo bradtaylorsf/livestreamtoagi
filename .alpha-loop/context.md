@@ -1,23 +1,26 @@
+Here's the project context file:
+
 ## Architecture
-- **Backend entry:** FastAPI app in `core/main.py` — bootstraps services (DB, Redis, TTS, agents), mounts `core/admin_routes.py`, serves WebSocket at `/ws` for frontend, static files for TTS audio
-- **Frontend entry:** Phaser.js app in `frontend/src/main.ts` → `MainScene.ts` — connects via WebSocket to backend, renders pixel art world with agent sprites, speech bubbles, stream overlay
-- **Website:** Next.js app in `website/` — public-facing site, calls backend REST API
-- **Database:** PostgreSQL 16 + pgvector (port 5434). Schema in `db/init.sql`, migrations in `db/migrations/`, run via `pnpm db:migrate`. Repos in `core/repos/` (asyncpg + SQLAlchemy async)
-- **Key directories:** `core/` (orchestrator, conversation engine, memory, eval, LLM client), `tools/` (agent tool implementations), `agents/` (YAML personality configs), `scripts/` (CLI entrypoints like `chat.py`), `evals/` + `scenarios/` (eval configs), `specs/` (read-only design docs)
+- **Backend entry:** FastAPI app in `core/main.py` — bootstraps services (DB, Redis, TTS, agent registry), mounts `admin_routes.py` router, serves WebSocket at `/ws` for frontend real-time comms
+- **Frontend entry:** Phaser.js game in `frontend/src/main.ts` — 1280x720 pixel art renderer, connects to backend via WebSocket (`VITE_WS_URL`), scene-driven (`scenes/MainScene`)
+- **Website:** Next.js app in `website/` — public-facing site on Vercel, calls FastAPI REST API (`BACKEND_URL`)
+- **Database:** PostgreSQL 16 + pgvector, schema in `db/init.sql` + `db/migrations/` (numbered up/down SQL files, 10+ migrations). Managed via `pnpm db:migrate/status/rollback`. Async access via asyncpg + SQLAlchemy
+- **Infrastructure:** Docker Compose runs Redis (port 6381), PostgreSQL (port 5434), Langfuse (port 3100). `pnpm dev` orchestrates all four services via concurrently
 
 ## Conventions
-- **Python 3.13**, strict type hints, async/await for all I/O, `ruff` for lint/format. Pydantic models for API schemas. All CLI commands wired through `pnpm` scripts in root `package.json` (e.g., `pnpm chat`, `pnpm sim`, `pnpm eval`)
-- **TypeScript** strict mode, ESM, Vite builds. Frontend uses Phaser.js; website uses Next.js + Tailwind + Recharts
-- **Tests:** Python in `tests/backend/` and `tests/integration/` (pytest-asyncio, `pnpm test:python`). Frontend tests co-located as `*.test.ts` (Vitest, `pnpm test:frontend`). Website tests via Vitest + Playwright (`pnpm test:website`)
-- **New features:** Backend routes go in `core/admin_routes.py` or new routers imported in `core/main.py`. New agent tools in `tools/`. New CLI commands must be added to root `package.json` scripts — never require raw `python` commands
+- **Python:** 3.13, async/await everywhere, Pydantic models, ruff for lint/format. Tests in `tests/backend/` and `tests/integration/` via pytest-asyncio
+- **TypeScript:** Strict mode, Vite builds, Vitest for unit tests in both `frontend/` and `website/`
+- **CLI gateway:** All scripts wired through `pnpm` — `pnpm chat`, `pnpm sim`, `pnpm eval`, `pnpm coverage` all route through `scripts/chat.py`. Never invoke raw python commands
+- **Git:** Conventional commits (`feat:`, `fix:`, etc.), one feature per PR
+- **New features:** Backend routes go in `core/admin_routes.py` or new routers mounted in `main.py`. Agent tools go in `tools/`. Agent configs in `agents/` (YAML)
 
 ## Critical Rules
-- **`specs/` is read-only** — reference docs, never modify
-- **Agent configs in `agents/`** and character names must use "Management" not "Overseer" — this rename is enforced everywhere
-- **Cost tracking must be 100% accurate** — any change touching `core/repos/cost_repo.py`, `core/llm_client.py`, or eval cost calculations requires verification
-- **Docker services must be healthy before integration tests** — run `docker compose up -d && bash scripts/check-services.sh` (Redis:6381, Postgres:5434, Langfuse:3100)
-- **`.env` is never committed** — contains all API keys, DB URLs. Python 3.14+ is unsupported (native deps won't build)
+- **`db/migrations/`** — numbered and ordered; never rename or reorder existing migrations. New migrations must be sequential
+- **`agents/` YAML + `core/agent_registry.py`** — agent config and registry must stay in sync; adding/removing an agent touches both
+- **`core/bootstrap.py`** — service initialization order matters (DB before agent registry before memory). Changes here can break startup
+- **Docker services must be healthy** before running integration tests — run `scripts/check-services.sh` first
+- **"Overseer" is banned** — always use "Management" in code, configs, and issues
 
 ## Active State
-- Test status: *(will be filled in by the loop)*
-- Recent changes: *(will be filled in by the loop)*
+- Test status: (will be filled in by the loop)
+- Recent changes: (will be filled in by the loop)
