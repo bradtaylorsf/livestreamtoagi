@@ -24,9 +24,85 @@ interface TilemapJSON {
 export class ChunkLoader {
   private scene: Phaser.Scene;
   private chunks: Map<string, ChunkData> = new Map();
+  private tileSize: number;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, tileSize = 32) {
     this.scene = scene;
+    this.tileSize = tileSize;
+  }
+
+  /**
+   * Load a chunk from a backend API URL. Fetches tilemap JSON, registers it
+   * in Phaser cache, loads tileset, then creates layers at the given pixel offset.
+   */
+  async loadChunkFromURL(
+    chunkId: string,
+    tilemapUrl: string,
+    tilesetUrl: string,
+    offset: { x: number; y: number },
+  ): Promise<ChunkData | null> {
+    if (this.chunks.has(chunkId)) {
+      return this.chunks.get(chunkId)!;
+    }
+
+    try {
+      const response = await fetch(tilemapUrl);
+      if (!response.ok) return null;
+      const chunkData = await response.json();
+
+      // Build a minimal Tiled-format tilemap JSON from the chunk data
+      const tilemapJSON: TilemapJSON = {
+        width: chunkData.width ?? 10,
+        height: chunkData.height ?? 10,
+        tilewidth: this.tileSize,
+        tileheight: this.tileSize,
+        tilesets: [{ name: `tileset_${chunkId}`, firstgid: 1, image: `tileset_${chunkId}` }],
+        layers: [],
+        areas: chunkData.areas,
+      };
+
+      // Convert tile_data into layers
+      if (chunkData.tile_data?.tiles) {
+        tilemapJSON.layers.push({
+          name: "Ground",
+          data: (chunkData.tile_data.tiles as number[][]).flat(),
+        });
+      }
+
+      // Register in Phaser cache
+      const jsonKey = `tilemap_${chunkId}`;
+      this.scene.cache.tilemap.add(jsonKey, { format: 1, data: tilemapJSON });
+
+      // Load tileset image
+      return new Promise<ChunkData | null>((resolve) => {
+        const tilesetKey = `tileset_${chunkId}`;
+        if (!this.scene.textures.exists(tilesetKey)) {
+          this.scene.load.image(tilesetKey, tilesetUrl);
+          this.scene.load.once("complete", () => {
+            const chunk = this.loadChunk(chunkId);
+            if (chunk) {
+              // Apply pixel offset to all layers
+              for (const layer of chunk.layers) {
+                layer.setPosition(offset.x * this.tileSize, offset.y * this.tileSize);
+              }
+            }
+            resolve(chunk);
+          });
+          this.scene.load.start();
+        } else {
+          const chunk = this.loadChunk(chunkId);
+          if (chunk) {
+            for (const layer of chunk.layers) {
+              layer.setPosition(offset.x * this.tileSize, offset.y * this.tileSize);
+            }
+          }
+          resolve(chunk);
+        }
+      });
+    } catch (err) {
+      console.warn(`Failed to load chunk from URL: ${tilemapUrl}`, err);
+      return null;
+    }
   }
 
   loadChunk(chunkId: string): ChunkData | null {

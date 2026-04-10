@@ -39,6 +39,10 @@ class EventType(str, Enum):
     AGI_PROGRESS = "agi_progress"
     ARTIFACT_CREATED = "artifact_created"
     CONVERSATION_PRODUCTIVITY = "conversation_productivity"
+    TASK_DELEGATED = "task_delegated"
+    TASK_COMPLETED = "task_completed"
+    AGENT_SPAWN = "agent_spawn"
+    AGENT_DESPAWN = "agent_despawn"
 
 
 # Custom JSON encoder for Decimal, datetime, UUID

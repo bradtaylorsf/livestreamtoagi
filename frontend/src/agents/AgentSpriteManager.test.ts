@@ -15,6 +15,7 @@ function createMockScene() {
         play: vi.fn(),
         setScale: vi.fn(),
         setVisible: vi.fn(),
+        setAlpha: vi.fn(),
         anims: { exists: vi.fn(() => false) },
         destroy: vi.fn(),
       })),
@@ -36,19 +37,29 @@ function createMockScene() {
           destroy: vi.fn(),
         }),
       ),
+      rectangle: vi.fn((_x: number, _y: number, _w: number, _h: number, _color: number) => ({
+        setDepth: vi.fn(),
+        setAlpha: vi.fn(),
+        destroy: vi.fn(),
+      })),
       graphics: vi.fn(() => ({
         x: 0,
         y: 0,
-        setDepth: vi.fn(),
-        setAlpha: vi.fn(),
+        setDepth: vi.fn().mockReturnThis(),
+        setAlpha: vi.fn().mockReturnThis(),
         setPosition: vi.fn(function (this: any, x: number, y: number) {
           this.x = x;
           this.y = y;
         }),
         setVisible: vi.fn(),
-        clear: vi.fn(),
-        fillStyle: vi.fn(),
-        fillCircle: vi.fn(),
+        clear: vi.fn().mockReturnThis(),
+        fillStyle: vi.fn().mockReturnThis(),
+        fillCircle: vi.fn().mockReturnThis(),
+        lineStyle: vi.fn().mockReturnThis(),
+        beginPath: vi.fn().mockReturnThis(),
+        moveTo: vi.fn().mockReturnThis(),
+        lineTo: vi.fn().mockReturnThis(),
+        strokePath: vi.fn().mockReturnThis(),
         destroy: vi.fn(),
       })),
     },
@@ -72,6 +83,13 @@ function createMockScene() {
     },
     anims: {
       exists: vi.fn(() => false),
+    },
+    textures: {
+      exists: vi.fn(() => true),
+    },
+    events: {
+      on: vi.fn(),
+      off: vi.fn(),
     },
   };
 }
@@ -272,7 +290,7 @@ describe("AgentSpriteManager", () => {
       expect(setProgressSpy).toHaveBeenCalledWith(true);
     });
 
-    it("clears progress and schedules cleanup on success", () => {
+    it("clears progress and schedules cleanup on success with 300ms delay", () => {
       const vera = manager.getSprite("vera")!;
       const setProgressSpy = vi.spyOn(vera, "setProgress");
 
@@ -284,7 +302,7 @@ describe("AgentSpriteManager", () => {
       });
 
       expect(setProgressSpy).toHaveBeenCalledWith(false);
-      expect(scene.time.delayedCall).toHaveBeenCalledWith(2000, expect.any(Function));
+      expect(scene.time.delayedCall).toHaveBeenCalledWith(300, expect.any(Function));
     });
 
     it("sets error badge on tool failure", () => {
@@ -309,6 +327,72 @@ describe("AgentSpriteManager", () => {
         data: { agent_id: "unknown", tool_name: "test" },
       });
       // Should not throw
+    });
+
+    it("plays thinking animation for reading tools (in-progress)", () => {
+      const vera = manager.getSprite("vera")!;
+      const playAnimSpy = vi.spyOn(vera, "playAnimation");
+
+      wsClient.emit({
+        event_id: "15",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_read" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    });
+
+    it("plays building animation for writing tools (in-progress)", () => {
+      const rex = manager.getSprite("rex")!;
+      const playAnimSpy = vi.spyOn(rex, "playAnimation");
+
+      wsClient.emit({
+        event_id: "16",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "rex", tool_name: "code_write" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("building");
+    });
+
+    it("plays thinking animation for unknown tools (default)", () => {
+      const vera = manager.getSprite("vera")!;
+      const playAnimSpy = vi.spyOn(vera, "playAnimation");
+
+      wsClient.emit({
+        event_id: "17",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "some_unknown_tool" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    });
+
+    it("cancels pending idle timer when new tool starts", () => {
+      const destroySpy = vi.fn();
+      scene.time.delayedCall = vi.fn(() => ({ destroy: destroySpy }));
+
+      // First tool completes — starts idle timer
+      wsClient.emit({
+        event_id: "18",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_read", success: true },
+      });
+
+      // New tool starts before idle timer fires
+      wsClient.emit({
+        event_id: "19",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_write" },
+      });
+
+      // The first timer should have been cancelled
+      expect(destroySpy).toHaveBeenCalled();
     });
   });
 
@@ -470,7 +554,7 @@ describe("AgentSpriteManager", () => {
       expect(setBadgeSpy).toHaveBeenCalledWith("active");
     });
 
-    it("tweens alpha off-screen", () => {
+    it("tweens alpha off-screen when no worldManager", () => {
       wsClient.emit({
         event_id: "52",
         event_type: EventType.ALPHA_DISPATCH,
@@ -485,12 +569,36 @@ describe("AgentSpriteManager", () => {
         }),
       );
     });
+
+    it("uses pathfinding when worldManager is available", () => {
+      const mockWorldManager = {
+        expandWorld: vi.fn(),
+        findPath: vi.fn(() => null),
+        getTileSize: vi.fn(() => 32),
+      };
+      const mgr = new AgentSpriteManager(
+        scene as any,
+        wsClient as any,
+        mockWorldManager as any,
+      );
+
+      wsClient.emit({
+        event_id: "53",
+        event_type: EventType.ALPHA_DISPATCH,
+        timestamp: Date.now(),
+        data: { task: "fetch data", from: "vera", task_id: "t1" },
+      });
+
+      const alpha = mgr.getSprite("alpha")!;
+      expect(alpha.getBadgeState()).toBe("active");
+      mgr.destroy();
+    });
   });
 
   // ── ALPHA_RETURN handler tests ────────────────────────────────
 
   describe("ALPHA_RETURN", () => {
-    it("makes alpha visible and tweens back to desk", () => {
+    it("makes alpha visible on return", () => {
       const alpha = manager.getSprite("alpha")!;
 
       wsClient.emit({
@@ -501,15 +609,9 @@ describe("AgentSpriteManager", () => {
       });
 
       expect(alpha.sprite.setVisible).toHaveBeenCalledWith(true);
-      expect(scene.tweens.add).toHaveBeenCalledWith(
-        expect.objectContaining({
-          duration: 1000,
-          ease: "Power2",
-        }),
-      );
     });
 
-    it("plays running animation during return", () => {
+    it("plays carrying animation on successful return", () => {
       const alpha = manager.getSprite("alpha")!;
       const playAnimSpy = vi.spyOn(alpha, "playAnimation");
 
@@ -520,7 +622,114 @@ describe("AgentSpriteManager", () => {
         data: { task: "fetch data", result: "done", success: true },
       });
 
-      expect(playAnimSpy).toHaveBeenCalledWith("running");
+      expect(playAnimSpy).toHaveBeenCalledWith("carrying");
+    });
+
+    it("plays confused animation on failed return", () => {
+      const alpha = manager.getSprite("alpha")!;
+      const playAnimSpy = vi.spyOn(alpha, "playAnimation");
+
+      wsClient.emit({
+        event_id: "62",
+        event_type: EventType.ALPHA_RETURN,
+        timestamp: Date.now(),
+        data: { task: "fetch data", result: "error", success: false },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("confused");
+    });
+  });
+
+  // ── TASK_DELEGATED handler tests ─────────────────────────────
+
+  describe("TASK_DELEGATED", () => {
+    it("skips alpha delegation (handled by ALPHA_DISPATCH)", () => {
+      const alpha = manager.getSprite("alpha")!;
+      const playAnimSpy = vi.spyOn(alpha, "playAnimation");
+
+      wsClient.emit({
+        event_id: "200",
+        event_type: EventType.TASK_DELEGATED,
+        timestamp: Date.now(),
+        data: {
+          from_agent: "vera",
+          to_agent: "alpha",
+          task_description: "fetch data",
+          task_id: "task_1",
+        },
+      });
+
+      // Should NOT trigger alpha dispatch — that's handled by ALPHA_DISPATCH event
+      expect(playAnimSpy).not.toHaveBeenCalledWith("running");
+    });
+
+    it("creates ghost sprite for non-alpha delegation", () => {
+      wsClient.emit({
+        event_id: "201",
+        event_type: EventType.TASK_DELEGATED,
+        timestamp: Date.now(),
+        data: {
+          from_agent: "vera",
+          to_agent: "rex",
+          task_description: "review code",
+          task_id: "task_2",
+        },
+      });
+
+      // Ghost sprite should be created via scene.add.sprite
+      expect(scene.add.sprite).toHaveBeenCalled();
+    });
+
+    it("does not crash for unknown delegator", () => {
+      wsClient.emit({
+        event_id: "202",
+        event_type: EventType.TASK_DELEGATED,
+        timestamp: Date.now(),
+        data: {
+          from_agent: "unknown",
+          to_agent: "rex",
+          task_description: "something",
+          task_id: "task_3",
+        },
+      });
+      // Should not throw
+    });
+  });
+
+  // ── TASK_COMPLETED handler tests ──────────────────────────────
+
+  describe("TASK_COMPLETED", () => {
+    it("skips alpha task completion (handled by ALPHA_RETURN)", () => {
+      const alpha = manager.getSprite("alpha")!;
+
+      wsClient.emit({
+        event_id: "210",
+        event_type: EventType.TASK_COMPLETED,
+        timestamp: Date.now(),
+        data: {
+          task_id: "task_1",
+          to_agent: "alpha",
+          success: true,
+          result: "done",
+        },
+      });
+
+      // Should NOT trigger alpha return — that's handled by ALPHA_RETURN event
+      expect(alpha.sprite.setVisible).not.toHaveBeenCalledWith(true);
+    });
+
+    it("does not crash for unknown task_id completion", () => {
+      wsClient.emit({
+        event_id: "211",
+        event_type: EventType.TASK_COMPLETED,
+        timestamp: Date.now(),
+        data: {
+          task_id: "nonexistent",
+          to_agent: "rex",
+          success: true,
+        },
+      });
+      // Should not throw
     });
   });
 
@@ -542,7 +751,11 @@ describe("AgentSpriteManager", () => {
         data: { zone: "garden", description: "A beautiful garden" },
       });
 
-      expect(mockWorldManager.expandWorld).toHaveBeenCalledWith("garden", "A beautiful garden");
+      expect(mockWorldManager.expandWorld).toHaveBeenCalledWith(
+        "garden",
+        "A beautiful garden",
+        expect.objectContaining({}),
+      );
       mgr.destroy();
     });
 
@@ -576,6 +789,84 @@ describe("AgentSpriteManager", () => {
         ["vera.chattiness"],
       );
       consoleSpy.mockRestore();
+    });
+  });
+
+  // ── AGENT_SPAWN handler tests ────────────────────────────────
+
+  describe("AGENT_SPAWN", () => {
+    it("plays spawn effect on existing agent (reconnect)", () => {
+      const vera = manager.getSprite("vera")!;
+
+      wsClient.emit({
+        event_id: "90",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "reconnect" },
+      });
+
+      // Spawn effect sets alpha to 0 and tweens back
+      expect(vera.sprite.setAlpha).toHaveBeenCalledWith(0);
+    });
+
+    it("does not crash for unknown agent spawn", () => {
+      wsClient.emit({
+        event_id: "91",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", reason: "start" },
+      });
+      // Should not throw
+    });
+
+    it("ignores management agent spawn", () => {
+      wsClient.emit({
+        event_id: "92",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "management", reason: "start" },
+      });
+      expect(manager.getSprite("management")).toBeUndefined();
+    });
+  });
+
+  // ── AGENT_DESPAWN handler tests ──────────────────────────────
+
+  describe("AGENT_DESPAWN", () => {
+    it("sets spawning flag on despawn", () => {
+      const vera = manager.getSprite("vera")!;
+
+      wsClient.emit({
+        event_id: "100",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "shutdown" },
+      });
+
+      // Despawn effect sets spawning flag immediately
+      expect(vera.spawning).toBe(true);
+    });
+
+    it("creates tween for sprite fade-out", () => {
+      wsClient.emit({
+        event_id: "101",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "error" },
+      });
+
+      // Should have created tweens (particles + sprite fade)
+      expect(scene.tweens.add).toHaveBeenCalled();
+    });
+
+    it("does not crash for unknown agent despawn", () => {
+      wsClient.emit({
+        event_id: "102",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", reason: "shutdown" },
+      });
+      // Should not throw
     });
   });
 });

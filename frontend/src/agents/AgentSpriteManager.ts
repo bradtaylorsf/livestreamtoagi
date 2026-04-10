@@ -6,9 +6,24 @@ import type { WebSocketClient } from "../network/WebSocketClient";
 import type { WorldManager } from "../world/WorldManager";
 import type { WorkspaceManager } from "../world/WorkspaceManager";
 import type { AutoStateManager } from "../world/furniture/AutoStateManager";
+import { SpawnEffect } from "../effects/SpawnEffect";
+import { DelegationLink } from "../effects/DelegationLink";
 
 /** Agents that get sprite representations (excludes management which has no sprite). */
 const SPRITE_AGENTS = AGENTS.filter((a) => a.id !== "management");
+
+/** Delay before reverting to idle after tool completes (prevents flicker). */
+const TOOL_DONE_DELAY_MS = 300;
+
+/** Tools that map to the "thinking" (reading/searching) animation. */
+const READING_TOOLS = new Set([
+  "code_read", "web_search", "memory_recall", "file_read", "file_search",
+]);
+
+/** Tools that map to the "building" (writing/executing) animation. */
+const WRITING_TOOLS = new Set([
+  "code_write", "file_edit", "terminal", "code_execute", "sandbox_run", "file_write",
+]);
 
 /**
  * Manages all agent sprites: creation, event handling, and lifecycle.
@@ -20,6 +35,11 @@ export class AgentSpriteManager {
   private workspaceManager: WorkspaceManager | null;
   private autoStateManager: AutoStateManager | null = null;
   private unsubscribe: (() => void) | null = null;
+  private toolIdleTimers: Map<string, Phaser.Time.TimerEvent> = new Map();
+  private spawnEffect: SpawnEffect;
+  private initialLoadComplete = false;
+  private delegationLinks: Map<string, DelegationLink> = new Map();
+  private ghostSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
 
   constructor(
     scene: Phaser.Scene,
@@ -30,8 +50,9 @@ export class AgentSpriteManager {
     this.scene = scene;
     this.worldManager = worldManager;
     this.workspaceManager = workspaceManager ?? null;
+    this.spawnEffect = new SpawnEffect(scene);
 
-    // Create sprites for each agent
+    // Create sprites for each agent (initial load — no spawn effect)
     for (const agent of SPRITE_AGENTS) {
       const pos = this.getDeskPosition(agent);
       const config = {
@@ -52,6 +73,9 @@ export class AgentSpriteManager {
         this.handleEvent(event),
       );
     }
+
+    // Mark initial load complete — subsequent spawn events will play effects
+    this.initialLoadComplete = true;
   }
 
   setAutoStateManager(manager: AutoStateManager): void {
@@ -78,6 +102,18 @@ export class AgentSpriteManager {
     if (this.unsubscribe) {
       this.unsubscribe();
     }
+    for (const timer of this.toolIdleTimers.values()) {
+      timer.destroy();
+    }
+    this.toolIdleTimers.clear();
+    for (const link of this.delegationLinks.values()) {
+      link.destroy();
+    }
+    this.delegationLinks.clear();
+    for (const ghost of this.ghostSprites.values()) {
+      ghost.destroy();
+    }
+    this.ghostSprites.clear();
     for (const sprite of this.sprites.values()) {
       sprite.destroy();
     }
@@ -116,8 +152,20 @@ export class AgentSpriteManager {
       case EventType.ALPHA_RETURN:
         this.handleAlphaReturn(event.data);
         break;
+      case EventType.TASK_DELEGATED:
+        this.handleTaskDelegated(event.data);
+        break;
+      case EventType.TASK_COMPLETED:
+        this.handleTaskCompleted(event.data);
+        break;
       case EventType.CONFIG_RELOADED:
         console.log("Config reloaded:", event.data.config_type, event.data.changes);
+        break;
+      case EventType.AGENT_SPAWN:
+        this.handleAgentSpawn(event.data);
+        break;
+      case EventType.AGENT_DESPAWN:
+        this.handleAgentDespawn(event.data);
         break;
     }
   }
@@ -190,18 +238,39 @@ export class AgentSpriteManager {
     sprite.setActivity(toolName);
     sprite.setBadgeState("active");
 
+    // Cancel any pending idle timer for this agent
+    const existingTimer = this.toolIdleTimers.get(agentId);
+    if (existingTimer) {
+      existingTimer.destroy();
+      this.toolIdleTimers.delete(agentId);
+    }
+
     if (success !== undefined && success !== null) {
-      // Tool completed — show result briefly then clear
+      // Tool completed — show result briefly, then revert to idle after delay
       sprite.setProgress(false);
       sprite.setBadgeState(success ? "active" : "error");
-      this.scene.time.delayedCall(2000, () => {
+      const timer = this.scene.time.delayedCall(TOOL_DONE_DELAY_MS, () => {
+        sprite.playAnimation("idle");
         sprite.setActivity(null);
         sprite.setBadgeState("idle");
+        this.autoStateManager?.onAgentStatusChange(agentId, "idle");
+        this.toolIdleTimers.delete(agentId);
       });
+      this.toolIdleTimers.set(agentId, timer);
     } else {
-      // Tool in progress — show spinner
+      // Tool in progress — play mapped animation and show spinner
+      const anim = this.getToolAnimation(toolName);
+      sprite.playAnimation(anim);
       sprite.setProgress(true);
+      this.autoStateManager?.onAgentStatusChange(agentId, anim === "building" ? "building" : "thinking");
     }
+  }
+
+  /** Map a tool name to the appropriate animation. */
+  private getToolAnimation(toolName: string): string {
+    if (WRITING_TOOLS.has(toolName)) return "building";
+    if (READING_TOOLS.has(toolName)) return "thinking";
+    return "thinking"; // default for unknown tools
   }
 
   private handleManagementShadow(data: Record<string, unknown>): void {
@@ -222,10 +291,32 @@ export class AgentSpriteManager {
   }
 
   private handleWorldExpansion(data: Record<string, unknown>): void {
-    const zone = data.zone as string;
-    const description = data.description as string;
+    const zone = (data.zone ?? data.chunk_name) as string;
+    const description = (data.description ?? "") as string;
+    const agentId = data.agent_id as string | undefined;
     if (this.worldManager) {
-      this.worldManager.expandWorld(zone, description);
+      this.worldManager.expandWorld(zone, description, {
+        tilemapUrl: data.tilemap_url as string | undefined,
+        tilesetUrl: data.tileset_url as string | undefined,
+        offset: data.offset as { x: number; y: number } | undefined,
+      });
+
+      // After reveal animation, move the builder agent to the new area
+      if (agentId && this.worldManager) {
+        const sprite = this.sprites.get(agentId);
+        const offset = data.offset as { x: number; y: number } | undefined;
+        if (sprite && offset) {
+          const tileSize = this.worldManager.getTileSize();
+          const chunkW = (data.chunk_width as number | undefined) ?? 10;
+          const chunkH = (data.chunk_height as number | undefined) ?? 10;
+          const targetX = offset.x * tileSize + Math.floor(chunkW / 2) * tileSize;
+          const targetY = offset.y * tileSize + Math.floor(chunkH / 2) * tileSize;
+          // Delay to let camera pan + fade-in finish first
+          this.scene.time.delayedCall(1500, () => {
+            sprite.moveTo(targetX, targetY, this.worldManager ?? undefined);
+          });
+        }
+      }
     }
   }
 
@@ -295,24 +386,43 @@ export class AgentSpriteManager {
     });
   }
 
-  private handleAlphaDispatch(_data: Record<string, unknown>): void {
+  private handleAlphaDispatch(data: Record<string, unknown>): void {
     const alpha = this.sprites.get("alpha");
     if (!alpha) return;
+
+    const dispatchedBy = (data.from ?? data.dispatched_by) as string | undefined;
+    const taskId = data.task_id as string | undefined;
+    const delegatorSprite = dispatchedBy ? this.sprites.get(dispatchedBy) : null;
 
     alpha.playAnimation("running");
     alpha.setBadgeState("active");
 
-    // Tween alpha off-screen to the left
-    this.scene.tweens.add({
-      targets: alpha.sprite,
-      x: -50,
-      duration: 1000,
-      ease: "Power2",
-      onComplete: () => {
-        alpha.setVisible(false);
-        alpha.setBadgeState("idle");
-      },
-    });
+    if (delegatorSprite && this.worldManager) {
+      // Pathfind Alpha to the delegating agent's position
+      const from = alpha.getPosition();
+      const to = delegatorSprite.getPosition();
+      alpha.moveTo(to.x, to.y, this.worldManager);
+
+      // Create delegation link between parent and Alpha
+      if (taskId) {
+        const link = new DelegationLink(
+          this.scene, delegatorSprite.sprite, alpha.sprite, dispatchedBy!,
+        );
+        this.delegationLinks.set(taskId, link);
+      }
+    } else {
+      // Fallback: tween alpha off-screen to the left
+      this.scene.tweens.add({
+        targets: alpha.sprite,
+        x: -50,
+        duration: 1000,
+        ease: "Power2",
+        onComplete: () => {
+          alpha.setVisible(false);
+          alpha.setBadgeState("idle");
+        },
+      });
+    }
   }
 
   private handleAlphaReturn(data: Record<string, unknown>): void {
@@ -321,38 +431,186 @@ export class AgentSpriteManager {
 
     const success = data.success as boolean;
     const result = data.result as string | undefined;
+    const taskId = data.task_id as string | undefined;
     const deskPos = this.getDeskPosition(
       AGENTS.find((a) => a.id === "alpha")!,
     );
 
-    alpha.setPosition(-50, deskPos.y);
+    // Remove delegation link
+    if (taskId) {
+      const link = this.delegationLinks.get(taskId);
+      if (link) {
+        link.destroy();
+        this.delegationLinks.delete(taskId);
+      }
+    }
+
     alpha.setVisible(true);
-    alpha.playAnimation("running");
+    alpha.playAnimation(success ? "carrying" : "confused");
     alpha.setBadgeState("active");
 
-    this.scene.tweens.add({
-      targets: alpha.sprite,
-      x: deskPos.x,
-      y: deskPos.y,
-      duration: 1000,
-      ease: "Power2",
-      onComplete: () => {
-        alpha.setPosition(deskPos.x, deskPos.y);
-        alpha.playAnimation(success ? "celebrate" : "confused");
-        alpha.setBadgeState("idle");
-        if (result) {
-          const truncated = result.length > 20 ? result.slice(0, 19) + "\u2026" : result;
-          alpha.setActivity(truncated);
-          this.scene.time.delayedCall(3000, () => {
-            alpha.setActivity(null);
-            alpha.playAnimation("idle");
-          });
-        } else {
-          this.scene.time.delayedCall(2000, () => {
-            alpha.playAnimation("idle");
-          });
-        }
-      },
+    // Pathfind back to kennel
+    if (this.worldManager) {
+      alpha.moveTo(deskPos.x, deskPos.y, this.worldManager);
+    } else {
+      alpha.setPosition(-50, deskPos.y);
+      this.scene.tweens.add({
+        targets: alpha.sprite,
+        x: deskPos.x,
+        y: deskPos.y,
+        duration: 1000,
+        ease: "Power2",
+        onComplete: () => alpha.setPosition(deskPos.x, deskPos.y),
+      });
+    }
+
+    // After arrival, show result animation
+    this.scene.time.delayedCall(2000, () => {
+      alpha.playAnimation(success ? "celebrate" : "confused");
+      alpha.setBadgeState("idle");
+      if (result) {
+        const truncated = result.length > 20 ? result.slice(0, 19) + "\u2026" : result;
+        alpha.setActivity(truncated);
+        this.scene.time.delayedCall(3000, () => {
+          alpha.setActivity(null);
+          alpha.playAnimation("idle");
+        });
+      } else {
+        this.scene.time.delayedCall(2000, () => {
+          alpha.playAnimation("idle");
+        });
+      }
+    });
+  }
+
+  private handleTaskDelegated(data: Record<string, unknown>): void {
+    const fromAgent = data.from_agent as string;
+    const toAgent = data.to_agent as string;
+    const taskId = data.task_id as string;
+
+    if (toAgent === "alpha") {
+      // Alpha delegations are already handled by ALPHA_DISPATCH events.
+      // The backend emits both ALPHA_DISPATCH and TASK_DELEGATED for the
+      // same operation, so we skip here to avoid double-processing.
+      return;
+    }
+
+    // Non-Alpha delegation: create ghost sprite at delegator's position
+    const fromSprite = this.sprites.get(fromAgent);
+    if (!fromSprite) return;
+
+    const pos = fromSprite.getPosition();
+    const spriteKey = `sprite_${fromAgent}`;
+
+    if (this.scene.textures.exists(spriteKey)) {
+      const ghost = this.scene.add.sprite(pos.x + 20, pos.y, spriteKey);
+      ghost.setOrigin(0.5, 1);
+      ghost.setAlpha(0.4);
+      ghost.setDepth(2);
+      this.ghostSprites.set(taskId, ghost);
+
+      // Pulsing alpha tween
+      this.scene.tweens.add({
+        targets: ghost,
+        alpha: 0.2,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+
+      // Delegation link between original and ghost
+      if (fromSprite) {
+        const link = new DelegationLink(this.scene, fromSprite.sprite, ghost, fromAgent);
+        this.delegationLinks.set(taskId, link);
+      }
+    }
+  }
+
+  private handleTaskCompleted(data: Record<string, unknown>): void {
+    const taskId = data.task_id as string;
+    const toAgent = data.to_agent as string;
+    const success = data.success as boolean;
+
+    if (toAgent === "alpha") {
+      // Alpha completions are already handled by ALPHA_RETURN events.
+      // The backend emits both ALPHA_RETURN and TASK_COMPLETED for the
+      // same operation, so we skip here to avoid double-processing.
+      return;
+    }
+
+    // Remove delegation link
+    const link = this.delegationLinks.get(taskId);
+    if (link) {
+      link.destroy();
+      this.delegationLinks.delete(taskId);
+    }
+
+    // Despawn ghost sprite with fade-out
+    const ghost = this.ghostSprites.get(taskId);
+    if (ghost) {
+      this.scene.tweens.killTweensOf(ghost);
+      this.scene.tweens.add({
+        targets: ghost,
+        alpha: 0,
+        duration: 400,
+        onComplete: () => {
+          ghost.destroy();
+          this.ghostSprites.delete(taskId);
+        },
+      });
+    }
+
+    // Show result on the delegating agent (look up from_agent via the payload)
+    const fromAgent = data.from_agent as string | undefined;
+    const badgeAgent = fromAgent ? this.sprites.get(fromAgent) : this.sprites.get(toAgent);
+    if (badgeAgent) {
+      badgeAgent.setBadgeState(success ? "active" : "error");
+      this.scene.time.delayedCall(2000, () => {
+        badgeAgent.setBadgeState("idle");
+      });
+    }
+  }
+
+  private handleAgentSpawn(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+
+    // Skip effects during initial page load
+    if (!this.initialLoadComplete) return;
+
+    const existing = this.sprites.get(agentId);
+    if (existing) {
+      // Agent already exists (reconnect) — play spawn effect in place
+      this.spawnEffect.playSpawn(existing);
+      return;
+    }
+
+    // New agent — create sprite then play spawn effect
+    const agent = AGENTS.find((a) => a.id === agentId);
+    if (!agent || agent.id === "management") return;
+
+    const pos = this.getDeskPosition(agent);
+    const config = {
+      agentId: agent.id,
+      name: agent.name,
+      spriteKey: `sprite_${agent.id}`,
+      frameSize: agent.id === "alpha" ? 24 : 32,
+      x: pos.x,
+      y: pos.y,
+    };
+    const sprite = new AgentSprite(this.scene, config);
+    this.sprites.set(agent.id, sprite);
+    this.spawnEffect.playSpawn(sprite);
+  }
+
+  private handleAgentDespawn(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    this.spawnEffect.playDespawn(sprite, () => {
+      sprite.destroy();
+      this.sprites.delete(agentId);
     });
   }
 

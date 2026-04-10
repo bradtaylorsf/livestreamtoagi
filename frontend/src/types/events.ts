@@ -22,6 +22,10 @@ export enum EventType {
   CONFIG_RELOADED = "config_reloaded",
   AGI_PROGRESS = "agi_progress",
   ARTIFACT_CREATED = "artifact_created",
+  AGENT_SPAWN = "agent_spawn",
+  AGENT_DESPAWN = "agent_despawn",
+  TASK_DELEGATED = "task_delegated",
+  TASK_COMPLETED = "task_completed",
 }
 
 /** Base event envelope matching backend event_bus.py emit() format. */
@@ -67,13 +71,18 @@ export interface AlphaReturnPayload {
 export interface ManagementWarningPayload {
   agent_id: string;
   reason: string;
+  severity?: ManagementSeverity;
 }
+
+export type ManagementSeverity = 1 | 2 | 3 | 4 | 5;
 
 export interface ManagementInterventionPayload {
   agent_id: string;
   action: string;
   original_text: string;
   filtered_text: string;
+  severity?: ManagementSeverity;
+  message?: string;
 }
 
 export interface ManagementShadowPayload {
@@ -84,6 +93,12 @@ export interface ManagementShadowPayload {
 export interface WorldExpansionPayload {
   zone: string;
   description: string;
+  chunk_id?: number;
+  chunk_name?: string;
+  tilemap_url?: string;
+  tileset_url?: string;
+  offset?: { x: number; y: number };
+  agent_id?: string;
 }
 
 export interface PollCreatedPayload {
@@ -120,6 +135,7 @@ export interface ToolExecutedPayload {
   tool_name: string;
   success: boolean;
   result?: string;
+  status?: "start" | "done";
 }
 
 export interface ConfigReloadedPayload {
@@ -137,4 +153,29 @@ export interface ArtifactCreatedPayload {
   artifact_type: string;
   name: string;
   url?: string;
+}
+
+export interface AgentSpawnPayload {
+  agent_id: string;
+  reason: "start" | "reconnect";
+}
+
+export interface AgentDespawnPayload {
+  agent_id: string;
+  reason: "error" | "kill_switch" | "shutdown";
+}
+
+export interface TaskDelegatedPayload {
+  from_agent: string;
+  to_agent: string;
+  task_description: string;
+  task_id: string;
+}
+
+export interface TaskCompletedPayload {
+  task_id: string;
+  to_agent: string;
+  from_agent?: string;
+  success: boolean;
+  result?: string;
 }

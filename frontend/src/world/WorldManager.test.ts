@@ -28,6 +28,8 @@ function createMockScene() {
   };
 
   const mockTilemap = {
+    width: 40,
+    height: 22,
     widthInPixels: 1280,
     heightInPixels: 704,
     tilesets: [],
@@ -37,6 +39,9 @@ function createMockScene() {
         layer: { name: _name },
         setCollisionByExclusion: vi.fn(),
         setVisible: vi.fn(),
+        setAlpha: vi.fn(),
+        setPosition: vi.fn(),
+        getTileAt: vi.fn(() => null), // all tiles walkable by default
         destroy: vi.fn(),
       };
       layers.push(layer);
@@ -144,5 +149,79 @@ describe("WorldManager", () => {
     for (const layer of mockScene.layers) {
       expect(layer.destroy).toHaveBeenCalled();
     }
+  });
+
+  describe("furniture collision", () => {
+    it("registerFurnitureCollision marks tiles as non-walkable", () => {
+      // Provide a collision layer mock with getTileAt so grid gets built
+      let layerMockRef: any = null;
+      mockScene.mockTilemap.createLayer = vi.fn((_name: string) => {
+        const layer: any = {
+          layer: { name: _name },
+          setCollisionByExclusion: vi.fn(),
+          setVisible: vi.fn(),
+          destroy: vi.fn(),
+          setAlpha: vi.fn(),
+          setPosition: vi.fn(),
+        };
+        if (_name === "collision") {
+          layer.getTileAt = (_x: number, _y: number) => null; // all walkable
+          layerMockRef = layer;
+        }
+        mockScene.layers.push(layer);
+        return layer;
+      });
+
+      worldManager = new WorldManager(mockScene.scene as any);
+      worldManager.create();
+
+      const grid = worldManager.getWalkabilityGrid();
+      expect(grid).not.toBeNull();
+      // Tile at (3,3) should be walkable initially
+      expect(grid![3][3]).toBe(true);
+
+      // Register furniture at pixel (96, 96) with 2x2 footprint
+      worldManager.registerFurnitureCollision(96, 96, 2, 2);
+
+      // Tile (3,3), (4,3), (3,4), (4,4) should be blocked
+      expect(grid![3][3]).toBe(false);
+      expect(grid![3][4]).toBe(false);
+      expect(grid![4][3]).toBe(false);
+      expect(grid![4][4]).toBe(false);
+
+      // Adjacent tiles should still be walkable
+      expect(grid![3][2]).toBe(true);
+      expect(grid![2][3]).toBe(true);
+    });
+
+    it("markTilesWalkable restores walkability", () => {
+      let layerMockRef: any = null;
+      mockScene.mockTilemap.createLayer = vi.fn((_name: string) => {
+        const layer: any = {
+          layer: { name: _name },
+          setCollisionByExclusion: vi.fn(),
+          setVisible: vi.fn(),
+          destroy: vi.fn(),
+          setAlpha: vi.fn(),
+          setPosition: vi.fn(),
+        };
+        if (_name === "collision") {
+          layer.getTileAt = () => null;
+          layerMockRef = layer;
+        }
+        mockScene.layers.push(layer);
+        return layer;
+      });
+
+      worldManager = new WorldManager(mockScene.scene as any);
+      worldManager.create();
+
+      const grid = worldManager.getWalkabilityGrid()!;
+      worldManager.markTilesBlocked([{ tx: 5, ty: 5 }]);
+      expect(grid[5][5]).toBe(false);
+
+      worldManager.markTilesWalkable([{ tx: 5, ty: 5 }]);
+      expect(grid[5][5]).toBe(true);
+    });
   });
 });

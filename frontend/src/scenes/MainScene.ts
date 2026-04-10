@@ -9,6 +9,7 @@ import { OverlayManager } from "../ui/OverlayManager";
 import { DevPanel } from "../ui/DevPanel";
 import { AudioManager } from "../audio/AudioManager";
 import { BehaviorScheduler } from "../agents/BehaviorScheduler";
+import { ManagementEffects } from "../effects/ManagementEffects";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 import furnitureManifestsData from "../world/furniture/furniture-manifests.json";
@@ -186,6 +187,8 @@ addSideCol(39, 18, 20, "side_right_olive");                    // right exterior
 const SHARED_FURNITURE: Array<{ key: string; x: number; y: number }> = [
   // Kitchen area
   { key: "coffee_machine", x: 15 * 32, y: 2 * 32 },
+  { key: "fridge", x: 17 * 32, y: 2 * 32 },
+  { key: "cafe_table", x: 14 * 32, y: 5 * 32 },
   // Meeting area
   { key: "rug", x: 34 * 32, y: 13 * 32 },
   { key: "meeting_table", x: 34 * 32, y: 12 * 32 },
@@ -221,6 +224,7 @@ export class MainScene extends Phaser.Scene {
   private devPanel: DevPanel | null = null;
   private audioManager: AudioManager | null = null;
   private behaviorScheduler: BehaviorScheduler | null = null;
+  private managementEffects: ManagementEffects | null = null;
   private wsClient: WebSocketClient | null = null;
   private connectionOverlay: Phaser.GameObjects.Text | null = null;
 
@@ -335,6 +339,9 @@ export class MainScene extends Phaser.Scene {
     // ── Draw thin interior walls between rooms ───────────────────
     this.drawInteriorWalls();
 
+    // ── Register wall tiles as non-walkable in pathfinding grid ──
+    this.registerWallCollision();
+
     // ── Place furniture sprites on top of tiles ─────────────────
     this.placeFurniture();
 
@@ -397,6 +404,9 @@ export class MainScene extends Phaser.Scene {
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
     this.streamOverlay = new StreamOverlay(this.wsClient);
 
+    // ── Management environmental effects (CSS overlay) ──────
+    this.managementEffects = new ManagementEffects(this.wsClient);
+
     // ── Notification overlay (polls, artifacts) ──────────────
     this.overlayManager = new OverlayManager(this.wsClient);
 
@@ -441,6 +451,8 @@ export class MainScene extends Phaser.Scene {
     this.audioManager = null;
     this.behaviorScheduler?.destroy();
     this.behaviorScheduler = null;
+    this.managementEffects?.destroy();
+    this.managementEffects = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
     this.autoStateManager?.destroy();
@@ -577,6 +589,46 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
+   * Register all interior wall positions as non-walkable in the pathfinding grid.
+   * The tilemap collision layer only covers exterior walls; interior walls
+   * (brick rows, side columns) are visual-only sprites that need explicit blocking.
+   */
+  private registerWallCollision(): void {
+    if (!this.worldManager) return;
+    const T = TILE_SIZE;
+
+    // Block all WALL_TILES positions (brick wall rows 0, 11, 17 + side wall columns)
+    for (const item of WALL_TILES) {
+      const tx = Math.floor(item.x / T);
+      const ty = Math.floor(item.y / T);
+      this.worldManager.markTilesBlocked([{ tx, ty }]);
+    }
+
+    // Block interior vertical wall columns between rooms (the Graphics walls).
+    // These are drawn as thin lines but occupy the tile column they're on.
+    // Top rooms: vertical walls at cols 10, 21 (rows 1-10), doorway gap at rows 4-5
+    for (const col of [10, 21]) {
+      for (let row = 1; row <= 10; row++) {
+        if (row === 4 || row === 5) continue; // doorway
+        this.worldManager.markTilesBlocked([{ tx: col, ty: row }]);
+      }
+    }
+    // Bottom rooms: vertical walls at cols 10, 21 (rows 12-20), doorway gap at rows 15-16
+    for (const col of [10, 21]) {
+      for (let row = 12; row <= 20; row++) {
+        if (row === 15 || row === 16) continue; // doorway
+        this.worldManager.markTilesBlocked([{ tx: col, ty: row }]);
+      }
+    }
+    // Col 31: Grok|Meeting (rows 12-16, doorway rows 13-14) + Alpha (rows 18-20)
+    for (let row = 12; row <= 20; row++) {
+      if (row === 13 || row === 14) continue; // Meeting doorway
+      if (row === 17) continue; // horizontal wall row (already blocked by WALL_TILES if present)
+      this.worldManager.markTilesBlocked([{ tx: 31, ty: row }]);
+    }
+  }
+
+  /**
    * Place furniture objects as sprites on top of the tile layer.
    * Creates FurnitureInstance objects for manifest-backed items (enabling state changes),
    * and falls back to raw sprites for shared furniture without manifests.
@@ -650,6 +702,12 @@ export class MainScene extends Phaser.Scene {
         const instanceKey = `shared_${item.key}_${item.x}_${item.y}`;
         const instance = new FurnitureInstance(this, manifest, item.x, item.y);
         this.furnitureInstances.set(instanceKey, instance);
+        // Register floor-level furniture as non-walkable
+        if (!manifest.canPlaceOnSurfaces && this.worldManager) {
+          this.worldManager.registerFurnitureCollision(
+            item.x, item.y, manifest.footprint[0], manifest.footprint[1],
+          );
+        }
       } else if (this.textures.exists(item.key)) {
         const sprite = this.add.image(item.x, item.y, item.key);
         sprite.setOrigin(0, 0);
@@ -670,6 +728,12 @@ export class MainScene extends Phaser.Scene {
             const instance = new FurnitureInstance(this, manifest, item.x, item.y);
             this.furnitureInstances.set(instanceKey, instance);
             agentInstances.push(instance);
+            // Register floor-level furniture as non-walkable
+            if (!manifest.canPlaceOnSurfaces && this.worldManager) {
+              this.worldManager.registerFurnitureCollision(
+                item.x, item.y, manifest.footprint[0], manifest.footprint[1],
+              );
+            }
           } else if (this.textures.exists(item.key)) {
             const sprite = this.add.image(item.x, item.y, item.key);
             sprite.setOrigin(0, 0);

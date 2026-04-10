@@ -34,5 +34,8 @@
   { "id": "BOOKSHELF", "name": "Bookshelf", "category": "decor", "footprint": [2, 3], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
   { "id": "WHITEBOARD", "name": "Whiteboard", "category": "decor", "footprint": [2, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
   { "id": "PLANT", "name": "Plant", "category": "plants", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
-  { "id": "RUG", "name": "Rug", "category": "surfaces", "footprint": [4, 3], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": -0.001 }
+  { "id": "RUG", "name": "Rug", "category": "surfaces", "footprint": [4, 3], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": -0.001 },
+
+  { "id": "FRIDGE", "name": "Mini Fridge", "category": "electronics", "footprint": [1, 1], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 },
+  { "id": "CAFE_TABLE", "name": "Cafe Table", "category": "desks", "footprint": [2, 2], "isDesk": false, "canPlaceOnSurfaces": false, "zSortOffset": 0 }
 ]
