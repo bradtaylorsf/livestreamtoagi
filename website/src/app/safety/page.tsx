@@ -424,6 +424,10 @@ export default function SafetyPage() {
               About the research
             </Link>{" "}
             &middot;{" "}
+            <Link href="/ethics" className="text-neon-cyan hover:underline">
+              Ethics &amp; data policy
+            </Link>{" "}
+            &middot;{" "}
             <Link href="/evals" className="text-neon-cyan hover:underline">
               Eval dashboard
             </Link>

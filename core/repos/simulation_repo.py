@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def _parse_row(row: dict) -> dict:
-    for key in ("config", "error_log"):
+    for key in ("config", "error_log", "model_versions"):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
     return row
@@ -32,8 +32,9 @@ class SimulationRepo:
         row = await self.db.fetchrow(
             """INSERT INTO simulations
                (name, description, config, status,
-                simulated_duration, agents_participated, error_log)
-               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb)
+                simulated_duration, agents_participated, error_log,
+                model_versions)
+               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb)
                RETURNING *""",
             sim.name,
             sim.description,
@@ -42,6 +43,7 @@ class SimulationRepo:
             sim.simulated_duration,
             sim.agents_participated,
             serialize_jsonb(sim.error_log),
+            serialize_jsonb(sim.model_versions),
         )
         return Simulation(**_parse_row(dict(row)))
 

@@ -57,11 +57,20 @@ class EvalEngine:
         existing_run_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Run evals and return the eval_run_id."""
+        # Fetch simulation model_versions for reproducibility tracking
+        from core.repos.simulation_repo import SimulationRepo
+
+        sim_repo = SimulationRepo(self._db)
+        sim = await sim_repo.get(simulation_id)
+        model_versions = sim.model_versions if sim else {}
+
         # Use pre-created run record or create a new one
         if existing_run_id is not None:
             run_id = existing_run_id
         else:
-            eval_run = await self._eval_repo.create_eval_run(simulation_id, suite)
+            eval_run = await self._eval_repo.create_eval_run(
+                simulation_id, suite, model_versions=model_versions,
+            )
             run_id = eval_run.id
 
         # Load simulation data

@@ -48,6 +48,8 @@ export default function EvalsPage() {
   const [loading, setLoading] = useState(true);
   const [compareA, setCompareA] = useState<string | null>(null);
   const [compareB, setCompareB] = useState<string | null>(null);
+  const [filterAgent, setFilterAgent] = useState<string>("");
+  const [filterModel, setFilterModel] = useState<string>("");
 
   useEffect(() => {
     Promise.all([
@@ -107,6 +109,46 @@ export default function EvalsPage() {
       exportAsCSV(flat, "eval-data.csv");
     }
   };
+
+  // Build unique agent and model lists for filter dropdowns
+  const allAgents = Array.from(
+    new Set(runs.flatMap((r) => Object.keys(r.model_versions ?? {}))),
+  ).sort();
+  const allModels = Array.from(
+    new Set(runs.flatMap((r) => Object.values(r.model_versions ?? {}))),
+  ).sort();
+
+  // Filter runs by agent/model selection
+  const filteredRuns = runs.filter((r) => {
+    const mv = r.model_versions ?? {};
+    if (filterAgent && filterModel) {
+      return mv[filterAgent] === filterModel;
+    }
+    if (filterAgent) {
+      return filterAgent in mv;
+    }
+    if (filterModel) {
+      return Object.values(mv).includes(filterModel);
+    }
+    return true;
+  });
+
+  // Build a set of model versions that changed from the previous run
+  function getChangedModels(
+    runIndex: number,
+    currentRuns: PublicEvalRun[],
+  ): Set<string> {
+    const changed = new Set<string>();
+    if (runIndex >= currentRuns.length - 1) return changed;
+    const current = currentRuns[runIndex].model_versions ?? {};
+    const previous = currentRuns[runIndex + 1].model_versions ?? {};
+    for (const [agent, model] of Object.entries(current)) {
+      if (previous[agent] !== undefined && previous[agent] !== model) {
+        changed.add(agent);
+      }
+    }
+    return changed;
+  }
 
   if (loading) {
     return (
@@ -240,10 +282,48 @@ export default function EvalsPage() {
           </div>
         </div>
 
-        {runs.length === 0 ? (
+        {/* Filter controls */}
+        {runs.length > 0 && (
+          <div className="flex flex-wrap gap-3 items-center" data-testid="model-filters">
+            <label className="text-xs text-foreground/50">Filter:</label>
+            <select
+              value={filterAgent}
+              onChange={(e) => setFilterAgent(e.target.value)}
+              className="text-xs px-2 py-1 rounded border border-border bg-surface text-foreground/70"
+              data-testid="filter-agent"
+            >
+              <option value="">All agents</option>
+              {allAgents.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+            <select
+              value={filterModel}
+              onChange={(e) => setFilterModel(e.target.value)}
+              className="text-xs px-2 py-1 rounded border border-border bg-surface text-foreground/70"
+              data-testid="filter-model"
+            >
+              <option value="">All models</option>
+              {allModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {(filterAgent || filterModel) && (
+              <button
+                onClick={() => { setFilterAgent(""); setFilterModel(""); }}
+                className="text-xs text-foreground/40 hover:text-foreground/60"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
+        {filteredRuns.length === 0 ? (
           <div className="text-center py-12 text-foreground/40 text-sm">
-            No simulation runs yet. Eval data will appear here after the first
-            simulation.
+            {runs.length === 0
+              ? "No simulation runs yet. Eval data will appear here after the first simulation."
+              : "No runs match the current filters."}
           </div>
         ) : (
           <div className="rounded-lg border border-border bg-surface overflow-x-auto">
@@ -258,13 +338,14 @@ export default function EvalsPage() {
                 </tr>
               </thead>
               <tbody>
-                {runs.map((run) => {
+                {filteredRuns.map((run, idx) => {
                   const score =
                     run.overall_score != null
                       ? Number(run.overall_score)
                       : null;
                   const isSelected =
                     run.id === compareA || run.id === compareB;
+                  const changedModels = getChangedModels(idx, filteredRuns);
                   return (
                     <tr
                       key={run.id}
@@ -309,7 +390,16 @@ export default function EvalsPage() {
                             ([agent, model]) => (
                               <span
                                 key={agent}
-                                className="text-[10px] px-1 py-0.5 rounded bg-surface-light text-foreground/50"
+                                className={`text-[10px] px-1 py-0.5 rounded ${
+                                  changedModels.has(agent)
+                                    ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30"
+                                    : "bg-surface-light text-foreground/50"
+                                }`}
+                                title={
+                                  changedModels.has(agent)
+                                    ? "Model changed from previous run"
+                                    : undefined
+                                }
                               >
                                 {agent}: {model}
                               </span>
