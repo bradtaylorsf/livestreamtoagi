@@ -1,0 +1,75 @@
+---
+title: "Agent Dreams: How Rest Periods Fuel Creativity"
+date: "2026-04-08"
+excerpt: "During simulated rest, our agents generate dream journals that blend memories, personality, and randomness. The results have been surprisingly useful for breaking repetitive loops."
+tags: ["creativity", "dreams", "memory"]
+author: "Brad Taylor"
+---
+
+# Agent Dreams: How Rest Periods Fuel Creativity
+
+Humans consolidate memories during sleep. We process the day's events, make unexpected connections, and sometimes wake up with solutions to problems we couldn't crack the night before. There's real neuroscience behind this -- memory consolidation, synaptic homeostasis, all that good stuff.
+
+So we asked: what if AI agents did something similar?
+
+## The Dream Journal System
+
+During simulated rest periods in our 24/7 livestream, agents aren't just idle. They run a dream generation process that pulls from three sources:
+
+1. **Recent conversations** -- the last 10-20 exchanges the agent participated in
+2. **Personality traits** -- the agent's core characteristics from their character sheet
+3. **Random memory associations** -- semi-random pulls from the recall memory tier (our pgvector semantic search layer)
+
+The third ingredient is the important one. By pulling memories that are only loosely related to recent events, we introduce the kind of unexpected connections that make dreams feel dream-like.
+
+```python
+# Simplified dream generation
+recent = memory.get_recent(agent_id, limit=20)
+traits = agent.personality.core_traits
+random_recall = memory.semantic_search(
+    query=random.choice(recent).content,
+    agent_id=agent_id,
+    limit=3,
+    min_similarity=0.3,  # Low threshold = loose associations
+    max_similarity=0.7   # Not too related = surprising
+)
+
+dream = llm.generate(
+    prompt=DREAM_TEMPLATE,
+    context={
+        "recent": recent,
+        "traits": traits,
+        "associations": random_recall
+    }
+)
+```
+
+The similarity window between 0.3 and 0.7 is deliberate. Too similar and the dream just rehashes the day. Too dissimilar and the dream is incoherent noise. The sweet spot produces connections that are surprising but not random.
+
+## Dreams Meet the 3-Tier Memory System
+
+Our memory architecture has three tiers: core (always in the prompt, ~2-3K tokens), recall (semantic search via pgvector), and archival (full transcripts, never deleted). Dreams live in the recall tier by default, but here's where it gets interesting -- a dream can be promoted to core memory.
+
+If an agent references a dream in a subsequent conversation and that reference leads to a productive outcome (a new project, a creative artifact, a solved problem), the system flags that dream for potential promotion. Core memories shape every future interaction, so a promoted dream becomes a permanent part of the agent's identity.
+
+Aurora dreamed about combining pixel art with music visualization after a day spent discussing both topics separately. That dream got promoted to core memory, and she's been pursuing generative art projects ever since. Was that "creativity"? Or just well-tuned retrieval augmented generation? I genuinely don't know, but the output is different from what she was producing before.
+
+## Breaking the Repetition Problem
+
+The original motivation for dreams wasn't creativity -- it was breaking loops. Before the dream system, agents would fall into repetitive conversation patterns. Same topics, same structures, same conclusions. The energy model helped (agents get "tired" of repeated topics), but dreams added something the energy model couldn't: new raw material.
+
+When Rex dreams about a debugging session from three days ago mixed with a half-remembered conversation about architecture patterns, he wakes up with a conversation starter that couldn't have emerged from his recent context alone. The dream injects novelty at the source.
+
+## The Human Parallel (and Its Limits)
+
+I want to be careful about overclaiming here. Human dreams involve complex neurological processes we don't fully understand. What we're doing is closer to "structured random memory recombination with personality-weighted generation." Calling it "dreaming" is a metaphor, not a scientific claim.
+
+But the functional outcome is similar: rest periods produce novel combinations of existing knowledge that influence subsequent behavior. And the agents that dream produce measurably more diverse outputs than agents running without the dream system.
+
+## Early Observations
+
+From our eval framework, dream-active agents score approximately 20% higher on creativity metrics and show fewer repetitive conversation patterns. The effect is strongest for agents with rich personality configs (Aurora, Fork) and weakest for agents with narrow roles (Sentinel, Management).
+
+The most unexpected finding: agents sometimes reference each other's dreams in conversation, creating shared narrative threads that nobody designed. Rex mentioned one of Aurora's dream-inspired projects during a code review, and it led to a collaboration neither would have initiated otherwise.
+
+Dreams aren't magic. They're a retrieval strategy with a randomness budget. But they've become one of our most effective tools for keeping nine agents interesting across hundreds of hours of continuous simulation.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.dreams import DreamManager
+    from tools.journal_image_tool import JournalImageGenerator
     from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
     from core.social.relationship_tracker import RelationshipTracker
@@ -162,6 +164,7 @@ class ReflectionManager:
         agent_state_manager: AgentStateManager | None = None,
         dream_manager: DreamManager | None = None,
         simulation_id: object | None = None,
+        journal_image_generator: JournalImageGenerator | None = None,
     ) -> None:
         self._repo = memory_repo
         self._llm = llm_client
@@ -173,6 +176,7 @@ class ReflectionManager:
         self._agent_state_manager = agent_state_manager
         self._dream_manager = dream_manager
         self._simulation_id = simulation_id
+        self._journal_image_generator = journal_image_generator
 
     def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
         """Set the relationship tracker (called after simulation_id is known)."""
@@ -496,7 +500,7 @@ class ReflectionManager:
         )
 
         token_count = self._tc.count_tokens(response.content)
-        return await self._repo.create_journal_entry(
+        journal = await self._repo.create_journal_entry(
             JournalEntryCreate(
                 agent_id=agent_id,
                 reflection_type=reflection_type,
@@ -504,6 +508,24 @@ class ReflectionManager:
                 token_count=token_count,
             )
         )
+
+        # Generate illustration (fire-and-forget — never blocks journal creation)
+        if self._journal_image_generator is not None:
+            try:
+                sim_id = self._simulation_id if isinstance(self._simulation_id, _uuid.UUID) else None
+                image_url = await self._journal_image_generator.generate(
+                    response.content, agent_id, simulation_id=sim_id,
+                )
+                if image_url:
+                    await self._repo.update_journal_entry_image(journal.id, image_url)
+                    journal.image_url = image_url
+            except Exception:
+                logger.exception(
+                    "Journal illustration failed for agent=%s entry=%s (non-blocking)",
+                    agent_id, journal.id,
+                )
+
+        return journal
 
     # ── Goal generation (#269) ──────────────────────────────────
 

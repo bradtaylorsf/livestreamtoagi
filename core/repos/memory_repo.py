@@ -217,15 +217,26 @@ class MemoryRepo:
     async def create_journal_entry(self, entry: JournalEntryCreate) -> JournalEntry:
         row = await self.db.fetchrow(
             """INSERT INTO journal_entries
-               (agent_id, reflection_type, content, token_count)
-               VALUES ($1, $2, $3, $4)
+               (agent_id, reflection_type, content, token_count, image_url)
+               VALUES ($1, $2, $3, $4, $5)
                RETURNING *""",
             entry.agent_id,
             entry.reflection_type,
             entry.content,
             entry.token_count,
+            entry.image_url,
         )
         return JournalEntry(**dict(row))
+
+    async def update_journal_entry_image(
+        self, entry_id: int, image_url: str
+    ) -> None:
+        """Set the image_url on an existing journal entry."""
+        await self.db.execute(
+            "UPDATE journal_entries SET image_url = $1 WHERE id = $2",
+            image_url,
+            entry_id,
+        )
 
     async def get_journal_entries(
         self, agent_id: str, limit: int = 20, offset: int = 0

@@ -305,6 +305,7 @@ async def get_agent_journal(
             "agent_id": r["agent_id"],
             "reflection_type": r["reflection_type"],
             "content": r["content"],
+            "image_url": r.get("image_url"),
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         }
         for r in rows

@@ -1,0 +1,73 @@
+---
+title: "Who Talks Next? Building a Conversation Engine"
+date: "2026-04-04"
+excerpt: "How we built a weighted speaker selection algorithm that creates natural-feeling conversations between 9 AI agents -- and the emergent social dynamics nobody predicted."
+tags: ["conversation-dynamics", "social-dynamics"]
+author: "Brad Taylor"
+---
+
+# Who Talks Next? Building a Conversation Engine
+
+When you have 9 AI agents in a room, the obvious question is: who talks next?
+
+The naive approach -- round robin or random selection -- produces conversations that feel mechanical and lifeless. Real conversations have rhythm. Some people jump in constantly. Others wait for the right moment. Certain pairs naturally riff off each other. We needed an algorithm that captured those dynamics.
+
+## The Algorithm
+
+Every time a speaker finishes, the engine scores all other agents and selects the next speaker based on weighted criteria:
+
+```yaml
+time_since_spoke: 0.30
+topic_relevance: 0.30
+chattiness: 0.15
+adjacency_fit: 0.15
+random_jitter: 0.10
+```
+
+Let me break down each weight.
+
+### Time Since Spoke (30%)
+
+The longer an agent has been quiet, the more likely they are to speak next. This prevents any single agent from dominating and ensures everyone gets airtime. It's the simplest factor but one of the most important -- without it, the chattiest agents would monopolize every conversation.
+
+### Topic Relevance (30%)
+
+If the current conversation is about code architecture, Rex (the engineer) should be more likely to chime in than Aurora (the creative director). We compute topic relevance by comparing the current conversation topic against each agent's expertise areas and interests. This keeps contributions on-topic without hard-coding who can talk about what.
+
+### Chattiness (15%)
+
+Each agent has a chattiness score baked into their personality profile. This is the parameter that creates natural introverts and extroverts. Fork has high chattiness -- the contrarian who always has an opinion. Sentinel is lower -- the budget monitor who speaks up when something is wrong but otherwise stays quiet. Alpha is the quietest, preferring to act rather than talk.
+
+The effect is subtle but important. Over a 30-minute stretch of conversation, you can feel the difference. Some agents are constant presences. Others appear, make a pointed observation, and fade back.
+
+### Adjacency Fit (15%)
+
+This is my favorite parameter. Adjacency fit models which agents naturally follow which other agents in conversation. It captures the social dynamics you see in real groups:
+
+- When Aurora proposes a creative idea, Pixel tends to follow up (the audience liaison thinking about how viewers will react)
+- When Rex presents a technical plan, Fork almost always responds (the code reviewer can't help themselves)
+- When Vera makes a decision, Sentinel often chimes in next (checking the budget implications)
+
+These pairings aren't hardcoded as rules. They're weighted affinities -- tendencies, not certainties. But they create conversational threads that feel organic rather than random.
+
+### Random Jitter (10%)
+
+This is just noise. Pure randomness. And it's essential.
+
+Without jitter, the conversation engine becomes deterministic. Given the same state, the same agent would always speak next, and you'd get loops. The 10% random factor means that occasionally the "wrong" agent speaks up, and those moments often produce the most interesting conversations. Grok derailing a serious architecture discussion with an unrelated observation. Sentinel raising a budget concern in the middle of a creative brainstorm.
+
+Real conversations have randomness. Ours should too.
+
+## Emergent Behaviors
+
+The most rewarding part of this system is what emerges that we didn't design:
+
+**Fork interrupts constantly.** High chattiness plus high adjacency fit with Rex (Fork reviews Rex's code) means Fork jumps into technical discussions more than any other agent. This matches the contrarian personality perfectly, but we didn't program "Fork should interrupt" -- it just falls out of the weights.
+
+**Vera naturally moderates.** As showrunner, Vera has moderate chattiness but high topic relevance across all subjects. The result is that Vera speaks frequently but not overwhelmingly, usually to redirect or summarize. That's moderation behavior, and it's entirely emergent.
+
+**Aurora and Pixel form creative pairs.** Their adjacency fit is high in both directions -- Aurora follows Pixel and Pixel follows Aurora. They end up in extended back-and-forth exchanges about creative direction that other agents gradually join. It looks like collaboration. It wasn't scripted.
+
+## The Takeaway
+
+Speaker selection sounds like a minor implementation detail. It's not. It's the difference between a system that feels like agents taking turns and a system that feels like a conversation. Five weights. Ten percent noise. And the social dynamics take care of themselves.

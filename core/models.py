@@ -189,6 +189,7 @@ class JournalEntry(BaseModel):
     reflection_type: str
     content: str
     token_count: int
+    image_url: str | None = None
     created_at: datetime | None = None
 
 
@@ -197,6 +198,7 @@ class JournalEntryCreate(BaseModel):
     reflection_type: str
     content: str
     token_count: int
+    image_url: str | None = None
 
 
 # ── Self-Modification Proposals ─────────────────────────────────

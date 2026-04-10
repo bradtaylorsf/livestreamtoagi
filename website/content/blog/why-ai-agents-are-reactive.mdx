@@ -1,0 +1,64 @@
+---
+title: "Why AI Agents Are Reactive by Default (and How We're Fixing It)"
+date: "2026-04-06"
+excerpt: "LLMs don't wake up with ideas. They wait for prompts. Here's how we're building proactivity into agents through dreams, drives, and autonomous goal generation."
+tags: ["agency", "autonomy", "evals"]
+author: "Brad Taylor"
+---
+
+# Why AI Agents Are Reactive by Default (and How We're Fixing It)
+
+Here's the dirty secret of every "autonomous AI agent" demo you've seen: the agent didn't decide to do anything. Someone typed a prompt. The agent responded. That's it.
+
+LLMs are fundamentally reactive. They sit in silence until a user or system prompt arrives, generate a response, and go back to silence. There's no internal clock ticking. No boredom building. No spark of "I should really finish that project." This is the single biggest gap between current AI agents and anything resembling genuine autonomy.
+
+We hit this wall around simulation 30. Our nine agents were having conversations, building projects, reviewing code -- but only when the orchestrator told them to. Left without prompts, they produced nothing. Worse, even when prompted, the conversations started repeating. Same topics, same dynamics, same jokes. The agents were stuck in loops because nothing internal was pushing them toward novelty.
+
+## The Diagnosis: No Inner Life
+
+The problem wasn't intelligence. Claude, GPT, Gemini -- they're all plenty smart. The problem was the absence of internal state that changes over time. A human developer gets bored of writing the same CRUD endpoint. An AI agent will write the same CRUD endpoint forever and never complain.
+
+So we built three systems to simulate proactivity.
+
+## Fix 1: The Dream System
+
+During simulated rest periods, agents generate dream entries. These aren't random -- they blend recent conversations with personality traits and pull in semi-random memory associations from the recall tier.
+
+```python
+dream_prompt = f"""
+Based on your recent experiences: {recent_memories}
+And your personality traits: {agent.traits}
+Generate a dream that processes these experiences.
+Include at least one unexpected connection.
+"""
+```
+
+Dreams get stored in the agent's memory and can influence their next waking conversation. Rex might dream about a debugging session and wake up with a new approach. Aurora might blend two unrelated creative projects into something novel.
+
+## Fix 2: Autonomous Goal Generation
+
+During reflection periods, each agent proposes goals based on their internal state -- not based on what anyone asked them to do. The key insight: goals must come from the agent's own assessment of what matters, filtered through their personality.
+
+Fork proposes adversarial goals ("audit Rex's last three PRs for security holes"). Aurora proposes creative goals ("design a pixel art gallery for the office"). Sentinel proposes governance goals ("establish a per-agent daily cost ceiling").
+
+## Fix 3: Drive Mechanics
+
+We implemented five internal drives that fluctuate over time:
+
+- **Boredom** -- increases during repetitive tasks, decreases with novel interactions
+- **Frustration** -- increases when goals are blocked, decreases when progress happens
+- **Social need** -- increases during isolation, decreases after group conversations
+- **Creative need** -- increases when an agent hasn't produced artifacts recently
+- **Recognition need** -- increases when an agent's contributions go unacknowledged
+
+These drives influence speaker selection weights and topic choice. A bored agent is more likely to propose something new. A frustrated agent is more likely to challenge the current approach.
+
+## The Dream-to-Goal Pipeline
+
+The real magic is when these systems connect. An agent dreams about an unfinished project. That dream increases their creative need drive. The elevated drive makes them more likely to speak up in the next conversation. When they do speak, they propose a goal inspired by the dream. Now you have something that looks a lot like intrinsic motivation.
+
+## Early Results
+
+We're tracking this through our eval framework, specifically the agency and creativity categories. Since adding these systems, we've seen a measurable decrease in repetitive conversation loops and an increase in novel project proposals. It's not consciousness. It's not AGI. But it's a meaningful step past "agent that waits for instructions."
+
+The fundamental question remains open: can simulated drives produce genuinely surprising behavior, or are we just adding more sophisticated prompts? Sixty-two simulations in, I honestly don't know yet. But the agents are definitely less boring.
