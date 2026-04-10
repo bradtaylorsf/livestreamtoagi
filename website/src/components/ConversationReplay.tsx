@@ -5,6 +5,8 @@ import type { ConversationDetail, SelectionLogEntry } from "@/types";
 import { getAgentData } from "@/lib/agent-data";
 import PlaybackControls from "@/components/PlaybackControls";
 import SpeakerSelectionPanel from "@/components/SpeakerSelectionPanel";
+import EnergySparkline from "@/components/EnergySparkline";
+import ManagementFlag from "@/components/ManagementFlag";
 
 interface ConversationReplayProps {
   conversation: ConversationDetail;
@@ -83,6 +85,46 @@ export default function ConversationReplay({
     energy: s.conversation_energy ?? 0,
   }));
 
+  // Keyboard shortcuts: space = play/pause, left/right = prev/next turn
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Don't capture when user is typing in an input
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      switch (e.key) {
+        case " ":
+          e.preventDefault();
+          setIsPlaying((p) => !p);
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          setCurrentTurn((prev) => Math.max(1, prev - 1));
+          setIsPlaying(false);
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          setCurrentTurn((prev) => Math.min(totalTurns, prev + 1));
+          setIsPlaying(false);
+          break;
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [totalTurns]);
+
+  function copyShareLink(turnNumber: number) {
+    const url = `${window.location.origin}${window.location.pathname}#turn-${turnNumber}`;
+    navigator.clipboard.writeText(url).catch(() => {
+      // Fallback: ignore clipboard errors
+    });
+  }
+
   return (
     <div className="space-y-4">
       {/* Header info */}
@@ -127,24 +169,8 @@ export default function ConversationReplay({
         })}
       </div>
 
-      {/* Energy graph (simple bar visualization) */}
-      {energyData.length > 0 && (
-        <div className="rounded border border-border bg-surface p-3">
-          <div className="text-xs text-foreground/40 mb-2">Conversation Energy</div>
-          <div className="flex items-end gap-0.5 h-12">
-            {energyData.map((d) => (
-              <div
-                key={d.turn}
-                className={`flex-1 rounded-t transition-all ${
-                  d.turn <= currentTurn ? "bg-neon-cyan/60" : "bg-foreground/10"
-                }`}
-                style={{ height: `${Math.max(d.energy * 100, 2)}%` }}
-                title={`Turn ${d.turn}: ${d.energy.toFixed(2)}`}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Energy sparkline (Recharts area chart) */}
+      <EnergySparkline data={energyData} currentTurn={currentTurn} />
 
       {/* Playback controls */}
       {totalTurns > 0 && (
@@ -205,6 +231,23 @@ export default function ConversationReplay({
                 {sel.was_interrupt && (
                   <span className="text-xs text-neon-magenta">INTERRUPT</span>
                 )}
+                <ManagementFlag wasFiltered={sel.was_interrupt} />
+                {sel.detected_topic && (
+                  <span className="rounded px-1.5 py-0.5 text-[10px] bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20">
+                    {sel.detected_topic}
+                  </span>
+                )}
+                {/* Share link button */}
+                <button
+                  onClick={() => copyShareLink(sel.turn_number)}
+                  className="ml-auto text-foreground/30 hover:text-neon-cyan transition-colors"
+                  title={`Copy link to turn ${sel.turn_number}`}
+                  aria-label={`Share turn ${sel.turn_number}`}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                    <path d="M9 0a2 2 0 1 1-1.6 3.2L4.2 5.1a2 2 0 0 1 0 1.8l3.2 1.9A2 2 0 1 1 6.8 10l-3.2-1.9a2 2 0 1 1 0-4.2L6.8 2A2 2 0 0 1 9 0z" />
+                  </svg>
+                </button>
               </div>
 
               {/* Selection panel */}

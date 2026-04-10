@@ -28,7 +28,7 @@ export default function SpeakerSelectionPanel({
     <div className="rounded border border-border bg-surface-light">
       <button
         onClick={onToggle}
-        className="flex w-full items-center justify-between px-3 py-2 text-xs text-foreground/60 hover:text-foreground transition-colors"
+        className="flex w-full items-center justify-between px-3 py-2 text-xs text-foreground/60 hover:text-foreground transition-colors md:py-2 py-1.5"
         aria-label="Toggle speaker selection details"
       >
         <span>

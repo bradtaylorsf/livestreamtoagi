@@ -28,6 +28,7 @@ export default function PlaybackControls({
         onClick={onPlayPause}
         className="flex h-8 w-8 items-center justify-center rounded bg-neon-cyan/20 text-neon-cyan hover:bg-neon-cyan/30 transition-colors"
         aria-label={isPlaying ? "Pause" : "Play"}
+        title={`${isPlaying ? "Pause" : "Play"} (Space)`}
       >
         {isPlaying ? (
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
@@ -54,6 +55,7 @@ export default function PlaybackControls({
           onChange={(e) => onTurnChange(Number(e.target.value))}
           className="flex-1 accent-neon-cyan"
           aria-label="Jump to turn"
+          title="Arrow keys: prev/next turn"
         />
       </div>
 
