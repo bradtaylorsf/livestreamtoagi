@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
     from core.idle_behavior import IdleBehaviorSystem
     from core.memory.reflection import ReflectionManager
     from core.tts import TTSPipeline
+    from tools.journal_image_tool import JournalImageGenerator
 
     tts_pipeline = TTSPipeline()
     idle_behavior: IdleBehaviorSystem | None = None
@@ -58,6 +59,8 @@ async def lifespan(app: FastAPI):
 
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
+        journal_image_gen = JournalImageGenerator(cost_repo=svc.cost_repo)
+
         reflection_mgr = ReflectionManager(
             memory_repo=svc.memory_repo,
             llm_client=svc.llm_client,
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
             goal_manager=svc.goal_manager,
             agent_state_manager=svc.agent_state_manager,
             dream_manager=svc.dream_manager,
+            journal_image_generator=journal_image_gen,
         )
 
         if api_key:
