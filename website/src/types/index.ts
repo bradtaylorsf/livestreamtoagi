@@ -73,3 +73,39 @@ export interface ApiError {
   status: number;
   message: string;
 }
+
+export interface BlogPost {
+  slug: string;
+  title: string;
+  date: string;
+  excerpt: string;
+}
+
+export interface WorldMilestone {
+  id: string;
+  date: string;
+  title: string;
+  description: string;
+}
+
+export interface AgentRelationship {
+  targetId: string;
+  targetName: string;
+  sentiment: number;
+  trust: number;
+  interactionCount: number;
+}
+
+export interface AgentEvolutionEvent {
+  date: string;
+  type: "config_change" | "personality_drift" | "self_modification";
+  description: string;
+}
+
+export interface AgentArtifact {
+  id: string;
+  type: string;
+  title: string;
+  preview: string;
+  createdAt: string;
+}

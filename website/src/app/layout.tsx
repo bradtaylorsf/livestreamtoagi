@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Press_Start_2P } from "next/font/google";
 import Navigation from "@/components/Navigation";
+import Footer from "@/components/Footer";
 import "./globals.css";
 
 const pixelFont = Press_Start_2P({
@@ -27,6 +28,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans antialiased">
         <Navigation />
         <main className="flex-1">{children}</main>
+        <Footer />
       </body>
     </html>
   );
