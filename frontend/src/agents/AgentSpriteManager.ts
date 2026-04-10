@@ -6,6 +6,7 @@ import type { WebSocketClient } from "../network/WebSocketClient";
 import type { WorldManager } from "../world/WorldManager";
 import type { WorkspaceManager } from "../world/WorkspaceManager";
 import type { AutoStateManager } from "../world/furniture/AutoStateManager";
+import { SpawnEffect } from "../effects/SpawnEffect";
 
 /** Agents that get sprite representations (excludes management which has no sprite). */
 const SPRITE_AGENTS = AGENTS.filter((a) => a.id !== "management");
@@ -34,6 +35,8 @@ export class AgentSpriteManager {
   private autoStateManager: AutoStateManager | null = null;
   private unsubscribe: (() => void) | null = null;
   private toolIdleTimers: Map<string, Phaser.Time.TimerEvent> = new Map();
+  private spawnEffect: SpawnEffect;
+  private initialLoadComplete = false;
 
   constructor(
     scene: Phaser.Scene,
@@ -44,8 +47,9 @@ export class AgentSpriteManager {
     this.scene = scene;
     this.worldManager = worldManager;
     this.workspaceManager = workspaceManager ?? null;
+    this.spawnEffect = new SpawnEffect(scene);
 
-    // Create sprites for each agent
+    // Create sprites for each agent (initial load — no spawn effect)
     for (const agent of SPRITE_AGENTS) {
       const pos = this.getDeskPosition(agent);
       const config = {
@@ -66,6 +70,9 @@ export class AgentSpriteManager {
         this.handleEvent(event),
       );
     }
+
+    // Mark initial load complete — subsequent spawn events will play effects
+    this.initialLoadComplete = true;
   }
 
   setAutoStateManager(manager: AutoStateManager): void {
@@ -136,6 +143,12 @@ export class AgentSpriteManager {
         break;
       case EventType.CONFIG_RELOADED:
         console.log("Config reloaded:", event.data.config_type, event.data.changes);
+        break;
+      case EventType.AGENT_SPAWN:
+        this.handleAgentSpawn(event.data);
+        break;
+      case EventType.AGENT_DESPAWN:
+        this.handleAgentDespawn(event.data);
         break;
     }
   }
@@ -392,6 +405,48 @@ export class AgentSpriteManager {
           });
         }
       },
+    });
+  }
+
+  private handleAgentSpawn(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+
+    // Skip effects during initial page load
+    if (!this.initialLoadComplete) return;
+
+    const existing = this.sprites.get(agentId);
+    if (existing) {
+      // Agent already exists (reconnect) — play spawn effect in place
+      this.spawnEffect.playSpawn(existing);
+      return;
+    }
+
+    // New agent — create sprite then play spawn effect
+    const agent = AGENTS.find((a) => a.id === agentId);
+    if (!agent || agent.id === "management") return;
+
+    const pos = this.getDeskPosition(agent);
+    const config = {
+      agentId: agent.id,
+      name: agent.name,
+      spriteKey: `sprite_${agent.id}`,
+      frameSize: agent.id === "alpha" ? 24 : 32,
+      x: pos.x,
+      y: pos.y,
+    };
+    const sprite = new AgentSprite(this.scene, config);
+    this.sprites.set(agent.id, sprite);
+    this.spawnEffect.playSpawn(sprite);
+  }
+
+  private handleAgentDespawn(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    this.spawnEffect.playDespawn(sprite, () => {
+      sprite.destroy();
+      this.sprites.delete(agentId);
     });
   }
 

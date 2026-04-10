@@ -41,8 +41,8 @@ export class BehaviorScheduler {
    */
   update(deltaMs: number): void {
     for (const [agentId, sprite] of this.sprites) {
-      // Skip busy agents (moving, in backend-driven action)
-      if (sprite.isBusy) continue;
+      // Skip busy or spawning agents
+      if (sprite.isBusy || sprite.spawning) continue;
 
       const elapsed = (this.timers.get(agentId) ?? 0) + deltaMs;
       const interval = this.nextIntervals.get(agentId) ?? BASE_MAX_INTERVAL_MS;

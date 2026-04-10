@@ -15,6 +15,7 @@ function createMockScene() {
         play: vi.fn(),
         setScale: vi.fn(),
         setVisible: vi.fn(),
+        setAlpha: vi.fn(),
         anims: { exists: vi.fn(() => false) },
         destroy: vi.fn(),
       })),
@@ -36,6 +37,11 @@ function createMockScene() {
           destroy: vi.fn(),
         }),
       ),
+      rectangle: vi.fn((_x: number, _y: number, _w: number, _h: number, _color: number) => ({
+        setDepth: vi.fn(),
+        setAlpha: vi.fn(),
+        destroy: vi.fn(),
+      })),
       graphics: vi.fn(() => ({
         x: 0,
         y: 0,
@@ -72,6 +78,16 @@ function createMockScene() {
     },
     anims: {
       exists: vi.fn(() => false),
+    },
+    textures: {
+      exists: vi.fn(() => false),
+      createCanvas: vi.fn(() => ({
+        getContext: vi.fn(() => ({
+          fillStyle: "",
+          fillRect: vi.fn(),
+        })),
+        refresh: vi.fn(),
+      })),
     },
   };
 }
@@ -642,6 +658,84 @@ describe("AgentSpriteManager", () => {
         ["vera.chattiness"],
       );
       consoleSpy.mockRestore();
+    });
+  });
+
+  // ── AGENT_SPAWN handler tests ────────────────────────────────
+
+  describe("AGENT_SPAWN", () => {
+    it("plays spawn effect on existing agent (reconnect)", () => {
+      const vera = manager.getSprite("vera")!;
+
+      wsClient.emit({
+        event_id: "90",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "reconnect" },
+      });
+
+      // Spawn effect sets alpha to 0 and tweens back
+      expect(vera.sprite.setAlpha).toHaveBeenCalledWith(0);
+    });
+
+    it("does not crash for unknown agent spawn", () => {
+      wsClient.emit({
+        event_id: "91",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", reason: "start" },
+      });
+      // Should not throw
+    });
+
+    it("ignores management agent spawn", () => {
+      wsClient.emit({
+        event_id: "92",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "management", reason: "start" },
+      });
+      expect(manager.getSprite("management")).toBeUndefined();
+    });
+  });
+
+  // ── AGENT_DESPAWN handler tests ──────────────────────────────
+
+  describe("AGENT_DESPAWN", () => {
+    it("sets spawning flag on despawn", () => {
+      const vera = manager.getSprite("vera")!;
+
+      wsClient.emit({
+        event_id: "100",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "shutdown" },
+      });
+
+      // Despawn effect sets spawning flag immediately
+      expect(vera.spawning).toBe(true);
+    });
+
+    it("creates tween for sprite fade-out", () => {
+      wsClient.emit({
+        event_id: "101",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "error" },
+      });
+
+      // Should have created tweens (particles + sprite fade)
+      expect(scene.tweens.add).toHaveBeenCalled();
+    });
+
+    it("does not crash for unknown agent despawn", () => {
+      wsClient.emit({
+        event_id: "102",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", reason: "shutdown" },
+      });
+      // Should not throw
     });
   });
 });

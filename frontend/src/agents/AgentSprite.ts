@@ -96,6 +96,7 @@ export class AgentSprite {
   private progressTimer: Phaser.Time.TimerEvent | null = null;
   private progressDotCount = 0;
   isBusy = false;
+  spawning = false;
 
   constructor(scene: Phaser.Scene, config: AgentSpriteConfig) {
     this.scene = scene;
