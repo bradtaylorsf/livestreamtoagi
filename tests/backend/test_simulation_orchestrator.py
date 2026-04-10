@@ -53,10 +53,24 @@ def make_simulation_row(**overrides: Any) -> dict:
         "total_management_flags": 0,
         "agents_participated": ["vera", "rex"],
         "error_log": None,
+        "model_versions": {},
         "created_at": datetime(2026, 4, 3, 12, 0),
     }
     base.update(overrides)
     return base
+
+
+def _make_agent_registry() -> MagicMock:
+    """Create an agent registry mock with proper string model fields."""
+    registry = MagicMock()
+    vera = MagicMock()
+    vera.model_conversation = "claude-haiku-4-5"
+    vera.model_building = "claude-sonnet-4-6"
+    rex = MagicMock()
+    rex.model_conversation = "claude-haiku-4-5"
+    rex.model_building = "claude-sonnet-4-6"
+    registry.get_agent.side_effect = lambda aid: {"vera": vera, "rex": rex}.get(aid)
+    return registry
 
 
 def make_mock_services() -> dict[str, Any]:
@@ -81,7 +95,7 @@ def make_mock_services() -> dict[str, Any]:
         "redis_client": redis_mock,
         "simulation_repo": sim_repo,
         "config_loader": MagicMock(),
-        "agent_registry": MagicMock(),
+        "agent_registry": _make_agent_registry(),
         "event_bus": MagicMock(),
         "llm_client": MagicMock(),
         "management": MagicMock(),
