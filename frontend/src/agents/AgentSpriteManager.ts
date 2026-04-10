@@ -487,12 +487,9 @@ export class AgentSpriteManager {
     const taskId = data.task_id as string;
 
     if (toAgent === "alpha") {
-      // Route to Alpha dispatch flow with pathfinding
-      this.handleAlphaDispatch({
-        from: fromAgent,
-        task: data.task_description,
-        task_id: taskId,
-      });
+      // Alpha delegations are already handled by ALPHA_DISPATCH events.
+      // The backend emits both ALPHA_DISPATCH and TASK_DELEGATED for the
+      // same operation, so we skip here to avoid double-processing.
       return;
     }
 
@@ -534,7 +531,9 @@ export class AgentSpriteManager {
     const success = data.success as boolean;
 
     if (toAgent === "alpha") {
-      this.handleAlphaReturn({ ...data, task_id: taskId });
+      // Alpha completions are already handled by ALPHA_RETURN events.
+      // The backend emits both ALPHA_RETURN and TASK_COMPLETED for the
+      // same operation, so we skip here to avoid double-processing.
       return;
     }
 

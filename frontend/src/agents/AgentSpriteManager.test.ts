@@ -643,7 +643,7 @@ describe("AgentSpriteManager", () => {
   // ── TASK_DELEGATED handler tests ─────────────────────────────
 
   describe("TASK_DELEGATED", () => {
-    it("routes alpha delegation through alpha dispatch handler", () => {
+    it("skips alpha delegation (handled by ALPHA_DISPATCH)", () => {
       const alpha = manager.getSprite("alpha")!;
       const playAnimSpy = vi.spyOn(alpha, "playAnimation");
 
@@ -659,7 +659,8 @@ describe("AgentSpriteManager", () => {
         },
       });
 
-      expect(playAnimSpy).toHaveBeenCalledWith("running");
+      // Should NOT trigger alpha dispatch — that's handled by ALPHA_DISPATCH event
+      expect(playAnimSpy).not.toHaveBeenCalledWith("running");
     });
 
     it("creates ghost sprite for non-alpha delegation", () => {
@@ -698,7 +699,7 @@ describe("AgentSpriteManager", () => {
   // ── TASK_COMPLETED handler tests ──────────────────────────────
 
   describe("TASK_COMPLETED", () => {
-    it("routes alpha task completion through alpha return handler", () => {
+    it("skips alpha task completion (handled by ALPHA_RETURN)", () => {
       const alpha = manager.getSprite("alpha")!;
 
       wsClient.emit({
@@ -713,7 +714,8 @@ describe("AgentSpriteManager", () => {
         },
       });
 
-      expect(alpha.sprite.setVisible).toHaveBeenCalledWith(true);
+      // Should NOT trigger alpha return — that's handled by ALPHA_RETURN event
+      expect(alpha.sprite.setVisible).not.toHaveBeenCalledWith(true);
     });
 
     it("does not crash for unknown task_id completion", () => {
