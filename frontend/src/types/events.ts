@@ -67,13 +67,18 @@ export interface AlphaReturnPayload {
 export interface ManagementWarningPayload {
   agent_id: string;
   reason: string;
+  severity?: ManagementSeverity;
 }
+
+export type ManagementSeverity = 1 | 2 | 3 | 4 | 5;
 
 export interface ManagementInterventionPayload {
   agent_id: string;
   action: string;
   original_text: string;
   filtered_text: string;
+  severity?: ManagementSeverity;
+  message?: string;
 }
 
 export interface ManagementShadowPayload {
