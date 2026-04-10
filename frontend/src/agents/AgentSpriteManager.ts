@@ -293,13 +293,28 @@ export class AgentSpriteManager {
   private handleWorldExpansion(data: Record<string, unknown>): void {
     const zone = (data.zone ?? data.chunk_name) as string;
     const description = (data.description ?? "") as string;
+    const agentId = data.agent_id as string | undefined;
     if (this.worldManager) {
       this.worldManager.expandWorld(zone, description, {
         tilemapUrl: data.tilemap_url as string | undefined,
         tilesetUrl: data.tileset_url as string | undefined,
         offset: data.offset as { x: number; y: number } | undefined,
-        agentId: data.agent_id as string | undefined,
       });
+
+      // After reveal animation, move the builder agent to the new area
+      if (agentId && this.worldManager) {
+        const sprite = this.sprites.get(agentId);
+        const offset = data.offset as { x: number; y: number } | undefined;
+        if (sprite && offset) {
+          const tileSize = this.worldManager.getTileSize();
+          const targetX = offset.x * tileSize + tileSize * 5; // center-ish of new chunk
+          const targetY = offset.y * tileSize + tileSize * 5;
+          // Delay to let camera pan + fade-in finish first
+          this.scene.time.delayedCall(1500, () => {
+            sprite.moveTo(targetX, targetY, this.worldManager ?? undefined);
+          });
+        }
+      }
     }
   }
 

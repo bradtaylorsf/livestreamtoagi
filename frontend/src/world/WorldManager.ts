@@ -199,7 +199,6 @@ export class WorldManager {
       tilemapUrl?: string;
       tilesetUrl?: string;
       offset?: { x: number; y: number };
-      agentId?: string;
     },
   ): void {
     if (options?.tilemapUrl && options?.tilesetUrl) {
