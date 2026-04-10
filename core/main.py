@@ -13,6 +13,7 @@ from starlette.staticfiles import StaticFiles
 
 from core.admin_routes import router as admin_router
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
+from core.public_routes import router as public_router
 from core.event_bus import event_bus
 from core.scheduler import start_scheduler, stop_scheduler
 
@@ -112,6 +113,7 @@ app.add_middleware(
 )
 
 app.include_router(admin_router)
+app.include_router(public_router)
 
 
 @app.websocket("/ws")

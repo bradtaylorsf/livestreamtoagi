@@ -2,9 +2,14 @@ import type {
   Agent,
   ApiError,
   Challenge,
+  ChallengeSubmission,
   ChatResponse,
+  ConversationDetail,
+  ConversationSummary,
   JournalEntry,
   LoreEvent,
+  PaginatedResponse,
+  SelectionLogEntry,
   Stats,
   WorldChunk,
 } from "@/types";
@@ -85,16 +90,31 @@ export async function getWorldChunks(): Promise<WorldChunk[]> {
 }
 
 // Challenges
-export async function getChallenges(): Promise<Challenge[]> {
-  return request<Challenge[]>("/api/challenges");
+export async function getChallenges(params?: {
+  status?: string;
+  category?: string;
+  sort?: string;
+}): Promise<Challenge[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.category) searchParams.set("category", params.category);
+  if (params?.sort) searchParams.set("sort", params.sort);
+  const qs = searchParams.toString();
+  return request<Challenge[]>(`/api/challenges${qs ? `?${qs}` : ""}`);
 }
 
 export async function submitChallenge(
-  challenge: Pick<Challenge, "title" | "description">,
+  challenge: ChallengeSubmission,
 ): Promise<Challenge> {
   return request<Challenge>("/api/challenges", {
     method: "POST",
     body: JSON.stringify(challenge),
+  });
+}
+
+export async function upvoteChallenge(id: number): Promise<Challenge> {
+  return request<Challenge>(`/api/challenges/${id}/upvote`, {
+    method: "POST",
   });
 }
 
@@ -104,8 +124,45 @@ export async function getStats(): Promise<Stats> {
 }
 
 // Lore
-export async function getLore(): Promise<LoreEvent[]> {
-  return request<LoreEvent[]>("/api/lore");
+export async function getLore(params?: {
+  limit?: number;
+  offset?: number;
+  agent?: string;
+  event_type?: string;
+}): Promise<PaginatedResponse<LoreEvent>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.agent) searchParams.set("agent", params.agent);
+  if (params?.event_type) searchParams.set("event_type", params.event_type);
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<LoreEvent>>(`/api/lore${qs ? `?${qs}` : ""}`);
+}
+
+// Conversations
+export async function getConversations(params?: {
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<ConversationSummary>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<ConversationSummary>>(
+    `/api/conversations${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getConversation(
+  id: string,
+): Promise<ConversationDetail> {
+  return request<ConversationDetail>(`/api/conversations/${id}`);
+}
+
+export async function getConversationSelections(
+  id: string,
+): Promise<SelectionLogEntry[]> {
+  return request<SelectionLogEntry[]>(`/api/conversations/${id}/selections`);
 }
 
 export { ApiRequestError };
