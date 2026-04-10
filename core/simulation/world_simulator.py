@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.redis_client import RedisClient
+    from core.redis_keys import ScopedRedis
     from core.simulation.clock import SimulationClock
     from core.simulation.recurring_personas import PersonaManager
 
@@ -56,7 +57,7 @@ class WorldSimulator:
 
     def __init__(
         self,
-        redis_client: RedisClient,
+        redis_client: RedisClient | ScopedRedis,
         llm_client: OpenRouterClient | None = None,
         clock: SimulationClock | None = None,
         event_bus: EventBus | None = None,

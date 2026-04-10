@@ -18,6 +18,7 @@ from core.models import AgentConfig, AgentStatus
 
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
+    from core.redis_keys import ScopedRedis
     from core.repos.config_version_repo import ConfigVersionRepo
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class AgentRegistry:
 
     def __init__(
         self,
-        redis_client: RedisClient | None = None,
+        redis_client: RedisClient | ScopedRedis | None = None,
         agents_dir: str | Path = "agents",
         config_version_repo: ConfigVersionRepo | None = None,
     ) -> None:

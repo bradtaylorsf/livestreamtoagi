@@ -37,7 +37,10 @@ async def services():
 
     # Initialize core memories for all agents (same as app startup)
     if svc.core_memory:
-        await init_core_memories(svc.agent_registry, svc.core_memory)
+        from core.constants import LIVE_SIMULATION_ID
+        await init_core_memories(
+            svc.agent_registry, svc.core_memory, simulation_id=LIVE_SIMULATION_ID,
+        )
 
     yield svc
 

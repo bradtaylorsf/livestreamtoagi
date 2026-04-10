@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from core.memory.recall_memory import RecallMemoryManager
     from core.memory.token_counter import TokenCounter
     from core.redis_client import RedisClient
+    from core.redis_keys import ScopedRedis
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ class ContextAssembler:
         recall_memory: RecallMemoryManager,
         archival_memory: ArchivalMemoryManager,
         token_counter: TokenCounter,
-        redis_client: RedisClient | None = None,
+        redis_client: RedisClient | ScopedRedis | None = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._core_memory = core_memory

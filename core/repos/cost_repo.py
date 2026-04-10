@@ -49,22 +49,45 @@ class CostRepo:
         _parse_jsonb_field(d, "details")
         return CostEvent(**d)
 
-    async def get_total_costs(self, since: datetime | None = None) -> Decimal:
-        if since:
-            val = await self.db.fetchval(
-                "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE created_at >= $1",
-                since,
-            )
-        else:
-            val = await self.db.fetchval(
-                "SELECT COALESCE(SUM(amount), 0) FROM cost_events"
-            )
+    async def get_total_costs(
+        self,
+        since: datetime | None = None,
+        simulation_id: uuid.UUID | None = None,
+    ) -> Decimal:
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
+
+        if since is not None:
+            clauses.append(f"created_at >= ${idx}")
+            params.append(since)
+            idx += 1
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = ${idx}")
+            params.append(simulation_id)
+            idx += 1
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        val = await self.db.fetchval(
+            f"SELECT COALESCE(SUM(amount), 0) FROM cost_events {where}",  # noqa: S608
+            *params,
+        )
         return Decimal(str(val))
 
-    async def get_costs_by_agent(self, agent_id: str) -> list[CostEvent]:
+    async def get_costs_by_agent(
+        self,
+        agent_id: str,
+        simulation_id: uuid.UUID | None = None,
+    ) -> list[CostEvent]:
+        clauses = ["agent_id = $1"]
+        params: list[object] = [agent_id]
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = $2")
+            params.append(simulation_id)
+        where = " AND ".join(clauses)
         rows = await self.db.fetch(
-            "SELECT * FROM cost_events WHERE agent_id = $1 ORDER BY created_at DESC",
-            agent_id,
+            f"SELECT * FROM cost_events WHERE {where} ORDER BY created_at DESC",  # noqa: S608
+            *params,
         )
         result = []
         for r in rows:
@@ -79,6 +102,7 @@ class CostRepo:
         *,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> dict[str, object]:
         """Return cost breakdown by day and by type for an agent."""
         clauses = ["agent_id = $1"]
@@ -92,6 +116,10 @@ class CostRepo:
         if to_date is not None:
             clauses.append(f"created_at <= ${idx}")
             params.append(to_date)
+            idx += 1
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = ${idx}")
+            params.append(simulation_id)
             idx += 1
 
         where = " AND ".join(clauses)
@@ -162,27 +190,41 @@ class CostRepo:
 
     async def add_revenue(self, revenue: RevenueEventCreate) -> RevenueEvent:
         row = await self.db.fetchrow(
-            """INSERT INTO revenue_events (source, amount, details)
-               VALUES ($1, $2, $3::jsonb)
+            """INSERT INTO revenue_events (source, amount, details, simulation_id)
+               VALUES ($1, $2, $3::jsonb, $4)
                RETURNING *""",
             revenue.source,
             revenue.amount,
             serialize_jsonb(revenue.details),
+            revenue.simulation_id,
         )
         d = dict(row)
         _parse_jsonb_field(d, "details")
         return RevenueEvent(**d)
 
-    async def get_total_revenue(self, since: datetime | None = None) -> Decimal:
-        if since:
-            val = await self.db.fetchval(
-                "SELECT COALESCE(SUM(amount), 0) FROM revenue_events WHERE created_at >= $1",
-                since,
-            )
-        else:
-            val = await self.db.fetchval(
-                "SELECT COALESCE(SUM(amount), 0) FROM revenue_events"
-            )
+    async def get_total_revenue(
+        self,
+        since: datetime | None = None,
+        simulation_id: uuid.UUID | None = None,
+    ) -> Decimal:
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
+
+        if since is not None:
+            clauses.append(f"created_at >= ${idx}")
+            params.append(since)
+            idx += 1
+        if simulation_id is not None:
+            clauses.append(f"simulation_id = ${idx}")
+            params.append(simulation_id)
+            idx += 1
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        val = await self.db.fetchval(
+            f"SELECT COALESCE(SUM(amount), 0) FROM revenue_events {where}",  # noqa: S608
+            *params,
+        )
         return Decimal(str(val))
 
     # ── Challenges ──────────────────────────────────────────
@@ -190,14 +232,15 @@ class CostRepo:
     async def create_challenge(self, challenge: ChallengeCreate) -> Challenge:
         row = await self.db.fetchrow(
             """INSERT INTO challenges
-               (description, submitted_by, source, assigned_agents, cost_estimate)
-               VALUES ($1, $2, $3, $4, $5)
+               (description, submitted_by, source, assigned_agents, cost_estimate, simulation_id)
+               VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING *""",
             challenge.description,
             challenge.submitted_by,
             challenge.source,
             challenge.assigned_agents,
             challenge.cost_estimate,
+            challenge.simulation_id,
         )
         return Challenge(**dict(row))
 

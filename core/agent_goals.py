@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
+    from core.redis_keys import ScopedRedis
     from core.repos.goal_repo import GoalRepo
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ class AgentGoalManager:
 
     def __init__(
         self,
-        redis: Redis | None = None,
+        redis: Redis | ScopedRedis | None = None,
         goal_repo: GoalRepo | None = None,
     ) -> None:
         self._redis = redis

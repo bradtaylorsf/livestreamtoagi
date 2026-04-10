@@ -21,10 +21,13 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import uuid
+
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
+    from core.redis_keys import ScopedRedis
     from core.repos.agent_state_repo import AgentStateRepo
 
 logger = logging.getLogger(__name__)
@@ -80,6 +83,7 @@ class AgentState(BaseModel):
     creative_need: float = Field(default=0.3, ge=0.0, le=1.0)
     recognition_need: float = Field(default=0.3, ge=0.0, le=1.0)
     mood: str = "neutral"
+    simulation_id: uuid.UUID | None = None
     version: int = 1
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -105,7 +109,7 @@ class AgentStateManager:
 
     def __init__(
         self,
-        redis_client: RedisClient | None = None,
+        redis_client: RedisClient | ScopedRedis | None = None,
         state_repo: AgentStateRepo | None = None,
     ) -> None:
         self._redis = redis_client

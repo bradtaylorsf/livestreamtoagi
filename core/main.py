@@ -4,6 +4,7 @@ import os
 import time as _time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
+from datetime import UTC
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -13,8 +14,8 @@ from starlette.staticfiles import StaticFiles
 
 from core.admin_routes import router as admin_router
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
-from core.public_routes import router as public_router
 from core.event_bus import event_bus
+from core.public_routes import router as public_router
 from core.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,10 @@ async def lifespan(app: FastAPI):
 
         # Initialize core memory for all agents at startup
         if svc.core_memory:
-            initialized = await init_core_memories(svc.agent_registry, svc.core_memory)
+            from core.constants import LIVE_SIMULATION_ID
+            initialized = await init_core_memories(
+                svc.agent_registry, svc.core_memory, simulation_id=LIVE_SIMULATION_ID,
+            )
             if initialized:
                 logger.info("Initialized core memory for: %s", ", ".join(initialized))
 
@@ -155,6 +159,9 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     Unlike the CLI simulation (which runs in a separate process with its own
     event_bus), this runs inside the FastAPI process so all emitted events are
     broadcast to connected browser clients immediately.
+
+    Creates a real simulation record so the conversation is fully tracked and
+    evaluatable via the /api/simulations endpoints.
     """
     import uuid as _uuid
 
@@ -162,33 +169,30 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     from core.conversation.selection_logger import SelectionLogger
     from core.conversation.triggers import TriggerSystem
     from core.conversation_engine import ConversationEngine
+    from core.models import SimulationCreate
+    from core.redis_keys import ScopedRedis
     from core.repos.conversation_repo import ConversationRepo
+    from core.repos.simulation_repo import SimulationRepo
 
     svc: Services = app.state.services
     cfg = svc.config_loader.config
+
+    # Create a tracked simulation record for this dev test
+    sim_repo = SimulationRepo(svc.db)
+    sim = await sim_repo.create(SimulationCreate(
+        name=f"dev-test-{req.test_type}",
+        description=f"Dev simulate: {req.test_type}, {req.turns} turns",
+        config={"test_type": req.test_type, "topic": req.topic, "turns": req.turns},
+    ))
+    simulation_id = sim.id
+
+    # Create a simulation-scoped Redis so all keys are isolated
+    sim_redis = ScopedRedis(svc.redis, simulation_id)
+
     conversation_repo = ConversationRepo(svc.db)
-    proximity = ProximityManager(svc.redis, cfg, event_bus)
+    proximity = ProximityManager(sim_redis, cfg, event_bus)
     trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
-
-    engine = ConversationEngine(
-        config_loader=svc.config_loader,
-        agent_registry=svc.agent_registry,
-        event_bus=event_bus,
-        llm_client=svc.llm_client,
-        management=svc.management,
-        context_assembler=svc.context_assembler,
-        conversation_repo=conversation_repo,
-        archival_memory=svc.archival_memory,
-        proximity=proximity,
-        trigger_system=trigger_system,
-        selection_logger=selection_logger,
-        compactor=svc.compactor,
-        memory_repo=svc.memory_repo,
-        speed_multiplier=1.0,
-        management_enabled=True,
-        services=svc,
-    )
 
     trigger_map: dict[str, dict[str, Any]] = {
         "idle": {"type": "idle", "reason": "Free-form conversation", "location": "town_square"},
@@ -268,12 +272,13 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
             speed_multiplier=1.0,
             management_enabled=True,
             services=svc,
+            simulation_id=simulation_id,
         )
 
         try:
             print(f"[DEV-SIM] {task_id}: setting up proximity for {len(agents)} agents")
             for agent in svc.agent_registry.get_all_agents():
-                await svc.redis.delete(f"agent:location:{agent.id}")
+                await sim_redis.delete(f"agent:location:{agent.id}")
             location = str(trigger.get("location", "town_square"))
             for agent_id in agents:
                 await proximity.update_location(agent_id, location)
@@ -332,6 +337,23 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
 
         print(f"[DEV-SIM] {task_id}: playback complete")
 
+        # Finalize simulation as completed
+        from datetime import datetime
+        await sim_repo.update_status(simulation_id, "completed", completed_at=datetime.now(UTC))
+        await sim_repo.update_agents_participated(simulation_id, agents)
+
+    async def _run_with_finalize() -> None:
+        try:
+            await _run()
+        except Exception:
+            from datetime import datetime
+            logger.exception("Dev simulate task %s failed", task_id)
+            await sim_repo.update_status(
+                simulation_id, "failed",
+                completed_at=datetime.now(UTC),
+                error_log={"task_id": task_id, "error": "unhandled exception"},
+            )
+
     def _on_done(t: asyncio.Task) -> None:
         _sim_tasks.discard(t)
         if t.cancelled():
@@ -341,10 +363,16 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
             import traceback
             traceback.print_exception(type(t.exception()), t.exception(), t.exception().__traceback__)
 
-    task = asyncio.create_task(_run())
+    task = asyncio.create_task(_run_with_finalize())
     _sim_tasks.add(task)
     task.add_done_callback(_on_done)
-    return {"ok": True, "task_id": task_id, "agents": agents, "turns": max_turns}
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "simulation_id": str(simulation_id),
+        "agents": agents,
+        "turns": max_turns,
+    }
 
 
 @app.post("/api/dev/emit")

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.models import AgentConfig, ConversationConfig
     from core.redis_client import RedisClient
+    from core.redis_keys import ScopedRedis
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class ProximityManager:
 
     def __init__(
         self,
-        redis_client: RedisClient,
+        redis_client: RedisClient | ScopedRedis,
         config: ConversationConfig,
         event_bus: EventBus,
         role_bonuses: dict[str, float] | None = None,

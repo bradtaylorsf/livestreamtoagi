@@ -20,6 +20,9 @@ DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
 )
 
+# Well-known live simulation UUID (seeded by migration 035)
+_LIVE_SIM_ID = "00000000-0000-0000-0000-000000000001"
+
 ALL_TABLES = [
     "agents",
     "core_memory",
@@ -45,12 +48,15 @@ ALL_TABLES = [
     "agent_internal_state",
 ]
 
+
 def _discover_agent_ids() -> list[str]:
     """Discover agent IDs from the agents/ directory."""
     from pathlib import Path
+
     agents_dir = Path(__file__).resolve().parent.parent.parent / "agents"
     return sorted(
-        d.name for d in agents_dir.iterdir()
+        d.name
+        for d in agents_dir.iterdir()
         if d.is_dir() and (d / "config.yaml").exists() and d.name != "template"
     )
 
@@ -115,9 +121,7 @@ async def test_rollback(conn):
     await up(conn)
     # Roll back all migrations in reverse order
     # Get current version to know how many times to call down()
-    row = await conn.fetchrow(
-        "SELECT MAX(version) as v FROM schema_migrations"
-    )
+    row = await conn.fetchrow("SELECT MAX(version) as v FROM schema_migrations")
     num_migrations = row["v"] if row and row["v"] else 0
     for _ in range(num_migrations):
         await down(conn)
@@ -149,101 +153,150 @@ async def test_insert_and_query_each_table(conn):
     await conn.execute(
         "INSERT INTO transcripts (event_type, participants, content, token_count) "
         "VALUES ($1, $2, $3, $4)",
-        "dialogue", ["vera", "rex"], "Hello world", 2,
+        "dialogue",
+        ["vera", "rex"],
+        "Hello world",
+        2,
     )
     row = await conn.fetchrow("SELECT * FROM transcripts WHERE event_type = 'dialogue'")
     assert row["content"] == "Hello world"
 
     # core_memory
     await conn.execute(
-        "INSERT INTO core_memory (agent_id, content, token_count) VALUES ($1, $2, $3)",
-        "vera", "I am Vera", 3,
+        "INSERT INTO core_memory (agent_id, content, token_count, simulation_id) VALUES ($1, $2, $3, $4)",
+        "vera",
+        "I am Vera",
+        3,
+        _LIVE_SIM_ID,
     )
     row = await conn.fetchrow("SELECT * FROM core_memory WHERE agent_id = 'vera'")
     assert row["content"] == "I am Vera"
 
     # core_memory_history
     await conn.execute(
-        "INSERT INTO core_memory_history (agent_id, content, version, change_reason) "
-        "VALUES ($1, $2, $3, $4)",
-        "vera", "I am Vera", 1, "initial",
+        "INSERT INTO core_memory_history (agent_id, content, version, change_reason, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        "vera",
+        "I am Vera",
+        1,
+        "initial",
+        _LIVE_SIM_ID,
     )
 
     # conversation_buffer
     await conn.execute(
-        "INSERT INTO conversation_buffer (agent_id, role, speaker, content) "
-        "VALUES ($1, $2, $3, $4)",
-        "rex", "agent", "rex", "Let me think.",
+        "INSERT INTO conversation_buffer (agent_id, role, speaker, content, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        "rex",
+        "agent",
+        "rex",
+        "Let me think.",
+        _LIVE_SIM_ID,
     )
 
     # world_chunks
     await conn.execute(
-        "INSERT INTO world_chunks (name, x_offset, y_offset, width, height, tile_data) "
-        "VALUES ($1, $2, $3, $4, $5, $6)",
-        "spawn", 0, 0, 16, 16, "{}",
+        "INSERT INTO world_chunks (name, x_offset, y_offset, width, height, tile_data, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "spawn",
+        0,
+        0,
+        16,
+        16,
+        "{}",
+        _LIVE_SIM_ID,
     )
 
     # world_events
     await conn.execute(
-        "INSERT INTO world_events (event_type, description) VALUES ($1, $2)",
-        "build", "A new chunk was built",
+        "INSERT INTO world_events (event_type, description, simulation_id) VALUES ($1, $2, $3)",
+        "build",
+        "A new chunk was built",
+        _LIVE_SIM_ID,
     )
 
     # expansion_proposals
     await conn.execute(
-        "INSERT INTO expansion_proposals (proposed_by, title, description) "
-        "VALUES ($1, $2, $3)",
-        "aurora", "New garden", "Let's build a garden",
+        "INSERT INTO expansion_proposals (proposed_by, title, description, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "aurora",
+        "New garden",
+        "Let's build a garden",
+        _LIVE_SIM_ID,
     )
 
     # challenges
     await conn.execute(
-        "INSERT INTO challenges (description, submitted_by, source) VALUES ($1, $2, $3)",
-        "Build a bridge", "viewer1", "twitch",
+        "INSERT INTO challenges (description, submitted_by, source, simulation_id) VALUES ($1, $2, $3, $4)",
+        "Build a bridge",
+        "viewer1",
+        "twitch",
+        _LIVE_SIM_ID,
     )
 
     # revenue_events
     await conn.execute(
-        "INSERT INTO revenue_events (source, amount) VALUES ($1, $2)",
-        "twitch_sub", 4.99,
+        "INSERT INTO revenue_events (source, amount, simulation_id) VALUES ($1, $2, $3)",
+        "twitch_sub",
+        4.99,
+        _LIVE_SIM_ID,
     )
 
     # cost_events
     await conn.execute(
-        "INSERT INTO cost_events (agent_id, cost_type, amount) VALUES ($1, $2, $3)",
-        "vera", "llm_api", 0.0012,
+        "INSERT INTO cost_events (agent_id, cost_type, amount, simulation_id) VALUES ($1, $2, $3, $4)",
+        "vera",
+        "llm_api",
+        0.0012,
+        _LIVE_SIM_ID,
     )
 
     # conversations
     conv_id = await conn.fetchval(
-        "INSERT INTO conversations (trigger_type, initial_energy, participating_agents) "
-        "VALUES ($1, $2, $3) RETURNING id",
-        "proximity", 1.0, '["vera", "rex"]',
+        "INSERT INTO conversations (trigger_type, initial_energy, participating_agents, simulation_id) "
+        "VALUES ($1, $2, $3, $4) RETURNING id",
+        "proximity",
+        1.0,
+        '["vera", "rex"]',
+        _LIVE_SIM_ID,
     )
     assert conv_id is not None
 
     # conversation_selection_log
     await conn.execute(
         "INSERT INTO conversation_selection_log "
-        "(conversation_id, turn_number, selected_agent_id, agent_scores) "
-        "VALUES ($1, $2, $3, $4)",
-        conv_id, 1, "vera", '{"vera": 0.8, "rex": 0.6}',
+        "(conversation_id, turn_number, selected_agent_id, agent_scores, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        conv_id,
+        1,
+        "vera",
+        '{"vera": 0.8, "rex": 0.6}',
+        _LIVE_SIM_ID,
     )
 
     # interrupt_log
     await conn.execute(
         "INSERT INTO interrupt_log "
         "(conversation_id, attempting_agent_id, would_have_spoken_id, "
-        "interrupt_score, threshold_at_time, succeeded) "
-        "VALUES ($1, $2, $3, $4, $5, $6)",
-        conv_id, "fork", "rex", 0.85, 0.7, True,
+        "interrupt_score, threshold_at_time, succeeded, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        conv_id,
+        "fork",
+        "rex",
+        0.85,
+        0.7,
+        True,
+        _LIVE_SIM_ID,
     )
 
     # recall_memory (requires a vector)
     embedding = [0.0] * 1536
     await conn.execute(
-        "INSERT INTO recall_memory (agent_id, summary, embedding) VALUES ($1, $2, $3)",
-        "vera", "Test memory", str(embedding),
+        "INSERT INTO recall_memory (agent_id, summary, embedding, simulation_id) VALUES ($1, $2, $3, $4)",
+        "vera",
+        "Test memory",
+        str(embedding),
+        _LIVE_SIM_ID,
     )
 
 
@@ -261,8 +314,11 @@ async def test_pgvector_similarity_search(conn):
 
     for i, v in enumerate(vecs):
         await conn.execute(
-            "INSERT INTO recall_memory (agent_id, summary, embedding) VALUES ($1, $2, $3)",
-            "vera", f"memory_{i}", str(v),
+            "INSERT INTO recall_memory (agent_id, summary, embedding, simulation_id) VALUES ($1, $2, $3, $4)",
+            "vera",
+            f"memory_{i}",
+            str(v),
+            _LIVE_SIM_ID,
         )
 
     # Query: nearest to vec[0] should be memory_0
@@ -288,8 +344,11 @@ async def test_foreign_key_constraints(conn):
 
     with pytest.raises(asyncpg.ForeignKeyViolationError):
         await conn.execute(
-            "INSERT INTO core_memory (agent_id, content, token_count) VALUES ($1, $2, $3)",
-            "nonexistent_agent", "should fail", 1,
+            "INSERT INTO core_memory (agent_id, content, token_count, simulation_id) VALUES ($1, $2, $3, $4)",
+            "nonexistent_agent",
+            "should fail",
+            1,
+            _LIVE_SIM_ID,
         )
 
 
@@ -310,8 +369,7 @@ async def test_ivfflat_index_exists(conn):
     await up(conn)
 
     row = await conn.fetchrow(
-        "SELECT indexname, indexdef FROM pg_indexes "
-        "WHERE indexname = 'idx_recall_embedding'"
+        "SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'idx_recall_embedding'"
     )
     assert row is not None, "IVF FLAT index idx_recall_embedding not found"
     assert "ivfflat" in row["indexdef"].lower()
@@ -379,15 +437,17 @@ async def test_unique_constraint_on_core_memory(conn):
         "VALUES ('test_uc', 'Test', 'claude-haiku-4-5', 'claude-haiku-4-5')"
     )
     await conn.execute(
-        "INSERT INTO core_memory (agent_id, content, token_count) "
-        "VALUES ('test_uc', 'memory1', 100)"
+        "INSERT INTO core_memory (agent_id, content, token_count, simulation_id) "
+        "VALUES ('test_uc', 'memory1', 100, $1)",
+        _LIVE_SIM_ID,
     )
 
-    # Second insert with same agent_id should fail on unique constraint
+    # Second insert with same agent_id + simulation_id should fail on unique constraint
     with pytest.raises(asyncpg.UniqueViolationError):
         await conn.execute(
-            "INSERT INTO core_memory (agent_id, content, token_count) "
-            "VALUES ('test_uc', 'memory2', 200)"
+            "INSERT INTO core_memory (agent_id, content, token_count, simulation_id) "
+            "VALUES ('test_uc', 'memory2', 200, $1)",
+            _LIVE_SIM_ID,
         )
 
 

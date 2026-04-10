@@ -14,19 +14,30 @@ from typing import Any
 
 import httpx
 
+from core.agent_economy import AgentEconomyManager
+from core.agent_goals import AgentGoalManager
 from core.agent_registry import AgentRegistry
+from core.agent_state import AgentStateManager
+from core.characters.departure import DepartureManager
+from core.characters.spawner import CharacterSpawner
+from core.characters.voting import VotingManager
 from core.config_loader import ConfigLoader
+from core.constants import LIVE_SIMULATION_ID
 from core.context_assembly import ContextAssembler
 from core.database import Database
 from core.event_bus import EventBus
+from core.events.event_generator import EventGenerator
 from core.llm_client import OpenRouterClient, refresh_pricing
+from core.management import Management
 from core.memory.archival_memory import ArchivalMemoryManager
 from core.memory.compaction import MemoryCompactor
 from core.memory.core_memory import CoreMemoryManager
+from core.memory.dreams import DreamManager
 from core.memory.recall_memory import RecallMemoryManager
 from core.memory.token_counter import TokenCounter
-from core.management import Management
 from core.redis_client import RedisClient
+from core.redis_keys import ScopedRedis
+from core.repos.alliance_repo import AllianceRepo
 from core.repos.artifact_repo import ArtifactRepo
 from core.repos.config_version_repo import ConfigVersionRepo
 from core.repos.cost_repo import CostRepo
@@ -35,15 +46,6 @@ from core.repos.memory_repo import MemoryRepo
 from core.repos.relationship_repo import RelationshipRepo
 from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
-from core.agent_economy import AgentEconomyManager
-from core.agent_goals import AgentGoalManager
-from core.agent_state import AgentStateManager
-from core.characters.departure import DepartureManager
-from core.characters.spawner import CharacterSpawner
-from core.characters.voting import VotingManager
-from core.events.event_generator import EventGenerator
-from core.memory.dreams import DreamManager
-from core.repos.alliance_repo import AllianceRepo
 from core.shared_state import SharedWorkingState
 from core.social.alliances import AllianceManager
 
@@ -58,6 +60,7 @@ class Services:
 
     db: Database | None
     redis: RedisClient | None
+    scoped_redis: ScopedRedis | None
     http_client: httpx.AsyncClient | None
     agent_registry: AgentRegistry
     llm_client: OpenRouterClient | None
@@ -137,13 +140,16 @@ async def bootstrap_services(
     await db.connect()
     await redis_client.connect()
 
+    # Create ScopedRedis for live simulation (prefix: "live:")
+    scoped_redis = ScopedRedis(redis_client, LIVE_SIMULATION_ID)
+
     if auto_migrate:
         await _auto_migrate(db)
 
     config_version_repo = ConfigVersionRepo(db)
 
     agent_registry = AgentRegistry(
-        redis_client=redis_client,
+        redis_client=scoped_redis,
         config_version_repo=config_version_repo,
     )
     await agent_registry.load_all()
@@ -181,7 +187,7 @@ async def bootstrap_services(
     from core.event_bus import event_bus as _module_event_bus
 
     management = Management(
-        redis_client=redis_client,
+        redis_client=scoped_redis,
         llm_client=llm_client,
         event_bus=_module_event_bus,
     )
@@ -189,15 +195,15 @@ async def bootstrap_services(
     # Inject config_version_repo into config_loader for DB-backed config
     config_loader._config_repo = config_version_repo
 
-    shared_working_state = SharedWorkingState(redis_client.client)
+    shared_working_state = SharedWorkingState(scoped_redis)
     goal_repo = GoalRepo(db)
-    goal_manager = AgentGoalManager(redis=redis_client.client, goal_repo=goal_repo)
+    goal_manager = AgentGoalManager(redis=scoped_redis, goal_repo=goal_repo)
 
     from core.repos.agent_state_repo import AgentStateRepo
 
     agent_state_repo = AgentStateRepo(db)
     agent_state_manager = AgentStateManager(
-        redis_client=redis_client,
+        redis_client=scoped_redis,
         state_repo=agent_state_repo,
     )
 
@@ -266,12 +272,13 @@ async def bootstrap_services(
         recall_memory=recall_memory,
         archival_memory=archival_memory,
         token_counter=token_counter,
-        redis_client=redis_client,
+        redis_client=scoped_redis,
     )
 
     return Services(
         db=db,
         redis=redis_client,
+        scoped_redis=scoped_redis,
         http_client=http_client,
         agent_registry=agent_registry,
         llm_client=llm_client,
@@ -337,6 +344,7 @@ async def _bootstrap_dry_run(
     return Services(
         db=None,
         redis=None,
+        scoped_redis=None,
         http_client=None,
         agent_registry=agent_registry,
         llm_client=None,

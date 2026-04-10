@@ -14,12 +14,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# SQL fragment for NULL-safe simulation_id filtering.
-_SIM_FILTER = "(simulation_id = ${n} OR (${n}::uuid IS NULL AND simulation_id IS NULL))"
-
-
 def _sim_filter(param_num: int) -> str:
-    return _SIM_FILTER.replace("${n}", f"${param_num}")
+    """Return SQL fragment for simulation_id filtering."""
+    return f"simulation_id = ${param_num}"
 
 
 class GoalRepo:

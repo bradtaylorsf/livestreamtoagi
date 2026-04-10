@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from redis.asyncio import Redis
+    from core.redis_keys import ScopedRedis
 
 
 TASK_KEY = "shared:tasks"
@@ -37,7 +37,7 @@ class Decision:
 class SharedWorkingState:
     """Redis-backed shared state for agent coordination."""
 
-    def __init__(self, redis: Redis) -> None:
+    def __init__(self, redis: ScopedRedis) -> None:
         self._redis = redis
 
     async def add_task(self, task: SharedTask) -> None:

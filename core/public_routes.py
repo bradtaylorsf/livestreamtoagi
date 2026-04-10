@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from core.constants import LIVE_SIMULATION_ID
 from core.models import (
     Challenge,
     Conversation,
@@ -308,10 +309,10 @@ async def get_agent_journal(
     db = _get_db()
     rows = await db.fetch(
         """SELECT * FROM journal_entries
-           WHERE agent_id = $1
+           WHERE agent_id = $1 AND simulation_id = $4
            ORDER BY created_at DESC
            LIMIT $2 OFFSET $3""",
-        agent_id, limit, offset,
+        agent_id, limit, offset, LIVE_SIMULATION_ID,
     )
     return [
         {
@@ -331,15 +332,8 @@ async def get_agent_relationships(agent_id: str) -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.relationship_repo:
         return []
-    # Get the latest simulation to fetch relationships from
-    db = _get_db()
-    latest_sim = await db.fetchrow(
-        "SELECT id FROM simulations ORDER BY started_at DESC LIMIT 1",
-    )
-    if not latest_sim:
-        return []
     relationships = await svc.relationship_repo.get_all_for_agent(
-        latest_sim["id"], agent_id,
+        LIVE_SIMULATION_ID, agent_id,
     )
     return [
         {
@@ -363,7 +357,7 @@ async def get_agent_conversations(
     db = _get_db()
     repo = ConversationRepo(db)
     convs, total = await repo.get_conversations_by_agent(
-        agent_id, limit=limit, offset=offset,
+        agent_id, simulation_id=LIVE_SIMULATION_ID, limit=limit, offset=offset,
     )
     return {
         "items": [_conversation_to_summary(c) for c in convs],
@@ -383,6 +377,7 @@ async def get_agent_artifacts(
     if not svc.artifact_repo:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
     artifacts, total = await svc.artifact_repo.get_all_artifacts(
+        simulation_id=LIVE_SIMULATION_ID,
         agent_ids=[agent_id], limit=limit, offset=offset,
     )
     return {
@@ -471,12 +466,16 @@ async def get_conversations(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     db = _get_db()
-    total = await db.fetchval("SELECT COUNT(*) FROM conversations")
+    total = await db.fetchval(
+        "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+        LIVE_SIMULATION_ID,
+    )
     rows = await db.fetch(
         """SELECT * FROM conversations
+           WHERE simulation_id = $3
            ORDER BY started_at DESC
            LIMIT $1 OFFSET $2""",
-        limit, offset,
+        limit, offset, LIVE_SIMULATION_ID,
     )
     items = []
     for r in rows:
@@ -735,7 +734,10 @@ async def get_world_chunks() -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.world_repo:
         return []
-    rows = await svc.db.fetch("SELECT * FROM world_chunks ORDER BY id")
+    rows = await svc.db.fetch(
+        "SELECT * FROM world_chunks WHERE simulation_id = $1 ORDER BY id",
+        LIVE_SIMULATION_ID,
+    )
     results = []
     for r in rows:
         d = dict(r)
@@ -763,9 +765,9 @@ async def get_challenges(
     sort: str = Query("newest"),
 ) -> list[ChallengeResponse]:
     db = _get_db()
-    clauses: list[str] = []
-    params: list[object] = []
-    idx = 1
+    clauses: list[str] = ["simulation_id = $1"]
+    params: list[object] = [LIVE_SIMULATION_ID]
+    idx = 2
 
     if status:
         clauses.append(f"status = ${idx}")
@@ -776,7 +778,7 @@ async def get_challenges(
         params.append(category)
         idx += 1
 
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    where = " WHERE " + " AND ".join(clauses)
 
     order_map = {
         "newest": "created_at DESC",
@@ -861,9 +863,13 @@ async def get_stats() -> StatsResponse:
     total_agents = len(svc.agent_registry.get_all_agents())
 
     sims = await db.fetchval("SELECT COUNT(*) FROM simulations") or 0
-    convs = await db.fetchval("SELECT COUNT(*) FROM conversations") or 0
+    convs = await db.fetchval(
+        "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+        LIVE_SIMULATION_ID,
+    ) or 0
     total_cost_val = await db.fetchval(
-        "SELECT COALESCE(SUM(amount), 0) FROM cost_events",
+        "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE simulation_id = $1",
+        LIVE_SIMULATION_ID,
     )
     total_cost = str(total_cost_val) if total_cost_val else "0"
 
@@ -883,9 +889,9 @@ async def get_lore(
     event_type: str | None = Query(None),
 ) -> dict[str, Any]:
     db = _get_db()
-    clauses: list[str] = []
-    params: list[object] = []
-    idx = 1
+    clauses: list[str] = ["simulation_id = $1"]
+    params: list[object] = [LIVE_SIMULATION_ID]
+    idx = 2
 
     if agent:
         clauses.append(f"${idx} = ANY(agents_involved)")
@@ -896,7 +902,7 @@ async def get_lore(
         params.append(event_type)
         idx += 1
 
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    where = " WHERE " + " AND ".join(clauses)
 
     total = await db.fetchval(
         f"SELECT COUNT(*) FROM world_events{where}",  # noqa: S608

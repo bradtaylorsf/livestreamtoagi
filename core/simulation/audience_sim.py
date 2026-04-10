@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
+    from core.redis_keys import ScopedRedis
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class AudienceSimulator:
 
     def __init__(
         self,
-        redis_client: RedisClient,
+        redis_client: RedisClient | ScopedRedis,
         config: dict[str, Any] | None = None,
     ) -> None:
         self._redis = redis_client

@@ -29,15 +29,9 @@ if TYPE_CHECKING:
 
 MAX_LIMIT = 500
 
-# SQL fragment for NULL-safe simulation_id filtering.
-# When the parameter is NULL, matches rows where simulation_id IS NULL (live mode).
-# When non-NULL, matches rows with that specific simulation_id.
-_SIM_FILTER = "(simulation_id = ${n} OR (${n}::uuid IS NULL AND simulation_id IS NULL))"
-
-
 def _sim_filter(param_num: int) -> str:
-    """Return SQL fragment for nullable simulation_id filtering."""
-    return _SIM_FILTER.replace("${n}", f"${param_num}")
+    """Return SQL fragment for simulation_id filtering."""
+    return f"simulation_id = ${param_num}"
 
 
 def _parse_embedding(val: str) -> list[float]:
@@ -96,8 +90,7 @@ class MemoryRepo:
             row = await conn.fetchrow(
                 """INSERT INTO core_memory (agent_id, content, token_count, version, simulation_id)
                        VALUES ($1, $2, $3, 1, $4)
-                       ON CONFLICT (agent_id, COALESCE(simulation_id,
-                           '00000000-0000-0000-0000-000000000000'::uuid))
+                       ON CONFLICT (agent_id, simulation_id)
                        DO UPDATE
                        SET content = $2,
                            token_count = $3,
@@ -417,8 +410,8 @@ class MemoryRepo:
         row = await self.db.fetchrow(
             """INSERT INTO self_modification_proposals
                (agent_id, proposal_type, description, reasoning,
-                file, new_content, impact_notes, status)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued_for_review')
+                file, new_content, impact_notes, status, simulation_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued_for_review', $8)
                RETURNING *""",
             proposal.agent_id,
             proposal.proposal_type,
@@ -427,26 +420,32 @@ class MemoryRepo:
             proposal.file,
             proposal.new_content,
             proposal.impact_notes,
+            proposal.simulation_id,
         )
         return SelfModificationProposal(**dict(row))
 
     async def get_proposals(
-        self, agent_id: str, status: str | None = None
+        self,
+        agent_id: str,
+        status: str | None = None,
+        simulation_id: _uuid.UUID | None = None,
     ) -> list[SelfModificationProposal]:
         if status:
             rows = await self.db.fetch(
-                """SELECT * FROM self_modification_proposals
-                   WHERE agent_id = $1 AND status = $2
+                f"""SELECT * FROM self_modification_proposals
+                   WHERE agent_id = $1 AND status = $2 AND {_sim_filter(3)}
                    ORDER BY created_at DESC""",
                 agent_id,
                 status,
+                simulation_id,
             )
         else:
             rows = await self.db.fetch(
-                """SELECT * FROM self_modification_proposals
-                   WHERE agent_id = $1
+                f"""SELECT * FROM self_modification_proposals
+                   WHERE agent_id = $1 AND {_sim_filter(2)}
                    ORDER BY created_at DESC""",
                 agent_id,
+                simulation_id,
             )
         return [SelfModificationProposal(**dict(r)) for r in rows]
 

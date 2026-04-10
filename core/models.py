@@ -222,6 +222,7 @@ class SelfModificationProposal(BaseModel):
     new_content: str | None = None
     impact_notes: str | None = None
     status: str = "queued_for_review"
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
     reviewed_at: datetime | None = None
     reviewed_by: str | None = None
@@ -235,6 +236,7 @@ class SelfModificationProposalCreate(BaseModel):
     file: str | None = None
     new_content: str | None = None
     impact_notes: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Reflection Result ───────────────────────────────────────────
@@ -371,6 +373,7 @@ class WorldChunk(BaseModel):
     description: str | None = None
     proposal_votes: dict[str, int] | None = None
     tileset_url: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 class WorldChunkCreate(BaseModel):
@@ -384,6 +387,7 @@ class WorldChunkCreate(BaseModel):
     built_by: list[str] | None = None
     description: str | None = None
     tileset_url: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── World Events ────────────────────────────────────────────────
@@ -395,6 +399,7 @@ class WorldEvent(BaseModel):
     description: str | None = None
     agents_involved: list[str] | None = None
     audience_participation: bool = False
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 
@@ -403,6 +408,7 @@ class WorldEventCreate(BaseModel):
     description: str | None = None
     agents_involved: list[str] | None = None
     audience_participation: bool = False
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Expansion Proposals ─────────────────────────────────────────
@@ -416,6 +422,7 @@ class ExpansionProposal(BaseModel):
     status: str = "proposed"
     votes_for: int = 0
     votes_against: int = 0
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 
@@ -423,6 +430,7 @@ class ExpansionProposalCreate(BaseModel):
     proposed_by: str
     title: str
     description: str
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Cost Events ─────────────────────────────────────────────────
@@ -454,6 +462,7 @@ class RevenueEvent(BaseModel):
     source: str | None = None
     amount: Decimal | None = None
     details: dict[str, Any] | None = None
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 
@@ -461,6 +470,7 @@ class RevenueEventCreate(BaseModel):
     source: str | None = None
     amount: Decimal
     details: dict[str, Any] | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Challenges ──────────────────────────────────────────────────
@@ -478,6 +488,7 @@ class Challenge(BaseModel):
     actual_cost: float | None = None
     votes: int = 0
     category: str | None = None
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -489,6 +500,7 @@ class ChallengeCreate(BaseModel):
     category: str | None = None
     assigned_agents: list[str] | None = None
     cost_estimate: float | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Management / Content Filter ──────────────────────────────────
@@ -767,6 +779,7 @@ class Simulation(BaseModel):
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    is_live: bool = False
     created_at: datetime | None = None
 
 

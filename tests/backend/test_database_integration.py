@@ -12,6 +12,7 @@ from decimal import Decimal
 import pytest
 from dotenv import load_dotenv
 
+from core.constants import LIVE_SIMULATION_ID
 from core.database import Database
 from core.models import (
     AgentCreate,
@@ -181,16 +182,20 @@ async def test_memory_upsert_transactional(db):
     repo = MemoryRepo(db)
 
     # First insert
-    mem = await repo.upsert_core_memory("vera", "I am Vera, the showrunner.", 6, "initial")
+    mem = await repo.upsert_core_memory(
+        "vera", "I am Vera, the showrunner.", 6, "initial", simulation_id=LIVE_SIMULATION_ID
+    )
     assert mem.version == 1
     assert mem.content == "I am Vera, the showrunner."
 
     # Update (should increment version)
-    mem2 = await repo.upsert_core_memory("vera", "I am Vera. I love planning.", 7, "update")
+    mem2 = await repo.upsert_core_memory(
+        "vera", "I am Vera. I love planning.", 7, "update", simulation_id=LIVE_SIMULATION_ID
+    )
     assert mem2.version == 2
 
     # History should have both versions
-    history = await repo.get_core_memory_history("vera")
+    history = await repo.get_core_memory_history("vera", simulation_id=LIVE_SIMULATION_ID)
     assert len(history) == 2
     assert history[0].version == 1
     assert history[1].version == 2
@@ -214,20 +219,21 @@ async def test_recall_memory_vector_search(db):
                 agent_id="vera",
                 summary=f"memory_{i}",
                 embedding=vec,
+                simulation_id=LIVE_SIMULATION_ID,
             )
         )
 
     # Search: closest to vec[0] should be memory_0
     query = list(base)
     query[0] = 1.0
-    results = await repo.search_recall("vera", query, limit=1)
+    results = await repo.search_recall("vera", query, limit=1, simulation_id=LIVE_SIMULATION_ID)
     assert len(results) == 1
     assert results[0].summary == "memory_0"
 
     # Search: closest to vec[2] should be memory_2
     query2 = list(base)
     query2[2] = 1.0
-    results2 = await repo.search_recall("vera", query2, limit=1)
+    results2 = await repo.search_recall("vera", query2, limit=1, simulation_id=LIVE_SIMULATION_ID)
     assert results2[0].summary == "memory_2"
 
 
@@ -245,6 +251,7 @@ async def test_conversation_lifecycle(db):
             initial_energy=1.0,
             participating_agents=["vera", "rex"],
             location="spawn",
+            simulation_id=LIVE_SIMULATION_ID,
         )
     )
     assert conv.id is not None
@@ -300,17 +307,29 @@ async def test_cost_and_revenue(db):
     repo = CostRepo(db)
 
     await repo.add_cost(
-        CostEventCreate(agent_id="vera", cost_type="llm_api", amount=Decimal("0.0050"))
+        CostEventCreate(
+            agent_id="vera",
+            cost_type="llm_api",
+            amount=Decimal("0.0050"),
+            simulation_id=LIVE_SIMULATION_ID,
+        )
     )
     await repo.add_cost(
-        CostEventCreate(agent_id="rex", cost_type="llm_api", amount=Decimal("0.0030"))
+        CostEventCreate(
+            agent_id="rex",
+            cost_type="llm_api",
+            amount=Decimal("0.0030"),
+            simulation_id=LIVE_SIMULATION_ID,
+        )
     )
 
     total = await repo.get_total_costs()
     assert total == Decimal("0.0080")
 
     await repo.add_revenue(
-        RevenueEventCreate(source="twitch_sub", amount=Decimal("4.99"))
+        RevenueEventCreate(
+            source="twitch_sub", amount=Decimal("4.99"), simulation_id=LIVE_SIMULATION_ID
+        )
     )
     rev = await repo.get_total_revenue()
     assert rev == Decimal("4.99")
@@ -329,8 +348,13 @@ async def test_world_chunk_and_events(db):
 
     chunk = await repo.create_chunk(
         WorldChunkCreate(
-            name="spawn", x_offset=0, y_offset=0, width=16, height=16,
-            tile_data={"layers": []}
+            name="spawn",
+            x_offset=0,
+            y_offset=0,
+            width=16,
+            height=16,
+            tile_data={"layers": []},
+            simulation_id=LIVE_SIMULATION_ID,
         )
     )
     assert chunk.id is not None
@@ -344,15 +368,22 @@ async def test_world_chunk_and_events(db):
     assert len(in_area) >= 1
 
     event = await repo.create_event(
-        WorldEventCreate(event_type="build", description="Built spawn",
-                         agents_involved=["aurora"])
+        WorldEventCreate(
+            event_type="build",
+            description="Built spawn",
+            agents_involved=["aurora"],
+            simulation_id=LIVE_SIMULATION_ID,
+        )
     )
     assert event.id is not None
 
     # Proposals
     proposal = await repo.create_proposal(
         ExpansionProposalCreate(
-            proposed_by="aurora", title="Garden", description="A peaceful garden"
+            proposed_by="aurora",
+            title="Garden",
+            description="A peaceful garden",
+            simulation_id=LIVE_SIMULATION_ID,
         )
     )
     assert proposal.id is not None
