@@ -27,6 +27,8 @@ const BACKEND_EVENT_TYPES = [
   "artifact_created",
   "agent_spawn",
   "agent_despawn",
+  "task_delegated",
+  "task_completed",
 ] as const;
 
 describe("EventType enum", () => {
@@ -42,7 +44,7 @@ describe("EventType enum", () => {
     expect(frontendValues).toHaveLength(BACKEND_EVENT_TYPES.length);
   });
 
-  it("has exactly 20 event types", () => {
-    expect(Object.values(EventType)).toHaveLength(20);
+  it("has exactly 22 event types", () => {
+    expect(Object.values(EventType)).toHaveLength(22);
   });
 });

@@ -4,6 +4,7 @@ import {
   pixelToTile,
   tileToPixel,
   buildWalkabilityGrid,
+  updateWalkability,
   type WalkabilityGrid,
 } from "./Pathfinding";
 
@@ -175,5 +176,74 @@ describe("buildWalkabilityGrid", () => {
       [true, true],
       [true, true],
     ]);
+  });
+});
+
+describe("updateWalkability", () => {
+  it("blocks specified tiles", () => {
+    const grid = gridFromString(`
+      ...
+      ...
+      ...
+    `);
+    updateWalkability(grid, [{ tx: 1, ty: 1 }], false);
+    expect(grid[1][1]).toBe(false);
+    // Others unchanged
+    expect(grid[0][0]).toBe(true);
+    expect(grid[0][1]).toBe(true);
+  });
+
+  it("unblocks specified tiles", () => {
+    const grid = gridFromString(`
+      .#.
+      ...
+    `);
+    expect(grid[0][1]).toBe(false);
+    updateWalkability(grid, [{ tx: 1, ty: 0 }], true);
+    expect(grid[0][1]).toBe(true);
+  });
+
+  it("handles multiple tiles at once", () => {
+    const grid = gridFromString(`
+      ...
+      ...
+    `);
+    updateWalkability(grid, [
+      { tx: 0, ty: 0 },
+      { tx: 1, ty: 0 },
+      { tx: 2, ty: 0 },
+    ], false);
+    expect(grid[0]).toEqual([false, false, false]);
+    expect(grid[1]).toEqual([true, true, true]);
+  });
+
+  it("ignores out-of-bounds coordinates", () => {
+    const grid = gridFromString(`
+      ..
+      ..
+    `);
+    // Should not throw
+    updateWalkability(grid, [{ tx: -1, ty: 0 }, { tx: 5, ty: 0 }, { tx: 0, ty: 5 }], false);
+    expect(grid[0]).toEqual([true, true]);
+  });
+
+  it("blocks tiles so pathfinding routes around them", () => {
+    const grid = gridFromString(`
+      .....
+      .....
+      .....
+    `);
+    // Block the middle row center
+    updateWalkability(grid, [
+      { tx: 1, ty: 1 },
+      { tx: 2, ty: 1 },
+      { tx: 3, ty: 1 },
+    ], false);
+
+    // Path from left to right must go around
+    const path = findPath(grid, { tx: 0, ty: 1 }, { tx: 4, ty: 1 });
+    expect(path).not.toBeNull();
+    // Path should detour through row 0 or 2
+    expect(path!.some((p) => p.ty !== 1)).toBe(true);
   });
 });

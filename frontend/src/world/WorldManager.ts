@@ -4,6 +4,7 @@ import {
   buildWalkabilityGrid,
   findPath,
   pixelToTile,
+  updateWalkability,
   type TileCoord,
   type WalkabilityGrid,
 } from "./Pathfinding";
@@ -139,6 +140,50 @@ export class WorldManager {
     const start = pixelToTile(fromX, fromY, tileSize);
     const end = pixelToTile(toX, toY, tileSize);
     return findPath(this.walkabilityGrid, start, end);
+  }
+
+  /**
+   * Mark tile positions as non-walkable in the pathfinding grid.
+   * Used when furniture is placed to prevent agents walking through it.
+   */
+  markTilesBlocked(tiles: TileCoord[]): void {
+    if (this.walkabilityGrid) {
+      updateWalkability(this.walkabilityGrid, tiles, false);
+    }
+  }
+
+  /**
+   * Mark tile positions as walkable in the pathfinding grid.
+   * Used when furniture is removed.
+   */
+  markTilesWalkable(tiles: TileCoord[]): void {
+    if (this.walkabilityGrid) {
+      updateWalkability(this.walkabilityGrid, tiles, true);
+    }
+  }
+
+  /**
+   * Register a furniture item's footprint as non-walkable.
+   * Converts pixel position to tile coordinates using the footprint size.
+   * Items placed on surfaces (canPlaceOnSurfaces with zSortOffset > 0) are skipped
+   * since they sit on top of desks and don't block floor movement.
+   */
+  registerFurnitureCollision(
+    pixelX: number,
+    pixelY: number,
+    footprintW: number,
+    footprintH: number,
+  ): void {
+    const tileSize = this.getTileSize();
+    const baseTX = Math.floor(pixelX / tileSize);
+    const baseTY = Math.floor(pixelY / tileSize);
+    const tiles: TileCoord[] = [];
+    for (let dy = 0; dy < footprintH; dy++) {
+      for (let dx = 0; dx < footprintW; dx++) {
+        tiles.push({ tx: baseTX + dx, ty: baseTY + dy });
+      }
+    }
+    this.markTilesBlocked(tiles);
   }
 
   /**
