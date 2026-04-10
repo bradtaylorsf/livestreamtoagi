@@ -166,13 +166,6 @@ export async function getConversationSelections(
 }
 
 // Evals (public read-only)
-export interface PublicEvalCategory {
-  name: string;
-  score: number | null;
-  trend: "up" | "down" | "flat";
-  description: string;
-}
-
 export interface PublicEvalRun {
   id: string;
   simulation_id: string;
@@ -187,8 +180,6 @@ export interface PublicEvalRun {
 export interface EvalHistoryPoint {
   score: number | null;
   created_at: string | null;
-  simulation_id: string;
-  eval_run_id: string;
 }
 
 export async function getEvalCategories(): Promise<string[]> {
@@ -225,18 +216,6 @@ export async function getEvalRunDetail(
 ): Promise<PublicEvalRun | null> {
   try {
     return await request<PublicEvalRun>(`/api/evals/runs/${id}`);
-  } catch {
-    return null;
-  }
-}
-
-export async function getEvalCategoryDetail(
-  category: string,
-): Promise<PublicEvalCategory | null> {
-  try {
-    return await request<PublicEvalCategory>(
-      `/api/evals/categories/${encodeURIComponent(category)}`,
-    );
   } catch {
     return null;
   }

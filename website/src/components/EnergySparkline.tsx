@@ -47,8 +47,8 @@ export default function EnergySparkline({
                 fontSize: "11px",
                 color: "#00f0ff",
               }}
-              formatter={(value: number) => [value.toFixed(2), "Energy"]}
-              labelFormatter={(label: number) => `Turn ${label}`}
+              formatter={(value) => [Number(value).toFixed(2), "Energy"]}
+              labelFormatter={(label) => `Turn ${label}`}
             />
             <Area
               type="monotone"
