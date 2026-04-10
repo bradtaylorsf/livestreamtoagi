@@ -10,6 +10,9 @@ const NAV_ITEMS = [
   { href: "/challenges", label: "Challenges" },
   { href: "/lore", label: "Lore" },
   { href: "/conversations", label: "Conversations" },
+  { href: "/about", label: "About" },
+  { href: "/blog", label: "Blog" },
+  { href: "/evals", label: "Evals" },
 ] as const;
 
 export default function Navigation() {
