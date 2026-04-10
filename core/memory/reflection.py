@@ -188,7 +188,9 @@ class ReflectionManager:
         """Review Tier 2 memories from last 6 hours, promote important learnings."""
         validate_agent_id(agent_id)
         since = datetime.now(UTC) - timedelta(hours=6)
-        recall_memories = await self._repo.get_recent_recall_memories(agent_id, since)
+        recall_memories = await self._repo.get_recent_recall_memories(
+            agent_id, since, simulation_id=self._simulation_id,
+        )
 
         if not recall_memories:
             logger.info("No recall memories for %s in last 6 hours, skipping", agent_id)
@@ -197,7 +199,9 @@ class ReflectionManager:
             )
             return ReflectionResult(journal_entry=journal)
 
-        core_memory = await self._core.get_core_memory(agent_id) or ""
+        core_memory = await self._core.get_core_memory(
+            agent_id, simulation_id=self._simulation_id,
+        ) or ""
         recall_text = "\n".join(
             f"- [ID:{m.id}] ({m.event_type}) {m.summary}" for m in recall_memories
         )
@@ -263,6 +267,7 @@ class ReflectionManager:
                     section,
                     content,
                     f"6hour_reflection: {promo.get('reason', 'promoted from recall')}",
+                    simulation_id=self._simulation_id,
                 )
                 promoted_count += 1
             except Exception:
@@ -271,7 +276,9 @@ class ReflectionManager:
         # Update relationships from reflection
         if self._relationship_tracker and promoted_count > 0:
             try:
-                core_mem = await self._core.get_core_memory(agent_id)
+                core_mem = await self._core.get_core_memory(
+                    agent_id, simulation_id=self._simulation_id,
+                )
                 if core_mem:
                     await self._relationship_tracker.update_from_reflection(
                         agent_id, analysis, core_mem,
@@ -286,7 +293,9 @@ class ReflectionManager:
         goal_context = ""
         if self._goal_manager is not None:
             try:
-                goals = await self._goal_manager.get_goals(agent_id)
+                goals = await self._goal_manager.get_goals(
+                    agent_id, simulation_id=self._simulation_id,
+                )
                 active_goals = [g for g in goals if g.status not in ("done", "completed")]
                 if active_goals:
                     goal_context = (
@@ -349,7 +358,9 @@ class ReflectionManager:
     async def run_weekly_reflection(self, agent_id: str) -> ReflectionResult:
         """Full Tier 1 review, relationship refresh, pruning, and self-modification proposals."""
         validate_agent_id(agent_id)
-        core_memory = await self._core.get_core_memory(agent_id) or ""
+        core_memory = await self._core.get_core_memory(
+            agent_id, simulation_id=self._simulation_id,
+        ) or ""
         model = self._get_building_model(agent_id)
 
         prompt = WEEKLY_SYSTEM_PROMPT.format(
@@ -389,6 +400,7 @@ class ReflectionManager:
                     section,
                     content,
                     f"weekly_reflection: {update.get('reason', 'weekly refresh')}",
+                    simulation_id=self._simulation_id,
                 )
                 promoted_count += 1
             except Exception:
@@ -396,7 +408,9 @@ class ReflectionManager:
 
         # Verify token count is under limit, trim if needed
         try:
-            token_count = await self._core.get_token_count(agent_id)
+            token_count = await self._core.get_token_count(
+                agent_id, simulation_id=self._simulation_id,
+            )
             if token_count > TOKEN_LIMIT:
                 logger.warning(
                     "Core memory for %s is %d tokens (limit %d), requesting trim",
@@ -433,7 +447,9 @@ class ReflectionManager:
         # Update relationships from weekly reflection
         if self._relationship_tracker and promoted_count > 0:
             try:
-                core_mem = await self._core.get_core_memory(agent_id)
+                core_mem = await self._core.get_core_memory(
+                    agent_id, simulation_id=self._simulation_id,
+                )
                 if core_mem:
                     await self._relationship_tracker.update_from_reflection(
                         agent_id, analysis, core_mem,
@@ -506,6 +522,7 @@ class ReflectionManager:
                 reflection_type=reflection_type,
                 content=response.content,
                 token_count=token_count,
+                simulation_id=self._simulation_id,
             )
         )
 
@@ -557,7 +574,9 @@ class ReflectionManager:
 
         # Check goal cap — skip if agent already has enough goals
         try:
-            existing_goals = await self._goal_manager.get_goals(agent_id)
+            existing_goals = await self._goal_manager.get_goals(
+                agent_id, simulation_id=self._simulation_id,
+            )
             active_goals = [g for g in existing_goals if g.status not in ("done", "completed")]
             if len(active_goals) >= self._GOAL_CAP:
                 logger.info(
@@ -659,6 +678,7 @@ class ReflectionManager:
                     priority=priority,
                     source="reflection",
                     category=category,
+                    simulation_id=self._simulation_id,
                 )
                 created += 1
             except Exception:
@@ -673,7 +693,9 @@ class ReflectionManager:
 
     async def _trim_core_memory(self, agent_id: str, model: str) -> None:
         """Ask the LLM to trim core memory to fit under the token limit."""
-        core_memory = await self._core.get_core_memory(agent_id) or ""
+        core_memory = await self._core.get_core_memory(
+            agent_id, simulation_id=self._simulation_id,
+        ) or ""
         response = await self._llm.complete(
             messages=[
                 {
@@ -702,7 +724,8 @@ class ReflectionManager:
             if section in VALID_SECTIONS and content:
                 try:
                     await self._core.update_core_memory(
-                        agent_id, section, content, "weekly_reflection: token trimming"
+                        agent_id, section, content, "weekly_reflection: token trimming",
+                        simulation_id=self._simulation_id,
                     )
                 except Exception:
                     logger.exception("Failed to trim %s for %s", section, agent_id)

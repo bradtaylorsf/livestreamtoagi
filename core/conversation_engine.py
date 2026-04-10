@@ -889,6 +889,7 @@ class ConversationEngine:
                             reflection_type="conversation",
                             content=journal_content,
                             token_count=len(journal_content.split()),
+                            simulation_id=self._simulation_id,
                         )
                     )
                 logger.info(
@@ -1086,13 +1087,17 @@ class ConversationEngine:
         if self._services and self._services.goal_manager:
             try:
                 agent_goals_context = (
-                    await self._services.goal_manager.get_agenda_context(agent.id)
+                    await self._services.goal_manager.get_agenda_context(
+                        agent.id, simulation_id=self._simulation_id,
+                    )
                 ) or None
             except Exception:
                 logger.warning("Failed to get agent goals for %s", agent.id, exc_info=True)
             try:
                 commitment_reminders = (
-                    await self._services.goal_manager.get_commitment_reminders(agent.id)
+                    await self._services.goal_manager.get_commitment_reminders(
+                        agent.id, simulation_id=self._simulation_id,
+                    )
                 ) or None
             except Exception:
                 logger.warning("Failed to get commitment reminders for %s", agent.id, exc_info=True)
@@ -1135,6 +1140,7 @@ class ConversationEngine:
             try:
                 entries = await self._services.memory_repo.get_recent_journal_entries_by_type(
                     agent.id, "dream", limit=1,
+                    simulation_id=self._simulation_id,
                 )
                 if entries:
                     recent_dream = entries[0].content
@@ -1166,6 +1172,7 @@ class ConversationEngine:
                     balance_context=balance_context,
                     recent_dream=recent_dream,
                     alliances_context=alliances_context,
+                    simulation_id=self._simulation_id,
                 )
                 messages = context_result.messages
 

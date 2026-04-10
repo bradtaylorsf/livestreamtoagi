@@ -20,6 +20,8 @@ from core.memory.validation import validate_agent_id
 from core.system_prompt import INFRASTRUCTURE_PROMPT
 
 if TYPE_CHECKING:
+    import uuid as _uuid
+
     from core.agent_registry import AgentRegistry
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.core_memory import CoreMemoryManager
@@ -126,6 +128,7 @@ class ContextAssembler:
         balance_context: str | None = None,
         recent_dream: str | None = None,
         alliances_context: str | None = None,
+        simulation_id: _uuid.UUID | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
 
@@ -165,7 +168,7 @@ class ContextAssembler:
         # ── Layer 3: Memory + Context (mutable) ──
 
         # Core memory (Tier 1)
-        core_mem = await self._core_memory.get_core_memory(agent_id)
+        core_mem = await self._core_memory.get_core_memory(agent_id, simulation_id=simulation_id)
         core_memory_text = core_mem or ""
         _track("core_memory", core_memory_text, bool(core_memory_text))
 
@@ -175,7 +178,7 @@ class ContextAssembler:
         if query_text:
             try:
                 recall_text = await self._recall_memory.retrieve_recall_memories(
-                    agent_id, query_text, limit=3
+                    agent_id, query_text, limit=3, simulation_id=simulation_id,
                 )
             except Exception:
                 logger.warning("Failed to retrieve recall memories for %s", agent_id)

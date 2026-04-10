@@ -192,7 +192,9 @@ class DreamManager:
 
         try:
             # Get recent journal entries and recall memories
-            entries = await self._repo.get_recent_journal_entries(agent_id, limit=10)
+            entries = await self._repo.get_recent_journal_entries(
+                agent_id, limit=10, simulation_id=self._simulation_id,
+            )
             texts = [e.content for e in entries] if entries else []
 
             if not texts:
@@ -240,7 +242,9 @@ class DreamManager:
         if self._core is None:
             return ""
         try:
-            return await self._core.get_core_memory(agent_id) or ""
+            return await self._core.get_core_memory(
+                agent_id, simulation_id=self._simulation_id,
+            ) or ""
         except Exception:
             return ""
 
@@ -301,6 +305,7 @@ class DreamManager:
                         priority=goal.priority,
                         source="dream",
                         category=goal.category,
+                        simulation_id=self._simulation_id,
                     )
                 except Exception as exc:
                     logger.warning("Failed to add dream goal for %s: %s", agent_id, exc)
@@ -318,6 +323,7 @@ class DreamManager:
                     reflection_type="dream",
                     content=dream.dream_narrative,
                     token_count=token_count,
+                    simulation_id=self._simulation_id,
                 ))
             except Exception:
                 logger.warning("Failed to store dream journal for %s", agent_id)
@@ -335,6 +341,7 @@ class DreamManager:
                         embedding=embedding,
                         event_type="dream",
                         importance_score=0.8,
+                        simulation_id=self._simulation_id,
                     ))
                 except Exception:
                     logger.warning("Failed to store dream insight for %s", agent_id)

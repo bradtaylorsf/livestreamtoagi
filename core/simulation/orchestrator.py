@@ -400,7 +400,9 @@ class SimulationOrchestrator:
                 await self._services.shared_working_state.seed_initial_tasks()
                 logger.info("Seeded initial tasks on shared task board")
             if self._config.seed_goals and self._services and self._services.goal_manager:
-                await self._services.goal_manager.seed_story_goals()
+                await self._services.goal_manager.seed_story_goals(
+                    simulation_id=self._simulation_id,
+                )
                 logger.info("Seeded story goals for agents")
 
         phases = self._config.phases

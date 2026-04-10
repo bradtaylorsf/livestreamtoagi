@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid as _uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -75,10 +76,12 @@ class CoreMemoryManager:
         self._repo = memory_repo
         self._tc = token_counter
 
-    async def get_core_memory(self, agent_id: str) -> str | None:
+    async def get_core_memory(
+        self, agent_id: str, simulation_id: _uuid.UUID | None = None
+    ) -> str | None:
         """Return the full core memory markdown string, or None if not found."""
         validate_agent_id(agent_id)
-        record = await self._repo.get_core_memory(agent_id)
+        record = await self._repo.get_core_memory(agent_id, simulation_id=simulation_id)
         return record.content if record else None
 
     async def update_core_memory(
@@ -87,6 +90,7 @@ class CoreMemoryManager:
         section: str,
         content: str,
         reason: str,
+        simulation_id: _uuid.UUID | None = None,
     ) -> CoreMemory:
         """Update a specific section of an agent's core memory.
 
@@ -99,7 +103,7 @@ class CoreMemoryManager:
                 f"Invalid section {section!r}. Must be one of: {sorted(VALID_SECTIONS)}"
             )
 
-        record = await self._repo.get_core_memory(agent_id)
+        record = await self._repo.get_core_memory(agent_id, simulation_id=simulation_id)
         if record is None:
             raise ValueError(f"No core memory found for agent {agent_id!r}")
 
@@ -113,25 +117,29 @@ class CoreMemoryManager:
             )
 
         return await self._repo.upsert_core_memory(
-            agent_id, new_content, token_count, reason
+            agent_id, new_content, token_count, reason, simulation_id=simulation_id
         )
 
-    async def get_token_count(self, agent_id: str) -> int:
+    async def get_token_count(
+        self, agent_id: str, simulation_id: _uuid.UUID | None = None
+    ) -> int:
         """Return the stored token count for an agent's core memory."""
-        record = await self._repo.get_core_memory(agent_id)
+        record = await self._repo.get_core_memory(agent_id, simulation_id=simulation_id)
         if record is None:
             raise ValueError(f"No core memory found for agent {agent_id!r}")
         return record.token_count
 
     async def get_history(
-        self, agent_id: str, limit: int = 50
+        self, agent_id: str, limit: int = 50, simulation_id: _uuid.UUID | None = None
     ) -> list[CoreMemoryHistory]:
         """Return version history for an agent's core memory."""
-        history = await self._repo.get_core_memory_history(agent_id)
+        history = await self._repo.get_core_memory_history(
+            agent_id, simulation_id=simulation_id
+        )
         return history[:limit]
 
     async def initialize_agent_memory(
-        self, agent_id: str, identity: str
+        self, agent_id: str, identity: str, simulation_id: _uuid.UUID | None = None
     ) -> CoreMemory:
         """Create initial core memory from template with identity filled in."""
         validate_agent_id(agent_id)
@@ -139,7 +147,7 @@ class CoreMemoryManager:
         content = CORE_MEMORY_TEMPLATE.format(date=date_str, identity=identity)
         token_count = self._tc.count_tokens(content)
         return await self._repo.upsert_core_memory(
-            agent_id, content, token_count, "initial_creation"
+            agent_id, content, token_count, "initial_creation", simulation_id=simulation_id
         )
 
 

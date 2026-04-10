@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid as _uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,7 @@ class RecallMemoryManager:
         event_type: str | None = None,
         participants: list[str] | None = None,
         importance_score: float = 0.5,
+        simulation_id: _uuid.UUID | None = None,
     ) -> RecallMemory:
         """Store a new recall memory with its pre-computed embedding."""
         validate_agent_id(agent_id)
@@ -54,6 +56,7 @@ class RecallMemoryManager:
             participants=participants,
             transcript_id=transcript_id,
             importance_score=importance_score,
+            simulation_id=simulation_id,
         )
         return await self._repo.add_recall(create)
 
@@ -62,6 +65,7 @@ class RecallMemoryManager:
         agent_id: str,
         query_text: str,
         limit: int = 3,
+        simulation_id: _uuid.UUID | None = None,
     ) -> str:
         """Retrieve most relevant memories using blended similarity + recency scoring.
 
@@ -72,7 +76,8 @@ class RecallMemoryManager:
 
         # Over-fetch candidates so blended scoring can re-rank
         candidates = await self._repo.search_recall(
-            agent_id, query_embedding, limit=limit * CANDIDATE_MULTIPLIER
+            agent_id, query_embedding, limit=limit * CANDIDATE_MULTIPLIER,
+            simulation_id=simulation_id,
         )
 
         if not candidates:

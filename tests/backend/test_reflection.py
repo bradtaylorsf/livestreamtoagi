@@ -299,7 +299,7 @@ class TestWeeklyReflection:
 
         assert result.promoted_count == 1
         # Token count was checked
-        core_memory_mgr.get_token_count.assert_awaited_once_with("vera")
+        core_memory_mgr.get_token_count.assert_awaited_once_with("vera", simulation_id=None)
 
     @pytest.mark.asyncio
     async def test_triggers_trim_when_over_limit(

@@ -92,7 +92,7 @@ async def test_init_core_memories_skips_existing(
             version=1, last_updated=datetime(2026, 4, 1),
         )
 
-    async def fake_get(agent_id: str):
+    async def fake_get(agent_id: str, **kwargs):
         if agent_id in existing:
             return _make_record(agent_id)
         return None

@@ -64,16 +64,22 @@ class AgentGoalManager:
     def _key(self, agent_id: str) -> str:
         return f"{_GOALS_KEY_PREFIX}{agent_id}"
 
-    async def get_goals(self, agent_id: str) -> list[AgentGoalLegacy]:
+    async def get_goals(
+        self, agent_id: str, simulation_id: object | None = None,
+    ) -> list[AgentGoalLegacy]:
         """Get all active goals for an agent, sorted by priority."""
         if self._use_db:
-            return await self._get_goals_db(agent_id)
+            return await self._get_goals_db(agent_id, simulation_id=simulation_id)
         return await self._get_goals_redis(agent_id)
 
-    async def _get_goals_db(self, agent_id: str) -> list[AgentGoalLegacy]:
+    async def _get_goals_db(
+        self, agent_id: str, simulation_id: object | None = None,
+    ) -> list[AgentGoalLegacy]:
         """Get goals from DB, converting to legacy format for compatibility."""
         assert self._goal_repo is not None
-        db_goals = await self._goal_repo.get_active_goals(agent_id)
+        db_goals = await self._goal_repo.get_active_goals(
+            agent_id, simulation_id=simulation_id,
+        )
         return [
             AgentGoalLegacy(
                 id=str(g.id),
@@ -119,19 +125,25 @@ class AgentGoalManager:
         related_agent: str | None = None,
         source: str = "self",
         category: str | None = None,
+        simulation_id: object | None = None,
     ) -> AgentGoalLegacy:
         """Add a new goal to an agent's queue."""
         if self._use_db:
-            return await self._add_goal_db(agent_id, goal_text, priority, source, category)
+            return await self._add_goal_db(
+                agent_id, goal_text, priority, source, category,
+                simulation_id=simulation_id,
+            )
         return await self._add_goal_redis(agent_id, goal_text, priority, related_agent)
 
     async def _add_goal_db(
         self, agent_id: str, goal_text: str, priority: int, source: str,
-        category: str | None = None,
+        category: str | None = None, simulation_id: object | None = None,
     ) -> AgentGoalLegacy:
         assert self._goal_repo is not None
         # Deduplicate — exact match or high similarity
-        existing = await self._goal_repo.get_active_goals(agent_id)
+        existing = await self._goal_repo.get_active_goals(
+            agent_id, simulation_id=simulation_id,
+        )
         for g in existing:
             if _is_similar_goal(g.goal, goal_text):
                 return AgentGoalLegacy(
@@ -140,7 +152,7 @@ class AgentGoalManager:
                 )
         db_goal = await self._goal_repo.add_goal(
             agent_id, goal_text, priority=priority, source=source,
-            category=category,
+            category=category, simulation_id=simulation_id,
         )
         return AgentGoalLegacy(
             id=str(db_goal.id), goal=db_goal.goal, priority=db_goal.priority,
@@ -217,9 +229,11 @@ class AgentGoalManager:
         """Mark a goal as done."""
         return await self.update_goal(agent_id, goal_id, status="done")
 
-    async def get_agenda_context(self, agent_id: str) -> str:
+    async def get_agenda_context(
+        self, agent_id: str, simulation_id: object | None = None,
+    ) -> str:
         """Build a formatted agenda string for injection into context."""
-        goals = await self.get_goals(agent_id)
+        goals = await self.get_goals(agent_id, simulation_id=simulation_id)
         active = [g for g in goals if g.status not in ("done", "completed")]
         if not active:
             return ""
@@ -242,9 +256,11 @@ class AgentGoalManager:
 
         return "\n".join(lines)
 
-    async def generate_morning_agenda(self, agent_id: str) -> str:
+    async def generate_morning_agenda(
+        self, agent_id: str, simulation_id: object | None = None,
+    ) -> str:
         """Generate a morning agenda summarizing current goals."""
-        goals = await self.get_goals(agent_id)
+        goals = await self.get_goals(agent_id, simulation_id=simulation_id)
         active = [g for g in goals if g.status not in ("done", "completed")]
         if not active:
             return "You have no active goals. Look for something to work on today."
@@ -265,13 +281,15 @@ class AgentGoalManager:
 
         return "\n".join(lines)
 
-    async def get_commitment_reminders(self, agent_id: str) -> str:
+    async def get_commitment_reminders(
+        self, agent_id: str, simulation_id: object | None = None,
+    ) -> str:
         """Get formatted reminders for commitments assigned to this agent.
 
         Returns text listing active goals from other agents (source='assigned'),
         or empty string if none.
         """
-        goals = await self.get_goals(agent_id)
+        goals = await self.get_goals(agent_id, simulation_id=simulation_id)
         assigned = [
             g for g in goals
             if g.related_agent and g.status not in ("done", "completed")
@@ -287,7 +305,7 @@ class AgentGoalManager:
             )
         return "\n".join(lines)
 
-    async def seed_story_goals(self) -> None:
+    async def seed_story_goals(self, simulation_id: object | None = None) -> None:
         """Seed initial story-arc goals for agents.
 
         Safe to call multiple times — skips agents that already have goals.
@@ -325,13 +343,14 @@ class AgentGoalManager:
         }
 
         for agent_id, goals in story_goals.items():
-            existing = await self.get_goals(agent_id)
+            existing = await self.get_goals(agent_id, simulation_id=simulation_id)
             if existing:
                 continue
             for goal_text, priority, related in goals:
                 await self.add_goal(
                     agent_id, goal_text,
                     priority=priority, related_agent=related,
+                    simulation_id=simulation_id,
                 )
 
 

@@ -312,12 +312,12 @@ async def _bootstrap_dry_run(
     await agent_registry.load_all()
 
     class _StubCoreMemory:
-        async def get_core_memory(self, agent_id: str) -> None:
+        async def get_core_memory(self, agent_id: str, **kwargs: object) -> None:
             return None
 
     class _StubRecallMemory:
         async def retrieve_recall_memories(
-            self, agent_id: str, query: str, limit: int = 3,
+            self, agent_id: str, query: str, limit: int = 3, **kwargs: object,
         ) -> str:
             return ""
 
@@ -384,6 +384,7 @@ async def shutdown_services(services: Services) -> None:
 async def init_core_memories(
     agent_registry: AgentRegistry,
     core_memory: CoreMemoryManager,
+    simulation_id: object | None = None,
 ) -> list[str]:
     """Ensure all agents have core memory initialized.
 
@@ -391,13 +392,15 @@ async def init_core_memories(
     """
     initialized: list[str] = []
     for agent in agent_registry.get_all_agents():
-        existing = await core_memory.get_core_memory(agent.id)
+        existing = await core_memory.get_core_memory(agent.id, simulation_id=simulation_id)
         if existing is None:
             identity = (
                 f"I am {agent.display_name}. "
                 f"My conversation model is {agent.model_conversation}."
             )
-            await core_memory.initialize_agent_memory(agent.id, identity)
+            await core_memory.initialize_agent_memory(
+                agent.id, identity, simulation_id=simulation_id,
+            )
             initialized.append(agent.id)
     return initialized
 

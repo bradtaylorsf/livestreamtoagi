@@ -66,12 +66,17 @@ async def conn():
     # Drop all tables directly (faster and avoids FK ordering issues from test data)
     await c.execute("""
         DROP TABLE IF EXISTS
-            eval_results, eval_runs, agent_internal_state,
+            eval_results, eval_runs, eval_analyses, agent_internal_state,
             energy_change_log, self_modification_proposals, journal_entries,
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,
             cost_events, revenue_events, challenges, world_events, world_chunks,
-            artifacts, management_shadow_log,
+            artifacts, management_shadow_log, agent_goals, agent_relationships,
+            phase_assertions, versioned_agent_configs, evolution_cycles,
+            prompt_logs, agent_accounts, agent_transactions,
+            character_applications, character_departures,
+            alliance_proposals, alliances, challenge_votes,
+            model_versions,
             simulations, conversations, transcripts, agents, schema_migrations
         CASCADE
     """)

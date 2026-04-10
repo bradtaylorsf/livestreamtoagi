@@ -105,6 +105,7 @@ class MemoryCompactor:
             transcript_id=transcript.id,
             event_type=event_type,
             participants=participants,
+            simulation_id=self._simulation_id,
         )
 
         return CompactionResult(transcript=transcript, recall_memory=recall_memory)
@@ -138,6 +139,7 @@ class MemoryCompactor:
             transcript_id=transcript_id,
             event_type=event_type,
             participants=participants,
+            simulation_id=self._simulation_id,
         )
 
     async def manage_conversation_buffer(

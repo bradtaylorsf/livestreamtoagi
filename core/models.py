@@ -77,6 +77,7 @@ class CoreMemory(BaseModel):
     token_count: int
     last_updated: datetime | None = None
     version: int = 1
+    simulation_id: uuid.UUID | None = None
 
 
 class CoreMemoryHistory(BaseModel):
@@ -87,6 +88,7 @@ class CoreMemoryHistory(BaseModel):
     version: int
     changed_at: datetime | None = None
     change_reason: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Recall Memory ───────────────────────────────────────────────
@@ -103,6 +105,7 @@ class RecallMemory(BaseModel):
     importance_score: float = 0.5
     timestamp: datetime | None = None
     recalled_count: int = 0
+    simulation_id: uuid.UUID | None = None
 
 
 class RecallMemoryCreate(BaseModel):
@@ -113,6 +116,7 @@ class RecallMemoryCreate(BaseModel):
     participants: list[str] | None = None
     transcript_id: int | None = None
     importance_score: float = 0.5
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Conversation Buffer ─────────────────────────────────────────
@@ -125,6 +129,7 @@ class ConversationBuffer(BaseModel):
     speaker: str | None = None
     content: str
     created_at: datetime | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 class ConversationBufferCreate(BaseModel):
@@ -132,6 +137,7 @@ class ConversationBufferCreate(BaseModel):
     role: Literal["user", "assistant", "system"]
     speaker: str | None = None
     content: str
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Transcripts ─────────────────────────────────────────────────
@@ -191,6 +197,7 @@ class JournalEntry(BaseModel):
     token_count: int
     image_url: str | None = None
     created_at: datetime | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 class JournalEntryCreate(BaseModel):
@@ -199,6 +206,7 @@ class JournalEntryCreate(BaseModel):
     content: str
     token_count: int
     image_url: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Self-Modification Proposals ─────────────────────────────────
@@ -1003,6 +1011,7 @@ class AgentGoal(BaseModel):
     created_at: datetime | None = None
     completed_at: datetime | None = None
     parent_goal_id: uuid.UUID | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Agent Economy ─────────────────────────────────────────────────────
