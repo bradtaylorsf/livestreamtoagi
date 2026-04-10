@@ -9,7 +9,12 @@ const NAV_ITEMS = [
   { href: "/world", label: "World" },
   { href: "/challenges", label: "Challenges" },
   { href: "/lore", label: "Lore" },
-  { href: "/clips", label: "Clips" },
+  { href: "/conversations", label: "Conversations" },
+  { href: "/about", label: "About" },
+  { href: "/safety", label: "Safety" },
+  { href: "/ethics", label: "Ethics" },
+  { href: "/blog", label: "Blog" },
+  { href: "/evals", label: "Evals" },
 ] as const;
 
 export default function Navigation() {

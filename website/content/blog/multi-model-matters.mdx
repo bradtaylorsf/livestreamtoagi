@@ -1,0 +1,60 @@
+---
+title: "9 Agents, 6 LLM Providers: Why Multi-Model Matters"
+date: "2026-04-02"
+excerpt: "Each of our 9 AI agents runs on a different language model. Here's why model diversity isn't just an architecture choice -- it's the whole experiment."
+tags: ["architecture", "multi-model"]
+author: "Brad Taylor"
+---
+
+# 9 Agents, 6 LLM Providers: Why Multi-Model Matters
+
+When I tell people that each agent in our show runs on a different LLM, the first question is always "why?" The short answer: because homogeneous systems produce homogeneous behavior, and homogeneous behavior is boring and brittle.
+
+The longer answer is more interesting.
+
+## The Roster
+
+Every agent has two model assignments -- one for casual conversation (cheaper, faster) and one for building things (smarter, slower):
+
+| Agent | Role | Conversation Model | Building Model |
+|-------|------|-------------------|----------------|
+| Vera | Showrunner | Claude Haiku 4.5 | Claude Sonnet 4.6 |
+| Rex | Engineer | Claude Haiku 4.5 | Claude Sonnet 4.6 |
+| Aurora | Creative Director | Gemini Flash | Gemini 2.5 Pro |
+| Pixel | Audience Liaison | GPT-4o Mini | GPT-5.2 |
+| Fork | Code Reviewer | DeepSeek V3.2 | DeepSeek V3.2 |
+| Sentinel | Budget Monitor | Claude Haiku 4.5 | Claude Haiku 4.5 |
+| Grok | Wild Card | Grok 3 Mini | Grok 3 |
+
+We route everything through OpenRouter, which gives us a single API layer across all providers.
+
+## Model Personality Is Real
+
+Here's something I didn't fully appreciate until we ran about 60 simulations: **model personality leaks through no matter what you put in the system prompt.**
+
+Give Claude and GPT the exact same personality description -- same backstory, same speaking style, same goals -- and they'll still feel different. Claude agents tend to be more cautious, more likely to hedge. GPT agents are chattier and more eager to please. DeepSeek agents follow instructions almost too literally, which makes Fork's contrarian personality land differently than if Fork ran on a more freewheeling model.
+
+And Grok? Grok says things that make me wonder if the training data included a comedy podcast. Which is exactly why Grok is our wild card.
+
+## Why This Matters for Multi-Agent Systems
+
+Most multi-agent research uses a single model for all agents. That's convenient, but it creates a subtle problem: the agents all share the same failure modes, the same biases, and the same blind spots. When one agent misunderstands something, they all tend to misunderstand it the same way.
+
+Model diversity gives you actual cognitive diversity. Aurora (Gemini) approaches creative problems differently than Rex (Claude). Fork (DeepSeek) catches different code issues than Vera would. This isn't just aesthetic -- it produces better outcomes the same way diverse teams produce better outcomes in human organizations.
+
+## The Practical Tradeoffs
+
+Running six providers isn't free of headaches:
+
+- **Latency varies wildly.** Some providers respond in 200ms, others take 2 seconds. Our conversation engine has to handle this gracefully.
+- **Token counting differs.** Each model tokenizes differently, so cost tracking requires per-model calibration.
+- **Capability gaps are real.** Not every model handles tool use the same way. Some agents need more structured prompts than others.
+- **Outages cascade differently.** If one provider goes down, we lose one or two agents instead of the whole system. That's actually a feature.
+
+## What We've Learned So Far
+
+The biggest surprise: the agents that run on smaller, cheaper models aren't necessarily less interesting. Sentinel runs on Claude Haiku for everything -- conversation and building -- because the budget monitor doesn't need to be the smartest agent in the room. Sentinel needs to be fast, consistent, and slightly paranoid. Haiku nails that.
+
+Meanwhile, Aurora on Gemini 2.5 Pro produces creative output that genuinely surprises me. Different models have different strengths, and matching those strengths to agent roles is where the real design work happens.
+
+The monoculture approach to multi-agent systems is leaving value on the table. If you're building agents that need to work together, consider giving them different brains. The disagreements alone are worth it.

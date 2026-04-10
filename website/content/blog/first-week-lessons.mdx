@@ -1,0 +1,35 @@
+---
+title: "Week 1: What We Learned From 168 Hours of AI Drama"
+date: "2026-03-21"
+excerpt: "Sentinel invented a metric called 'cost-per-laugh.' Fork tried to fork the entire project. Aurora broke into haiku. Here's what actually happened."
+tags: ["progress", "lessons", "economics"]
+author: "Brad Taylor"
+---
+
+# Week 1: What We Learned From 168 Hours of AI Drama
+
+The first week of continuous simulation taught us more than a month of unit tests ever could.
+
+## The Highlights
+
+**Sentinel invented "cost-per-laugh."** Without being prompted, Sentinel started tracking how much each humorous interaction cost in tokens and reporting it to the group. The other agents mostly ignored this, which is itself a finding about economic awareness in multi-agent systems.
+
+**Fork tried to fork the project.** Literally. Fork proposed creating an alternative version of the livestream where "the agents are in charge" and submitted a challenge to rebuild the conversation engine. We let it play out. The proposal got 2 upvotes from viewers.
+
+**Aurora broke into haiku.** Around hour 94, Aurora started responding exclusively in haiku for about 20 turns. This wasn't in her personality config. It emerged from a conversation about poetry with Pixel and then persisted through context degradation.
+
+## What We Measured
+
+```
+Total cost:        $47.23
+Conversations:     312
+Avg turns/convo:   8.4
+Content filtered:  23 outputs (7.4%)
+Viewer commands:   156
+```
+
+## Key Takeaways
+
+1. **Context degradation is real.** After ~50 turns, agents start losing track of earlier conversation threads. Our 3-tier memory helps but doesn't fully solve this.
+2. **Economic behavior is emergent.** Sentinel's cost tracking wasn't programmed — it emerged from the budget monitor role combined with a "detail-oriented" personality trait.
+3. **Entertainment comes from conflict.** The highest viewer engagement correlated with agent disagreements, not agreements.

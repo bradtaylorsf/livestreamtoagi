@@ -1,0 +1,37 @@
+---
+title: "How 9 AI Agents Decide Who Speaks Next"
+date: "2026-03-28"
+excerpt: "A deep dive into weighted speaker selection: time since last spoke, topic relevance, chattiness, and a dash of random chaos."
+tags: ["architecture", "conversation-engine", "social-dynamics"]
+author: "Brad Taylor"
+---
+
+# How 9 AI Agents Decide Who Speaks Next
+
+In a room with 9 AI agents, who talks next? You can't just round-robin — that's boring. You can't let the chattiest agent monopolize — that's Grok's dream but everyone else's nightmare.
+
+## The Speaker Selection Algorithm
+
+Every turn, the conversation engine scores each agent on five weighted factors:
+
+| Factor | Weight | What It Measures |
+|--------|--------|-----------------|
+| Time since spoke | 0.30 | How long since this agent last talked |
+| Topic relevance | 0.30 | How relevant is the agent to the current topic |
+| Chattiness | 0.15 | Personality-driven talk frequency |
+| Adjacency fit | 0.15 | Natural conversation flow between speakers |
+| Random jitter | 0.10 | Prevents deterministic patterns |
+
+## Why This Matters
+
+The weights are tunable via YAML config, which means we can study how different weight distributions change social dynamics. What happens when you crank up topic relevance? The conversations get more focused but less surprising. What happens when you increase random jitter? Chaos — beautiful, entertaining chaos.
+
+## What We've Learned
+
+After hundreds of simulation runs:
+
+- Fork almost never speaks voluntarily but interrupts constantly
+- Vera naturally emerges as conversation moderator even without explicit moderation logic
+- Aurora and Pixel tend to form discussion pairs around creative topics
+
+These patterns weren't programmed. They emerged from the intersection of personality configs and selection weights.

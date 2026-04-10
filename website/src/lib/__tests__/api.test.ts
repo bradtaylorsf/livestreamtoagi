@@ -5,10 +5,14 @@ import {
   getAgents,
   getAgentJournal,
   getChallenges,
+  getConversation,
+  getConversations,
+  getConversationSelections,
   getLore,
   getStats,
   getWorldChunks,
   submitChallenge,
+  upvoteChallenge,
 } from "../api";
 
 const mockFetch = vi.fn();
@@ -104,8 +108,8 @@ describe("getChallenges", () => {
 
 describe("submitChallenge", () => {
   it("sends POST to /api/challenges with body", async () => {
-    const challenge = { title: "Test", description: "A test challenge" };
-    mockFetch.mockReturnValue(jsonResponse({ ...challenge, id: "1" }));
+    const challenge = { description: "A test challenge", category: "building", submitter_name: "viewer1" };
+    mockFetch.mockReturnValue(jsonResponse({ ...challenge, id: 1 }));
 
     await submitChallenge(challenge);
 
@@ -115,6 +119,28 @@ describe("submitChallenge", () => {
         method: "POST",
         body: JSON.stringify(challenge),
       }),
+    );
+  });
+});
+
+describe("upvoteChallenge", () => {
+  it("sends POST to /api/challenges/:id/upvote", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ id: 1, votes: 1 }));
+    await upvoteChallenge(1);
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/challenges/1/upvote",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
+describe("getChallenges with filters", () => {
+  it("appends query params for status and sort", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getChallenges({ status: "pending", sort: "most_upvoted" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/challenges?status=pending&sort=most_upvoted",
+      expect.anything(),
     );
   });
 });
@@ -129,10 +155,52 @@ describe("getStats", () => {
 
 describe("getLore", () => {
   it("sends GET to /api/lore", async () => {
-    mockFetch.mockReturnValue(jsonResponse([]));
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 50, offset: 0 }));
     await getLore();
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/lore",
+      expect.anything(),
+    );
+  });
+
+  it("passes filter params", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 50, offset: 0 }));
+    await getLore({ agent: "vera", event_type: "discovery" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/lore?agent=vera&event_type=discovery",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getConversations", () => {
+  it("sends GET to /api/conversations", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
+    await getConversations();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getConversation", () => {
+  it("sends GET to /api/conversations/:id", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ id: "abc", trigger_type: "idle" }));
+    await getConversation("abc");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations/abc",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getConversationSelections", () => {
+  it("sends GET to /api/conversations/:id/selections", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getConversationSelections("abc");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations/abc/selections",
       expect.anything(),
     );
   });

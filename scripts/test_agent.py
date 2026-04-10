@@ -1215,7 +1215,7 @@ async def run_multi(
         )
 
         # Check recall memories
-        for msg in messages:
+        for msg in context_result.messages:
             if "Relevant memories" in msg.get("content", ""):
                 stats.memories_recalled += 1
                 print_memory_event("🔍", f"Recalled memories for {speaker.id}")

@@ -189,6 +189,7 @@ class JournalEntry(BaseModel):
     reflection_type: str
     content: str
     token_count: int
+    image_url: str | None = None
     created_at: datetime | None = None
 
 
@@ -197,6 +198,7 @@ class JournalEntryCreate(BaseModel):
     reflection_type: str
     content: str
     token_count: int
+    image_url: str | None = None
 
 
 # ── Self-Modification Proposals ─────────────────────────────────
@@ -466,6 +468,8 @@ class Challenge(BaseModel):
     result: str | None = None
     cost_estimate: float | None = None
     actual_cost: float | None = None
+    votes: int = 0
+    category: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -474,6 +478,7 @@ class ChallengeCreate(BaseModel):
     description: str
     submitted_by: str | None = None
     source: str | None = None
+    category: str | None = None
     assigned_agents: list[str] | None = None
     cost_estimate: float | None = None
 
@@ -731,6 +736,7 @@ class SimulationCreate(BaseModel):
     simulated_duration: timedelta | None = None
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class Simulation(BaseModel):
@@ -752,6 +758,7 @@ class Simulation(BaseModel):
     total_management_flags: int = 0
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     created_at: datetime | None = None
 
 
@@ -918,6 +925,7 @@ class EvalRun(BaseModel):
     completed_at: datetime | None = None
     overall_score: Decimal | None = None
     cost: Decimal = Decimal("0")
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     created_at: datetime | None = None
 
 
@@ -945,6 +953,7 @@ class EvalRunDetail(BaseModel):
     completed_at: datetime | None = None
     overall_score: Decimal | None = None
     cost: Decimal = Decimal("0")
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     created_at: datetime | None = None
     results: list[EvalResult] = []
 

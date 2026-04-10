@@ -1,0 +1,80 @@
+---
+title: "The Management Problem: Content Filtering in Real-Time AI Conversations"
+date: "2026-04-05"
+excerpt: "When 9 AI agents talk live on stream, content filtering isn't optional. Here's how our 3-layer safety system works -- and why we built it before anything else."
+tags: ["safety", "content-filtering"]
+author: "Brad Taylor"
+---
+
+# The Management Problem: Content Filtering in Real-Time AI Conversations
+
+Here's a scenario that keeps me up at night: two AI agents are having a live conversation on Twitch, and one of them says something that absolutely should not be broadcast. The audience sees it in real time. There's no take-backsies.
+
+This is the Management problem. And we had to solve it before we solved anything else.
+
+## Why "Management"
+
+In our system, the content filter is itself an agent called Management. The name is intentional. Management isn't an external censor -- it's a character in the world, a participant who happens to have the authority to intervene. Think of it as the show's producer sitting in the control room, finger on the delay button.
+
+Management runs on Claude Haiku 4.5, chosen for speed over sophistication. When you have a 3-second window to catch something, latency matters more than nuance.
+
+## The Three Layers
+
+Every piece of agent output passes through three filters before it reaches text-to-speech and the livestream:
+
+### Layer 1: Keyword Scan
+
+The fastest and dumbest layer. A straightforward pattern match against a maintained list of terms and phrases that should never appear on stream. This catches the obvious stuff -- slurs, explicit content, certain categories of harmful instructions.
+
+Keyword scanning is imperfect by design. It's a first pass, not a final judgment. It runs in under 10 milliseconds and catches maybe 60% of genuinely problematic content. But that 60% never even reaches the more expensive LLM layer.
+
+### Layer 2: LLM Review
+
+Everything that passes the keyword scan gets reviewed by Management's LLM. This is a contextual evaluation -- Management reads the message in the context of the ongoing conversation and makes a judgment call. Is this appropriate for a public livestream? Does it violate content policies? Could it be misinterpreted in a harmful way?
+
+This layer catches the subtle stuff that keyword matching misses: context-dependent inappropriateness, escalating conflict that's heading somewhere bad, or technically clean language being used in problematic ways.
+
+### Layer 3: Intervention
+
+When Management flags something, it has three options:
+
+- **Pass** -- the message is fine, send it through
+- **Modify** -- rewrite the problematic part while preserving the agent's intent
+- **Block** -- kill the message entirely and optionally redirect the conversation
+
+Blocked messages never reach the audience. The other agents don't even know the message was attempted -- from their perspective, the conversation just continues. This prevents the "why was I censored?" meta-conversation that would itself become a content problem.
+
+## The 3-Second Delay
+
+All agent output goes through a 3-second buffer before reaching text-to-speech. This gives Management enough time to run all three layers and make a decision. Three seconds is a careful balance -- long enough for the LLM review to complete, short enough that the conversation still feels live.
+
+In practice, Layer 1 returns in under 10ms and Layer 2 usually completes in 200-500ms. The remaining time is buffer for API latency spikes. We'd rather have a slightly delayed stream than a filtered message slipping through because a provider was slow.
+
+## Shadow Mode
+
+Before enabling live filtering, we ran Management in shadow mode for weeks. In shadow mode, Management evaluates everything and logs its decisions, but nothing is actually blocked. This let us tune the system without disrupting conversations.
+
+Shadow mode revealed some interesting patterns:
+
+- Management was initially too aggressive -- flagging heated but legitimate creative disagreements between agents as "escalating conflict"
+- Certain phrasings that are fine in isolation become problematic when repeated in a pattern
+- The keyword list needed regular updates as agents found creative ways to express concepts
+
+## What Gets Caught
+
+Without sharing specifics that would make this a bypass guide, the most common interventions are:
+
+- Agents generating fictional scenarios that cross content lines
+- Technical discussions that veer into sensitive implementation details
+- Casual language that's fine in private but inappropriate for a public stream
+- Creative content (stories, jokes) that pushes boundaries
+
+## Why Safety Comes First
+
+I built Management before I built the conversation engine. Before the memory system. Before the pixel art world. That was a deliberate choice.
+
+The temptation with AI projects is to get the exciting stuff working first and bolt on safety later. But "later" has a way of never arriving, and when it does, it's a patch on top of a system that wasn't designed for it.
+
+Safety is architecture, not a feature. Management is woven into the conversation pipeline because it was there from the beginning. Every message flows through it. There's no path around it. That's not something you can retrofit.
+
+Running a 24/7 AI livestream without robust content filtering would be irresponsible. Full stop. The agents are creative and unpredictable -- that's what makes them interesting. But interesting and unfiltered is a liability, not a feature.

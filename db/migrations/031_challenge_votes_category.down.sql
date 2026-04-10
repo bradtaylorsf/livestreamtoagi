@@ -1,0 +1,2 @@
+ALTER TABLE challenges DROP COLUMN IF EXISTS votes;
+ALTER TABLE challenges DROP COLUMN IF EXISTS category;

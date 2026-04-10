@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
 from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import SimulationCreate, SimulationStatus
 from core.simulation.clock import SimulationClock
@@ -299,6 +300,32 @@ class SimulationOrchestrator:
         gap = random.uniform(mean * (1 - jitter), mean * (1 + jitter))
         return timedelta(seconds=gap)
 
+    def _build_model_versions(self) -> dict[str, dict[str, str]]:
+        """Build a map of agent_id → {conversation, building} resolved model IDs."""
+        versions: dict[str, dict[str, str]] = {}
+        for agent_id in self._config.agents:
+            agent = self._agents.get_agent(agent_id)
+            if agent is None:
+                continue
+            conv_model = agent.model_conversation
+            build_model = agent.model_building
+            # Resolve to OpenRouter IDs for exact reproducibility
+            conv_canonical = MODEL_NAME_ALIASES.get(conv_model, conv_model)
+            build_canonical = MODEL_NAME_ALIASES.get(build_model, build_model)
+            conv_openrouter = (
+                MODEL_REGISTRY[conv_canonical].openrouter_id
+                if conv_canonical in MODEL_REGISTRY else conv_model
+            )
+            build_openrouter = (
+                MODEL_REGISTRY[build_canonical].openrouter_id
+                if build_canonical in MODEL_REGISTRY else build_model
+            )
+            versions[agent_id] = {
+                "conversation": conv_openrouter,
+                "building": build_openrouter,
+            }
+        return versions
+
     def _seed_rng(self, simulation_id: object) -> None:
         """Seed the global RNG from the simulation ID for reproducibility."""
         seed = int(hashlib.sha256(str(simulation_id).encode()).hexdigest()[:8], 16)
@@ -311,17 +338,22 @@ class SimulationOrchestrator:
 
         # Create simulation record (include clock state in config snapshot)
         config_snapshot = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        model_versions = self._build_model_versions()
         sim = await self._sim_repo.create(SimulationCreate(
             name=self._config.name,
             description=self._config.description,
             config=config_snapshot,
             status=SimulationStatus.running,
             agents_participated=self._config.agents,
+            model_versions=model_versions,
         ))
         self._simulation_id = sim.id
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._seed_rng(sim.id)
-        logger.info("Created simulation %s (%s)", sim.id, sim.name)
+        logger.info(
+            "Created simulation %s (%s) with model versions: %s",
+            sim.id, sim.name, model_versions,
+        )
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -480,18 +512,21 @@ class SimulationOrchestrator:
         self._start_time = time.monotonic()
 
         config_snapshot = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        model_versions = self._build_model_versions()
         sim = await self._sim_repo.create(SimulationCreate(
             name=self._config.name,
             description=self._config.description,
             config=config_snapshot,
             status=SimulationStatus.running,
             agents_participated=self._config.agents,
+            model_versions=model_versions,
         ))
         self._simulation_id = sim.id
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._seed_rng(sim.id)
         logger.info(
-            "Created autonomous simulation %s (%s)", sim.id, sim.name
+            "Created autonomous simulation %s (%s) with model versions: %s",
+            sim.id, sim.name, model_versions,
         )
 
         self._display.show_simulation_start(sim, self._config)

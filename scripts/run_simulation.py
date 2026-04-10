@@ -70,6 +70,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
     from core.memory.reflection import ReflectionManager
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
+    from tools.journal_image_tool import JournalImageGenerator
     from core.simulation.clock import SimulationClock
     from core.simulation.display import SimulationDisplay
     from core.simulation.orchestrator import (
@@ -138,6 +139,8 @@ async def run_simulation(args: argparse.Namespace) -> None:
     if svc.event_generator is not None:
         svc.event_generator._triggers = trigger_system
 
+    journal_image_gen = JournalImageGenerator(cost_repo=svc.cost_repo)
+
     reflection_manager = ReflectionManager(
         memory_repo=svc.memory_repo,
         llm_client=svc.llm_client,
@@ -147,6 +150,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         goal_manager=svc.goal_manager,
         agent_state_manager=svc.agent_state_manager,
         dream_manager=svc.dream_manager,
+        journal_image_generator=journal_image_gen,
     )
 
     display = SimulationDisplay(verbose=verbose, agent_registry=svc.agent_registry)

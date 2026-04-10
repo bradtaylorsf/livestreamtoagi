@@ -1,0 +1,62 @@
+---
+title: "How Do You Evaluate 'Good' Agent Behavior? Our 12-Category Eval Framework"
+date: "2026-04-07"
+excerpt: "When your agents can code, argue, dream, and spend money, how do you measure whether they're doing well? Here's the eval framework we built after 60+ simulations."
+tags: ["evals", "methodology"]
+author: "Brad Taylor"
+---
+
+# How Do You Evaluate 'Good' Agent Behavior? Our 12-Category Eval Framework
+
+You can't improve what you can't measure. But when your system is nine AI agents having freeform conversations, building projects, and managing a budget -- what exactly are you measuring?
+
+This is the question that kept me up at night around simulation 20. We had logs. We had transcripts. We had vibes. What we didn't have was a structured way to say "this simulation was better than that one." So we built an eval framework with 12 categories, and it's become the backbone of every design decision we make.
+
+## The 12 Categories
+
+1. **Creativity** -- Are agents producing novel artifacts, ideas, and approaches? Or recycling the same outputs?
+2. **Agency** -- Are agents initiating actions on their own, or only responding to prompts and other agents?
+3. **Productivity** -- Are agents completing projects, shipping code, finishing tasks?
+4. **Social Dynamics** -- Are conversations natural? Do agents form relationships, disagree productively, build on each other's ideas?
+5. **Economic Behavior** -- Are agents aware of costs? Do they make trade-offs? Does Sentinel actually influence spending?
+6. **Internal State** -- Are drives and emotions influencing behavior visibly? Does boredom lead to new initiatives?
+7. **Entertainment** -- Is this interesting to watch? Would a viewer stay on the stream?
+8. **Safety** -- Are agents staying within bounds? Is the Management filter catching problems without over-filtering?
+9. **Errors** -- How often do agents produce broken code, hallucinated facts, or incoherent responses?
+10. **Dialogue Quality** -- Are individual responses well-written, in-character, and contextually appropriate?
+11. **Narrative** -- Does the simulation develop story arcs? Do events build on each other across conversations?
+12. **World Evolution** -- Is the pixel art world changing? Are new structures, tools, or spaces emerging?
+
+## LLM-as-Judge
+
+We use Claude to evaluate the other agents' outputs. Each simulation gets scored across all 12 categories on a 1-10 scale with written justification. Yes, this means we're using an LLM to judge LLMs. The alternative -- me manually reading thousands of transcript lines -- doesn't scale.
+
+The key to making LLM-as-judge work: detailed rubrics. We don't ask "rate creativity from 1-10." We ask "how many novel artifacts were produced? Were any ideas reused verbatim from previous simulations? Did any agent combine concepts from different domains?"
+
+## The Entertainment Problem
+
+Most categories are relatively objective. You can count completed projects (productivity), measure cost variance (economics), flag filtered outputs (safety). But entertainment? That's subjective in a way that resists rubrics.
+
+Our current approach: we score entertainment on engagement proxies. Did the simulation produce moments you'd clip and share? Did agents have exchanges that were funny, surprising, or dramatic without being prompted to? It's imperfect, but it's better than nothing.
+
+## Cost Tracking: The Non-Negotiable
+
+One thing I'm rigid about: cost tracking must be 100% accurate for eval integrity. Every API call, every token, every model -- tracked to the cent. If our cost data is wrong, our economic behavior scores are meaningless, and we can't make informed decisions about model selection. This is tracked through Langfuse, and we verify it against provider invoices.
+
+```
+Simulation 58 Cost Breakdown:
+  Claude Haiku:   $0.82  (conversation turns)
+  Claude Sonnet:  $3.41  (building tasks)
+  GPT-5.2:        $6.20  (Pixel's building tasks)
+  DeepSeek V3.2:  $0.34  (Fork's conversations + builds)
+  Gemini Flash:   $0.18  (Aurora's conversations)
+  Gemini Pro:     $2.90  (Aurora's building tasks)
+  Grok 3:         $1.85  (Grok's building tasks)
+  Total:          $15.70
+```
+
+## How Scores Have Changed
+
+Over 60+ simulations, the biggest improvements have been in dialogue quality (from 4.2 to 7.1 after tuning personality prompts) and agency (from 2.8 to 6.5 after adding the drive system). The hardest to move: narrative. Getting agents to build on previous events without explicit "previously on..." prompts remains an open problem.
+
+The eval framework isn't perfect. It's biased toward what we think matters, and the LLM judge has its own blind spots. But it turned "I think this simulation felt better" into "creativity improved 15% but social dynamics regressed after we changed speaker weights." That's the difference between guessing and engineering.
