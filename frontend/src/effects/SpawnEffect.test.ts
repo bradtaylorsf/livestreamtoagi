@@ -19,16 +19,6 @@ function createMockScene() {
         return { stop: vi.fn() };
       }),
     },
-    textures: {
-      exists: vi.fn(() => false),
-      createCanvas: vi.fn(() => ({
-        getContext: vi.fn(() => ({
-          fillStyle: "",
-          fillRect: vi.fn(),
-        })),
-        refresh: vi.fn(),
-      })),
-    },
   };
 }
 
@@ -52,17 +42,6 @@ describe("SpawnEffect", () => {
   beforeEach(() => {
     scene = createMockScene();
     effect = new SpawnEffect(scene as any);
-  });
-
-  it("creates particle texture on construction", () => {
-    expect(scene.textures.createCanvas).toHaveBeenCalledWith("__spawn_particle", 2, 2);
-  });
-
-  it("skips texture creation if already exists", () => {
-    scene.textures.exists = vi.fn(() => true);
-    scene.textures.createCanvas = vi.fn();
-    new SpawnEffect(scene as any);
-    expect(scene.textures.createCanvas).not.toHaveBeenCalled();
   });
 
   describe("playSpawn", () => {

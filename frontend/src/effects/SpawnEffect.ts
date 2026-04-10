@@ -7,9 +7,6 @@ const EFFECT_DURATION_MS = 400;
 /** Number of particles in the dissolve effect. */
 const PARTICLE_COUNT = 24;
 
-/** Key for the generated particle texture. */
-const PARTICLE_TEXTURE_KEY = "__spawn_particle";
-
 /**
  * Handles visual spawn and despawn effects for agent sprites.
  * Uses Phaser tweens and particle-like squares for a pixel dissolve effect.
@@ -19,7 +16,6 @@ export class SpawnEffect {
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
-    this.ensureParticleTexture();
   }
 
   /**
@@ -69,18 +65,6 @@ export class SpawnEffect {
         onComplete?.();
       },
     });
-  }
-
-  /** Create a simple 2x2 white square texture for particles if it doesn't exist. */
-  private ensureParticleTexture(): void {
-    if (this.scene.textures.exists(PARTICLE_TEXTURE_KEY)) return;
-    const canvas = this.scene.textures.createCanvas(PARTICLE_TEXTURE_KEY, 2, 2);
-    if (canvas) {
-      const ctx = canvas.getContext();
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, 2, 2);
-      canvas.refresh();
-    }
   }
 
   /**

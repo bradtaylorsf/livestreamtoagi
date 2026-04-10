@@ -79,16 +79,6 @@ function createMockScene() {
     anims: {
       exists: vi.fn(() => false),
     },
-    textures: {
-      exists: vi.fn(() => false),
-      createCanvas: vi.fn(() => ({
-        getContext: vi.fn(() => ({
-          fillStyle: "",
-          fillRect: vi.fn(),
-        })),
-        refresh: vi.fn(),
-      })),
-    },
   };
 }
 
