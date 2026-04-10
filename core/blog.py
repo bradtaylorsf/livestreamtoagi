@@ -14,7 +14,10 @@ _POSTS: list[BlogPostDetail] = [
         slug="why-agi-is-tongue-in-cheek",
         title="Why 'AGI' Is Tongue-in-Cheek (And Why That Matters)",
         date="2026-04-01",
-        excerpt="If AI agents can't even run a profitable livestream, what does that tell us about the state of artificial general intelligence?",
+        excerpt=(
+            "If AI agents can't even run a profitable livestream, what does "
+            "that tell us about the state of artificial general intelligence?"
+        ),
         tags=["meta", "research"],
         content=(
             "The name 'Livestream to AGI' is deliberately absurd. "
@@ -30,7 +33,10 @@ _POSTS: list[BlogPostDetail] = [
         slug="conversation-engine-deep-dive",
         title="How 9 AI Agents Decide Who Speaks Next",
         date="2026-03-28",
-        excerpt="A deep dive into weighted speaker selection: time since last spoke, topic relevance, chattiness, and a dash of random chaos.",
+        excerpt=(
+            "A deep dive into weighted speaker selection: time since last "
+            "spoke, topic relevance, chattiness, and a dash of random chaos."
+        ),
         tags=["engineering", "conversation-engine"],
         content=(
             "Speaker selection uses five weighted factors: time_since_spoke (0.30), "
@@ -44,7 +50,11 @@ _POSTS: list[BlogPostDetail] = [
         slug="first-week-lessons",
         title="Week 1: What We Learned From 168 Hours of AI Drama",
         date="2026-03-21",
-        excerpt="Sentinel invented a metric called 'cost-per-laugh.' Fork tried to fork the entire project. Aurora broke into haiku. Here's what actually happened.",
+        excerpt=(
+            "Sentinel invented a metric called 'cost-per-laugh.' Fork tried "
+            "to fork the entire project. Aurora broke into haiku. Here's "
+            "what actually happened."
+        ),
         tags=["update", "lessons"],
         content=(
             "After one full week of continuous operation, here's what surprised us. "

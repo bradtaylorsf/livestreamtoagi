@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -16,12 +17,11 @@ from pydantic import BaseModel
 
 from core.models import (
     Challenge,
-    ChallengeCreate,
     Conversation,
-    SelectionLog,
     WorldChunk,
     WorldEvent,
 )
+from core.repos.conversation_repo import ConversationRepo
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +345,6 @@ async def get_agent_conversations(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    from core.repos.conversation_repo import ConversationRepo
     db = _get_db()
     repo = ConversationRepo(db)
     convs, total = await repo.get_conversations_by_agent(
@@ -427,18 +426,24 @@ async def chat_with_agent(
     if not svc.llm_client:
         raise HTTPException(status_code=503, detail="LLM client not available")
 
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
     response = await svc.llm_client.chat(
         model=agent.model_conversation,
         messages=[
-            {"role": "system", "content": f"You are {agent.display_name}, {agent.role}. {agent.system_prompt[:500] if agent.system_prompt else ''}"},
+            {
+                "role": "system",
+                "content": (
+                    f"You are {agent.display_name}, {agent.role}. "
+                    f"{agent.system_prompt[:500] if agent.system_prompt else ''}"
+                ),
+            },
             {"role": "user", "content": req.message},
         ],
     )
     return ChatResponse(
         agent_id=agent_id,
         message=response.content,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 
@@ -471,14 +476,14 @@ async def get_conversations(
 
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
-    import uuid
-    from core.repos.conversation_repo import ConversationRepo
     db = _get_db()
     repo = ConversationRepo(db)
     try:
         conv_uuid = uuid.UUID(conversation_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid conversation ID",
+        ) from exc
     conv = await repo.get(conv_uuid)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -486,15 +491,17 @@ async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
 
 
 @router.get("/conversations/{conversation_id}/selections")
-async def get_conversation_selections(conversation_id: str) -> list[SelectionLogResponse]:
-    import uuid
-    from core.repos.conversation_repo import ConversationRepo
+async def get_conversation_selections(
+    conversation_id: str,
+) -> list[SelectionLogResponse]:
     db = _get_db()
     repo = ConversationRepo(db)
     try:
         conv_uuid = uuid.UUID(conversation_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid conversation ID",
+        ) from exc
     logs = await repo.get_selection_log(conv_uuid)
     return [
         SelectionLogResponse(
@@ -533,7 +540,6 @@ async def get_blog_post(slug: str) -> BlogPostDetail:
 
 @router.get("/evals/summary")
 async def get_evals_summary() -> list[EvalSummaryItem]:
-    svc = _get_services()
     db = _get_db()
     if not db:
         return []
@@ -757,10 +763,11 @@ async def get_lore(
         *params,
     )
 
-    rows = await db.fetch(
-        f"SELECT * FROM world_events{where} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",  # noqa: S608
-        *params, limit, offset,
+    query = (
+        f"SELECT * FROM world_events{where}"  # noqa: S608
+        f" ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
     )
+    rows = await db.fetch(query, *params, limit, offset)
 
     items = [
         _event_to_response(WorldEvent(**dict(r)))
