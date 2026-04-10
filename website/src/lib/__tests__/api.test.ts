@@ -5,6 +5,9 @@ import {
   getAgents,
   getAgentJournal,
   getChallenges,
+  getConversation,
+  getConversations,
+  getConversationSelections,
   getLore,
   getStats,
   getWorldChunks,
@@ -152,10 +155,52 @@ describe("getStats", () => {
 
 describe("getLore", () => {
   it("sends GET to /api/lore", async () => {
-    mockFetch.mockReturnValue(jsonResponse([]));
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 50, offset: 0 }));
     await getLore();
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/lore",
+      expect.anything(),
+    );
+  });
+
+  it("passes filter params", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 50, offset: 0 }));
+    await getLore({ agent: "vera", event_type: "discovery" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/lore?agent=vera&event_type=discovery",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getConversations", () => {
+  it("sends GET to /api/conversations", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
+    await getConversations();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getConversation", () => {
+  it("sends GET to /api/conversations/:id", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ id: "abc", trigger_type: "idle" }));
+    await getConversation("abc");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations/abc",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getConversationSelections", () => {
+  it("sends GET to /api/conversations/:id/selections", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getConversationSelections("abc");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations/abc/selections",
       expect.anything(),
     );
   });

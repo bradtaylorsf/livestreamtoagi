@@ -72,12 +72,52 @@ export interface Stats {
 }
 
 export interface LoreEvent {
+  id: number;
+  event_type: string | null;
+  description: string | null;
+  agents_involved: string[] | null;
+  audience_participation: boolean;
+  created_at: string | null;
+}
+
+export interface ConversationSummary {
   id: string;
-  timestamp: string;
-  title: string;
-  description: string;
-  agents_involved: string[];
-  significance: "minor" | "major" | "legendary";
+  trigger_type: string;
+  participating_agents: string[];
+  topics_discussed: string[] | null;
+  turn_count: number;
+  location: string | null;
+  started_at: string | null;
+}
+
+export interface ConversationDetail {
+  id: string;
+  trigger_type: string;
+  participating_agents: string[];
+  topics_discussed: string[] | null;
+  turn_count: number;
+  location: string | null;
+  initial_energy: number;
+  final_energy: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface SelectionLogEntry {
+  turn_number: number;
+  selected_agent_id: string;
+  was_interrupt: boolean;
+  agent_scores: Record<string, Record<string, number>>;
+  detected_topic: string | null;
+  previous_speaker_id: string | null;
+  conversation_energy: number | null;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface ApiError {
