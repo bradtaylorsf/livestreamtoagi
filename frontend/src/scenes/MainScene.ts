@@ -187,6 +187,8 @@ addSideCol(39, 18, 20, "side_right_olive");                    // right exterior
 const SHARED_FURNITURE: Array<{ key: string; x: number; y: number }> = [
   // Kitchen area
   { key: "coffee_machine", x: 15 * 32, y: 2 * 32 },
+  { key: "fridge", x: 17 * 32, y: 2 * 32 },
+  { key: "cafe_table", x: 14 * 32, y: 5 * 32 },
   // Meeting area
   { key: "rug", x: 34 * 32, y: 13 * 32 },
   { key: "meeting_table", x: 34 * 32, y: 12 * 32 },

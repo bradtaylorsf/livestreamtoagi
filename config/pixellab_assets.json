@@ -55,5 +55,208 @@
       "tile_size": 32,
       "tiles": 16
     }
+  },
+  "furniture": {
+    "desk": {
+      "pixellab_id": "14aec94d-d8ff-4f74-8750-14428c48dab6",
+      "size": [96, 64],
+      "description": "Office desk, dark wood L-shaped"
+    },
+    "engineering_bench": {
+      "pixellab_id": "acea8596-1100-463b-a33a-3d313fe98476",
+      "size": [96, 64],
+      "description": "Engineering workbench with three monitors"
+    },
+    "art_desk": {
+      "pixellab_id": "0febc4d4-3830-4d3d-8b5c-2a1dc87903b2",
+      "size": [96, 64],
+      "description": "Art desk with creative materials"
+    },
+    "research_desk": {
+      "pixellab_id": "c3a58d34-6f6c-4e01-be91-c6f9f93b18b4",
+      "size": [96, 64],
+      "description": "Research desk with monitor and trinkets"
+    },
+    "minimal_desk": {
+      "pixellab_id": "5b05314f-1f4a-4469-ae77-f197faf1d8fd",
+      "size": [64, 64],
+      "description": "Minimal black desk with laptop"
+    },
+    "organized_desk": {
+      "pixellab_id": "15f9c07a-b5f1-4f24-a5a0-3a5829bf0203",
+      "size": [96, 64],
+      "description": "Organized grey desk with cost dashboard"
+    },
+    "chaotic_desk": {
+      "pixellab_id": "26bd5073-c8ef-455f-b1b4-139ca1e0ef3c",
+      "size": [96, 64],
+      "description": "Chaotic desk with sticky notes"
+    },
+    "meeting_table": {
+      "pixellab_id": "4d740f68-a704-4336-b1d9-3a5cc9109268",
+      "size": [128, 64],
+      "description": "Oval conference table with chairs"
+    },
+    "workshop_bench": {
+      "pixellab_id": "59dfb956-45ee-4db1-963a-5710bead076c",
+      "size": [128, 64],
+      "description": "Industrial workbench with tools"
+    },
+    "chair": {
+      "pixellab_id": "d0178b91-6ad8-458f-9a64-8e1ca4b870e3",
+      "size": [32, 32],
+      "description": "Office swivel chair"
+    },
+    "monitor_off": {
+      "pixellab_id": "93a1d5f9-8016-45be-a13e-b7729e473f24",
+      "size": [32, 32],
+      "description": "Computer monitor off"
+    },
+    "monitor_on": {
+      "pixellab_id": "d063d561-0ca1-4061-a9f0-18d44b0d1d95",
+      "size": [32, 32],
+      "description": "Computer monitor on"
+    },
+    "calculator_off": {
+      "pixellab_id": "01d4e8fc-9f77-44cc-af0e-73ae2e6c461d",
+      "size": [32, 32],
+      "description": "Calculator off"
+    },
+    "calculator_on": {
+      "pixellab_id": "e613e9d2-6eb4-4969-9da4-729d41b1a961",
+      "size": [32, 32],
+      "description": "Calculator on with LED display"
+    },
+    "clipboard": {
+      "pixellab_id": "73d1ca39-2b5f-4c16-b7e3-e1d868f088e5",
+      "size": [32, 32],
+      "description": "Clipboard with paper"
+    },
+    "tools": {
+      "pixellab_id": "e9a05fe9-00ad-4553-87c5-f3fdf1d21af4",
+      "size": [32, 32],
+      "description": "Engineering tools"
+    },
+    "color_palette": {
+      "pixellab_id": "786b386f-ab56-43b6-bad3-bdcfc45544b9",
+      "size": [32, 32],
+      "description": "Artist color palette"
+    },
+    "easel": {
+      "pixellab_id": "3fd5666d-47cc-4507-b8ec-e4232cd49973",
+      "size": [32, 64],
+      "description": "Artist easel with canvas"
+    },
+    "bookstack": {
+      "pixellab_id": "3079dfb5-deef-4e66-874b-a8036387b19d",
+      "size": [32, 32],
+      "description": "Stack of colorful books"
+    },
+    "magnifying_glass": {
+      "pixellab_id": "f8fc3c7a-1998-4c2e-ad72-f19e6aada33a",
+      "size": [32, 32],
+      "description": "Brass magnifying glass"
+    },
+    "antenna_off": {
+      "pixellab_id": "f805f15c-0841-4b0d-a150-a18e76d8faab",
+      "size": [32, 32],
+      "description": "Radio antenna off"
+    },
+    "antenna_on": {
+      "pixellab_id": "6ef1b107-df61-4225-b875-82194a224b2e",
+      "size": [32, 32],
+      "description": "Radio antenna on with LED"
+    },
+    "ledger": {
+      "pixellab_id": "0f55a1dd-c1d0-43fe-b58f-5f6315868697",
+      "size": [32, 32],
+      "description": "Open accounting ledger"
+    },
+    "neat_stack": {
+      "pixellab_id": "a2eed479-510a-4e6b-a02e-29040dff08a5",
+      "size": [32, 32],
+      "description": "Neat stack of papers"
+    },
+    "random_objects": {
+      "pixellab_id": "239cf125-75c4-4524-aa02-01af28a2cbf3",
+      "size": [32, 32],
+      "description": "Scattered random fun objects"
+    },
+    "disco_ball_off": {
+      "pixellab_id": "e701b62e-c9f1-44f6-9580-6ed18e2c5a4a",
+      "size": [32, 32],
+      "description": "Disco ball not lit"
+    },
+    "disco_ball_on": {
+      "pixellab_id": "1a6d981a-e666-40c1-84bb-08b53c5a69e2",
+      "size": [32, 32],
+      "description": "Disco ball with light rays"
+    },
+    "dog_bed": {
+      "pixellab_id": "5d2ec99c-296e-49f7-ab95-2b1b9c8adad3",
+      "size": [64, 32],
+      "description": "Round grey dog bed"
+    },
+    "bone": {
+      "pixellab_id": "4333efbc-ee79-4403-9572-cca03611bd9d",
+      "size": [32, 32],
+      "description": "Dog chew bone"
+    },
+    "mobile_station": {
+      "pixellab_id": "73e4b71e-f4af-4ef3-b2e2-dfd035871f5b",
+      "size": [64, 32],
+      "description": "Mobile rolling cart station"
+    },
+    "elevated_platform": {
+      "pixellab_id": "c65164d9-b1ba-4dea-a606-2ec5d9c91c42",
+      "size": [128, 64],
+      "description": "Raised wooden platform"
+    },
+    "coffee_machine": {
+      "pixellab_id": "1f5b4d98-4df3-4020-9dcd-1014d05c58d8",
+      "size": [32, 32],
+      "description": "Espresso machine off"
+    },
+    "coffee_machine_on": {
+      "pixellab_id": "5f249139-81e8-4a60-bcde-03f17e905cf4",
+      "size": [32, 32],
+      "description": "Espresso machine brewing"
+    },
+    "bookshelf": {
+      "pixellab_id": "0a01b782-1c5b-4f07-b767-2eaf256d089c",
+      "size": [64, 96],
+      "description": "Tall bookshelf with books"
+    },
+    "whiteboard": {
+      "pixellab_id": "9bf436a2-09b0-4172-a3e3-497c6ca96e62",
+      "size": [64, 64],
+      "description": "Whiteboard with kanban notes"
+    },
+    "plant": {
+      "pixellab_id": "b98f142d-3b86-43bf-94a9-d7812b493fd1",
+      "size": [32, 32],
+      "description": "Potted green plant"
+    },
+    "rug": {
+      "pixellab_id": "3dcf6caa-c10b-4bda-ae37-4236b7b80425",
+      "size": [128, 96],
+      "description": "Patterned area rug"
+    },
+    "fridge": {
+      "pixellab_id": "bd0c7f67-df73-4fb3-8cdf-578a95f1c96f",
+      "size": [32, 32],
+      "description": "Mini fridge"
+    },
+    "cafe_table": {
+      "pixellab_id": "89a4be87-0cd8-4901-859e-7457e278b55d",
+      "size": [64, 64],
+      "description": "Round cafe table with chairs"
+    }
+  },
+  "floor_tiles_pro": {
+    "pixellab_id": "7b59bd2f-5e9b-486d-b23f-eddaf956b2c3",
+    "tile_size": 32,
+    "tile_type": "square_topdown",
+    "tiles": ["hardwood", "whitetile", "teal", "purple", "bluegrey", "concrete", "olive"]
   }
 }
