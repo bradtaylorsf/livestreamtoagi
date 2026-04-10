@@ -466,6 +466,8 @@ class Challenge(BaseModel):
     result: str | None = None
     cost_estimate: float | None = None
     actual_cost: float | None = None
+    votes: int = 0
+    category: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -474,6 +476,7 @@ class ChallengeCreate(BaseModel):
     description: str
     submitted_by: str | None = None
     source: str | None = None
+    category: str | None = None
     assigned_agents: list[str] | None = None
     cost_estimate: float | None = None
 
