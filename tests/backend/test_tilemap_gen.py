@@ -247,6 +247,11 @@ class TestEvents:
             {
                 "chunk_id": 42,
                 "chunk_name": "library",
+                "zone": "library",
+                "description": "A cozy library",
+                "tilemap_url": "/api/admin/chunks/42",
+                "tileset_url": "/api/admin/chunks/42/tileset.png",
+                "offset": {"x": 0, "y": 0},
                 "agent_id": "rex",
             },
         )
@@ -349,5 +354,14 @@ print(json.dumps(room))
         # Verify event emitted
         event_bus.emit.assert_awaited_once_with(
             EventType.WORLD_EXPANSION,
-            {"chunk_id": 99, "chunk_name": "small_room", "agent_id": "rex"},
+            {
+                "chunk_id": 99,
+                "chunk_name": "small_room",
+                "zone": "small_room",
+                "description": "A small 5x5 room",
+                "tilemap_url": "/api/admin/chunks/99",
+                "tileset_url": "/api/admin/chunks/99/tileset.png",
+                "offset": {"x": 0, "y": 0},
+                "agent_id": "rex",
+            },
         )

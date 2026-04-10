@@ -657,6 +657,12 @@ export class MainScene extends Phaser.Scene {
         const instanceKey = `shared_${item.key}_${item.x}_${item.y}`;
         const instance = new FurnitureInstance(this, manifest, item.x, item.y);
         this.furnitureInstances.set(instanceKey, instance);
+        // Register floor-level furniture as non-walkable
+        if (!manifest.canPlaceOnSurfaces && this.worldManager) {
+          this.worldManager.registerFurnitureCollision(
+            item.x, item.y, manifest.footprint[0], manifest.footprint[1],
+          );
+        }
       } else if (this.textures.exists(item.key)) {
         const sprite = this.add.image(item.x, item.y, item.key);
         sprite.setOrigin(0, 0);
@@ -677,6 +683,12 @@ export class MainScene extends Phaser.Scene {
             const instance = new FurnitureInstance(this, manifest, item.x, item.y);
             this.furnitureInstances.set(instanceKey, instance);
             agentInstances.push(instance);
+            // Register floor-level furniture as non-walkable
+            if (!manifest.canPlaceOnSurfaces && this.worldManager) {
+              this.worldManager.registerFurnitureCollision(
+                item.x, item.y, manifest.footprint[0], manifest.footprint[1],
+              );
+            }
           } else if (this.textures.exists(item.key)) {
             const sprite = this.add.image(item.x, item.y, item.key);
             sprite.setOrigin(0, 0);

@@ -162,6 +162,24 @@ export function findPath(
   return null; // No path found
 }
 
+/**
+ * Update walkability for specific tile positions in the grid.
+ * Used to dynamically block/unblock tiles when furniture is placed or moved.
+ */
+export function updateWalkability(
+  grid: WalkabilityGrid,
+  tiles: TileCoord[],
+  walkable: boolean,
+): void {
+  const height = grid.length;
+  const width = height > 0 ? grid[0].length : 0;
+  for (const { tx, ty } of tiles) {
+    if (ty >= 0 && ty < height && tx >= 0 && tx < width) {
+      grid[ty][tx] = walkable;
+    }
+  }
+}
+
 /** Convert pixel coordinates to tile coordinates. */
 export function pixelToTile(px: number, py: number, tileSize: number): TileCoord {
   return {

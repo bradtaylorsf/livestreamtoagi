@@ -136,12 +136,17 @@ class GenerateTilemapTool(BaseTool):
 
         chunk = await self._world_repo.create_chunk(chunk_create)
 
-        # Emit world expansion event
+        # Emit world expansion event with full payload for frontend rendering
         await self._event_bus.emit(
             EventType.WORLD_EXPANSION,
             {
                 "chunk_id": chunk.id,
                 "chunk_name": chunk.name,
+                "zone": chunk.name,
+                "description": chunk.description or description,
+                "tilemap_url": f"/api/admin/chunks/{chunk.id}",
+                "tileset_url": chunk.tileset_url or f"/api/admin/chunks/{chunk.id}/tileset.png",
+                "offset": {"x": chunk.x_offset, "y": chunk.y_offset},
                 "agent_id": self._agent_id,
             },
         )

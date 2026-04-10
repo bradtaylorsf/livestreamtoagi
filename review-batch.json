@@ -1,55 +1,34 @@
 {
   "passed": true,
-  "summary": "All 3 issues implemented with comprehensive unit tests. Fixed 5 issues: AGI progress event wiring, WebSocket client creation, sarcastic bubble quotes, Management volume, and shutdown cleanup.",
+  "summary": "All 3 issues implemented correctly. Fixed #280 missing agent-walks-to-new-area behavior after world expansion reveal.",
   "findings": [
     {
-      "severity": "critical",
-      "description": "AGI progress bar was created but never wired to any event. No AGI_PROGRESS event type existed in events.ts or event_bus.py, and StreamOverlay.handleEvent() had no case for it. Added event type to both frontend and backend, and wired handler in StreamOverlay.",
-      "fixed": true,
-      "file": "frontend/src/ui/StreamOverlay.ts",
-      "issueNum": 48
-    },
-    {
-      "severity": "critical",
-      "description": "WebSocket client was never instantiated or connected. main.ts created the Phaser game but no WebSocketClient. All managers accepted null and silently did nothing (the exact red-flag pattern). Fixed by auto-creating and connecting a WebSocketClient in MainScene.create() when none is externally provided.",
-      "fixed": true,
-      "file": "frontend/src/scenes/MainScene.ts",
-      "issueNum": 48
-    },
-    {
       "severity": "warning",
-      "description": "Sarcastic bubble style missing quotation marks. Acceptance criteria specifies 'square with quotation marks' but CSS only had square borders. Added CSS ::before/::after pseudo-elements with curly quotes.",
+      "description": "expandWorld accepted agentId option but never used it — builder agent was not moved to the new area after reveal animation, violating #280 acceptance criteria 'Agents walk to new area after reveal'",
       "fixed": true,
-      "file": "frontend/src/ui/SpeechBubbleManager.ts",
-      "issueNum": 47
-    },
-    {
-      "severity": "warning",
-      "description": "Management 'louder' volume was impossible. DEFAULT_AGENT_VOLUMES set management to 1.2 but getEffectiveVolume() clamped to Math.min(1, ...) since HTML Audio max volume is 1.0. Fixed by setting default agent volume to 0.8 and management to 1.0, making management relatively louder.",
-      "fixed": true,
-      "file": "frontend/src/audio/AudioManager.ts",
-      "issueNum": 51
-    },
-    {
-      "severity": "warning",
-      "description": "MainScene.shutdown() did not disconnect WebSocket client, causing reconnection attempts after scene teardown. Added wsClient.disconnect() to shutdown.",
-      "fixed": true,
-      "file": "frontend/src/scenes/MainScene.ts",
-      "issueNum": 48
-    },
-    {
-      "severity": "warning",
-      "description": "E2E Playwright tests required by all three issues are not implemented. Unit test coverage is thorough (147 tests passing).",
-      "fixed": false,
-      "file": "frontend/src/ui/SpeechBubbleManager.ts",
-      "issueNum": 47
+      "file": "frontend/src/agents/AgentSpriteManager.ts",
+      "issueNum": 280
     },
     {
       "severity": "info",
-      "description": "AgentStatusPanel supports 'sleeping' status but no event ever transitions an agent to sleeping state. Will need a sleep/wake event or timeout-based detection.",
+      "description": "updateVisibleChunks remains a documented no-op — reasonable for current world size but should be revisited if chunk count grows",
       "fixed": false,
-      "file": "frontend/src/ui/components/AgentStatusPanel.ts",
-      "issueNum": 48
+      "file": "frontend/src/world/WorldManager.ts",
+      "issueNum": 280
+    },
+    {
+      "severity": "info",
+      "description": "No Phaser physics.add.collider() as visual safety net between agents and furniture — pathfinding grid is the sole enforcement. Acceptable since A* prevents traversal, but could add a physics collider layer as a future hardening step",
+      "fixed": false,
+      "file": "frontend/src/scenes/MainScene.ts",
+      "issueNum": 297
+    },
+    {
+      "severity": "info",
+      "description": "Backend EventType enum lacks AGENT_SPAWN/AGENT_DESPAWN which frontend handles — these events are pre-existing (not introduced by this PR) and would need backend support when spawn/despawn emission is wired up",
+      "fixed": false,
+      "file": "core/event_bus.py",
+      "issueNum": 263
     }
   ]
 }

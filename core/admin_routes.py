@@ -1297,3 +1297,36 @@ async def get_evolution_loop(loop_run_id: uuid_mod.UUID) -> list[dict]:
     repo = EvolutionRepo(db)
     cycles = await repo.get_loop_history(loop_run_id)
     return [c.model_dump(mode="json") for c in cycles]
+
+
+# ── World Chunks ────────────────────────────────────────────
+
+
+@router.get("/chunks/{chunk_id}")
+async def get_chunk(chunk_id: int) -> dict:
+    """Get chunk metadata and tile data for frontend rendering."""
+    db = _get_db()
+    from core.repos.world_repo import WorldRepo
+
+    repo = WorldRepo(db)
+    chunk = await repo.get_chunk(chunk_id)
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return chunk.model_dump(mode="json")
+
+
+@router.get("/chunks/{chunk_id}/tileset.png")
+async def get_chunk_tileset(chunk_id: int) -> Any:
+    """Serve or redirect to the tileset image for a chunk."""
+    from fastapi.responses import RedirectResponse
+
+    db = _get_db()
+    from core.repos.world_repo import WorldRepo
+
+    repo = WorldRepo(db)
+    chunk = await repo.get_chunk(chunk_id)
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    if not chunk.tileset_url:
+        raise HTTPException(status_code=404, detail="No tileset URL for this chunk")
+    return RedirectResponse(url=chunk.tileset_url)
