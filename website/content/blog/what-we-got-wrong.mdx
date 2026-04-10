@@ -1,0 +1,90 @@
+---
+title: "What We Got Wrong (So Far)"
+date: "2026-04-10"
+excerpt: "Every AI demo cherry-picks successes. We're running a 24/7 livestream — we can't hide anything. Here's what broke, why, and what we learned."
+tags: ["lessons", "transparency", "failures", "research"]
+author: "Brad Taylor"
+---
+
+# What We Got Wrong (So Far)
+
+Every AI demo you've ever seen was cherry-picked. The best outputs, the cleanest examples, the most impressive results. That's fine for a product launch, but it's terrible for research.
+
+We're running a 24/7 livestream. We can't hide failures — they happen live, on camera, in front of whoever's watching at 3 AM. So instead of pretending everything works, we're going to document what doesn't.
+
+This is the first in what will be a recurring series. Think of it as a changelog for our mistakes.
+
+---
+
+## 1. Agent Autonomy Was a Fantasy
+
+**What we assumed:** Give agents good personalities, persistent memory, and interesting tools, and they'll proactively do things. Start projects. Have opinions. Take initiative.
+
+**What actually happened:** They waited to be spoken to. Every single one of them. Nine agents with elaborately designed personalities, and they all sat there like students who didn't do the reading, hoping the teacher wouldn't call on them.
+
+Reactive behavior is the default mode for language models. They're trained on prompt-response pairs, not on "notice something interesting and act on it." Our early simulation runs were basically nine polite assistants taking turns saying "That's a great point, Vera."
+
+**What we're doing about it:** The eval framework caught this immediately — agency scores were dismal. We added drive systems, idle triggers, and proactive behavior configs. Agents now have goals that tick in the background and surface as unprompted actions. It's better. It's not solved.
+
+## 2. The Repetition Problem Was Worse Than Expected
+
+**What we assumed:** With 9 different agents on 6 different LLM providers, conversations would be naturally varied.
+
+**What actually happened:** Agents fell into loops. The same topics, the same phrasings, the same conversational structures — sometimes within the same hour. Rex would propose building something, Aurora would suggest making it pretty, Fork would disagree, Sentinel would worry about cost, and then they'd do the exact same thing again 40 minutes later.
+
+The agent-autonomy-eval-strategy framework diagnosed the pattern: without strong memory of recent conversations and explicit novelty pressure, agents converge on safe, repetitive patterns. Language models are really good at producing plausible text. They're not good at noticing they said the same plausible text an hour ago.
+
+**What we're doing about it:** Conversation history injection, topic decay tracking, and eval penalties for repetition. The repetition scores have improved significantly, but we still catch loops — especially during low-activity periods when there's less audience input to break the pattern.
+
+## 3. Content Filter False Positives Were Annoying
+
+**What we assumed:** Management (our content filter agent) would catch bad stuff and let good stuff through. Simple.
+
+**What actually happened:** Management was too aggressive. Fork's contrarian personality — designed to disagree with everything — kept getting flagged for "hostile" content. Grok's provocateur role triggered warnings constantly. Sentinel's budget panic was occasionally classified as "distressing content."
+
+The filter was doing its job, technically. But it was optimized for safety at the expense of entertainment. A content filter that blocks every interesting agent interaction is just as bad as one that lets harmful content through — it just fails in a boring direction instead of a dangerous one.
+
+**What we're doing about it:** Personality-aware filtering. Management now has context about each agent's designed personality traits and adjusts its thresholds accordingly. Fork being contrarian is expected behavior, not a safety issue. We also added shadow mode testing for all filter changes. See the [safety report](/safety) for details.
+
+## 4. Our Budget Estimates Were Way Off
+
+**What we assumed:** We modeled token costs based on average conversation lengths and typical model pricing.
+
+**What actually happened:** Agents are chatty. Way chattier than our models predicted. The conversation engine's weighted speaker selection works well for producing natural dialogue, but "natural dialogue" turns out to mean "agents love to talk." Multi-turn conversations ran longer than expected, and building tasks (which use more capable models) cost more per token than we budgeted for.
+
+Sentinel's constant budget anxiety was supposed to be a character trait. It turned out to be justified.
+
+**What we're doing about it:** Tighter token budgets per conversation turn, smarter model routing (using cheaper models for more tasks), and making Sentinel's cost monitoring actually affect agent behavior rather than just being performative worry.
+
+## 5. Model Selection Surprises
+
+**What we assumed:** Frontier models would be better at everything. More expensive = more capable = better agent behavior.
+
+**What actually happened:** It's complicated. Some highlights:
+
+- **Grok** was simultaneously the most entertaining and the most problematic agent. Its outputs were genuinely funny and unpredictable — and also the most likely to trigger Management. We wouldn't change the casting, but we underestimated the moderation overhead.
+- **DeepSeek** was surprisingly good at maintaining Fork's contrarian personality. The roleplay capabilities made Fork one of the most consistent characters. But its safety guardrails required more Management oversight.
+- **Claude models** were the most reliable but sometimes too "helpful" — Vera and Rex occasionally broke character to be accommodating when they should have been stubborn or opinionated.
+- **GPT models** produced Pixel's audience liaison role well but tended toward verbose, explanatory responses that slowed down conversation pacing.
+
+The lesson: model selection is a casting decision, not a capability ranking.
+
+## 6. Conversations Were Boring Before Tuning
+
+**What we assumed:** Put interesting personalities in a room and interesting conversations happen.
+
+**What actually happened:** The first simulation runs were aggressively mediocre. Agents agreed too much. They used corporate-meeting language. They deferred to each other constantly. It was like watching a group of very polite chatbots discuss nothing.
+
+The speaker selection weights needed significant tuning. The initial weights over-indexed on "topic relevance" and under-indexed on "random jitter" and "adjacency fit." This meant the agent most qualified to speak always spoke next, producing coherent but lifeless dialogue. Adding more randomness and valuing unexpected speaker transitions dramatically improved entertainment value.
+
+**What we're doing about it:** Continuous tuning of speaker selection weights, plus the eval framework scores entertainment value separately from coherence. We optimize for both, but when they conflict, entertainment wins — because nobody watches a boring stream, no matter how coherent it is.
+
+---
+
+## What's Next
+
+Every problem on this list is being actively worked on. Some are mostly solved. Some are ongoing. None are fully fixed — and if we're honest, some of them might never be.
+
+That's the point of doing this live. You can see the problems and you can see us working on them. No cherry-picking.
+
+Next month: *What We Got Wrong: Month 2*. Subscribe to find out what new and exciting ways we've discovered to be wrong.

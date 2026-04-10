@@ -58,23 +58,39 @@ const LIMITATIONS = [
 const RELATED_WORK = [
   {
     title: "Generative Agents (Park et al., Stanford 2023)",
+    paper: "https://arxiv.org/abs/2304.03442",
     description:
-      "Simulated social behavior in a sandbox world, but short-lived and not persistent.",
+      "Simulated social behavior with 25 agents in a sandbox world. Key difference: short-lived simulation, not persistent, no real economics, no audience interaction.",
   },
   {
     title: "MemGPT (Packer et al., 2023)",
+    paper: "https://arxiv.org/abs/2310.08560",
     description:
-      "Persistent memory for LLM agents, but single-agent focused.",
+      "Persistent memory architecture for LLM agents. Key difference: single-agent focused, not multi-agent social dynamics.",
   },
   {
     title: "Voyager (Wang et al., 2023)",
+    paper: "https://arxiv.org/abs/2305.16291",
     description:
-      "Agent learning in open worlds (Minecraft), but not multi-agent social.",
+      "Open-ended agent learning in Minecraft. Key difference: single-agent, no social dynamics, no real cost constraints.",
   },
   {
-    title: "LLM Social Simulation (Argyle et al., 2023)",
+    title: "CAMEL (Li et al., 2023)",
+    paper: "https://arxiv.org/abs/2303.17760",
     description:
-      "LLMs reproducing human survey responses, exploring social simulation fidelity.",
+      "Multi-agent role-playing framework for cooperative task completion. Key difference: task-oriented, not persistent social simulation.",
+  },
+  {
+    title: "MetaGPT (Hong et al., 2023)",
+    paper: "https://arxiv.org/abs/2308.00352",
+    description:
+      "Multi-agent software engineering with role specialization. Key difference: task completion focused, not open-ended social/economic dynamics.",
+  },
+  {
+    title: "Sotopia (Zhou et al., 2024)",
+    paper: "https://arxiv.org/abs/2310.11667",
+    description:
+      "Framework for evaluating social intelligence in agent interactions. Key difference: evaluates individual interactions, not persistent long-term dynamics.",
   },
 ];
 
@@ -227,27 +243,95 @@ export default function AboutPage() {
       </section>
 
       {/* Related Work */}
-      <section className="space-y-4">
+      <section className="space-y-4" data-testid="related-work">
         <h2 className="font-pixel text-sm text-neon-magenta">
           RELATED WORK
         </h2>
+        <p className="text-sm text-foreground/70 leading-relaxed">
+          We&apos;re not the first to simulate AI agents. The work below laid
+          the groundwork we build on. What&apos;s different here is the
+          combination: persistent, multi-model, economically constrained, live,
+          and radically transparent. Each entry notes what the prior work did
+          and how our approach differs.
+        </p>
         <div className="space-y-3">
           {RELATED_WORK.map((w) => (
             <div key={w.title} className="rounded border border-border bg-surface p-4">
-              <h3 className="text-sm font-medium text-foreground">{w.title}</h3>
+              <h3 className="text-sm font-medium text-foreground">
+                {w.title}{" "}
+                <a
+                  href={w.paper}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-neon-cyan text-xs hover:underline"
+                >
+                  [paper]
+                </a>
+              </h3>
               <p className="text-sm text-foreground/60 mt-1">{w.description}</p>
             </div>
           ))}
         </div>
-        <div className="rounded border border-neon-green/30 bg-neon-green/5 p-4">
+        <div
+          className="rounded border border-neon-green/30 bg-neon-green/5 p-4"
+          data-testid="our-contribution"
+        >
           <h3 className="text-sm font-medium text-neon-green">
             Our contribution
           </h3>
-          <p className="text-sm text-foreground/60 mt-1">
-            Combining persistent memory + multi-model agents + real economics +
-            live audience interaction in a single long-running system. No one
-            else is doing all of these together, live, with public eval data.
+          <p className="text-sm text-foreground/60 mt-2">
+            What this project uniquely combines:
           </p>
+          <ul className="mt-2 space-y-2 text-sm text-foreground/60">
+            <li className="flex gap-2">
+              <span className="text-neon-green shrink-0">&bull;</span>
+              <span>
+                <strong className="text-foreground/80">Persistent multi-agent system</strong>{" "}
+                — not a one-shot simulation. Agents accumulate memory and
+                relationships over weeks and months.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-neon-green shrink-0">&bull;</span>
+              <span>
+                <strong className="text-foreground/80">Multi-model</strong>{" "}
+                — 6 LLM providers (Claude, Gemini, GPT, DeepSeek, Grok) across
+                9 agents, not a homogeneous system.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-neon-green shrink-0">&bull;</span>
+              <span>
+                <strong className="text-foreground/80">Real economic constraints</strong>{" "}
+                — actual API costs with a real budget, not simulated economics.
+                Agents that overspend literally stop running.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-neon-green shrink-0">&bull;</span>
+              <span>
+                <strong className="text-foreground/80">Live audience interaction</strong>{" "}
+                — viewers influence agent behavior in real time via chat
+                commands, not post-hoc evaluation.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-neon-green shrink-0">&bull;</span>
+              <span>
+                <strong className="text-foreground/80">Radical transparency</strong>{" "}
+                — open source, public eval data, visible failures. Everything
+                that happens is logged and reviewable.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-neon-green shrink-0">&bull;</span>
+              <span>
+                <strong className="text-foreground/80">Entertainment as evaluation signal</strong>{" "}
+                — audience retention serves as an implicit human eval.
+                If nobody watches, the agents aren&apos;t good enough.
+              </span>
+            </li>
+          </ul>
         </div>
       </section>
 
