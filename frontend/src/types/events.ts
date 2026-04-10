@@ -22,6 +22,8 @@ export enum EventType {
   CONFIG_RELOADED = "config_reloaded",
   AGI_PROGRESS = "agi_progress",
   ARTIFACT_CREATED = "artifact_created",
+  AGENT_SPAWN = "agent_spawn",
+  AGENT_DESPAWN = "agent_despawn",
 }
 
 /** Base event envelope matching backend event_bus.py emit() format. */
@@ -67,13 +69,18 @@ export interface AlphaReturnPayload {
 export interface ManagementWarningPayload {
   agent_id: string;
   reason: string;
+  severity?: ManagementSeverity;
 }
+
+export type ManagementSeverity = 1 | 2 | 3 | 4 | 5;
 
 export interface ManagementInterventionPayload {
   agent_id: string;
   action: string;
   original_text: string;
   filtered_text: string;
+  severity?: ManagementSeverity;
+  message?: string;
 }
 
 export interface ManagementShadowPayload {
@@ -120,6 +127,7 @@ export interface ToolExecutedPayload {
   tool_name: string;
   success: boolean;
   result?: string;
+  status?: "start" | "done";
 }
 
 export interface ConfigReloadedPayload {
@@ -137,4 +145,14 @@ export interface ArtifactCreatedPayload {
   artifact_type: string;
   name: string;
   url?: string;
+}
+
+export interface AgentSpawnPayload {
+  agent_id: string;
+  reason: "start" | "reconnect";
+}
+
+export interface AgentDespawnPayload {
+  agent_id: string;
+  reason: "error" | "kill_switch" | "shutdown";
 }

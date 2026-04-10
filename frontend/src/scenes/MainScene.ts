@@ -9,6 +9,7 @@ import { OverlayManager } from "../ui/OverlayManager";
 import { DevPanel } from "../ui/DevPanel";
 import { AudioManager } from "../audio/AudioManager";
 import { BehaviorScheduler } from "../agents/BehaviorScheduler";
+import { ManagementEffects } from "../effects/ManagementEffects";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 import furnitureManifestsData from "../world/furniture/furniture-manifests.json";
@@ -221,6 +222,7 @@ export class MainScene extends Phaser.Scene {
   private devPanel: DevPanel | null = null;
   private audioManager: AudioManager | null = null;
   private behaviorScheduler: BehaviorScheduler | null = null;
+  private managementEffects: ManagementEffects | null = null;
   private wsClient: WebSocketClient | null = null;
   private connectionOverlay: Phaser.GameObjects.Text | null = null;
 
@@ -397,6 +399,9 @@ export class MainScene extends Phaser.Scene {
     // ── Stream overlay (budget, AGI progress, viewers, topic, agent status) ──
     this.streamOverlay = new StreamOverlay(this.wsClient);
 
+    // ── Management environmental effects (CSS overlay) ──────
+    this.managementEffects = new ManagementEffects(this.wsClient);
+
     // ── Notification overlay (polls, artifacts) ──────────────
     this.overlayManager = new OverlayManager(this.wsClient);
 
@@ -441,6 +446,8 @@ export class MainScene extends Phaser.Scene {
     this.audioManager = null;
     this.behaviorScheduler?.destroy();
     this.behaviorScheduler = null;
+    this.managementEffects?.destroy();
+    this.managementEffects = null;
     this.agentSpriteManager?.destroy();
     this.agentSpriteManager = null;
     this.autoStateManager?.destroy();

@@ -15,6 +15,7 @@ function createMockScene() {
         play: vi.fn(),
         setScale: vi.fn(),
         setVisible: vi.fn(),
+        setAlpha: vi.fn(),
         anims: { exists: vi.fn(() => false) },
         destroy: vi.fn(),
       })),
@@ -36,6 +37,11 @@ function createMockScene() {
           destroy: vi.fn(),
         }),
       ),
+      rectangle: vi.fn((_x: number, _y: number, _w: number, _h: number, _color: number) => ({
+        setDepth: vi.fn(),
+        setAlpha: vi.fn(),
+        destroy: vi.fn(),
+      })),
       graphics: vi.fn(() => ({
         x: 0,
         y: 0,
@@ -272,7 +278,7 @@ describe("AgentSpriteManager", () => {
       expect(setProgressSpy).toHaveBeenCalledWith(true);
     });
 
-    it("clears progress and schedules cleanup on success", () => {
+    it("clears progress and schedules cleanup on success with 300ms delay", () => {
       const vera = manager.getSprite("vera")!;
       const setProgressSpy = vi.spyOn(vera, "setProgress");
 
@@ -284,7 +290,7 @@ describe("AgentSpriteManager", () => {
       });
 
       expect(setProgressSpy).toHaveBeenCalledWith(false);
-      expect(scene.time.delayedCall).toHaveBeenCalledWith(2000, expect.any(Function));
+      expect(scene.time.delayedCall).toHaveBeenCalledWith(300, expect.any(Function));
     });
 
     it("sets error badge on tool failure", () => {
@@ -309,6 +315,72 @@ describe("AgentSpriteManager", () => {
         data: { agent_id: "unknown", tool_name: "test" },
       });
       // Should not throw
+    });
+
+    it("plays thinking animation for reading tools (in-progress)", () => {
+      const vera = manager.getSprite("vera")!;
+      const playAnimSpy = vi.spyOn(vera, "playAnimation");
+
+      wsClient.emit({
+        event_id: "15",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_read" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    });
+
+    it("plays building animation for writing tools (in-progress)", () => {
+      const rex = manager.getSprite("rex")!;
+      const playAnimSpy = vi.spyOn(rex, "playAnimation");
+
+      wsClient.emit({
+        event_id: "16",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "rex", tool_name: "code_write" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("building");
+    });
+
+    it("plays thinking animation for unknown tools (default)", () => {
+      const vera = manager.getSprite("vera")!;
+      const playAnimSpy = vi.spyOn(vera, "playAnimation");
+
+      wsClient.emit({
+        event_id: "17",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "some_unknown_tool" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    });
+
+    it("cancels pending idle timer when new tool starts", () => {
+      const destroySpy = vi.fn();
+      scene.time.delayedCall = vi.fn(() => ({ destroy: destroySpy }));
+
+      // First tool completes — starts idle timer
+      wsClient.emit({
+        event_id: "18",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_read", success: true },
+      });
+
+      // New tool starts before idle timer fires
+      wsClient.emit({
+        event_id: "19",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_write" },
+      });
+
+      // The first timer should have been cancelled
+      expect(destroySpy).toHaveBeenCalled();
     });
   });
 
@@ -576,6 +648,84 @@ describe("AgentSpriteManager", () => {
         ["vera.chattiness"],
       );
       consoleSpy.mockRestore();
+    });
+  });
+
+  // ── AGENT_SPAWN handler tests ────────────────────────────────
+
+  describe("AGENT_SPAWN", () => {
+    it("plays spawn effect on existing agent (reconnect)", () => {
+      const vera = manager.getSprite("vera")!;
+
+      wsClient.emit({
+        event_id: "90",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "reconnect" },
+      });
+
+      // Spawn effect sets alpha to 0 and tweens back
+      expect(vera.sprite.setAlpha).toHaveBeenCalledWith(0);
+    });
+
+    it("does not crash for unknown agent spawn", () => {
+      wsClient.emit({
+        event_id: "91",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", reason: "start" },
+      });
+      // Should not throw
+    });
+
+    it("ignores management agent spawn", () => {
+      wsClient.emit({
+        event_id: "92",
+        event_type: EventType.AGENT_SPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "management", reason: "start" },
+      });
+      expect(manager.getSprite("management")).toBeUndefined();
+    });
+  });
+
+  // ── AGENT_DESPAWN handler tests ──────────────────────────────
+
+  describe("AGENT_DESPAWN", () => {
+    it("sets spawning flag on despawn", () => {
+      const vera = manager.getSprite("vera")!;
+
+      wsClient.emit({
+        event_id: "100",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "shutdown" },
+      });
+
+      // Despawn effect sets spawning flag immediately
+      expect(vera.spawning).toBe(true);
+    });
+
+    it("creates tween for sprite fade-out", () => {
+      wsClient.emit({
+        event_id: "101",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", reason: "error" },
+      });
+
+      // Should have created tweens (particles + sprite fade)
+      expect(scene.tweens.add).toHaveBeenCalled();
+    });
+
+    it("does not crash for unknown agent despawn", () => {
+      wsClient.emit({
+        event_id: "102",
+        event_type: EventType.AGENT_DESPAWN,
+        timestamp: Date.now(),
+        data: { agent_id: "nonexistent", reason: "shutdown" },
+      });
+      // Should not throw
     });
   });
 });

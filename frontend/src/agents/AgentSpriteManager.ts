@@ -6,9 +6,23 @@ import type { WebSocketClient } from "../network/WebSocketClient";
 import type { WorldManager } from "../world/WorldManager";
 import type { WorkspaceManager } from "../world/WorkspaceManager";
 import type { AutoStateManager } from "../world/furniture/AutoStateManager";
+import { SpawnEffect } from "../effects/SpawnEffect";
 
 /** Agents that get sprite representations (excludes management which has no sprite). */
 const SPRITE_AGENTS = AGENTS.filter((a) => a.id !== "management");
+
+/** Delay before reverting to idle after tool completes (prevents flicker). */
+const TOOL_DONE_DELAY_MS = 300;
+
+/** Tools that map to the "thinking" (reading/searching) animation. */
+const READING_TOOLS = new Set([
+  "code_read", "web_search", "memory_recall", "file_read", "file_search",
+]);
+
+/** Tools that map to the "building" (writing/executing) animation. */
+const WRITING_TOOLS = new Set([
+  "code_write", "file_edit", "terminal", "code_execute", "sandbox_run", "file_write",
+]);
 
 /**
  * Manages all agent sprites: creation, event handling, and lifecycle.
@@ -20,6 +34,9 @@ export class AgentSpriteManager {
   private workspaceManager: WorkspaceManager | null;
   private autoStateManager: AutoStateManager | null = null;
   private unsubscribe: (() => void) | null = null;
+  private toolIdleTimers: Map<string, Phaser.Time.TimerEvent> = new Map();
+  private spawnEffect: SpawnEffect;
+  private initialLoadComplete = false;
 
   constructor(
     scene: Phaser.Scene,
@@ -30,8 +47,9 @@ export class AgentSpriteManager {
     this.scene = scene;
     this.worldManager = worldManager;
     this.workspaceManager = workspaceManager ?? null;
+    this.spawnEffect = new SpawnEffect(scene);
 
-    // Create sprites for each agent
+    // Create sprites for each agent (initial load — no spawn effect)
     for (const agent of SPRITE_AGENTS) {
       const pos = this.getDeskPosition(agent);
       const config = {
@@ -52,6 +70,9 @@ export class AgentSpriteManager {
         this.handleEvent(event),
       );
     }
+
+    // Mark initial load complete — subsequent spawn events will play effects
+    this.initialLoadComplete = true;
   }
 
   setAutoStateManager(manager: AutoStateManager): void {
@@ -78,6 +99,10 @@ export class AgentSpriteManager {
     if (this.unsubscribe) {
       this.unsubscribe();
     }
+    for (const timer of this.toolIdleTimers.values()) {
+      timer.destroy();
+    }
+    this.toolIdleTimers.clear();
     for (const sprite of this.sprites.values()) {
       sprite.destroy();
     }
@@ -118,6 +143,12 @@ export class AgentSpriteManager {
         break;
       case EventType.CONFIG_RELOADED:
         console.log("Config reloaded:", event.data.config_type, event.data.changes);
+        break;
+      case EventType.AGENT_SPAWN:
+        this.handleAgentSpawn(event.data);
+        break;
+      case EventType.AGENT_DESPAWN:
+        this.handleAgentDespawn(event.data);
         break;
     }
   }
@@ -190,18 +221,39 @@ export class AgentSpriteManager {
     sprite.setActivity(toolName);
     sprite.setBadgeState("active");
 
+    // Cancel any pending idle timer for this agent
+    const existingTimer = this.toolIdleTimers.get(agentId);
+    if (existingTimer) {
+      existingTimer.destroy();
+      this.toolIdleTimers.delete(agentId);
+    }
+
     if (success !== undefined && success !== null) {
-      // Tool completed — show result briefly then clear
+      // Tool completed — show result briefly, then revert to idle after delay
       sprite.setProgress(false);
       sprite.setBadgeState(success ? "active" : "error");
-      this.scene.time.delayedCall(2000, () => {
+      const timer = this.scene.time.delayedCall(TOOL_DONE_DELAY_MS, () => {
+        sprite.playAnimation("idle");
         sprite.setActivity(null);
         sprite.setBadgeState("idle");
+        this.autoStateManager?.onAgentStatusChange(agentId, "idle");
+        this.toolIdleTimers.delete(agentId);
       });
+      this.toolIdleTimers.set(agentId, timer);
     } else {
-      // Tool in progress — show spinner
+      // Tool in progress — play mapped animation and show spinner
+      const anim = this.getToolAnimation(toolName);
+      sprite.playAnimation(anim);
       sprite.setProgress(true);
+      this.autoStateManager?.onAgentStatusChange(agentId, anim === "building" ? "building" : "thinking");
     }
+  }
+
+  /** Map a tool name to the appropriate animation. */
+  private getToolAnimation(toolName: string): string {
+    if (WRITING_TOOLS.has(toolName)) return "building";
+    if (READING_TOOLS.has(toolName)) return "thinking";
+    return "thinking"; // default for unknown tools
   }
 
   private handleManagementShadow(data: Record<string, unknown>): void {
@@ -353,6 +405,48 @@ export class AgentSpriteManager {
           });
         }
       },
+    });
+  }
+
+  private handleAgentSpawn(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+
+    // Skip effects during initial page load
+    if (!this.initialLoadComplete) return;
+
+    const existing = this.sprites.get(agentId);
+    if (existing) {
+      // Agent already exists (reconnect) — play spawn effect in place
+      this.spawnEffect.playSpawn(existing);
+      return;
+    }
+
+    // New agent — create sprite then play spawn effect
+    const agent = AGENTS.find((a) => a.id === agentId);
+    if (!agent || agent.id === "management") return;
+
+    const pos = this.getDeskPosition(agent);
+    const config = {
+      agentId: agent.id,
+      name: agent.name,
+      spriteKey: `sprite_${agent.id}`,
+      frameSize: agent.id === "alpha" ? 24 : 32,
+      x: pos.x,
+      y: pos.y,
+    };
+    const sprite = new AgentSprite(this.scene, config);
+    this.sprites.set(agent.id, sprite);
+    this.spawnEffect.playSpawn(sprite);
+  }
+
+  private handleAgentDespawn(data: Record<string, unknown>): void {
+    const agentId = data.agent_id as string;
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return;
+
+    this.spawnEffect.playDespawn(sprite, () => {
+      sprite.destroy();
+      this.sprites.delete(agentId);
     });
   }
 
