@@ -1,15 +1,23 @@
 "use client";
 
+import React from "react";
 import { scoreColor } from "@/lib/score-utils";
 
 interface EvalRunSummary {
   id: string;
-  started_at: string | null;
   overall_score: number | null;
+  category_scores?: Record<string, number | null>;
   results?: {
     category: string;
     score: number | null;
   }[];
+}
+
+function getCategoryEntries(run: EvalRunSummary): { category: string; score: number | null }[] {
+  if (run.category_scores && Object.keys(run.category_scores).length > 0) {
+    return Object.entries(run.category_scores).map(([category, score]) => ({ category, score }));
+  }
+  return run.results ?? [];
 }
 
 export default function ABComparisonView({
@@ -19,8 +27,8 @@ export default function ABComparisonView({
   runA: EvalRunSummary;
   runB: EvalRunSummary;
 }) {
-  const categoriesA = runA.results ?? [];
-  const categoriesB = runB.results ?? [];
+  const categoriesA = getCategoryEntries(runA);
+  const categoriesB = getCategoryEntries(runB);
 
   const allCategories = Array.from(
     new Set([
@@ -115,7 +123,7 @@ export default function ABComparisonView({
   );
 }
 
-function formatDelta(delta: number): JSX.Element {
+function formatDelta(delta: number): React.ReactElement {
   const color =
     delta > 0
       ? "text-green-400"
