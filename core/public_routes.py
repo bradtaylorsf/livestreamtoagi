@@ -172,6 +172,20 @@ class EvalHistoryItem(BaseModel):
     created_at: str | None = None
 
 
+class PublicEvalRun(BaseModel):
+    id: str
+    simulation_id: str
+    date: str
+    overall_score: float | None = None
+    cost: float = 0
+    model_versions: dict[str, str] = {}
+    category_scores: dict[str, float | None] = {}
+
+
+class PublicEvalRunDetail(PublicEvalRun):
+    results: list[dict[str, Any]] = []
+
+
 class BlogPostSummary(BaseModel):
     slug: str
     title: str
@@ -586,6 +600,131 @@ async def get_evals_history(
         )
         for r in rows
     ]
+
+
+@router.get("/evals/categories")
+async def get_eval_categories() -> list[str]:
+    db = _get_db()
+    if not db:
+        return []
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    return await eval_repo.get_eval_categories()
+
+
+@router.get("/evals/runs")
+async def get_eval_runs(
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> list[PublicEvalRun]:
+    db = _get_db()
+    if not db:
+        return []
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    runs = await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
+    result = []
+    for run in runs:
+        results = await eval_repo.get_eval_results(run.id)
+        # Flatten model_versions: agent_id -> conversation model for display
+        flat_versions: dict[str, str] = {}
+        for agent_id, models in (run.model_versions or {}).items():
+            if isinstance(models, dict):
+                flat_versions[agent_id] = models.get("conversation", "unknown")
+            else:
+                flat_versions[agent_id] = str(models)
+        category_scores = {
+            r.category: float(r.score) if r.score is not None else None
+            for r in results
+        }
+        result.append(PublicEvalRun(
+            id=str(run.id),
+            simulation_id=str(run.simulation_id),
+            date=run.started_at.isoformat() if run.started_at else "",
+            overall_score=float(run.overall_score) if run.overall_score is not None else None,
+            cost=float(run.cost),
+            model_versions=flat_versions,
+            category_scores=category_scores,
+        ))
+    return result
+
+
+@router.get("/evals/latest")
+async def get_latest_eval_run() -> PublicEvalRun | None:
+    db = _get_db()
+    if not db:
+        return None
+    rows = await db.fetch(
+        "SELECT * FROM eval_runs ORDER BY started_at DESC LIMIT 1",
+    )
+    if not rows:
+        return None
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    run_row = rows[0]
+    import json as _json
+    mv = run_row.get("model_versions") or {}
+    if isinstance(mv, str):
+        mv = _json.loads(mv)
+    run_id = run_row["id"]
+    results = await eval_repo.get_eval_results(run_id)
+    flat_versions: dict[str, str] = {}
+    for agent_id, models in mv.items():
+        if isinstance(models, dict):
+            flat_versions[agent_id] = models.get("conversation", "unknown")
+        else:
+            flat_versions[agent_id] = str(models)
+    category_scores = {
+        r.category: float(r.score) if r.score is not None else None
+        for r in results
+    }
+    or_score = run_row.get("overall_score")
+    return PublicEvalRun(
+        id=str(run_row["id"]),
+        simulation_id=str(run_row["simulation_id"]),
+        date=run_row["started_at"].isoformat() if run_row.get("started_at") else "",
+        overall_score=float(or_score) if or_score is not None else None,
+        cost=float(run_row.get("cost", 0)),
+        model_versions=flat_versions,
+        category_scores=category_scores,
+    )
+
+
+@router.get("/evals/runs/{run_id}")
+async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
+    db = _get_db()
+    if not db:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+    run = await eval_repo.get_eval_run(uuid.UUID(run_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Eval run not found")
+    results = await eval_repo.get_eval_results(run.id)
+    flat_versions: dict[str, str] = {}
+    for agent_id, models in (run.model_versions or {}).items():
+        if isinstance(models, dict):
+            flat_versions[agent_id] = models.get("conversation", "unknown")
+        else:
+            flat_versions[agent_id] = str(models)
+    category_scores = {r.category: float(r.score) if r.score is not None else None for r in results}
+    return PublicEvalRunDetail(
+        id=str(run.id),
+        simulation_id=str(run.simulation_id),
+        date=run.started_at.isoformat() if run.started_at else "",
+        overall_score=float(run.overall_score) if run.overall_score is not None else None,
+        cost=float(run.cost),
+        model_versions=flat_versions,
+        category_scores=category_scores,
+        results=[
+            {"category": r.category, "score": float(r.score) if r.score is not None else None}
+            for r in results
+        ],
+    )
 
 
 # ── World & Challenge Endpoints ──────────────────────────────────

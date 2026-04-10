@@ -736,6 +736,7 @@ class SimulationCreate(BaseModel):
     simulated_duration: timedelta | None = None
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class Simulation(BaseModel):
@@ -757,6 +758,7 @@ class Simulation(BaseModel):
     total_management_flags: int = 0
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     created_at: datetime | None = None
 
 
@@ -923,6 +925,7 @@ class EvalRun(BaseModel):
     completed_at: datetime | None = None
     overall_score: Decimal | None = None
     cost: Decimal = Decimal("0")
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     created_at: datetime | None = None
 
 
@@ -950,6 +953,7 @@ class EvalRunDetail(BaseModel):
     completed_at: datetime | None = None
     overall_score: Decimal | None = None
     cost: Decimal = Decimal("0")
+    model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     created_at: datetime | None = None
     results: list[EvalResult] = []
 

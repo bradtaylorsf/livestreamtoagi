@@ -213,6 +213,7 @@ class OpenRouterClient:
         self._langfuse = langfuse_client
         self._lost_cost_events: int = 0
         self._simulation_id: object | None = None  # Set externally for simulation tracking
+        self._model_fallbacks: list[dict[str, str]] = []
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
             base_url=OPENROUTER_BASE_URL,
@@ -226,6 +227,23 @@ class OpenRouterClient:
     async def close(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+    def record_fallback(
+        self, agent_id: str, requested_model: str, actual_model: str, reason: str,
+    ) -> None:
+        """Record when a model fallback occurs (e.g., requested model unavailable)."""
+        entry = {
+            "agent_id": agent_id,
+            "requested": requested_model,
+            "actual": actual_model,
+            "reason": reason,
+        }
+        self._model_fallbacks.append(entry)
+        logger.warning("Model fallback: %s", entry)
+
+    def get_fallbacks(self) -> list[dict[str, str]]:
+        """Return all model fallback events recorded during this session."""
+        return list(self._model_fallbacks)
 
     def _resolve_model(self, model: str) -> ModelConfig:
         canonical_model = MODEL_NAME_ALIASES.get(model, model)

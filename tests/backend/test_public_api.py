@@ -275,6 +275,69 @@ class TestEvalEndpoints:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    def test_get_eval_categories(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[
+            {"category": "creativity"},
+            {"category": "safety"},
+        ])
+        resp = client.get("/api/evals/categories")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "creativity" in data
+        assert "safety" in data
+
+    def test_get_eval_runs_empty(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/evals/runs")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_get_eval_runs_with_model_versions(self, mock_app):
+        client, mock_db, *_ = mock_app
+        run_id = uuid.uuid4()
+        sim_id = uuid.uuid4()
+        mock_db.fetch = AsyncMock(side_effect=[
+            # First call: get_all_eval_runs
+            [{
+                "id": run_id,
+                "simulation_id": sim_id,
+                "eval_suite": "full",
+                "status": "completed",
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "overall_score": 72.5,
+                "cost": 0.05,
+                "model_versions": (
+                    '{"vera": {"conversation": "anthropic/claude-haiku-4.5",'
+                    ' "building": "anthropic/claude-sonnet-4.6"}}'
+                ),
+                "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            }],
+            # Second call: get_eval_results for this run
+            [],
+        ])
+        resp = client.get("/api/evals/runs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["model_versions"]["vera"] == "anthropic/claude-haiku-4.5"
+
+    def test_get_eval_latest_empty(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/evals/latest")
+        assert resp.status_code == 200
+        assert resp.json() is None
+
+    def test_get_eval_run_detail_not_found(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=None)
+        run_id = str(uuid.uuid4())
+        resp = client.get(f"/api/evals/runs/{run_id}")
+        assert resp.status_code == 404
+
 
 # ── World Endpoints ───────────────────────────────────────────
 

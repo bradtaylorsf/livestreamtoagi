@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def _parse_jsonb(row: dict) -> dict:
-    for key in ("evidence", "sub_scores"):
+    for key in ("evidence", "sub_scores", "model_versions"):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
     return row
@@ -30,15 +30,19 @@ class EvalRepo:
         self,
         simulation_id: uuid.UUID,
         eval_suite: str,
+        *,
+        model_versions: dict[str, dict[str, str]] | None = None,
     ) -> EvalRun:
+        mv = model_versions or {}
         row = await self.db.fetchrow(
-            """INSERT INTO eval_runs (simulation_id, eval_suite)
-               VALUES ($1, $2)
+            """INSERT INTO eval_runs (simulation_id, eval_suite, model_versions)
+               VALUES ($1, $2, $3::jsonb)
                RETURNING *""",
             simulation_id,
             eval_suite,
+            json.dumps(mv),
         )
-        return EvalRun(**dict(row))
+        return EvalRun(**_parse_jsonb(dict(row)))
 
     async def update_eval_run(
         self,
@@ -65,7 +69,7 @@ class EvalRepo:
         )
         if row is None:
             return None
-        return EvalRun(**dict(row))
+        return EvalRun(**_parse_jsonb(dict(row)))
 
     async def save_eval_result(
         self,
@@ -107,7 +111,7 @@ class EvalRepo:
                ORDER BY started_at DESC""",
             simulation_id,
         )
-        return [EvalRun(**dict(r)) for r in rows]
+        return [EvalRun(**_parse_jsonb(dict(r))) for r in rows]
 
     async def get_eval_run(self, run_id: uuid.UUID) -> EvalRun | None:
         row = await self.db.fetchrow(
@@ -115,7 +119,7 @@ class EvalRepo:
         )
         if row is None:
             return None
-        return EvalRun(**dict(row))
+        return EvalRun(**_parse_jsonb(dict(row)))
 
     async def get_eval_results(self, eval_run_id: uuid.UUID) -> list[EvalResult]:
         rows = await self.db.fetch(
@@ -138,7 +142,7 @@ class EvalRepo:
         )
         if row is None:
             return None
-        return EvalRun(**dict(row))
+        return EvalRun(**_parse_jsonb(dict(row)))
 
     async def get_all_eval_runs(
         self,
@@ -153,7 +157,7 @@ class EvalRepo:
             limit,
             offset,
         )
-        return [EvalRun(**dict(r)) for r in rows]
+        return [EvalRun(**_parse_jsonb(dict(r))) for r in rows]
 
     async def get_eval_categories(self) -> list[str]:
         """Return distinct category names from all eval results."""
