@@ -291,10 +291,15 @@ export class AgentSpriteManager {
   }
 
   private handleWorldExpansion(data: Record<string, unknown>): void {
-    const zone = data.zone as string;
-    const description = data.description as string;
+    const zone = (data.zone ?? data.chunk_name) as string;
+    const description = (data.description ?? "") as string;
     if (this.worldManager) {
-      this.worldManager.expandWorld(zone, description);
+      this.worldManager.expandWorld(zone, description, {
+        tilemapUrl: data.tilemap_url as string | undefined,
+        tilesetUrl: data.tileset_url as string | undefined,
+        offset: data.offset as { x: number; y: number } | undefined,
+        agentId: data.agent_id as string | undefined,
+      });
     }
   }
 

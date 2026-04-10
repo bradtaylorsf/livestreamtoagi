@@ -749,7 +749,11 @@ describe("AgentSpriteManager", () => {
         data: { zone: "garden", description: "A beautiful garden" },
       });
 
-      expect(mockWorldManager.expandWorld).toHaveBeenCalledWith("garden", "A beautiful garden");
+      expect(mockWorldManager.expandWorld).toHaveBeenCalledWith(
+        "garden",
+        "A beautiful garden",
+        expect.objectContaining({}),
+      );
       mgr.destroy();
     });
 

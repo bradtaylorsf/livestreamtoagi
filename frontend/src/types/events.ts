@@ -93,6 +93,12 @@ export interface ManagementShadowPayload {
 export interface WorldExpansionPayload {
   zone: string;
   description: string;
+  chunk_id?: number;
+  chunk_name?: string;
+  tilemap_url?: string;
+  tileset_url?: string;
+  offset?: { x: number; y: number };
+  agent_id?: string;
 }
 
 export interface PollCreatedPayload {

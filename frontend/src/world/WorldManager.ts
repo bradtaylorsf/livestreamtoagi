@@ -31,6 +31,7 @@ export class WorldManager {
   private worldWidth = 0;
   private worldHeight = 0;
   private walkabilityGrid: WalkabilityGrid | null = null;
+  private worldBounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -81,6 +82,12 @@ export class WorldManager {
           : areasProp.value;
       }
     }
+
+    // Track world bounds for camera expansion
+    this.worldBounds = {
+      minX: 0, minY: 0,
+      maxX: this.worldWidth, maxY: this.worldHeight,
+    };
 
     // Configure camera — zoom to fit entire office in viewport with padding
     const cam = this.scene.cameras.main;
@@ -135,24 +142,47 @@ export class WorldManager {
   }
 
   /**
-   * Dynamically load a new world zone chunk. If the tilemap JSON is already
-   * in the Phaser cache, loads immediately. Otherwise triggers async preload.
-   * After loading, pans camera to reveal the new area.
+   * Dynamically load a new world zone chunk. Supports two modes:
+   * 1. URL-based: fetches tilemap from backend API (used for agent-built chunks)
+   * 2. Cache-based: loads from Phaser cache or local assets (legacy/preloaded chunks)
+   * After loading, expands camera bounds, pans to reveal, and applies fade-in.
    */
-  expandWorld(zone: string, description: string): void {
-    const jsonKey = `tilemap_${zone}`;
-    const cacheEntry = this.scene.cache.tilemap.get(jsonKey);
-
-    if (cacheEntry) {
-      // Tilemap already cached — load chunk directly
-      this.loadExpansionChunk(zone, description);
+  expandWorld(
+    zone: string,
+    description: string,
+    options?: {
+      tilemapUrl?: string;
+      tilesetUrl?: string;
+      offset?: { x: number; y: number };
+      agentId?: string;
+    },
+  ): void {
+    if (options?.tilemapUrl && options?.tilesetUrl) {
+      // URL-based dynamic loading from backend
+      const offset = options.offset ?? { x: 0, y: 0 };
+      this.chunkLoader
+        .loadChunkFromURL(zone, options.tilemapUrl, options.tilesetUrl, offset)
+        .then((chunk) => {
+          if (chunk) {
+            this.onChunkLoaded(chunk, description, offset);
+          } else {
+            console.warn(`Failed to load expansion chunk from URL: ${zone}`);
+          }
+        });
     } else {
-      // Dynamic tilemap load: preload then create
-      this.scene.load.tilemapTiledJSON(jsonKey, `assets/tilesets/${zone}/tilemap_${zone}.json`);
-      this.scene.load.once("complete", () => {
+      // Legacy: cache-based loading
+      const jsonKey = `tilemap_${zone}`;
+      const cacheEntry = this.scene.cache.tilemap.get(jsonKey);
+
+      if (cacheEntry) {
         this.loadExpansionChunk(zone, description);
-      });
-      this.scene.load.start();
+      } else {
+        this.scene.load.tilemapTiledJSON(jsonKey, `assets/tilesets/${zone}/tilemap_${zone}.json`);
+        this.scene.load.once("complete", () => {
+          this.loadExpansionChunk(zone, description);
+        });
+        this.scene.load.start();
+      }
     }
   }
 
@@ -162,16 +192,74 @@ export class WorldManager {
       console.warn(`Failed to load expansion chunk: ${zone}`);
       return;
     }
+    this.onChunkLoaded(chunk, description, { x: 0, y: 0 });
+  }
 
-    // Pan camera to center of new chunk
-    const centerX = chunk.tilemap.widthInPixels / 2;
-    const centerY = chunk.tilemap.heightInPixels / 2;
-    this.scene.cameras.main.pan(centerX, centerY, 1000, "Power2");
+  private onChunkLoaded(
+    chunk: import("./ChunkLoader").ChunkData,
+    description: string,
+    offset: { x: number; y: number },
+  ): void {
+    const tileSize = this.getTileSize();
+    const chunkPixelX = offset.x * tileSize;
+    const chunkPixelY = offset.y * tileSize;
+    const chunkW = chunk.tilemap.widthInPixels;
+    const chunkH = chunk.tilemap.heightInPixels;
+
+    // Expand world bounds to include new chunk
+    this.worldBounds.minX = Math.min(this.worldBounds.minX, chunkPixelX);
+    this.worldBounds.minY = Math.min(this.worldBounds.minY, chunkPixelY);
+    this.worldBounds.maxX = Math.max(this.worldBounds.maxX, chunkPixelX + chunkW);
+    this.worldBounds.maxY = Math.max(this.worldBounds.maxY, chunkPixelY + chunkH);
+
+    // Update camera bounds
+    const pad = 16;
+    const cam = this.scene.cameras.main;
+    const bw = this.worldBounds.maxX - this.worldBounds.minX;
+    const bh = this.worldBounds.maxY - this.worldBounds.minY;
+    cam.setBounds(
+      this.worldBounds.minX - pad,
+      this.worldBounds.minY - pad,
+      bw + pad * 2,
+      bh + pad * 2,
+    );
+
+    // Update walkability grid for new chunk's collision layer
+    for (const layer of chunk.layers) {
+      if (layer.layer.name.toLowerCase() === "collision") {
+        layer.setCollisionByExclusion([-1, 0]);
+        layer.setVisible(false);
+        // Merge collision into walkability grid
+        if (this.walkabilityGrid) {
+          const newGrid = buildWalkabilityGrid(layer, chunk.tilemap.width, chunk.tilemap.height);
+          this.mergeWalkabilityGrid(newGrid, offset.x, offset.y);
+        }
+        break;
+      }
+    }
+
+    // Fade-in effect on new chunk layers
+    for (const layer of chunk.layers) {
+      if (layer.layer.name.toLowerCase() !== "collision") {
+        layer.setAlpha(0);
+        this.scene.tweens.add({
+          targets: layer,
+          alpha: 1,
+          duration: 500,
+          ease: "Power2",
+        });
+      }
+    }
+
+    // Pan camera to new chunk center
+    const centerX = chunkPixelX + chunkW / 2;
+    const centerY = chunkPixelY + chunkH / 2;
+    cam.pan(centerX, centerY, 1000, "Power2");
 
     // Show expansion notification
     const notifyText = this.scene.add.text(
-      this.scene.cameras.main.centerX,
-      this.scene.cameras.main.centerY + 60,
+      cam.centerX,
+      cam.centerY + 60,
       `World expanded: ${description}`,
       {
         fontSize: "12px",
@@ -196,9 +284,49 @@ export class WorldManager {
     });
   }
 
+  /**
+   * Merge a new walkability grid from an expansion chunk into the main grid.
+   * Extends the grid dimensions if needed.
+   */
+  private mergeWalkabilityGrid(
+    newGrid: WalkabilityGrid,
+    offsetTX: number,
+    offsetTY: number,
+  ): void {
+    if (!this.walkabilityGrid) return;
+
+    const existingH = this.walkabilityGrid.length;
+    const existingW = existingH > 0 ? this.walkabilityGrid[0].length : 0;
+    const neededW = offsetTX + (newGrid[0]?.length ?? 0);
+    const neededH = offsetTY + newGrid.length;
+    const finalW = Math.max(existingW, neededW);
+    const finalH = Math.max(existingH, neededH);
+
+    // Extend rows if needed
+    while (this.walkabilityGrid.length < finalH) {
+      this.walkabilityGrid.push(new Array(finalW).fill(false));
+    }
+    // Extend columns if needed
+    for (let y = 0; y < this.walkabilityGrid.length; y++) {
+      while (this.walkabilityGrid[y].length < finalW) {
+        this.walkabilityGrid[y].push(false);
+      }
+    }
+
+    // Overlay new grid values
+    for (let y = 0; y < newGrid.length; y++) {
+      for (let x = 0; x < newGrid[y].length; x++) {
+        this.walkabilityGrid[offsetTY + y][offsetTX + x] = newGrid[y][x];
+      }
+    }
+  }
+
   updateVisibleChunks(_cameraX: number, _cameraY: number): void {
-    // For single-chunk office, nothing to load/unload.
-    // Future: load/unload chunks based on camera viewport.
+    // Keep all loaded chunks visible for now. In the future, chunks far from
+    // the camera viewport could be hidden to save rendering cost:
+    //   const viewport = cam.worldView;
+    //   for (const chunk of this.chunkLoader.getLoadedChunks()) { ... }
+    // Currently the world is small enough that all chunks render simultaneously.
   }
 
   destroy(): void {
