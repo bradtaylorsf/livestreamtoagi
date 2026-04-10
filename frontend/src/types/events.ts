@@ -175,6 +175,7 @@ export interface TaskDelegatedPayload {
 export interface TaskCompletedPayload {
   task_id: string;
   to_agent: string;
+  from_agent?: string;
   success: boolean;
   result?: string;
 }

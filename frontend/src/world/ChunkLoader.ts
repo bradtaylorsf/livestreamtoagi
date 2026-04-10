@@ -24,9 +24,11 @@ interface TilemapJSON {
 export class ChunkLoader {
   private scene: Phaser.Scene;
   private chunks: Map<string, ChunkData> = new Map();
+  private tileSize: number;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, tileSize = 32) {
     this.scene = scene;
+    this.tileSize = tileSize;
   }
 
   /**
@@ -52,8 +54,8 @@ export class ChunkLoader {
       const tilemapJSON: TilemapJSON = {
         width: chunkData.width ?? 10,
         height: chunkData.height ?? 10,
-        tilewidth: 32,
-        tileheight: 32,
+        tilewidth: this.tileSize,
+        tileheight: this.tileSize,
         tilesets: [{ name: `tileset_${chunkId}`, firstgid: 1, image: `tileset_${chunkId}` }],
         layers: [],
         areas: chunkData.areas,
@@ -81,7 +83,7 @@ export class ChunkLoader {
             if (chunk) {
               // Apply pixel offset to all layers
               for (const layer of chunk.layers) {
-                layer.setPosition(offset.x * 32, offset.y * 32);
+                layer.setPosition(offset.x * this.tileSize, offset.y * this.tileSize);
               }
             }
             resolve(chunk);
@@ -91,7 +93,7 @@ export class ChunkLoader {
           const chunk = this.loadChunk(chunkId);
           if (chunk) {
             for (const layer of chunk.layers) {
-              layer.setPosition(offset.x * 32, offset.y * 32);
+              layer.setPosition(offset.x * this.tileSize, offset.y * this.tileSize);
             }
           }
           resolve(chunk);

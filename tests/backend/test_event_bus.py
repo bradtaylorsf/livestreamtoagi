@@ -327,6 +327,7 @@ class TestEventTypeEnum:
             "conversation_productivity",
             "agi_progress",
             "task_delegated", "task_completed",
+            "agent_spawn", "agent_despawn",
         }
         actual = {e.value for e in EventType}
         assert actual == expected

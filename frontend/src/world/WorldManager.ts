@@ -36,7 +36,7 @@ export class WorldManager {
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
-    this.chunkLoader = new ChunkLoader(scene);
+    this.chunkLoader = new ChunkLoader(scene, this.getTileSize());
   }
 
   create(): void {
@@ -212,7 +212,8 @@ export class WorldManager {
           } else {
             console.warn(`Failed to load expansion chunk from URL: ${zone}`);
           }
-        });
+        })
+        .catch((err) => console.error(`expandWorld failed for zone "${zone}":`, err));
     } else {
       // Legacy: cache-based loading
       const jsonKey = `tilemap_${zone}`;
@@ -346,14 +347,14 @@ export class WorldManager {
     const finalW = Math.max(existingW, neededW);
     const finalH = Math.max(existingH, neededH);
 
-    // Extend rows if needed
+    // Extend rows if needed (default walkable — collision overlay will block walls)
     while (this.walkabilityGrid.length < finalH) {
-      this.walkabilityGrid.push(new Array(finalW).fill(false));
+      this.walkabilityGrid.push(new Array(finalW).fill(true));
     }
     // Extend columns if needed
     for (let y = 0; y < this.walkabilityGrid.length; y++) {
       while (this.walkabilityGrid[y].length < finalW) {
-        this.walkabilityGrid[y].push(false);
+        this.walkabilityGrid[y].push(true);
       }
     }
 

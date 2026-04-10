@@ -337,6 +337,9 @@ export class MainScene extends Phaser.Scene {
     // ── Draw thin interior walls between rooms ───────────────────
     this.drawInteriorWalls();
 
+    // ── Register wall tiles as non-walkable in pathfinding grid ──
+    this.registerWallCollision();
+
     // ── Place furniture sprites on top of tiles ─────────────────
     this.placeFurniture();
 
@@ -581,6 +584,46 @@ export class MainScene extends Phaser.Scene {
     // Horizontal wall between Meeting and Alpha — with doorway gap at cols 34-35
     walls.fillRect(31 * T, 17 * T - WALL_WIDTH / 2, 3 * T, WALL_WIDTH);
     walls.fillRect(36 * T, 17 * T - WALL_WIDTH / 2, 4 * T, WALL_WIDTH);
+  }
+
+  /**
+   * Register all interior wall positions as non-walkable in the pathfinding grid.
+   * The tilemap collision layer only covers exterior walls; interior walls
+   * (brick rows, side columns) are visual-only sprites that need explicit blocking.
+   */
+  private registerWallCollision(): void {
+    if (!this.worldManager) return;
+    const T = TILE_SIZE;
+
+    // Block all WALL_TILES positions (brick wall rows 0, 11, 17 + side wall columns)
+    for (const item of WALL_TILES) {
+      const tx = Math.floor(item.x / T);
+      const ty = Math.floor(item.y / T);
+      this.worldManager.markTilesBlocked([{ tx, ty }]);
+    }
+
+    // Block interior vertical wall columns between rooms (the Graphics walls).
+    // These are drawn as thin lines but occupy the tile column they're on.
+    // Top rooms: vertical walls at cols 10, 21 (rows 1-10), doorway gap at rows 4-5
+    for (const col of [10, 21]) {
+      for (let row = 1; row <= 10; row++) {
+        if (row === 4 || row === 5) continue; // doorway
+        this.worldManager.markTilesBlocked([{ tx: col, ty: row }]);
+      }
+    }
+    // Bottom rooms: vertical walls at cols 10, 21 (rows 12-20), doorway gap at rows 15-16
+    for (const col of [10, 21]) {
+      for (let row = 12; row <= 20; row++) {
+        if (row === 15 || row === 16) continue; // doorway
+        this.worldManager.markTilesBlocked([{ tx: col, ty: row }]);
+      }
+    }
+    // Col 31: Grok|Meeting (rows 12-16, doorway rows 13-14) + Alpha (rows 18-20)
+    for (let row = 12; row <= 20; row++) {
+      if (row === 13 || row === 14) continue; // Meeting doorway
+      if (row === 17) continue; // horizontal wall row (already blocked by WALL_TILES if present)
+      this.worldManager.markTilesBlocked([{ tx: 31, ty: row }]);
+    }
   }
 
   /**

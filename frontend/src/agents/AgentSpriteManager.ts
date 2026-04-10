@@ -307,8 +307,10 @@ export class AgentSpriteManager {
         const offset = data.offset as { x: number; y: number } | undefined;
         if (sprite && offset) {
           const tileSize = this.worldManager.getTileSize();
-          const targetX = offset.x * tileSize + tileSize * 5; // center-ish of new chunk
-          const targetY = offset.y * tileSize + tileSize * 5;
+          const chunkW = (data.chunk_width as number | undefined) ?? 10;
+          const chunkH = (data.chunk_height as number | undefined) ?? 10;
+          const targetX = offset.x * tileSize + Math.floor(chunkW / 2) * tileSize;
+          const targetY = offset.y * tileSize + Math.floor(chunkH / 2) * tileSize;
           // Delay to let camera pan + fade-in finish first
           this.scene.time.delayedCall(1500, () => {
             sprite.moveTo(targetX, targetY, this.worldManager ?? undefined);
@@ -559,12 +561,13 @@ export class AgentSpriteManager {
       });
     }
 
-    // Show result on the delegating agent
-    const agentSprite = this.sprites.get(toAgent);
-    if (agentSprite) {
-      agentSprite.setBadgeState(success ? "active" : "error");
+    // Show result on the delegating agent (look up from_agent via the payload)
+    const fromAgent = data.from_agent as string | undefined;
+    const badgeAgent = fromAgent ? this.sprites.get(fromAgent) : this.sprites.get(toAgent);
+    if (badgeAgent) {
+      badgeAgent.setBadgeState(success ? "active" : "error");
       this.scene.time.delayedCall(2000, () => {
-        agentSprite.setBadgeState("idle");
+        badgeAgent.setBadgeState("idle");
       });
     }
   }

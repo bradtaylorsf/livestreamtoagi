@@ -203,6 +203,9 @@ export class ManagementEffects {
       if (!this.audioCtx) {
         this.audioCtx = new AudioContext();
       }
+      if (this.audioCtx.state === "suspended") {
+        this.audioCtx.resume();
+      }
       const osc = this.audioCtx.createOscillator();
       const gain = this.audioCtx.createGain();
       osc.type = "sine";
