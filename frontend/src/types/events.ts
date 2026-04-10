@@ -125,6 +125,7 @@ export interface ToolExecutedPayload {
   tool_name: string;
   success: boolean;
   result?: string;
+  status?: "start" | "done";
 }
 
 export interface ConfigReloadedPayload {

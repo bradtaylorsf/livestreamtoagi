@@ -272,7 +272,7 @@ describe("AgentSpriteManager", () => {
       expect(setProgressSpy).toHaveBeenCalledWith(true);
     });
 
-    it("clears progress and schedules cleanup on success", () => {
+    it("clears progress and schedules cleanup on success with 300ms delay", () => {
       const vera = manager.getSprite("vera")!;
       const setProgressSpy = vi.spyOn(vera, "setProgress");
 
@@ -284,7 +284,7 @@ describe("AgentSpriteManager", () => {
       });
 
       expect(setProgressSpy).toHaveBeenCalledWith(false);
-      expect(scene.time.delayedCall).toHaveBeenCalledWith(2000, expect.any(Function));
+      expect(scene.time.delayedCall).toHaveBeenCalledWith(300, expect.any(Function));
     });
 
     it("sets error badge on tool failure", () => {
@@ -309,6 +309,72 @@ describe("AgentSpriteManager", () => {
         data: { agent_id: "unknown", tool_name: "test" },
       });
       // Should not throw
+    });
+
+    it("plays thinking animation for reading tools (in-progress)", () => {
+      const vera = manager.getSprite("vera")!;
+      const playAnimSpy = vi.spyOn(vera, "playAnimation");
+
+      wsClient.emit({
+        event_id: "15",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_read" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    });
+
+    it("plays building animation for writing tools (in-progress)", () => {
+      const rex = manager.getSprite("rex")!;
+      const playAnimSpy = vi.spyOn(rex, "playAnimation");
+
+      wsClient.emit({
+        event_id: "16",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "rex", tool_name: "code_write" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("building");
+    });
+
+    it("plays thinking animation for unknown tools (default)", () => {
+      const vera = manager.getSprite("vera")!;
+      const playAnimSpy = vi.spyOn(vera, "playAnimation");
+
+      wsClient.emit({
+        event_id: "17",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "some_unknown_tool" },
+      });
+
+      expect(playAnimSpy).toHaveBeenCalledWith("thinking");
+    });
+
+    it("cancels pending idle timer when new tool starts", () => {
+      const destroySpy = vi.fn();
+      scene.time.delayedCall = vi.fn(() => ({ destroy: destroySpy }));
+
+      // First tool completes — starts idle timer
+      wsClient.emit({
+        event_id: "18",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_read", success: true },
+      });
+
+      // New tool starts before idle timer fires
+      wsClient.emit({
+        event_id: "19",
+        event_type: EventType.TOOL_EXECUTED,
+        timestamp: Date.now(),
+        data: { agent_id: "vera", tool_name: "code_write" },
+      });
+
+      // The first timer should have been cancelled
+      expect(destroySpy).toHaveBeenCalled();
     });
   });
 

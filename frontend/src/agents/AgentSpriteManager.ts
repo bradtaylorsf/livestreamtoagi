@@ -10,6 +10,19 @@ import type { AutoStateManager } from "../world/furniture/AutoStateManager";
 /** Agents that get sprite representations (excludes management which has no sprite). */
 const SPRITE_AGENTS = AGENTS.filter((a) => a.id !== "management");
 
+/** Delay before reverting to idle after tool completes (prevents flicker). */
+const TOOL_DONE_DELAY_MS = 300;
+
+/** Tools that map to the "thinking" (reading/searching) animation. */
+const READING_TOOLS = new Set([
+  "code_read", "web_search", "memory_recall", "file_read", "file_search",
+]);
+
+/** Tools that map to the "building" (writing/executing) animation. */
+const WRITING_TOOLS = new Set([
+  "code_write", "file_edit", "terminal", "code_execute", "sandbox_run", "file_write",
+]);
+
 /**
  * Manages all agent sprites: creation, event handling, and lifecycle.
  */
@@ -20,6 +33,7 @@ export class AgentSpriteManager {
   private workspaceManager: WorkspaceManager | null;
   private autoStateManager: AutoStateManager | null = null;
   private unsubscribe: (() => void) | null = null;
+  private toolIdleTimers: Map<string, Phaser.Time.TimerEvent> = new Map();
 
   constructor(
     scene: Phaser.Scene,
@@ -78,6 +92,10 @@ export class AgentSpriteManager {
     if (this.unsubscribe) {
       this.unsubscribe();
     }
+    for (const timer of this.toolIdleTimers.values()) {
+      timer.destroy();
+    }
+    this.toolIdleTimers.clear();
     for (const sprite of this.sprites.values()) {
       sprite.destroy();
     }
@@ -190,18 +208,39 @@ export class AgentSpriteManager {
     sprite.setActivity(toolName);
     sprite.setBadgeState("active");
 
+    // Cancel any pending idle timer for this agent
+    const existingTimer = this.toolIdleTimers.get(agentId);
+    if (existingTimer) {
+      existingTimer.destroy();
+      this.toolIdleTimers.delete(agentId);
+    }
+
     if (success !== undefined && success !== null) {
-      // Tool completed — show result briefly then clear
+      // Tool completed — show result briefly, then revert to idle after delay
       sprite.setProgress(false);
       sprite.setBadgeState(success ? "active" : "error");
-      this.scene.time.delayedCall(2000, () => {
+      const timer = this.scene.time.delayedCall(TOOL_DONE_DELAY_MS, () => {
+        sprite.playAnimation("idle");
         sprite.setActivity(null);
         sprite.setBadgeState("idle");
+        this.autoStateManager?.onAgentStatusChange(agentId, "idle");
+        this.toolIdleTimers.delete(agentId);
       });
+      this.toolIdleTimers.set(agentId, timer);
     } else {
-      // Tool in progress — show spinner
+      // Tool in progress — play mapped animation and show spinner
+      const anim = this.getToolAnimation(toolName);
+      sprite.playAnimation(anim);
       sprite.setProgress(true);
+      this.autoStateManager?.onAgentStatusChange(agentId, anim === "building" ? "building" : "thinking");
     }
+  }
+
+  /** Map a tool name to the appropriate animation. */
+  private getToolAnimation(toolName: string): string {
+    if (WRITING_TOOLS.has(toolName)) return "building";
+    if (READING_TOOLS.has(toolName)) return "thinking";
+    return "thinking"; // default for unknown tools
   }
 
   private handleManagementShadow(data: Record<string, unknown>): void {
