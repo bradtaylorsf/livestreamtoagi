@@ -787,8 +787,17 @@ async def run_simulation_evals(
     eval_repo = EvalRepo(db)
     engine = EvalEngine(db=db, llm_client=llm, eval_repo=eval_repo)
 
+    # Fetch simulation model_versions for reproducibility tracking
+    from core.repos.simulation_repo import SimulationRepo
+
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.get(sim_id)
+    model_versions = sim.model_versions if sim else {}
+
     # Pre-create the eval run record so we can return its ID immediately
-    eval_run = await eval_repo.create_eval_run(sim_id, body.eval_suite or "full")
+    eval_run = await eval_repo.create_eval_run(
+        sim_id, body.eval_suite or "full", model_versions=model_versions,
+    )
     run_id = eval_run.id
 
     # Run evals in tracked background task so shutdown can wait

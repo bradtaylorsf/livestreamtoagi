@@ -178,6 +178,17 @@ async def test_eval_engine_run_handles_partial_failure():
     sim_id = uuid.uuid4()
     now = datetime(2024, 6, 1)
 
+    # Mock DB fetchrow for SimulationRepo.get() — returns simulation with model_versions
+    db.fetchrow = AsyncMock(return_value={
+        "id": sim_id, "name": "test", "description": None,
+        "config": "{}", "status": "completed", "started_at": now,
+        "ended_at": None, "wall_time_seconds": None,
+        "simulated_duration": None, "total_conversations": 0,
+        "total_turns": 0, "total_tokens": 0, "total_cost": 0,
+        "total_management_flags": 0, "agents_participated": [],
+        "error_log": None, "model_versions": "{}", "created_at": now,
+    })
+
     eval_repo.create_eval_run = AsyncMock(return_value=EvalRun(
         id=run_id, simulation_id=sim_id, eval_suite="full",
         status="running", started_at=now,
@@ -224,6 +235,17 @@ async def test_eval_engine_run_success():
     run_id = uuid.uuid4()
     sim_id = uuid.uuid4()
     now = datetime(2024, 6, 1)
+
+    # Mock DB fetchrow for SimulationRepo.get() — returns simulation with model_versions
+    db.fetchrow = AsyncMock(return_value={
+        "id": sim_id, "name": "test", "description": None,
+        "config": "{}", "status": "completed", "started_at": now,
+        "ended_at": None, "wall_time_seconds": None,
+        "simulated_duration": None, "total_conversations": 0,
+        "total_turns": 0, "total_tokens": 0, "total_cost": 0,
+        "total_management_flags": 0, "agents_participated": [],
+        "error_log": None, "model_versions": "{}", "created_at": now,
+    })
 
     eval_repo.create_eval_run = AsyncMock(return_value=EvalRun(
         id=run_id, simulation_id=sim_id, eval_suite="full",
