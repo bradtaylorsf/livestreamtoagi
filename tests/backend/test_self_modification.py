@@ -242,7 +242,7 @@ class TestViewEvolutionLog:
         assert result["count"] == 2
 
         # Verify repo was called with correct agent_id
-        memory_repo.get_evolution_log.assert_called_once_with(agent_id="rex", limit=10)
+        memory_repo.get_evolution_log.assert_called_once_with(agent_id="rex", limit=10, simulation_id=None)
 
         # Verify entry structure
         entries = result["entries"]
@@ -255,7 +255,7 @@ class TestViewEvolutionLog:
         self, view_tool: ViewEvolutionLogTool, memory_repo: AsyncMock
     ) -> None:
         await view_tool.execute()
-        memory_repo.get_evolution_log.assert_called_once_with(agent_id="rex", limit=10)
+        memory_repo.get_evolution_log.assert_called_once_with(agent_id="rex", limit=10, simulation_id=None)
 
     async def test_empty_log(
         self, view_tool: ViewEvolutionLogTool, memory_repo: AsyncMock

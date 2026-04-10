@@ -170,10 +170,14 @@ class MemoryRepo:
         )
         return [_row_to_recall(r) for r in rows]
 
-    async def increment_recalled_count(self, memory_id: int) -> None:
+    async def increment_recalled_count(
+        self, memory_id: int, simulation_id: _uuid.UUID | None = None
+    ) -> None:
         await self.db.execute(
-            "UPDATE recall_memory SET recalled_count = recalled_count + 1 WHERE id = $1",
+            "UPDATE recall_memory SET recalled_count = recalled_count + 1"
+            f" WHERE id = $1 AND {_sim_filter(2)}",
             memory_id,
+            simulation_id,
         )
 
     # ── Conversation Buffer ─────────────────────────────────
@@ -243,13 +247,14 @@ class MemoryRepo:
         return [_row_to_recall(r) for r in rows]
 
     async def update_importance_score(
-        self, memory_id: int, importance_score: float
+        self, memory_id: int, importance_score: float, simulation_id: _uuid.UUID | None = None
     ) -> None:
         """Update the importance score of a recall memory."""
         await self.db.execute(
-            "UPDATE recall_memory SET importance_score = $1 WHERE id = $2",
+            f"UPDATE recall_memory SET importance_score = $1 WHERE id = $2 AND {_sim_filter(3)}",
             importance_score,
             memory_id,
+            simulation_id,
         )
 
     # ── Journal Entries ────────────────────────────────────────
@@ -270,13 +275,14 @@ class MemoryRepo:
         return JournalEntry(**dict(row))
 
     async def update_journal_entry_image(
-        self, entry_id: int, image_url: str
+        self, entry_id: int, image_url: str, simulation_id: _uuid.UUID | None = None
     ) -> None:
         """Set the image_url on an existing journal entry."""
         await self.db.execute(
-            "UPDATE journal_entries SET image_url = $1 WHERE id = $2",
+            f"UPDATE journal_entries SET image_url = $1 WHERE id = $2 AND {_sim_filter(3)}",
             image_url,
             entry_id,
+            simulation_id,
         )
 
     async def get_journal_entries(
@@ -450,34 +456,38 @@ class MemoryRepo:
         return [SelfModificationProposal(**dict(r)) for r in rows]
 
     async def update_proposal_status(
-        self, proposal_id: int, status: str, reviewed_by: str
+        self, proposal_id: int, status: str, reviewed_by: str,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         await self.db.execute(
-            """UPDATE self_modification_proposals
+            f"""UPDATE self_modification_proposals
                SET status = $1, reviewed_at = NOW(), reviewed_by = $2
-               WHERE id = $3""",
+               WHERE id = $3 AND {_sim_filter(4)}""",
             status,
             reviewed_by,
             proposal_id,
+            simulation_id,
         )
 
     async def get_evolution_log(
-        self, agent_id: str, limit: int = 10
+        self, agent_id: str, limit: int = 10, simulation_id: _uuid.UUID | None = None
     ) -> list[SelfModificationProposal]:
         """Fetch proposals for a specific agent, ordered by most recent first."""
         limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
-            """SELECT * FROM self_modification_proposals
-               WHERE agent_id = $1
+            f"""SELECT * FROM self_modification_proposals
+               WHERE agent_id = $1 AND {_sim_filter(3)}
                ORDER BY created_at DESC
                LIMIT $2""",
             agent_id,
             limit,
+            simulation_id,
         )
         return [SelfModificationProposal(**dict(r)) for r in rows]
 
     async def check_and_auto_approve(
-        self, auto_approval_enabled: bool = False
+        self, auto_approval_enabled: bool = False,
+        simulation_id: _uuid.UUID | None = None,
     ) -> int:
         """Auto-approve proposals older than 4 hours when enabled.
 
@@ -486,12 +496,14 @@ class MemoryRepo:
         if not auto_approval_enabled:
             return 0
         result = await self.db.execute(
-            """UPDATE self_modification_proposals
+            f"""UPDATE self_modification_proposals
                SET status = 'auto_approved',
                    reviewed_at = NOW(),
                    reviewed_by = 'system:auto_approve'
                WHERE status = 'queued_for_review'
-                 AND created_at < NOW() - INTERVAL '4 hours'""",
+                 AND created_at < NOW() - INTERVAL '4 hours'
+                 AND {_sim_filter(1)}""",
+            simulation_id,
         )
         # asyncpg execute returns status string like "UPDATE N"
         try:

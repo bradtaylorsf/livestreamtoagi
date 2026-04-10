@@ -87,34 +87,41 @@ class GoalRepo:
         self,
         goal_id: _uuid.UUID,
         status: str,
+        simulation_id: _uuid.UUID | None = None,
     ) -> bool:
         """Update a goal's status. Returns True if found."""
         result = await self.db.execute(
-            """UPDATE agent_goals
+            f"""UPDATE agent_goals
                SET status = $1,
                    completed_at = CASE WHEN $1 IN ('completed', 'abandoned')
                                        THEN now() ELSE completed_at END
-               WHERE id = $2""",
+               WHERE id = $2 AND {_sim_filter(3)}""",
             status,
             goal_id,
+            simulation_id,
         )
         return "UPDATE 1" in result
 
     async def update_progress(
-        self, goal_id: _uuid.UUID, notes: str
+        self, goal_id: _uuid.UUID, notes: str, simulation_id: _uuid.UUID | None = None
     ) -> bool:
         """Update progress notes for a goal."""
         result = await self.db.execute(
-            "UPDATE agent_goals SET progress_notes = $1 WHERE id = $2",
+            f"UPDATE agent_goals SET progress_notes = $1 WHERE id = $2 AND {_sim_filter(3)}",
             notes,
             goal_id,
+            simulation_id,
         )
         return "UPDATE 1" in result
 
-    async def get_goal(self, goal_id: _uuid.UUID) -> AgentGoal | None:
+    async def get_goal(
+        self, goal_id: _uuid.UUID, simulation_id: _uuid.UUID | None = None
+    ) -> AgentGoal | None:
         """Get a specific goal by ID."""
         row = await self.db.fetchrow(
-            "SELECT * FROM agent_goals WHERE id = $1", goal_id
+            f"SELECT * FROM agent_goals WHERE id = $1 AND {_sim_filter(2)}",
+            goal_id,
+            simulation_id,
         )
         if row is None:
             return None

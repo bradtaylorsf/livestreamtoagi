@@ -559,8 +559,11 @@ async def get_evals_summary() -> list[EvalSummaryItem]:
         return []
     rows = await db.fetch(
         """SELECT DISTINCT ON (category) category, score
-           FROM eval_results
-           ORDER BY category, created_at DESC""",
+           FROM eval_results er
+           JOIN eval_runs e ON e.id = er.eval_run_id
+           WHERE e.simulation_id = $1
+           ORDER BY category, er.created_at DESC""",
+        LIVE_SIMULATION_ID,
     )
     return [
         EvalSummaryItem(
@@ -581,16 +584,19 @@ async def get_evals_history(
         return []
     if category:
         rows = await db.fetch(
-            """SELECT score, created_at FROM eval_results
-               WHERE category = $1
-               ORDER BY created_at DESC LIMIT $2""",
-            category, limit,
+            """SELECT er.score, er.created_at FROM eval_results er
+               JOIN eval_runs e ON e.id = er.eval_run_id
+               WHERE er.category = $1 AND e.simulation_id = $2
+               ORDER BY er.created_at DESC LIMIT $3""",
+            category, LIVE_SIMULATION_ID, limit,
         )
     else:
         rows = await db.fetch(
-            """SELECT score, created_at FROM eval_results
-               ORDER BY created_at DESC LIMIT $1""",
-            limit,
+            """SELECT er.score, er.created_at FROM eval_results er
+               JOIN eval_runs e ON e.id = er.eval_run_id
+               WHERE e.simulation_id = $1
+               ORDER BY er.created_at DESC LIMIT $2""",
+            LIVE_SIMULATION_ID, limit,
         )
     return [
         EvalHistoryItem(
@@ -606,10 +612,14 @@ async def get_eval_categories() -> list[str]:
     db = _get_db()
     if not db:
         return []
-    from core.repos.eval_repo import EvalRepo
-
-    eval_repo = EvalRepo(db)
-    return await eval_repo.get_eval_categories()
+    rows = await db.fetch(
+        """SELECT DISTINCT er.category FROM eval_results er
+           JOIN eval_runs e ON e.id = er.eval_run_id
+           WHERE e.simulation_id = $1
+           ORDER BY er.category""",
+        LIVE_SIMULATION_ID,
+    )
+    return [r["category"] for r in rows]
 
 
 @router.get("/evals/runs")
@@ -623,7 +633,7 @@ async def get_eval_runs(
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    runs = await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
+    runs = await eval_repo.get_eval_runs(LIVE_SIMULATION_ID)
     result = []
     for run in runs:
         results = await eval_repo.get_eval_results(run.id)
@@ -655,23 +665,15 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
     db = _get_db()
     if not db:
         return None
-    rows = await db.fetch(
-        "SELECT * FROM eval_runs ORDER BY started_at DESC LIMIT 1",
-    )
-    if not rows:
-        return None
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    run_row = rows[0]
-    import json as _json
-    mv = run_row.get("model_versions") or {}
-    if isinstance(mv, str):
-        mv = _json.loads(mv)
-    run_id = run_row["id"]
-    results = await eval_repo.get_eval_results(run_id)
+    run = await eval_repo.get_latest_eval_run(LIVE_SIMULATION_ID)
+    if run is None:
+        return None
+    results = await eval_repo.get_eval_results(run.id)
     flat_versions: dict[str, str] = {}
-    for agent_id, models in mv.items():
+    for agent_id, models in (run.model_versions or {}).items():
         if isinstance(models, dict):
             flat_versions[agent_id] = models.get("conversation", "unknown")
         else:
@@ -680,13 +682,12 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
         r.category: float(r.score) if r.score is not None else None
         for r in results
     }
-    or_score = run_row.get("overall_score")
     return PublicEvalRun(
-        id=str(run_row["id"]),
-        simulation_id=str(run_row["simulation_id"]),
-        date=run_row["started_at"].isoformat() if run_row.get("started_at") else "",
-        overall_score=float(or_score) if or_score is not None else None,
-        cost=float(run_row.get("cost", 0)),
+        id=str(run.id),
+        simulation_id=str(run.simulation_id),
+        date=run.started_at.isoformat() if run.started_at else "",
+        overall_score=float(run.overall_score) if run.overall_score is not None else None,
+        cost=float(run.cost),
         model_versions=flat_versions,
         category_scores=category_scores,
     )
@@ -812,12 +813,13 @@ async def submit_challenge(
 
     db = _get_db()
     row = await db.fetchrow(
-        """INSERT INTO challenges (description, submitted_by, source, category, votes)
-           VALUES ($1, $2, 'website', $3, 0)
+        """INSERT INTO challenges (description, submitted_by, source, category, votes, simulation_id)
+           VALUES ($1, $2, 'website', $3, 0, $4)
            RETURNING *""",
         req.description,
         req.submitter_name,
         req.category,
+        LIVE_SIMULATION_ID,
     )
     c = Challenge(**dict(row))
     return _challenge_to_response(c)
@@ -843,8 +845,9 @@ async def upvote_challenge(
     db = _get_db()
     row = await db.fetchrow(
         """UPDATE challenges SET votes = votes + 1
-           WHERE id = $1 RETURNING *""",
+           WHERE id = $1 AND simulation_id = $2 RETURNING *""",
         challenge_id,
+        LIVE_SIMULATION_ID,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Challenge not found")

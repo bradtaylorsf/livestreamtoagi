@@ -241,7 +241,9 @@ class ReflectionManager:
                         break
                 mem_id = int(cleaned_id)
                 score = max(0.0, min(1.0, float(score)))
-                await self._repo.update_importance_score(mem_id, score)
+                await self._repo.update_importance_score(
+                    mem_id, score, simulation_id=self._simulation_id,
+                )
                 importance_updates += 1
             except (ValueError, TypeError):
                 logger.warning("Invalid importance score entry: %s=%s", mem_id_str, score)
@@ -534,7 +536,10 @@ class ReflectionManager:
                     response.content, agent_id, simulation_id=sim_id,
                 )
                 if image_url:
-                    await self._repo.update_journal_entry_image(journal.id, image_url)
+                    await self._repo.update_journal_entry_image(
+                        journal.id, image_url,
+                        simulation_id=self._simulation_id,
+                    )
                     journal.image_url = image_url
             except Exception:
                 logger.exception(

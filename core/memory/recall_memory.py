@@ -88,7 +88,7 @@ class RecallMemoryManager:
 
         # Increment recalled_count for each returned memory
         for memory, _ in top:
-            await self._repo.increment_recalled_count(memory.id)
+            await self._repo.increment_recalled_count(memory.id, simulation_id=simulation_id)
 
         return _format_memories([m for m, _ in top])
 

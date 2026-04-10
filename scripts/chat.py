@@ -701,6 +701,408 @@ def run_coverage_check(
         console.print("\n[dim]Coverage check interrupted.[/dim]")
 
 
+def _sim_list(args: list[str]) -> None:
+    """List past simulations: pnpm chat sim list [--status running|completed|failed]"""
+    import asyncio
+
+    status_filter = None
+    limit = 20
+    i = 0
+    while i < len(args):
+        if args[i] == "--status" and i + 1 < len(args):
+            status_filter = args[i + 1]; i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1]); i += 2
+        else:
+            i += 1
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+
+        svc = await bootstrap_services()
+        try:
+            sim_repo = SimulationRepo(svc.db)
+            sims = await sim_repo.list(status=status_filter, limit=limit)
+            total = await sim_repo.count(status=status_filter)
+
+            if not sims:
+                console.print("[dim]No simulations found.[/dim]")
+                return
+
+            table = Table(show_header=True, border_style="dim", padding=(0, 1))
+            table.add_column("Name", style="bold", width=30)
+            table.add_column("Status", width=12)
+            table.add_column("Agents", width=8)
+            table.add_column("Convos", width=8)
+            table.add_column("Cost", width=10)
+            table.add_column("Started", width=20)
+            table.add_column("ID", style="dim", width=36)
+
+            status_colors = {
+                "running": "green",
+                "completed": "blue",
+                "failed": "red",
+                "cancelled": "yellow",
+            }
+
+            for s in sims:
+                status_color = status_colors.get(s.status, "white")
+                agent_count = len(s.agents_participated) if s.agents_participated else 0
+                started = s.started_at.strftime("%Y-%m-%d %H:%M") if s.started_at else "—"
+                cost = f"${float(s.total_cost):.4f}" if s.total_cost else "$0"
+                table.add_row(
+                    s.name,
+                    f"[{status_color}]{s.status}[/{status_color}]",
+                    str(agent_count),
+                    str(s.total_conversations),
+                    cost,
+                    started,
+                    str(s.id),
+                )
+
+            console.print(f"\n[bold bright_cyan]Simulations[/bold bright_cyan] ({total} total)\n")
+            console.print(table)
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
+def _sim_view(args: list[str]) -> None:
+    """View a specific simulation: pnpm chat sim view <name-or-id>"""
+    import asyncio
+
+    if not args:
+        console.print("[red]Usage: pnpm chat sim view <name-or-id>[/red]")
+        return
+
+    target = args[0]
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+        from core.repos.cost_repo import CostRepo
+        import uuid as uuid_mod
+
+        svc = await bootstrap_services()
+        try:
+            sim_repo = SimulationRepo(svc.db)
+
+            # Try as UUID first, then by name
+            sim = None
+            try:
+                sim = await sim_repo.get(uuid_mod.UUID(target))
+            except ValueError:
+                pass
+            if sim is None:
+                sims = await sim_repo.list(limit=200)
+                for s in sims:
+                    if s.name == target:
+                        sim = s
+                        break
+            if sim is None:
+                console.print(f"[red]Simulation not found: {target}[/red]")
+                return
+
+            # Display
+            console.print(f"\n[bold bright_cyan]Simulation: {sim.name}[/bold bright_cyan]")
+            console.print(f"  [bold]ID:[/bold] {sim.id}")
+            console.print(f"  [bold]Status:[/bold] {sim.status}")
+            console.print(f"  [bold]Started:[/bold] {sim.started_at}")
+            console.print(f"  [bold]Completed:[/bold] {sim.completed_at or '—'}")
+            console.print(f"  [bold]Agents:[/bold] {', '.join(sim.agents_participated or [])}")
+            console.print(f"  [bold]Conversations:[/bold] {sim.total_conversations}")
+            console.print(f"  [bold]Turns:[/bold] {sim.total_turns}")
+            console.print(f"  [bold]Tokens:[/bold] {sim.total_tokens:,}")
+            console.print(f"  [bold]Cost:[/bold] ${float(sim.total_cost):.4f}")
+            console.print(f"  [bold]Artifacts:[/bold] {sim.total_artifacts}")
+            console.print(f"  [bold]Management Flags:[/bold] {sim.total_management_flags}")
+
+            if sim.config:
+                console.print(f"  [bold]Config:[/bold]")
+                for k, v in sim.config.items():
+                    console.print(f"    {k}: {v}")
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
+def _sim_compare(args: list[str]) -> None:
+    """Compare two simulations: pnpm chat sim compare <id-a> <id-b>"""
+    import asyncio
+
+    if len(args) < 2:
+        console.print("[red]Usage: pnpm chat sim compare <id-or-name-a> <id-or-name-b>[/red]")
+        return
+
+    async def _resolve(sim_repo, target: str):
+        import uuid as uuid_mod
+        try:
+            return await sim_repo.get(uuid_mod.UUID(target))
+        except ValueError:
+            pass
+        sims = await sim_repo.list(limit=200)
+        for s in sims:
+            if s.name == target:
+                return s
+        return None
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+
+        svc = await bootstrap_services()
+        try:
+            sim_repo = SimulationRepo(svc.db)
+            sim_a = await _resolve(sim_repo, args[0])
+            sim_b = await _resolve(sim_repo, args[1])
+
+            if not sim_a:
+                console.print(f"[red]Simulation A not found: {args[0]}[/red]"); return
+            if not sim_b:
+                console.print(f"[red]Simulation B not found: {args[1]}[/red]"); return
+
+            table = Table(show_header=True, border_style="dim", padding=(0, 1))
+            table.add_column("Metric", style="bold", width=25)
+            table.add_column(sim_a.name, width=25)
+            table.add_column(sim_b.name, width=25)
+
+            comparisons = [
+                ("Status", sim_a.status, sim_b.status),
+                ("Agents", str(len(sim_a.agents_participated or [])), str(len(sim_b.agents_participated or []))),
+                ("Conversations", str(sim_a.total_conversations), str(sim_b.total_conversations)),
+                ("Turns", str(sim_a.total_turns), str(sim_b.total_turns)),
+                ("Tokens", f"{sim_a.total_tokens:,}", f"{sim_b.total_tokens:,}"),
+                ("Cost", f"${float(sim_a.total_cost):.4f}", f"${float(sim_b.total_cost):.4f}"),
+                ("Artifacts", str(sim_a.total_artifacts), str(sim_b.total_artifacts)),
+                ("Mgmt Flags", str(sim_a.total_management_flags), str(sim_b.total_management_flags)),
+            ]
+            for label, va, vb in comparisons:
+                table.add_row(label, va, vb)
+
+            console.print(f"\n[bold bright_cyan]Simulation Comparison[/bold bright_cyan]\n")
+            console.print(table)
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
+def _sim_delete(args: list[str]) -> None:
+    """Delete a simulation: pnpm chat sim delete <id-or-name>"""
+    import asyncio
+
+    if not args:
+        console.print("[red]Usage: pnpm chat sim delete <id-or-name>[/red]")
+        return
+
+    target = args[0]
+    force = "--force" in args
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+        import uuid as uuid_mod
+
+        svc = await bootstrap_services()
+        try:
+            sim_repo = SimulationRepo(svc.db)
+            sim = None
+            try:
+                sim = await sim_repo.get(uuid_mod.UUID(target))
+            except ValueError:
+                pass
+            if sim is None:
+                sims = await sim_repo.list(limit=200)
+                for s in sims:
+                    if s.name == target:
+                        sim = s
+                        break
+            if sim is None:
+                console.print(f"[red]Simulation not found: {target}[/red]")
+                return
+
+            if sim.is_live if hasattr(sim, "is_live") else False:
+                console.print("[red]Cannot delete the live simulation.[/red]")
+                return
+
+            if not force:
+                try:
+                    confirm = console.input(
+                        f"[bold yellow]Delete simulation '{sim.name}' ({sim.id})? [y/N]: [/bold yellow]"
+                    ).strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    return
+                if confirm != "y":
+                    console.print("[dim]Cancelled.[/dim]")
+                    return
+
+            deleted = await sim_repo.delete(sim.id)
+            if deleted:
+                console.print(f"[green]Deleted simulation: {sim.name}[/green]")
+            else:
+                console.print(f"[red]Failed to delete simulation (may have FK constraints).[/red]")
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
+def _sim_clone(args: list[str]) -> None:
+    """Clone a simulation: pnpm chat sim clone <id-or-name> [--name new-name]"""
+    import asyncio
+
+    if not args:
+        console.print("[red]Usage: pnpm chat sim clone <id-or-name> [--name new-name][/red]")
+        return
+
+    target = args[0]
+    clone_name = None
+    i = 1
+    while i < len(args):
+        if args[i] == "--name" and i + 1 < len(args):
+            clone_name = args[i + 1]; i += 2
+        else:
+            i += 1
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+        from core.simulation.snapshot import SimulationSnapshotExporter, SimulationSnapshotImporter
+        from core.models import SimulationCreate
+        import uuid as uuid_mod
+        import time as _time
+
+        svc = await bootstrap_services()
+        try:
+            sim_repo = SimulationRepo(svc.db)
+            sim = None
+            try:
+                sim = await sim_repo.get(uuid_mod.UUID(target))
+            except ValueError:
+                pass
+            if sim is None:
+                sims = await sim_repo.list(limit=200)
+                for s in sims:
+                    if s.name == target:
+                        sim = s
+                        break
+            if sim is None:
+                console.print(f"[red]Simulation not found: {target}[/red]")
+                return
+
+            console.print(f"[bold bright_cyan]Cloning simulation: {sim.name}[/bold bright_cyan]")
+
+            # Export
+            exporter = SimulationSnapshotExporter(svc.db)
+            console.print("[dim]Exporting state...[/dim]")
+            snapshot_data = await exporter.export(str(sim.id))
+
+            # Create new sim
+            name = clone_name or f"clone-{sim.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
+            new_sim = await sim_repo.create(SimulationCreate(
+                name=name,
+                description=f"Cloned from {sim.name} ({sim.id})",
+                config={"source": "clone", "source_simulation_id": str(sim.id)},
+                agents_participated=list(snapshot_data.get("agents", {}).keys()),
+            ))
+
+            # Import
+            importer = SimulationSnapshotImporter(svc.db)
+            console.print("[dim]Importing state...[/dim]")
+            result = await importer.restore(snapshot_data, str(new_sim.id))
+
+            console.print(f"\n[green]Cloned successfully![/green]")
+            console.print(f"  [bold]New simulation:[/bold] {name}")
+            console.print(f"  [bold]ID:[/bold] {new_sim.id}")
+            console.print(f"  [bold]Agents:[/bold] {len(result.agents_restored)}")
+            console.print(f"  [bold]Core memories:[/bold] {result.core_memories_restored}")
+            console.print(f"  [bold]Recall memories:[/bold] {result.recall_memories_restored}")
+            console.print(f"  [bold]Journal entries:[/bold] {result.journal_entries_restored}")
+            console.print(f"  [bold]Goals:[/bold] {result.goals_restored}")
+            console.print(f"  [bold]Agent states:[/bold] {result.agent_states_restored}")
+            console.print(f"  [bold]Accounts:[/bold] {result.agent_accounts_restored}")
+            console.print(f"  [bold]World chunks:[/bold] {result.world_chunks_restored}")
+            console.print(f"  [bold]Relationships:[/bold] {result.relationships_restored}")
+            if result.warnings:
+                console.print(f"  [yellow]Warnings:[/yellow] {len(result.warnings)}")
+                for w in result.warnings[:5]:
+                    console.print(f"    - {w}")
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
+def _sim_export(args: list[str]) -> None:
+    """Export full simulation snapshot: pnpm chat sim export <id-or-name> [--output file.json]"""
+    import asyncio
+
+    if not args:
+        console.print("[red]Usage: pnpm chat sim export <id-or-name> [--output file.json][/red]")
+        return
+
+    target = args[0]
+    output_path = None
+    i = 1
+    while i < len(args):
+        if args[i] in ("--output", "-o") and i + 1 < len(args):
+            output_path = args[i + 1]; i += 2
+        else:
+            i += 1
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.repos.simulation_repo import SimulationRepo
+        from core.simulation.snapshot import SimulationSnapshotExporter
+        import uuid as uuid_mod
+        import json as _json
+
+        svc = await bootstrap_services()
+        try:
+            sim_repo = SimulationRepo(svc.db)
+            sim = None
+            try:
+                sim = await sim_repo.get(uuid_mod.UUID(target))
+            except ValueError:
+                pass
+            if sim is None:
+                sims = await sim_repo.list(limit=200)
+                for s in sims:
+                    if s.name == target:
+                        sim = s
+                        break
+            if sim is None:
+                console.print(f"[red]Simulation not found: {target}[/red]")
+                return
+
+            console.print(f"[bold bright_cyan]Exporting simulation: {sim.name}[/bold bright_cyan]")
+            exporter = SimulationSnapshotExporter(svc.db)
+            snapshot_data = await exporter.export(str(sim.id))
+
+            out = output_path or f"snapshots/full-{sim.name}.json"
+            from pathlib import Path
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_text(_json.dumps(snapshot_data, indent=2, default=str))
+
+            agent_count = len(snapshot_data.get("agents", {}))
+            chunk_count = len(snapshot_data.get("world_chunks", []))
+            rel_count = len(snapshot_data.get("relationships", []))
+            goal_count = sum(len(g) for g in snapshot_data.get("agent_goals", {}).values())
+
+            console.print(f"\n[green]Exported to {out}[/green]")
+            console.print(f"  [bold]Agents:[/bold] {agent_count}")
+            console.print(f"  [bold]World chunks:[/bold] {chunk_count}")
+            console.print(f"  [bold]Relationships:[/bold] {rel_count}")
+            console.print(f"  [bold]Goals:[/bold] {goal_count}")
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
 def pick_sim_name() -> str | None:
     """Optionally name the simulation."""
     console.print()
@@ -802,6 +1204,27 @@ def main() -> None:
     # ── Quick-launch: pnpm chat sim ... ──
     if args and args[0].lower() == "sim":
         sim_args = args[1:]
+
+        # ── Sub-commands: list, view, compare, delete, clone ──
+        if sim_args and sim_args[0].lower() in ("--list", "list"):
+            _sim_list(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--view", "view"):
+            _sim_view(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--compare", "compare"):
+            _sim_compare(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--delete", "delete"):
+            _sim_delete(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--clone", "clone"):
+            _sim_clone(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--export", "export"):
+            _sim_export(sim_args[1:])
+            return
+
         verbose = "-v" in sim_args or "--verbose" in sim_args
         dry_run = "--dry-run" in sim_args
         world_sim = "--world-sim" in sim_args

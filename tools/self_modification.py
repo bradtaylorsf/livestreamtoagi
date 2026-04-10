@@ -10,6 +10,8 @@ from core.models import SelfModificationProposalCreate
 from .base import BaseTool
 
 if TYPE_CHECKING:
+    import uuid as _uuid
+
     from core.repos.memory_repo import MemoryRepo
 
 logger = logging.getLogger(__name__)
@@ -164,9 +166,13 @@ class ViewEvolutionLogTool(BaseTool):
         },
     }
 
-    def __init__(self, agent_id: str, memory_repo: MemoryRepo) -> None:
+    def __init__(
+        self, agent_id: str, memory_repo: MemoryRepo,
+        simulation_id: _uuid.UUID | None = None,
+    ) -> None:
         self.agent_id = agent_id
         self.memory_repo = memory_repo
+        self.simulation_id = simulation_id
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         limit: int = kwargs.get("limit", 10)
@@ -174,7 +180,7 @@ class ViewEvolutionLogTool(BaseTool):
             limit = 10
 
         proposals = await self.memory_repo.get_evolution_log(
-            agent_id=self.agent_id, limit=limit
+            agent_id=self.agent_id, limit=limit, simulation_id=self.simulation_id
         )
 
         entries = [

@@ -566,6 +566,132 @@ async def get_simulation(sim_id: uuid_mod.UUID) -> Simulation:
     return sim
 
 
+class CloneSimulationRequest(BaseModel):
+    """Request body for cloning a simulation."""
+
+    name: str | None = None
+    agents: list[str] | None = None
+
+
+class CloneSimulationResponse(BaseModel):
+    simulation_id: str
+    name: str
+    source_simulation_id: str
+    restore_result: dict[str, Any] = {}
+
+
+class SnapshotExportResponse(BaseModel):
+    simulation_id: str
+    snapshot_at: str
+    agent_count: int
+    world_chunk_count: int
+    relationship_count: int
+    goal_count: int
+
+
+@router.post("/simulations/{sim_id}/clone", response_model=CloneSimulationResponse)
+async def clone_simulation(
+    sim_id: uuid_mod.UUID, body: CloneSimulationRequest
+) -> CloneSimulationResponse:
+    """Clone a simulation by exporting its full state and importing into a new simulation."""
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+    from core.simulation.snapshot import SimulationSnapshotExporter, SimulationSnapshotImporter
+
+    sim_repo = SimulationRepo(db)
+    source = await sim_repo.get(sim_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source simulation not found")
+
+    # Export full state from source
+    exporter = SimulationSnapshotExporter(db)
+    snapshot_data = await exporter.export(str(sim_id), agents=body.agents)
+
+    # Create new simulation record
+    import time as _time
+    from core.models import SimulationCreate
+
+    clone_name = body.name or f"clone-{source.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
+    new_sim = await sim_repo.create(SimulationCreate(
+        name=clone_name,
+        description=f"Cloned from {source.name} ({sim_id})",
+        config={
+            "source": "clone",
+            "source_simulation_id": str(sim_id),
+            **(source.config or {}),
+        },
+        agents_participated=list(snapshot_data.get("agents", {}).keys()),
+    ))
+
+    # Import state into new simulation
+    importer = SimulationSnapshotImporter(db)
+    restore_result = await importer.restore(
+        snapshot_data, str(new_sim.id), agents=body.agents,
+    )
+
+    return CloneSimulationResponse(
+        simulation_id=str(new_sim.id),
+        name=clone_name,
+        source_simulation_id=str(sim_id),
+        restore_result={
+            "agents_restored": restore_result.agents_restored,
+            "core_memories": restore_result.core_memories_restored,
+            "recall_memories": restore_result.recall_memories_restored,
+            "journal_entries": restore_result.journal_entries_restored,
+            "relationships": restore_result.relationships_restored,
+            "goals": restore_result.goals_restored,
+            "agent_states": restore_result.agent_states_restored,
+            "agent_accounts": restore_result.agent_accounts_restored,
+            "world_chunks": restore_result.world_chunks_restored,
+            "warnings": restore_result.warnings,
+        },
+    )
+
+
+@router.post("/simulations/{sim_id}/snapshot/export")
+async def export_simulation_snapshot(
+    sim_id: uuid_mod.UUID,
+) -> SnapshotExportResponse:
+    """Export a complete simulation snapshot (full state) to JSON."""
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+    from core.simulation.snapshot import SimulationSnapshotExporter
+
+    sim_repo = SimulationRepo(db)
+    source = await sim_repo.get(sim_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    exporter = SimulationSnapshotExporter(db)
+    snapshot_data = await exporter.export(str(sim_id))
+
+    # Save to disk
+    from pathlib import Path
+    import json as _json
+
+    snapshots_dir = Path(__file__).resolve().parent.parent / "snapshots"
+    snapshots_dir.mkdir(exist_ok=True)
+    filename = f"full-{source.name}-{_time_str()}.json"
+    filepath = snapshots_dir / filename
+    filepath.write_text(_json.dumps(snapshot_data, indent=2, default=str))
+
+    return SnapshotExportResponse(
+        simulation_id=str(sim_id),
+        snapshot_at=snapshot_data.get("snapshot_at", ""),
+        agent_count=len(snapshot_data.get("agents", {})),
+        world_chunk_count=len(snapshot_data.get("world_chunks", [])),
+        relationship_count=len(snapshot_data.get("relationships", [])),
+        goal_count=sum(
+            len(goals) for goals in snapshot_data.get("agent_goals", {}).values()
+        ),
+    )
+
+
+def _time_str() -> str:
+    import time
+    return time.strftime("%Y%m%d-%H%M%S")
+
+
 @router.get("/simulations/{sim_id}/timeline", response_model=list[TimelineEvent])
 async def get_simulation_timeline(
     sim_id: uuid_mod.UUID,

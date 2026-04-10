@@ -250,16 +250,18 @@ class CostRepo:
         status: str,
         result: str | None = None,
         actual_cost: float | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> Challenge | None:
         row = await self.db.fetchrow(
             """UPDATE challenges
                SET status = $1, result = $2, actual_cost = $3,
                    completed_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE completed_at END
-               WHERE id = $4
+               WHERE id = $4 AND simulation_id = $5
                RETURNING *""",
             status,
             result,
             actual_cost,
             challenge_id,
+            simulation_id,
         )
         return Challenge(**dict(row)) if row else None

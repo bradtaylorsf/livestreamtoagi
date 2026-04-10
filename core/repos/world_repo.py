@@ -22,6 +22,11 @@ if TYPE_CHECKING:
     from core.database import Database
 
 
+def _sim_filter(param_num: int) -> str:
+    """Return SQL fragment for simulation_id filtering."""
+    return f"simulation_id = ${param_num}"
+
+
 def _row_to_chunk(row: asyncpg.Record) -> WorldChunk:
     """Convert a record row, parsing any JSONB string fields."""
     d = dict(row)
@@ -63,16 +68,11 @@ class WorldRepo:
     async def get_chunk(
         self, chunk_id: int, simulation_id: _uuid.UUID | None = None
     ) -> WorldChunk | None:
-        if simulation_id is not None:
-            row = await self.db.fetchrow(
-                "SELECT * FROM world_chunks WHERE id = $1 AND simulation_id = $2",
-                chunk_id,
-                simulation_id,
-            )
-        else:
-            row = await self.db.fetchrow(
-                "SELECT * FROM world_chunks WHERE id = $1", chunk_id
-            )
+        row = await self.db.fetchrow(
+            f"SELECT * FROM world_chunks WHERE id = $1 AND {_sim_filter(2)}",
+            chunk_id,
+            simulation_id,
+        )
         return _row_to_chunk(row) if row else None
 
     async def get_chunks_in_area(
@@ -83,32 +83,19 @@ class WorldRepo:
         height: int,
         simulation_id: _uuid.UUID | None = None,
     ) -> list[WorldChunk]:
-        if simulation_id is not None:
-            rows = await self.db.fetch(
-                """SELECT * FROM world_chunks
-                   WHERE x_offset < $1::int + $3::int
-                     AND x_offset + world_chunks.width > $1::int
-                     AND y_offset < $2::int + $4::int
-                     AND y_offset + world_chunks.height > $2::int
-                     AND simulation_id = $5""",
-                x,
-                y,
-                width,
-                height,
-                simulation_id,
-            )
-        else:
-            rows = await self.db.fetch(
-                """SELECT * FROM world_chunks
-                   WHERE x_offset < $1::int + $3::int
-                     AND x_offset + world_chunks.width > $1::int
-                     AND y_offset < $2::int + $4::int
-                     AND y_offset + world_chunks.height > $2::int""",
-                x,
-                y,
-                width,
-                height,
-            )
+        rows = await self.db.fetch(
+            f"""SELECT * FROM world_chunks
+               WHERE x_offset < $1::int + $3::int
+                 AND x_offset + world_chunks.width > $1::int
+                 AND y_offset < $2::int + $4::int
+                 AND y_offset + world_chunks.height > $2::int
+                 AND {_sim_filter(5)}""",
+            x,
+            y,
+            width,
+            height,
+            simulation_id,
+        )
         return [_row_to_chunk(r) for r in rows]
 
     # ── World Events ────────────────────────────────────────
@@ -134,41 +121,27 @@ class WorldRepo:
         self, hours: int = 24, simulation_id: _uuid.UUID | None = None
     ) -> list[WorldEvent]:
         """Get events from the last N hours for cooldown and history checks."""
-        if simulation_id is not None:
-            rows = await self.db.fetch(
-                """SELECT * FROM world_events
-                   WHERE created_at > NOW() - make_interval(hours => $1)
-                     AND simulation_id = $2
-                   ORDER BY created_at DESC""",
-                hours,
-                simulation_id,
-            )
-        else:
-            rows = await self.db.fetch(
-                """SELECT * FROM world_events
-                   WHERE created_at > NOW() - make_interval(hours => $1)
-                   ORDER BY created_at DESC""",
-                hours,
-            )
+        rows = await self.db.fetch(
+            f"""SELECT * FROM world_events
+               WHERE created_at > NOW() - make_interval(hours => $1)
+                 AND {_sim_filter(2)}
+               ORDER BY created_at DESC""",
+            hours,
+            simulation_id,
+        )
         return [WorldEvent(**dict(r)) for r in rows]
 
     async def get_event_count_since(
         self, since: str, simulation_id: _uuid.UUID | None = None
     ) -> int:
         """Count events since a given timestamp (ISO format or interval)."""
-        if simulation_id is not None:
-            count = await self.db.fetchval(
-                """SELECT COUNT(*) FROM world_events
-                   WHERE created_at > $1::timestamptz
-                     AND simulation_id = $2""",
-                since,
-                simulation_id,
-            )
-        else:
-            count = await self.db.fetchval(
-                "SELECT COUNT(*) FROM world_events WHERE created_at > $1::timestamptz",
-                since,
-            )
+        count = await self.db.fetchval(
+            f"""SELECT COUNT(*) FROM world_events
+               WHERE created_at > $1::timestamptz
+                 AND {_sim_filter(2)}""",
+            since,
+            simulation_id,
+        )
         return count or 0
 
     # ── Expansion Proposals ─────────────────────────────────
@@ -192,12 +165,12 @@ class WorldRepo:
         self, proposal_id: int, vote_for: bool, simulation_id: _uuid.UUID | None = None
     ) -> ExpansionProposal | None:
         if vote_for:
-            sql = """UPDATE expansion_proposals
+            sql = f"""UPDATE expansion_proposals
                      SET votes_for = votes_for + 1
-                     WHERE id = $1 RETURNING *"""
+                     WHERE id = $1 AND {_sim_filter(2)} RETURNING *"""
         else:
-            sql = """UPDATE expansion_proposals
+            sql = f"""UPDATE expansion_proposals
                      SET votes_against = votes_against + 1
-                     WHERE id = $1 RETURNING *"""
-        row = await self.db.fetchrow(sql, proposal_id)
+                     WHERE id = $1 AND {_sim_filter(2)} RETURNING *"""
+        row = await self.db.fetchrow(sql, proposal_id, simulation_id)
         return ExpansionProposal(**dict(row)) if row else None

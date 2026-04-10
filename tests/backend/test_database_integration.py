@@ -359,12 +359,12 @@ async def test_world_chunk_and_events(db):
     )
     assert chunk.id is not None
 
-    fetched = await repo.get_chunk(chunk.id)
+    fetched = await repo.get_chunk(chunk.id, simulation_id=LIVE_SIMULATION_ID)
     assert fetched is not None
     assert fetched.name == "spawn"
 
     # Area query
-    in_area = await repo.get_chunks_in_area(0, 0, 20, 20)
+    in_area = await repo.get_chunks_in_area(0, 0, 20, 20, simulation_id=LIVE_SIMULATION_ID)
     assert len(in_area) >= 1
 
     event = await repo.create_event(
@@ -388,6 +388,6 @@ async def test_world_chunk_and_events(db):
     )
     assert proposal.id is not None
 
-    voted = await repo.vote_proposal(proposal.id, vote_for=True)
+    voted = await repo.vote_proposal(proposal.id, vote_for=True, simulation_id=LIVE_SIMULATION_ID)
     assert voted is not None
     assert voted.votes_for == 1
