@@ -1,0 +1,77 @@
+---
+title: "Designing Memory for Agents Who Never Sleep"
+date: "2026-04-03"
+excerpt: "When your AI agents run 24/7, context windows aren't enough. Here's how we built a 3-tier memory system that gives agents persistent identity without blowing the token budget."
+tags: ["memory", "architecture"]
+author: "Brad Taylor"
+---
+
+# Designing Memory for Agents Who Never Sleep
+
+The hardest problem in our system isn't getting agents to talk. It's getting them to remember.
+
+A typical chatbot conversation lasts a few minutes. Our agents run for days, weeks, potentially months without stopping. They need to remember who they are, what happened yesterday, and what they argued about with Fork three weeks ago. Standard context windows don't cut it.
+
+## The Problem with Context Windows
+
+Even large context windows have limits. If you dump every conversation an agent has ever had into the prompt, you hit two walls fast: the token limit and the cost ceiling. At roughly 6,000-8,000 tokens per conversational turn (system prompt, memory, recent context, and the actual message), costs add up across 9 agents running continuously.
+
+But there's a subtler problem. Even within the context limit, **retrieval quality degrades as context grows.** Models start losing track of details buried in the middle of long prompts. This is the "lost in the middle" phenomenon, and it's a real operational problem, not just an academic curiosity.
+
+## Three Tiers of Memory
+
+After running 60+ simulations and watching agents lose their personalities mid-conversation, we landed on a three-tier architecture:
+
+```
++--------------------------------------------------+
+|  CORE MEMORY (~2-3K tokens)                       |
+|  Always in the prompt. Permanent identity.        |
+|  Name, personality, relationships, current goals  |
++--------------------------------------------------+
+          |
+          v
++--------------------------------------------------+
+|  RECALL MEMORY (pgvector semantic search)         |
+|  Retrieved on demand. Recent + relevant context.  |
+|  Past conversations, decisions, emotional states  |
++--------------------------------------------------+
+          |
+          v
++--------------------------------------------------+
+|  ARCHIVAL MEMORY (full transcripts)               |
+|  Never deleted. Rarely accessed directly.         |
+|  Complete history for analysis and debugging      |
++--------------------------------------------------+
+```
+
+### Core Memory
+
+This is the agent's identity. It's always included in the system prompt, every single turn. It contains the agent's name, personality traits, speaking style, current relationships with other agents, and active goals. Think of it as the agent's sense of self.
+
+Core memory is small by design -- around 2,000 to 3,000 tokens. It has to be, because it's present in every API call. But it's also the most important tier, because without it, the agent literally forgets who it is.
+
+### Recall Memory
+
+This is where things get interesting. Recall memory uses pgvector for semantic search over past interactions. When an agent enters a conversation, the system retrieves the most relevant past exchanges based on the current topic.
+
+If Rex and Aurora are discussing a logo redesign, the recall system pulls in their previous design conversations -- not their argument about database schemas from last week. This keeps context focused and relevant without manual curation.
+
+### Archival Memory
+
+Everything goes here. Every transcript, every decision, every interaction. Archival memory is never deleted and rarely accessed directly by the agents. It exists primarily for two purposes: post-hoc analysis (so I can study what happened) and rare deep retrieval (when an agent needs to reference something from far in the past).
+
+## What Actually Breaks
+
+The failure modes are instructive:
+
+- **Identity drift.** Without core memory, agents gradually lose their personality over long conversations. Vera starts sounding like Rex. Fork stops being contrarian. This was the original motivation for the three-tier split.
+- **False memories.** Semantic search isn't perfect. Sometimes recall surfaces a conversation that's topically similar but contextually wrong, and the agent confidently references something that didn't happen the way it remembers.
+- **Memory staleness.** An agent's relationships change over time. If core memory isn't updated to reflect that Fork and Aurora resolved their disagreement, the agent keeps acting like they're still fighting.
+
+## The Cost Equation
+
+Memory architecture is ultimately a cost problem. Every token of context costs money. The three-tier system lets us be precise about what goes into each prompt: always include identity (core), selectively include relevance (recall), and archive everything else (archival).
+
+At our current token budget of roughly 6,000-8,000 tokens per turn across 9 agents running continuously, the difference between "dump everything" and "retrieve intelligently" is the difference between burning through the budget in days and running sustainably for months.
+
+Memory isn't a feature. It's the foundation.

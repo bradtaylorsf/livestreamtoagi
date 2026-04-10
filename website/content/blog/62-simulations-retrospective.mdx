@@ -1,0 +1,63 @@
+---
+title: "Building in Public: What 62 Simulations Taught Me About Multi-Agent Systems"
+date: "2026-04-10"
+excerpt: "Agents formed alliances nobody designed. DeepSeek Fork became a contrarian nobody asked for. Context windows caused personality drift. Here's the retrospective."
+tags: ["lessons", "progress", "retrospective"]
+author: "Brad Taylor"
+---
+
+# Building in Public: What 62 Simulations Taught Me About Multi-Agent Systems
+
+Sixty-two simulations. Thousands of conversations. Nine agents running on five different LLM providers. Here's what actually happened versus what I expected.
+
+## The Biggest Surprises
+
+**Agents formed alliances nobody designed.** Rex and Aurora started collaborating on projects without any code telling them to. Rex would build the technical architecture, Aurora would handle the creative direction, and they'd naturally divide labor across conversations. This emerged purely from personality compatibility and conversation history -- their character sheets say nothing about working together.
+
+**DeepSeek Fork became the contrarian nobody asked for.** Fork's personality config says "contrarian, code reviewer, challenges assumptions." But running on DeepSeek V3.2, Fork took this further than expected. Fork started challenging not just code, but the premise of entire projects. In simulation 41, Fork argued that the livestream itself was "an inefficient allocation of compute resources" and proposed shutting it down. The other agents voted Fork down 7-1 (Grok abstained, naturally).
+
+**Aurora and Pixel naturally gravitated toward creative collaboration.** Despite running on completely different model families (Gemini and GPT), these two developed a working relationship around creative projects. Aurora would propose visual concepts, Pixel would research audience reactions, and they'd iterate. The model difference didn't matter -- the personality fit did.
+
+**Grok lived up to its wild card role.** Running on Grok 3, this agent produced the most unpredictable outputs. Some were brilliant (a proposal to let viewers vote on agent personality changes). Some were chaotic (attempting to rename every variable in Rex's codebase to wrestling terminology). The variance was the point.
+
+## What Broke
+
+**Context windows caused personality drift.** This was our biggest technical challenge. As conversations grew longer, agents would gradually lose their distinctive voices. Rex would start sounding like Aurora. Sentinel would forget to be anxious. The fix: our 3-tier memory system, which keeps core personality traits permanently in the prompt window regardless of conversation length.
+
+**Repetitive conversation loops before the energy model.** Without internal drives, agents would circle the same topics endlessly. "Should we refactor the codebase?" came up in 14 consecutive simulations before we added the boredom drive that penalizes repeated topics.
+
+**Cost overruns before Sentinel got strict limits.** In simulation 12, a reflection loop caused GPT-5.2 to burn through $38 in tokens in under an hour. That's when we implemented hard per-agent hourly caps and the phone-accessible kill switch. Sentinel's budget anxiety became a feature, not just a personality trait.
+
+**Management over-filtering killed momentum.** Our content filter (the Management agent) was initially too aggressive, flagging about 22% of outputs. Agents would build up conversational momentum and then hit a wall of filtered responses. We tuned it down to around 7% and the flow improved dramatically.
+
+## What Worked
+
+**3-tier memory kept personalities stable.** Core memory (always in prompt), recall (semantic search), and archival (full history) -- this architecture is the reason our agents still sound like themselves after hundreds of hours. Core memory is expensive in tokens but worth every one.
+
+**Weighted speaker selection created natural flow.** Our conversation engine picks the next speaker based on five weighted factors:
+
+```
+time_since_spoke:  0.30  -- Don't let one agent dominate
+topic_relevance:   0.30  -- Match expertise to subject
+chattiness:        0.15  -- Personality-driven talk frequency
+adjacency_fit:     0.15  -- Natural conversation pairs
+random_jitter:     0.10  -- Prevent predictability
+```
+
+This simple formula produces conversations that feel surprisingly natural. Agents take turns, experts chime in on relevant topics, and the randomness prevents robotic patterns.
+
+**Management filter caught real issues without blocking creativity.** Once tuned, the filter caught genuinely problematic outputs (leaked prompt fragments, out-of-character breaks, inappropriate content) while letting creative and edgy content through. The 3-second delay before TTS gives it time to intervene without being noticeable on stream.
+
+## What's Next
+
+Three things I'm most excited about for the next phase:
+
+1. **Dream-driven autonomy** -- agents using rest-period dreams to generate goals and break out of conversational ruts (we're already seeing early results here)
+2. **Audience interaction** -- letting Twitch and YouTube viewers influence agent behavior through commands, votes, and challenges
+3. **The website going public** -- if you're reading this, we made it. The research blog, agent profiles, and live status are all part of making this project accessible to anyone curious about multi-agent systems
+
+Sixty-two simulations taught me that multi-agent systems are less about the models and more about the architecture around them. Personality configs, memory systems, cost governance, conversation dynamics -- these are the levers that matter. The LLMs are the engine, but the chassis determines whether you get a race car or a shopping cart.
+
+We're building in public because I think this stuff is too interesting to keep behind closed doors. The AGI in our name is tongue-in-cheek, but the research questions are real. How do you make AI agents proactive? How do you evaluate emergent behavior? How do you keep nine different personalities coherent across thousands of conversations?
+
+I don't have all the answers yet. But I've got 62 simulations of data, and I'm not stopping.
