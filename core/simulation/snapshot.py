@@ -138,7 +138,11 @@ class SimulationSnapshotExporter:
         simulation_id: str,
         agents: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Export all state for a simulation."""
+        """Export all state for a simulation.
+
+        Uses REPEATABLE READ isolation to ensure a consistent snapshot
+        even if the simulation is actively running during export.
+        """
         sim_uuid = uuid_mod.UUID(simulation_id)
         snapshot = SimulationSnapshot(
             source_simulation_id=simulation_id,
@@ -150,12 +154,36 @@ class SimulationSnapshotExporter:
         if agents:
             all_agent_ids = [a for a in all_agent_ids if a in agents]
 
+        # Use REPEATABLE READ isolation for consistent snapshot reads.
+        # This ensures all SELECT queries see a single consistent point-in-time,
+        # even if the simulation is actively writing data during export.
+        async with self._db.acquire() as conn:
+            await conn.execute(
+                "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+            )
+            try:
+                await self._export_state(conn, sim_uuid, all_agent_ids, snapshot)
+            finally:
+                await conn.execute("COMMIT")
+
+        return snapshot.model_dump()
+
+    async def _export_state(
+        self,
+        conn: Any,
+        sim_uuid: uuid_mod.UUID,
+        all_agent_ids: list[str],
+        snapshot: SimulationSnapshot,
+    ) -> None:
+        """Export all state tables using the provided connection for consistency."""
+        agent_id_set = set(all_agent_ids)
+
         # Export memories per agent
         for agent_id in all_agent_ids:
             agent_snap = AgentMemorySnapshot()
 
             # Core memory
-            row = await self._db.fetchrow(
+            row = await conn.fetchrow(
                 "SELECT content FROM core_memory WHERE agent_id = $1 AND simulation_id = $2",
                 agent_id, sim_uuid,
             )
@@ -163,8 +191,9 @@ class SimulationSnapshotExporter:
                 agent_snap.core_memory = row["content"]
 
             # Recall memories
-            rows = await self._db.fetch(
-                """SELECT summary, importance_score, event_type, participants, embedding
+            rows = await conn.fetch(
+                """SELECT summary, importance_score, event_type, participants,
+                          embedding, timestamp, recalled_count
                    FROM recall_memory WHERE agent_id = $1 AND simulation_id = $2
                    ORDER BY timestamp DESC LIMIT 500""",
                 agent_id, sim_uuid,
@@ -179,10 +208,12 @@ class SimulationSnapshotExporter:
                     "event_type": r["event_type"],
                     "participants": r["participants"],
                     "embedding": emb,
+                    "timestamp": r["timestamp"].isoformat() if r["timestamp"] else None,
+                    "recalled_count": r["recalled_count"] or 0,
                 })
 
             # Journal entries
-            rows = await self._db.fetch(
+            rows = await conn.fetch(
                 """SELECT reflection_type, content, token_count
                    FROM journal_entries WHERE agent_id = $1 AND simulation_id = $2
                    ORDER BY created_at DESC LIMIT 500""",
@@ -198,14 +229,14 @@ class SimulationSnapshotExporter:
             snapshot.agents[agent_id] = agent_snap
 
         # Export agent internal state
-        rows = await self._db.fetch(
+        rows = await conn.fetch(
             "SELECT * FROM agent_internal_state WHERE simulation_id = $1",
             sim_uuid,
         )
         for r in rows:
             d = dict(r)
             aid = d["agent_id"]
-            if agents and aid not in agents:
+            if aid not in agent_id_set:
                 continue
             snapshot.agent_states[aid] = AgentStateSnapshot(
                 energy=float(d.get("energy", 0.7)),
@@ -218,14 +249,14 @@ class SimulationSnapshotExporter:
             )
 
         # Export agent accounts
-        rows = await self._db.fetch(
+        rows = await conn.fetch(
             "SELECT * FROM agent_accounts WHERE simulation_id = $1",
             sim_uuid,
         )
         for r in rows:
             d = dict(r)
             aid = d["agent_id"]
-            if agents and aid not in agents:
+            if aid not in agent_id_set:
                 continue
             snapshot.agent_accounts[aid] = AgentAccountSnapshot(
                 balance=float(d.get("balance", 0)),
@@ -235,7 +266,7 @@ class SimulationSnapshotExporter:
             )
 
         # Export agent goals
-        rows = await self._db.fetch(
+        rows = await conn.fetch(
             """SELECT agent_id, goal, priority, status, source, category, progress_notes
                FROM agent_goals WHERE simulation_id = $1
                ORDER BY agent_id, priority""",
@@ -243,7 +274,7 @@ class SimulationSnapshotExporter:
         )
         for r in rows:
             aid = r["agent_id"]
-            if agents and aid not in agents:
+            if aid not in agent_id_set:
                 continue
             if aid not in snapshot.agent_goals:
                 snapshot.agent_goals[aid] = []
@@ -257,7 +288,7 @@ class SimulationSnapshotExporter:
             ))
 
         # Export world chunks
-        rows = await self._db.fetch(
+        rows = await conn.fetch(
             "SELECT * FROM world_chunks WHERE simulation_id = $1 ORDER BY id",
             sim_uuid,
         )
@@ -280,7 +311,7 @@ class SimulationSnapshotExporter:
             ))
 
         # Export relationships
-        rows = await self._db.fetch(
+        rows = await conn.fetch(
             """SELECT agent_id, target_agent_id, sentiment_score, trust_score,
                       interaction_count, relationship_summary
                FROM agent_relationships WHERE simulation_id = $1""",
@@ -289,7 +320,7 @@ class SimulationSnapshotExporter:
         for r in rows:
             agent = r["agent_id"]
             target = r["target_agent_id"]
-            if agents and (agent not in agents or target not in agents):
+            if agent not in agent_id_set or target not in agent_id_set:
                 continue
             snapshot.relationships.append(RelationshipSnapshot(
                 agent=agent,
@@ -300,9 +331,14 @@ class SimulationSnapshotExporter:
                 summary=r["relationship_summary"],
             ))
 
-        return snapshot.model_dump()
-
     async def _get_agent_ids(self, sim_uuid: uuid_mod.UUID) -> list[str]:
+        """Get agent IDs for a simulation.
+
+        Falls back to querying core_memory if agents_participated is empty.
+        NOTE: The fallback excludes agents that never wrote core_memory
+        (e.g. Management, Alpha in some scenarios). For complete agent lists,
+        ensure agents_participated is set on the simulation record.
+        """
         row = await self._db.fetchrow(
             "SELECT agents_participated FROM simulations WHERE id = $1",
             sim_uuid,
@@ -359,6 +395,9 @@ class SimulationSnapshotImporter:
             # Core memory
             if agent_snap.core_memory:
                 try:
+                    # Rough heuristic (~1.3 tokens per word). Intentionally approximate
+                    # to avoid importing TokenCounter; restored memories may have slightly
+                    # different token counts than the original.
                     token_count = int(len(agent_snap.core_memory.split()) * 1.3)
                     await self._db.execute(
                         """INSERT INTO core_memory
@@ -382,14 +421,20 @@ class SimulationSnapshotImporter:
                         result.warnings.append(f"Skipping recall for {agent_id}: no embedding")
                         continue
                     emb_str = "[" + ",".join(f"{v:.10f}" for v in embedding) + "]"
+                    # Preserve original timestamp if available
+                    ts = None
+                    if mem.get("timestamp"):
+                        ts = datetime.fromisoformat(mem["timestamp"])
                     await self._db.execute(
                         """INSERT INTO recall_memory
                            (agent_id, summary, embedding, event_type, participants,
-                            importance_score, simulation_id)
-                           VALUES ($1, $2, $3::vector, $4, $5, $6, $7)""",
+                            importance_score, simulation_id, timestamp, recalled_count)
+                           VALUES ($1, $2, $3::vector, $4, $5, $6, $7,
+                                   COALESCE($8, NOW()), $9)""",
                         agent_id, mem["summary"], emb_str,
                         mem.get("event_type"), mem.get("participants"),
                         mem.get("importance_score", 0.5), sim_uuid,
+                        ts, mem.get("recalled_count", 0),
                     )
                     result.recall_memories_restored += 1
                 except Exception as exc:
@@ -518,8 +563,13 @@ class SimulationSnapshotImporter:
         self, sim_uuid: uuid_mod.UUID, agent_ids: list[str]
     ) -> None:
         """Clear existing state for agents in the target simulation."""
+        # Tables with agent_id + simulation_id scope
+        agent_tables = (
+            "recall_memory", "journal_entries", "agent_goals",
+            "core_memory", "agent_internal_state", "agent_accounts",
+        )
         for agent_id in agent_ids:
-            for table in ("recall_memory", "journal_entries", "agent_goals"):
+            for table in agent_tables:
                 try:
                     await self._db.execute(
                         f"DELETE FROM {table} WHERE agent_id = $1 AND simulation_id = $2",  # noqa: S608
@@ -527,6 +577,14 @@ class SimulationSnapshotImporter:
                     )
                 except Exception:
                     logger.warning("Failed to clear %s for %s", table, agent_id, exc_info=True)
+        # Clear agent relationships (uses agent_id, not just simulation_id)
+        try:
+            await self._db.execute(
+                "DELETE FROM agent_relationships WHERE simulation_id = $1",
+                sim_uuid,
+            )
+        except Exception:
+            logger.warning("Failed to clear agent_relationships", exc_info=True)
         # Clear world chunks for this simulation
         try:
             await self._db.execute(

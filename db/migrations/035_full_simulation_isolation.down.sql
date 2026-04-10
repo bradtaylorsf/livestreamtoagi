@@ -1,5 +1,12 @@
 -- Rollback migration 035: Undo full simulation isolation.
 -- Restores nullable simulation_id, removes is_live, drops new columns.
+--
+-- NOTE: After rollback, rows backfilled with the live simulation UUID
+-- (00000000-0000-0000-0000-000000000001) retain that value instead of NULL.
+-- Application code using WHERE simulation_id IS NULL for live data will need
+-- manual adjustment. This is an acceptable limitation for dev/test environments.
+
+BEGIN;
 
 -- ── 1. Restore partial indexes from migration 034 ─────────────
 
@@ -78,3 +85,5 @@ DROP INDEX IF EXISTS idx_energy_change_simulation;
 DELETE FROM simulations WHERE id = '00000000-0000-0000-0000-000000000001';
 DROP INDEX IF EXISTS uq_simulations_live;
 ALTER TABLE simulations DROP COLUMN IF EXISTS is_live;
+
+COMMIT;

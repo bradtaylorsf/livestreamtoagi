@@ -1,5 +1,7 @@
 -- Rollback migration 036: Restore nullable simulation_id on remaining tables.
 
+BEGIN;
+
 -- Drop full indexes and restore partial indexes
 DROP INDEX IF EXISTS idx_phase_assertions_simulation;
 CREATE INDEX idx_phase_assertions_simulation ON phase_assertions(simulation_id) WHERE simulation_id IS NOT NULL;
@@ -33,3 +35,5 @@ ALTER TABLE alliance_proposals ALTER COLUMN simulation_id DROP NOT NULL;
 
 -- Drop simulation_id from alliance_members (added in 036)
 ALTER TABLE alliance_members DROP COLUMN IF EXISTS simulation_id;
+
+COMMIT;

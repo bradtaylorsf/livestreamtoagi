@@ -91,6 +91,15 @@ class RedisClient:
     ) -> tuple[int, list[str]]:
         return await self.client.scan(cursor, match=match, count=count)
 
+    async def hset(self, key: str, field: str, value: Any) -> int:
+        return await self.client.hset(key, field, value)
+
+    async def hget(self, key: str, field: str) -> str | None:
+        return await self.client.hget(key, field)
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return await self.client.hgetall(key)
+
     async def publish(self, channel: str, message: str) -> int:
         return await self.client.publish(channel, message)
 

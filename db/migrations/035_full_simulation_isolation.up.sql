@@ -6,6 +6,8 @@
 -- 4. Backfill existing NULL simulation_id rows to the live simulation
 -- 5. Add NOT NULL constraints and clean up COALESCE indexes from migration 034
 
+BEGIN;
+
 -- Well-known UUID for the live simulation
 -- Referenced in code as core.constants.LIVE_SIMULATION_ID
 DO $$ BEGIN RAISE NOTICE 'Live simulation UUID: 00000000-0000-0000-0000-000000000001'; END $$;
@@ -207,3 +209,5 @@ CREATE INDEX idx_journal_simulation ON journal_entries(simulation_id);
 
 DROP INDEX IF EXISTS idx_goals_simulation;
 CREATE INDEX idx_goals_simulation ON agent_goals(simulation_id);
+
+COMMIT;

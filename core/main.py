@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
 
             # Health check: verify all agents have core memory
             for agent in svc.agent_registry.get_all_agents():
-                mem = await svc.core_memory.get_core_memory(agent.id)
+                mem = await svc.core_memory.get_core_memory(agent.id, simulation_id=LIVE_SIMULATION_ID)
                 if mem is None:
                     logger.warning("Agent %s still missing core memory after init", agent.id)
 

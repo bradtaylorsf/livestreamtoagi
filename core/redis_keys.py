@@ -78,13 +78,13 @@ class ScopedRedis:
     # ── Hash operations ────────────────────────────────────────
 
     async def hset(self, key: str, field: str, value: Any) -> int:
-        return await self._redis.client.hset(self._key(key), field, value)
+        return await self._redis.hset(self._key(key), field, value)
 
     async def hget(self, key: str, field: str) -> str | None:
-        return await self._redis.client.hget(self._key(key), field)
+        return await self._redis.hget(self._key(key), field)
 
     async def hgetall(self, key: str) -> dict[str, str]:
-        return await self._redis.client.hgetall(self._key(key))
+        return await self._redis.hgetall(self._key(key))
 
     # ── Scan (prefixes the match pattern) ──────────────────────
 

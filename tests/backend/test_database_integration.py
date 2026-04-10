@@ -62,10 +62,15 @@ async def db():
             DELETE FROM interrupt_log;
             DELETE FROM conversation_selection_log;
             DELETE FROM conversation_buffer;
+            DELETE FROM journal_entries;
             DELETE FROM recall_memory;
             DELETE FROM core_memory_history;
             DELETE FROM core_memory;
             DELETE FROM expansion_proposals;
+            DELETE FROM agent_goals;
+            DELETE FROM agent_relationships;
+            DELETE FROM agent_accounts;
+            DELETE FROM agent_internal_state;
             DELETE FROM cost_events;
             DELETE FROM revenue_events;
             DELETE FROM challenges;

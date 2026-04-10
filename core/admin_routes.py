@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from core.constants import LIVE_SIMULATION_ID
 from core.models import (
     AgentDetail,
     AgentSummary,
@@ -192,7 +193,7 @@ async def list_agents() -> list[AgentSummary]:
     agents = registry.get_all_agents()
     result = []
     for a in agents:
-        costs = await cost_repo.get_costs_by_agent(a.id)
+        costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
         total = sum(c.amount for c in costs if c.amount) if costs else 0
         result.append(_agent_summary_from_config(
             a, total_cost=total, message_count=len(costs) if costs else 0,
@@ -211,7 +212,7 @@ async def get_agent(agent_id: str) -> AgentDetail:
     db = _get_db()
     from core.repos.cost_repo import CostRepo
     cost_repo = CostRepo(db)
-    costs = await cost_repo.get_costs_by_agent(agent_id)
+    costs = await cost_repo.get_costs_by_agent(agent_id, simulation_id=LIVE_SIMULATION_ID)
     total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
 
     summary = _agent_summary_from_config(
@@ -235,7 +236,7 @@ async def get_agent_system_prompt(agent_id: str) -> SystemPromptResponse:
     db = _get_db()
     from core.repos.memory_repo import MemoryRepo
     memory_repo = MemoryRepo(db)
-    core_mem = await memory_repo.get_core_memory(agent_id)
+    core_mem = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
 
     raw_layers = {
         "Infrastructure": INFRASTRUCTURE_PROMPT,
@@ -269,8 +270,8 @@ async def get_agent_core_memory(agent_id: str) -> CoreMemoryResponse:
     from core.repos.memory_repo import MemoryRepo
     memory_repo = MemoryRepo(db)
 
-    current = await memory_repo.get_core_memory(agent_id)
-    history = await memory_repo.get_core_memory_history(agent_id)
+    current = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
+    history = await memory_repo.get_core_memory_history(agent_id, simulation_id=LIVE_SIMULATION_ID)
 
     version_entries = [
         CoreMemoryVersionEntry(
@@ -671,7 +672,9 @@ async def export_simulation_snapshot(
 
     snapshots_dir = Path(__file__).resolve().parent.parent / "snapshots"
     snapshots_dir.mkdir(exist_ok=True)
-    filename = f"full-{source.name}-{_time_str()}.json"
+    import re
+    safe_name = re.sub(r'[^\w\-]', '_', source.name)
+    filename = f"full-{safe_name}-{_time_str()}.json"
     filepath = snapshots_dir / filename
     filepath.write_text(_json.dumps(snapshot_data, indent=2, default=str))
 
@@ -1144,7 +1147,12 @@ async def get_snapshot(sim_id: uuid_mod.UUID, filename: str) -> dict[str, Any]:
 
 @router.post("/simulations/{sim_id}/snapshots")
 async def create_snapshot(sim_id: uuid_mod.UUID) -> dict[str, Any]:
-    """Export a new memory snapshot for this simulation."""
+    """Export a new memory snapshot for this simulation.
+
+    DEPRECATED: Use POST /simulations/{sim_id}/snapshot/export instead,
+    which captures full simulation state (memories, goals, world, accounts,
+    agent states, relationships) rather than memories and relationships only.
+    """
     import json
     from pathlib import Path
     from core.repos.memory_repo import MemoryRepo
@@ -1193,16 +1201,16 @@ async def get_current_memory_state(sim_id: uuid_mod.UUID) -> dict[str, Any]:
 
     for agent_id in agents:
         agent_data: dict[str, Any] = {"core_memory": "", "recall_count": 0, "journal_count": 0}
-        core = await memory_repo.get_core_memory(agent_id)
+        core = await memory_repo.get_core_memory(agent_id, simulation_id=sim_id)
         if core:
             agent_data["core_memory"] = core.content
 
         recall, total_recall = await memory_repo.get_recall_memories_paginated(
-            agent_id, limit=0
+            agent_id, limit=0, simulation_id=sim_id,
         )
         agent_data["recall_count"] = total_recall
 
-        entries, total_journal = await memory_repo.get_journal_entries(agent_id, limit=0)
+        entries, total_journal = await memory_repo.get_journal_entries(agent_id, limit=0, simulation_id=sim_id)
         agent_data["journal_count"] = total_journal
 
         result["agents"][agent_id] = agent_data

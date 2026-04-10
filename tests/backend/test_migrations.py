@@ -46,6 +46,19 @@ ALL_TABLES = [
     "eval_runs",
     "eval_results",
     "agent_internal_state",
+    "agent_accounts",
+    "agent_goals",
+    "agent_relationships",
+    "journal_entries",
+    "self_modification_proposals",
+    "alliances",
+    "alliance_members",
+    "alliance_proposals",
+    "phase_assertions",
+    "evolution_cycles",
+    "character_applications",
+    "character_departures",
+    "agent_transactions",
 ]
 
 
@@ -449,6 +462,131 @@ async def test_unique_constraint_on_core_memory(conn):
             "VALUES ('test_uc', 'memory2', 200, $1)",
             _LIVE_SIM_ID,
         )
+
+
+@pytest.mark.integration
+async def test_cross_simulation_isolation(conn):
+    """The same agent can exist in two simulations simultaneously without data leakage.
+
+    Verifies the core correctness property of simulation-scoped memory:
+    - core_memory rows for 'vera' in sim1 and sim2 are independent.
+    - recall_memory rows for 'vera' in sim1 and sim2 are independent.
+    - Querying by simulation_id returns exactly the row for that simulation.
+    """
+    await up(conn)
+
+    sim2_id = "00000000-0000-0000-0000-000000000002"
+
+    # ── Arrange ──────────────────────────────────────────────────────────────
+
+    # Create a second simulation row (sim1 / _LIVE_SIM_ID is seeded by migration 035)
+    await conn.execute(
+        "INSERT INTO simulations (id, name, description, config, status, agents_participated) "
+        "VALUES ($1, $2, $3, $4, $5, $6)",
+        sim2_id,
+        "Test Simulation 2",
+        "Second simulation for isolation testing",
+        '{"mode": "eval"}',
+        "running",
+        "{}",
+    )
+
+    # Insert core_memory for 'vera' in sim1
+    await conn.execute(
+        "INSERT INTO core_memory (agent_id, content, token_count, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "vera",
+        "Vera's core memory in sim1",
+        5,
+        _LIVE_SIM_ID,
+    )
+
+    # Insert core_memory for 'vera' in sim2
+    await conn.execute(
+        "INSERT INTO core_memory (agent_id, content, token_count, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "vera",
+        "Vera's core memory in sim2",
+        6,
+        sim2_id,
+    )
+
+    # Insert recall_memory for 'vera' in sim1
+    embedding_sim1 = [0.1] * 1536
+    embedding_sim1[0] = 1.0
+    await conn.execute(
+        "INSERT INTO recall_memory (agent_id, summary, embedding, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "vera",
+        "Vera's recall in sim1",
+        str(embedding_sim1),
+        _LIVE_SIM_ID,
+    )
+
+    # Insert recall_memory for 'vera' in sim2
+    embedding_sim2 = [0.2] * 1536
+    embedding_sim2[0] = 0.5
+    await conn.execute(
+        "INSERT INTO recall_memory (agent_id, summary, embedding, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "vera",
+        "Vera's recall in sim2",
+        str(embedding_sim2),
+        sim2_id,
+    )
+
+    # ── Act & Assert: core_memory isolation ──────────────────────────────────
+
+    sim1_core_rows = await conn.fetch(
+        "SELECT content FROM core_memory WHERE agent_id = 'vera' AND simulation_id = $1",
+        _LIVE_SIM_ID,
+    )
+    sim2_core_rows = await conn.fetch(
+        "SELECT content FROM core_memory WHERE agent_id = 'vera' AND simulation_id = $1",
+        sim2_id,
+    )
+
+    assert len(sim1_core_rows) == 1, (
+        f"Expected 1 core_memory row for vera in sim1, got {len(sim1_core_rows)}"
+    )
+    assert len(sim2_core_rows) == 1, (
+        f"Expected 1 core_memory row for vera in sim2, got {len(sim2_core_rows)}"
+    )
+
+    # Verify content is distinct — no cross-contamination
+    sim1_content = sim1_core_rows[0]["content"]
+    sim2_content = sim2_core_rows[0]["content"]
+    assert sim1_content != sim2_content, (
+        "core_memory content should differ across simulations, but got the same value"
+    )
+    assert sim1_content == "Vera's core memory in sim1"
+    assert sim2_content == "Vera's core memory in sim2"
+
+    # ── Act & Assert: recall_memory isolation ─────────────────────────────────
+
+    sim1_recall_rows = await conn.fetch(
+        "SELECT summary FROM recall_memory WHERE agent_id = 'vera' AND simulation_id = $1",
+        _LIVE_SIM_ID,
+    )
+    sim2_recall_rows = await conn.fetch(
+        "SELECT summary FROM recall_memory WHERE agent_id = 'vera' AND simulation_id = $1",
+        sim2_id,
+    )
+
+    assert len(sim1_recall_rows) == 1, (
+        f"Expected 1 recall_memory row for vera in sim1, got {len(sim1_recall_rows)}"
+    )
+    assert len(sim2_recall_rows) == 1, (
+        f"Expected 1 recall_memory row for vera in sim2, got {len(sim2_recall_rows)}"
+    )
+
+    sim1_summary = sim1_recall_rows[0]["summary"]
+    sim2_summary = sim2_recall_rows[0]["summary"]
+    assert sim1_summary != sim2_summary, (
+        "recall_memory summaries should differ across simulations, but got the same value"
+    )
+    assert sim1_summary == "Vera's recall in sim1"
+    assert sim2_summary == "Vera's recall in sim2"
 
 
 @pytest.mark.integration

@@ -4,6 +4,8 @@
 -- phase_assertions, evolution_cycles, character_applications,
 -- character_departures, alliances, alliance_members, alliance_proposals
 
+BEGIN;
+
 -- ── 0. Add simulation_id column to alliance_members (missing from 026) ──
 
 ALTER TABLE alliance_members
@@ -51,3 +53,5 @@ CREATE INDEX idx_alliance_members_simulation ON alliance_members(simulation_id);
 
 DROP INDEX IF EXISTS idx_alliance_proposals_simulation;
 CREATE INDEX idx_alliance_proposals_simulation ON alliance_proposals(simulation_id);
+
+COMMIT;

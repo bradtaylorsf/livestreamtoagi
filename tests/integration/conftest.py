@@ -48,9 +48,13 @@ async def services():
     # the shared test database for subsequent test runs.
     if svc.db:
         await svc.db.execute("DELETE FROM management_shadow_log")
-        await svc.db.execute("DELETE FROM journal_entries WHERE reflection_type = 'conversation'")
+        await svc.db.execute("DELETE FROM journal_entries")
         await svc.db.execute("DELETE FROM recall_memory")
         await svc.db.execute("DELETE FROM artifacts")
+        await svc.db.execute("DELETE FROM agent_goals")
+        await svc.db.execute("DELETE FROM agent_relationships")
+        await svc.db.execute("DELETE FROM agent_accounts")
+        await svc.db.execute("DELETE FROM agent_internal_state")
         await svc.db.execute("DELETE FROM cost_events")
         await svc.db.execute("DELETE FROM energy_change_log")
         await svc.db.execute("DELETE FROM conversation_selection_log")

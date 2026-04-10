@@ -55,6 +55,16 @@ class SimulationRepo:
             return None
         return Simulation(**_parse_row(dict(row)))
 
+    async def get_by_name(self, name: str) -> Simulation | None:
+        """Look up a simulation by name."""
+        row = await self.db.fetchrow(
+            "SELECT * FROM simulations WHERE name = $1 ORDER BY started_at DESC LIMIT 1",
+            name,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
     async def list(
         self,
         *,

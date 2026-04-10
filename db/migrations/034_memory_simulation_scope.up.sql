@@ -8,13 +8,19 @@ BEGIN;
 -- Current PK is (agent_id). Must change to composite unique index
 -- since simulation_id is nullable and PG doesn't allow nullable PKs.
 
-ALTER TABLE core_memory DROP CONSTRAINT core_memory_pkey;
+ALTER TABLE core_memory DROP CONSTRAINT IF EXISTS core_memory_pkey;
 
 ALTER TABLE core_memory
     ADD COLUMN simulation_id UUID REFERENCES simulations(id);
 
 -- Unique constraint using COALESCE so NULL simulation_id is treated
 -- as a sentinel value for uniqueness purposes.
+-- NOTE: The nil UUID (00000000...0000) is a computation-only sentinel — it is
+-- never inserted into the simulations table and would be rejected by the FK
+-- constraint if anyone tried to use it as an actual simulation_id. It exists
+-- solely to collapse NULL into a comparable value for uniqueness checking.
+-- Migration 035 replaces these COALESCE indexes with proper composite indexes
+-- once simulation_id becomes NOT NULL.
 CREATE UNIQUE INDEX uq_core_memory_agent_sim
     ON core_memory (agent_id, COALESCE(simulation_id, '00000000-0000-0000-0000-000000000000'::uuid));
 

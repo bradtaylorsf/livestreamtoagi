@@ -109,13 +109,13 @@ class MemorySnapshotExporter:
             agent_snap = AgentSnapshot()
 
             # Core memory
-            core_mem = await self._memory_repo.get_core_memory(agent_id)
+            core_mem = await self._memory_repo.get_core_memory(agent_id, simulation_id=sim_uuid)
             if core_mem:
                 agent_snap.core_memory = core_mem.content
 
             # Recall memories (paginated retrieval)
             recall_mems_raw, _ = await self._memory_repo.get_recall_memories_paginated(
-                agent_id, limit=500
+                agent_id, limit=500, simulation_id=sim_uuid,
             )
             recall_mems = recall_mems_raw
             for mem in recall_mems:
@@ -128,7 +128,7 @@ class MemorySnapshotExporter:
                 })
 
             # Journal entries
-            entries, _ = await self._memory_repo.get_journal_entries(agent_id, limit=500)
+            entries, _ = await self._memory_repo.get_journal_entries(agent_id, limit=500, simulation_id=sim_uuid)
             for entry in entries:
                 agent_snap.journal_entries.append({
                     "reflection_type": entry.reflection_type,
@@ -221,8 +221,11 @@ class MemorySnapshotImporter:
         Returns:
             RestoreResult with counts and warnings.
         """
+        import uuid as uuid_mod
+
         snapshot = MemorySnapshot(**snapshot_data)
         result = RestoreResult()
+        sim_uuid = uuid_mod.UUID(simulation_id) if simulation_id else None
 
         if snapshot.version != SNAPSHOT_VERSION:
             result.warnings.append(
@@ -242,7 +245,7 @@ class MemorySnapshotImporter:
             # Restore core memory
             if agent_snap.core_memory:
                 try:
-                    existing = await self._core_memory.get_core_memory(agent_id)
+                    existing = await self._core_memory.get_core_memory(agent_id, simulation_id=sim_uuid)
                     if existing is None:
                         await self._core_memory.initialize_agent_memory(
                             agent_id, agent_snap.core_memory
@@ -321,9 +324,6 @@ class MemorySnapshotImporter:
 
         # Restore relationships
         if simulation_id and self._relationship_repo and snapshot.relationships:
-            import uuid as uuid_mod
-
-            sim_uuid = uuid_mod.UUID(simulation_id)
             for rel_data in snapshot.relationships:
                 agent = rel_data.get("agent", "")
                 target = rel_data.get("target", "")
