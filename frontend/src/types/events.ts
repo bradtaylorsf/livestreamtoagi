@@ -24,6 +24,8 @@ export enum EventType {
   ARTIFACT_CREATED = "artifact_created",
   AGENT_SPAWN = "agent_spawn",
   AGENT_DESPAWN = "agent_despawn",
+  TASK_DELEGATED = "task_delegated",
+  TASK_COMPLETED = "task_completed",
 }
 
 /** Base event envelope matching backend event_bus.py emit() format. */
@@ -155,4 +157,18 @@ export interface AgentSpawnPayload {
 export interface AgentDespawnPayload {
   agent_id: string;
   reason: "error" | "kill_switch" | "shutdown";
+}
+
+export interface TaskDelegatedPayload {
+  from_agent: string;
+  to_agent: string;
+  task_description: string;
+  task_id: string;
+}
+
+export interface TaskCompletedPayload {
+  task_id: string;
+  to_agent: string;
+  success: boolean;
+  result?: string;
 }

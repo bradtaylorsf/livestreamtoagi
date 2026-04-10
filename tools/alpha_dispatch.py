@@ -89,6 +89,17 @@ class DispatchAlphaTool(BaseTool):
             {"from": self._agent_id, "task": task, "status": "running", "task_id": task_id},
         )
 
+        # Emit structured delegation event for frontend visualization
+        await self._event_bus.emit(
+            EventType.TASK_DELEGATED,
+            {
+                "from_agent": self._agent_id,
+                "to_agent": "alpha",
+                "task_description": task,
+                "task_id": task_id,
+            },
+        )
+
         # Call LLM with timeout
         try:
             response = await asyncio.wait_for(
@@ -119,6 +130,17 @@ class DispatchAlphaTool(BaseTool):
         await self._event_bus.emit(
             EventType.ALPHA_RETURN,
             {"result": result, "status": status, "task_id": task_id},
+        )
+
+        # Emit structured completion event for frontend visualization
+        await self._event_bus.emit(
+            EventType.TASK_COMPLETED,
+            {
+                "task_id": task_id,
+                "to_agent": "alpha",
+                "success": status == "success",
+                "result": result,
+            },
         )
 
         return {

@@ -107,6 +107,23 @@ class TestDispatchEvent:
         assert event_data["status"] == "running"
         assert "task_id" in event_data
 
+    async def test_dispatch_emits_task_delegated_event(
+        self,
+        event_bus: AsyncMock,
+        llm_client: AsyncMock,
+    ) -> None:
+        tool = _make_tool(event_bus, llm_client)
+        await tool.execute(task="search for info")
+
+        calls = event_bus.emit.call_args_list
+        # Second emit should be task_delegated
+        event_type, event_data = calls[1].args
+        assert event_type == "task_delegated"
+        assert event_data["from_agent"] == "vera"
+        assert event_data["to_agent"] == "alpha"
+        assert event_data["task_description"] == "search for info"
+        assert "task_id" in event_data
+
 
 # --- Success ---
 
@@ -124,13 +141,19 @@ class TestSuccessfulDispatch:
         assert result["result"] == "The answer is 42"
         assert "task_id" in result
 
-        # Second emit should be alpha_return with success
+        # Should emit: alpha_dispatch, task_delegated, alpha_return, task_completed
         calls = event_bus.emit.call_args_list
-        assert len(calls) == 2
-        event_type, event_data = calls[1].args
+        assert len(calls) == 4
+        event_type, event_data = calls[2].args
         assert event_type == "alpha_return"
         assert event_data["status"] == "success"
         assert event_data["result"] == "The answer is 42"
+
+        # task_completed event
+        event_type, event_data = calls[3].args
+        assert event_type == "task_completed"
+        assert event_data["to_agent"] == "alpha"
+        assert event_data["success"] is True
 
     async def test_llm_called_with_correct_model(
         self,
@@ -162,9 +185,9 @@ class TestTimeout:
         assert result["status"] == "confused"
         assert "took too long" in result["result"]
 
-        # Return event should have confused status
+        # Return event should have confused status (3rd emit: dispatch, delegated, return)
         calls = event_bus.emit.call_args_list
-        return_call = calls[1]
+        return_call = calls[2]
         event_type, event_data = return_call.args
         assert event_type == "alpha_return"
         assert event_data["status"] == "confused"
