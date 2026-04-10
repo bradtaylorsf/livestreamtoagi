@@ -2,6 +2,7 @@ import type {
   Agent,
   ApiError,
   Challenge,
+  ChallengeSubmission,
   ChatResponse,
   JournalEntry,
   LoreEvent,
@@ -85,16 +86,31 @@ export async function getWorldChunks(): Promise<WorldChunk[]> {
 }
 
 // Challenges
-export async function getChallenges(): Promise<Challenge[]> {
-  return request<Challenge[]>("/api/challenges");
+export async function getChallenges(params?: {
+  status?: string;
+  category?: string;
+  sort?: string;
+}): Promise<Challenge[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.category) searchParams.set("category", params.category);
+  if (params?.sort) searchParams.set("sort", params.sort);
+  const qs = searchParams.toString();
+  return request<Challenge[]>(`/api/challenges${qs ? `?${qs}` : ""}`);
 }
 
 export async function submitChallenge(
-  challenge: Pick<Challenge, "title" | "description">,
+  challenge: ChallengeSubmission,
 ): Promise<Challenge> {
   return request<Challenge>("/api/challenges", {
     method: "POST",
     body: JSON.stringify(challenge),
+  });
+}
+
+export async function upvoteChallenge(id: number): Promise<Challenge> {
+  return request<Challenge>(`/api/challenges/${id}/upvote`, {
+    method: "POST",
   });
 }
 

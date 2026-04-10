@@ -42,13 +42,24 @@ export interface WorldObject {
 }
 
 export interface Challenge {
-  id: string;
-  title: string;
+  id: number;
   description: string;
-  status: "proposed" | "active" | "completed" | "failed";
+  submitted_by: string | null;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  assigned_agents: string[] | null;
+  result: string | null;
+  cost_estimate: number | null;
+  actual_cost: number | null;
   votes: number;
-  submitted_by: string;
-  created_at: string;
+  category: string | null;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ChallengeSubmission {
+  description: string;
+  category?: string;
+  submitter_name?: string;
 }
 
 export interface Stats {

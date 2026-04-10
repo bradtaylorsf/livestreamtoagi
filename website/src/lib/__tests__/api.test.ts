@@ -9,6 +9,7 @@ import {
   getStats,
   getWorldChunks,
   submitChallenge,
+  upvoteChallenge,
 } from "../api";
 
 const mockFetch = vi.fn();
@@ -104,8 +105,8 @@ describe("getChallenges", () => {
 
 describe("submitChallenge", () => {
   it("sends POST to /api/challenges with body", async () => {
-    const challenge = { title: "Test", description: "A test challenge" };
-    mockFetch.mockReturnValue(jsonResponse({ ...challenge, id: "1" }));
+    const challenge = { description: "A test challenge", category: "building", submitter_name: "viewer1" };
+    mockFetch.mockReturnValue(jsonResponse({ ...challenge, id: 1 }));
 
     await submitChallenge(challenge);
 
@@ -115,6 +116,28 @@ describe("submitChallenge", () => {
         method: "POST",
         body: JSON.stringify(challenge),
       }),
+    );
+  });
+});
+
+describe("upvoteChallenge", () => {
+  it("sends POST to /api/challenges/:id/upvote", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ id: 1, votes: 1 }));
+    await upvoteChallenge(1);
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/challenges/1/upvote",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
+describe("getChallenges with filters", () => {
+  it("appends query params for status and sort", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getChallenges({ status: "pending", sort: "most_upvoted" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/challenges?status=pending&sort=most_upvoted",
+      expect.anything(),
     );
   });
 });
