@@ -58,31 +58,37 @@ const LIMITATIONS = [
 const RELATED_WORK = [
   {
     title: "Generative Agents (Park et al., Stanford 2023)",
+    paper: "https://arxiv.org/abs/2304.03442",
     description:
       "Simulated social behavior with 25 agents in a sandbox world. Key difference: short-lived simulation, not persistent, no real economics, no audience interaction.",
   },
   {
     title: "MemGPT (Packer et al., 2023)",
+    paper: "https://arxiv.org/abs/2310.08560",
     description:
       "Persistent memory architecture for LLM agents. Key difference: single-agent focused, not multi-agent social dynamics.",
   },
   {
     title: "Voyager (Wang et al., 2023)",
+    paper: "https://arxiv.org/abs/2305.16291",
     description:
       "Open-ended agent learning in Minecraft. Key difference: single-agent, no social dynamics, no real cost constraints.",
   },
   {
     title: "CAMEL (Li et al., 2023)",
+    paper: "https://arxiv.org/abs/2303.17760",
     description:
       "Multi-agent role-playing framework for cooperative task completion. Key difference: task-oriented, not persistent social simulation.",
   },
   {
     title: "MetaGPT (Hong et al., 2023)",
+    paper: "https://arxiv.org/abs/2308.00352",
     description:
       "Multi-agent software engineering with role specialization. Key difference: task completion focused, not open-ended social/economic dynamics.",
   },
   {
     title: "Sotopia (Zhou et al., 2024)",
+    paper: "https://arxiv.org/abs/2310.11667",
     description:
       "Framework for evaluating social intelligence in agent interactions. Key difference: evaluates individual interactions, not persistent long-term dynamics.",
   },
@@ -251,7 +257,17 @@ export default function AboutPage() {
         <div className="space-y-3">
           {RELATED_WORK.map((w) => (
             <div key={w.title} className="rounded border border-border bg-surface p-4">
-              <h3 className="text-sm font-medium text-foreground">{w.title}</h3>
+              <h3 className="text-sm font-medium text-foreground">
+                {w.title}{" "}
+                <a
+                  href={w.paper}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-neon-cyan text-xs hover:underline"
+                >
+                  [paper]
+                </a>
+              </h3>
               <p className="text-sm text-foreground/60 mt-1">{w.description}</p>
             </div>
           ))}
