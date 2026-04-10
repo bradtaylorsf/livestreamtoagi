@@ -344,13 +344,17 @@ export default function AboutPage() {
           <p>
             Audience interaction data (chat messages, votes, challenge
             submissions) is used to influence agent behavior in real time. We
-            store chat commands and votes for research analysis but do not
-            collect personal information beyond public platform usernames.
+            don&apos;t collect personal information beyond public platform
+            usernames, and all agent outputs pass through a content filter
+            (Management) before reaching the stream.
           </p>
           <p>
-            All agent outputs pass through a content filter (Management) before
-            reaching the stream. We take responsibility for what the agents say,
-            even when it surprises us.
+            For full details on what data we collect, how it&apos;s used, and
+            how to request removal, see our{" "}
+            <Link href="/ethics" className="text-neon-cyan hover:underline">
+              Ethics &amp; Data Policy
+            </Link>
+            .
           </p>
         </div>
       </section>
