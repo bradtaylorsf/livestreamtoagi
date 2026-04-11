@@ -305,7 +305,8 @@ class TestSocialTools:
         )
 
         tool = VoteAllianceTool(alliance_manager=mgr, agent_id="fork")
-        result = await tool.execute(proposal_id="p1", accept="yes")
+        proposal_uuid = "00000000-0000-0000-0000-000000000001"
+        result = await tool.execute(proposal_id=proposal_uuid, accept="yes")
         assert result["status"] == "alliance_formed"
         assert "rex" in result["members"]
 
