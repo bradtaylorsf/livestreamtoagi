@@ -160,3 +160,16 @@ export interface AgentArtifact {
   preview: string;
   createdAt: string;
 }
+
+export type ClipCategory = "funny" | "dramatic" | "technical" | "philosophical";
+
+export interface Clip {
+  id: string;
+  title: string;
+  participants: string[];
+  timestamp: string;
+  transcript_excerpt: string;
+  video_url?: string;
+  category: ClipCategory;
+  agent_ids: string[];
+}

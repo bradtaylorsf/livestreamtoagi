@@ -5,6 +5,7 @@ import {
   getAgents,
   getAgentJournal,
   getChallenges,
+  getClips,
   getConversation,
   getConversations,
   getConversationSelections,
@@ -201,6 +202,26 @@ describe("getConversationSelections", () => {
     await getConversationSelections("abc");
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/conversations/abc/selections",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getClips", () => {
+  it("sends GET request to /api/clips", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getClips();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/clips",
+      expect.anything(),
+    );
+  });
+
+  it("sends agent and category query params", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getClips({ agent: "vera", category: "funny" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/clips?agent=vera&category=funny",
       expect.anything(),
     );
   });

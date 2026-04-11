@@ -4,6 +4,7 @@ import type {
   Challenge,
   ChallengeSubmission,
   ChatResponse,
+  Clip,
   ConversationDetail,
   ConversationSummary,
   JournalEntry,
@@ -219,6 +220,18 @@ export async function getEvalRunDetail(
   } catch {
     return null;
   }
+}
+
+// Clips
+export async function getClips(params?: {
+  agent?: string;
+  category?: string;
+}): Promise<Clip[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.agent) searchParams.set("agent", params.agent);
+  if (params?.category) searchParams.set("category", params.category);
+  const qs = searchParams.toString();
+  return request<Clip[]>(`/api/clips${qs ? `?${qs}` : ""}`);
 }
 
 export { ApiRequestError };
