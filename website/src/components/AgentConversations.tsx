@@ -52,7 +52,17 @@ export default function AgentConversations({ agentId }: Props) {
       <div className="text-center py-8">
         <p className="text-sm text-red-400">Unable to load conversations</p>
         <button
-          onClick={() => setOffset((o) => o)}
+          onClick={() => {
+            setLoading(true);
+            setError(null);
+            getAgentConversations(agentId, { limit: PAGE_SIZE, offset })
+              .then((data) => {
+                setConversations(data.items);
+                setTotal(data.total);
+              })
+              .catch((err) => setError(err instanceof Error ? err.message : "Failed to load conversations"))
+              .finally(() => setLoading(false));
+          }}
           className="text-xs text-neon-cyan hover:text-neon-cyan/80 mt-2"
         >
           Retry

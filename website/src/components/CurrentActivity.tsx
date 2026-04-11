@@ -17,6 +17,7 @@ const FALLBACK_ACTIVITIES: ActivityItem[] = [
 export default function CurrentActivity() {
   const [activities, setActivities] = useState<ActivityItem[]>(FALLBACK_ACTIVITIES);
   const [loading, setLoading] = useState(true);
+  const [apiLoaded, setApiLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,6 +25,7 @@ export default function CurrentActivity() {
     getStats()
       .then((stats) => {
         if (cancelled) return;
+        setApiLoaded(true);
         setActivities([
           {
             label: "Active agents",
@@ -72,7 +74,7 @@ export default function CurrentActivity() {
           </li>
         ))}
       </ul>
-      {!loading && activities === FALLBACK_ACTIVITIES && (
+      {!loading && !apiLoaded && (
         <p className="text-xs text-foreground/30 mt-3">
           Agents are idle — check back during a live session.
         </p>

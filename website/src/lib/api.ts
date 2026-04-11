@@ -91,8 +91,8 @@ export async function getAgentConversations(
   params?: { limit?: number; offset?: number },
 ): Promise<PaginatedResponse<AgentConversation>> {
   const searchParams = new URLSearchParams();
-  if (params?.limit) searchParams.set("limit", String(params.limit));
-  if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();
   return request<PaginatedResponse<AgentConversation>>(
     `/api/agents/${id}/conversations${qs ? `?${qs}` : ""}`,
@@ -104,8 +104,8 @@ export async function getAgentArtifacts(
   params?: { limit?: number; offset?: number },
 ): Promise<PaginatedResponse<AgentArtifactResponse>> {
   const searchParams = new URLSearchParams();
-  if (params?.limit) searchParams.set("limit", String(params.limit));
-  if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();
   return request<PaginatedResponse<AgentArtifactResponse>>(
     `/api/agents/${id}/artifacts${qs ? `?${qs}` : ""}`,
