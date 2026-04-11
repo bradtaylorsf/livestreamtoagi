@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "/ethics", label: "Ethics" },
   { href: "/blog", label: "Blog" },
   { href: "/evals", label: "Evals" },
+  { href: "/contribute", label: "Contribute" },
 ] as const;
 
 export default function Navigation() {
