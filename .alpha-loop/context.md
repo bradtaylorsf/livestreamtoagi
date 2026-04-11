@@ -1,24 +1,26 @@
-Here's the project context file:
+Here's the project context:
 
 ## Architecture
-- **Entry point:** `core/main.py` — FastAPI app with lifespan handler, mounts `admin_routes.py` and `public_routes.py`, opens WebSocket at `/ws`. Bootstrap in `core/bootstrap.py` initializes DB, Redis, and agent services.
-- **Database:** PostgreSQL 16 + pgvector. Schema managed via custom migration runner in `db/` (36 migrations, up/down SQL pairs). Run `pnpm db:migrate` / `pnpm db:status`. Init schema in `db/init.sql`.
-- **Key directories:** `core/` = orchestrator, conversation engine, memory, eval, simulation, LLM client. `tools/` = agent tool implementations (code exec, economy, social, world state). `agents/` = YAML personality configs. `config/` = conversation/event config, office layout. `evals/` + `scenarios/` = simulation eval system.
-- **Frontend/Website:** `frontend/` = Phaser.js pixel art renderer (Vite + Vitest). `website/` = Next.js public site (Vitest + Playwright). Both connect to backend via WebSocket/REST.
-- **Dev orchestration:** Root `package.json` uses `concurrently` — `pnpm dev` starts Docker, backend (:8010), frontend, and website together. `pnpm chat` / `pnpm sim` for CLI interaction.
+- **Entry point:** `core/main.py` — FastAPI app with lifespan manager that bootstraps services (DB, Redis, TTS, scheduler), mounts `admin_routes.py` and `public_routes.py`, serves WebSocket at `/ws` for frontend
+- **Database:** PostgreSQL 16 + pgvector; schema in `db/migrations/` (numbered up/down SQL files), managed via `pnpm db:migrate`; connection through `core/database.py` using asyncpg/SQLAlchemy async
+- **Frontend:** `frontend/` — Phaser.js pixel art renderer connecting to backend via WebSocket; built with Vite
+- **Website:** `website/` — Next.js public site consuming FastAPI REST API; deployed on Vercel
+- **Agent system:** 9 agents defined in `agents/` (YAML configs); orchestrated by `core/conversation_engine.py` with weighted speaker selection; all output filtered through `core/management.py` before TTS
 
 ## Conventions
-- **Python 3.13** (pinned in `.python-version`), type hints everywhere, async/await for I/O, `ruff` for lint/format, Pydantic models for schemas.
-- **Tests:** `tests/backend/` and `tests/integration/` (pytest + pytest-asyncio). Frontend/website use Vitest. Run all: `pnpm test`. Integration tests need `docker compose up -d` first.
-- **New features:** Backend routes go in `core/admin_routes.py` or `core/public_routes.py`. New agent tools go in `tools/` and must be registered in `core/tool_executor.py`. New CLI commands must be wired through `scripts/chat.py` into `pnpm` scripts — never require raw `python` invocation.
+- **Python:** 3.13, type hints everywhere, async/await for I/O, Pydantic models for schemas, `ruff` for lint/format
+- **TypeScript:** strict mode, ESM, Vite builds, Vitest for tests
+- **Tests:** `tests/backend/` and `tests/integration/` for Python (pytest, asyncio_mode=auto); `frontend/` and `website/` have colocated Vitest suites; run all via `pnpm test`
+- **CLI:** All scripts wired through `pnpm` in root `package.json` — `pnpm sim`, `pnpm eval`, `pnpm chat`, `pnpm db:migrate`; never call raw python directly
+- **Git:** Conventional commits (`feat:`, `fix:`, etc.), focused single-purpose PRs
 
 ## Critical Rules
-- **`specs/` is read-only reference** — never modify spec files during implementation.
-- **All agent output passes through Management filter** (`core/management.py`) before TTS — bypassing this breaks content safety.
-- **Simulation isolation:** simulation_id must propagate through all tools/memory/DB writes. Migrations 034-036 enforce this — schema changes must preserve isolation.
-- **Cost tracking must be 100% accurate** — every LLM call must record cost events. This is load-bearing for eval integrity.
-- **"Overseer" is renamed to "Management"** everywhere — migration 016 did the DB rename; use "Management" in all new code and configs.
+- **`specs/` is read-only** — design reference documents, never modify
+- **Agent outputs must pass through Management filter** (`core/management.py`) before TTS — bypassing breaks content safety
+- **DB migrations are ordered** — `db/migrations/` numbered files must stay sequential; adding out-of-order breaks `pnpm db:migrate`
+- **Docker services must be healthy before integration tests** — run `scripts/check-services.sh` first (Redis:6381, PostgreSQL:5434, Langfuse:3100)
+- **Cost tracking must be 100% accurate** — every LLM call goes through `core/llm_client.py` with Langfuse tracing; never bypass for eval integrity
 
 ## Active State
-- Test status: _(to be filled by loop)_
-- Recent changes: simulation isolation fixes, error logging for evals, DB-backed eval analysis (commits around #252)
+- Test status: (will be filled in by the loop)
+- Recent changes: (will be filled in by the loop)

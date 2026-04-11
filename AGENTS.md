@@ -12,7 +12,7 @@ The live codebase includes:
 - a conversation engine orchestrator with speaker selection, energy model, interrupts, topic detection, pacing, proximity groups, Management safety review, and TTS output
 - a context assembly pipeline that builds three-layer prompts: infrastructure rules → character identity → mutable memory state
 - a tool registry with 15 functional tool modules exporting 32 tool classes (plus 2 simulation stubs): messaging, audience interaction, memory operations, code execution (Docker sandbox), tilemap generation, revenue/social drafts, web search, Alpha dispatch, self-modification, task management, world state, evolution log viewer, alliances, economy/budget, and character proposals
-- raw SQL migrations (36 pairs, up to `036_remaining_simulation_isolation`) and typed repository classes
+- raw SQL migrations (37 pairs, up to `037_config_version_simulation_isolation`) and typed repository classes
 - YAML-backed agent config loading from `agents/*`, including `config.yaml`, `behaviors.yaml`, `system_prompt.md`, and optional extra YAML files (e.g., management's `content_rules.yaml` and `intervention_levels.yaml`)
 - an OpenRouter LLM client with a 9-model registry, cost tracking, retry logic, and optional Langfuse hooks
 - an admin dashboard backend (`core/admin_routes.py`) with 58 endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, evolution tracking — protected by `ADMIN_PASSWORD` Bearer auth
@@ -45,7 +45,7 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 - Characters: `core/characters/` — CharacterSpawner, VotingManager, departure handling for dynamic agent creation and voting
 - Social: `core/social/` — RelationshipTracker for agent-to-agent dynamics, AllianceManager for group formation
 - Events: `core/events/` — EventGenerator and EventTemplates for world event creation
-- Data layer: PostgreSQL 16 with `pgvector` and `pg_trgm`, plus 36 raw SQL migration pairs under `db/migrations`
+- Data layer: PostgreSQL 16 with `pgvector` and `pg_trgm`, plus 37 raw SQL migration pairs under `db/migrations`
 - Realtime: WebSocket event bus in `core/event_bus.py` (24 event types, 50-message history buffer, max 100 connections)
 - Support services: Redis 7 and Langfuse via `docker-compose.yaml`; Docker sandbox service for code execution
 - Frontend package: Vite 6 + TypeScript 5 + Phaser 3.87 in `frontend/`
@@ -74,7 +74,7 @@ core/reporting/         Reporting subsystem: timeline_reporter, scorecard, compa
 core/simulation/        Simulation orchestrator: clock, phases, assertions, audience_sim, world_simulator, snapshot, recurring_personas, display, orchestrator
 core/social/            Social subsystem: relationship_tracker, alliances
 core/world/             World generation: office_generator, pixellab_client, sprite_generator
-db/                     Raw SQL migration runner, init SQL, and numbered up/down migrations (001–036)
+db/                     Raw SQL migration runner, init SQL, and numbered up/down migrations (001–037)
 evals/                  Evaluation framework: 13 eval prompts (agency, creativity, dialogue_quality, economic_behavior, entertainment, errors, internal_state, productivity, safety, simulation_narrative, social_dynamics, world_evolution) and results
 frontend/               Phaser.js world renderer: main scene, chunk-based world loading, agent sprite rendering/management, WebSocket client, typed events
 research/               Research papers and analysis documents for project positioning
@@ -83,7 +83,7 @@ scripts/                Utility scripts: chat.py, test_agent.py, watch_conversat
 skills/                 Skill definitions for code-review, git-workflow, implementation-planning, playwright-cli, security-analysis, test-robustness, testing-patterns
 specs/                  Product and architecture reference docs; useful context, not the runtime source of truth
 tools/                  Agent tool implementations: 15 functional modules + ToolRegistry (messaging, audience, memory, code execution, tilemap, revenue, web, Alpha dispatch, self-modification, task management, world state, evolution log, alliances, economy, character proposals)
-tests/                  ~94 test files: backend/ (unit + integration), frontend/ (vitest), website/ (vitest + playwright e2e)
+tests/                  ~94 Python test files: backend/ (unit + integration), frontend/ (vitest), website/ (vitest + playwright e2e)
 ```
 
 Important files:
@@ -92,7 +92,7 @@ Important files:
 - `core/admin_routes.py` provides 58 admin endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, evolution tracking
 - `core/agent_registry.py` loads agent configs from disk, validates model names via aliases, and syncs status through Redis
 - `core/llm_client.py` defines 9 allowed models with aliases and per-token cost metadata
-- `core/models.py` is the source of backend Pydantic schemas (~106 model classes: agents, memory tiers, conversations, transcripts, journal entries, self-modification proposals, LLM responses, cost events, goals, relationships, prompt logs)
+- `core/models.py` is the source of backend Pydantic schemas (~102 model classes: agents, memory tiers, conversations, transcripts, journal entries, self-modification proposals, LLM responses, cost events, goals, relationships, prompt logs)
 - `core/conversation_engine.py` is the central runtime loop — ties together triggers, speaker selection, energy, interrupts, Management review, TTS, and event emission
 - `core/context_assembly.py` builds three-layer prompts: infrastructure → character → memory
 - `core/memory/reflection.py` drives 6-hour and weekly reflection cycles with journaling and self-modification proposals
@@ -104,7 +104,7 @@ Important files:
 - `core/eval/issue_generator.py` creates GitHub issues from low-scoring eval findings
 - `core/reporting/timeline_reporter.py` generates structured simulation reports with sectioned output
 - `tools/__init__.py` exports all tools and the `ToolRegistry` with `get_core_tools()` and `get_memory_tools()` factories
-- `db/migrate.py` is the raw SQL migration entry point for `python -m db`; migrations go up to `036_remaining_simulation_isolation`
+- `db/migrate.py` is the raw SQL migration entry point for `python -m db`; migrations go up to `037_config_version_simulation_isolation`
 - `website/src/lib/api.ts` calls planned REST endpoints (`/api/agents`, `/api/agents/{id}/journal`, `/api/agents/{id}/chat`, `/api/world/chunks`, `/api/challenges`, `/api/stats`, `/api/lore`) that the backend does not currently expose as public routes (admin equivalents exist under `/api/admin`)
 
 ## Code Style
