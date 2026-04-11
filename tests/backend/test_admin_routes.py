@@ -250,7 +250,9 @@ class TestAgentEndpoints:
             resp = client.get("/api/admin/agents/vera/recall-memories?search=budget")
 
         assert resp.status_code == 200
-        mock_search.assert_called_once_with("vera", "budget", limit=50, offset=0)
+        mock_search.assert_called_once_with(
+            "vera", "budget", limit=50, offset=0, simulation_id=None,
+        )
 
     def test_get_agent_conversations(self, mock_app):
         client, mock_db, _ = mock_app

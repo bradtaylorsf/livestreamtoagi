@@ -403,7 +403,9 @@ async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.config_version_repo:
         return []
-    versions = await svc.config_version_repo.get_prompt_history(agent_id)
+    versions = await svc.config_version_repo.get_prompt_history(
+        agent_id, simulation_id=LIVE_SIMULATION_ID,
+    )
     return [
         {
             "id": str(v.id),
@@ -499,7 +501,7 @@ async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
         raise HTTPException(
             status_code=400, detail="Invalid conversation ID",
         ) from exc
-    conv = await repo.get(conv_uuid)
+    conv = await repo.get(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return _conversation_to_detail(conv)
@@ -517,7 +519,7 @@ async def get_conversation_selections(
         raise HTTPException(
             status_code=400, detail="Invalid conversation ID",
         ) from exc
-    logs = await repo.get_selection_log(conv_uuid)
+    logs = await repo.get_selection_log(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
     return [
         SelectionLogResponse(
             turn_number=log.turn_number,

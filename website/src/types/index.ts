@@ -63,12 +63,10 @@ export interface ChallengeSubmission {
 }
 
 export interface Stats {
-  agi_progress: number;
-  total_cost: number;
-  daily_cost: number;
-  revenue: number;
-  viewers: number;
-  uptime_hours: number;
+  total_simulations: number;
+  total_agents: number;
+  total_cost: string;
+  total_conversations: number;
 }
 
 export interface LoreEvent {
@@ -159,4 +157,52 @@ export interface AgentArtifact {
   title: string;
   preview: string;
   createdAt: string;
+}
+
+export interface AgentConversation {
+  id: string;
+  trigger_type: string;
+  participating_agents: string[];
+  topics_discussed: string[] | null;
+  turn_count: number;
+  location: string | null;
+  started_at: string | null;
+}
+
+export interface AgentArtifactResponse {
+  id: string;
+  agent_id: string;
+  tool_name: string;
+  artifact_type: string;
+  status: string;
+  created_at: string | null;
+}
+
+export interface AgentRelationshipResponse {
+  id: string;
+  target_agent_id: string;
+  sentiment_score: number;
+  trust_score: number;
+  interaction_count: number;
+  relationship_summary: string | null;
+}
+
+export interface AgentEvolutionResponse {
+  id: string;
+  version: number;
+  change_reason: string | null;
+  source: "manual" | "system" | "evolution";
+  created_at: string | null;
+}
+
+export type ClipCategory = "funny" | "dramatic" | "technical" | "philosophical";
+
+export interface Clip {
+  id: string;
+  title: string;
+  timestamp: string;
+  transcript_excerpt: string;
+  video_url?: string;
+  category: ClipCategory;
+  agent_ids: string[];
 }

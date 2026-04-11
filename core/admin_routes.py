@@ -295,6 +295,7 @@ async def get_agent_core_memory(agent_id: str) -> CoreMemoryResponse:
 @router.get("/agents/{agent_id}/recall-memories")
 async def get_agent_recall_memories(
     agent_id: str,
+    simulation_id: uuid_mod.UUID | None = Query(default=None),  # noqa: B008
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     search: str | None = Query(None),
@@ -306,11 +307,11 @@ async def get_agent_recall_memories(
 
     if search:
         memories, total = await memory_repo.search_recall_memories_by_keyword(
-            agent_id, search, limit=limit, offset=offset
+            agent_id, search, limit=limit, offset=offset, simulation_id=simulation_id,
         )
     else:
         memories, total = await memory_repo.get_recall_memories_paginated(
-            agent_id, limit=limit, offset=offset
+            agent_id, limit=limit, offset=offset, simulation_id=simulation_id,
         )
 
     # Strip embeddings from response
@@ -413,7 +414,9 @@ async def get_agent_journal(
     from core.repos.memory_repo import MemoryRepo
     memory_repo = MemoryRepo(db)
 
-    entries, total = await memory_repo.get_journal_entries(agent_id, limit=limit, offset=offset)
+    entries, total = await memory_repo.get_journal_entries(
+        agent_id, limit=limit, offset=offset, simulation_id=simulation_id,
+    )
     return PaginatedResponse(items=entries, total=total, limit=limit, offset=offset)
 
 
@@ -1353,12 +1356,13 @@ class RollbackRequest(BaseModel):
 async def get_agent_config_versions(
     agent_id: str,
     limit: int = Query(default=20, ge=1, le=100),
+    simulation_id: uuid_mod.UUID | None = Query(default=None),
 ) -> list[dict]:
     """Get prompt version history for an agent."""
     repo = _get_config_version_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Config version repo not available")
-    versions = await repo.get_prompt_history(agent_id, limit=limit)
+    versions = await repo.get_prompt_history(agent_id, limit=limit, simulation_id=simulation_id)
     return [v.model_dump(mode="json") for v in versions]
 
 
@@ -1366,13 +1370,14 @@ async def get_agent_config_versions(
 async def rollback_agent_config(
     agent_id: str,
     body: RollbackRequest,
+    simulation_id: uuid_mod.UUID | None = Query(default=None),
 ) -> dict:
     """Rollback an agent's config to a previous version."""
     repo = _get_config_version_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Config version repo not available")
     try:
-        await repo.rollback_prompt(agent_id, body.version)
+        await repo.rollback_prompt(agent_id, body.version, simulation_id=simulation_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     # Hot-swap the agent config
@@ -1384,12 +1389,13 @@ async def rollback_agent_config(
 @router.get("/config/conversation/versions")
 async def get_conversation_config_versions(
     limit: int = Query(default=20, ge=1, le=100),
+    simulation_id: uuid_mod.UUID | None = Query(default=None),
 ) -> list[dict]:
     """Get conversation parameter version history."""
     repo = _get_config_version_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Config version repo not available")
-    versions = await repo.get_conversation_param_history(limit=limit)
+    versions = await repo.get_conversation_param_history(limit=limit, simulation_id=simulation_id)
     return [v.model_dump(mode="json") for v in versions]
 
 
@@ -1427,13 +1433,16 @@ async def get_eval_analysis(eval_id: uuid_mod.UUID) -> dict:
 
 
 @router.post("/config/conversation/rollback")
-async def rollback_conversation_config(body: RollbackRequest) -> dict:
+async def rollback_conversation_config(
+    body: RollbackRequest,
+    simulation_id: uuid_mod.UUID | None = Query(default=None),
+) -> dict:
     """Rollback conversation params to a previous version."""
     repo = _get_config_version_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Config version repo not available")
     try:
-        await repo.rollback_conversation_params(body.version)
+        await repo.rollback_conversation_params(body.version, simulation_id=simulation_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"status": "ok", "version": body.version}

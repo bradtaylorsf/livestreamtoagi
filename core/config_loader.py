@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+import uuid as _uuid
+
+from core.constants import LIVE_SIMULATION_ID
 from core.event_bus import event_bus
 from core.models import ConversationConfig
 
@@ -35,12 +38,14 @@ class ConfigLoader:
         self,
         path: str | Path = DEFAULT_CONFIG_PATH,
         config_version_repo: ConfigVersionRepo | None = None,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         self._path = Path(path)
         self._config: ConversationConfig | None = None
         self._config_hash: str = ""
         self._watch_task: asyncio.Task[None] | None = None
         self._config_repo = config_version_repo
+        self._simulation_id = simulation_id if simulation_id is not None else LIVE_SIMULATION_ID
 
     @property
     def config(self) -> ConversationConfig:
@@ -90,7 +95,7 @@ class ConfigLoader:
             return None
 
         try:
-            version = await self._config_repo.get_active_conversation_params()
+            version = await self._config_repo.get_active_conversation_params(simulation_id=self._simulation_id)
             if version is None:
                 return None
 

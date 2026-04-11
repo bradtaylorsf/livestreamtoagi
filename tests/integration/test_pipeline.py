@@ -45,9 +45,12 @@ class TestPreConversation:
 
     async def test_core_memory_content_is_valid(self, services):
         """Each core memory should contain identity text."""
+        from core.constants import LIVE_SIMULATION_ID
         agents = services.agent_registry.get_all_agents()
         for agent in agents:
-            mem = await services.core_memory.get_core_memory(agent.id)
+            mem = await services.core_memory.get_core_memory(
+                agent.id, simulation_id=LIVE_SIMULATION_ID,
+            )
             assert mem is not None, f"Agent {agent.id} missing core memory"
             # get_core_memory returns a string
             assert len(mem) > 10, (
@@ -358,7 +361,11 @@ class TestAdminAPI:
     async def test_get_agent_recall_memories(self, client, simulation_result):
         """GET /api/admin/agents/{id}/recall-memories should return new memories."""
         agent_id = simulation_result["agents"][0]
-        resp = await client.get(f"/api/admin/agents/{agent_id}/recall-memories")
+        sim_id = simulation_result["simulation_id"]
+        resp = await client.get(
+            f"/api/admin/agents/{agent_id}/recall-memories",
+            params={"simulation_id": str(sim_id)},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] > 0
@@ -366,7 +373,11 @@ class TestAdminAPI:
     async def test_get_agent_journal(self, client, simulation_result):
         """GET /api/admin/agents/{id}/journal should return new entries."""
         agent_id = simulation_result["agents"][0]
-        resp = await client.get(f"/api/admin/agents/{agent_id}/journal")
+        sim_id = simulation_result["simulation_id"]
+        resp = await client.get(
+            f"/api/admin/agents/{agent_id}/journal",
+            params={"simulation_id": str(sim_id)},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] > 0

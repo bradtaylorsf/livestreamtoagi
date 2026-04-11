@@ -1,9 +1,14 @@
 import type {
   Agent,
+  AgentArtifactResponse,
+  AgentConversation,
+  AgentEvolutionResponse,
+  AgentRelationshipResponse,
   ApiError,
   Challenge,
   ChallengeSubmission,
   ChatResponse,
+  Clip,
   ConversationDetail,
   ConversationSummary,
   JournalEntry,
@@ -72,6 +77,46 @@ export async function getAgentJournal(
   id: string,
 ): Promise<JournalEntry[]> {
   return request<JournalEntry[]>(`/api/agents/${id}/journal`);
+}
+
+export async function getAgentRelationships(
+  id: string,
+): Promise<AgentRelationshipResponse[]> {
+  return request<AgentRelationshipResponse[]>(
+    `/api/agents/${id}/relationships`,
+  );
+}
+
+export async function getAgentConversations(
+  id: string,
+  params?: { limit?: number; offset?: number },
+): Promise<PaginatedResponse<AgentConversation>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<AgentConversation>>(
+    `/api/agents/${id}/conversations${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getAgentArtifacts(
+  id: string,
+  params?: { limit?: number; offset?: number },
+): Promise<PaginatedResponse<AgentArtifactResponse>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<AgentArtifactResponse>>(
+    `/api/agents/${id}/artifacts${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getAgentEvolution(
+  id: string,
+): Promise<AgentEvolutionResponse[]> {
+  return request<AgentEvolutionResponse[]>(`/api/agents/${id}/evolution`);
 }
 
 export async function chatWithAgent(
@@ -219,6 +264,18 @@ export async function getEvalRunDetail(
   } catch {
     return null;
   }
+}
+
+// Clips
+export async function getClips(params?: {
+  agent?: string;
+  category?: string;
+}): Promise<Clip[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.agent) searchParams.set("agent", params.agent);
+  if (params?.category) searchParams.set("category", params.category);
+  const qs = searchParams.toString();
+  return request<Clip[]>(`/api/clips${qs ? `?${qs}` : ""}`);
 }
 
 export { ApiRequestError };

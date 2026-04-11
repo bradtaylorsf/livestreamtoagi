@@ -3,8 +3,13 @@ import {
   ApiRequestError,
   chatWithAgent,
   getAgents,
+  getAgentArtifacts,
+  getAgentConversations,
+  getAgentEvolution,
   getAgentJournal,
+  getAgentRelationships,
   getChallenges,
+  getClips,
   getConversation,
   getConversations,
   getConversationSelections,
@@ -147,9 +152,10 @@ describe("getChallenges with filters", () => {
 
 describe("getStats", () => {
   it("sends GET to /api/stats", async () => {
-    mockFetch.mockReturnValue(jsonResponse({ viewers: 42 }));
+    const statsData = { total_simulations: 10, total_agents: 9, total_cost: "1.23", total_conversations: 42 };
+    mockFetch.mockReturnValue(jsonResponse(statsData));
     const result = await getStats();
-    expect(result).toEqual({ viewers: 42 });
+    expect(result).toEqual(statsData);
   });
 });
 
@@ -205,6 +211,92 @@ describe("getConversationSelections", () => {
     );
   });
 });
+
+describe("getAgentRelationships", () => {
+  it("sends GET to /api/agents/:id/relationships", async () => {
+    const rels = [{ id: "1", target_agent_id: "rex", sentiment_score: 0.7 }];
+    mockFetch.mockReturnValue(jsonResponse(rels));
+
+    const result = await getAgentRelationships("vera");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/vera/relationships",
+      expect.anything(),
+    );
+    expect(result).toEqual(rels);
+  });
+});
+
+describe("getAgentConversations", () => {
+  it("sends GET to /api/agents/:id/conversations with pagination", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await getAgentConversations("vera", { limit: 10, offset: 5 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/vera/conversations?limit=10&offset=5",
+      expect.anything(),
+    );
+  });
+
+  it("sends GET without params when none provided", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
+
+    await getAgentConversations("vera");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/vera/conversations",
+      expect.anything(),
+    );
+  });
+});
+
+
+describe("getClips", () => {
+  it("sends GET request to /api/clips", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getClips();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/clips",
+      expect.anything(),
+    );
+  });
+
+  it("sends agent and category query params", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getClips({ agent: "vera", category: "funny" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/clips?agent=vera&category=funny",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getAgentArtifacts", () => {
+  it("sends GET to /api/agents/:id/artifacts with pagination", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await getAgentArtifacts("rex", { limit: 5, offset: 10 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/rex/artifacts?limit=5&offset=10",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getAgentEvolution", () => {
+  it("sends GET to /api/agents/:id/evolution", async () => {
+    const events = [{ id: "1", version: 1, source: "system" }];
+    mockFetch.mockReturnValue(jsonResponse(events));
+
+    const result = await getAgentEvolution("fork");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/fork/evolution",
+      expect.anything(),
+    );
+    expect(result).toEqual(events);
+  });
+});
+
 
 describe("error handling", () => {
   it("throws ApiRequestError on non-2xx response", async () => {

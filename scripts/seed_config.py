@@ -26,6 +26,8 @@ import yaml
 
 from rich.console import Console
 
+from core.constants import LIVE_SIMULATION_ID
+
 console = Console()
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ async def seed_agent_configs() -> None:
             agent_id = agent_dir.name
 
             # Check if version 1 already exists
-            existing = await config_repo.get_prompt_version(agent_id, 1)
+            existing = await config_repo.get_prompt_version(agent_id, 1, simulation_id=LIVE_SIMULATION_ID)
             if existing is not None:
                 console.print(f"  [dim]Skipping {agent_id} (version 1 exists)[/dim]")
                 skipped_agents += 1
@@ -102,10 +104,11 @@ async def seed_agent_configs() -> None:
                 config_params=config_params,
                 change_reason="Initial seed from YAML files",
                 source="seed",
+                simulation_id=LIVE_SIMULATION_ID,
             )
 
             # Set as active
-            await config_repo.set_active_prompt_version(agent_id, version.version)
+            await config_repo.set_active_prompt_version(agent_id, version.version, simulation_id=LIVE_SIMULATION_ID)
 
             console.print(f"  [green]Seeded {agent_id} v{version.version}[/green]")
             seeded_agents += 1
@@ -113,7 +116,7 @@ async def seed_agent_configs() -> None:
         # Seed conversation params
         config_path = PROJECT_ROOT / "config" / "conversation_config.yaml"
         if config_path.exists():
-            existing_params = await config_repo.get_conversation_param_version(1)
+            existing_params = await config_repo.get_conversation_param_version(1, simulation_id=LIVE_SIMULATION_ID)
             if existing_params is not None:
                 console.print("  [dim]Skipping conversation params (version 1 exists)[/dim]")
             else:
@@ -124,8 +127,9 @@ async def seed_agent_configs() -> None:
                     params=raw_params,
                     change_reason="Initial seed from conversation_config.yaml",
                     source="seed",
+                    simulation_id=LIVE_SIMULATION_ID,
                 )
-                await config_repo.set_active_conversation_version(version.version)
+                await config_repo.set_active_conversation_version(version.version, simulation_id=LIVE_SIMULATION_ID)
                 console.print(f"  [green]Seeded conversation params v{version.version}[/green]")
 
         console.print(

@@ -1,0 +1,8 @@
+id: captured-331-add-public-api-filter-exclude-simulation
+description: "Add public API filter: exclude simulation data from all public endpoints"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 331
+  session: session/layer-10-1-website-pages-continued
+  date: 2026-04-11

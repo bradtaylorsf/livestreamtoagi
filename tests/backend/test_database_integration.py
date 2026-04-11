@@ -52,6 +52,16 @@ async def db():
     async with database.acquire() as conn:
         await up(conn)
 
+    # Ensure the live simulation row exists (may have been deleted by
+    # integration test teardown sharing the same test database).
+    await database.execute(
+        """INSERT INTO simulations (id, name, description, config, status, is_live, agents_participated)
+           VALUES ($1, 'Live Livestream', 'Persistent live simulation', '{"mode": "live"}'::jsonb,
+                   'running', TRUE, '{}')
+           ON CONFLICT (id) DO NOTHING""",
+        LIVE_SIMULATION_ID,
+    )
+
     yield database
 
     # Clean all data (but keep schema) for test isolation

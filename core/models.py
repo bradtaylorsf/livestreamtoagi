@@ -1114,6 +1114,7 @@ class AgentPromptVersion(BaseModel):
     change_reason: str | None = None
     source: str  # 'seed', 'manual', 'eval_loop'
     eval_run_id: uuid.UUID | None = None
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 
@@ -1127,6 +1128,7 @@ class ConversationParamVersion(BaseModel):
     change_reason: str | None = None
     source: str  # 'seed', 'manual', 'eval_loop'
     eval_run_id: uuid.UUID | None = None
+    simulation_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
 
@@ -1137,6 +1139,7 @@ class ActiveConfig(BaseModel):
     agent_id: str
     prompt_version: int
     conversation_param_version: int
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Relationships ──────────────────────────────────────────────────

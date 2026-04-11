@@ -1,7 +1,21 @@
+import type { Metadata } from "next";
 import { getAllAgents } from "@/lib/agent-data";
 import WorldViewer from "@/components/WorldViewer";
 import WorldTimeline from "@/components/WorldTimeline";
 import WorldGallery from "@/components/WorldGallery";
+import AgentPositions from "@/components/AgentPositions";
+
+export const metadata: Metadata = {
+  title: "World",
+  description:
+    "Explore the pixel art world the 9 AI agents are building together — view agent positions, world evolution, and build progression.",
+  openGraph: {
+    title: "World",
+    description:
+      "Explore the pixel art world the AI agents are building together.",
+    type: "website",
+  },
+};
 
 export default function WorldPage() {
   const agents = getAllAgents().filter((a) => a.id !== "management");
@@ -19,27 +33,7 @@ export default function WorldPage() {
           <div className="lg:col-span-2">
             <WorldViewer />
           </div>
-          <div className="rounded border border-border bg-surface p-4">
-            <h3 className="font-pixel text-xs text-neon-green mb-3">
-              AGENT POSITIONS
-            </h3>
-            <div className="space-y-3">
-              {agents.map((agent) => (
-                <div key={agent.id} className="flex items-center gap-2">
-                  <div
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ backgroundColor: agent.color }}
-                  />
-                  <span className="text-sm text-foreground/70">
-                    {agent.name}
-                  </span>
-                  <span className="text-xs text-foreground/30 ml-auto">
-                    {agent.role.split("/")[0]}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <AgentPositions agents={agents} />
         </div>
       </section>
 

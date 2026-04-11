@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+import uuid as _uuid
+
+from core.constants import LIVE_SIMULATION_ID
 from core.llm_client import MODEL_REGISTRY
 from core.models import AgentConfig, AgentStatus
 
@@ -46,11 +49,13 @@ class AgentRegistry:
         redis_client: RedisClient | ScopedRedis | None = None,
         agents_dir: str | Path = "agents",
         config_version_repo: ConfigVersionRepo | None = None,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         self._redis = redis_client
         self._agents_dir = Path(agents_dir)
         self._agents: dict[str, AgentConfig] = {}
         self._config_repo = config_version_repo
+        self._simulation_id = simulation_id if simulation_id is not None else LIVE_SIMULATION_ID
 
     async def load_all(self) -> None:
         """Load agent configs from DB (if available), falling back to YAML."""
@@ -81,7 +86,7 @@ class AgentRegistry:
         agents: dict[str, AgentConfig] = {}
 
         try:
-            active_configs = await self._config_repo.get_all_active_configs()
+            active_configs = await self._config_repo.get_all_active_configs(simulation_id=self._simulation_id)
         except Exception:
             logger.warning("Failed to load active configs from DB, will fall back to YAML")
             return agents
@@ -89,7 +94,8 @@ class AgentRegistry:
         for ac in active_configs:
             try:
                 prompt_ver = await self._config_repo.get_prompt_version(
-                    ac.agent_id, ac.prompt_version
+                    ac.agent_id, ac.prompt_version,
+                    simulation_id=self._simulation_id,
                 )
                 if prompt_ver is None:
                     continue
@@ -178,12 +184,13 @@ class AgentRegistry:
             return
 
         try:
-            ac = await self._config_repo.get_active_config(agent_id)
+            ac = await self._config_repo.get_active_config(agent_id, simulation_id=self._simulation_id)
             if ac is None:
                 return
 
             prompt_ver = await self._config_repo.get_prompt_version(
-                agent_id, ac.prompt_version
+                agent_id, ac.prompt_version,
+                simulation_id=self._simulation_id,
             )
             if prompt_ver is None:
                 return

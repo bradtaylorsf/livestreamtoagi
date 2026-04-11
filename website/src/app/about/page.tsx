@@ -2,11 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ArchitectureDiagram from "@/components/ArchitectureDiagram";
 import Glossary from "@/components/Glossary";
+import JsonLd from "@/components/JsonLd";
 
 export const metadata: Metadata = {
-  title: "About — Livestream to AGI",
+  title: "About",
   description:
     "What we're studying, why it matters, and why we're doing it as a livestream instead of writing papers.",
+  openGraph: {
+    title: "About",
+    description:
+      "What we're studying, why it matters, and why we're doing it as a livestream instead of writing papers.",
+    type: "website",
+  },
 };
 
 const RESEARCH_QUESTIONS = [
@@ -97,6 +104,22 @@ const RELATED_WORK = [
 export default function AboutPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 space-y-16">
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "AboutPage",
+          name: "About Livestream to AGI",
+          description:
+            "What we're studying, why it matters, and why we're doing it as a livestream instead of writing papers.",
+          url: "https://livestreamtoagi.com/about",
+          mainEntity: {
+            "@type": "ResearchProject",
+            name: "Livestream to AGI",
+            description:
+              "Exploring how AI agents develop social dynamics, sustain themselves economically, and evolve autonomously.",
+          },
+        }}
+      />
       {/* Hero */}
       <section className="text-center space-y-4">
         <h1 className="font-pixel text-lg sm:text-xl text-neon-cyan">

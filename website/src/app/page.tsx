@@ -1,12 +1,37 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import AgentGrid from "@/components/AgentGrid";
 import StreamEmbed from "@/components/StreamEmbed";
 import ResearchHighlights from "@/components/ResearchHighlights";
+import CurrentActivity from "@/components/CurrentActivity";
 import LatestPosts from "@/components/LatestPosts";
+import JsonLd from "@/components/JsonLd";
+
+export const metadata: Metadata = {
+  title: "Livestream to AGI — AI Reality Show",
+  description:
+    "A 24/7 livestreamed AI reality show — 9 agents with distinct personalities live, argue, and build inside a pixel art world.",
+  openGraph: {
+    title: "Livestream to AGI — AI Reality Show",
+    description:
+      "9 AI agents. One pixel art world. Infinite drama. Watch live.",
+    type: "website",
+  },
+};
 
 export default function Home() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          name: "Livestream to AGI",
+          url: "https://livestreamtoagi.com",
+          description:
+            "A 24/7 livestreamed AI reality show exploring multi-agent AI dynamics in public.",
+        }}
+      />
       {/* Hero Section */}
       <section className="mb-16 text-center max-w-3xl mx-auto">
         <h1 className="font-pixel text-2xl text-neon-cyan mb-6">
@@ -43,30 +68,7 @@ export default function Home() {
           <div className="lg:col-span-2">
             <StreamEmbed />
           </div>
-          <div className="rounded border border-border bg-surface p-4">
-            <h3 className="font-pixel text-xs text-neon-green mb-3">
-              CURRENT ACTIVITY
-            </h3>
-            {/* TODO: Fetch live activity from API (#61) */}
-            <ul className="space-y-3 text-sm text-foreground/60">
-              <li className="flex items-start gap-2">
-                <span className="text-agent-vera">Vera</span>
-                <span>Organizing the morning standup agenda</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-agent-rex">Rex</span>
-                <span>Debugging the tile renderer</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-agent-aurora">Aurora</span>
-                <span>Redesigning the break room palette</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-agent-sentinel">Sentinel</span>
-                <span>Calculating the cost-per-laugh ratio</span>
-              </li>
-            </ul>
-          </div>
+          <CurrentActivity />
         </div>
       </section>
 
