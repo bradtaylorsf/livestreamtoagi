@@ -1,33 +1,70 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { getAllAgents } from "@/lib/agent-data";
-
-// Static adjacency scores derived from agent configs
-const ADJACENCY_SCORES: Record<string, Record<string, number>> = {
-  vera: { rex: 0.7, aurora: 0.6, sentinel: 0.8, pixel: 0.5, fork: 0.5, grok: 0.6 },
-  rex: { vera: 0.5, fork: 0.8, aurora: 0.3, sentinel: 0.4, pixel: 0.4, grok: 0.3 },
-  aurora: { rex: 0.6, vera: 0.5, pixel: 0.7, grok: 0.5, fork: 0.4, sentinel: 0.4 },
-  pixel: { vera: 0.5, aurora: 0.7, grok: 0.6, rex: 0.4, fork: 0.3, sentinel: 0.3 },
-  fork: { rex: 0.8, grok: 0.6, vera: 0.5, aurora: 0.4, sentinel: 0.5, pixel: 0.3 },
-  sentinel: { vera: 0.8, rex: 0.5, grok: 0.6, aurora: 0.5, fork: 0.4, pixel: 0.3 },
-  grok: { fork: 0.7, aurora: 0.6, vera: 0.5, pixel: 0.6, rex: 0.4, sentinel: 0.5 },
-  management: {},
-  alpha: {},
-};
+import { getAgentRelationships } from "@/lib/api";
+import type { AgentRelationshipResponse } from "@/types";
 
 interface Props {
   agentId: string;
 }
 
 export default function RelationshipGraph({ agentId }: Props) {
+  const [relationships, setRelationships] = useState<AgentRelationshipResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const allAgents = getAllAgents();
-  const relationships = ADJACENCY_SCORES[agentId] ?? {};
-  const sortedRelationships = Object.entries(relationships).sort(
-    ([, a], [, b]) => b - a,
-  );
 
-  if (sortedRelationships.length === 0) {
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    getAgentRelationships(agentId)
+      .then((data) => {
+        if (!cancelled) setRelationships(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load relationships");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [agentId]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-8">
+        <span className="text-sm text-foreground/40">Loading relationships...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-sm text-red-400">Unable to load relationships</p>
+        <button
+          onClick={() => {
+            setLoading(true);
+            setError(null);
+            getAgentRelationships(agentId)
+              .then(setRelationships)
+              .catch((err) => setError(err instanceof Error ? err.message : "Failed to load relationships"))
+              .finally(() => setLoading(false));
+          }}
+          className="text-xs text-neon-cyan hover:text-neon-cyan/80 mt-2"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (relationships.length === 0) {
     return (
       <p className="text-sm text-foreground/40 text-center py-8">
         Relationship data not available for this agent.
@@ -35,18 +72,22 @@ export default function RelationshipGraph({ agentId }: Props) {
     );
   }
 
+  const sorted = [...relationships].sort(
+    (a, b) => b.sentiment_score - a.sentiment_score,
+  );
+
   return (
     <div className="space-y-3">
-      {sortedRelationships.map(([targetId, score]) => {
-        const target = allAgents.find((a) => a.id === targetId);
+      {sorted.map((rel) => {
+        const target = allAgents.find((a) => a.id === rel.target_agent_id);
         if (!target) return null;
 
-        const barWidth = Math.round(score * 100);
+        const barWidth = Math.round(Math.abs(rel.sentiment_score) * 100);
 
         return (
           <Link
-            key={targetId}
-            href={`/agents/${targetId}`}
+            key={rel.id}
+            href={`/agents/${rel.target_agent_id}`}
             className="flex items-center gap-3 rounded border border-border bg-surface p-3 hover:bg-surface-light transition-colors"
           >
             <div
@@ -64,7 +105,7 @@ export default function RelationshipGraph({ agentId }: Props) {
                   {target.name}
                 </span>
                 <span className="text-xs text-foreground/40">
-                  {score.toFixed(1)}
+                  {rel.sentiment_score.toFixed(1)}
                 </span>
               </div>
               <div className="h-1.5 bg-surface-light rounded overflow-hidden">
@@ -77,6 +118,11 @@ export default function RelationshipGraph({ agentId }: Props) {
                   }}
                 />
               </div>
+              {rel.interaction_count > 0 && (
+                <span className="text-xs text-foreground/30 mt-1 block">
+                  {rel.interaction_count} interactions
+                </span>
+              )}
             </div>
           </Link>
         );
