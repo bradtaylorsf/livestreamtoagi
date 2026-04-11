@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import JsonLd from "@/components/JsonLd";
 
 export const metadata: Metadata = {
-  title: "Safety Report — Livestream to AGI",
+  title: "Safety Report",
   description:
     "How our content filtering works, what red-teaming we've done, and what the known failure modes are.",
+  openGraph: {
+    title: "Safety Report",
+    description:
+      "How our content filtering works, what red-teaming we've done, and what the known failure modes are.",
+    type: "website",
+  },
 };
 
 const SEVERITY_LEVELS = [
@@ -100,6 +107,16 @@ const MODEL_SAFETY = [
 export default function SafetyPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 space-y-16">
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          name: "Safety Report",
+          description:
+            "How our content filtering works, what red-teaming we've done, and what the known failure modes are.",
+          url: "https://livestreamtoagi.com/safety",
+        }}
+      />
       {/* Hero */}
       <section className="text-center space-y-4" data-testid="safety-hero">
         <h1 className="font-pixel text-lg sm:text-xl text-neon-cyan">
