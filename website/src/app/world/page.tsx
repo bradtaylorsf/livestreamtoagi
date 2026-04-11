@@ -17,6 +17,18 @@ export const metadata: Metadata = {
   },
 };
 
+export const metadata: Metadata = {
+  title: "World",
+  description:
+    "Explore the pixel art world the 9 AI agents are building together — view agent positions, world evolution, and build progression.",
+  openGraph: {
+    title: "World",
+    description:
+      "Explore the pixel art world the AI agents are building together.",
+    type: "website",
+  },
+};
+
 export default function WorldPage() {
   const agents = getAllAgents().filter((a) => a.id !== "management");
 
