@@ -119,6 +119,12 @@ class VoteCharacterTool(BaseTool):
         if self._voting is None:
             return {"status": "error", "reason": "Voting system not available"}
 
+        import uuid as _uuid
+        try:
+            _uuid.UUID(kwargs["application_id"])
+        except (ValueError, AttributeError):
+            return {"status": "error", "reason": "Invalid application_id (not a valid UUID)"}
+
         vote_bool = kwargs["vote"].lower() == "yes"
         await self._voting.record_agent_vote(
             application_id=kwargs["application_id"],

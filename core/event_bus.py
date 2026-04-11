@@ -43,6 +43,7 @@ class EventType(str, Enum):
     TASK_COMPLETED = "task_completed"
     AGENT_SPAWN = "agent_spawn"
     AGENT_DESPAWN = "agent_despawn"
+    SIMULATION_ERROR = "simulation_error"
 
 
 # Custom JSON encoder for Decimal, datetime, UUID

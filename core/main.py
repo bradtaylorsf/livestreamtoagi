@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI):
             agent_state_manager=svc.agent_state_manager,
             dream_manager=svc.dream_manager,
             journal_image_generator=journal_image_gen,
+            event_bus=svc.event_bus,
         )
 
         if api_key:

@@ -151,6 +151,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         agent_state_manager=svc.agent_state_manager,
         dream_manager=svc.dream_manager,
         journal_image_generator=journal_image_gen,
+        event_bus=svc.event_bus,
     )
 
     display = SimulationDisplay(verbose=verbose, agent_registry=svc.agent_registry)

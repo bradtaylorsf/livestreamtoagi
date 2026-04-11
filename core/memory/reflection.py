@@ -26,13 +26,14 @@ if TYPE_CHECKING:
     from core.agent_goals import AgentGoalManager
     from core.agent_registry import AgentRegistry
     from core.agent_state import AgentStateManager
+    from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.dreams import DreamManager
-    from tools.journal_image_tool import JournalImageGenerator
     from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
     from core.social.relationship_tracker import RelationshipTracker
+    from tools.journal_image_tool import JournalImageGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,7 @@ class ReflectionManager:
         dream_manager: DreamManager | None = None,
         simulation_id: _uuid.UUID | None = None,
         journal_image_generator: JournalImageGenerator | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._repo = memory_repo
         self._llm = llm_client
@@ -177,6 +179,28 @@ class ReflectionManager:
         self._dream_manager = dream_manager
         self._simulation_id = simulation_id
         self._journal_image_generator = journal_image_generator
+        self._event_bus = event_bus
+
+    async def _parse_and_track(
+        self, content: str, agent_id: str, context: str,
+    ) -> dict:
+        """Parse JSON from LLM response and emit error event on failure."""
+        result = _parse_json_response(content)
+        if not result and self._event_bus is not None:
+            from core.event_bus import EventType
+
+            await self._event_bus.emit(
+                EventType.SIMULATION_ERROR,
+                {
+                    "source": "reflection",
+                    "error_type": "json_parse_failure",
+                    "context": context,
+                    "agent_id": agent_id,
+                    "detail": content[:500],
+                    "simulation_id": str(self._simulation_id) if self._simulation_id else None,
+                },
+            )
+        return result
 
     def set_relationship_tracker(self, tracker: RelationshipTracker) -> None:
         """Set the relationship tracker (called after simulation_id is known)."""
@@ -225,7 +249,9 @@ class ReflectionManager:
             simulation_id=self._simulation_id,
         )
 
-        analysis = _parse_json_response(response.content)
+        analysis = await self._parse_and_track(
+            response.content, agent_id, "6hour_reflection",
+        )
         importance_updates = 0
         promoted_count = 0
 
@@ -383,7 +409,9 @@ class ReflectionManager:
             simulation_id=self._simulation_id,
         )
 
-        analysis = _parse_json_response(response.content)
+        analysis = await self._parse_and_track(
+            response.content, agent_id, "weekly_reflection",
+        )
         promoted_count = 0
         proposals = []
 
@@ -648,7 +676,9 @@ class ReflectionManager:
             logger.warning("Goal generation LLM call failed for %s", agent_id, exc_info=True)
             return 0
 
-        parsed = _parse_json_response(response.content)
+        parsed = await self._parse_and_track(
+            response.content, agent_id, "goal_generation",
+        )
         goals = parsed.get("goals", [])
         if not isinstance(goals, list):
             return 0
@@ -722,7 +752,9 @@ class ReflectionManager:
             max_tokens=2000,
             simulation_id=self._simulation_id,
         )
-        trimmed = _parse_json_response(response.content)
+        trimmed = await self._parse_and_track(
+            response.content, agent_id, "memory_trimming",
+        )
         for update in trimmed.get("updates", []):
             section = update.get("section", "")
             content = update.get("content")

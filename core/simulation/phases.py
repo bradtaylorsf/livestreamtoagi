@@ -414,8 +414,20 @@ class PhaseRunner:
                         result.promoted_count,
                         result.importance_updates,
                     )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Reflection failed for %s", agent_id)
+                from core.event_bus import EventType
+
+                await self._event_bus.emit(
+                    EventType.SIMULATION_ERROR,
+                    {
+                        "source": "reflection",
+                        "error_type": "reflection_exception",
+                        "agent_id": agent_id,
+                        "detail": str(exc)[:500],
+                        "simulation_id": str(self._simulation_id) if self._simulation_id else None,
+                    },
+                )
 
     async def _run_audience_sim(self, phase: Phase) -> None:
         """Inject fake audience messages and trigger Pixel responses."""

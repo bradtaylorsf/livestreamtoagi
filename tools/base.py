@@ -63,6 +63,10 @@ class BaseTool(ABC):
                 status = "pending_approval"
             elif isinstance(result, dict) and result.get("simulated"):
                 status = "simulated"
+            elif isinstance(result, dict) and result.get("status") in (
+                "error", "rejected", "rate_limited",
+            ):
+                status = "error"
             return result
         finally:
             if self.artifact_repo is not None:
@@ -115,6 +119,26 @@ class BaseTool(ABC):
                             },
                         )
                     )
+
+                    # Emit error event for orchestrator error_log collection
+                    if status in ("failed", "error"):
+                        _reason = _error_msg or (
+                            tool_output.get("reason", "unknown")
+                            if isinstance(tool_output, dict) else "unknown"
+                        )
+                        asyncio.create_task(
+                            self.event_bus.emit(
+                                EventType.SIMULATION_ERROR,
+                                {
+                                    "source": "tool",
+                                    "tool_name": self.name,
+                                    "agent_id": agent_id,
+                                    "status": status,
+                                    "error": _reason,
+                                    "simulation_id": str(simulation_id) if simulation_id else None,
+                                },
+                            )
+                        )
 
 
 async def _save_artifact(repo: ArtifactRepo, artifact: Any) -> None:

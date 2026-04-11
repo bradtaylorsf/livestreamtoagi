@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from core.event_bus import EventType
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
 from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import SimulationCreate, SimulationStatus
@@ -230,6 +231,7 @@ class SimulationOrchestrator:
         self._start_time: float = 0.0
         self._total_cost = Decimal("0")
         self._cancelled = False
+        self._errors: list[dict[str, Any]] = []
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
     @property
@@ -416,6 +418,13 @@ class SimulationOrchestrator:
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
+
+        # Collect runtime errors for error_log persistence
+        self._errors.clear()
+        self._event_bus.on(
+            EventType.SIMULATION_ERROR, self._on_simulation_error,
+        )
+
         logger.info(
             "Created simulation %s (%s) with model versions: %s",
             sim.id, sim.name, model_versions,
@@ -606,6 +615,13 @@ class SimulationOrchestrator:
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
+
+        # Collect runtime errors for error_log persistence
+        self._errors.clear()
+        self._event_bus.on(
+            EventType.SIMULATION_ERROR, self._on_simulation_error,
+        )
+
         logger.info(
             "Created autonomous simulation %s (%s) with model versions: %s",
             sim.id, sim.name, model_versions,
@@ -892,6 +908,10 @@ class SimulationOrchestrator:
                 f"Total cost ${self._total_cost} exceeds limit ${self._config.max_cost}"
             )
 
+    async def _on_simulation_error(self, event: dict[str, Any]) -> None:
+        """Collect runtime errors emitted via SIMULATION_ERROR events."""
+        self._errors.append(event)
+
     async def _finalize(
         self,
         status: SimulationStatus,
@@ -901,6 +921,20 @@ class SimulationOrchestrator:
         """Update the simulation record with final status and durations."""
         if self._simulation_id is None:
             return
+
+        # Merge explicit error_log with accumulated runtime errors
+        combined_log: dict[str, Any] | list[Any] | None = None
+        if error_log and self._errors:
+            combined_log = {**error_log, "runtime_errors": self._errors}
+        elif error_log:
+            combined_log = error_log
+        elif self._errors:
+            combined_log = {"runtime_errors": self._errors}
+
+        # Unsubscribe error listener
+        self._event_bus.off(
+            EventType.SIMULATION_ERROR, self._on_simulation_error,
+        )
 
         real_duration = timedelta(seconds=time.monotonic() - self._start_time)
         # Use clock elapsed time if speed_multiplier > 0, else fallback to phase count
@@ -913,7 +947,7 @@ class SimulationOrchestrator:
             self._simulation_id,
             status.value,
             completed_at=datetime.now(UTC),
-            error_log=error_log,
+            error_log=combined_log,
         )
         await self._sim_repo.update_durations(
             self._simulation_id,
