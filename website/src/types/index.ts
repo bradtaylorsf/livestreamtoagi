@@ -63,12 +63,10 @@ export interface ChallengeSubmission {
 }
 
 export interface Stats {
-  agi_progress: number;
-  total_cost: number;
-  daily_cost: number;
-  revenue: number;
-  viewers: number;
-  uptime_hours: number;
+  total_simulations: number;
+  total_agents: number;
+  total_cost: string;
+  total_conversations: number;
 }
 
 export interface LoreEvent {

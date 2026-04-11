@@ -2,6 +2,7 @@ import Link from "next/link";
 import AgentGrid from "@/components/AgentGrid";
 import StreamEmbed from "@/components/StreamEmbed";
 import ResearchHighlights from "@/components/ResearchHighlights";
+import CurrentActivity from "@/components/CurrentActivity";
 import LatestPosts from "@/components/LatestPosts";
 
 export default function Home() {
@@ -43,30 +44,7 @@ export default function Home() {
           <div className="lg:col-span-2">
             <StreamEmbed />
           </div>
-          <div className="rounded border border-border bg-surface p-4">
-            <h3 className="font-pixel text-xs text-neon-green mb-3">
-              CURRENT ACTIVITY
-            </h3>
-            {/* TODO: Fetch live activity from API (#61) */}
-            <ul className="space-y-3 text-sm text-foreground/60">
-              <li className="flex items-start gap-2">
-                <span className="text-agent-vera">Vera</span>
-                <span>Organizing the morning standup agenda</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-agent-rex">Rex</span>
-                <span>Debugging the tile renderer</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-agent-aurora">Aurora</span>
-                <span>Redesigning the break room palette</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-agent-sentinel">Sentinel</span>
-                <span>Calculating the cost-per-laugh ratio</span>
-              </li>
-            </ul>
-          </div>
+          <CurrentActivity />
         </div>
       </section>
 

@@ -151,9 +151,10 @@ describe("getChallenges with filters", () => {
 
 describe("getStats", () => {
   it("sends GET to /api/stats", async () => {
-    mockFetch.mockReturnValue(jsonResponse({ viewers: 42 }));
+    const statsData = { total_simulations: 10, total_agents: 9, total_cost: "1.23", total_conversations: 42 };
+    mockFetch.mockReturnValue(jsonResponse(statsData));
     const result = await getStats();
-    expect(result).toEqual({ viewers: 42 });
+    expect(result).toEqual(statsData);
   });
 });
 
