@@ -42,7 +42,9 @@ class SendChatMessageTool(BaseTool):
         if self._agent_id not in self.ALLOWED_AGENTS:
             return {"status": "rejected", "reason": f"Agent {self._agent_id!r} not authorized"}
 
-        review = await self._management.review(self._agent_id, message)
+        review = await self._management.review(
+            self._agent_id, message, simulation_id=kwargs.get("simulation_id"),
+        )
         if not review.approved:
             return {"status": "rejected", "reason": review.reason}
 

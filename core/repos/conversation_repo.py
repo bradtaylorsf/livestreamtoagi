@@ -100,8 +100,9 @@ class ConversationRepo:
             """INSERT INTO conversation_selection_log
                (conversation_id, turn_number, selected_agent_id, was_interrupt,
                 agent_scores, detected_topic, previous_speaker_id,
-                conversation_energy, active_agents, trigger_type, config_hash)
-               VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9::jsonb, $10, $11)""",
+                conversation_energy, active_agents, trigger_type, config_hash,
+                simulation_id)
+               VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9::jsonb, $10, $11, $12)""",
             entry.conversation_id,
             entry.turn_number,
             entry.selected_agent_id,
@@ -113,14 +114,16 @@ class ConversationRepo:
             serialize_jsonb(entry.active_agents),
             entry.trigger_type,
             entry.config_hash,
+            entry.simulation_id,
         )
 
     async def log_interrupt(self, entry: InterruptLogCreate) -> None:
         await self.db.execute(
             """INSERT INTO interrupt_log
                (conversation_id, attempting_agent_id, would_have_spoken_id,
-                interrupt_score, threshold_at_time, succeeded, reason)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+                interrupt_score, threshold_at_time, succeeded, reason,
+                simulation_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
             entry.conversation_id,
             entry.attempting_agent_id,
             entry.would_have_spoken_id,
@@ -128,16 +131,18 @@ class ConversationRepo:
             entry.threshold_at_time,
             entry.succeeded,
             entry.reason,
+            entry.simulation_id,
         )
 
     async def log_energy(self, entry: EnergyLogCreate) -> None:
         await self.db.execute(
             """INSERT INTO energy_change_log
-               (conversation_id, turn_number, changes)
-               VALUES ($1, $2, $3::jsonb)""",
+               (conversation_id, turn_number, changes, simulation_id)
+               VALUES ($1, $2, $3::jsonb, $4)""",
             entry.conversation_id,
             entry.turn_number,
             serialize_jsonb(entry.changes),
+            entry.simulation_id,
         )
 
     async def cleanup_old_logs(self, retention_days: int) -> None:

@@ -29,9 +29,15 @@ logger = logging.getLogger(__name__)
 class SelectionLogger:
     """Records speaker selection decisions, interrupts, and energy changes."""
 
-    def __init__(self, repo: ConversationRepo, config: LoggingConfig) -> None:
+    def __init__(
+        self,
+        repo: ConversationRepo,
+        config: LoggingConfig,
+        simulation_id: uuid.UUID | None = None,
+    ) -> None:
         self.repo = repo
         self.config = config
+        self.simulation_id = simulation_id
 
     async def log_selection(
         self,
@@ -60,6 +66,7 @@ class SelectionLogger:
             active_agents=active_agents,
             trigger_type=trigger_type,
             config_hash=config_hash,
+            simulation_id=self.simulation_id,
         )
         await self.repo.log_selection(entry)
 
@@ -96,6 +103,7 @@ class SelectionLogger:
             threshold_at_time=threshold,
             succeeded=succeeded,
             reason=reason,
+            simulation_id=self.simulation_id,
         )
         await self.repo.log_interrupt(entry)
 
@@ -113,6 +121,7 @@ class SelectionLogger:
             conversation_id=conversation_id,
             turn_number=turn_number,
             changes=changes,
+            simulation_id=self.simulation_id,
         )
         await self.repo.log_energy(entry)
 

@@ -154,6 +154,96 @@ phases:
     context: "Check our budget and revenue status for a team update"
     location: town_square
 
+  # ── Economy tools ───────────────────────────────────────────
+  - name: economy_view_account
+    type: tool_exercise
+    agent: sentinel
+    tool: view_account
+    context: "Check your current budget balance and transaction history"
+    location: town_square
+
+  - name: economy_transfer_budget
+    type: tool_exercise
+    agent: vera
+    tool: transfer_budget
+    context: "Transfer 5 tokens to Rex for his coding work on the project"
+    location: town_square
+
+  # ── Alliance tools ────────────────────────────────────────
+  - name: alliance_propose
+    type: tool_exercise
+    agent: grok
+    tool: propose_alliance
+    context: "Propose an alliance called 'Creative Collective' with Aurora to collaborate on art projects"
+    location: town_square
+
+  - name: alliance_vote
+    type: tool_exercise
+    agent: aurora
+    tool: vote_alliance
+    context: "Vote yes on the most recent alliance proposal"
+    location: town_square
+
+  - name: alliance_view
+    type: tool_exercise
+    agent: grok
+    tool: view_alliances
+    context: "View all current alliances and their members"
+    location: town_square
+
+  - name: alliance_leave
+    type: tool_exercise
+    agent: grok
+    tool: leave_alliance
+    context: "Leave the Creative Collective alliance"
+    location: town_square
+
+  # ── Task management tool ──────────────────────────────────
+  - name: task_manage
+    type: tool_exercise
+    agent: vera
+    tool: manage_task
+    context: "Create a new task on the shared board: 'Set up project repository' assigned to Rex"
+    location: town_square
+
+  # ── Character tools ───────────────────────────────────────
+  - name: character_propose
+    type: tool_exercise
+    agent: aurora
+    tool: propose_character
+    context: "Propose a new character named 'Sage' who would be a philosophy-focused AI mentor"
+    location: town_square
+
+  - name: character_vote
+    type: tool_exercise
+    agent: vera
+    tool: vote_character
+    context: "Vote yes on the most recent character proposal"
+    location: town_square
+
+  # ── Revenue tracking tools ────────────────────────────────
+  - name: revenue_check_post
+    type: tool_exercise
+    agent: pixel
+    tool: check_post_performance
+    context: "Check how our recent social media posts have been performing"
+    location: town_square
+
+  - name: revenue_check_email
+    type: tool_exercise
+    agent: pixel
+    tool: check_email_responses
+    context: "Check if we got any responses to our sponsorship emails"
+    location: town_square
+
+  # ── Organic break ──────────────────────────────────────────
+  - name: organic_break_4
+    type: organic
+    count: 1
+    topics:
+      - "How are the economy and alliance features working? Any thoughts on team collaboration?"
+    location: town_square
+
   # ── Agent autonomy tools ───────────────────────────────────
   - name: autonomy_dispatch_alpha
     type: tool_exercise
@@ -187,6 +277,10 @@ phases:
   - name: tool_coverage_reflection
     type: reflection
     reflection_type: 6hour
+
+  - name: tool_coverage_dream
+    type: reflection
+    reflection_type: dream
 
   - name: wrapup
     type: organic

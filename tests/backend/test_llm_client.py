@@ -439,6 +439,8 @@ async def test_integration_real_call():
     try:
         cost_repo = CostRepo(db)
         client = OpenRouterClient(api_key, cost_repo)
+        from core.constants import LIVE_SIMULATION_ID
+        client._simulation_id = LIVE_SIMULATION_ID
         try:
             result = await client.complete(
                 [{"role": "user", "content": "Say 'test' and nothing else."}],

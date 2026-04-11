@@ -112,6 +112,7 @@ class WebSearchTool(BaseTool):
                     cost_type="web_search",
                     amount=SEARCH_COST,
                     details={"query": query, "provider": provider},
+                    simulation_id=kwargs.get("simulation_id"),
                 )
             )
 
@@ -272,6 +273,7 @@ class FetchUrlTool(BaseTool):
                     cost_type="fetch_url",
                     amount=FETCH_COST,
                     details={"url": url},
+                    simulation_id=kwargs.get("simulation_id"),
                 )
             )
 

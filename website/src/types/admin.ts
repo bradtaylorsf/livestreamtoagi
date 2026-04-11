@@ -8,6 +8,7 @@ export interface Simulation {
   description: string | null;
   config: Record<string, unknown>;
   status: SimulationStatus;
+  is_live: boolean;
   started_at: string | null;
   completed_at: string | null;
   simulated_duration: string | null;

@@ -132,6 +132,7 @@ class GenerateTilemapTool(BaseTool):
             objects=objects,
             built_by=[self._agent_id],
             description=description,
+            simulation_id=kwargs.get("simulation_id"),
         )
 
         chunk = await self._world_repo.create_chunk(chunk_create)

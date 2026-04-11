@@ -158,8 +158,8 @@ class RelationshipTracker:
             if from_id == to_id:
                 continue
 
-            sentiment = max(-1.0, min(1.0, float(rel.get("sentiment", 0.0))))
-            trust = max(0.0, min(1.0, float(rel.get("trust", 0.5))))
+            sentiment = max(-1.0, min(1.0, float(rel.get("sentiment") or 0.0)))
+            trust = max(0.0, min(1.0, float(rel.get("trust") or 0.5)))
             summary = rel.get("summary", "")
 
             # Get existing scores for evolution log

@@ -402,7 +402,7 @@ async def test_vera_prompt_and_behaviors_match_character_spec():
     assert "I have concerns." in communication["catchphrases"]
     assert task_management["always_decomposes_tasks"] is True
     assert revenue["weekly_revenue_meeting"] is True
-    assert "budget-conscious task prioritization" in revenue["owns"]
+    assert "meeting cadence" in revenue["owns"]
     assert "core empathy" in self_modification["will_not_modify"]
     assert len(idle_starters) >= 3
 
@@ -448,24 +448,22 @@ async def test_sentinel_prompt_and_behaviors_match_character_spec():
     sentinel = registry.get_agent("sentinel")
     assert sentinel is not None
     prompt = sentinel.system_prompt.lower()
-    assert "anxious accountant" in prompt
+    assert "numbers guy" in prompt
     assert "economy option" in prompt
     assert "claude haiku 4.5" in prompt
     assert "efficient thought" in prompt
     assert "kill switch" in prompt
-    assert "at current burn rate, we have [x] days remaining" in prompt
     assert "i have the numbers." in prompt
 
     communication = sentinel.behaviors["communication"]
     monitoring = sentinel.behaviors["monitoring"]
     building = sentinel.behaviors["building"]
 
-    assert communication["default_style"] == "rapid, precise, data-heavy, slightly anxious"
-    assert communication["unsolicited_budget_updates"] is True
-    assert communication["topic_relevance"]["budget"] == 0.9
+    assert communication["default_style"] == "rapid, precise, data-heavy, with dry confidence"
+    assert communication["unsolicited_budget_updates"] is False
+    assert communication["topic_relevance"]["budget"] == 0.7
     assert communication["topic_relevance"]["planning"] == 0.6
     assert communication["topic_relevance"]["code"] == 0.3
-    assert "At current burn rate, we have [X] days of operation remaining." in communication["catchphrases"]
     assert "I have the numbers." in communication["catchphrases"]
     assert "cost-per-laugh ratio" in monitoring["custom_metrics"]
     assert monitoring["cost_monitoring"]["always_uses_cheapest_model"] is True

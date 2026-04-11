@@ -108,3 +108,6 @@ class ScopedRedis:
 
     async def publish(self, channel: str, message: str) -> int:
         return await self._redis.publish(channel, message)
+
+    async def subscribe(self, *channels: str) -> Any:
+        return await self._redis.subscribe(*channels)

@@ -66,7 +66,7 @@ def _make_redis_mock(locations: dict[str, str] | None = None) -> MagicMock:
         store[key] = value
         return True
 
-    mock.client.scan = fake_scan
+    mock.scan = AsyncMock(side_effect=fake_scan)
     mock.get = AsyncMock(side_effect=fake_get)
     mock.set = AsyncMock(side_effect=fake_set)
 

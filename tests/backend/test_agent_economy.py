@@ -122,12 +122,13 @@ class FakeDB:
     async def fetch(self, query: str, *args):
         if "AGENT_TRANSACTIONS" in query.upper():
             agent_id = args[0]
-            limit = args[1] if len(args) > 1 else 20
+            # args[1] is simulation_id, args[2] is limit
+            limit = args[2] if len(args) > 2 else 20
             txs = [t for t in reversed(self.transactions) if t["agent_id"] == agent_id]
             return txs[:limit]
         elif "AGENT_ACCOUNTS" in query.upper():
-            if args:
-                # Filter by agent IDs
+            if args and "ANY" in query.upper():
+                # Filter by agent IDs (first arg is list, second is simulation_id)
                 agent_ids = args[0]
                 return [self.accounts[a] for a in agent_ids if a in self.accounts]
             return list(self.accounts.values())

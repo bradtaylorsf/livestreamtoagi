@@ -12,6 +12,8 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import uuid
+
     from core.llm_client import OpenRouterClient
     from core.models import TopicConfig
 
@@ -28,7 +30,7 @@ class TopicDetector:
         self,
         config: TopicConfig,
         llm_client: OpenRouterClient | None = None,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
         topic_history: dict[str, list[float]] | None = None,
     ) -> None:
         self._config = config

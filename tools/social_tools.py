@@ -55,6 +55,7 @@ class ProposeAllianceTool(BaseTool):
             name=kwargs["alliance_name"],
             invitees=kwargs["invitees"],
             purpose=kwargs.get("purpose", ""),
+            simulation_id=kwargs.get("simulation_id"),
         )
 
         if proposal is None:
@@ -106,10 +107,16 @@ class VoteAllianceTool(BaseTool):
             return {"status": "error", "reason": "Alliance system not available"}
 
         accept = kwargs["accept"].lower() == "yes"
+        try:
+            from uuid import UUID
+            UUID(kwargs["proposal_id"])
+        except (ValueError, AttributeError):
+            return {"status": "error", "reason": "Invalid proposal_id (not a valid UUID)"}
         result = await self._alliance_mgr.vote_on_proposal(
             proposal_id=kwargs["proposal_id"],
             agent_id=self._agent_id,
             accept=accept,
+            simulation_id=kwargs.get("simulation_id"),
         )
 
         if result is None:

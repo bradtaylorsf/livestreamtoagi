@@ -8,7 +8,13 @@ import SummaryCard from "@/components/admin/SummaryCard";
 import TimelineView from "@/components/admin/TimelineView";
 import CostChart from "@/components/admin/CostChart";
 import ConfigViewer from "@/components/admin/ConfigViewer";
-import { fetchSimulation, fetchSimulationConversations } from "@/lib/admin-api";
+import {
+  fetchSimulation,
+  fetchSimulationConversations,
+  cloneSimulation,
+  exportSimulationSnapshot,
+  deleteSimulation,
+} from "@/lib/admin-api";
 import type { AgentConversation, Simulation } from "@/types/admin";
 
 function formatDuration(iso: string | null): string {
@@ -32,6 +38,8 @@ export default function SimulationDetailPage() {
   const [sim, setSim] = useState<Simulation | null>(null);
   const [convos, setConvos] = useState<AgentConversation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     fetchSimulation(id)
@@ -92,8 +100,8 @@ export default function SimulationDetailPage() {
         </div>
       </div>
 
-      {/* Eval Link + Assertions Link */}
-      <div className="flex items-center gap-3">
+      {/* Navigation Links */}
+      <div className="flex items-center gap-3 flex-wrap">
         <Link
           href={`/admin/simulations/${id}/evals`}
           className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
@@ -124,6 +132,71 @@ export default function SimulationDetailPage() {
         >
           Snapshots
         </Link>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          disabled={actionLoading}
+          onClick={async () => {
+            setActionLoading(true);
+            setActionMsg(null);
+            try {
+              const result = await cloneSimulation(id);
+              setActionMsg(`Cloned! New simulation: ${result.name} (${result.id})`);
+            } catch (err) {
+              setActionMsg(`Clone failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+            } finally {
+              setActionLoading(false);
+            }
+          }}
+          className="rounded border border-green-500/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+        >
+          Clone
+        </button>
+        <button
+          disabled={actionLoading}
+          onClick={async () => {
+            setActionLoading(true);
+            setActionMsg(null);
+            try {
+              const result = await exportSimulationSnapshot(id);
+              setActionMsg(`Exported to ${result.path} (${result.agents} agents, ${result.chunks} chunks)`);
+            } catch (err) {
+              setActionMsg(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+            } finally {
+              setActionLoading(false);
+            }
+          }}
+          className="rounded border border-yellow-500/60 px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+        >
+          Export Snapshot
+        </button>
+        {!sim.is_live && (
+          <button
+            disabled={actionLoading || sim.status === "running"}
+            onClick={async () => {
+              if (!confirm(`Delete simulation "${sim.name}"? This cannot be undone.`)) return;
+              setActionLoading(true);
+              setActionMsg(null);
+              try {
+                await deleteSimulation(id);
+                setActionMsg("Deleted. Redirecting...");
+                setTimeout(() => { window.location.href = "/admin/simulations"; }, 1000);
+              } catch (err) {
+                setActionMsg(`Delete failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+              } finally {
+                setActionLoading(false);
+              }
+            }}
+            className="rounded border border-red-500/60 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+          >
+            Delete
+          </button>
+        )}
+        {actionMsg && (
+          <span className="text-xs text-foreground/60">{actionMsg}</span>
+        )}
       </div>
 
       {/* Summary Panel */}

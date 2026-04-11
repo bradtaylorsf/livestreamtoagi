@@ -66,7 +66,7 @@ class AgentGoalManager:
         return f"{_GOALS_KEY_PREFIX}{agent_id}"
 
     async def get_goals(
-        self, agent_id: str, simulation_id: object | None = None,
+        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
     ) -> list[AgentGoalLegacy]:
         """Get all active goals for an agent, sorted by priority."""
         if self._use_db:
@@ -74,7 +74,7 @@ class AgentGoalManager:
         return await self._get_goals_redis(agent_id)
 
     async def _get_goals_db(
-        self, agent_id: str, simulation_id: object | None = None,
+        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
     ) -> list[AgentGoalLegacy]:
         """Get goals from DB, converting to legacy format for compatibility."""
         assert self._goal_repo is not None
@@ -126,7 +126,7 @@ class AgentGoalManager:
         related_agent: str | None = None,
         source: str = "self",
         category: str | None = None,
-        simulation_id: object | None = None,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> AgentGoalLegacy:
         """Add a new goal to an agent's queue."""
         if self._use_db:
@@ -138,7 +138,7 @@ class AgentGoalManager:
 
     async def _add_goal_db(
         self, agent_id: str, goal_text: str, priority: int, source: str,
-        category: str | None = None, simulation_id: object | None = None,
+        category: str | None = None, simulation_id: uuid_mod.UUID | None = None,
     ) -> AgentGoalLegacy:
         assert self._goal_repo is not None
         # Deduplicate — exact match or high similarity
@@ -231,7 +231,7 @@ class AgentGoalManager:
         return await self.update_goal(agent_id, goal_id, status="done")
 
     async def get_agenda_context(
-        self, agent_id: str, simulation_id: object | None = None,
+        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
     ) -> str:
         """Build a formatted agenda string for injection into context."""
         goals = await self.get_goals(agent_id, simulation_id=simulation_id)
@@ -258,7 +258,7 @@ class AgentGoalManager:
         return "\n".join(lines)
 
     async def generate_morning_agenda(
-        self, agent_id: str, simulation_id: object | None = None,
+        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
     ) -> str:
         """Generate a morning agenda summarizing current goals."""
         goals = await self.get_goals(agent_id, simulation_id=simulation_id)
@@ -283,7 +283,7 @@ class AgentGoalManager:
         return "\n".join(lines)
 
     async def get_commitment_reminders(
-        self, agent_id: str, simulation_id: object | None = None,
+        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
     ) -> str:
         """Get formatted reminders for commitments assigned to this agent.
 
@@ -306,40 +306,42 @@ class AgentGoalManager:
             )
         return "\n".join(lines)
 
-    async def seed_story_goals(self, simulation_id: object | None = None) -> None:
+    async def seed_story_goals(self, simulation_id: uuid_mod.UUID | None = None) -> None:
         """Seed initial story-arc goals for agents.
 
         Safe to call multiple times — skips agents that already have goals.
         """
         story_goals: dict[str, list[tuple[str, int, str | None]]] = {
             "vera": [
-                ("Establish team operating rhythm and daily standups", 1, None),
-                ("Get Rex to finish the first prototype", 2, "rex"),
-                ("Draft a sponsorship outreach plan", 3, None),
+                ("Get to know everyone on the team — learn their strengths and interests", 1, None),
+                ("Help the team decorate and personalize their office spaces", 2, None),
+                ("Create a welcoming first impression for anyone watching the stream", 3, None),
             ],
             "rex": [
-                ("Evaluate tech stack for the first build project", 1, None),
-                ("Build a working prototype to show the team", 2, None),
+                ("Introduce yourself and find out what each teammate is good at", 1, None),
+                ("Set up your workspace and show people what you're working with", 2, None),
             ],
             "fork": [
-                ("Challenge groupthink on monetization strategy", 1, None),
-                ("Review Rex's technical proposals critically", 2, "rex"),
+                ("Meet the team and share your perspective on how things should work", 1, None),
+                ("Find out what tools and platforms the team is using", 2, None),
             ],
             "aurora": [
-                ("Design the visual identity for the stream", 1, None),
-                ("Create concept art for the first world area", 2, None),
+                ("Introduce yourself and share your creative vision with the team", 1, None),
+                ("Decorate the shared spaces and create a mood board for the stream", 2, None),
+                ("Design a social media post announcing the stream to the world", 3, None),
             ],
             "sentinel": [
-                ("Set up daily cost tracking and budget alerts", 1, None),
-                ("Establish spending limits per agent", 2, None),
+                ("Get to know the team and understand what everyone does", 1, None),
+                ("Review the team's budget — we have $1,000/month, which is a great start", 2, None),
             ],
             "pixel": [
-                ("Set up social media accounts for the show", 1, None),
-                ("Create a viewer engagement strategy", 2, None),
+                ("Introduce yourself to the team and find out what excites everyone", 1, None),
+                ("Create a social media post or journal entry to attract viewers", 2, None),
+                ("Welcome any audience members and make them feel part of the show", 3, None),
             ],
             "grok": [
-                ("Find a controversial angle to drive engagement", 1, None),
-                ("Propose something wild that might go viral", 2, None),
+                ("Meet everyone and figure out the team dynamics", 1, None),
+                ("Come up with a fun idea to get people talking about the stream", 2, None),
             ],
         }
 

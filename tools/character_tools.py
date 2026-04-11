@@ -65,7 +65,10 @@ class ProposeCharacterTool(BaseTool):
             source="agent",
         )
 
-        saved = await self._spawner.submit_application(application)
+        simulation_id = kwargs.get("simulation_id")
+        saved = await self._spawner.submit_application(
+            application, simulation_id=simulation_id,
+        )
         if saved is None:
             return {"status": "error", "reason": "Failed to save character application"}
 

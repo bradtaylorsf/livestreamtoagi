@@ -192,7 +192,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     conversation_repo = ConversationRepo(svc.db)
     proximity = ProximityManager(sim_redis, cfg, event_bus)
     trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
-    selection_logger = SelectionLogger(conversation_repo, cfg.logging)
+    selection_logger = SelectionLogger(conversation_repo, cfg.logging, simulation_id=simulation_id)
 
     trigger_map: dict[str, dict[str, Any]] = {
         "idle": {"type": "idle", "reason": "Free-form conversation", "location": "town_square"},

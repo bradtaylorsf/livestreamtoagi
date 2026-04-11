@@ -409,10 +409,11 @@ async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
             "id": str(v.id),
             "version": v.version,
             "change_reason": v.change_reason,
-            "source": v.source,
+            "source": v.source if v.source in ("manual", "system", "evolution") else "system",
             "created_at": v.created_at.isoformat() if v.created_at else None,
         }
         for v in versions
+        if v.source in ("manual", "system", "evolution")
     ]
 
 
@@ -698,11 +699,14 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
     db = _get_db()
     if not db:
         raise HTTPException(status_code=503, detail="Database unavailable")
+    from core.constants import LIVE_SIMULATION_ID
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
     run = await eval_repo.get_eval_run(uuid.UUID(run_id))
     if run is None:
+        raise HTTPException(status_code=404, detail="Eval run not found")
+    if run.simulation_id != LIVE_SIMULATION_ID:
         raise HTTPException(status_code=404, detail="Eval run not found")
     results = await eval_repo.get_eval_results(run.id)
     flat_versions: dict[str, str] = {}

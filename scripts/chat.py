@@ -326,48 +326,7 @@ def run_convo(
         console.print("\n[dim]Conversation ended.[/dim]")
 
 
-def run_simulation(
-    agents: list[str],
-    convo_type: str,
-    topic: str | None = None,
-    turns: int | None = None,
-    speed: float = 1.0,
-    verbose: bool = False,
-    management_shadow: bool = True,
-    sim_name: str | None = None,
-) -> None:
-    """Launch a tracked simulation via watch_conversations.py --test --simulate (legacy)."""
-    import subprocess
-
-    cmd = [
-        sys.executable, str(PROJECT_ROOT / "scripts" / "watch_conversations.py"),
-        "--test", "--simulate",
-        "--test-type", convo_type,
-        "--agents", ",".join(agents),
-        "--speed", str(speed),
-    ]
-    if turns is not None:
-        cmd += ["--turns", str(turns)]
-    if topic is not None:
-        cmd += ["--topic", topic]
-    if verbose:
-        cmd.append("--verbose")
-    if management_shadow:
-        cmd.append("--management-shadow")
-    if sim_name:
-        cmd += ["--sim-name", sim_name]
-
-    console.print(f"\n[bold bright_cyan]Starting simulation...[/bold bright_cyan]")
-    console.print(f"[dim]Agents: {', '.join(agents)}[/dim]")
-    console.print(f"[dim]Type: {convo_type} | Turns: {turns or 'default'} | Management shadow: {management_shadow}[/dim]\n")
-
-    try:
-        subprocess.run(cmd, check=False)
-    except KeyboardInterrupt:
-        console.print("\n[dim]Simulation interrupted.[/dim]")
-
-
-# ── New simulation orchestrator integration ──────────────────
+# ── Simulation orchestrator integration ──────────────────────
 
 SCENARIOS_DIR = PROJECT_ROOT / "scenarios"
 
@@ -508,6 +467,13 @@ def run_sim_orchestrator(
         cmd.append("--dry-run")
     if world_sim:
         cmd.append("--world-sim")
+
+    if max_cost < 0:
+        console.print("[red]--max-cost cannot be negative[/red]")
+        return
+    if speed_multiplier < 0:
+        console.print("[red]--speed-multiplier cannot be negative[/red]")
+        return
 
     mode = "seeded" if seed_file else "autonomous"
     console.print(f"\n[bold bright_cyan]Starting {mode} simulation: {name}[/bold bright_cyan]")
@@ -908,6 +874,10 @@ def _sim_delete(args: list[str]) -> None:
                 console.print("[red]Cannot delete the live simulation.[/red]")
                 return
 
+            if sim.status == "running":
+                console.print("[red]Cannot delete a running simulation. Stop it first.[/red]")
+                return
+
             if not force:
                 try:
                     confirm = console.input(
@@ -995,6 +965,10 @@ def _sim_clone(args: list[str]) -> None:
             console.print(f"  [bold]Accounts:[/bold] {result.agent_accounts_restored}")
             console.print(f"  [bold]World chunks:[/bold] {result.world_chunks_restored}")
             console.print(f"  [bold]Relationships:[/bold] {result.relationships_restored}")
+            console.print(f"  [bold]Transactions:[/bold] {result.transactions_restored}")
+            console.print(f"  [bold]Challenges:[/bold] {result.challenges_restored}")
+            console.print(f"  [bold]World events:[/bold] {result.world_events_restored}")
+            console.print(f"  [bold]Alliances:[/bold] {result.alliances_restored}")
             if result.warnings:
                 console.print(f"  [yellow]Warnings:[/yellow] {len(result.warnings)}")
                 for w in result.warnings[:5]:
@@ -1049,12 +1023,20 @@ def _sim_export(args: list[str]) -> None:
             chunk_count = len(snapshot_data.get("world_chunks", []))
             rel_count = len(snapshot_data.get("relationships", []))
             goal_count = sum(len(g) for g in snapshot_data.get("agent_goals", {}).values())
+            tx_count = len(snapshot_data.get("transactions", []))
+            challenge_count = len(snapshot_data.get("challenges", []))
+            event_count = len(snapshot_data.get("world_events", []))
+            alliance_count = len(snapshot_data.get("alliances", []))
 
             console.print(f"\n[green]Exported to {out}[/green]")
             console.print(f"  [bold]Agents:[/bold] {agent_count}")
             console.print(f"  [bold]World chunks:[/bold] {chunk_count}")
+            console.print(f"  [bold]World events:[/bold] {event_count}")
             console.print(f"  [bold]Relationships:[/bold] {rel_count}")
             console.print(f"  [bold]Goals:[/bold] {goal_count}")
+            console.print(f"  [bold]Transactions:[/bold] {tx_count}")
+            console.print(f"  [bold]Challenges:[/bold] {challenge_count}")
+            console.print(f"  [bold]Alliances:[/bold] {alliance_count}")
         finally:
             await shutdown_services(svc)
 
@@ -1134,10 +1116,133 @@ def _sim_import(args: list[str]) -> None:
             console.print(f"  [bold]Accounts:[/bold] {result.agent_accounts_restored}")
             console.print(f"  [bold]World chunks:[/bold] {result.world_chunks_restored}")
             console.print(f"  [bold]Relationships:[/bold] {result.relationships_restored}")
+            console.print(f"  [bold]Transactions:[/bold] {result.transactions_restored}")
+            console.print(f"  [bold]Challenges:[/bold] {result.challenges_restored}")
+            console.print(f"  [bold]World events:[/bold] {result.world_events_restored}")
+            console.print(f"  [bold]Alliances:[/bold] {result.alliances_restored}")
             if result.warnings:
                 console.print(f"  [yellow]Warnings:[/yellow] {len(result.warnings)}")
                 for w in result.warnings[:10]:
                     console.print(f"    - {w}")
+        finally:
+            await shutdown_services(svc)
+
+    asyncio.run(_run())
+
+
+def _sim_seed(args: list[str]) -> None:
+    """Seed a new simulation from a template: pnpm chat sim seed [template-name] [--name name]"""
+    import asyncio
+    from pathlib import Path
+
+    seeds_dir = PROJECT_ROOT / "scenarios" / "seeds"
+    available = list(seeds_dir.glob("*.json")) if seeds_dir.exists() else []
+
+    if not available:
+        console.print("[red]No seed templates found in scenarios/seeds/[/red]")
+        return
+
+    # Resolve template
+    template_path = None
+    sim_name = None
+    clear_first = False
+    i = 0
+    while i < len(args):
+        if args[i] == "--name" and i + 1 < len(args):
+            sim_name = args[i + 1]; i += 2
+        elif args[i] == "--clear":
+            clear_first = True; i += 1
+        elif not args[i].startswith("--") and template_path is None:
+            # Try to match template name
+            target = args[i].lower().replace(".json", "")
+            for p in available:
+                if p.stem.lower() == target:
+                    template_path = p
+                    break
+            if template_path is None:
+                console.print(f"[red]Template not found: {args[i]}[/red]")
+                console.print(f"[dim]Available: {', '.join(p.stem for p in available)}[/dim]")
+                return
+            i += 1
+        else:
+            i += 1
+
+    if template_path is None:
+        # Interactive picker
+        console.print("\n[bold bright_cyan]Available seed templates:[/bold bright_cyan]")
+        for idx, p in enumerate(available, 1):
+            console.print(f"  [bold]{idx}[/bold]  {p.stem}")
+        console.print()
+        try:
+            choice = console.input(f"[bold]Pick a template (1-{len(available)}): [/bold]").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(available):
+                template_path = available[idx]
+            else:
+                console.print("[red]Invalid choice[/red]")
+                return
+        except (EOFError, KeyboardInterrupt, ValueError):
+            return
+
+    # Delegate to import
+    import_args = [str(template_path)]
+    if sim_name:
+        import_args += ["--name", sim_name]
+    else:
+        import_args += ["--name", f"seed-{template_path.stem}"]
+    if clear_first:
+        import_args.append("--clear")
+
+    _sim_import(import_args)
+
+
+def _sim_capture_live(args: list[str]) -> None:
+    """Capture the live simulation state: pnpm chat sim capture-live [--output file.json]"""
+    import asyncio
+
+    output_path = None
+    i = 0
+    while i < len(args):
+        if args[i] in ("--output", "-o") and i + 1 < len(args):
+            output_path = args[i + 1]; i += 2
+        else:
+            i += 1
+
+    async def _run() -> None:
+        from core.bootstrap import bootstrap_services, shutdown_services
+        from core.simulation.snapshot import SimulationSnapshotExporter
+        from core.constants import LIVE_SIMULATION_ID
+        import json as _json
+        import time as _time
+
+        svc = await bootstrap_services()
+        try:
+            console.print("[bold bright_cyan]Capturing live simulation state...[/bold bright_cyan]")
+            exporter = SimulationSnapshotExporter(svc.db)
+            snapshot_data = await exporter.export(str(LIVE_SIMULATION_ID))
+
+            out = output_path or f"snapshots/live-capture-{_time.strftime('%Y%m%d-%H%M%S')}.json"
+            from pathlib import Path
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_text(_json.dumps(snapshot_data, indent=2, default=str))
+
+            agent_count = len(snapshot_data.get("agents", {}))
+            chunk_count = len(snapshot_data.get("world_chunks", []))
+            rel_count = len(snapshot_data.get("relationships", []))
+            goal_count = sum(len(g) for g in snapshot_data.get("agent_goals", {}).values())
+            tx_count = len(snapshot_data.get("transactions", []))
+            challenge_count = len(snapshot_data.get("challenges", []))
+            event_count = len(snapshot_data.get("world_events", []))
+
+            console.print(f"\n[green]Live state captured to {out}[/green]")
+            console.print(f"  [bold]Agents:[/bold] {agent_count}")
+            console.print(f"  [bold]World chunks:[/bold] {chunk_count}")
+            console.print(f"  [bold]World events:[/bold] {event_count}")
+            console.print(f"  [bold]Relationships:[/bold] {rel_count}")
+            console.print(f"  [bold]Goals:[/bold] {goal_count}")
+            console.print(f"  [bold]Transactions:[/bold] {tx_count}")
+            console.print(f"  [bold]Challenges:[/bold] {challenge_count}")
+            console.print(f"\n[dim]Use 'pnpm chat sim import {out}' to seed a new simulation from this state.[/dim]")
         finally:
             await shutdown_services(svc)
 
@@ -1267,6 +1372,12 @@ def main() -> None:
             return
         if sim_args and sim_args[0].lower() in ("--import", "import"):
             _sim_import(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--capture-live", "capture-live"):
+            _sim_capture_live(sim_args[1:])
+            return
+        if sim_args and sim_args[0].lower() in ("--seed", "seed"):
+            _sim_seed(sim_args[1:])
             return
 
         verbose = "-v" in sim_args or "--verbose" in sim_args

@@ -56,6 +56,7 @@ class ProposeSelfModificationTool(BaseTool):
         file: str = kwargs.get("file", "")
         change_description: str = kwargs.get("change_description", "")
         new_content: str = kwargs.get("new_content", "")
+        simulation_id: _uuid.UUID | None = kwargs.get("simulation_id")
 
         if not file or not change_description or not new_content:
             return {
@@ -112,6 +113,7 @@ class ProposeSelfModificationTool(BaseTool):
             reasoning=f"Agent {self.agent_id} proposed modification to {file}",
             file=file,
             new_content=new_content,
+            simulation_id=simulation_id,
         )
 
         result = await self.memory_repo.create_proposal(proposal)
@@ -179,8 +181,9 @@ class ViewEvolutionLogTool(BaseTool):
         if not isinstance(limit, int) or limit < 1:
             limit = 10
 
+        sim_id = kwargs.get("simulation_id") or self.simulation_id
         proposals = await self.memory_repo.get_evolution_log(
-            agent_id=self.agent_id, limit=limit, simulation_id=self.simulation_id
+            agent_id=self.agent_id, limit=limit, simulation_id=sim_id
         )
 
         entries = [

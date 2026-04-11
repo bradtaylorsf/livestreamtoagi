@@ -189,6 +189,31 @@ export async function fetchSimulation(id: string): Promise<Simulation> {
   return request<Simulation>(`/api/admin/simulations/${id}`);
 }
 
+export async function cloneSimulation(
+  id: string,
+  name?: string,
+): Promise<{ id: string; name: string; restore_stats: Record<string, number> }> {
+  return request(`/api/admin/simulations/${id}/clone`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function exportSimulationSnapshot(
+  id: string,
+): Promise<{ filename: string; path: string; agents: number; chunks: number }> {
+  return request(`/api/admin/simulations/${id}/snapshot/export`, {
+    method: "POST",
+  });
+}
+
+export async function deleteSimulation(id: string): Promise<{ deleted: boolean }> {
+  return request(`/api/admin/simulations/${id}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchSimulationTimeline(
   id: string,
   agentId?: string,

@@ -15,6 +15,7 @@ import httpx
 from core.models import CostEventCreate, LLMResponse, StreamChunk, ToolCall
 
 if TYPE_CHECKING:
+    import uuid
     from collections.abc import AsyncGenerator
 
     from core.repos.cost_repo import CostRepo
@@ -212,7 +213,7 @@ class OpenRouterClient:
         self._cost_repo = cost_repo
         self._langfuse = langfuse_client
         self._lost_cost_events: int = 0
-        self._simulation_id: object | None = None  # Set externally for simulation tracking
+        self._simulation_id: uuid.UUID | None = None  # Set externally for simulation tracking
         self._model_fallbacks: list[dict[str, str]] = []
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
@@ -264,7 +265,7 @@ class OpenRouterClient:
         latency_ms: int,
         stream: bool,
         openrouter_id: str | None,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> None:
         """Log cost with single retry — never let DB errors break LLM calls."""
         event = CostEventCreate(
@@ -381,7 +382,7 @@ class OpenRouterClient:
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> LLMResponse:
         model_config = self._resolve_model(model)
         payload: dict[str, Any] = {
@@ -464,7 +465,7 @@ class OpenRouterClient:
         timeout: float = 30.0,
         temperature: float = 0.7,
         max_tokens: int | None = None,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         model_config = self._resolve_model(model)
         payload: dict[str, Any] = {

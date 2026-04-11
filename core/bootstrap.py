@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -182,6 +183,7 @@ async def bootstrap_services(
         llm_client=llm_client,
         http_client=http_client,
         openrouter_api_key=api_key,
+        simulation_id=LIVE_SIMULATION_ID,
     )
 
     from core.event_bus import event_bus as _module_event_bus
@@ -205,9 +207,10 @@ async def bootstrap_services(
     agent_state_manager = AgentStateManager(
         redis_client=scoped_redis,
         state_repo=agent_state_repo,
+        simulation_id=LIVE_SIMULATION_ID,
     )
 
-    economy_manager = AgentEconomyManager(db)
+    economy_manager = AgentEconomyManager(db, simulation_id=LIVE_SIMULATION_ID)
 
     # Initialize economy accounts — exclude management and alpha (non-participant agents)
     _ECONOMY_EXCLUDED = {"management", "alpha"}
@@ -226,6 +229,7 @@ async def bootstrap_services(
     alliance_manager = AllianceManager(
         alliance_repo=alliance_repo,
         economy_manager=economy_manager,
+        simulation_id=LIVE_SIMULATION_ID,
     )
 
     # Character spawning (#275)
@@ -257,6 +261,7 @@ async def bootstrap_services(
         agent_registry=agent_registry,
         token_counter=token_counter,
         embedding_fn=make_embedding_fn(http_client, api_key),
+        simulation_id=LIVE_SIMULATION_ID,
     )
 
     # Event/novelty injection (#273)
@@ -264,6 +269,7 @@ async def bootstrap_services(
         world_repo=world_repo,
         event_bus=_module_event_bus,
         agent_state_manager=agent_state_manager,
+        simulation_id=LIVE_SIMULATION_ID,
     )
 
     context_assembler = ContextAssembler(
@@ -392,7 +398,7 @@ async def shutdown_services(services: Services) -> None:
 async def init_core_memories(
     agent_registry: AgentRegistry,
     core_memory: CoreMemoryManager,
-    simulation_id: object | None = None,
+    simulation_id: uuid.UUID | None = None,
 ) -> list[str]:
     """Ensure all agents have core memory initialized.
 

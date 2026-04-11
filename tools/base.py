@@ -51,7 +51,9 @@ class BaseTool(ABC):
         status = "executed"
         _error_msg: str | None = None
         try:
-            result = await self.execute(**kwargs)
+            result = await self.execute(
+                simulation_id=simulation_id, **kwargs,
+            )
         except Exception as exc:
             status = "failed"
             _error_msg = str(exc)

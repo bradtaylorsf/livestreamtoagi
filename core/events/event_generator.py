@@ -21,6 +21,8 @@ from core.events.event_templates import (
 )
 
 if TYPE_CHECKING:
+    import uuid as _uuid
+
     from core.agent_state import AgentStateManager
     from core.conversation.triggers import TriggerSystem
     from core.event_bus import EventBus
@@ -68,6 +70,7 @@ class EventGenerator:
         event_bus: EventBus | None = None,
         agent_state_manager: AgentStateManager | None = None,
         rng: random.Random | None = None,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         self._config = config or EventGeneratorConfig()
         self._world_repo = world_repo
@@ -75,6 +78,7 @@ class EventGenerator:
         self._event_bus = event_bus
         self._state_mgr = agent_state_manager
         self._rng = rng or random.Random()
+        self.simulation_id = simulation_id
 
         # Tracking state
         self._events_today: int = 0
@@ -163,6 +167,7 @@ class EventGenerator:
                 description=f"[{event.severity.upper()}] {event.title}: {event.description}",
                 agents_involved=event.affected_agents or [],
                 audience_participation=False,
+                simulation_id=self.simulation_id,
             ))
 
         # Inject into trigger system

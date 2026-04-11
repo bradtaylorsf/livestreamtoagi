@@ -55,9 +55,11 @@ class AllianceManager:
         *,
         alliance_repo: AllianceRepo | None = None,
         economy_manager: AgentEconomyManager | None = None,
+        simulation_id: UUID | None = None,
     ) -> None:
         self._repo = alliance_repo
         self._economy = economy_manager
+        self.simulation_id = simulation_id
 
     async def propose_alliance(
         self,
@@ -71,12 +73,13 @@ class AllianceManager:
 
         Returns None if proposer already has MAX_ALLIANCES_PER_AGENT.
         """
+        simulation_id = simulation_id or self.simulation_id
         if self._repo is None:
             logger.warning("No alliance repo available")
             return None
 
         # Check proposer's current alliance count
-        current = await self._repo.get_agent_alliances(proposer_id)
+        current = await self._repo.get_agent_alliances(proposer_id, simulation_id)
         if len(current) >= MAX_ALLIANCES_PER_AGENT:
             logger.info(
                 "%s already in %d alliances (max %d)",
@@ -113,6 +116,7 @@ class AllianceManager:
 
         Returns Alliance if formed, AllianceProposal if still pending, None on error.
         """
+        simulation_id = simulation_id or self.simulation_id
         if self._repo is None:
             return None
 
@@ -151,10 +155,10 @@ class AllianceManager:
 
             # Add proposer + accepting invitees as members
             members = [updated["proposer"]]
-            await self._repo.add_member(alliance_id, updated["proposer"])
+            await self._repo.add_member(alliance_id, updated["proposer"], simulation_id)
             for inv in invitees:
                 if votes.get(inv, False):
-                    await self._repo.add_member(alliance_id, inv)
+                    await self._repo.add_member(alliance_id, inv, simulation_id)
                     members.append(inv)
 
             # Update proposal status
@@ -209,12 +213,15 @@ class AllianceManager:
 
         return True
 
-    async def get_alliance_context(self, agent_id: str) -> str:
+    async def get_alliance_context(
+        self, agent_id: str, simulation_id: UUID | None = None,
+    ) -> str:
         """Format active alliances for injection into agent context."""
+        simulation_id = simulation_id or self.simulation_id
         if self._repo is None:
             return ""
 
-        alliances = await self._repo.get_agent_alliances(agent_id)
+        alliances = await self._repo.get_agent_alliances(agent_id, simulation_id)
         if not alliances:
             return ""
 
@@ -233,6 +240,7 @@ class AllianceManager:
         self, simulation_id: UUID | None = None,
     ) -> list[Alliance]:
         """Get all active alliances."""
+        simulation_id = simulation_id or self.simulation_id
         if self._repo is None:
             return []
 
@@ -253,15 +261,18 @@ class AllianceManager:
             ))
         return result
 
-    async def are_allies(self, agent_a: str, agent_b: str) -> bool:
+    async def are_allies(
+        self, agent_a: str, agent_b: str, simulation_id: UUID | None = None,
+    ) -> bool:
         """Check if two agents are in the same alliance."""
+        simulation_id = simulation_id or self.simulation_id
         if self._repo is None:
             return False
 
-        a_alliances = await self._repo.get_agent_alliances(agent_a)
+        a_alliances = await self._repo.get_agent_alliances(agent_a, simulation_id)
         a_ids = {str(a["id"]) for a in a_alliances}
 
-        b_alliances = await self._repo.get_agent_alliances(agent_b)
+        b_alliances = await self._repo.get_agent_alliances(agent_b, simulation_id)
         b_ids = {str(a["id"]) for a in b_alliances}
 
         return bool(a_ids & b_ids)

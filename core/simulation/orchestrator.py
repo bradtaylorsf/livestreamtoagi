@@ -253,12 +253,77 @@ class SimulationOrchestrator:
             pass
         return ReflectionScheduler(self.clock, self._reflection, **kwargs)
 
+    def _rescope_redis(self, sim_id: uuid.UUID) -> None:
+        """Create a simulation-scoped Redis and re-wire all services.
+
+        Every service created at bootstrap holds a reference to a ScopedRedis
+        with the ``live:`` prefix.  When running a non-live simulation we must
+        swap that reference so Redis keys are namespaced under
+        ``sim:<uuid>:`` — giving true isolation between live and simulated
+        runs.
+        """
+        from core.redis_keys import ScopedRedis
+
+        scoped = ScopedRedis(self._redis, sim_id)
+
+        # Services that hold a direct _redis reference
+        if self._services:
+            if self._services.agent_state_manager is not None:
+                self._services.agent_state_manager._redis = scoped
+                self._services.agent_state_manager._cache.clear()
+            if self._services.shared_working_state is not None:
+                self._services.shared_working_state._redis = scoped
+            if self._services.goal_manager is not None:
+                self._services.goal_manager._redis = scoped
+            if self._services.agent_registry is not None:
+                self._services.agent_registry._redis = scoped
+            if self._services.scoped_redis is not None:
+                # Update the canonical reference so anything that reads it later
+                # picks up the sim-scoped instance.
+                self._services.scoped_redis = scoped
+
+        # Services held directly by the orchestrator
+        if self._proximity is not None:
+            self._proximity._redis = scoped
+        if self._context is not None:
+            self._context._redis = scoped
+        if self._management is not None:
+            self._management._redis = scoped
+
+        logger.info(
+            "Re-scoped Redis for simulation %s (prefix: %s)",
+            sim_id, scoped._prefix,
+        )
+
     def _build_phase_runner(
         self,
         sim_id: uuid.UUID,
         relationship_tracker: Any | None = None,
     ) -> PhaseRunner:
         """Create a PhaseRunner with all dependencies wired."""
+        # Re-scope Redis so all services use sim:<uuid>: key prefix
+        self._rescope_redis(sim_id)
+
+        # Override simulation_id on all shared service objects to match this simulation.
+        # These are created once at bootstrap with LIVE_SIMULATION_ID and must be
+        # repointed when running a non-live simulation.
+        if self._compactor is not None:
+            self._compactor._simulation_id = sim_id
+        if self._reflection is not None:
+            self._reflection._simulation_id = sim_id
+        if self._management is not None:
+            self._management._simulation_id = sim_id
+        if self._services:
+            if self._services.economy_manager is not None:
+                self._services.economy_manager.simulation_id = sim_id
+            if self._services.alliance_manager is not None:
+                self._services.alliance_manager.simulation_id = sim_id
+            if self._services.dream_manager is not None:
+                self._services.dream_manager._simulation_id = sim_id
+            if self._services.event_generator is not None:
+                self._services.event_generator.simulation_id = sim_id
+            if self._services.agent_state_manager is not None:
+                self._services.agent_state_manager.simulation_id = sim_id
         return PhaseRunner(
             config_loader=self._config_loader,
             agent_registry=self._agents,
@@ -326,7 +391,7 @@ class SimulationOrchestrator:
             }
         return versions
 
-    def _seed_rng(self, simulation_id: object) -> None:
+    def _seed_rng(self, simulation_id: uuid.UUID) -> None:
         """Seed the global RNG from the simulation ID for reproducibility."""
         seed = int(hashlib.sha256(str(simulation_id).encode()).hexdigest()[:8], 16)
         random.seed(seed)
@@ -349,6 +414,7 @@ class SimulationOrchestrator:
         ))
         self._simulation_id = sim.id
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
+        self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
         logger.info(
             "Created simulation %s (%s) with model versions: %s",
@@ -356,6 +422,19 @@ class SimulationOrchestrator:
         )
 
         self._display.show_simulation_start(sim, self._config)
+
+        # Initialize core memory for all agents in this simulation
+        if self._services and self._services.core_memory:
+            from core.bootstrap import init_core_memories
+            initialized = await init_core_memories(
+                self._agents, self._services.core_memory,
+                simulation_id=sim.id,
+            )
+            if initialized:
+                logger.info(
+                    "Initialized core memory for %d agents: %s",
+                    len(initialized), initialized,
+                )
 
         # Create RelationshipTracker and AssertionEngine now that sim_id is known
         relationship_tracker = self._build_relationship_tracker(sim.id)
@@ -525,6 +604,7 @@ class SimulationOrchestrator:
         ))
         self._simulation_id = sim.id
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
+        self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
         logger.info(
             "Created autonomous simulation %s (%s) with model versions: %s",
@@ -532,6 +612,19 @@ class SimulationOrchestrator:
         )
 
         self._display.show_simulation_start(sim, self._config)
+
+        # Initialize core memory for all agents in this simulation
+        if self._services and self._services.core_memory:
+            from core.bootstrap import init_core_memories
+            initialized = await init_core_memories(
+                self._agents, self._services.core_memory,
+                simulation_id=sim.id,
+            )
+            if initialized:
+                logger.info(
+                    "Initialized core memory for %d agents: %s",
+                    len(initialized), initialized,
+                )
 
         # Create RelationshipTracker and AssertionEngine now that sim_id is known
         relationship_tracker = self._build_relationship_tracker(sim.id)

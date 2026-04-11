@@ -86,7 +86,7 @@ class ProximityManager:
         group: list[str] = []
         cursor: int | str = 0
         while True:
-            cursor, keys = await self._redis.client.scan(
+            cursor, keys = await self._redis.scan(
                 cursor=cursor,
                 match=f"{_LOCATION_KEY_PREFIX}*",
                 count=50,

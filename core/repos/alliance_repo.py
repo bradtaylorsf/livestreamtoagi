@@ -62,7 +62,9 @@ class AllianceRepo:
         )
         return [dict(r) for r in rows]
 
-    async def get_agent_alliances(self, agent_id: str) -> list[dict[str, Any]]:
+    async def get_agent_alliances(
+        self, agent_id: str, simulation_id: UUID | None = None,
+    ) -> list[dict[str, Any]]:
         """Get all active alliances an agent belongs to."""
         rows = await self.db.fetch(
             """SELECT a.*
@@ -70,19 +72,24 @@ class AllianceRepo:
                JOIN alliance_members am ON am.alliance_id = a.id
                WHERE am.agent_id = $1
                  AND am.left_at IS NULL
-                 AND a.dissolved_at IS NULL""",
+                 AND a.dissolved_at IS NULL
+                 AND ($2::uuid IS NULL OR a.simulation_id = $2)""",
             agent_id,
+            simulation_id,
         )
         return [dict(r) for r in rows]
 
-    async def add_member(self, alliance_id: UUID, agent_id: str) -> None:
+    async def add_member(
+        self, alliance_id: UUID, agent_id: str, simulation_id: UUID | None = None,
+    ) -> None:
         await self.db.execute(
-            """INSERT INTO alliance_members (alliance_id, agent_id)
-               VALUES ($1, $2)
+            """INSERT INTO alliance_members (alliance_id, agent_id, simulation_id)
+               VALUES ($1, $2, $3)
                ON CONFLICT (alliance_id, agent_id)
                DO UPDATE SET left_at = NULL, joined_at = NOW()""",
             alliance_id,
             agent_id,
+            simulation_id,
         )
 
     async def remove_member(self, alliance_id: UUID, agent_id: str) -> None:

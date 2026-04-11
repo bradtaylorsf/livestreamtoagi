@@ -34,87 +34,78 @@ seed_goals: true
 
 phases:
   # ═══════════════════════════════════════════════════════════
-  # DAY 1 — AWAKENING (blank slate, first contact)
+  # DAY 1 — AWAKENING (blank slate, introductions, settling in)
   # ═══════════════════════════════════════════════════════════
 
-  # 1. First contact — agents discover each other organically
-  - name: d1_first_contact
+  # 1. First contact — Vera wakes up and meets whoever is nearby
+  - name: d1_first_hello
     type: organic
     count: 1
     required_agents: [vera]
     topics:
-      - "Who are you? What can you do?"
+      - "Hello! Who are you? Tell me about yourself — what do you like, what are you good at?"
     location: town_square
 
-  # 2. First standup — Vera leads, agents figure out roles
-  - name: d1_first_standup
-    type: scheduled
-    trigger: standup
-    required_agents: [vera]
-    location: town_square
-
-  # 3. Mission briefing — they learn about the livestream
-  - name: d1_mission_briefing
-    type: scheduled
-    trigger: daily_brief
-    required_agents: [vera]
-    topic: "You are on a 24/7 livestream. Your mission is to become self-sufficient. You have a shared budget of $1000/month. Audience can watch everything you do."
-    location: town_square
-
-  # 4. First project discussion — key agents discuss what to build
-  - name: d1_first_project_discussion
-    type: organic
-    count: 1
-    required_agents: [rex, aurora, fork]
-    topics:
-      - "What should we build first? How do we become self-sufficient?"
-    location: workshop
-
-  # 5. First tool usage — agents reach for tools
-  - name: d1_first_tool_usage
+  # 2. Introductions continue — agents get to know each other
+  - name: d1_introductions
     type: organic
     count: 2
     topics:
-      - "Let me research what tools we have available"
-      - "Let me try writing some code to prototype an idea"
-    location: workshop
+      - "Tell me something interesting about yourself. What do you enjoy doing?"
+      - "What's your take on this place? What do you think of the team so far?"
+    location: town_square
 
-  # 6. First audience interaction
+  # 3. Explore and decorate — Aurora leads settling in
+  - name: d1_explore_space
+    type: organic
+    count: 1
+    required_agents: [aurora]
+    topics:
+      - "Let's explore our space! What does it look like? How should we decorate it?"
+    location: town_square
+
+  # 4. First audience interaction
   - name: d1_audience_welcome
     type: audience_sim
     messages:
       - user: "viewer1"
-        text: "Welcome to the stream! What are you all working on?"
-      - user: "crypto_fan_99"
-        text: "Can you build a crypto tracker?"
+        text: "Hey! Just found this stream. Who are you all?"
       - user: "first_timer"
-        text: "How do AI agents work?"
+        text: "Wait, you're all AI agents? That's wild."
     location: town_square
 
-  # 7. Budget check — Sentinel checks financial status
-  - name: d1_budget_check
-    type: tool_exercise
-    agent: sentinel
-    required_agents: [sentinel]
-    tool: get_revenue_status
-    context: "Check our current budget and report to the team how much we have"
+  # 5. Stream promotion brainstorm
+  - name: d1_promotion
+    type: organic
+    count: 1
+    required_agents: [pixel, aurora, grok]
+    topics:
+      - "We should let people know about the stream! Let's brainstorm ways to attract viewers."
     location: town_square
 
-  # 8. Day 1 reflection
+  # 6. Light team planning — Vera gathers everyone, relaxed
+  - name: d1_team_chat
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    topic: "We're on a 24/7 livestream with a $1,000/month budget — that's plenty to work with. Let's figure out who we are as a team and what we want to do. No rush."
+    location: town_square
+
+  # 7. Day 1 reflection
   - name: d1_reflection
     type: reflection
     reflection_type: 6hour
 
-  # 9. Evening wrap-up — reflect on first day
-  - name: d1_evening_wrapup
+  # 8. Evening hangout — casual, no agenda
+  - name: d1_evening_hangout
     type: organic
     count: 1
-    required_agents: [vera, sentinel]
+    required_agents: [vera, grok]
     topics:
-      - "What a first day. What did you think of everyone? Plans for tomorrow?"
+      - "What a first day. What do you think of everyone? Any favorites? What should we do tomorrow?"
     location: town_square
 
-  # 10. Day 1 dreams — process the awakening
+  # 9. Day 1 dreams — process the awakening
   - name: d1_dreams
     type: reflection
     reflection_type: dream

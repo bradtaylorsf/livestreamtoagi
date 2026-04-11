@@ -155,7 +155,8 @@ async def simulation_result(services, start_time):
 
     proximity = ProximityManager(svc.redis, cfg, event_bus)
     trigger_system = TriggerSystem(cfg.triggers, recall_memory=svc.recall_memory)
-    selection_logger = SelectionLogger(conversation_repo, cfg.logging)
+    from core.constants import LIVE_SIMULATION_ID
+    selection_logger = SelectionLogger(conversation_repo, cfg.logging, simulation_id=LIVE_SIMULATION_ID)
 
     reflection_manager = ReflectionManager(
         memory_repo=svc.memory_repo,

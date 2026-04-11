@@ -49,7 +49,7 @@ class Management:
         rules_path: Path | None = None,
         shadow_mode: bool = False,
         db: Database | None = None,
-        simulation_id: object | None = None,
+        simulation_id: UUID | None = None,
     ) -> None:
         self._redis = redis_client
         self._llm = llm_client

@@ -111,9 +111,11 @@ class AgentStateManager:
         self,
         redis_client: RedisClient | ScopedRedis | None = None,
         state_repo: AgentStateRepo | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> None:
         self._redis = redis_client
         self._repo = state_repo
+        self.simulation_id = simulation_id
         # In-memory cache for simulation mode (no Redis)
         self._cache: dict[str, AgentState] = {}
         # Per-agent locks to serialize concurrent state modifications
@@ -137,6 +139,9 @@ class AgentStateManager:
             if raw is not None:
                 try:
                     state = AgentState(**json.loads(raw))
+                    # Stamp simulation_id if stale data from previous run
+                    if state.simulation_id is None and self.simulation_id is not None:
+                        state.simulation_id = self.simulation_id
                     self._cache[agent_id] = state
                     return state
                 except Exception:
@@ -144,19 +149,22 @@ class AgentStateManager:
 
         # 3. DB
         if self._repo is not None:
-            state = await self._repo.get(agent_id)
+            state = await self._repo.get(agent_id, simulation_id=self.simulation_id)
             if state is not None:
                 self._cache[agent_id] = state
                 await self._write_redis(state)
                 return state
 
         # 4. Defaults
-        state = AgentState(agent_id=agent_id)
+        state = AgentState(agent_id=agent_id, simulation_id=self.simulation_id)
         self._cache[agent_id] = state
         return state
 
     async def save_state(self, state: AgentState) -> None:
         """Persist state to Redis and update in-memory cache."""
+        # Ensure simulation_id is set (state may have been loaded from stale Redis)
+        if state.simulation_id is None and self.simulation_id is not None:
+            state.simulation_id = self.simulation_id
         state.version += 1
         state.updated_at = datetime.now(UTC)
         state.refresh_mood()
@@ -166,6 +174,9 @@ class AgentStateManager:
     async def snapshot_to_db(self, agent_id: str) -> None:
         """Persist current state to PostgreSQL (called during reflection)."""
         state = await self.get_state(agent_id)
+        # Ensure simulation_id is set even if state was cached before override
+        if state.simulation_id is None and self.simulation_id is not None:
+            state.simulation_id = self.simulation_id
         if self._repo is not None:
             await self._repo.upsert(state)
 

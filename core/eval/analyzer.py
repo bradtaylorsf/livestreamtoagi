@@ -43,7 +43,7 @@ class EvalAnalyzer:
         db: Database,
         eval_repo: EvalRepo,
         llm_client: OpenRouterClient,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> None:
         self._db = db
         self._eval_repo = eval_repo

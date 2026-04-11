@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SNAPSHOT_VERSION = 2
+SNAPSHOT_VERSION = 3
 
 
 # ── Schema models ──────────────────────────────────────────────
@@ -74,6 +74,63 @@ class WorldChunkSnapshot(BaseModel):
     tileset_url: str | None = None
 
 
+class TransactionSnapshot(BaseModel):
+    """Single economy transaction."""
+
+    agent_id: str
+    type: str
+    amount: float
+    counterparty_agent_id: str | None = None
+    description: str | None = None
+    created_at: str | None = None
+
+
+class ChallengeSnapshot(BaseModel):
+    """Single challenge/task."""
+
+    description: str
+    submitted_by: str | None = None
+    status: str = "pending"
+    assigned_agents: list[str] | None = None
+    result: str | None = None
+    upvotes: int = 0
+    created_at: str | None = None
+
+
+class WorldEventSnapshot(BaseModel):
+    """Single world event."""
+
+    event_type: str
+    description: str
+    location: str | None = None
+    agents_involved: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: str | None = None
+
+
+class AllianceSnapshot(BaseModel):
+    """Single alliance/faction."""
+
+    name: str
+    founded_by: str | None = None
+    purpose: str | None = None
+    shared_treasury: float = 0.0
+    status: str = "active"
+    members: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class SelfModProposalSnapshot(BaseModel):
+    """Single self-modification proposal."""
+
+    agent_id: str
+    proposal_type: str
+    description: str
+    reasoning: str | None = None
+    status: str = "pending"
+    created_at: str | None = None
+
+
 class RelationshipSnapshot(BaseModel):
     """Single relationship between two agents."""
 
@@ -105,6 +162,11 @@ class SimulationSnapshot(BaseModel):
     agent_goals: dict[str, list[AgentGoalSnapshot]] = Field(default_factory=dict)
     world_chunks: list[WorldChunkSnapshot] = Field(default_factory=list)
     relationships: list[RelationshipSnapshot] = Field(default_factory=list)
+    transactions: list[TransactionSnapshot] = Field(default_factory=list)
+    challenges: list[ChallengeSnapshot] = Field(default_factory=list)
+    world_events: list[WorldEventSnapshot] = Field(default_factory=list)
+    alliances: list[AllianceSnapshot] = Field(default_factory=list)
+    self_modification_proposals: list[SelfModProposalSnapshot] = Field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +183,11 @@ class SnapshotRestoreResult:
     agent_states_restored: int = 0
     agent_accounts_restored: int = 0
     world_chunks_restored: int = 0
+    transactions_restored: int = 0
+    challenges_restored: int = 0
+    world_events_restored: int = 0
+    alliances_restored: int = 0
+    self_mod_proposals_restored: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -331,6 +398,113 @@ class SimulationSnapshotExporter:
                 summary=r["relationship_summary"],
             ))
 
+        # Export transactions
+        rows = await conn.fetch(
+            """SELECT agent_id, type, amount, counterparty_agent_id, description, created_at
+               FROM agent_transactions WHERE simulation_id = $1
+               ORDER BY created_at""",
+            sim_uuid,
+        )
+        for r in rows:
+            if r["agent_id"] not in agent_id_set:
+                continue
+            snapshot.transactions.append(TransactionSnapshot(
+                agent_id=r["agent_id"],
+                type=r["type"],
+                amount=float(r["amount"]),
+                counterparty_agent_id=r["counterparty_agent_id"],
+                description=r["description"],
+                created_at=r["created_at"].isoformat() if r["created_at"] else None,
+            ))
+
+        # Export challenges
+        rows = await conn.fetch(
+            """SELECT description, submitted_by, status, assigned_agents, result,
+                      upvotes, created_at
+               FROM challenges WHERE simulation_id = $1
+               ORDER BY created_at""",
+            sim_uuid,
+        )
+        for r in rows:
+            snapshot.challenges.append(ChallengeSnapshot(
+                description=r["description"],
+                submitted_by=r["submitted_by"],
+                status=r["status"],
+                assigned_agents=r["assigned_agents"],
+                result=r["result"],
+                upvotes=r["upvotes"] or 0,
+                created_at=r["created_at"].isoformat() if r["created_at"] else None,
+            ))
+
+        # Export world events
+        rows = await conn.fetch(
+            """SELECT event_type, description, location, agents_involved, metadata, created_at
+               FROM world_events WHERE simulation_id = $1
+               ORDER BY created_at DESC LIMIT 1000""",
+            sim_uuid,
+        )
+        for r in rows:
+            md = r["metadata"]
+            if isinstance(md, str):
+                md = json.loads(md)
+            snapshot.world_events.append(WorldEventSnapshot(
+                event_type=r["event_type"],
+                description=r["description"],
+                location=r["location"],
+                agents_involved=r["agents_involved"],
+                metadata=md,
+                created_at=r["created_at"].isoformat() if r["created_at"] else None,
+            ))
+
+        # Export alliances with members
+        alliance_rows = await conn.fetch(
+            """SELECT id, name, founded_by, purpose, shared_treasury, status, created_at
+               FROM alliances WHERE simulation_id = $1""",
+            sim_uuid,
+        )
+        for ar in alliance_rows:
+            member_rows = await conn.fetch(
+                """SELECT agent_id, joined_at, left_at
+                   FROM alliance_members WHERE alliance_id = $1 AND simulation_id = $2""",
+                ar["id"], sim_uuid,
+            )
+            members = [
+                {
+                    "agent_id": m["agent_id"],
+                    "joined_at": m["joined_at"].isoformat() if m["joined_at"] else None,
+                    "left_at": m["left_at"].isoformat() if m["left_at"] else None,
+                }
+                for m in member_rows
+            ]
+            snapshot.alliances.append(AllianceSnapshot(
+                name=ar["name"],
+                founded_by=ar["founded_by"],
+                purpose=ar["purpose"],
+                shared_treasury=float(ar["shared_treasury"]) if ar["shared_treasury"] else 0.0,
+                status=ar["status"] or "active",
+                members=members,
+                created_at=ar["created_at"].isoformat() if ar["created_at"] else None,
+            ))
+
+        # Export self-modification proposals
+        rows = await conn.fetch(
+            """SELECT agent_id, proposal_type, description, reasoning, status, created_at
+               FROM self_modification_proposals WHERE simulation_id = $1
+               ORDER BY created_at""",
+            sim_uuid,
+        )
+        for r in rows:
+            if r["agent_id"] not in agent_id_set:
+                continue
+            snapshot.self_modification_proposals.append(SelfModProposalSnapshot(
+                agent_id=r["agent_id"],
+                proposal_type=r["proposal_type"],
+                description=r["description"],
+                reasoning=r["reasoning"],
+                status=r["status"],
+                created_at=r["created_at"].isoformat() if r["created_at"] else None,
+            ))
+
     async def _get_agent_ids(self, sim_uuid: uuid_mod.UUID) -> list[str]:
         """Get agent IDs for a simulation.
 
@@ -374,7 +548,7 @@ class SimulationSnapshotImporter:
         result = SnapshotRestoreResult(simulation_id=target_simulation_id)
         sim_uuid = uuid_mod.UUID(target_simulation_id)
 
-        if snapshot.version not in (1, 2):
+        if snapshot.version not in (1, 2, 3):
             result.warnings.append(
                 f"Snapshot version {snapshot.version} != expected {SNAPSHOT_VERSION}"
             )
@@ -557,6 +731,122 @@ class SimulationSnapshotImporter:
             except Exception as exc:
                 result.warnings.append(f"Relationship {agent}->{target}: {exc}")
 
+        # Restore transactions
+        for tx in snapshot.transactions:
+            if agents and tx.agent_id not in agents:
+                continue
+            try:
+                ts = None
+                if tx.created_at:
+                    ts = datetime.fromisoformat(tx.created_at)
+                await self._db.execute(
+                    """INSERT INTO agent_transactions
+                       (agent_id, type, amount, counterparty_agent_id, description,
+                        simulation_id, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()))""",
+                    tx.agent_id, tx.type, tx.amount,
+                    tx.counterparty_agent_id, tx.description,
+                    sim_uuid, ts,
+                )
+                result.transactions_restored += 1
+            except Exception as exc:
+                result.warnings.append(f"Transaction for {tx.agent_id}: {exc}")
+
+        # Restore challenges
+        for ch in snapshot.challenges:
+            try:
+                ts = None
+                if ch.created_at:
+                    ts = datetime.fromisoformat(ch.created_at)
+                await self._db.execute(
+                    """INSERT INTO challenges
+                       (description, submitted_by, status, assigned_agents, result,
+                        upvotes, simulation_id, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()))""",
+                    ch.description, ch.submitted_by, ch.status,
+                    ch.assigned_agents, ch.result, ch.upvotes,
+                    sim_uuid, ts,
+                )
+                result.challenges_restored += 1
+            except Exception as exc:
+                result.warnings.append(f"Challenge: {exc}")
+
+        # Restore world events
+        for evt in snapshot.world_events:
+            try:
+                ts = None
+                if evt.created_at:
+                    ts = datetime.fromisoformat(evt.created_at)
+                md = json.dumps(evt.metadata) if evt.metadata else None
+                await self._db.execute(
+                    """INSERT INTO world_events
+                       (event_type, description, location, agents_involved, metadata,
+                        simulation_id, created_at)
+                       VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7, NOW()))""",
+                    evt.event_type, evt.description, evt.location,
+                    evt.agents_involved, md,
+                    sim_uuid, ts,
+                )
+                result.world_events_restored += 1
+            except Exception as exc:
+                result.warnings.append(f"World event: {exc}")
+
+        # Restore alliances with members
+        for alliance in snapshot.alliances:
+            try:
+                ts = None
+                if alliance.created_at:
+                    ts = datetime.fromisoformat(alliance.created_at)
+                rows = await self._db.fetch(
+                    """INSERT INTO alliances
+                       (name, founded_by, purpose, shared_treasury, status,
+                        simulation_id, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()))
+                       RETURNING id""",
+                    alliance.name, alliance.founded_by, alliance.purpose,
+                    alliance.shared_treasury, alliance.status,
+                    sim_uuid, ts,
+                )
+                if rows:
+                    alliance_id = rows[0]["id"]
+                    for member in alliance.members:
+                        joined = None
+                        if member.get("joined_at"):
+                            joined = datetime.fromisoformat(member["joined_at"])
+                        left = None
+                        if member.get("left_at"):
+                            left = datetime.fromisoformat(member["left_at"])
+                        await self._db.execute(
+                            """INSERT INTO alliance_members
+                               (alliance_id, agent_id, joined_at, left_at, simulation_id)
+                               VALUES ($1, $2, COALESCE($3, NOW()), $4, $5)""",
+                            alliance_id, member["agent_id"], joined, left, sim_uuid,
+                        )
+                result.alliances_restored += 1
+            except Exception as exc:
+                result.warnings.append(f"Alliance '{alliance.name}': {exc}")
+
+        # Restore self-modification proposals
+        for prop in snapshot.self_modification_proposals:
+            if agents and prop.agent_id not in agents:
+                continue
+            try:
+                ts = None
+                if prop.created_at:
+                    ts = datetime.fromisoformat(prop.created_at)
+                await self._db.execute(
+                    """INSERT INTO self_modification_proposals
+                       (agent_id, proposal_type, description, reasoning, status,
+                        simulation_id, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()))""",
+                    prop.agent_id, prop.proposal_type, prop.description,
+                    prop.reasoning, prop.status,
+                    sim_uuid, ts,
+                )
+                result.self_mod_proposals_restored += 1
+            except Exception as exc:
+                result.warnings.append(f"Self-mod proposal for {prop.agent_id}: {exc}")
+
         return result
 
     async def _clear_simulation_state(
@@ -567,6 +857,7 @@ class SimulationSnapshotImporter:
         agent_tables = (
             "recall_memory", "journal_entries", "agent_goals",
             "core_memory", "agent_internal_state", "agent_accounts",
+            "agent_transactions", "self_modification_proposals",
         )
         for agent_id in agent_ids:
             for table in agent_tables:
@@ -577,7 +868,7 @@ class SimulationSnapshotImporter:
                     )
                 except Exception:
                     logger.warning("Failed to clear %s for %s", table, agent_id, exc_info=True)
-        # Clear agent relationships (uses agent_id, not just simulation_id)
+        # Clear agent relationships
         try:
             await self._db.execute(
                 "DELETE FROM agent_relationships WHERE simulation_id = $1",
@@ -585,10 +876,15 @@ class SimulationSnapshotImporter:
             )
         except Exception:
             logger.warning("Failed to clear agent_relationships", exc_info=True)
-        # Clear world chunks for this simulation
-        try:
-            await self._db.execute(
-                "DELETE FROM world_chunks WHERE simulation_id = $1", sim_uuid,
-            )
-        except Exception:
-            logger.warning("Failed to clear world_chunks", exc_info=True)
+        # Clear simulation-scoped tables (no agent_id filter)
+        sim_only_tables = (
+            "world_chunks", "world_events", "challenges",
+            "alliance_members", "alliances",
+        )
+        for table in sim_only_tables:
+            try:
+                await self._db.execute(
+                    f"DELETE FROM {table} WHERE simulation_id = $1", sim_uuid,  # noqa: S608
+                )
+            except Exception:
+                logger.warning("Failed to clear %s", table, exc_info=True)

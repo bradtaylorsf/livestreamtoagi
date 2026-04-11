@@ -355,9 +355,10 @@ async def run_watch(args: argparse.Namespace) -> None:
     else:
         management = svc.management
 
+    from core.constants import LIVE_SIMULATION_ID
     proximity = ProximityManager(svc.redis, cfg, event_bus)
     trigger_system = TriggerSystem(cfg.triggers, svc.recall_memory)
-    selection_logger = SelectionLogger(conversation_repo, cfg.logging)
+    selection_logger = SelectionLogger(conversation_repo, cfg.logging, simulation_id=LIVE_SIMULATION_ID)
 
     speed = float(args.speed) if hasattr(args, "speed") and args.speed is not None else 1.0
 

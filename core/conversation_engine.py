@@ -949,12 +949,20 @@ class ConversationEngine:
 
             commitments = parse_commitments(response.content)
             goal_mgr = self._services.goal_manager
+            valid_ids = {a.id for a in self._agents.get_all_agents()}
             for c in commitments:
+                if c["agent_id"] not in valid_ids:
+                    logger.debug(
+                        "Skipping commitment with invalid agent_id=%r",
+                        c["agent_id"],
+                    )
+                    continue
                 goal = await goal_mgr.add_goal(
                     agent_id=c["agent_id"],
                     goal_text=c["commitment"],
                     priority=2,
                     related_agent=c.get("related_to_agent") or None,
+                    simulation_id=self._simulation_id,
                 )
 
                 # Create shared task from commitment (#249)
@@ -998,6 +1006,7 @@ class ConversationEngine:
                             priority=3,
                             related_agent=c["agent_id"],
                             source="assigned",
+                            simulation_id=self._simulation_id,
                         )
                     except Exception:
                         logger.warning(
@@ -1129,7 +1138,7 @@ class ConversationEngine:
         alliances_context: str | None = None
         if self._services and self._services.alliance_manager:
             try:
-                alliances_context = await self._services.alliance_manager.get_alliance_context(agent.id)
+                alliances_context = await self._services.alliance_manager.get_alliance_context(agent.id, self._simulation_id)
                 alliances_context = alliances_context or None
             except Exception:
                 logger.warning("Failed to get alliances for %s", agent.id, exc_info=True)

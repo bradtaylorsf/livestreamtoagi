@@ -62,12 +62,16 @@ def _display_agent_speak(agent_id: str, data: dict) -> None:
     text = data.get("dialogue") or data.get("content", "")
     actions = data.get("actions", [])
     preview = text[:300] + "..." if len(text) > 300 else text
+    # Escape Rich markup in agent dialogue to prevent MarkupError
+    preview = preview.replace("[", "\\[")
     cost = data.get("cost", 0)
     tokens = data.get("input_tokens", 0) + data.get("output_tokens", 0)
 
     # Show actions (stage directions) if present
     if actions:
-        action_str = " ".join(f"*{a}*" for a in actions)
+        action_str = " ".join(
+            "*{}*".format(a.replace("[", "\\[")) for a in actions
+        )
         console.print(f"       [dim]{'':>10}  {action_str}[/dim]")
 
     console.print(
@@ -383,16 +387,33 @@ class PhaseRunner:
                 continue
             self._phase_agents.add(agent_id)
             try:
-                if reflection_type == "weekly":
+                if reflection_type == "dream":
+                    # Dream-only phase — run dream cycle directly via dream manager
+                    if self._services and self._services.dream_manager:
+                        dream_result = await self._services.dream_manager.run_dream(agent_id)
+                        logger.info(
+                            "Dream for %s: %s",
+                            agent_id,
+                            f"mood={dream_result.mood_shift}" if dream_result else "skipped",
+                        )
+                    else:
+                        logger.warning("Dream manager not available for %s", agent_id)
+                elif reflection_type == "weekly":
                     result = await self._reflection.run_weekly_reflection(agent_id)
+                    logger.info(
+                        "Reflection for %s: promoted=%d, importance=%d",
+                        agent_id,
+                        result.promoted_count,
+                        result.importance_updates,
+                    )
                 else:
                     result = await self._reflection.run_6hour_reflection(agent_id)
-                logger.info(
-                    "Reflection for %s: promoted=%d, importance=%d",
-                    agent_id,
-                    result.promoted_count,
-                    result.importance_updates,
-                )
+                    logger.info(
+                        "Reflection for %s: promoted=%d, importance=%d",
+                        agent_id,
+                        result.promoted_count,
+                        result.importance_updates,
+                    )
             except Exception:
                 logger.exception("Reflection failed for %s", agent_id)
 
@@ -484,6 +505,7 @@ class PhaseRunner:
                             ),
                             priority=1,
                             source="assigned",
+                            simulation_id=self._simulation_id,
                         )
                     except Exception:
                         logger.warning(

@@ -588,6 +588,12 @@ class SnapshotExportResponse(BaseModel):
     world_chunk_count: int
     relationship_count: int
     goal_count: int
+    transaction_count: int = 0
+    challenge_count: int = 0
+    world_event_count: int = 0
+    alliance_count: int = 0
+    filename: str = ""
+    path: str = ""
 
 
 @router.post("/simulations/{sim_id}/clone", response_model=CloneSimulationResponse)
@@ -644,6 +650,10 @@ async def clone_simulation(
             "agent_states": restore_result.agent_states_restored,
             "agent_accounts": restore_result.agent_accounts_restored,
             "world_chunks": restore_result.world_chunks_restored,
+            "transactions": restore_result.transactions_restored,
+            "challenges": restore_result.challenges_restored,
+            "world_events": restore_result.world_events_restored,
+            "alliances": restore_result.alliances_restored,
             "warnings": restore_result.warnings,
         },
     )
@@ -687,12 +697,42 @@ async def export_simulation_snapshot(
         goal_count=sum(
             len(goals) for goals in snapshot_data.get("agent_goals", {}).values()
         ),
+        transaction_count=len(snapshot_data.get("transactions", [])),
+        challenge_count=len(snapshot_data.get("challenges", [])),
+        world_event_count=len(snapshot_data.get("world_events", [])),
+        alliance_count=len(snapshot_data.get("alliances", [])),
+        filename=filename,
+        path=str(filepath),
     )
 
 
 def _time_str() -> str:
     import time
     return time.strftime("%Y%m%d-%H%M%S")
+
+
+@router.delete("/simulations/{sim_id}")
+async def delete_simulation(sim_id: uuid_mod.UUID) -> dict[str, bool]:
+    """Delete a simulation and all its data."""
+    db = _get_db()
+    from core.constants import LIVE_SIMULATION_ID
+    from core.repos.simulation_repo import SimulationRepo
+
+    if sim_id == LIVE_SIMULATION_ID:
+        raise HTTPException(status_code=400, detail="Cannot delete the live simulation")
+
+    sim_repo = SimulationRepo(db)
+    source = await sim_repo.get(sim_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    if source.status == "running":
+        raise HTTPException(status_code=400, detail="Cannot delete a running simulation")
+
+    deleted = await sim_repo.delete(sim_id)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete simulation")
+    return {"deleted": True}
 
 
 @router.get("/simulations/{sim_id}/timeline", response_model=list[TimelineEvent])

@@ -46,7 +46,8 @@ class RecallMemoryTool(BaseTool):
         limit: int = kwargs.get("limit", 3)
 
         result = await self._recall_manager.retrieve_recall_memories(
-            self._agent_id, query, limit=limit
+            self._agent_id, query, limit=limit,
+            simulation_id=kwargs.get("simulation_id"),
         )
 
         if not result:
@@ -156,6 +157,7 @@ class UpdateCoreMemoryTool(BaseTool):
                 section=section,
                 content=content,
                 reason=f"tool_update by {self._agent_id}",
+                simulation_id=kwargs.get("simulation_id"),
             )
         except InvalidSectionError as exc:
             return {"status": "error", "error": str(exc)}

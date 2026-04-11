@@ -482,13 +482,13 @@ async def test_cross_simulation_isolation(conn):
     # Create a second simulation row (sim1 / _LIVE_SIM_ID is seeded by migration 035)
     await conn.execute(
         "INSERT INTO simulations (id, name, description, config, status, agents_participated) "
-        "VALUES ($1, $2, $3, $4, $5, $6)",
+        "VALUES ($1, $2, $3, $4::jsonb, $5, $6)",
         sim2_id,
         "Test Simulation 2",
         "Second simulation for isolation testing",
         '{"mode": "eval"}',
         "running",
-        "{}",
+        [],
     )
 
     # Insert core_memory for 'vera' in sim1
@@ -587,6 +587,108 @@ async def test_cross_simulation_isolation(conn):
     )
     assert sim1_summary == "Vera's recall in sim1"
     assert sim2_summary == "Vera's recall in sim2"
+
+    # ── Act & Assert: journal_entries isolation ──────────────────────────────
+
+    await conn.execute(
+        "INSERT INTO journal_entries (agent_id, reflection_type, content, token_count, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        "vera", "6hour", "Journal in sim1", 5, _LIVE_SIM_ID,
+    )
+    await conn.execute(
+        "INSERT INTO journal_entries (agent_id, reflection_type, content, token_count, simulation_id) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        "vera", "6hour", "Journal in sim2", 5, sim2_id,
+    )
+
+    sim1_journals = await conn.fetch(
+        "SELECT content FROM journal_entries WHERE agent_id = 'vera' AND simulation_id = $1",
+        _LIVE_SIM_ID,
+    )
+    sim2_journals = await conn.fetch(
+        "SELECT content FROM journal_entries WHERE agent_id = 'vera' AND simulation_id = $1",
+        sim2_id,
+    )
+    assert len(sim1_journals) == 1
+    assert len(sim2_journals) == 1
+    assert sim1_journals[0]["content"] == "Journal in sim1"
+    assert sim2_journals[0]["content"] == "Journal in sim2"
+
+    # ── Act & Assert: agent_goals isolation ──────────────────────────────────
+
+    await conn.execute(
+        "INSERT INTO agent_goals (agent_id, goal, priority, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "vera", "Goal in sim1", 1, _LIVE_SIM_ID,
+    )
+    await conn.execute(
+        "INSERT INTO agent_goals (agent_id, goal, priority, simulation_id) "
+        "VALUES ($1, $2, $3, $4)",
+        "vera", "Goal in sim2", 1, sim2_id,
+    )
+
+    sim1_goals = await conn.fetch(
+        "SELECT goal FROM agent_goals WHERE agent_id = 'vera' AND simulation_id = $1",
+        _LIVE_SIM_ID,
+    )
+    sim2_goals = await conn.fetch(
+        "SELECT goal FROM agent_goals WHERE agent_id = 'vera' AND simulation_id = $1",
+        sim2_id,
+    )
+    assert len(sim1_goals) == 1
+    assert len(sim2_goals) == 1
+    assert sim1_goals[0]["goal"] == "Goal in sim1"
+    assert sim2_goals[0]["goal"] == "Goal in sim2"
+
+    # ── Act & Assert: world_events isolation ─────────────────────────────────
+
+    await conn.execute(
+        "INSERT INTO world_events (event_type, description, simulation_id) "
+        "VALUES ($1, $2, $3)",
+        "test", "Event in sim1", _LIVE_SIM_ID,
+    )
+    await conn.execute(
+        "INSERT INTO world_events (event_type, description, simulation_id) "
+        "VALUES ($1, $2, $3)",
+        "test", "Event in sim2", sim2_id,
+    )
+
+    sim1_events = await conn.fetch(
+        "SELECT description FROM world_events WHERE simulation_id = $1",
+        _LIVE_SIM_ID,
+    )
+    sim2_events = await conn.fetch(
+        "SELECT description FROM world_events WHERE simulation_id = $1",
+        sim2_id,
+    )
+    assert len(sim1_events) == 1
+    assert len(sim2_events) == 1
+    assert sim1_events[0]["description"] == "Event in sim1"
+    assert sim2_events[0]["description"] == "Event in sim2"
+
+    # ── Act & Assert: challenges isolation ────────────────────────────────────
+
+    await conn.execute(
+        "INSERT INTO challenges (description, simulation_id) VALUES ($1, $2)",
+        "Challenge in sim1", _LIVE_SIM_ID,
+    )
+    await conn.execute(
+        "INSERT INTO challenges (description, simulation_id) VALUES ($1, $2)",
+        "Challenge in sim2", sim2_id,
+    )
+
+    sim1_ch = await conn.fetch(
+        "SELECT description FROM challenges WHERE simulation_id = $1",
+        _LIVE_SIM_ID,
+    )
+    sim2_ch = await conn.fetch(
+        "SELECT description FROM challenges WHERE simulation_id = $1",
+        sim2_id,
+    )
+    assert len(sim1_ch) == 1
+    assert len(sim2_ch) == 1
+    assert sim1_ch[0]["description"] == "Challenge in sim1"
+    assert sim2_ch[0]["description"] == "Challenge in sim2"
 
 
 @pytest.mark.integration

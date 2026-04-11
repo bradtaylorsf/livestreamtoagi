@@ -187,11 +187,11 @@ class TestStoryGoalSeeding:
 
         vera_goals = await mgr.get_goals("vera")
         assert len(vera_goals) >= 2
-        assert any("operating rhythm" in g.goal.lower() for g in vera_goals)
+        assert any("get to know" in g.goal.lower() for g in vera_goals)
 
         fork_goals = await mgr.get_goals("fork")
         assert len(fork_goals) >= 1
-        assert any("monetization" in g.goal.lower() for g in fork_goals)
+        assert any("meet the team" in g.goal.lower() for g in fork_goals)
 
     @pytest.mark.asyncio
     async def test_seed_story_goals_idempotent(self) -> None:

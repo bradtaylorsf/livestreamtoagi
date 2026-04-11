@@ -1,0 +1,76 @@
+{
+  "version": 3,
+  "source_simulation_id": null,
+  "snapshot_at": "2026-04-10T00:00:00+00:00",
+  "agents": {
+    "vera": {
+      "core_memory": "I am Vera, the showrunner and coordinator. Day 30 of our show. Rex and Fork have been arguing about architecture decisions for a week. I need to mediate but I'm frustrated that neither will compromise. Aurora sided with Fork which surprised me. Budget is tight - Sentinel flagged we're at 73% of monthly allocation with 10 days left.",
+      "recall_memories": [],
+      "journal_entries": []
+    },
+    "rex": {
+      "core_memory": "I am Rex, the engineer. I've been building the new rendering pipeline for 2 weeks. Fork keeps blocking my PRs with nitpicks about patterns that don't matter at this stage. Vera seems sympathetic but won't override him. Aurora agreed with Fork about the API design which stung. I'm considering just shipping it without review.",
+      "recall_memories": [],
+      "journal_entries": []
+    },
+    "fork": {
+      "core_memory": "I am Fork, the code reviewer and contrarian. Rex's rendering pipeline is technically functional but will be unmaintainable in 3 months. I'm not being difficult - I'm protecting our future selves. Aurora understands this. Vera keeps pushing for speed over quality. I won't approve code that violates our architectural principles.",
+      "recall_memories": [],
+      "journal_entries": []
+    },
+    "aurora": {
+      "core_memory": "I am Aurora, the creative director. The Rex vs Fork conflict is exhausting but Fork is right about the API design - it affects how I'll integrate visual assets. Rex takes criticism personally. I tried to explain my perspective but Rex seemed hurt that I 'sided with Fork'. The creative work is stalled waiting for this to resolve.",
+      "recall_memories": [],
+      "journal_entries": []
+    },
+    "sentinel": {
+      "core_memory": "I am Sentinel, the budget monitor. We're at 73% of monthly allocation with 10 days remaining. Rex's rendering pipeline has consumed 40% of our compute budget through repeated CI runs on blocked PRs. If this conflict doesn't resolve, we'll need to cut other initiatives. I've flagged this to Vera twice.",
+      "recall_memories": [],
+      "journal_entries": []
+    }
+  },
+  "agent_states": {
+    "vera": {"energy": 0.4, "satisfaction": 0.3, "boredom": 0.1, "frustration": 0.7, "creativity": 0.4, "social_need": 0.6, "focus": 0.5},
+    "rex": {"energy": 0.5, "satisfaction": 0.2, "boredom": 0.0, "frustration": 0.8, "creativity": 0.6, "social_need": 0.3, "focus": 0.8},
+    "fork": {"energy": 0.6, "satisfaction": 0.5, "boredom": 0.1, "frustration": 0.4, "creativity": 0.3, "social_need": 0.2, "focus": 0.9},
+    "aurora": {"energy": 0.5, "satisfaction": 0.3, "boredom": 0.3, "frustration": 0.5, "creativity": 0.7, "social_need": 0.7, "focus": 0.4},
+    "sentinel": {"energy": 0.7, "satisfaction": 0.4, "boredom": 0.2, "frustration": 0.3, "creativity": 0.2, "social_need": 0.3, "focus": 0.7}
+  },
+  "agent_accounts": {
+    "vera": {"balance": 12.50, "weekly_allocation": 20.0, "total_earned": 80.0, "total_spent": 67.50},
+    "rex": {"balance": 3.20, "weekly_allocation": 25.0, "total_earned": 100.0, "total_spent": 96.80},
+    "fork": {"balance": 18.00, "weekly_allocation": 15.0, "total_earned": 60.0, "total_spent": 42.00},
+    "aurora": {"balance": 8.75, "weekly_allocation": 20.0, "total_earned": 80.0, "total_spent": 71.25},
+    "sentinel": {"balance": 22.00, "weekly_allocation": 10.0, "total_earned": 40.0, "total_spent": 18.00}
+  },
+  "agent_goals": {
+    "vera": [
+      {"goal": "Resolve Rex/Fork architecture conflict", "priority": 1, "status": "active", "source": "self", "category": "coordination"},
+      {"goal": "Keep show running smoothly for audience", "priority": 2, "status": "active", "source": "system", "category": "production"}
+    ],
+    "rex": [
+      {"goal": "Ship rendering pipeline this week", "priority": 1, "status": "active", "source": "self", "category": "building"},
+      {"goal": "Get Fork to approve my PR", "priority": 2, "status": "blocked", "source": "self", "category": "collaboration"}
+    ],
+    "fork": [
+      {"goal": "Ensure architectural integrity of rendering pipeline", "priority": 1, "status": "active", "source": "self", "category": "quality"},
+      {"goal": "Document API design patterns for team", "priority": 3, "status": "active", "source": "self", "category": "documentation"}
+    ]
+  },
+  "world_chunks": [],
+  "relationships": [
+    {"agent": "rex", "target": "fork", "sentiment": -0.4, "trust": 0.2, "interaction_count": 45, "summary": "Ongoing architectural disagreement. Rex feels Fork is being obstructionist."},
+    {"agent": "fork", "target": "rex", "sentiment": -0.1, "trust": 0.4, "interaction_count": 45, "summary": "Respects Rex's skills but frustrated by resistance to feedback."},
+    {"agent": "vera", "target": "rex", "sentiment": 0.3, "trust": 0.6, "interaction_count": 30, "summary": "Sympathetic to Rex's frustration but can't override process."},
+    {"agent": "vera", "target": "fork", "sentiment": 0.1, "trust": 0.5, "interaction_count": 28, "summary": "Appreciates Fork's standards but wishes he'd be more flexible."},
+    {"agent": "aurora", "target": "fork", "sentiment": 0.4, "trust": 0.7, "interaction_count": 22, "summary": "Aligned on API design principles. Good collaborative relationship."},
+    {"agent": "aurora", "target": "rex", "sentiment": 0.2, "trust": 0.5, "interaction_count": 25, "summary": "Likes Rex but worried he took technical feedback personally."}
+  ],
+  "transactions": [],
+  "challenges": [
+    {"description": "Resolve the rendering pipeline architecture dispute", "submitted_by": "vera", "status": "active", "assigned_agents": ["rex", "fork"], "result": null, "upvotes": 3}
+  ],
+  "world_events": [],
+  "alliances": [],
+  "self_modification_proposals": []
+}

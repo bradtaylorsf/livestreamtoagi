@@ -311,6 +311,7 @@ class SelectionLogCreate(BaseModel):
     active_agents: list[str] | None = None
     trigger_type: str | None = None
     config_hash: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Interrupt Log ───────────────────────────────────────────────
@@ -336,6 +337,7 @@ class InterruptLogCreate(BaseModel):
     threshold_at_time: float
     succeeded: bool
     reason: str | None = None
+    simulation_id: uuid.UUID | None = None
 
 
 # ── Energy Change Log ──────────────────────────────────────────
@@ -354,6 +356,7 @@ class EnergyLogCreate(BaseModel):
     conversation_id: uuid.UUID
     turn_number: int
     changes: dict[str, Any]
+    simulation_id: uuid.UUID | None = None
 
 
 # ── World Chunks ────────────────────────────────────────────────

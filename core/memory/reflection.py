@@ -163,7 +163,7 @@ class ReflectionManager:
         goal_manager: AgentGoalManager | None = None,
         agent_state_manager: AgentStateManager | None = None,
         dream_manager: DreamManager | None = None,
-        simulation_id: object | None = None,
+        simulation_id: _uuid.UUID | None = None,
         journal_image_generator: JournalImageGenerator | None = None,
     ) -> None:
         self._repo = memory_repo
@@ -658,7 +658,7 @@ class ReflectionManager:
         for goal_data in goals[:max_goals]:
             if not isinstance(goal_data, dict):
                 continue
-            goal_text = goal_data.get("goal", "").strip()
+            goal_text = (goal_data.get("goal") or "").strip()
             if not goal_text:
                 continue
 
@@ -818,6 +818,37 @@ def _repair_truncated_json(text: str) -> str:
     return primary  # caller will handle remaining parse failure
 
 
+def _sanitize_json_newlines(text: str) -> str:
+    """Replace literal newlines inside JSON string values with spaces.
+
+    LLMs frequently emit unescaped newlines within JSON strings, which is
+    invalid per the JSON spec. This walks the string tracking whether we're
+    inside a quoted value and replaces bare newlines with spaces there.
+    """
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            out.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            if in_string:
+                escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ch == "\n":
+            out.append(" ")
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _parse_json_response(content: str) -> dict:
     """Extract JSON from LLM response, handling markdown code fences.
 
@@ -830,6 +861,9 @@ def _parse_json_response(content: str) -> dict:
         # Remove first and last lines (code fences)
         lines = [line for line in lines if not line.strip().startswith("```")]
         text = "\n".join(lines)
+    # LLMs often put literal newlines inside JSON string values which is invalid.
+    # Replace unescaped newlines within strings with spaces.
+    text = _sanitize_json_newlines(text)
     try:
         result = json.loads(text)
         if not isinstance(result, dict):

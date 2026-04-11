@@ -828,15 +828,15 @@ class TestAwakeningSeedFile:
         config = self._load_awakening()
         names = [p.name for p in config.phases]
         assert names == [
-            "first_contact",
-            "first_standup",
-            "mission_briefing",
-            "first_project_discussion",
-            "first_tool_usage",
+            "first_hello",
+            "introductions",
+            "explore_space",
+            "creative_vision",
             "audience_welcome",
-            "budget_check",
+            "promotion_chat",
+            "first_team_chat",
             "first_reflection",
-            "evening_wrapup",
+            "evening_hangout",
         ]
 
     def test_awakening_phase_types(self):
@@ -844,37 +844,36 @@ class TestAwakeningSeedFile:
         types = [p.type for p in config.phases]
         assert types == [
             PhaseType.organic,
-            PhaseType.scheduled,
-            PhaseType.scheduled,
+            PhaseType.organic,
             PhaseType.organic,
             PhaseType.organic,
             PhaseType.audience_sim,
-            PhaseType.tool_exercise,
+            PhaseType.organic,
+            PhaseType.scheduled,
             PhaseType.reflection,
             PhaseType.organic,
         ]
 
-    def test_awakening_first_standup_requires_vera(self):
+    def test_awakening_first_hello_requires_vera(self):
         config = self._load_awakening()
-        standup = config.phases[1]
-        assert "vera" in standup.required_agents
+        first_hello = config.phases[0]
+        assert "vera" in first_hello.required_agents
 
-    def test_awakening_project_discussion_requires_key_agents(self):
+    def test_awakening_creative_vision_requires_key_agents(self):
         config = self._load_awakening()
-        discussion = config.phases[3]
-        assert set(discussion.required_agents) == {"rex", "aurora", "fork"}
+        creative = config.phases[3]
+        assert set(creative.required_agents) == {"aurora", "rex"}
 
     def test_awakening_audience_sim_has_messages(self):
         config = self._load_awakening()
-        audience = config.phases[5]
+        audience = config.phases[4]
         messages = audience.config.get("messages", [])
-        assert len(messages) == 3
+        assert len(messages) == 2
 
-    def test_awakening_budget_check_uses_sentinel(self):
+    def test_awakening_team_chat_requires_vera(self):
         config = self._load_awakening()
-        budget = config.phases[6]
-        assert budget.config.get("agent") == "sentinel"
-        assert budget.config.get("tool") == "get_revenue_status"
+        team_chat = config.phases[6]
+        assert "vera" in team_chat.required_agents
 
     def test_awakening_reflection_is_6hour(self):
         config = self._load_awakening()
@@ -886,14 +885,18 @@ class TestAwakeningSeedFile:
 
 
 class TestToolCoverageSeedFile:
-    # All 21 tools that the scenario should exercise
+    # All 30 tools that the scenario should exercise
     ALL_TOOLS = {
         "send_message", "get_world_state", "get_audience_status",
         "send_chat_message", "create_poll", "get_poll_results",
         "recall_memory", "retrieve_transcript", "update_core_memory",
         "execute_code", "generate_tilemap",
         "web_search", "fetch_url", "draft_social_post", "draft_email",
-        "get_revenue_status",
+        "get_revenue_status", "check_post_performance", "check_email_responses",
+        "transfer_budget", "view_account",
+        "propose_alliance", "vote_alliance", "leave_alliance", "view_alliances",
+        "manage_task",
+        "propose_character", "vote_character",
         "dispatch_alpha", "propose_self_modification", "view_evolution_log",
     }
 
@@ -911,9 +914,9 @@ class TestToolCoverageSeedFile:
         config.load_seed_file()
         return config
 
-    def test_tool_coverage_has_25_phases(self):
+    def test_tool_coverage_has_38_phases(self):
         config = self._load_tool_coverage()
-        assert len(config.phases) == 25
+        assert len(config.phases) == 38
 
     def test_tool_coverage_exercises_all_tools(self):
         config = self._load_tool_coverage()
@@ -929,11 +932,12 @@ class TestToolCoverageSeedFile:
         organic_phases = [p for p in config.phases if p.type == PhaseType.organic]
         assert len(organic_phases) >= 3
 
-    def test_tool_coverage_has_reflection_phase(self):
+    def test_tool_coverage_has_reflection_phases(self):
         config = self._load_tool_coverage()
         reflection_phases = [p for p in config.phases if p.type == PhaseType.reflection]
-        assert len(reflection_phases) == 1
-        assert reflection_phases[0].config.get("reflection_type") == "6hour"
+        assert len(reflection_phases) == 2
+        types = {p.config.get("reflection_type") for p in reflection_phases}
+        assert types == {"6hour", "dream"}
 
     def test_tool_coverage_agent_assignments(self):
         """Verify tools are assigned to the most appropriate agents."""
@@ -948,6 +952,10 @@ class TestToolCoverageSeedFile:
         assert tool_agents["dispatch_alpha"] == "vera"
         assert tool_agents["generate_tilemap"] == "aurora"
         assert tool_agents["send_chat_message"] == "pixel"
+        assert tool_agents["propose_alliance"] == "grok"
+        assert tool_agents["transfer_budget"] == "vera"
+        assert tool_agents["view_account"] == "sentinel"
+        assert tool_agents["manage_task"] == "vera"
 
     def test_tool_coverage_ends_with_wrapup(self):
         config = self._load_tool_coverage()

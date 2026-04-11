@@ -15,6 +15,7 @@ from core.memory.embeddings import generate_embedding
 
 if TYPE_CHECKING:
     import httpx
+    import uuid
 
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
@@ -56,7 +57,7 @@ class MemoryCompactor:
         llm_client: OpenRouterClient,
         http_client: httpx.AsyncClient,
         openrouter_api_key: str,
-        simulation_id: object | None = None,
+        simulation_id: uuid.UUID | None = None,
     ) -> None:
         self._archival = archival
         self._recall = recall
