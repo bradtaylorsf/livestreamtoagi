@@ -96,7 +96,7 @@ def make_mock_services() -> dict[str, Any]:
         "simulation_repo": sim_repo,
         "config_loader": MagicMock(),
         "agent_registry": _make_agent_registry(),
-        "event_bus": MagicMock(),
+        "event_bus": MagicMock(emit=AsyncMock()),
         "llm_client": MagicMock(),
         "management": MagicMock(),
         "context_assembler": MagicMock(),
@@ -216,7 +216,7 @@ class TestPhaseRunner:
         return PhaseRunner(
             config_loader=MagicMock(),
             agent_registry=MagicMock(),
-            event_bus=MagicMock(),
+            event_bus=MagicMock(emit=AsyncMock()),
             llm_client=MagicMock(),
             management=MagicMock(),
             context_assembler=MagicMock(),

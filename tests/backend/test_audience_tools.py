@@ -70,7 +70,7 @@ class TestSendChatMessage:
     ) -> None:
         await send_chat.execute(message="Hello chat!")
 
-        management_mock.review.assert_called_once_with("pixel", "Hello chat!")
+        management_mock.review.assert_called_once_with("pixel", "Hello chat!", simulation_id=None)
 
     async def test_rejected_by_management_returns_error(
         self, management_mock: AsyncMock, event_bus: AsyncMock, redis_client: AsyncMock
