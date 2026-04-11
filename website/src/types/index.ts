@@ -160,3 +160,39 @@ export interface AgentArtifact {
   preview: string;
   createdAt: string;
 }
+
+export interface AgentConversation {
+  id: string;
+  trigger_type: string;
+  participating_agents: string[];
+  topics_discussed: string[] | null;
+  turn_count: number;
+  location: string | null;
+  started_at: string | null;
+}
+
+export interface AgentArtifactResponse {
+  id: string;
+  agent_id: string;
+  tool_name: string;
+  artifact_type: string;
+  status: string;
+  created_at: string | null;
+}
+
+export interface AgentRelationshipResponse {
+  id: string;
+  target_agent_id: string;
+  sentiment_score: number;
+  trust_score: number;
+  interaction_count: number;
+  relationship_summary: string | null;
+}
+
+export interface AgentEvolutionResponse {
+  id: string;
+  version: number;
+  change_reason: string | null;
+  source: "manual" | "system" | "evolution";
+  created_at: string | null;
+}

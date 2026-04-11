@@ -3,7 +3,11 @@ import {
   ApiRequestError,
   chatWithAgent,
   getAgents,
+  getAgentArtifacts,
+  getAgentConversations,
+  getAgentEvolution,
   getAgentJournal,
+  getAgentRelationships,
   getChallenges,
   getConversation,
   getConversations,
@@ -203,6 +207,70 @@ describe("getConversationSelections", () => {
       "/api/conversations/abc/selections",
       expect.anything(),
     );
+  });
+});
+
+describe("getAgentRelationships", () => {
+  it("sends GET to /api/agents/:id/relationships", async () => {
+    const rels = [{ id: "1", target_agent_id: "rex", sentiment_score: 0.7 }];
+    mockFetch.mockReturnValue(jsonResponse(rels));
+
+    const result = await getAgentRelationships("vera");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/vera/relationships",
+      expect.anything(),
+    );
+    expect(result).toEqual(rels);
+  });
+});
+
+describe("getAgentConversations", () => {
+  it("sends GET to /api/agents/:id/conversations with pagination", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await getAgentConversations("vera", { limit: 10, offset: 5 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/vera/conversations?limit=10&offset=5",
+      expect.anything(),
+    );
+  });
+
+  it("sends GET without params when none provided", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
+
+    await getAgentConversations("vera");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/vera/conversations",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getAgentArtifacts", () => {
+  it("sends GET to /api/agents/:id/artifacts with pagination", async () => {
+    const paginated = { items: [], total: 0, limit: 20, offset: 0 };
+    mockFetch.mockReturnValue(jsonResponse(paginated));
+
+    await getAgentArtifacts("rex", { limit: 5, offset: 10 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/rex/artifacts?limit=5&offset=10",
+      expect.anything(),
+    );
+  });
+});
+
+describe("getAgentEvolution", () => {
+  it("sends GET to /api/agents/:id/evolution", async () => {
+    const events = [{ id: "1", version: 1, source: "system" }];
+    mockFetch.mockReturnValue(jsonResponse(events));
+
+    const result = await getAgentEvolution("fork");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/agents/fork/evolution",
+      expect.anything(),
+    );
+    expect(result).toEqual(events);
   });
 });
 
