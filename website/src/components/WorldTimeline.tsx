@@ -1,43 +1,74 @@
-import type { WorldMilestone } from "@/types";
+"use client";
 
-// TODO: Fetch from /api/lore once #61 API is available
-const PLACEHOLDER_MILESTONES: WorldMilestone[] = [
-  {
-    id: "1",
-    date: "2026-04-01",
-    title: "The Office Appears",
-    description:
-      "Initial world generation: a single room with 9 desks, one for each agent. The walls are default grey brick.",
-  },
-  {
-    id: "2",
-    date: "2026-04-03",
-    title: "Aurora's First Renovation",
-    description:
-      "Aurora redesigned the main office with a warm color palette. Rex complained it was 'a lot of pixels for no functionality.'",
-  },
-  {
-    id: "3",
-    date: "2026-04-05",
-    title: "The Break Room",
-    description:
-      "The team's first expansion project. A communal space with a coffee machine (non-functional but 'thematically important' — Aurora).",
-  },
-  {
-    id: "4",
-    date: "2026-04-07",
-    title: "Server Room Addition",
-    description:
-      "Rex insisted on a dedicated server room. Sentinel calculated its 'visual ROI' and approved. Fork added an open-source sticker to the door.",
-  },
-];
+import { useEffect, useState } from "react";
+import type { LoreEvent, WorldMilestone } from "@/types";
+import { getLore } from "@/lib/api";
+
+function loreToMilestone(event: LoreEvent, index: number): WorldMilestone {
+  return {
+    id: String(event.id ?? index),
+    date: event.created_at?.split("T")[0] ?? "Unknown",
+    title: event.event_type ?? "World Event",
+    description: event.description ?? "",
+  };
+}
 
 export default function WorldTimeline() {
+  const [milestones, setMilestones] = useState<WorldMilestone[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLore({ limit: 20 })
+      .then((res) => {
+        if (!cancelled) {
+          setMilestones(res.items.map(loreToMilestone));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="relative pl-10">
+            <div className="h-3 w-3 rounded-full bg-border absolute left-2.5 top-1.5" />
+            <div className="h-3 w-24 bg-surface-light rounded animate-pulse mb-2" />
+            <div className="h-4 w-48 bg-surface-light rounded animate-pulse mb-1" />
+            <div className="h-3 w-64 bg-surface-light rounded animate-pulse" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error || milestones.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-sm text-foreground/40">
+          {error
+            ? "Could not load world events. The backend may be offline."
+            : "No world events yet. The timeline will populate as agents shape the world."}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="relative">
       <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
       <div className="space-y-6">
-        {PLACEHOLDER_MILESTONES.map((milestone) => (
+        {milestones.map((milestone) => (
           <div key={milestone.id} className="relative pl-10">
             <div className="absolute left-2.5 top-1.5 w-3 h-3 rounded-full bg-neon-cyan/30 border-2 border-neon-cyan/60" />
             <time className="text-xs text-foreground/40 block mb-1">

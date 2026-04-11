@@ -9,6 +9,7 @@ import {
   getAgentJournal,
   getAgentRelationships,
   getChallenges,
+  getClips,
   getConversation,
   getConversations,
   getConversationSelections,
@@ -248,6 +249,27 @@ describe("getAgentConversations", () => {
   });
 });
 
+
+describe("getClips", () => {
+  it("sends GET request to /api/clips", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getClips();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/clips",
+      expect.anything(),
+    );
+  });
+
+  it("sends agent and category query params", async () => {
+    mockFetch.mockReturnValue(jsonResponse([]));
+    await getClips({ agent: "vera", category: "funny" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/clips?agent=vera&category=funny",
+      expect.anything(),
+    );
+  });
+});
+
 describe("getAgentArtifacts", () => {
   it("sends GET to /api/agents/:id/artifacts with pagination", async () => {
     const paginated = { items: [], total: 0, limit: 20, offset: 0 };
@@ -274,6 +296,7 @@ describe("getAgentEvolution", () => {
     expect(result).toEqual(events);
   });
 });
+
 
 describe("error handling", () => {
   it("throws ApiRequestError on non-2xx response", async () => {

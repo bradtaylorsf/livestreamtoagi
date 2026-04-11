@@ -2,11 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getAllPosts, getAllTags } from "@/lib/blog";
 import BlogPostCard from "@/components/BlogPostCard";
+import JsonLd from "@/components/JsonLd";
 
 export const metadata: Metadata = {
-  title: "Blog — Livestream to AGI",
+  title: "Blog",
   description:
     "Research notes, findings, and progress updates from the Livestream to AGI project.",
+  openGraph: {
+    title: "Blog",
+    description:
+      "Research notes, findings, and progress updates from the Livestream to AGI project.",
+    type: "website",
+  },
 };
 
 export default async function BlogPage({
@@ -23,6 +30,16 @@ export default async function BlogPage({
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 space-y-8">
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "Blog",
+          name: "Livestream to AGI Blog",
+          description:
+            "Research notes, findings, and progress updates from the Livestream to AGI project.",
+          url: "https://livestreamtoagi.com/blog",
+        }}
+      />
       <h1 className="font-pixel text-lg text-neon-cyan">BLOG</h1>
 
       {/* Tag filter bar */}

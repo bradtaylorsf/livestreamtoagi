@@ -194,3 +194,15 @@ export interface AgentEvolutionResponse {
   source: "manual" | "system" | "evolution";
   created_at: string | null;
 }
+
+export type ClipCategory = "funny" | "dramatic" | "technical" | "philosophical";
+
+export interface Clip {
+  id: string;
+  title: string;
+  timestamp: string;
+  transcript_excerpt: string;
+  video_url?: string;
+  category: ClipCategory;
+  agent_ids: string[];
+}

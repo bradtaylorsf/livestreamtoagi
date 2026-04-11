@@ -5,6 +5,7 @@ import AgentProfile from "@/components/AgentProfile";
 import PersonalityRadar from "@/components/PersonalityRadar";
 import AgentStats from "@/components/AgentStats";
 import AgentProfileTabs from "@/components/AgentProfileTabs";
+import JsonLd from "@/components/JsonLd";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -20,7 +21,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!agent) return { title: "Agent Not Found" };
 
   return {
-    title: `${agent.name} — ${agent.tagline} | Livestream to AGI`,
+    title: `${agent.name} — ${agent.tagline}`,
     description: agent.hook,
     openGraph: {
       title: `${agent.name} — ${agent.tagline}`,
@@ -36,6 +37,16 @@ export default async function AgentProfilePage({ params }: Props) {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-12">
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "Person",
+          name: agent.name,
+          description: agent.hook,
+          jobTitle: agent.role,
+          url: `https://livestreamtoagi.com/agents/${agent.id}`,
+        }}
+      />
       <AgentProfile agent={agent} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">

@@ -108,7 +108,7 @@ class TestRecallMemory:
         assert "transcript_42" in result["memories"]
         assert "architecture" in result["memories"]
         recall_manager.retrieve_recall_memories.assert_called_once_with(
-            "rex", "architecture discussion", limit=3
+            "rex", "architecture discussion", limit=3, simulation_id=None,
         )
 
     async def test_returns_no_results_when_empty(
@@ -129,7 +129,7 @@ class TestRecallMemory:
         await recall_tool.execute(query="test", limit=5)
 
         recall_manager.retrieve_recall_memories.assert_called_once_with(
-            "rex", "test", limit=5
+            "rex", "test", limit=5, simulation_id=None,
         )
 
     async def test_defaults_limit_to_3(
@@ -140,7 +140,7 @@ class TestRecallMemory:
         await recall_tool.execute(query="test")
 
         recall_manager.retrieve_recall_memories.assert_called_once_with(
-            "rex", "test", limit=3
+            "rex", "test", limit=3, simulation_id=None,
         )
 
 
@@ -208,6 +208,7 @@ class TestUpdateCoreMemory:
             section="goals",
             content="- Build the library module",
             reason="tool_update by rex",
+            simulation_id=None,
         )
 
     async def test_validates_section_names(
@@ -257,6 +258,7 @@ class TestUpdateCoreMemory:
             section="goals",
             content="test",
             reason="tool_update by rex",
+            simulation_id=None,
         )
 
     async def test_unprivileged_agent_cannot_target_another_agent(
@@ -294,6 +296,7 @@ class TestUpdateCoreMemory:
             section="relationships",
             content="- Rex: good collaborator",
             reason="tool_update by vera",
+            simulation_id=None,
         )
 
 

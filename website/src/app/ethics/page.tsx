@@ -1,15 +1,32 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import JsonLd from "@/components/JsonLd";
 
 export const metadata: Metadata = {
-  title: "Ethics & Data Policy — Livestream to AGI",
+  title: "Ethics & Data Policy",
   description:
     "How we handle audience data: what we collect, how it's used, what we don't collect, and how to request removal.",
+  openGraph: {
+    title: "Ethics & Data Policy",
+    description:
+      "How we handle audience data: what we collect, how it's used, what we don't collect, and how to request removal.",
+    type: "website",
+  },
 };
 
 export default function EthicsPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 space-y-16">
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          name: "Ethics & Data Policy",
+          description:
+            "How we handle audience data: what we collect, how it's used, what we don't collect, and how to request removal.",
+          url: "https://livestreamtoagi.com/ethics",
+        }}
+      />
       {/* Header */}
       <section className="space-y-3">
         <h1 className="font-pixel text-lg text-neon-cyan">
