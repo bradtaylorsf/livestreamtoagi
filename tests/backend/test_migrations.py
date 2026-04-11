@@ -59,6 +59,9 @@ ALL_TABLES = [
     "character_applications",
     "character_departures",
     "agent_transactions",
+    "agent_prompt_versions",
+    "conversation_param_versions",
+    "active_config",
 ]
 
 
@@ -96,6 +99,7 @@ async def conn():
             character_applications, character_departures,
             alliance_proposals, alliances, challenge_votes,
             model_versions,
+            active_config, agent_prompt_versions, conversation_param_versions,
             simulations, conversations, transcripts, agents, schema_migrations
         CASCADE
     """)

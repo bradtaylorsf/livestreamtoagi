@@ -24,6 +24,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from rich.console import Console
 from rich.table import Table
 
+from core.constants import LIVE_SIMULATION_ID
+
 console = Console()
 logger = logging.getLogger(__name__)
 
@@ -116,10 +118,10 @@ async def run_rollback(version: int) -> None:
     try:
         assert services.db is not None
         repo = ConfigVersionRepo(services.db)
-        configs = await repo.get_all_active_configs()
+        configs = await repo.get_all_active_configs(simulation_id=LIVE_SIMULATION_ID)
         for ac in configs:
             try:
-                await repo.rollback_prompt(ac.agent_id, version)
+                await repo.rollback_prompt(ac.agent_id, version, simulation_id=LIVE_SIMULATION_ID)
                 console.print(f"  [green]Rolled back {ac.agent_id} to v{version}[/green]")
             except ValueError:
                 console.print(f"  [yellow]Skipping {ac.agent_id} (v{version} not found)[/yellow]")
@@ -180,7 +182,7 @@ async def run_evolution(args: argparse.Namespace) -> None:
             eval_repo=eval_repo,
             llm_client=services.llm_client,
         )
-        change_applier = ChangeApplier(config_version_repo)
+        change_applier = ChangeApplier(config_version_repo, simulation_id=LIVE_SIMULATION_ID)
 
         config = EvolutionConfig(
             max_cycles=args.cycles,

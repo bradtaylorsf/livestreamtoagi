@@ -27,8 +27,14 @@ MAX_PARAM_DELTA = 0.1
 class ChangeApplier:
     """Applies prompt/param changes as new DB versions."""
 
-    def __init__(self, config_version_repo: ConfigVersionRepo) -> None:
+    def __init__(
+        self,
+        config_version_repo: ConfigVersionRepo,
+        *,
+        simulation_id: uuid.UUID | None = None,
+    ) -> None:
         self._repo = config_version_repo
+        self._simulation_id = simulation_id
 
     async def apply(
         self,
@@ -100,7 +106,7 @@ class ChangeApplier:
         eval_run_id: uuid.UUID,
     ) -> None:
         """Apply prompt changes as a new version."""
-        current = await self._repo.get_active_prompt(agent_id)
+        current = await self._repo.get_active_prompt(agent_id, simulation_id=self._simulation_id)
         if current is None:
             logger.warning("No active prompt for %s, skipping", agent_id)
             return
@@ -123,8 +129,9 @@ class ChangeApplier:
             change_reason=reasons[:500],
             source="eval_loop",
             eval_run_id=eval_run_id,
+            simulation_id=self._simulation_id,
         )
-        await self._repo.set_active_prompt_version(agent_id, version.version)
+        await self._repo.set_active_prompt_version(agent_id, version.version, simulation_id=self._simulation_id)
 
     async def _apply_param_changes(
         self,
@@ -133,7 +140,7 @@ class ChangeApplier:
         eval_run_id: uuid.UUID,
     ) -> None:
         """Apply parameter changes as a new version."""
-        current = await self._repo.get_active_prompt(agent_id)
+        current = await self._repo.get_active_prompt(agent_id, simulation_id=self._simulation_id)
         if current is None:
             logger.warning("No active prompt for %s, skipping", agent_id)
             return
@@ -161,8 +168,9 @@ class ChangeApplier:
             change_reason=reasons[:500],
             source="eval_loop",
             eval_run_id=eval_run_id,
+            simulation_id=self._simulation_id,
         )
-        await self._repo.set_active_prompt_version(agent_id, version.version)
+        await self._repo.set_active_prompt_version(agent_id, version.version, simulation_id=self._simulation_id)
 
     async def _apply_config_changes(
         self,
@@ -170,7 +178,7 @@ class ChangeApplier:
         eval_run_id: uuid.UUID,
     ) -> None:
         """Apply conversation config changes as a new version."""
-        current = await self._repo.get_active_conversation_params()
+        current = await self._repo.get_active_conversation_params(simulation_id=self._simulation_id)
         if current is None:
             logger.warning("No active conversation params, skipping")
             return
@@ -188,8 +196,9 @@ class ChangeApplier:
             change_reason=reasons[:500],
             source="eval_loop",
             eval_run_id=eval_run_id,
+            simulation_id=self._simulation_id,
         )
-        await self._repo.set_active_conversation_version(version.version)
+        await self._repo.set_active_conversation_version(version.version, simulation_id=self._simulation_id)
 
 
 def _set_nested(d: dict, path: str, value: Any) -> None:

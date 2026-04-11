@@ -403,7 +403,9 @@ async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.config_version_repo:
         return []
-    versions = await svc.config_version_repo.get_prompt_history(agent_id)
+    versions = await svc.config_version_repo.get_prompt_history(
+        agent_id, simulation_id=LIVE_SIMULATION_ID,
+    )
     return [
         {
             "id": str(v.id),
