@@ -69,10 +69,22 @@ class ConversationRepo:
             )
         return _row_to_conversation(row)
 
-    async def get(self, conversation_id: uuid.UUID) -> Conversation | None:
-        row = await self.db.fetchrow(
-            "SELECT * FROM conversations WHERE id = $1", conversation_id
-        )
+    async def get(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        simulation_id: uuid.UUID | None = None,
+    ) -> Conversation | None:
+        if simulation_id is not None:
+            row = await self.db.fetchrow(
+                "SELECT * FROM conversations WHERE id = $1 AND simulation_id = $2",
+                conversation_id,
+                simulation_id,
+            )
+        else:
+            row = await self.db.fetchrow(
+                "SELECT * FROM conversations WHERE id = $1", conversation_id
+            )
         return _row_to_conversation(row) if row else None
 
     async def close(
@@ -158,14 +170,26 @@ class ConversationRepo:
             )
 
     async def get_selection_log(
-        self, conversation_id: uuid.UUID
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        simulation_id: uuid.UUID | None = None,
     ) -> list[SelectionLog]:
-        rows = await self.db.fetch(
-            """SELECT * FROM conversation_selection_log
-               WHERE conversation_id = $1
-               ORDER BY turn_number""",
-            conversation_id,
-        )
+        if simulation_id is not None:
+            rows = await self.db.fetch(
+                """SELECT * FROM conversation_selection_log
+                   WHERE conversation_id = $1 AND simulation_id = $2
+                   ORDER BY turn_number""",
+                conversation_id,
+                simulation_id,
+            )
+        else:
+            rows = await self.db.fetch(
+                """SELECT * FROM conversation_selection_log
+                   WHERE conversation_id = $1
+                   ORDER BY turn_number""",
+                conversation_id,
+            )
         result = []
         for r in rows:
             d = dict(r)

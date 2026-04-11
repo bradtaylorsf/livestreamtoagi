@@ -229,6 +229,30 @@ class TestConversationEndpoints:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    def test_get_conversation_filters_by_simulation_id(self, mock_app):
+        """GET /api/conversations/{id} must filter by LIVE_SIMULATION_ID."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=None)
+        conv_id = str(uuid.uuid4())
+        resp = client.get(f"/api/conversations/{conv_id}")
+        assert resp.status_code == 404
+        # Verify the query included simulation_id filter
+        call_args = mock_db.fetchrow.call_args
+        query = call_args[0][0]
+        assert "simulation_id" in query
+
+    def test_get_selections_filters_by_simulation_id(self, mock_app):
+        """GET /api/conversations/{id}/selections must filter by LIVE_SIMULATION_ID."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        conv_id = str(uuid.uuid4())
+        resp = client.get(f"/api/conversations/{conv_id}/selections")
+        assert resp.status_code == 200
+        # Verify the query included simulation_id filter
+        call_args = mock_db.fetch.call_args
+        query = call_args[0][0]
+        assert "simulation_id" in query
+
 
 # ── Blog Endpoints ────────────────────────────────────────────
 
