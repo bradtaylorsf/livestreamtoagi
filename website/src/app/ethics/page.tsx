@@ -2,9 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Ethics & Data Policy — Livestream to AGI",
+  title: "Ethics & Data Policy",
   description:
     "How we handle audience data: what we collect, how it's used, what we don't collect, and how to request removal.",
+  openGraph: {
+    title: "Ethics & Data Policy",
+    description:
+      "How we handle audience data: what we collect, how it's used, what we don't collect, and how to request removal.",
+    type: "website",
+  },
 };
 
 export default function EthicsPage() {

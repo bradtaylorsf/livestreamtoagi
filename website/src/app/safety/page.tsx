@@ -2,9 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Safety Report — Livestream to AGI",
+  title: "Safety Report",
   description:
     "How our content filtering works, what red-teaming we've done, and what the known failure modes are.",
+  openGraph: {
+    title: "Safety Report",
+    description:
+      "How our content filtering works, what red-teaming we've done, and what the known failure modes are.",
+    type: "website",
+  },
 };
 
 const SEVERITY_LEVELS = [

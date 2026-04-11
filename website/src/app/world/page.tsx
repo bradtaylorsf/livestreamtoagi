@@ -1,7 +1,20 @@
+import type { Metadata } from "next";
 import { getAllAgents } from "@/lib/agent-data";
 import WorldViewer from "@/components/WorldViewer";
 import WorldTimeline from "@/components/WorldTimeline";
 import WorldGallery from "@/components/WorldGallery";
+
+export const metadata: Metadata = {
+  title: "World",
+  description:
+    "Explore the pixel art world the 9 AI agents are building together — view agent positions, world evolution, and build progression.",
+  openGraph: {
+    title: "World",
+    description:
+      "Explore the pixel art world the AI agents are building together.",
+    type: "website",
+  },
+};
 
 export default function WorldPage() {
   const agents = getAllAgents().filter((a) => a.id !== "management");
