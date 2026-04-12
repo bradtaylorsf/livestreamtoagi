@@ -301,8 +301,8 @@ async def test_cost_log_failure_non_fatal():
         )
 
     assert result.content == "Hello!"
-    # With retry logic, add_cost is called twice (initial + 1 retry)
-    assert cost_repo.add_cost.call_count == 2
+    # With retry logic, add_cost is called 4 times (initial + 3 retries)
+    assert cost_repo.add_cost.call_count == 4
 
 
 # ── Streaming ──────────────────────────────────────────────────
@@ -508,8 +508,8 @@ def test_api_key_rejects_non_string():
 
 
 @pytest.mark.asyncio
-async def test_cost_logging_retries_once_on_failure():
-    """Cost logging should retry once before giving up."""
+async def test_cost_logging_retries_three_times_on_failure():
+    """Cost logging should retry 3 times with exponential backoff before giving up."""
     cost_repo = make_mock_cost_repo()
     cost_repo.add_cost = AsyncMock(side_effect=Exception("db error"))
 
@@ -522,10 +522,10 @@ async def test_cost_logging_retries_once_on_failure():
             cost=Decimal("0.001"), latency_ms=100,
             stream=False, openrouter_id="gen-123",
         )
-        mock_sleep.assert_awaited_once_with(0.5)
+        assert mock_sleep.await_count == 3
 
-    # Should have been called twice (initial + 1 retry)
-    assert cost_repo.add_cost.call_count == 2
+    # Should have been called 4 times (initial + 3 retries)
+    assert cost_repo.add_cost.call_count == 4
     assert client._lost_cost_events == 1
 
 

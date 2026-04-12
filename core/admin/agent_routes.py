@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from core.admin.dependencies import get_db, get_registry
 from core.constants import LIVE_SIMULATION_ID
 from core.models import (
+    AgentConfig,
     AgentDetail,
     AgentSummary,
     Artifact,
@@ -34,11 +35,14 @@ from core.system_prompt import INFRASTRUCTURE_PROMPT
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from core.agent_registry import AgentRegistry
+    from core.database import Database
+
 router = APIRouter(tags=["agents"])
 
 
 def _agent_summary_from_config(
-    a: Any, *, total_cost: float = 0, message_count: int = 0,
+    a: AgentConfig, *, total_cost: float = 0, message_count: int = 0,
     conversation_count: int = 0, artifact_count: int = 0,
 ) -> AgentSummary:
     """Build AgentSummary from an AgentConfig object."""
@@ -67,8 +71,8 @@ def _agent_summary_from_config(
 
 @router.get("/agents", response_model=list[AgentSummary])
 async def list_agents(
-    registry: Any = Depends(get_registry),
-    db: Any = Depends(get_db),
+    registry: AgentRegistry = Depends(get_registry),
+    db: Database = Depends(get_db),
 ) -> list[AgentSummary]:
     """List all agents with current status, total cost, message count."""
     from core.repos.cost_repo import CostRepo
@@ -88,8 +92,8 @@ async def list_agents(
 @router.get("/agents/{agent_id}", response_model=AgentDetail)
 async def get_agent(
     agent_id: str,
-    registry: Any = Depends(get_registry),
-    db: Any = Depends(get_db),
+    registry: AgentRegistry = Depends(get_registry),
+    db: Database = Depends(get_db),
 ) -> AgentDetail:
     """Full agent detail: config, personality traits, model assignments, voice."""
     agent = registry.get_agent(agent_id)
@@ -114,8 +118,8 @@ async def get_agent(
 @router.get("/agents/{agent_id}/system-prompt", response_model=SystemPromptResponse)
 async def get_agent_system_prompt(
     agent_id: str,
-    registry: Any = Depends(get_registry),
-    db: Any = Depends(get_db),
+    registry: AgentRegistry = Depends(get_registry),
+    db: Database = Depends(get_db),
 ) -> SystemPromptResponse:
     """Current assembled system prompt (all 3 layers)."""
     agent = registry.get_agent(agent_id)
@@ -153,7 +157,7 @@ async def get_agent_system_prompt(
 @router.get("/agents/{agent_id}/core-memory", response_model=CoreMemoryResponse)
 async def get_agent_core_memory(
     agent_id: str,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> CoreMemoryResponse:
     """Current core memory contents + version history."""
     from core.repos.memory_repo import MemoryRepo
@@ -188,7 +192,7 @@ async def get_agent_recall_memories(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     search: str | None = Query(None),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[dict[str, Any]]:
     """Paginated recall memories (embeddings hidden, content shown)."""
     from core.repos.memory_repo import MemoryRepo
@@ -218,7 +222,7 @@ async def get_agent_conversations(
     simulation_id: uuid_mod.UUID | None = Query(default=None),
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[Conversation]:
     """Paginated conversation history for this agent."""
     from core.repos.conversation_repo import ConversationRepo
@@ -237,7 +241,7 @@ async def get_agent_artifacts(
     simulation_id: uuid_mod.UUID | None = Query(default=None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[Artifact]:
     """All artifacts produced by this agent."""
     from core.repos.artifact_repo import ArtifactRepo
@@ -258,7 +262,7 @@ async def get_agent_costs(
     agent_id: str,
     from_date: datetime | None = Query(default=None, alias="from"),
     to_date: datetime | None = Query(default=None, alias="to"),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> CostBreakdownResponse:
     """Cost breakdown: by day, by type, total."""
     from core.repos.cost_repo import CostRepo
@@ -296,7 +300,7 @@ async def get_agent_journal(
     simulation_id: uuid_mod.UUID | None = Query(default=None),
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[JournalEntry]:
     """Journal entries with full content."""
     from core.repos.memory_repo import MemoryRepo
@@ -312,7 +316,7 @@ async def get_agent_journal(
 async def get_agent_relationships(
     agent_id: str,
     simulation_id: uuid_mod.UUID | None = Query(default=None),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """All relationships for an agent in a simulation."""
     if simulation_id is None:
@@ -328,7 +332,7 @@ async def get_agent_relationship_detail(
     agent_id: str,
     target_id: str,
     simulation_id: uuid_mod.UUID | None = Query(default=None),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Specific relationship with evolution timeline."""
     if simulation_id is None:

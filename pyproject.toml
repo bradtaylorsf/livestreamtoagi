@@ -43,6 +43,25 @@ dev = [
 where = ["."]
 include = ["core*", "tools*", "agents*"]
 
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "crewai.*",
+    "edge_tts.*",
+    "langfuse.*",
+    "docker.*",
+    "apscheduler.*",
+    "pgvector.*",
+    "watchfiles.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests/backend", "tests/integration"]
 asyncio_mode = "auto"

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time as _time_mod
 import uuid as uuid_mod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -23,6 +23,12 @@ from core.models import (
     SimulationCostResponse,
     TimelineEvent,
 )
+
+if TYPE_CHECKING:
+    from fastapi.responses import RedirectResponse
+
+    from core.agent_registry import AgentRegistry
+    from core.database import Database
 
 router = APIRouter(tags=["simulations"])
 
@@ -82,8 +88,8 @@ def _time_str() -> str:
 @router.post("/simulations", response_model=NewSimulationResponse)
 async def create_simulation(
     body: NewSimulationRequest,
-    registry: Any = Depends(get_registry),
-    db: Any = Depends(get_db),
+    registry: AgentRegistry = Depends(get_registry),
+    db: Database = Depends(get_db),
 ) -> NewSimulationResponse:
     """Create a new simulation and launch it as a background subprocess."""
     import subprocess
@@ -149,7 +155,7 @@ async def list_simulations(
     status: str | None = Query(None),
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[Simulation]:
     """List all simulations with summary stats."""
     from core.repos.simulation_repo import SimulationRepo
@@ -164,7 +170,7 @@ async def list_simulations(
 async def compare_simulations(
     sim_a: uuid_mod.UUID = Query(...),
     sim_b: uuid_mod.UUID = Query(...),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Side-by-side comparison of two simulation runs."""
     from core.repos.relationship_repo import RelationshipRepo
@@ -198,7 +204,7 @@ async def compare_simulations(
 @router.get("/simulations/{sim_id}", response_model=Simulation)
 async def get_simulation(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> Simulation:
     """Full simulation detail: config, stats, phases, timing."""
     from core.repos.simulation_repo import SimulationRepo
@@ -214,7 +220,7 @@ async def get_simulation(
 async def clone_simulation(
     sim_id: uuid_mod.UUID,
     body: CloneSimulationRequest,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> CloneSimulationResponse:
     """Clone a simulation by exporting its full state and importing into a new simulation."""
     from core.repos.simulation_repo import SimulationRepo
@@ -273,7 +279,7 @@ async def clone_simulation(
 @router.post("/simulations/{sim_id}/snapshot/export")
 async def export_simulation_snapshot(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> SnapshotExportResponse:
     """Export a complete simulation snapshot (full state) to JSON."""
     import json as _json
@@ -319,7 +325,7 @@ async def export_simulation_snapshot(
 @router.delete("/simulations/{sim_id}")
 async def delete_simulation(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, bool]:
     """Delete a simulation and all its data."""
     from core.constants import LIVE_SIMULATION_ID
@@ -347,7 +353,7 @@ async def get_simulation_timeline(
     sim_id: uuid_mod.UUID,
     agent_id: str | None = Query(None),
     event_type: str | None = Query(None),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[TimelineEvent]:
     """Chronological event stream for a simulation."""
     from core.repos.simulation_repo import SimulationRepo
@@ -364,7 +370,7 @@ async def get_simulation_conversations(
     sim_id: uuid_mod.UUID,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[Conversation]:
     """All conversations in this simulation."""
     from core.repos.conversation_repo import ConversationRepo
@@ -381,7 +387,7 @@ async def get_simulation_artifacts(
     sim_id: uuid_mod.UUID,
     agent_id: str | None = Query(None),
     artifact_type: str | None = Query(None, alias="type"),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[Artifact]:
     """All artifacts from this simulation."""
     from core.repos.artifact_repo import ArtifactRepo
@@ -396,7 +402,7 @@ async def get_simulation_artifacts(
 async def get_simulation_management_log(
     sim_id: uuid_mod.UUID,
     severity_min: int = Query(1, ge=1, le=5),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """All Management shadow flags from this simulation."""
     from core.repos.simulation_repo import SimulationRepo
@@ -408,7 +414,7 @@ async def get_simulation_management_log(
 @router.get("/simulations/{sim_id}/costs", response_model=SimulationCostResponse)
 async def get_simulation_costs(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> SimulationCostResponse:
     """Cost breakdown by agent, by tool type, total."""
     from core.repos.cost_repo import CostRepo
@@ -421,7 +427,7 @@ async def get_simulation_costs(
 @router.get("/simulations/{sim_id}/assertions")
 async def get_simulation_assertions(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """All assertion results for a simulation."""
     from core.repos.assertion_repo import AssertionRepo
@@ -432,7 +438,7 @@ async def get_simulation_assertions(
 @router.get("/simulations/{sim_id}/assertions/summary")
 async def get_simulation_assertions_summary(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Pass/fail/warn summary for simulation assertions."""
     from core.repos.assertion_repo import AssertionRepo
@@ -443,7 +449,7 @@ async def get_simulation_assertions_summary(
 @router.get("/simulations/{sim_id}/social-graph")
 async def get_social_graph(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Full relationship matrix for a simulation."""
     from core.repos.relationship_repo import RelationshipRepo
@@ -508,7 +514,7 @@ async def get_snapshot(
 @router.post("/simulations/{sim_id}/snapshots")
 async def create_snapshot(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Export a new memory snapshot for this simulation.
 
@@ -545,7 +551,7 @@ async def create_snapshot(
 @router.get("/simulations/{sim_id}/memory-current")
 async def get_current_memory_state(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Return current memory state for comparison with snapshots."""
     from core.repos.memory_repo import MemoryRepo
@@ -583,7 +589,7 @@ async def get_current_memory_state(
 async def get_simulation_report(
     sim_id: uuid_mod.UUID,
     days: str | None = Query(default=None),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate structured timeline report for a simulation."""
     from core.repos.relationship_repo import RelationshipRepo
@@ -629,7 +635,7 @@ async def get_simulation_report(
 @router.get("/chunks/{chunk_id}")
 async def get_chunk(
     chunk_id: int,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> dict:
     """Get chunk metadata and tile data for frontend rendering."""
     from core.repos.world_repo import WorldRepo
@@ -644,8 +650,8 @@ async def get_chunk(
 @router.get("/chunks/{chunk_id}/tileset.png")
 async def get_chunk_tileset(
     chunk_id: int,
-    db: Any = Depends(get_db),
-) -> Any:
+    db: Database = Depends(get_db),
+) -> RedirectResponse:
     """Serve or redirect to the tileset image for a chunk."""
     from fastapi.responses import RedirectResponse
     from core.repos.world_repo import WorldRepo

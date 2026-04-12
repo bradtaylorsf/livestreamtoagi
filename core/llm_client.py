@@ -213,6 +213,8 @@ class OpenRouterClient:
         self._cost_repo = cost_repo
         self._langfuse = langfuse_client
         self._lost_cost_events: int = 0
+        self._last_cost_failure_ts: float | None = None
+        self._total_cost_calls: int = 0
         self._simulation_id: uuid.UUID | None = None  # Set externally for simulation tracking
         self._model_fallbacks: list[dict[str, str]] = []
         self._owns_client = http_client is None
@@ -267,7 +269,15 @@ class OpenRouterClient:
         openrouter_id: str | None,
         simulation_id: uuid.UUID | None = None,
     ) -> None:
-        """Log cost with single retry — never let DB errors break LLM calls."""
+        """Log cost with 3 retries and exponential backoff."""
+        self._total_cost_calls += 1
+
+        if self._lost_cost_events > 0:
+            logger.warning(
+                "Cost data loss detected: %d events lost so far — logging may be unreliable",
+                self._lost_cost_events,
+            )
+
         event = CostEventCreate(
             agent_id=agent_id,
             cost_type="llm_call",
@@ -282,19 +292,34 @@ class OpenRouterClient:
             },
             simulation_id=simulation_id,
         )
-        for attempt in range(2):
+        max_attempts = 4  # 1 initial + 3 retries
+        for attempt in range(max_attempts):
             try:
                 await self._cost_repo.add_cost(event)
                 return
             except Exception:
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
                 else:
                     self._lost_cost_events += 1
+                    self._last_cost_failure_ts = time.time()
                     logger.warning(
                         "Cost event lost (total lost: %d) for model=%s agent=%s",
                         self._lost_cost_events, model, agent_id,
                     )
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Return cost tracking diagnostics."""
+        return {
+            "lost_cost_events": self._lost_cost_events,
+            "last_failure_ts": self._last_cost_failure_ts,
+            "total_cost_calls": self._total_cost_calls,
+            "loss_rate": (
+                self._lost_cost_events / self._total_cost_calls
+                if self._total_cost_calls > 0
+                else 0.0
+            ),
+        }
 
     def _trace_langfuse(
         self,

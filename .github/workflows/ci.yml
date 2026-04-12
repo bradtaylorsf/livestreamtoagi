@@ -23,6 +23,8 @@ jobs:
         run: ruff check core/ tools/
       - name: Ruff format check
         run: ruff format --check core/ tools/
+      - name: Mypy strict check
+        run: mypy core/ tools/ --strict
 
   backend-test:
     name: Backend Unit Tests
