@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
 from core.conversation_engine import ConversationEngine, _ActiveConversation
 from core.conversation.energy import ConversationEnergy
 from core.models import ConversationRecord
@@ -63,17 +64,20 @@ def _make_engine(llm_response_content: str | None = None, llm_error: bool = Fals
     mock_config_loader.config_hash = "test"
 
     engine = ConversationEngine(
-        config_loader=mock_config_loader,
-        agent_registry=MagicMock(),
-        event_bus=MagicMock(),
-        llm_client=mock_llm,
+        infra=InfraServices(
+            config_loader=mock_config_loader,
+            agent_registry=MagicMock(),
+            event_bus=MagicMock(),
+            llm_client=mock_llm,
+            proximity=MagicMock(),
+            trigger_system=MagicMock(),
+            selection_logger=MagicMock(),
+        ),
+        memory=MemoryServices(archival_memory=MagicMock()),
+        options=ConversationOptions(),
         management=MagicMock(),
         context_assembler=MagicMock(),
         conversation_repo=MagicMock(),
-        archival_memory=MagicMock(),
-        proximity=MagicMock(),
-        trigger_system=MagicMock(),
-        selection_logger=MagicMock(),
     )
     return engine
 

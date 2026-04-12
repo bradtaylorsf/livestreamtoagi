@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
 from core.context_assembly import ContextAssembler
 from core.conversation_engine import ConversationEngine
 from core.models import AgentConfig
@@ -111,18 +112,20 @@ def _make_engine_for_repetition(recent_outputs: list[str] | None = None) -> Conv
     selection_logger = AsyncMock()
 
     return ConversationEngine(
-        config_loader=config_loader,
-        agent_registry=agent_registry,
-        event_bus=event_bus,
-        llm_client=llm_client,
+        infra=InfraServices(
+            config_loader=config_loader,
+            agent_registry=agent_registry,
+            event_bus=event_bus,
+            llm_client=llm_client,
+            proximity=proximity,
+            trigger_system=trigger_system,
+            selection_logger=selection_logger,
+        ),
+        memory=MemoryServices(archival_memory=archival_memory),
+        options=ConversationOptions(recent_outputs=recent_outputs),
         management=management,
         context_assembler=context_assembler,
         conversation_repo=conversation_repo,
-        archival_memory=archival_memory,
-        proximity=proximity,
-        trigger_system=trigger_system,
-        selection_logger=selection_logger,
-        recent_outputs=recent_outputs,
     )
 
 

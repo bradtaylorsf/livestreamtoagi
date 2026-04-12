@@ -33,21 +33,11 @@ from core.tool_executor import (
 )
 
 if TYPE_CHECKING:
-    from core.agent_registry import AgentRegistry
-    from core.bootstrap import Services
-    from core.config_loader import ConfigLoader
+    from core.bootstrap import ConversationOptions, InfraServices, MemoryServices, Services
     from core.context_assembly import ContextAssembler
-    from core.conversation.proximity import ProximityManager
-    from core.conversation.selection_logger import SelectionLogger
-    from core.conversation.triggers import TriggerSystem
-    from core.event_bus import EventBus
-    from core.llm_client import OpenRouterClient
     from core.management import Management
-    from core.memory.archival_memory import ArchivalMemoryManager
-    from core.memory.compaction import MemoryCompactor
     from core.models import AgentConfig, ConversationConfig
     from core.repos.conversation_repo import ConversationRepo
-    from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
     from core.social.relationship_tracker import RelationshipTracker
     from tools.base import BaseTool
@@ -103,62 +93,52 @@ class ConversationEngine:
     def __init__(
         self,
         *,
-        config_loader: ConfigLoader,
-        agent_registry: AgentRegistry,
-        event_bus: EventBus,
-        llm_client: OpenRouterClient,
+        infra: InfraServices,
+        memory: MemoryServices,
+        options: ConversationOptions,
         management: Management,
         context_assembler: ContextAssembler,
         conversation_repo: ConversationRepo,
-        archival_memory: ArchivalMemoryManager,
-        proximity: ProximityManager,
-        trigger_system: TriggerSystem,
-        selection_logger: SelectionLogger,
-        compactor: MemoryCompactor | None = None,
-        memory_repo: MemoryRepo | None = None,
-        speed_multiplier: float = 1.0,
-        management_enabled: bool = True,
-        simulation_id: uuid.UUID | None = None,
         services: Services | None = None,
         clock: SimulationClock | None = None,
         relationship_tracker: RelationshipTracker | None = None,
-        recent_conversation_summaries: list[str] | None = None,
-        recent_outputs: list[str] | None = None,
-        required_agents: set[str] | None = None,
-        max_turns: int = 15,
-        debug_prompts: bool = False,
-        prompt_log_repo: object | None = None,
-        topic_history: dict[str, list[float]] | None = None,
     ) -> None:
-        self._config_loader = config_loader
-        self._agents = agent_registry
-        self._event_bus = event_bus
-        self._llm = llm_client
-        self._management_enabled = management_enabled
+        # Unpack infra facade
+        self._config_loader = infra.config_loader
+        self._agents = infra.agent_registry
+        self._event_bus = infra.event_bus
+        self._llm = infra.llm_client
+        self._proximity = infra.proximity
+        self._triggers = infra.trigger_system
+        self._selection_logger = infra.selection_logger
+
+        # Unpack memory facade
+        self._archival = memory.archival_memory
+        self._compactor = memory.compactor
+        self._memory_repo = memory.memory_repo
+
+        # Unpack options facade
+        self._management_enabled = options.management_enabled
+        self._simulation_id = options.simulation_id
+        self._debug_prompts = options.debug_prompts
+        self._prompt_log_repo = options.prompt_log_repo
+        self._speed_multiplier = options.speed_multiplier
+
+        # Direct dependencies
         self._management = management
-        self._simulation_id = simulation_id
         self._context = context_assembler
         self._repo = conversation_repo
-        self._archival = archival_memory
-        self._compactor = compactor
-        self._memory_repo = memory_repo
-        self._proximity = proximity
-        self._triggers = trigger_system
-        self._selection_logger = selection_logger
-        self._debug_prompts = debug_prompts
-        self._prompt_log_repo = prompt_log_repo
-        self._speed_multiplier = speed_multiplier
         self._services = services
         self._clock = clock
         self._relationship_tracker = relationship_tracker
-        self._simulation_mode = simulation_id is not None
+        self._simulation_mode = options.simulation_id is not None
 
         # Subsystems that depend on config
-        cfg = config_loader.config
+        cfg = infra.config_loader.config
         self._selector = SpeakerSelector(cfg)
         self._topic_detector = TopicDetector(
-            cfg.topics, llm_client, simulation_id=simulation_id,
-            topic_history=topic_history,
+            cfg.topics, infra.llm_client, simulation_id=options.simulation_id,
+            topic_history=options.topic_history,
         )
 
         self._active: _ActiveConversation | None = None
@@ -166,15 +146,15 @@ class ConversationEngine:
         self._last_llm_meta: dict[str, Any] | None = None
 
         # Cross-phase repetition prevention
-        self._recent_summaries = recent_conversation_summaries or []
-        self._recent_outputs: deque[str] = deque(recent_outputs or [], maxlen=50)
+        self._recent_summaries = options.recent_conversation_summaries or []
+        self._recent_outputs: deque[str] = deque(options.recent_outputs or [], maxlen=50)
         self._last_conversation_summary: str | None = None
         self._last_conversation_record: ConversationRecord | None = None
 
         # Required-agent participation tracking
-        self._required_agents: set[str] = required_agents or set()
+        self._required_agents: set[str] = options.required_agents or set()
         self._agents_who_spoke: set[str] = set()
-        self._max_turns: int = max_turns
+        self._max_turns: int = options.max_turns
 
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
