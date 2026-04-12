@@ -20,6 +20,8 @@ from core.conversation.pacing import calculate_pause
 from core.conversation.speaker_selector import InterruptState, SpeakerSelector
 from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
+from core.exceptions import AgentError, TransientError
+from core.llm_client import LLMError
 from core.models import ConversationCreate, ConversationRecord
 from core.speech_parser import parse_speech
 from core.tool_executor import (
@@ -336,7 +338,7 @@ class ConversationEngine:
                         for m2 in members[i + 1:]:
                             pairs.add(frozenset({m1, m2}))
                 self._selector.set_alliance_pairs(pairs)
-            except Exception:
+            except (AgentError, OSError, KeyError, ValueError):
                 logger.warning("Failed to load alliance pairs", exc_info=True)
 
         # Generate opening line
@@ -453,7 +455,7 @@ class ConversationEngine:
                     active = [g.goal for g in goals if g.status not in ("done", "completed")]
                     if active:
                         _agent_goals[a.id] = active[:3]
-            except Exception:
+            except (AgentError, OSError, KeyError, ValueError):
                 logger.warning("Failed to build agent goals for speaker selection", exc_info=True)
                 _agent_goals = None
 
@@ -549,7 +551,7 @@ class ConversationEngine:
                     topic=topic,
                     previous_topics=conv.topics if conv.topics else None,
                 )
-            except Exception:
+            except (AgentError, OSError, KeyError, ValueError):
                 logger.warning(
                     "Failed to update internal state for %s", selected_agent.id, exc_info=True
                 )
@@ -660,7 +662,7 @@ class ConversationEngine:
                 await self._relationship_tracker.update_after_conversation(
                     conv.history, conv.participants,
                 )
-            except Exception:
+            except (AgentError, OSError, KeyError, ValueError):
                 logger.warning(
                     "Relationship update failed for conversation %s",
                     conv.id,
@@ -788,7 +790,7 @@ class ConversationEngine:
                     participants=speakers,
                     turn_count=conv.turn_number,
                 )
-        except Exception:
+        except (LLMError, AgentError, OSError, KeyError, ValueError):
             logger.warning(
                 "Conversation record generation failed for %s, using fallback",
                 conv.id,
@@ -839,7 +841,7 @@ class ConversationEngine:
                 logger.info(
                     "Compacted memories for %d participants", len(participants),
                 )
-            except Exception:
+            except (LLMError, AgentError, OSError, RuntimeError):
                 logger.warning(
                     "Memory compaction failed for conversation %s",
                     conv.id,
@@ -854,7 +856,7 @@ class ConversationEngine:
                     content=transcript_content,
                     conversation_id=conv.id,
                 )
-            except Exception:
+            except (AgentError, OSError, RuntimeError):
                 logger.warning(
                     "Archival storage failed for conversation %s",
                     conv.id,
@@ -896,7 +898,7 @@ class ConversationEngine:
                     "Created journal entries for %d participants",
                     len(participants),
                 )
-            except Exception:
+            except (AgentError, OSError, KeyError, ValueError):
                 logger.warning(
                     "Journal creation failed for conversation %s",
                     conv.id,
@@ -977,7 +979,7 @@ class ConversationEngine:
                             owner=c["agent_id"],
                             status="pending",
                         ))
-                    except Exception:
+                    except (AgentError, OSError, KeyError, ValueError):
                         logger.warning(
                             "Failed to create shared task for commitment: %s",
                             c["commitment"][:100],
@@ -1008,7 +1010,7 @@ class ConversationEngine:
                             source="assigned",
                             simulation_id=self._simulation_id,
                         )
-                    except Exception:
+                    except (AgentError, OSError, KeyError, ValueError):
                         logger.warning(
                             "Failed to create cross-agent goal for %s → %s",
                             c["agent_id"], rel_id,
@@ -1020,7 +1022,7 @@ class ConversationEngine:
                     len(commitments),
                     conv.id,
                 )
-        except Exception:
+        except (LLMError, AgentError, OSError, KeyError, ValueError):
             logger.warning(
                 "Commitment extraction failed for conversation %s",
                 conv.id,
@@ -1046,6 +1048,22 @@ class ConversationEngine:
                 agent_id,
             )
         return self._tool_cache[agent_id]
+
+    # ── Context building helper ────────────────────────────────
+
+    async def _safe_context_build(
+        self, label: str, builder: Any,
+    ) -> Any | None:
+        """Run an async context builder, returning None on failure.
+
+        Catches expected error types and logs with *label* for diagnostics.
+        Used by _generate_turn to reduce repeated try/except blocks.
+        """
+        try:
+            return await builder
+        except (LLMError, AgentError, OSError, KeyError, ValueError):
+            logger.warning("Failed to build %s context", label, exc_info=True)
+            return None
 
     # ── Turn generation ────────────────────────────────────────
 
@@ -1073,97 +1091,80 @@ class ConversationEngine:
         agent_tools = self._get_tools_for_agent(agent.id)
         openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
 
-        # Build relationship context if tracker is available
+        # Build optional context sections — each uses _safe_context_build
+        # so individual failures don't block turn generation.
         relationship_context: str | None = None
         if self._relationship_tracker and self._active:
-            try:
-                other_ids = [pid for pid in self._active.participants if pid != agent.id]
-                if other_ids:
-                    relationship_context = (
-                        await self._relationship_tracker.get_context_for_agent(
-                            agent.id,
-                            other_ids,
-                        )
-                    ) or None
-            except Exception:
-                logger.warning(
-                    "Failed to build relationship context for %s", agent.id, exc_info=True
-                )
+            other_ids = [pid for pid in self._active.participants if pid != agent.id]
+            if other_ids:
+                relationship_context = await self._safe_context_build(
+                    f"relationship:{agent.id}",
+                    self._relationship_tracker.get_context_for_agent(agent.id, other_ids),
+                ) or None
 
-        # Build agent goals context if available
         agent_goals_context: str | None = None
         commitment_reminders: str | None = None
         if self._services and self._services.goal_manager:
-            try:
-                agent_goals_context = (
-                    await self._services.goal_manager.get_agenda_context(
-                        agent.id, simulation_id=self._simulation_id,
-                    )
-                ) or None
-            except Exception:
-                logger.warning("Failed to get agent goals for %s", agent.id, exc_info=True)
-            try:
-                commitment_reminders = (
-                    await self._services.goal_manager.get_commitment_reminders(
-                        agent.id, simulation_id=self._simulation_id,
-                    )
-                ) or None
-            except Exception:
-                logger.warning("Failed to get commitment reminders for %s", agent.id, exc_info=True)
+            agent_goals_context = await self._safe_context_build(
+                f"goals:{agent.id}",
+                self._services.goal_manager.get_agenda_context(
+                    agent.id, simulation_id=self._simulation_id,
+                ),
+            ) or None
+            commitment_reminders = await self._safe_context_build(
+                f"commitments:{agent.id}",
+                self._services.goal_manager.get_commitment_reminders(
+                    agent.id, simulation_id=self._simulation_id,
+                ),
+            ) or None
 
-        # Build internal state context if available (#267)
         internal_state_context: str | None = None
         if self._services and self._services.agent_state_manager:
-            try:
-                _state = await self._services.agent_state_manager.get_state(agent.id)
+            _state = await self._safe_context_build(
+                f"internal_state:{agent.id}",
+                self._services.agent_state_manager.get_state(agent.id),
+            )
+            if _state is not None:
                 internal_state_context = (
                     self._services.agent_state_manager.format_state_for_context(_state)
                 )
-            except Exception:
-                logger.warning("Failed to get internal state for %s", agent.id, exc_info=True)
 
-        # Build balance context if economy manager is available (#270)
         balance_context: str | None = None
         if self._services and self._services.economy_manager:
-            try:
-                balance = await self._services.economy_manager.get_balance(agent.id)
+            balance = await self._safe_context_build(
+                f"balance:{agent.id}",
+                self._services.economy_manager.get_balance(agent.id),
+            )
+            if balance is not None:
                 balance_context = f"Your current balance: ${balance:.2f}"
-                is_broke = balance <= 0
-                if is_broke:
+                if balance <= 0:
                     balance_context += " [BROKE — you cannot use paid tools until you earn or receive funds]"
-            except Exception:
-                logger.warning("Failed to get balance for %s", agent.id, exc_info=True)
 
-        # Fetch alliances context (#274)
         alliances_context: str | None = None
         if self._services and self._services.alliance_manager:
-            try:
-                alliances_context = await self._services.alliance_manager.get_alliance_context(agent.id, self._simulation_id)
-                alliances_context = alliances_context or None
-            except Exception:
-                logger.warning("Failed to get alliances for %s", agent.id, exc_info=True)
+            alliances_context = await self._safe_context_build(
+                f"alliances:{agent.id}",
+                self._services.alliance_manager.get_alliance_context(agent.id, self._simulation_id),
+            ) or None
 
-        # Fetch most recent dream for context injection (#272)
         recent_dream: str | None = None
         if self._services and self._services.memory_repo:
-            try:
-                entries = await self._services.memory_repo.get_recent_journal_entries_by_type(
+            entries = await self._safe_context_build(
+                f"dream:{agent.id}",
+                self._services.memory_repo.get_recent_journal_entries_by_type(
                     agent.id, "dream", limit=1,
                     simulation_id=self._simulation_id,
-                )
-                if entries:
-                    recent_dream = entries[0].content
-            except Exception:
-                logger.warning("Failed to get recent dream for %s", agent.id, exc_info=True)
+                ),
+            )
+            if entries:
+                recent_dream = entries[0].content
 
-        # Build shared working state context if available
         shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
-            try:
-                _sws = await self._services.shared_working_state.get_summary_for_context()
-                shared_state_context = _sws or None
-            except Exception:
-                logger.warning("Failed to get shared working state context", exc_info=True)
+            shared_state_context = await self._safe_context_build(
+                "shared_working_state",
+                self._services.shared_working_state.get_summary_for_context(),
+            ) or None
 
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
@@ -1199,7 +1200,7 @@ class ConversationEngine:
                             sections_included=context_result.sections_included,
                             total_tokens=context_result.total_tokens,
                         ))
-                    except Exception:
+                    except (AgentError, OSError, KeyError, ValueError):
                         logger.warning(
                             "Failed to store prompt log for %s turn %d",
                             agent.id, self._active.turn_number,
@@ -1388,12 +1389,13 @@ class ConversationEngine:
 
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except (LLMError, TransientError, OSError) as exc:
                 logger.exception(
-                    "LLM call failed for %s (attempt %d/%d)",
+                    "LLM call failed for %s (attempt %d/%d): %s",
                     agent.id,
                     attempt + 1,
                     MAX_GENERATE_RETRIES,
+                    exc,
                 )
                 if attempt < MAX_GENERATE_RETRIES - 1:
                     await self._sleep(BACKOFF_BASE_SECONDS * (2**attempt))

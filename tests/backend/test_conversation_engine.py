@@ -1024,6 +1024,10 @@ def _make_mock_services() -> MagicMock:
     svc.archival_memory = MagicMock()
     svc.economy_manager = None  # Prevent await errors on MagicMock
     svc.agent_state_manager = AsyncMock()  # Must be AsyncMock for await calls
+    svc.goal_manager = None  # Prevent await errors on MagicMock
+    svc.alliance_manager = None  # Prevent await errors on MagicMock
+    svc.shared_working_state = None  # Prevent await errors on MagicMock
+    svc.memory_repo = None  # Prevent await errors on MagicMock
     return svc
 
 

@@ -245,7 +245,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
                 return None
             try:
                 return await tts_pipeline.generate(agent_id, text, cleanup_ttl=batch_ttl)
-            except Exception:
+            except (OSError, ValueError, RuntimeError):
                 logger.exception("TTS pre-gen failed for %s", agent_id)
                 return None
 
@@ -316,7 +316,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
                     break
             if silent_engine.active_conversation:
                 await silent_engine._end_conversation()
-        except Exception:
+        except Exception:  # Broad catch: dev simulation must not crash the server
             logger.exception("Dev simulate task %s: conversation phase failed", task_id)
             return
 
@@ -360,7 +360,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     async def _run_with_finalize() -> None:
         try:
             await _run()
-        except Exception:
+        except Exception:  # Broad catch: must finalize simulation status on any failure
             from datetime import datetime
             logger.exception("Dev simulate task %s failed", task_id)
             await sim_repo.update_status(
@@ -418,7 +418,7 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
                     first = segments[0]
                     data["audio_url"] = first["audio_url"]
                     data["duration"] = int(first["duration"] * 1000)
-            except Exception:
+            except (OSError, ValueError, RuntimeError):
                 logger.exception("TTS generation failed in dev_emit")
 
     event = await event_bus.emit(req.event_type, data)
