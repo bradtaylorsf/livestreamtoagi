@@ -242,6 +242,7 @@ export class AgentSprite {
   cancelPath(): void {
     for (const tween of this.moveTweens) {
       tween.stop();
+      tween.destroy();
     }
     this.moveTweens = [];
     this.currentPath = [];
@@ -252,6 +253,13 @@ export class AgentSprite {
 
   /** Tween directly to a position (single segment). */
   private directMoveTo(x: number, y: number, onComplete?: () => void): void {
+    // Stop any existing move tweens before creating a new one
+    for (const tween of this.moveTweens) {
+      tween.stop();
+      tween.destroy();
+    }
+    this.moveTweens = [];
+
     const dx = x - this.sprite.x;
     const dy = y - this.sprite.y;
     if (Math.abs(dx) > Math.abs(dy)) {
@@ -261,12 +269,24 @@ export class AgentSprite {
     }
 
     const h = this.sprite.height;
-    const tweenProps = { x, duration: TWEEN_DURATION_MS, ease: "Power2" };
+    const nameHalfW = this.nameLabel.width / 2;
 
-    const spriteTween = this.scene.tweens.add({
+    const tween = this.scene.tweens.add({
       targets: this.sprite,
-      ...tweenProps,
+      x,
       y,
+      duration: TWEEN_DURATION_MS,
+      ease: "Power2",
+      onUpdate: () => {
+        const sx = this.sprite.x;
+        const sy = this.sprite.y;
+        this.nameLabel.setPosition(sx, sy + 4);
+        this.statusLabel.setPosition(sx, sy - h - 4);
+        this.activityLabel.setPosition(sx, sy - h - 20);
+        this.permissionIndicator.setPosition(sx, sy - h - 34);
+        this.progressDots.setPosition(sx + 40, sy - h - 20);
+        this.drawBadge(sx + nameHalfW + 6, sy + 4 + 5, this.currentBadgeState);
+      },
       onComplete: () => {
         this.moveTweens = [];
         this.playAnimation("idle");
@@ -274,51 +294,7 @@ export class AgentSprite {
       },
     });
 
-    const nameTween = this.scene.tweens.add({
-      targets: this.nameLabel,
-      ...tweenProps,
-      y: y + 4,
-    });
-
-    const statusTween = this.scene.tweens.add({
-      targets: this.statusLabel,
-      ...tweenProps,
-      y: y - h - 4,
-    });
-
-    const activityTween = this.scene.tweens.add({
-      targets: this.activityLabel,
-      ...tweenProps,
-      y: y - h - 20,
-    });
-
-    const permissionTween = this.scene.tweens.add({
-      targets: this.permissionIndicator,
-      ...tweenProps,
-      y: y - h - 34,
-    });
-
-    const progressTween = this.scene.tweens.add({
-      targets: this.progressDots,
-      x: x + 40,
-      y: y - h - 20,
-      duration: TWEEN_DURATION_MS,
-      ease: "Power2",
-    });
-
-    const nameHalfW = this.nameLabel.width / 2;
-    const badgeTween = this.scene.tweens.add({
-      targets: this.statusBadge,
-      x: x + nameHalfW + 6,
-      y: y + 4 + 5,
-      duration: TWEEN_DURATION_MS,
-      ease: "Power2",
-    });
-
-    this.moveTweens = [
-      spriteTween, nameTween, statusTween,
-      activityTween, permissionTween, progressTween, badgeTween,
-    ];
+    this.moveTweens = [tween];
   }
 
   /** Walk one tile along the current path, then chain to next. */
@@ -342,63 +318,31 @@ export class AgentSprite {
     }
 
     const h = this.sprite.height;
-    const stepProps = { x: target.x, duration: STEP_DURATION_MS, ease: "Linear" };
+    const nameHalfW = this.nameLabel.width / 2;
 
-    const spriteTween = this.scene.tweens.add({
+    const tween = this.scene.tweens.add({
       targets: this.sprite,
-      ...stepProps,
+      x: target.x,
       y: target.y,
+      duration: STEP_DURATION_MS,
+      ease: "Linear",
+      onUpdate: () => {
+        const sx = this.sprite.x;
+        const sy = this.sprite.y;
+        this.nameLabel.setPosition(sx, sy + 4);
+        this.statusLabel.setPosition(sx, sy - h - 4);
+        this.activityLabel.setPosition(sx, sy - h - 20);
+        this.permissionIndicator.setPosition(sx, sy - h - 34);
+        this.progressDots.setPosition(sx + 40, sy - h - 20);
+        this.drawBadge(sx + nameHalfW + 6, sy + 4 + 5, this.currentBadgeState);
+      },
       onComplete: () => {
         this.pathStepIndex++;
         this.stepToNextTile();
       },
     });
 
-    const nameTween = this.scene.tweens.add({
-      targets: this.nameLabel,
-      ...stepProps,
-      y: target.y + 4,
-    });
-
-    const statusTween = this.scene.tweens.add({
-      targets: this.statusLabel,
-      ...stepProps,
-      y: target.y - h - 4,
-    });
-
-    const activityTween = this.scene.tweens.add({
-      targets: this.activityLabel,
-      ...stepProps,
-      y: target.y - h - 20,
-    });
-
-    const permissionTween = this.scene.tweens.add({
-      targets: this.permissionIndicator,
-      ...stepProps,
-      y: target.y - h - 34,
-    });
-
-    const progressTween = this.scene.tweens.add({
-      targets: this.progressDots,
-      x: target.x + 40,
-      y: target.y - h - 20,
-      duration: STEP_DURATION_MS,
-      ease: "Linear",
-    });
-
-    const nameHalfW = this.nameLabel.width / 2;
-    const badgeTween = this.scene.tweens.add({
-      targets: this.statusBadge,
-      x: target.x + nameHalfW + 6,
-      y: target.y + 4 + 5,
-      duration: STEP_DURATION_MS,
-      ease: "Linear",
-    });
-
-    this.moveTweens = [
-      spriteTween, nameTween, statusTween,
-      activityTween, permissionTween, progressTween, badgeTween,
-    ];
+    this.moveTweens = [tween];
   }
 
   setStatus(status: StatusType): void {
@@ -587,9 +531,11 @@ export class AgentSprite {
   destroy(): void {
     for (const tween of this.moveTweens) {
       tween.stop();
+      tween.destroy();
     }
     if (this.pulseTween) {
       this.pulseTween.stop();
+      this.pulseTween.destroy();
     }
     if (this.progressTimer) {
       this.progressTimer.destroy();

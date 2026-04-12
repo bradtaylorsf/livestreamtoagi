@@ -1,4 +1,4 @@
-# Tool coverage — exercise all 19 agent tools
+# Tool coverage — exercise all 31 agent tools
 # QA scenario that guarantees every tool fires at least once.
 #
 # Run with:
@@ -10,6 +10,12 @@
 #
 # Validate coverage:
 #   python scripts/check_tool_coverage.py --name "tool-coverage"
+#
+# Full verification:
+#   python scripts/verify_simulation.py --name "tool-coverage"
+
+seed_goals: true
+seed_tasks: true
 
 phases:
   # ── Core tools ─────────────────────────────────────────────

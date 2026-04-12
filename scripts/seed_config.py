@@ -50,8 +50,13 @@ async def seed_agent_configs() -> None:
         seeded_agents = 0
         skipped_agents = 0
 
+        # Directories to skip — template is used for character spawning, not a real agent
+        SKIP_DIRS = {"template", "__pycache__"}
+
         for agent_dir in sorted(agents_dir.iterdir()):
             if not agent_dir.is_dir():
+                continue
+            if agent_dir.name in SKIP_DIRS:
                 continue
             config_path = agent_dir / "config.yaml"
             if not config_path.exists():

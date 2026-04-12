@@ -1,0 +1,52 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bandit:
+    name: Python Security Scan (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install bandit
+        run: pip install bandit
+      - name: Run bandit
+        run: bandit -r core/ tools/ -ll -x tests/
+
+  python-audit:
+    name: Python Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install uv and pip-audit
+        uses: astral-sh/setup-uv@v4
+      - name: Install project deps
+        run: uv pip install --system -e ".[dev]" pip-audit
+      - name: Run pip-audit
+        run: pip-audit
+
+  npm-audit:
+    name: NPM Dependency Audit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [frontend, website]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: cd ${{ matrix.dir }} && npm ci
+      - name: Run npm audit
+        run: cd ${{ matrix.dir }} && npm audit --audit-level=high

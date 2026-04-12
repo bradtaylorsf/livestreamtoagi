@@ -7,6 +7,7 @@ with stats for incremental DB updates.
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import logging
 import time
@@ -210,7 +211,7 @@ class PhaseRunner:
         from core.models import ConversationRecord
 
         self._conversation_records: deque[ConversationRecord] = deque(maxlen=25)
-        self._conversation_summaries: deque[str] = deque(maxlen=25)
+        self._conversation_summaries: deque[str] = deque(maxlen=10)
         self._recent_outputs: deque[str] = deque(maxlen=50)  # Last 50 agent outputs
         self._topic_history: dict[str, list[float]] = {}  # Persists across conversations
 
@@ -228,6 +229,9 @@ class PhaseRunner:
         """Dispatch to the appropriate phase runner method."""
         start = time.monotonic()
         self._reset_phase_stats()
+
+        # Periodic maintenance: retire stale goals and prune completed tasks
+        await self._run_maintenance()
 
         runner = {
             PhaseType.scheduled: self._run_scheduled,
@@ -253,6 +257,9 @@ class PhaseRunner:
             result.status = "failed"
             result.errors.append(str(exc))
 
+        # Yield to let fire-and-forget artifact events drain before checking
+        await asyncio.sleep(0.05)
+
         result.duration_seconds = time.monotonic() - start
         result.conversations = self._phase_conversations
         result.turns = self._phase_turns
@@ -262,6 +269,47 @@ class PhaseRunner:
         result.artifacts = self._phase_artifacts
         result.agents_participated = list(self._phase_agents)
         result.tools_used = sorted(self._phase_tools_used)
+
+        # Verify tool_exercise phases actually fired their target tool
+        if phase.type == PhaseType.tool_exercise and result.status == "completed":
+            expected_tool = phase.config.get("tool")
+            if expected_tool and expected_tool not in self._phase_tools_used:
+                msg = (
+                    f"Tool exercise '{phase.name}' completed but tool "
+                    f"'{expected_tool}' never fired (tools_used={result.tools_used})"
+                )
+                logger.warning(msg)
+                result.status = "tool_not_fired"
+                result.errors.append(msg)
+                from core.event_bus import EventType
+                await self._event_bus.emit(
+                    EventType.SIMULATION_ERROR,
+                    {
+                        "source": "tool_exercise",
+                        "error_type": "tool_not_fired",
+                        "phase": phase.name,
+                        "expected_tool": expected_tool,
+                        "tools_used": result.tools_used,
+                        "turns": result.turns,
+                        "simulation_id": str(self._simulation_id) if self._simulation_id else None,
+                    },
+                )
+
+        # Emit SIMULATION_ERROR for any phase that failed with errors
+        if result.errors and result.status == "failed":
+            from core.event_bus import EventType
+            await self._event_bus.emit(
+                EventType.SIMULATION_ERROR,
+                {
+                    "source": "phase_runner",
+                    "error_type": "phase_failed",
+                    "phase": phase.name,
+                    "phase_type": str(phase.type),
+                    "errors": result.errors,
+                    "simulation_id": str(self._simulation_id) if self._simulation_id else None,
+                },
+            )
+
         return result
 
     def _reset_phase_stats(self) -> None:
@@ -273,6 +321,27 @@ class PhaseRunner:
         self._phase_artifacts = 0
         self._phase_agents.clear()
         self._phase_tools_used.clear()
+
+    async def _run_maintenance(self) -> None:
+        """Retire stale goals and prune completed tasks between phases."""
+        if self._services and self._services.goal_manager:
+            for agent_id in self._agent_ids:
+                try:
+                    retired = await self._services.goal_manager.retire_stale_goals(
+                        agent_id, simulation_id=self._simulation_id,
+                    )
+                    if retired:
+                        logger.info("Retired %d stale goals for %s", retired, agent_id)
+                except (OSError, KeyError, ValueError):
+                    logger.warning("Goal retirement failed for %s", agent_id, exc_info=True)
+
+        if self._services and self._services.shared_working_state:
+            try:
+                pruned = await self._services.shared_working_state.prune_completed_tasks()
+                if pruned:
+                    logger.info("Pruned %d completed tasks from shared board", pruned)
+            except (OSError, KeyError, ValueError):
+                logger.warning("Task pruning failed", exc_info=True)
 
     # ── Phase runners ─────────────────────────────────────
 
@@ -541,33 +610,41 @@ class PhaseRunner:
         self._event_bus.on("conversation_productivity", _on_productivity)
 
         try:
+            from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+
             engine = ConversationEngine(
-                config_loader=self._config_loader,
-                agent_registry=self._agents,
-                event_bus=self._event_bus,
-                llm_client=self._llm,
+                infra=InfraServices(
+                    config_loader=self._config_loader,
+                    agent_registry=self._agents,
+                    event_bus=self._event_bus,
+                    llm_client=self._llm,
+                    proximity=self._proximity,
+                    trigger_system=self._triggers,
+                    selection_logger=self._selection_logger,
+                ),
+                memory=MemoryServices(
+                    archival_memory=self._archival,
+                    compactor=self._compactor,
+                    memory_repo=self._memory_repo,
+                ),
+                options=ConversationOptions(
+                    speed_multiplier=0,  # No delays in simulation
+                    management_enabled=False,  # Skip LLM review during sims; eval covers this
+                    simulation_id=self._simulation_id,
+                    recent_conversation_summaries=list(self._conversation_summaries),
+                    recent_outputs=list(self._recent_outputs),
+                    required_agents=set(phase.required_agents) if phase.required_agents else None,
+                    max_turns=max_turns,
+                    debug_prompts=self._debug_prompts,
+                    prompt_log_repo=self._prompt_log_repo,
+                    topic_history=dict(self._topic_history),
+                ),
                 management=self._management,
                 context_assembler=self._context,
                 conversation_repo=self._conversation_repo,
-                archival_memory=self._archival,
-                proximity=self._proximity,
-                trigger_system=self._triggers,
-                selection_logger=self._selection_logger,
-                compactor=self._compactor,
-                memory_repo=self._memory_repo,
-                speed_multiplier=0,  # No delays in simulation
-                management_enabled=False,  # Skip LLM review during sims; eval covers this
-                simulation_id=self._simulation_id,
                 services=self._services,
                 clock=self._clock,
                 relationship_tracker=self._relationship_tracker,
-                recent_conversation_summaries=list(self._conversation_summaries),
-                recent_outputs=list(self._recent_outputs),
-                required_agents=set(phase.required_agents) if phase.required_agents else None,
-                max_turns=max_turns,
-                debug_prompts=self._debug_prompts,
-                prompt_log_repo=self._prompt_log_repo,
-                topic_history=dict(self._topic_history),
             )
 
             engine._running = True
@@ -598,7 +675,11 @@ class PhaseRunner:
         if engine.active_conversation is None and engine.last_conversation_record:
             record = engine.last_conversation_record
             self._conversation_records.append(record)
-            self._conversation_summaries.append(record.format_for_context())
+            _summary = record.format_for_context()
+            # Truncate long summaries to prevent context bloat (~150 tokens ≈ 600 chars)
+            if len(_summary) > 600:
+                _summary = _summary[:597] + "..."
+            self._conversation_summaries.append(_summary)
 
             # Seed unresolved tensions as trigger events for future conversations
             for tension in record.unresolved_tensions[:2]:
@@ -607,7 +688,10 @@ class PhaseRunner:
                     "from_participants": record.participants,
                 })
         elif engine.active_conversation is None and engine.last_conversation_summary:
-            self._conversation_summaries.append(engine.last_conversation_summary)
+            _raw = engine.last_conversation_summary
+            if len(_raw) > 600:
+                _raw = _raw[:597] + "..."
+            self._conversation_summaries.append(_raw)
 
         # Collect recent outputs for repetition detection
         self._recent_outputs.extend(engine.recent_outputs)

@@ -1,0 +1,26 @@
+# Pre-commit hooks — run `pre-commit install` after cloning
+# See https://pre-commit.com for more information
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: no-commit-to-branch
+        args: ['--branch', 'main']
+
+  - repo: local
+    hooks:
+      - id: block-env-files
+        name: Block .env file commits
+        entry: bash -c 'if git diff --cached --name-only | grep -qE "^\.env($|\.)"; then echo "ERROR: Attempting to commit .env file(s). This is blocked for security." >&2; exit 1; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: ['--fix']
+      - id: ruff-format

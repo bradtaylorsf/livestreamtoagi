@@ -208,12 +208,19 @@ class ContextAssembler:
         chat_highlights_text = await self._get_chat_highlights(agent_id)
         _track("chat_highlights", chat_highlights_text, bool(chat_highlights_text))
 
-        # Summaries
+        # Summaries — cap to RECENT_SUMMARIES_BUDGET tokens, newest first
         summaries_text = ""
         if recent_conversation_summaries:
-            summaries_text = "\n".join(
-                f"{i + 1}. {s}" for i, s in enumerate(recent_conversation_summaries)
-            )
+            lines: list[str] = []
+            running_tokens = 0
+            for i, s in enumerate(recent_conversation_summaries):
+                line = f"{i + 1}. {s}"
+                line_tokens = self._token_counter.count_tokens(line)
+                if running_tokens + line_tokens > RECENT_SUMMARIES_BUDGET:
+                    break
+                lines.append(line)
+                running_tokens += line_tokens
+            summaries_text = "\n".join(lines)
         _track("summaries", summaries_text, bool(recent_conversation_summaries))
 
         # Relationships

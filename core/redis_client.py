@@ -100,6 +100,9 @@ class RedisClient:
     async def hgetall(self, key: str) -> dict[str, str]:
         return await self.client.hgetall(key)
 
+    async def hdel(self, key: str, *fields: str) -> int:
+        return await self.client.hdel(key, *fields)
+
     async def publish(self, channel: str, message: str) -> int:
         return await self.client.publish(channel, message)
 

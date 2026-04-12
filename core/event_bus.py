@@ -137,6 +137,23 @@ class EventBus:
                 await cb(event)
             except Exception:
                 logger.exception("Error in event callback for %s", event_type)
+                # Emit a SIMULATION_ERROR so callback failures appear in
+                # the simulation error_log — but guard against recursion
+                # (don't re-emit if the failing callback was for SIMULATION_ERROR)
+                if event_type != EventType.SIMULATION_ERROR:
+                    try:
+                        await self.emit(
+                            EventType.SIMULATION_ERROR,
+                            {
+                                "source": "event_bus",
+                                "error_type": "callback_exception",
+                                "event_type": event_type,
+                                "callback": getattr(cb, "__name__", str(cb)),
+                                "detail": str(event.get("data", {}))[:200],
+                            },
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit SIMULATION_ERROR for callback failure")
 
         # Broadcast to WebSocket clients
         await self._broadcast(message)

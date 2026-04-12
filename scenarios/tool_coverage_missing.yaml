@@ -1,0 +1,98 @@
+# Focused tool coverage — exercises only the 11 tools that failed in the
+# full tool_coverage simulation.
+#
+# Run with:
+#   python scripts/run_simulation.py \
+#     --name "tool-coverage-missing" \
+#     --seed-file scenarios/tool_coverage_missing.yaml \
+#     --max-cost 5.00 \
+#     --verbose
+#
+# Validate:
+#   python scripts/check_tool_coverage.py --name "tool-coverage-missing"
+
+seed_goals: false
+seed_tasks: false
+
+phases:
+  # ── Audience tools ─────────────────────────────────────────
+  - name: chat_send_message
+    type: tool_exercise
+    agent: pixel
+    tool: send_chat_message
+    context: "Send a welcome message to chat: 'Hey everyone, welcome to the show!'"
+    location: town_square
+
+  - name: chat_create_poll
+    type: tool_exercise
+    agent: pixel
+    tool: create_poll
+    context: "Create a poll titled 'What should we build?' with options: Game, Tool, Art"
+    location: town_square
+
+  # ── Web & research tools ───────────────────────────────────
+  - name: web_search_tool
+    type: tool_exercise
+    agent: pixel
+    tool: web_search
+    context: "Search for 'pixel art game development trends 2026'"
+    location: town_square
+
+  - name: web_fetch_url_tool
+    type: tool_exercise
+    agent: pixel
+    tool: fetch_url
+    context: "Fetch the page at https://example.com to test URL fetching"
+    location: town_square
+
+  # ── Content & social tools ─────────────────────────────────
+  - name: social_draft_post
+    type: tool_exercise
+    agent: pixel
+    tool: draft_social_post
+    context: "Draft a tweet on twitter: 'Day 1 of our AI reality show — building a pixel world live!'"
+    location: town_square
+
+  - name: social_draft_email
+    type: tool_exercise
+    agent: pixel
+    tool: draft_email
+    context: "Draft an email to sponsors@example.com with subject 'Partnership Inquiry' and body about our show"
+    location: town_square
+
+  - name: social_check_post
+    type: tool_exercise
+    agent: pixel
+    tool: check_post_performance
+    context: "Check how our latest social media post is performing"
+    location: town_square
+
+  - name: social_check_email
+    type: tool_exercise
+    agent: pixel
+    tool: check_email_responses
+    context: "Check if we got any email responses to our outreach"
+    location: town_square
+
+  # ── Business tools ─────────────────────────────────────────
+  - name: business_revenue
+    type: tool_exercise
+    agent: sentinel
+    tool: get_revenue_status
+    context: "Check the current revenue and budget status for the show"
+    location: town_square
+
+  # ── Code & world tools ─────────────────────────────────────
+  - name: code_execute_tool
+    type: tool_exercise
+    agent: rex
+    tool: execute_code
+    context: "Write and run a Python program that prints 'Hello from the show!'"
+    location: workshop
+
+  - name: world_tilemap_gen
+    type: tool_exercise
+    agent: aurora
+    tool: generate_tilemap
+    context: "Generate a small 4x4 tilemap called 'garden' for a garden area using pixel art tiles"
+    location: workshop

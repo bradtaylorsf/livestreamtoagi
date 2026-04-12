@@ -448,7 +448,7 @@ class ReflectionManager:
                 )
                 await self._trim_core_memory(agent_id, model)
         except ValueError:
-            pass  # No core memory yet
+            logger.debug("No core memory yet for %s — skipping token check", agent_id)
 
         # Create self-modification proposals
         for mod in analysis.get("self_modifications", []):

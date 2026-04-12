@@ -164,10 +164,13 @@ class LeaveAllianceTool(BaseTool):
         if self._alliance_mgr is None:
             return {"status": "error", "reason": "Alliance system not available"}
 
-        success = await self._alliance_mgr.leave_alliance(
-            agent_id=self._agent_id,
-            alliance_id=kwargs["alliance_id"],
-        )
+        try:
+            success = await self._alliance_mgr.leave_alliance(
+                agent_id=self._agent_id,
+                alliance_id=kwargs["alliance_id"],
+            )
+        except (ValueError, KeyError):
+            return {"status": "error", "reason": f"Invalid alliance_id: {kwargs['alliance_id']!r}"}
 
         if success:
             return {"status": "left", "message": "You have left the alliance."}

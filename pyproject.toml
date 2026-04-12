@@ -25,6 +25,8 @@ dependencies = [
     "rich>=13.0.0",
     "watchfiles>=0.21.0",
     "docker>=7.0.0",
+    "bcrypt>=4.0.0",
+    "PyJWT>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -34,11 +36,31 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.8.0",
     "mypy>=1.0.0",
+    "pre-commit>=4.0.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "tools*", "agents*"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "crewai.*",
+    "edge_tts.*",
+    "langfuse.*",
+    "docker.*",
+    "apscheduler.*",
+    "pgvector.*",
+    "watchfiles.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests/backend", "tests/integration"]

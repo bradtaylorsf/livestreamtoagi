@@ -91,7 +91,7 @@ export default function SocialGraph({ relationships, onSelectPair }: Props) {
         const a = positions[r.agent_id];
         const b = positions[r.target_agent_id];
         if (!a || !b) return null;
-        const color = sentimentColor(r.sentiment_score);
+        const color = sentimentColor(Number(r.sentiment_score ?? 0));
         const thickness = edgeThickness(r.interaction_count);
         const key = `${r.agent_id}-${r.target_agent_id}`;
         return (
@@ -109,7 +109,7 @@ export default function SocialGraph({ relationships, onSelectPair }: Props) {
           >
             <title>
               {r.agent_id} ↔ {r.target_agent_id} | sentiment:{" "}
-              {r.sentiment_score.toFixed(2)} | interactions: {r.interaction_count}
+              {Number(r.sentiment_score ?? 0).toFixed(2)} | interactions: {r.interaction_count}
             </title>
           </line>
         );

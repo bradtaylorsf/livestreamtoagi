@@ -5,14 +5,17 @@ import time as _time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from datetime import UTC
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+
+if TYPE_CHECKING:
+    from core.tts import TTSPipeline
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
-from core.admin_routes import router as admin_router
+from core.admin import admin_router, auth_api, kill_switch_api
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
 from core.event_bus import event_bus
 from core.public_routes import router as public_router
@@ -92,7 +95,7 @@ async def lifespan(app: FastAPI):
         if idle_behavior is not None:
             idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
-        from core.admin_routes import _background_tasks
+        from core.admin import _background_tasks
         if _background_tasks:
             logger.info("Waiting for %d background eval task(s) to finish...", len(_background_tasks))
             await asyncio.gather(*_background_tasks, return_exceptions=True)
@@ -122,6 +125,8 @@ app.add_middleware(
 )
 
 app.include_router(admin_router)
+app.include_router(auth_api)
+app.include_router(kill_switch_api)
 app.include_router(public_router)
 
 
@@ -153,7 +158,21 @@ class DevSimulateRequest(BaseModel):
 _sim_tasks: set[asyncio.Task] = set()
 
 
-@app.post("/api/dev/simulate")
+async def _require_dev_mode() -> None:
+    """Block dev endpoints in production.
+
+    Dev endpoints are only available when ENV is 'development' (the default).
+    Set ENV=production to disable them.
+    """
+    env = os.environ.get("ENV", "development")
+    if env != "development":
+        raise HTTPException(
+            status_code=403,
+            detail="Dev endpoints are disabled outside development mode",
+        )
+
+
+@app.post("/api/dev/simulate", dependencies=[Depends(_require_dev_mode)])
 async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     """Trigger a test conversation in-process so events reach WebSocket clients.
 
@@ -215,7 +234,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     max_turns = req.turns
 
     async def _run() -> None:
-        tts_pipeline: Any = getattr(app.state, "tts_pipeline", None)
+        tts_pipeline: TTSPipeline | None = getattr(app.state, "tts_pipeline", None)
         batch_ttl = max_turns * 15 + 300
 
         # ── Helpers ───────────────────────────────────────────────
@@ -231,7 +250,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
                 return None
             try:
                 return await tts_pipeline.generate(agent_id, text, cleanup_ttl=batch_ttl)
-            except Exception:
+            except (OSError, ValueError, RuntimeError):
                 logger.exception("TTS pre-gen failed for %s", agent_id)
                 return None
 
@@ -246,8 +265,8 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
         # Each turn's TTS starts generating as soon as the LLM produces it,
         # running in parallel with the LLM generating subsequent turns.
         class _SilentBus:
-            def on(self, *_: Any) -> None: pass
-            def off(self, *_: Any) -> None: pass
+            def on(self, *_: object) -> None: pass
+            def off(self, *_: object) -> None: pass
             async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
                 evt = {"event_type": event_type, "event_id": str(_uuid_mod.uuid4()),
                        "timestamp": _time.time(), "data": data or {}}
@@ -256,24 +275,32 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
 
         silent_bus = _SilentBus()
 
+        from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+
         silent_engine = ConversationEngine(
-            config_loader=svc.config_loader,
-            agent_registry=svc.agent_registry,
-            event_bus=silent_bus,  # type: ignore[arg-type]
-            llm_client=svc.llm_client,
+            infra=InfraServices(
+                config_loader=svc.config_loader,
+                agent_registry=svc.agent_registry,
+                event_bus=silent_bus,  # type: ignore[arg-type]
+                llm_client=svc.llm_client,
+                proximity=proximity,
+                trigger_system=trigger_system,
+                selection_logger=selection_logger,
+            ),
+            memory=MemoryServices(
+                archival_memory=svc.archival_memory,
+                compactor=svc.compactor,
+                memory_repo=svc.memory_repo,
+            ),
+            options=ConversationOptions(
+                speed_multiplier=1.0,
+                management_enabled=True,
+                simulation_id=simulation_id,
+            ),
             management=svc.management,
             context_assembler=svc.context_assembler,
             conversation_repo=conversation_repo,
-            archival_memory=svc.archival_memory,
-            proximity=proximity,
-            trigger_system=trigger_system,
-            selection_logger=selection_logger,
-            compactor=svc.compactor,
-            memory_repo=svc.memory_repo,
-            speed_multiplier=1.0,
-            management_enabled=True,
             services=svc,
-            simulation_id=simulation_id,
         )
 
         try:
@@ -302,7 +329,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
                     break
             if silent_engine.active_conversation:
                 await silent_engine._end_conversation()
-        except Exception:
+        except Exception:  # Broad catch: dev simulation must not crash the server
             logger.exception("Dev simulate task %s: conversation phase failed", task_id)
             return
 
@@ -346,7 +373,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     async def _run_with_finalize() -> None:
         try:
             await _run()
-        except Exception:
+        except Exception:  # Broad catch: must finalize simulation status on any failure
             from datetime import datetime
             logger.exception("Dev simulate task %s failed", task_id)
             await sim_repo.update_status(
@@ -376,7 +403,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/api/dev/emit")
+@app.post("/api/dev/emit", dependencies=[Depends(_require_dev_mode)])
 async def dev_emit(req: EmitRequest) -> dict[str, Any]:
     """Inject an event into the event bus (dev/CLI use only).
 
@@ -393,7 +420,7 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
     # If "duration" is present, the CLI already generated audio and timed the
     # bubble — skip server-side TTS to avoid double generation and stale timing.
     if req.event_type == "agent_speak" and "text" in data and "agent_id" in data and "duration" not in data:
-        tts: Any = getattr(app.state, "tts_pipeline", None)
+        tts: TTSPipeline | None = getattr(app.state, "tts_pipeline", None)
         if tts is not None:
             try:
                 segments = await tts.speak_segmented(data["agent_id"], data["text"])
@@ -404,7 +431,7 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
                     first = segments[0]
                     data["audio_url"] = first["audio_url"]
                     data["duration"] = int(first["duration"] * 1000)
-            except Exception:
+            except (OSError, ValueError, RuntimeError):
                 logger.exception("TTS generation failed in dev_emit")
 
     event = await event_bus.emit(req.event_type, data)

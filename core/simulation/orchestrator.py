@@ -456,6 +456,19 @@ class SimulationOrchestrator:
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
 
+        # Initialize economy accounts for this simulation scope
+        # (bootstrap creates live-scoped accounts; we need sim-scoped ones)
+        if self._services and self._services.economy_manager and not self._config.dry_run:
+            try:
+                economy_excluded = {"management", "alpha"}
+                agent_ids = [
+                    a for a in self._config.agents if a not in economy_excluded
+                ]
+                await self._services.economy_manager.initialize_accounts(agent_ids)
+                logger.info("Initialized economy accounts for %d agents in simulation", len(agent_ids))
+            except Exception:
+                logger.warning("Failed to initialize economy accounts for simulation", exc_info=True)
+
         # Start audience simulator if configured
         audience_sim = None
         if self._config.audience_config and not self._config.dry_run:

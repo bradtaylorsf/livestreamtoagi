@@ -20,6 +20,7 @@ import type {
 } from "@/types";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_RETRIES = 2;
 
 class ApiRequestError extends Error {
   status: number;
@@ -31,41 +32,69 @@ class ApiRequestError extends Error {
   }
 }
 
+function isRetryable(error: unknown): boolean {
+  if (error instanceof ApiRequestError) {
+    return error.status >= 500;
+  }
+  // Retry on network errors (TypeError from fetch) and abort timeouts
+  return error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError");
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    DEFAULT_TIMEOUT_MS,
-  );
+  let lastError: unknown;
 
-  try {
-    const response = await fetch(path, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    });
-
-    if (!response.ok) {
-      let message = response.statusText;
-      try {
-        const body = (await response.json()) as ApiError;
-        message = body.message || message;
-      } catch {
-        // Use statusText as fallback
-      }
-      throw new ApiRequestError(response.status, message);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 1s, 2s
+      await sleep(1000 * attempt);
     }
 
-    return (await response.json()) as T;
-  } finally {
-    clearTimeout(timeout);
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      DEFAULT_TIMEOUT_MS,
+    );
+
+    try {
+      const response = await fetch(path, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
+
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const body = (await response.json()) as ApiError;
+          message = body.message || message;
+        } catch {
+          // Use statusText as fallback
+        }
+        throw new ApiRequestError(response.status, message);
+      }
+
+      return (await response.json()) as T;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryable(error) || attempt === MAX_RETRIES) {
+        throw error;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  throw lastError;
 }
 
 // Agents

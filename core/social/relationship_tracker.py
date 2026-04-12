@@ -84,18 +84,25 @@ class RelationshipTracker:
         # Increment interaction counts for all pairs
         for i, agent_a in enumerate(participants):
             for agent_b in participants[i + 1 :]:
-                await self._repo.increment_interaction(
-                    self._simulation_id,
-                    agent_a,
-                    agent_b,
-                    interaction_at=now,
-                )
-                await self._repo.increment_interaction(
-                    self._simulation_id,
-                    agent_b,
-                    agent_a,
-                    interaction_at=now,
-                )
+                try:
+                    await self._repo.increment_interaction(
+                        self._simulation_id,
+                        agent_a,
+                        agent_b,
+                        interaction_at=now,
+                    )
+                    await self._repo.increment_interaction(
+                        self._simulation_id,
+                        agent_b,
+                        agent_a,
+                        interaction_at=now,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to increment interaction count for %s <-> %s",
+                        agent_a, agent_b,
+                        exc_info=True,
+                    )
 
         # Extract sentiment via LLM
         try:
@@ -158,45 +165,52 @@ class RelationshipTracker:
             if from_id == to_id:
                 continue
 
-            sentiment = max(-1.0, min(1.0, float(rel.get("sentiment") or 0.0)))
-            trust = max(0.0, min(1.0, float(rel.get("trust") or 0.5)))
-            summary = rel.get("summary", "")
+            try:
+                sentiment = max(-1.0, min(1.0, float(rel.get("sentiment") or 0.0)))
+                trust = max(0.0, min(1.0, float(rel.get("trust") or 0.5)))
+                summary = rel.get("summary", "")
 
-            # Get existing scores for evolution log
-            existing = await self._repo.get(
-                self._simulation_id,
-                from_id,
-                to_id,
-            )
-            old_sentiment = (
-                float(existing.sentiment_score) if existing and existing.sentiment_score else None
-            )
-            old_trust = float(existing.trust_score) if existing and existing.trust_score else None
+                # Get existing scores for evolution log
+                existing = await self._repo.get(
+                    self._simulation_id,
+                    from_id,
+                    to_id,
+                )
+                old_sentiment = (
+                    float(existing.sentiment_score) if existing and existing.sentiment_score else None
+                )
+                old_trust = float(existing.trust_score) if existing and existing.trust_score else None
 
-            await self._repo.upsert(
-                self._simulation_id,
-                from_id,
-                to_id,
-                sentiment_score=sentiment,
-                trust_score=trust,
-                relationship_summary=summary,
-            )
+                await self._repo.upsert(
+                    self._simulation_id,
+                    from_id,
+                    to_id,
+                    sentiment_score=sentiment,
+                    trust_score=trust,
+                    relationship_summary=summary,
+                )
 
-            # Append evolution event
-            event = {
-                "timestamp": ts_str,
-                "event": f"conversation_update: {summary}",
-                "sentiment_before": old_sentiment,
-                "sentiment_after": sentiment,
-                "trust_before": old_trust,
-                "trust_after": trust,
-            }
-            await self._repo.append_evolution_event(
-                self._simulation_id,
-                from_id,
-                to_id,
-                event,
-            )
+                # Append evolution event
+                event = {
+                    "timestamp": ts_str,
+                    "event": f"conversation_update: {summary}",
+                    "sentiment_before": old_sentiment,
+                    "sentiment_after": sentiment,
+                    "trust_before": old_trust,
+                    "trust_after": trust,
+                }
+                await self._repo.append_evolution_event(
+                    self._simulation_id,
+                    from_id,
+                    to_id,
+                    event,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to update relationship %s -> %s",
+                    from_id, to_id,
+                    exc_info=True,
+                )
 
     async def update_from_reflection(
         self,
@@ -244,40 +258,47 @@ class RelationshipTracker:
             if not target_id or target_id == agent_id:
                 continue
 
-            # Simple heuristic sentiment from description keywords
-            sentiment = _estimate_sentiment_from_text(description)
+            try:
+                # Simple heuristic sentiment from description keywords
+                sentiment = _estimate_sentiment_from_text(description)
 
-            existing = await self._repo.get(
-                self._simulation_id,
-                agent_id,
-                target_id,
-            )
-            if existing is None:
-                # Only update if record exists (created by conversation)
-                continue
+                existing = await self._repo.get(
+                    self._simulation_id,
+                    agent_id,
+                    target_id,
+                )
+                if existing is None:
+                    # Only update if record exists (created by conversation)
+                    continue
 
-            old_sentiment = float(existing.sentiment_score) if existing.sentiment_score else None
+                old_sentiment = float(existing.sentiment_score) if existing.sentiment_score else None
 
-            await self._repo.upsert(
-                self._simulation_id,
-                agent_id,
-                target_id,
-                sentiment_score=sentiment,
-                relationship_summary=description,
-            )
+                await self._repo.upsert(
+                    self._simulation_id,
+                    agent_id,
+                    target_id,
+                    sentiment_score=sentiment,
+                    relationship_summary=description,
+                )
 
-            event = {
-                "timestamp": ts_str,
-                "event": f"reflection_update: {description}",
-                "sentiment_before": old_sentiment,
-                "sentiment_after": sentiment,
-            }
-            await self._repo.append_evolution_event(
-                self._simulation_id,
-                agent_id,
-                target_id,
-                event,
-            )
+                event = {
+                    "timestamp": ts_str,
+                    "event": f"reflection_update: {description}",
+                    "sentiment_before": old_sentiment,
+                    "sentiment_after": sentiment,
+                }
+                await self._repo.append_evolution_event(
+                    self._simulation_id,
+                    agent_id,
+                    target_id,
+                    event,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to update relationship from reflection: %s -> %s",
+                    agent_id, target_id,
+                    exc_info=True,
+                )
 
     async def get_relationship(
         self,

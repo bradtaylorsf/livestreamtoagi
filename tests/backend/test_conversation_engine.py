@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
 from core.conversation_engine import ConversationEngine
 from core.event_bus import EventType
 from core.models import (
@@ -341,20 +342,24 @@ def engine(
     mock_proximity.get_eligible_speakers = AsyncMock(return_value=agents)
 
     return ConversationEngine(
-        config_loader=mock_config_loader,
-        agent_registry=mock_agent_registry,
-        event_bus=mock_event_bus,
-        llm_client=mock_llm,
+        infra=InfraServices(
+            config_loader=mock_config_loader,
+            agent_registry=mock_agent_registry,
+            event_bus=mock_event_bus,
+            llm_client=mock_llm,
+            proximity=mock_proximity,
+            trigger_system=mock_trigger_system,
+            selection_logger=mock_selection_logger,
+        ),
+        memory=MemoryServices(
+            archival_memory=mock_archival_memory,
+            compactor=mock_compactor,
+            memory_repo=mock_memory_repo,
+        ),
+        options=ConversationOptions(speed_multiplier=0),
         management=mock_management,
         context_assembler=mock_context_assembler,
         conversation_repo=mock_conversation_repo,
-        archival_memory=mock_archival_memory,
-        proximity=mock_proximity,
-        trigger_system=mock_trigger_system,
-        selection_logger=mock_selection_logger,
-        compactor=mock_compactor,
-        memory_repo=mock_memory_repo,
-        speed_multiplier=0,  # No delays in tests
     )
 
 
@@ -606,18 +611,20 @@ class TestPostConversationMemories:
         """Engine without compactor falls back to direct archival storage."""
         mock_proximity.get_eligible_speakers = AsyncMock(return_value=agents)
         engine_no_compactor = ConversationEngine(
-            config_loader=mock_config_loader,
-            agent_registry=mock_agent_registry,
-            event_bus=mock_event_bus,
-            llm_client=mock_llm,
+            infra=InfraServices(
+                config_loader=mock_config_loader,
+                agent_registry=mock_agent_registry,
+                event_bus=mock_event_bus,
+                llm_client=mock_llm,
+                proximity=mock_proximity,
+                trigger_system=mock_trigger_system,
+                selection_logger=mock_selection_logger,
+            ),
+            memory=MemoryServices(archival_memory=mock_archival_memory),
+            options=ConversationOptions(speed_multiplier=0),
             management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
-            archival_memory=mock_archival_memory,
-            proximity=mock_proximity,
-            trigger_system=mock_trigger_system,
-            selection_logger=mock_selection_logger,
-            speed_multiplier=0,
         )
 
         trigger = {"type": "idle", "location": "town_square"}
@@ -979,18 +986,20 @@ class TestSpeedMultiplier:
         loader.config_hash = "test"
 
         engine = ConversationEngine(
-            config_loader=loader,
-            agent_registry=MagicMock(),
-            event_bus=MagicMock(),
-            llm_client=MagicMock(),
+            infra=InfraServices(
+                config_loader=loader,
+                agent_registry=MagicMock(),
+                event_bus=MagicMock(),
+                llm_client=MagicMock(),
+                proximity=MagicMock(),
+                trigger_system=MagicMock(),
+                selection_logger=MagicMock(),
+            ),
+            memory=MemoryServices(archival_memory=MagicMock()),
+            options=ConversationOptions(speed_multiplier=0.5),
             management=MagicMock(),
             context_assembler=MagicMock(),
             conversation_repo=MagicMock(),
-            archival_memory=MagicMock(),
-            proximity=MagicMock(),
-            trigger_system=MagicMock(),
-            selection_logger=MagicMock(),
-            speed_multiplier=0.5,
         )
 
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
@@ -1024,6 +1033,10 @@ def _make_mock_services() -> MagicMock:
     svc.archival_memory = MagicMock()
     svc.economy_manager = None  # Prevent await errors on MagicMock
     svc.agent_state_manager = AsyncMock()  # Must be AsyncMock for await calls
+    svc.goal_manager = None  # Prevent await errors on MagicMock
+    svc.alliance_manager = None  # Prevent await errors on MagicMock
+    svc.shared_working_state = None  # Prevent await errors on MagicMock
+    svc.memory_repo = None  # Prevent await errors on MagicMock
     return svc
 
 
@@ -1059,18 +1072,20 @@ class TestToolSupport:
         mock_services = _make_mock_services()
 
         engine_with_tools = ConversationEngine(
-            config_loader=mock_config_loader,
-            agent_registry=mock_agent_registry,
-            event_bus=mock_event_bus,
-            llm_client=mock_llm,
+            infra=InfraServices(
+                config_loader=mock_config_loader,
+                agent_registry=mock_agent_registry,
+                event_bus=mock_event_bus,
+                llm_client=mock_llm,
+                proximity=mock_proximity,
+                trigger_system=mock_trigger_system,
+                selection_logger=mock_selection_logger,
+            ),
+            memory=MemoryServices(archival_memory=mock_archival_memory),
+            options=ConversationOptions(speed_multiplier=0),
             management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
-            archival_memory=mock_archival_memory,
-            proximity=mock_proximity,
-            trigger_system=mock_trigger_system,
-            selection_logger=mock_selection_logger,
-            speed_multiplier=0,
             services=mock_services,
         )
 
@@ -1110,18 +1125,20 @@ class TestToolSupport:
         mock_services = _make_mock_services()
 
         engine_with_tools = ConversationEngine(
-            config_loader=mock_config_loader,
-            agent_registry=mock_agent_registry,
-            event_bus=mock_event_bus,
-            llm_client=mock_llm,
+            infra=InfraServices(
+                config_loader=mock_config_loader,
+                agent_registry=mock_agent_registry,
+                event_bus=mock_event_bus,
+                llm_client=mock_llm,
+                proximity=mock_proximity,
+                trigger_system=mock_trigger_system,
+                selection_logger=mock_selection_logger,
+            ),
+            memory=MemoryServices(archival_memory=mock_archival_memory),
+            options=ConversationOptions(speed_multiplier=0),
             management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
-            archival_memory=mock_archival_memory,
-            proximity=mock_proximity,
-            trigger_system=mock_trigger_system,
-            selection_logger=mock_selection_logger,
-            speed_multiplier=0,
             services=mock_services,
         )
 
@@ -1170,18 +1187,20 @@ class TestToolSupport:
         mock_services = _make_mock_services()
 
         engine_with_tools = ConversationEngine(
-            config_loader=mock_config_loader,
-            agent_registry=mock_agent_registry,
-            event_bus=mock_event_bus,
-            llm_client=mock_llm,
+            infra=InfraServices(
+                config_loader=mock_config_loader,
+                agent_registry=mock_agent_registry,
+                event_bus=mock_event_bus,
+                llm_client=mock_llm,
+                proximity=mock_proximity,
+                trigger_system=mock_trigger_system,
+                selection_logger=mock_selection_logger,
+            ),
+            memory=MemoryServices(archival_memory=mock_archival_memory),
+            options=ConversationOptions(speed_multiplier=0),
             management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
-            archival_memory=mock_archival_memory,
-            proximity=mock_proximity,
-            trigger_system=mock_trigger_system,
-            selection_logger=mock_selection_logger,
-            speed_multiplier=0,
             services=mock_services,
         )
 
@@ -1243,18 +1262,20 @@ class TestToolSupport:
         mock_services = _make_mock_services()
 
         engine_with_tools = ConversationEngine(
-            config_loader=mock_config_loader,
-            agent_registry=mock_agent_registry,
-            event_bus=mock_event_bus,
-            llm_client=mock_llm,
+            infra=InfraServices(
+                config_loader=mock_config_loader,
+                agent_registry=mock_agent_registry,
+                event_bus=mock_event_bus,
+                llm_client=mock_llm,
+                proximity=mock_proximity,
+                trigger_system=mock_trigger_system,
+                selection_logger=mock_selection_logger,
+            ),
+            memory=MemoryServices(archival_memory=mock_archival_memory),
+            options=ConversationOptions(speed_multiplier=0),
             management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
-            archival_memory=mock_archival_memory,
-            proximity=mock_proximity,
-            trigger_system=mock_trigger_system,
-            selection_logger=mock_selection_logger,
-            speed_multiplier=0,
             services=mock_services,
         )
 
@@ -1313,18 +1334,20 @@ class TestConversationProgression:
         mock_proximity.get_eligible_speakers = AsyncMock(return_value=agents)
 
         engine_with_tools = ConversationEngine(
-            config_loader=mock_config_loader,
-            agent_registry=mock_agent_registry,
-            event_bus=mock_event_bus,
-            llm_client=mock_llm,
+            infra=InfraServices(
+                config_loader=mock_config_loader,
+                agent_registry=mock_agent_registry,
+                event_bus=mock_event_bus,
+                llm_client=mock_llm,
+                proximity=mock_proximity,
+                trigger_system=mock_trigger_system,
+                selection_logger=mock_selection_logger,
+            ),
+            memory=MemoryServices(archival_memory=mock_archival_memory),
+            options=ConversationOptions(speed_multiplier=0),
             management=mock_management,
             context_assembler=mock_context_assembler,
             conversation_repo=mock_conversation_repo,
-            archival_memory=mock_archival_memory,
-            proximity=mock_proximity,
-            trigger_system=mock_trigger_system,
-            selection_logger=mock_selection_logger,
-            speed_multiplier=0,
             services=mock_services,
         )
 

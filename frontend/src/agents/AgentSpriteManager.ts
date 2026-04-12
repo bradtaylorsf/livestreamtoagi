@@ -121,52 +121,56 @@ export class AgentSpriteManager {
   }
 
   private handleEvent(event: ServerEvent): void {
-    switch (event.event_type) {
-      case EventType.AGENT_MOVE:
-        this.handleMove(event.data);
-        break;
-      case EventType.AGENT_SPEAK:
-        this.handleSpeak(event.data);
-        break;
-      case EventType.AGENT_ACTION:
-        this.handleAction(event.data);
-        break;
-      case EventType.TOOL_EXECUTED:
-        this.handleToolExecuted(event.data);
-        break;
-      case EventType.MANAGEMENT_SHADOW:
-        this.handleManagementShadow(event.data);
-        break;
-      case EventType.WORLD_EXPANSION:
-        this.handleWorldExpansion(event.data);
-        break;
-      case EventType.MANAGEMENT_INTERVENTION:
-        this.handleManagementIntervention(event.data);
-        break;
-      case EventType.MANAGEMENT_WARNING:
-        this.handleManagementWarning(event.data);
-        break;
-      case EventType.ALPHA_DISPATCH:
-        this.handleAlphaDispatch(event.data);
-        break;
-      case EventType.ALPHA_RETURN:
-        this.handleAlphaReturn(event.data);
-        break;
-      case EventType.TASK_DELEGATED:
-        this.handleTaskDelegated(event.data);
-        break;
-      case EventType.TASK_COMPLETED:
-        this.handleTaskCompleted(event.data);
-        break;
-      case EventType.CONFIG_RELOADED:
-        console.log("Config reloaded:", event.data.config_type, event.data.changes);
-        break;
-      case EventType.AGENT_SPAWN:
-        this.handleAgentSpawn(event.data);
-        break;
-      case EventType.AGENT_DESPAWN:
-        this.handleAgentDespawn(event.data);
-        break;
+    try {
+      switch (event.event_type) {
+        case EventType.AGENT_MOVE:
+          this.handleMove(event.data);
+          break;
+        case EventType.AGENT_SPEAK:
+          this.handleSpeak(event.data);
+          break;
+        case EventType.AGENT_ACTION:
+          this.handleAction(event.data);
+          break;
+        case EventType.TOOL_EXECUTED:
+          this.handleToolExecuted(event.data);
+          break;
+        case EventType.MANAGEMENT_SHADOW:
+          this.handleManagementShadow(event.data);
+          break;
+        case EventType.WORLD_EXPANSION:
+          this.handleWorldExpansion(event.data);
+          break;
+        case EventType.MANAGEMENT_INTERVENTION:
+          this.handleManagementIntervention(event.data);
+          break;
+        case EventType.MANAGEMENT_WARNING:
+          this.handleManagementWarning(event.data);
+          break;
+        case EventType.ALPHA_DISPATCH:
+          this.handleAlphaDispatch(event.data);
+          break;
+        case EventType.ALPHA_RETURN:
+          this.handleAlphaReturn(event.data);
+          break;
+        case EventType.TASK_DELEGATED:
+          this.handleTaskDelegated(event.data);
+          break;
+        case EventType.TASK_COMPLETED:
+          this.handleTaskCompleted(event.data);
+          break;
+        case EventType.CONFIG_RELOADED:
+          console.log("Config reloaded:", event.data.config_type, event.data.changes);
+          break;
+        case EventType.AGENT_SPAWN:
+          this.handleAgentSpawn(event.data);
+          break;
+        case EventType.AGENT_DESPAWN:
+          this.handleAgentDespawn(event.data);
+          break;
+      }
+    } catch (err) {
+      console.error(`Error handling event ${event.event_type}:`, err);
     }
   }
 
