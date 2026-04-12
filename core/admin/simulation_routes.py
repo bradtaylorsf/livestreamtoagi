@@ -25,6 +25,8 @@ from core.models import (
 )
 
 if TYPE_CHECKING:
+    from fastapi.responses import RedirectResponse
+
     from core.agent_registry import AgentRegistry
     from core.database import Database
 
@@ -649,7 +651,7 @@ async def get_chunk(
 async def get_chunk_tileset(
     chunk_id: int,
     db: Database = Depends(get_db),
-) -> Any:
+) -> RedirectResponse:
     """Serve or redirect to the tileset image for a chunk."""
     from fastapi.responses import RedirectResponse
     from core.repos.world_repo import WorldRepo

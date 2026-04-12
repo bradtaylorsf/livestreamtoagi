@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from core.admin.dependencies import get_db, get_registry
 from core.constants import LIVE_SIMULATION_ID
 from core.models import (
+    AgentConfig,
     AgentDetail,
     AgentSummary,
     Artifact,
@@ -41,7 +42,7 @@ router = APIRouter(tags=["agents"])
 
 
 def _agent_summary_from_config(
-    a: Any, *, total_cost: float = 0, message_count: int = 0,
+    a: AgentConfig, *, total_cost: float = 0, message_count: int = 0,
     conversation_count: int = 0, artifact_count: int = 0,
 ) -> AgentSummary:
     """Build AgentSummary from an AgentConfig object."""
