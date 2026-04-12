@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Post-run validation: check that all 19 agent tools were exercised.
+"""Post-run validation: check that all agent tools were exercised.
 
 Usage:
     python scripts/check_tool_coverage.py --name "tool-coverage"
     python scripts/check_tool_coverage.py --simulation-id <uuid>
 
-Exits with code 0 if 19/19 tools found, 1 otherwise.
+Exits with code 0 if all tools found, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -22,24 +22,47 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-# All 19 tools that should be exercised
+# All tools that should be exercised (must match tool_coverage.yaml phases)
 ALL_TOOLS = sorted([
+    # Core
     "send_message",
     "get_world_state",
     "get_audience_status",
+    # Audience
     "send_chat_message",
     "create_poll",
     "get_poll_results",
+    # Memory
     "recall_memory",
     "retrieve_transcript",
     "update_core_memory",
+    # Code & world
     "execute_code",
     "generate_tilemap",
+    # Web & content
     "web_search",
     "fetch_url",
     "draft_social_post",
     "draft_email",
+    # Business
     "get_revenue_status",
+    # Economy
+    "view_account",
+    "transfer_budget",
+    # Alliance
+    "propose_alliance",
+    "vote_alliance",
+    "view_alliances",
+    "leave_alliance",
+    # Task management
+    "manage_task",
+    # Character
+    "propose_character",
+    "vote_character",
+    # Revenue tracking
+    "check_post_performance",
+    "check_email_responses",
+    # Agent autonomy
     "dispatch_alpha",
     "propose_self_modification",
     "view_evolution_log",
