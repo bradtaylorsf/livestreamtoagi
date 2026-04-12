@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -67,6 +68,12 @@ class Management:
         ]
         self._tos_patterns: dict[str, Any] = rules.get("tos_violation_patterns", {})
         self._custom_rules: dict[str, Any] = rules.get("custom_content_rules", {})
+
+        # Circuit breaker for LLM review failures
+        self._consecutive_llm_failures: int = 0
+        self._circuit_open_until: float | None = None
+        self._circuit_breaker_threshold: int = 3
+        self._circuit_breaker_cooldown: float = 60.0  # seconds
 
     # -- Public API -------------------------------------------------
 
@@ -352,6 +359,21 @@ class Management:
 
     async def _llm_review(self, agent_id: str, content: str) -> ContentReviewResult:
         """Layer 2: LLM-based content review with TOS context."""
+        # Circuit breaker: if open, block without calling LLM
+        if self._circuit_open_until is not None:
+            if time.monotonic() < self._circuit_open_until:
+                logger.warning(
+                    "Circuit breaker open — blocking agent %s without LLM review", agent_id,
+                )
+                return ContentReviewResult(
+                    approved=False,
+                    reason="Content review unavailable — circuit breaker open",
+                    severity=3,
+                )
+            # Half-open: cooldown expired, allow a retry
+            logger.info("Circuit breaker half-open — retrying LLM review for agent %s", agent_id)
+            self._circuit_open_until = None
+
         tos_context = self._build_tos_context()
         messages = [
             {
@@ -383,10 +405,27 @@ class Management:
                 max_tokens=150,
                 simulation_id=self._simulation_id,
             )
-            return self._parse_llm_response(resp.content)
+            result = self._parse_llm_response(resp.content)
+            self._consecutive_llm_failures = 0
+            return result
         except Exception:
-            logger.exception("LLM review failed for agent %s, defaulting to approved", agent_id)
-            return ContentReviewResult(approved=True, reason="LLM review unavailable", severity=1)
+            self._consecutive_llm_failures += 1
+            logger.error(
+                "LLM review failed for agent %s (consecutive failures: %d)",
+                agent_id, self._consecutive_llm_failures,
+            )
+            if self._consecutive_llm_failures >= self._circuit_breaker_threshold:
+                self._circuit_open_until = time.monotonic() + self._circuit_breaker_cooldown
+                logger.critical(
+                    "Circuit breaker OPEN — %d consecutive LLM failures, "
+                    "blocking all content for %.0fs",
+                    self._consecutive_llm_failures, self._circuit_breaker_cooldown,
+                )
+            return ContentReviewResult(
+                approved=False,
+                reason="Content review unavailable — LLM failure",
+                severity=3,
+            )
 
     def _build_tos_context(self) -> str:
         """Build TOS violation patterns into a string for the LLM prompt."""
@@ -431,17 +470,17 @@ class Management:
                     pass
                 else:
                     return ContentReviewResult(
-                        approved=bool(data.get("approved", True)),
+                        approved=bool(data.get("approved", False)),
                         reason=str(data.get("reason", "No reason provided")),
-                        severity=max(1, min(5, int(data.get("severity", 1)))),
+                        severity=max(1, min(5, int(data.get("severity", 3)))),
                     )
             logger.warning("Failed to parse LLM review response: %s", raw[:200])
             return ContentReviewResult(
-                approved=True, reason="Unparseable LLM response, defaulting to approved", severity=1
+                approved=False, reason="Unparseable LLM response, blocking by default", severity=3
             )
 
         return ContentReviewResult(
-            approved=bool(data.get("approved", True)),
+            approved=bool(data.get("approved", False)),
             reason=str(data.get("reason", "No reason provided")),
-            severity=max(1, min(5, int(data.get("severity", 1)))),
+            severity=max(1, min(5, int(data.get("severity", 3)))),
         )
