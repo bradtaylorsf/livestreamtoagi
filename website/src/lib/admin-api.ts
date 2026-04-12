@@ -39,6 +39,10 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/**
+ * Get admin token from localStorage (Bearer fallback for API clients).
+ * Prefer cookie-based auth via login() — this is for backward compat.
+ */
 function getAdminToken(): string {
   if (typeof window !== "undefined") {
     return localStorage.getItem("admin_password") ?? "";
@@ -52,6 +56,36 @@ export function setAdminToken(password: string): void {
 
 export function clearAdminToken(): void {
   localStorage.removeItem("admin_password");
+}
+
+/**
+ * Authenticate via the login endpoint. Sets an httpOnly session cookie.
+ * Preferred over localStorage-based Bearer tokens.
+ */
+export async function login(password: string): Promise<void> {
+  const response = await fetch("/api/admin/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ password }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new AdminApiError(response.status, body.detail || "Login failed");
+  }
+  // Also store in localStorage as Bearer fallback
+  setAdminToken(password);
+}
+
+/**
+ * Clear the admin session cookie and local token.
+ */
+export async function logout(): Promise<void> {
+  await fetch("/api/admin/logout", {
+    method: "POST",
+    credentials: "include",
+  }).catch(() => {});
+  clearAdminToken();
 }
 
 class AdminApiError extends Error {
@@ -75,6 +109,7 @@ async function request<T>(
   try {
     const response = await fetch(path, {
       ...options,
+      credentials: "include",
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",

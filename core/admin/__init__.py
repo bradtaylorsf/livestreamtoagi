@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 
 from core.admin.agent_routes import router as agent_router
 from core.admin.artifact_routes import router as artifact_router
+from core.admin.auth_routes import router as auth_router
 from core.admin.config_routes import router as config_router
 from core.admin.conversation_routes import router as conversation_router
 from core.admin.dependencies import require_admin
@@ -34,4 +35,8 @@ admin_router.include_router(simulation_router)
 kill_switch_api = APIRouter(prefix="/api/admin")
 kill_switch_api.include_router(kill_switch_router)
 
-__all__ = ["admin_router", "kill_switch_api", "_background_tasks"]
+# Auth routes (login/logout) don't require existing admin auth.
+auth_api = APIRouter(prefix="/api/admin")
+auth_api.include_router(auth_router)
+
+__all__ = ["admin_router", "kill_switch_api", "auth_api", "_background_tasks"]
