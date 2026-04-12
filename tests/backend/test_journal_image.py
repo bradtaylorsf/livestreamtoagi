@@ -82,7 +82,8 @@ class TestFallbackBehavior:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_is_configured_property(self):
+    async def test_is_configured_property(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_IMAGEN_API_KEY", raising=False)
         assert not JournalImageGenerator(api_key="").is_configured
         assert JournalImageGenerator(api_key="sk-123").is_configured
 

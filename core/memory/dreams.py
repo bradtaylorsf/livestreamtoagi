@@ -168,7 +168,7 @@ class DreamManager:
                 simulation_id=self._simulation_id,
             )
         except Exception:
-            logger.warning("Dream LLM call failed for %s", agent_id)
+            logger.warning("Dream LLM call failed for %s", agent_id, exc_info=True)
             return None
 
         # 5. Parse dream result
@@ -205,7 +205,7 @@ class DreamManager:
             selected = texts[:5]
             return "\n- ".join([""] + selected)
         except Exception:
-            logger.warning("Failed to fetch memories for dream: %s", agent_id)
+            logger.warning("Failed to fetch memories for dream: %s", agent_id, exc_info=True)
             return ""
 
     async def _get_state_context(self, agent_id: str) -> tuple[str, str]:
@@ -235,6 +235,7 @@ class DreamManager:
                 "; ".join(unmet_parts) if unmet_parts else "",
             )
         except Exception:
+            logger.warning("Failed to get agent state for dream: %s", agent_id, exc_info=True)
             return ("", "")
 
     async def _get_core_memory(self, agent_id: str) -> str:
@@ -246,6 +247,7 @@ class DreamManager:
                 agent_id, simulation_id=self._simulation_id,
             ) or ""
         except Exception:
+            logger.warning("Failed to get core memory for dream: %s", agent_id, exc_info=True)
             return ""
 
     def _parse_dream_response(self, content: str) -> DreamResult | None:
@@ -282,7 +284,7 @@ class DreamManager:
                 mood_shift=mood,
             )
         except Exception:
-            logger.warning("Failed to construct DreamResult from parsed data")
+            logger.warning("Failed to construct DreamResult from parsed data", exc_info=True)
             return None
 
     async def _apply_dream_effects(
@@ -308,7 +310,7 @@ class DreamManager:
                         simulation_id=self._simulation_id,
                     )
                 except Exception as exc:
-                    logger.warning("Failed to add dream goal for %s: %s", agent_id, exc)
+                    logger.warning("Failed to add dream goal for %s: %s", agent_id, exc, exc_info=True)
 
         # Store dream narrative as journal entry
         if self._repo is not None:
@@ -326,7 +328,7 @@ class DreamManager:
                     simulation_id=self._simulation_id,
                 ))
             except Exception:
-                logger.warning("Failed to store dream journal for %s", agent_id)
+                logger.warning("Failed to store dream journal for %s", agent_id, exc_info=True)
 
         # Store insights as high-importance recall memories (only if we can embed)
         if self._repo is not None and self._embedding_fn is not None:
@@ -344,7 +346,7 @@ class DreamManager:
                         simulation_id=self._simulation_id,
                     ))
                 except Exception:
-                    logger.warning("Failed to store dream insight for %s", agent_id)
+                    logger.warning("Failed to store dream insight for %s", agent_id, exc_info=True)
 
     async def _apply_mood_shift(
         self,

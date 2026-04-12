@@ -36,7 +36,7 @@ class TransferBudgetTool(BaseTool):
         self._agent_id = agent_id
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        to_agent = kwargs["to_agent_id"]
+        to_agent = kwargs["to_agent_id"].lower().strip()
         amount = Decimal(str(kwargs["amount"]))
         reason = kwargs["reason"]
 

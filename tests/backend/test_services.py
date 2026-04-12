@@ -19,7 +19,8 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", 6381))
 @integration
 def test_redis_ping():
     """Redis accepts connections and responds to PING."""
-    r = redis.Redis(host="localhost", port=REDIS_PORT, socket_connect_timeout=5)
+    redis_password = os.environ.get("REDIS_PASSWORD", "devpassword")
+    r = redis.Redis(host="localhost", port=REDIS_PORT, password=redis_password, socket_connect_timeout=5)
     assert r.ping() is True
 
 

@@ -1,4 +1,4 @@
-"""Journal illustration generator using Google Imagen API.
+"""Journal illustration generator using Google Gemini image generation.
 
 Generates pixel-art-style illustrations for agent journal entries,
 with per-agent visual style based on personality color and aesthetic.
@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Imagen API pricing (~$0.02 per image at 512x512)
+# Gemini image generation pricing (~$0.02 per image)
 IMAGEN_COST_PER_IMAGE = Decimal("0.02")
-IMAGEN_MODEL = "imagen-3.0-generate-002"
+IMAGEN_MODEL = "gemini-2.5-flash-image"
 IMAGEN_SIZE = "512x512"
 
 # Agent personality → visual style mapping
@@ -62,7 +62,7 @@ def build_illustration_prompt(journal_content: str, agent_id: str) -> str:
 
 
 class JournalImageGenerator:
-    """Generates illustrations for journal entries using Google Imagen API."""
+    """Generates illustrations for journal entries using Google Gemini image generation."""
 
     def __init__(
         self,
@@ -70,8 +70,8 @@ class JournalImageGenerator:
         api_key: str | None = None,
         gcs_bucket: str | None = None,
     ) -> None:
-        self._api_key = api_key or os.environ.get("GOOGLE_IMAGEN_API_KEY", "")
-        self._gcs_bucket = gcs_bucket or os.environ.get("GCS_BUCKET_NAME", "")
+        self._api_key = api_key if api_key is not None else os.environ.get("GOOGLE_IMAGEN_API_KEY", "")
+        self._gcs_bucket = gcs_bucket if gcs_bucket is not None else os.environ.get("GCS_BUCKET_NAME", "")
         self._cost_repo = cost_repo
 
     @property
@@ -112,35 +112,46 @@ class JournalImageGenerator:
             return None
 
     async def _call_imagen_api(self, prompt: str) -> bytes | None:
-        """Call Google Imagen API and return raw image bytes."""
+        """Call Gemini generateContent API and return raw image bytes."""
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{IMAGEN_MODEL}:generateImages?key={self._api_key}"
+            f"{IMAGEN_MODEL}:generateContent"
         )
         payload: dict[str, Any] = {
-            "instances": [{"prompt": prompt}],
-            "parameters": {
-                "sampleCount": 1,
-                "aspectRatio": "1:1",
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": "1:1",
+                },
             },
         }
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self._api_key,
+        }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
 
         data = resp.json()
-        predictions = data.get("predictions", [])
-        if not predictions:
-            logger.warning("Imagen API returned no predictions")
+        candidates = data.get("candidates", [])
+        if not candidates:
+            logger.warning("Gemini image API returned no candidates")
             return None
 
-        b64_image = predictions[0].get("bytesBase64Encoded", "")
-        if not b64_image:
-            logger.warning("Imagen prediction missing base64 image data")
-            return None
+        # Extract image from response parts
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for part in parts:
+            inline_data = part.get("inlineData") or part.get("inline_data")
+            if inline_data and inline_data.get("mimeType", inline_data.get("mime_type", "")) == "image/png":
+                b64_image = inline_data.get("data", "")
+                if b64_image:
+                    return base64.b64decode(b64_image)
 
-        return base64.b64decode(b64_image)
+        logger.warning("Gemini image API returned no image data in response parts")
+        return None
 
     async def _upload_to_gcs(self, image_bytes: bytes, agent_id: str) -> str:
         """Upload image bytes to GCS and return the public URL.

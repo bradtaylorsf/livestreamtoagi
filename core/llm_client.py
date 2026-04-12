@@ -299,6 +299,11 @@ class OpenRouterClient:
                 return
             except Exception:
                 if attempt < max_attempts - 1:
+                    logger.debug(
+                        "Cost event retry %d/%d failed for model=%s agent=%s",
+                        attempt + 1, max_attempts, model, agent_id,
+                        exc_info=True,
+                    )
                     await asyncio.sleep(0.5 * (2 ** attempt))
                 else:
                     self._lost_cost_events += 1
@@ -450,6 +455,10 @@ class OpenRouterClient:
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
             except json.JSONDecodeError:
+                logger.warning(
+                    "Malformed tool call JSON from LLM (tool=%s): %s",
+                    fn.get("name", "?"), args_raw[:200],
+                )
                 args = {"_raw": args_raw}
             tool_calls.append(ToolCall(
                 id=tc.get("id", ""),
@@ -530,6 +539,7 @@ class OpenRouterClient:
                 try:
                     chunk = json.loads(data_str)
                 except json.JSONDecodeError:
+                    logger.warning("Malformed SSE chunk (skipping): %s", data_str[:200])
                     continue
 
                 if openrouter_id is None:
