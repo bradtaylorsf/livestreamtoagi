@@ -25,24 +25,39 @@ ADMIN_RATE_LIMIT_MAX = 5
 ADMIN_RATE_LIMIT_WINDOW = 60  # seconds
 
 
+def _get_redis(request: Request):
+    """Extract Redis client from request, returning None if unavailable."""
+    services = getattr(getattr(request.app, "state", None), "services", None)
+    return services.redis if services is not None else None
+
+
 async def _check_admin_rate_limit(request: Request) -> None:
-    """Rate-limit admin auth attempts: 5 per minute per IP."""
-    redis = getattr(getattr(request.app, "state", None), "services", None)
-    if redis is not None:
-        redis = redis.redis
+    """Check if IP has exceeded failed-auth rate limit (read-only)."""
+    redis = _get_redis(request)
     if redis is None:
         return
 
     ip = request.client.host if request.client else "unknown"
-    key = f"ratelimit:admin:{ip}"
-    current = await redis.incr(key)
-    if current == 1:
-        await redis.expire(key, ADMIN_RATE_LIMIT_WINDOW)
-    if current > ADMIN_RATE_LIMIT_MAX:
+    key = f"ratelimit:admin_fail:{ip}"
+    current = await redis.get(key)
+    if current is not None and int(current) >= ADMIN_RATE_LIMIT_MAX:
         raise HTTPException(
             status_code=429,
             detail=f"Too many auth attempts ({ADMIN_RATE_LIMIT_MAX}/{ADMIN_RATE_LIMIT_WINDOW}s)",
         )
+
+
+async def _record_failed_auth(request: Request) -> None:
+    """Increment failed-auth counter for the client IP."""
+    redis = _get_redis(request)
+    if redis is None:
+        return
+
+    ip = request.client.host if request.client else "unknown"
+    key = f"ratelimit:admin_fail:{ip}"
+    current = await redis.incr(key)
+    if current == 1:
+        await redis.expire(key, ADMIN_RATE_LIMIT_WINDOW)
 
 
 def _validate_password(provided: str) -> bool:
@@ -87,7 +102,7 @@ async def require_admin(
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    # Rate-limit only actual password validation attempts
+    # Rate-limit only failed password attempts (check before, increment only on failure)
     await _check_admin_rate_limit(request)
 
     has_hash = bool(os.environ.get("ADMIN_PASSWORD_HASH", ""))
@@ -98,8 +113,11 @@ async def require_admin(
             detail="ADMIN_PASSWORD not configured on server",
         )
 
-    if not _validate_password(credentials.credentials):
-        raise HTTPException(status_code=401, detail="Invalid admin password")
+    if _validate_password(credentials.credentials):
+        return
+
+    await _record_failed_auth(request)
+    raise HTTPException(status_code=401, detail="Invalid admin password")
 
 
 def get_db(request: Request) -> Any:

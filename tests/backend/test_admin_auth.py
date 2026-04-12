@@ -11,6 +11,7 @@ import pytest
 
 from core.admin.dependencies import (
     _check_admin_rate_limit,
+    _record_failed_auth,
     _validate_password,
     _validate_jwt_cookie,
 )
@@ -83,8 +84,7 @@ class TestJWTCookie:
 class TestAdminRateLimit:
     async def test_allows_within_limit(self) -> None:
         mock_redis = MagicMock()
-        mock_redis.incr = AsyncMock(return_value=1)
-        mock_redis.expire = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"3")  # Under limit of 5
 
         mock_request = MagicMock()
         mock_request.client.host = "127.0.0.1"
@@ -95,8 +95,7 @@ class TestAdminRateLimit:
 
     async def test_blocks_over_limit(self) -> None:
         mock_redis = MagicMock()
-        mock_redis.incr = AsyncMock(return_value=6)  # Over the limit of 5
-        mock_redis.expire = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"5")  # At the limit of 5
 
         mock_request = MagicMock()
         mock_request.client.host = "127.0.0.1"
@@ -113,3 +112,16 @@ class TestAdminRateLimit:
 
         # Should not raise
         await _check_admin_rate_limit(mock_request)
+
+    async def test_record_failed_auth_increments(self) -> None:
+        mock_redis = MagicMock()
+        mock_redis.incr = AsyncMock(return_value=1)
+        mock_redis.expire = AsyncMock()
+
+        mock_request = MagicMock()
+        mock_request.client.host = "127.0.0.1"
+        mock_request.app.state.services.redis = mock_redis
+
+        await _record_failed_auth(mock_request)
+        mock_redis.incr.assert_called_once()
+        mock_redis.expire.assert_called_once()

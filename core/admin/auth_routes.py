@@ -9,7 +9,11 @@ import jwt
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from core.admin.dependencies import _check_admin_rate_limit, _validate_password
+from core.admin.dependencies import (
+    _check_admin_rate_limit,
+    _record_failed_auth,
+    _validate_password,
+)
 
 router = APIRouter(tags=["auth"])
 
@@ -28,6 +32,7 @@ async def admin_login(
     await _check_admin_rate_limit(request)
 
     if not _validate_password(body.password):
+        await _record_failed_auth(request)
         raise HTTPException(status_code=401, detail="Invalid admin password")
 
     secret = os.environ.get("ADMIN_JWT_SECRET", "")
