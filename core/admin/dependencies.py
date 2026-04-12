@@ -10,12 +10,19 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import bcrypt
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+if TYPE_CHECKING:
+    from core.agent_registry import AgentRegistry
+    from core.database import Database
+    from core.llm_client import OpenRouterClient
+    from core.redis_client import RedisClient
+    from core.repos.config_version_repo import ConfigVersionRepo
 
 logger = logging.getLogger(__name__)
 
@@ -120,26 +127,26 @@ async def require_admin(
     raise HTTPException(status_code=401, detail="Invalid admin password")
 
 
-def get_db(request: Request) -> Any:
+def get_db(request: Request) -> Database:
     """Get database connection from app state."""
     return request.app.state.services.db
 
 
-def get_llm(request: Request) -> Any:
+def get_llm(request: Request) -> OpenRouterClient:
     """Get LLM client from app state."""
     return request.app.state.services.llm_client
 
 
-def get_registry(request: Request) -> Any:
+def get_registry(request: Request) -> AgentRegistry:
     """Get agent registry from app state."""
     return request.app.state.services.agent_registry
 
 
-def get_redis(request: Request) -> Any:
+def get_redis(request: Request) -> RedisClient:
     """Get Redis client from app state."""
     return request.app.state.services.redis
 
 
-def get_config_version_repo(request: Request) -> Any:
+def get_config_version_repo(request: Request) -> ConfigVersionRepo:
     """Get config version repo from app state."""
     return request.app.state.services.config_version_repo

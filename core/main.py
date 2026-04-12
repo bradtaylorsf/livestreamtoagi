@@ -5,9 +5,12 @@ import time as _time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from datetime import UTC
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+
+if TYPE_CHECKING:
+    from core.tts import TTSPipeline
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
@@ -231,7 +234,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     max_turns = req.turns
 
     async def _run() -> None:
-        tts_pipeline: Any = getattr(app.state, "tts_pipeline", None)
+        tts_pipeline: TTSPipeline | None = getattr(app.state, "tts_pipeline", None)
         batch_ttl = max_turns * 15 + 300
 
         # ── Helpers ───────────────────────────────────────────────
@@ -262,8 +265,8 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
         # Each turn's TTS starts generating as soon as the LLM produces it,
         # running in parallel with the LLM generating subsequent turns.
         class _SilentBus:
-            def on(self, *_: Any) -> None: pass
-            def off(self, *_: Any) -> None: pass
+            def on(self, *_: object) -> None: pass
+            def off(self, *_: object) -> None: pass
             async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
                 evt = {"event_type": event_type, "event_id": str(_uuid_mod.uuid4()),
                        "timestamp": _time.time(), "data": data or {}}
@@ -409,7 +412,7 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
     # If "duration" is present, the CLI already generated audio and timed the
     # bubble — skip server-side TTS to avoid double generation and stale timing.
     if req.event_type == "agent_speak" and "text" in data and "agent_id" in data and "duration" not in data:
-        tts: Any = getattr(app.state, "tts_pipeline", None)
+        tts: TTSPipeline | None = getattr(app.state, "tts_pipeline", None)
         if tts is not None:
             try:
                 segments = await tts.speak_segmented(data["agent_id"], data["text"])

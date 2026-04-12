@@ -13,6 +13,7 @@ import logging
 import uuid
 from collections import deque
 from difflib import SequenceMatcher
+from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any
 
 from core.conversation.energy import ConversationEnergy
@@ -22,7 +23,7 @@ from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
 from core.exceptions import AgentError, TransientError
 from core.llm_client import LLMError
-from core.models import ConversationCreate, ConversationRecord
+from core.models import ConversationCreate, ConversationRecord, SelectionResult
 from core.speech_parser import parse_speech
 from core.tool_executor import (
     MAX_TOOL_ROUNDS,
@@ -427,7 +428,7 @@ class ConversationEngine:
         conv: _ActiveConversation,
         eligible: list[AgentConfig],
         topic: str,
-    ) -> Any:
+    ) -> SelectionResult:
         """Run weighted speaker selection with optional goal-based boost."""
         _agent_goals: dict[str, list[str]] | None = None
         if self._services and self._services.goal_manager:
@@ -468,7 +469,7 @@ class ConversationEngine:
         selected_agent: AgentConfig,
         content: str,
         topic: str,
-        result: Any,
+        result: SelectionResult,
         events: list[str],
     ) -> None:
         """Handle all post-turn side effects: events, state, energy, logging."""
@@ -1083,8 +1084,8 @@ class ConversationEngine:
     # ── Context building helper ────────────────────────────────
 
     async def _safe_context_build(
-        self, label: str, builder: Any,
-    ) -> Any | None:
+        self, label: str, builder: Awaitable[str],
+    ) -> str | None:
         """Run an async context builder, returning None on failure.
 
         Catches expected error types and logs with *label* for diagnostics.

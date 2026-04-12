@@ -7,7 +7,7 @@ artifacts, and interrupts.
 from __future__ import annotations
 
 import uuid as uuid_mod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -18,13 +18,16 @@ from core.models import (
     TurnDetail,
 )
 
+if TYPE_CHECKING:
+    from core.database import Database
+
 router = APIRouter(tags=["conversations"])
 
 
 @router.get("/conversations/{conv_id}", response_model=ConversationDetail)
 async def get_conversation(
     conv_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> ConversationDetail:
     """Full conversation: transcript, participants, trigger, energy history."""
     from core.repos.conversation_repo import ConversationRepo
@@ -66,7 +69,7 @@ async def get_conversation(
 @router.get("/conversations/{conv_id}/turns", response_model=list[TurnDetail])
 async def get_conversation_turns(
     conv_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[TurnDetail]:
     """Turn-by-turn detail with selection scores."""
     from core.repos.conversation_repo import ConversationRepo
@@ -91,7 +94,7 @@ async def get_conversation_turns(
 @router.get("/conversations/{conv_id}/selection-log", response_model=list[SelectionLog])
 async def get_conversation_selection_log(
     conv_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[SelectionLog]:
     """Speaker selection scores for every turn (all candidates scored)."""
     from core.repos.conversation_repo import ConversationRepo
@@ -103,7 +106,7 @@ async def get_conversation_selection_log(
 @router.get("/conversations/{conv_id}/management-flags")
 async def get_conversation_management_flags(
     conv_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Management shadow flags for this conversation."""
     from core.repos.conversation_repo import ConversationRepo
@@ -115,7 +118,7 @@ async def get_conversation_management_flags(
 @router.get("/conversations/{conv_id}/artifacts")
 async def get_conversation_artifacts(
     conv_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Tool invocation artifacts for this conversation."""
     from core.repos.conversation_repo import ConversationRepo
@@ -127,7 +130,7 @@ async def get_conversation_artifacts(
 @router.get("/conversations/{conv_id}/interrupts")
 async def get_conversation_interrupts(
     conv_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Interrupt events for this conversation."""
     from core.repos.conversation_repo import ConversationRepo

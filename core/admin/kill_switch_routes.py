@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import hmac
 import os
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from core.admin.dependencies import get_redis
+
+if TYPE_CHECKING:
+    from core.redis_client import RedisClient
 
 router = APIRouter(tags=["kill-switch"])
 
@@ -35,7 +38,7 @@ def _validate_kill_switch_key(x_kill_switch_key: str = Header(...)) -> str:
 
 @router.post("/kill")
 async def activate_kill_switch(
-    redis: Any = Depends(get_redis),
+    redis: RedisClient = Depends(get_redis),
     _key: str = Depends(_validate_kill_switch_key),
     ttl: int = DEFAULT_KILL_SWITCH_TTL,
 ) -> dict[str, str | int]:
@@ -46,7 +49,7 @@ async def activate_kill_switch(
 
 @router.delete("/kill")
 async def deactivate_kill_switch(
-    redis: Any = Depends(get_redis),
+    redis: RedisClient = Depends(get_redis),
     _key: str = Depends(_validate_kill_switch_key),
 ) -> dict[str, str]:
     """Deactivate the kill switch."""

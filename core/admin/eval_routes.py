@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid as uuid_mod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -25,6 +25,10 @@ from core.models import (
     EvalRunResponse,
 )
 
+if TYPE_CHECKING:
+    from core.database import Database
+    from core.llm_client import OpenRouterClient
+
 logger = logging.getLogger(__name__)
 
 # Track background eval tasks so shutdown can wait for them
@@ -36,7 +40,7 @@ router = APIRouter(tags=["evals"])
 @router.get("/simulations/{sim_id}/evals", response_model=list[EvalRunDetail])
 async def get_simulation_evals(
     sim_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[EvalRunDetail]:
     """All eval runs for this simulation with nested results."""
     from core.repos.eval_repo import EvalRepo
@@ -57,8 +61,8 @@ async def get_simulation_evals(
 async def run_simulation_evals(
     sim_id: uuid_mod.UUID,
     body: EvalRunRequest,
-    db: Any = Depends(get_db),
-    llm: Any = Depends(get_llm),
+    db: Database = Depends(get_db),
+    llm: OpenRouterClient = Depends(get_llm),
 ) -> EvalRunResponse:
     """Trigger eval run -- dispatches asynchronously and returns immediately."""
     from core.eval.engine import EvalEngine
@@ -107,7 +111,7 @@ async def run_simulation_evals(
 async def list_eval_runs(
     limit: int = 50,
     offset: int = 0,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[EvalRun]:
     """Paginated list of all eval runs across simulations."""
     from core.repos.eval_repo import EvalRepo
@@ -118,7 +122,7 @@ async def list_eval_runs(
 
 @router.get("/evals/categories")
 async def eval_categories(
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[str]:
     """Distinct eval categories from all results."""
     from core.repos.eval_repo import EvalRepo
@@ -131,7 +135,7 @@ async def eval_categories(
 async def compare_evals(
     run_a: str,
     run_b: str,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> EvalComparisonResponse:
     """Side-by-side comparison of two eval runs."""
     from core.repos.eval_repo import EvalRepo
@@ -160,7 +164,7 @@ async def compare_evals(
 @router.get("/evals/history", response_model=list[EvalHistoryPoint])
 async def eval_history(
     category: str,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[EvalHistoryPoint]:
     """Score history for a category across all runs, for charting."""
     from core.repos.eval_repo import EvalRepo
@@ -173,7 +177,7 @@ async def eval_history(
 @router.get("/evals/{eval_id}", response_model=EvalRunDetail)
 async def get_eval_result(
     eval_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> EvalRunDetail:
     """Full eval run with all results."""
     from core.repos.eval_repo import EvalRepo
@@ -190,7 +194,7 @@ async def get_eval_result(
 async def create_issues_from_eval(
     eval_id: uuid_mod.UUID,
     threshold: int = Query(default=60),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Generate GitHub issues from low-scoring eval categories."""
     from core.repos.eval_repo import EvalRepo
@@ -209,7 +213,7 @@ async def create_issues_from_eval(
 @router.get("/evals/{eval_id}/export", response_model=EvalExportResponse)
 async def export_eval(
     eval_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> EvalExportResponse:
     """Export full eval results as JSON."""
     from core.repos.eval_repo import EvalRepo
@@ -225,9 +229,9 @@ async def export_eval(
 @router.post("/evals/{eval_id}/analyze")
 async def analyze_eval(
     eval_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
-    llm: Any = Depends(get_llm),
-) -> dict:
+    db: Database = Depends(get_db),
+    llm: OpenRouterClient = Depends(get_llm),
+) -> dict[str, Any]:
     """Run eval analyzer on a completed eval run."""
     from core.repos.eval_repo import EvalRepo
     from core.eval.analyzer import EvalAnalyzer
@@ -244,9 +248,9 @@ async def analyze_eval(
 @router.get("/evals/{eval_id}/analysis")
 async def get_eval_analysis(
     eval_id: uuid_mod.UUID,
-    db: Any = Depends(get_db),
-    llm: Any = Depends(get_llm),
-) -> dict:
+    db: Database = Depends(get_db),
+    llm: OpenRouterClient = Depends(get_llm),
+) -> dict[str, Any]:
     """Get stored analysis for an eval run."""
     from core.repos.eval_repo import EvalRepo
     from core.eval.analyzer import EvalAnalyzer

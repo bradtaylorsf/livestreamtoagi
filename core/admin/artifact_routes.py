@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import uuid as uuid_mod
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query
 
 from core.admin.dependencies import get_db
 from core.models import Artifact, PaginatedResponse
+
+if TYPE_CHECKING:
+    from core.database import Database
 
 router = APIRouter(tags=["artifacts"])
 
@@ -26,7 +29,7 @@ async def list_artifacts(
     sort: str = Query("newest"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    db: Any = Depends(get_db),
+    db: Database = Depends(get_db),
 ) -> PaginatedResponse[Artifact]:
     """Browse all artifacts with filtering, search, and pagination."""
     from core.repos.artifact_repo import ArtifactRepo
