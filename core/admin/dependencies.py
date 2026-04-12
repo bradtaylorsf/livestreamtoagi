@@ -79,15 +79,16 @@ async def require_admin(
     admin_session: str | None = Cookie(default=None),
 ) -> None:
     """Validate admin auth via JWT cookie, Bearer token, or password."""
-    await _check_admin_rate_limit(request)
-
-    # Try JWT cookie first (set by /api/admin/login)
+    # Try JWT cookie first (set by /api/admin/login) — no rate limit needed
     if admin_session and _validate_jwt_cookie(admin_session):
         return
 
     # Fall back to Bearer token (password)
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Rate-limit only actual password validation attempts
+    await _check_admin_rate_limit(request)
 
     has_hash = bool(os.environ.get("ADMIN_PASSWORD_HASH", ""))
     has_plain = bool(os.environ.get("ADMIN_PASSWORD", ""))
