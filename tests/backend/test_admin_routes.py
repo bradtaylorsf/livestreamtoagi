@@ -1,4 +1,4 @@
-"""Tests for admin API endpoints (core/admin_routes.py)."""
+"""Tests for admin API endpoints (core/admin/ sub-routers)."""
 
 from __future__ import annotations
 
@@ -115,21 +115,29 @@ def mock_app():
     mock_redis.disconnect = AsyncMock()
     mock_redis.ping = AsyncMock(return_value=True)
 
+    mock_llm = MagicMock()
+
     env_overrides = {
         "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key-for-unit-tests",
         "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
     }
-    with (
-        patch.dict(os.environ, env_overrides),
-        patch("core.admin_routes._get_db", return_value=mock_db),
-        patch("core.admin_routes._get_registry", return_value=mock_registry),
-    ):
+    with patch.dict(os.environ, env_overrides):
+        from core.admin.dependencies import get_db, get_llm, get_registry, require_admin
         from core.main import app
-        # Wrap client to inject auth header automatically
-        with TestClient(app) as raw_client:
-            raw_client.headers["Authorization"] = "Bearer test-admin-password"
-            yield raw_client, mock_db, mock_registry
+
+        # Override FastAPI dependency injection for the new sub-router architecture
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_registry] = lambda: mock_registry
+        app.dependency_overrides[get_llm] = lambda: mock_llm
+        app.dependency_overrides[require_admin] = lambda: None
+
+        try:
+            with TestClient(app) as raw_client:
+                raw_client.headers["Authorization"] = "Bearer test-admin-password"
+                yield raw_client, mock_db, mock_registry
+        finally:
+            app.dependency_overrides.clear()
 
 
 # ── Agent Endpoint Tests ───────────────────────────────────────
@@ -707,7 +715,6 @@ class TestEvalEndpoints:
             started_at=now,
         )
         with (
-            patch("core.admin_routes._get_llm", return_value=MagicMock()),
             patch(
                 "core.eval.engine.EvalEngine.run",
                 new_callable=AsyncMock,

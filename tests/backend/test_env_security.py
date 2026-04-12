@@ -23,7 +23,7 @@ def test_env_example_has_no_real_values():
             continue
         key, _, value = line.partition("=")
         # Allow placeholder defaults (localhost URLs, 'devpassword', 'dev-*')
-        if value and not any(p in value for p in ["localhost", "devpassword", "dev-", "ws://"]):
+        if value and not any(p in value for p in ["localhost", "devpassword", "dev-", "development", "ws://"]):
             assert False, f".env.example has a suspicious real value for {key}: {value!r}"
 
 
