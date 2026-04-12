@@ -21,7 +21,7 @@ echo "Checking development services..."
 echo
 
 # Redis
-check "Redis PING/PONG" docker compose exec -T redis redis-cli ping
+check "Redis PING/PONG" docker compose exec -T redis redis-cli -a "${REDIS_PASSWORD:-devpassword}" ping
 
 # PostgreSQL readiness
 check "PostgreSQL ready" docker compose exec -T postgres pg_isready -U agi -d livestream_agi

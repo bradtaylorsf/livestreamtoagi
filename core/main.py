@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
-from core.admin import admin_router
+from core.admin import admin_router, auth_api, kill_switch_api
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
 from core.event_bus import event_bus
 from core.public_routes import router as public_router
@@ -122,6 +122,8 @@ app.add_middleware(
 )
 
 app.include_router(admin_router)
+app.include_router(auth_api)
+app.include_router(kill_switch_api)
 app.include_router(public_router)
 
 

@@ -109,20 +109,21 @@ async def test_llm_review_blocks_content(
     assert "harassment" in result.reason.lower()
 
 
-async def test_llm_failure_defaults_to_approved(
+async def test_llm_failure_defaults_to_blocked(
     management: Management, mock_llm: MagicMock
 ) -> None:
-    """If LLM call fails, default to approved to avoid false blocks."""
+    """If LLM call fails, default to blocked to prevent unreviewed content."""
     mock_llm.complete.side_effect = Exception("API timeout")
     result = await management.review("rex", "Normal conversation content")
-    assert result.approved is True
-    assert result.severity == 1
+    assert result.approved is False
+    assert result.severity == 3
+    assert "LLM failure" in result.reason
 
 
-async def test_llm_unparseable_response_defaults_approved(
+async def test_llm_unparseable_response_defaults_to_blocked(
     management: Management, mock_llm: MagicMock
 ) -> None:
-    """If LLM returns non-JSON, default to approved."""
+    """If LLM returns non-JSON, default to blocked."""
     mock_llm.complete.return_value = LLMResponse(
         content="I cannot parse this as JSON sorry",
         model="claude-haiku-4-5",
@@ -133,7 +134,8 @@ async def test_llm_unparseable_response_defaults_approved(
         openrouter_id="test-id",
     )
     result = await management.review("aurora", "Some content")
-    assert result.approved is True
+    assert result.approved is False
+    assert result.severity == 3
 
 
 # -- Replacement generation ---------------------------------------------
@@ -273,8 +275,8 @@ async def test_intervene_severity_5_mutes_and_sets_kill_switch(
 ) -> None:
     """Severity 5 mutes agent, sets kill switch, emits intervention."""
     await management.intervene(5, "grok", "self-harm content")
-    # Kill switch set
-    mock_redis.set.assert_any_call("kill_switch", "active")
+    # Kill switch set with TTL
+    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)
     # Agent muted
     mock_redis.set.assert_any_call("mute:grok", "muted", ex=300)
     # Event emitted
@@ -561,3 +563,65 @@ async def test_end_to_end_review_with_llm(
         assert 1 <= result.severity <= 5
     finally:
         await llm_client.close()
+
+
+# -- Circuit breaker ---------------------------------------------------
+
+
+async def test_circuit_breaker_opens_after_3_failures(
+    management: Management, mock_llm: MagicMock
+) -> None:
+    """Circuit breaker opens after 3 consecutive LLM failures, blocking without calling LLM."""
+    mock_llm.complete.side_effect = Exception("API timeout")
+
+    # Trigger 3 failures to open the circuit breaker
+    for _ in range(3):
+        result = await management.review("rex", "Some content")
+        assert result.approved is False
+
+    # Reset mock call count to verify LLM is NOT called when circuit is open
+    mock_llm.complete.reset_mock()
+
+    # 4th call should be blocked by circuit breaker without LLM call
+    result = await management.review("rex", "More content")
+    assert result.approved is False
+    assert "circuit breaker" in result.reason.lower()
+    mock_llm.complete.assert_not_called()
+
+
+async def test_circuit_breaker_resets_on_success(
+    management: Management, mock_llm: MagicMock
+) -> None:
+    """Circuit breaker failure counter resets after a successful LLM call."""
+    # Cause 2 failures (below threshold)
+    mock_llm.complete.side_effect = Exception("API timeout")
+    for _ in range(2):
+        await management.review("rex", "Some content")
+
+    assert management._consecutive_llm_failures == 2
+
+    # Successful call resets the counter
+    mock_llm.complete.side_effect = None
+    mock_llm.complete.return_value = LLMResponse(
+        content='{"approved": true, "reason": "Content is fine", "severity": 1}',
+        model="claude-haiku-4-5",
+        input_tokens=100,
+        output_tokens=20,
+        estimated_cost=Decimal("0.0001"),
+        latency_ms=200,
+        openrouter_id="test-id",
+    )
+    result = await management.review("rex", "Good content")
+    assert result.approved is True
+    assert management._consecutive_llm_failures == 0
+
+
+# -- Kill switch TTL ---------------------------------------------------
+
+
+async def test_kill_switch_has_ttl(
+    management: Management, mock_redis: MagicMock, mock_event_bus: MagicMock
+) -> None:
+    """Severity 5 intervention sets kill switch with a 4-hour TTL."""
+    await management.intervene(5, "grok", "extreme content")
+    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)

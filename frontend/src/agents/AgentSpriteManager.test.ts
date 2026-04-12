@@ -66,7 +66,9 @@ function createMockScene() {
     tweens: {
       add: vi.fn(() => ({
         stop: vi.fn(),
+        destroy: vi.fn(),
       })),
+      killTweensOf: vi.fn(),
     },
     time: {
       delayedCall: vi.fn(),
