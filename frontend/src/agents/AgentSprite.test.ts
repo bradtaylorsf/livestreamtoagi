@@ -30,6 +30,10 @@ function createMockScene() {
           }),
           setText: vi.fn(),
           setAlpha: vi.fn(),
+          setPosition: vi.fn(function (this: any, x: number, y: number) {
+            this.x = x;
+            this.y = y;
+          }),
           destroy: vi.fn(),
         }),
       ),
@@ -52,6 +56,7 @@ function createMockScene() {
     tweens: {
       add: vi.fn(() => ({
         stop: vi.fn(),
+        destroy: vi.fn(),
       })),
     },
     time: {
@@ -186,6 +191,24 @@ describe("AgentSprite", () => {
   it("cleans up on destroy", () => {
     agentSprite.destroy();
     expect(agentSprite.sprite.destroy).toHaveBeenCalled();
+  });
+
+  // ── Tween optimization tests ─────────────────────────────────
+
+  it("creates exactly 1 tween for movement (not 7)", () => {
+    // Reset tween mock to count calls from moveTo only
+    scene.tweens.add.mockClear();
+    agentSprite.moveTo(300, 400);
+    // Should create exactly 1 tween (single sprite tween with onUpdate)
+    expect(scene.tweens.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops and destroys previous tween when starting new movement", () => {
+    agentSprite.moveTo(300, 400);
+    const firstTween = scene.tweens.add.mock.results[scene.tweens.add.mock.results.length - 1].value;
+    agentSprite.moveTo(500, 600);
+    expect(firstTween.stop).toHaveBeenCalled();
+    expect(firstTween.destroy).toHaveBeenCalled();
   });
 
   // ── Activity indicator tests ─────────────────────────────────
