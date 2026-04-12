@@ -73,8 +73,9 @@ export async function login(password: string): Promise<void> {
     const body = await response.json().catch(() => ({}));
     throw new AdminApiError(response.status, body.detail || "Login failed");
   }
-  // Also store in localStorage as Bearer fallback
-  setAdminToken(password);
+  // Clear any stale localStorage token — session cookie is the auth mechanism.
+  // Storing the raw password in localStorage is an XSS risk (see #359).
+  clearAdminToken();
 }
 
 /**

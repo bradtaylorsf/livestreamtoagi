@@ -7,6 +7,7 @@ admin auth.
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Any
 
@@ -27,7 +28,7 @@ def _validate_kill_switch_key(x_kill_switch_key: str = Header(...)) -> str:
             status_code=503,
             detail="KILL_SWITCH_API_KEY not configured on server",
         )
-    if x_kill_switch_key != expected:
+    if not hmac.compare_digest(x_kill_switch_key, expected):
         raise HTTPException(status_code=403, detail="Invalid kill switch key")
     return x_kill_switch_key
 
