@@ -88,12 +88,21 @@ def mock_app():
         patch("core.public_routes._get_db", return_value=mock_db),
         patch("core.public_routes._get_registry", return_value=mock_registry),
         patch("core.public_routes._get_redis", return_value=mock_redis),
-        patch("core.admin_routes._get_db", return_value=mock_db),
-        patch("core.admin_routes._get_registry", return_value=mock_registry),
     ):
+        from core.admin.dependencies import get_db, get_llm, get_registry, require_admin
         from core.main import app
-        with TestClient(app) as client:
-            yield client, mock_db, mock_registry, mock_redis, mock_services
+
+        # Override admin sub-router dependencies (admin_routes.py was split into core/admin/)
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_registry] = lambda: mock_registry
+        app.dependency_overrides[get_llm] = lambda: MagicMock()
+        app.dependency_overrides[require_admin] = lambda: None
+
+        try:
+            with TestClient(app) as client:
+                yield client, mock_db, mock_registry, mock_redis, mock_services
+        finally:
+            app.dependency_overrides.clear()
 
 
 # ── Agent Endpoints ───────────────────────────────────────────

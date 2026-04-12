@@ -821,7 +821,7 @@ class ConversationEngine:
                     participants=speakers,
                     turn_count=conv.turn_number,
                 )
-        except (LLMError, AgentError, OSError, KeyError, ValueError):
+        except Exception:
             logger.warning(
                 "Conversation record generation failed for %s, using fallback",
                 conv.id,
