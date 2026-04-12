@@ -541,33 +541,41 @@ class PhaseRunner:
         self._event_bus.on("conversation_productivity", _on_productivity)
 
         try:
+            from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+
             engine = ConversationEngine(
-                config_loader=self._config_loader,
-                agent_registry=self._agents,
-                event_bus=self._event_bus,
-                llm_client=self._llm,
+                infra=InfraServices(
+                    config_loader=self._config_loader,
+                    agent_registry=self._agents,
+                    event_bus=self._event_bus,
+                    llm_client=self._llm,
+                    proximity=self._proximity,
+                    trigger_system=self._triggers,
+                    selection_logger=self._selection_logger,
+                ),
+                memory=MemoryServices(
+                    archival_memory=self._archival,
+                    compactor=self._compactor,
+                    memory_repo=self._memory_repo,
+                ),
+                options=ConversationOptions(
+                    speed_multiplier=0,  # No delays in simulation
+                    management_enabled=False,  # Skip LLM review during sims; eval covers this
+                    simulation_id=self._simulation_id,
+                    recent_conversation_summaries=list(self._conversation_summaries),
+                    recent_outputs=list(self._recent_outputs),
+                    required_agents=set(phase.required_agents) if phase.required_agents else None,
+                    max_turns=max_turns,
+                    debug_prompts=self._debug_prompts,
+                    prompt_log_repo=self._prompt_log_repo,
+                    topic_history=dict(self._topic_history),
+                ),
                 management=self._management,
                 context_assembler=self._context,
                 conversation_repo=self._conversation_repo,
-                archival_memory=self._archival,
-                proximity=self._proximity,
-                trigger_system=self._triggers,
-                selection_logger=self._selection_logger,
-                compactor=self._compactor,
-                memory_repo=self._memory_repo,
-                speed_multiplier=0,  # No delays in simulation
-                management_enabled=False,  # Skip LLM review during sims; eval covers this
-                simulation_id=self._simulation_id,
                 services=self._services,
                 clock=self._clock,
                 relationship_tracker=self._relationship_tracker,
-                recent_conversation_summaries=list(self._conversation_summaries),
-                recent_outputs=list(self._recent_outputs),
-                required_agents=set(phase.required_agents) if phase.required_agents else None,
-                max_turns=max_turns,
-                debug_prompts=self._debug_prompts,
-                prompt_log_repo=self._prompt_log_repo,
-                topic_history=dict(self._topic_history),
             )
 
             engine._running = True

@@ -275,24 +275,32 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
 
         silent_bus = _SilentBus()
 
+        from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+
         silent_engine = ConversationEngine(
-            config_loader=svc.config_loader,
-            agent_registry=svc.agent_registry,
-            event_bus=silent_bus,  # type: ignore[arg-type]
-            llm_client=svc.llm_client,
+            infra=InfraServices(
+                config_loader=svc.config_loader,
+                agent_registry=svc.agent_registry,
+                event_bus=silent_bus,  # type: ignore[arg-type]
+                llm_client=svc.llm_client,
+                proximity=proximity,
+                trigger_system=trigger_system,
+                selection_logger=selection_logger,
+            ),
+            memory=MemoryServices(
+                archival_memory=svc.archival_memory,
+                compactor=svc.compactor,
+                memory_repo=svc.memory_repo,
+            ),
+            options=ConversationOptions(
+                speed_multiplier=1.0,
+                management_enabled=True,
+                simulation_id=simulation_id,
+            ),
             management=svc.management,
             context_assembler=svc.context_assembler,
             conversation_repo=conversation_repo,
-            archival_memory=svc.archival_memory,
-            proximity=proximity,
-            trigger_system=trigger_system,
-            selection_logger=selection_logger,
-            compactor=svc.compactor,
-            memory_repo=svc.memory_repo,
-            speed_multiplier=1.0,
-            management_enabled=True,
             services=svc,
-            simulation_id=simulation_id,
         )
 
         try:

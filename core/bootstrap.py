@@ -56,6 +56,44 @@ EmbeddingFn = Callable[[str], Coroutine[Any, Any, list[float]]]
 
 
 @dataclass
+class MemoryServices:
+    """Memory subsystem facade for ConversationEngine."""
+
+    archival_memory: Any
+    compactor: Any | None = None
+    memory_repo: Any | None = None
+
+
+@dataclass
+class InfraServices:
+    """Infrastructure facade for ConversationEngine."""
+
+    config_loader: Any
+    agent_registry: Any
+    event_bus: Any
+    llm_client: Any
+    proximity: Any
+    trigger_system: Any
+    selection_logger: Any
+
+
+@dataclass
+class ConversationOptions:
+    """Runtime options facade for ConversationEngine."""
+
+    speed_multiplier: float = 1.0
+    management_enabled: bool = True
+    max_turns: int = 15
+    debug_prompts: bool = False
+    simulation_id: uuid.UUID | None = None
+    recent_conversation_summaries: list[str] | None = None
+    recent_outputs: list[str] | None = None
+    required_agents: set[str] | None = None
+    topic_history: dict[str, list[float]] | None = None
+    prompt_log_repo: object | None = None
+
+
+@dataclass
 class Services:
     """All initialized subsystems returned by bootstrap_services()."""
 

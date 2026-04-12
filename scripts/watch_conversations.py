@@ -370,22 +370,30 @@ async def run_watch(args: argparse.Namespace) -> None:
     elif not management_enabled:
         console.print("[yellow]Management disabled for testing[/yellow]")
 
+    from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+
     engine = ConversationEngine(
-        config_loader=svc.config_loader,
-        agent_registry=svc.agent_registry,
-        event_bus=event_bus,
-        llm_client=svc.llm_client,
+        infra=InfraServices(
+            config_loader=svc.config_loader,
+            agent_registry=svc.agent_registry,
+            event_bus=event_bus,
+            llm_client=svc.llm_client,
+            proximity=proximity,
+            trigger_system=trigger_system,
+            selection_logger=selection_logger,
+        ),
+        memory=MemoryServices(
+            archival_memory=svc.archival_memory,
+            compactor=svc.compactor,
+            memory_repo=svc.memory_repo,
+        ),
+        options=ConversationOptions(
+            speed_multiplier=speed,
+            management_enabled=management_enabled,
+        ),
         management=management,
         context_assembler=svc.context_assembler,
         conversation_repo=conversation_repo,
-        archival_memory=svc.archival_memory,
-        proximity=proximity,
-        trigger_system=trigger_system,
-        selection_logger=selection_logger,
-        compactor=svc.compactor,
-        memory_repo=svc.memory_repo,
-        speed_multiplier=speed,
-        management_enabled=management_enabled,
         services=svc,
         # simulation_id is set later after sim record is created/attached
     )
