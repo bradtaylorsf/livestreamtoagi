@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
@@ -153,7 +153,21 @@ class DevSimulateRequest(BaseModel):
 _sim_tasks: set[asyncio.Task] = set()
 
 
-@app.post("/api/dev/simulate")
+async def _require_dev_mode() -> None:
+    """Block dev endpoints in production.
+
+    Dev endpoints are only available when ENV is 'development' (the default).
+    Set ENV=production to disable them.
+    """
+    env = os.environ.get("ENV", "development")
+    if env != "development":
+        raise HTTPException(
+            status_code=403,
+            detail="Dev endpoints are disabled outside development mode",
+        )
+
+
+@app.post("/api/dev/simulate", dependencies=[Depends(_require_dev_mode)])
 async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     """Trigger a test conversation in-process so events reach WebSocket clients.
 
@@ -376,7 +390,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/api/dev/emit")
+@app.post("/api/dev/emit", dependencies=[Depends(_require_dev_mode)])
 async def dev_emit(req: EmitRequest) -> dict[str, Any]:
     """Inject an event into the event bus (dev/CLI use only).
 
