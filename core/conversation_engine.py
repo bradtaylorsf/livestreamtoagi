@@ -387,26 +387,19 @@ class ConversationEngine:
 
     # ── Continue conversation ──────────────────────────────────
 
-    async def _continue_conversation(self) -> bool:
-        """Run one turn of the active conversation.
-
-        Returns True if the conversation should continue, False if it should end.
-        """
-        conv = self._active
-        if conv is None:
-            return False
-
-        cfg = self.config
-
-        # Detect topic from recent history
+    async def _detect_topic(self, conv: _ActiveConversation) -> str:
+        """Detect topic from recent history and update tracking."""
         topic = await self._topic_detector.detect_topic(conv.history[-5:])
         if topic not in conv.topics:
             conv.topics.append(topic)
             self._topic_detector.record_topic(topic)
+        return topic
 
-        # Check for eavesdroppers joining
-        all_agents = self._agents.get_all_agents()
-        adjacent_chunks = []  # TODO: wire up world map adjacency
+    async def _check_eavesdroppers(
+        self, conv: _ActiveConversation, topic: str, all_agents: list[AgentConfig],
+    ) -> list[str]:
+        """Check for agents eavesdropping and add them to conversation."""
+        adjacent_chunks: list[str] = []  # TODO: wire up world map adjacency
         new_joiners = await self._proximity.check_eavesdroppers(
             conv.location or "town_square",
             topic,
@@ -427,25 +420,15 @@ class ConversationEngine:
                         "conversation_id": str(conv.id),
                     },
                 )
+        return events
 
-        # Check energy before this turn
-        if not conv.energy.should_continue:
-            logger.info(
-                "Energy check: ending (energy=%.1f, turns=%d, min=%d, max=%d)",
-                conv.energy.energy,
-                conv.energy.turn_count,
-                cfg.energy.minimum_turns,
-                cfg.energy.maximum_turns,
-            )
-            return False
-
-        # Get eligible agents for this turn
-        eligible = [a for a in all_agents if a.id in conv.participants and not self._is_muted(a)]
-        if not eligible:
-            logger.warning("No eligible agents for turn %d", conv.turn_number + 1)
-            return False
-
-        # Build agent goals dict for initiative boost in speaker selection
+    async def _select_next_speaker(
+        self,
+        conv: _ActiveConversation,
+        eligible: list[AgentConfig],
+        topic: str,
+    ) -> Any:
+        """Run weighted speaker selection with optional goal-based boost."""
         _agent_goals: dict[str, list[str]] | None = None
         if self._services and self._services.goal_manager:
             try:
@@ -459,7 +442,6 @@ class ConversationEngine:
                 logger.warning("Failed to build agent goals for speaker selection", exc_info=True)
                 _agent_goals = None
 
-        # Select speaker
         result = self._selector.select(
             conversation_history=conv.history,
             eligible_agents=eligible,
@@ -478,26 +460,18 @@ class ConversationEngine:
             result.scores.get(result.selected_agent_id, 0.0),
             result.was_interrupt,
         )
+        return result
 
-        selected_agent = next((a for a in eligible if a.id == result.selected_agent_id), None)
-        if selected_agent is None:
-            logger.warning("Selected agent %s not in eligible list", result.selected_agent_id)
-            return False
-
-        # Determine prompt hint
-        hint: str | None = None
-        if result.was_interrupt:
-            hint = "interrupt"
-        elif conv.energy.energy < 0.2 * cfg.energy.initial_range[1]:
-            hint = "closing"
-
-        # Generate turn
-        conv.turn_number += 1
-        content = await self._generate_turn(selected_agent, prompt_hint=hint, history=conv.history)
-        if content is None:
-            conv.turn_number -= 1
-            return True  # Skip this turn but keep going
-
+    async def _post_turn_updates(
+        self,
+        conv: _ActiveConversation,
+        selected_agent: AgentConfig,
+        content: str,
+        topic: str,
+        result: Any,
+        events: list[str],
+    ) -> None:
+        """Handle all post-turn side effects: events, state, energy, logging."""
         self._agents_who_spoke.add(selected_agent.id)
         conv.history.append({"role": "assistant", "speaker": selected_agent.id, "content": content})
 
@@ -584,8 +558,65 @@ class ConversationEngine:
         )
 
         # Variable pacing
-        pause = calculate_pause(content, cfg.timing, is_interrupt=result.was_interrupt)
+        pause = calculate_pause(content, self.config.timing, is_interrupt=result.was_interrupt)
         await self._sleep(pause)
+
+    async def _continue_conversation(self) -> bool:
+        """Run one turn of the active conversation.
+
+        Returns True if the conversation should continue, False if it should end.
+        Orchestrates: topic detection -> eavesdroppers -> energy check ->
+        speaker selection -> turn generation -> post-turn updates.
+        """
+        conv = self._active
+        if conv is None:
+            return False
+
+        cfg = self.config
+
+        # Phase 1: Topic detection and eavesdroppers
+        topic = await self._detect_topic(conv)
+        all_agents = self._agents.get_all_agents()
+        events = await self._check_eavesdroppers(conv, topic, all_agents)
+
+        # Phase 2: Energy check
+        if not conv.energy.should_continue:
+            logger.info(
+                "Energy check: ending (energy=%.1f, turns=%d, min=%d, max=%d)",
+                conv.energy.energy,
+                conv.energy.turn_count,
+                cfg.energy.minimum_turns,
+                cfg.energy.maximum_turns,
+            )
+            return False
+
+        # Phase 3: Speaker selection
+        eligible = [a for a in all_agents if a.id in conv.participants and not self._is_muted(a)]
+        if not eligible:
+            logger.warning("No eligible agents for turn %d", conv.turn_number + 1)
+            return False
+
+        result = await self._select_next_speaker(conv, eligible, topic)
+        selected_agent = next((a for a in eligible if a.id == result.selected_agent_id), None)
+        if selected_agent is None:
+            logger.warning("Selected agent %s not in eligible list", result.selected_agent_id)
+            return False
+
+        # Phase 4: Generate turn
+        hint: str | None = None
+        if result.was_interrupt:
+            hint = "interrupt"
+        elif conv.energy.energy < 0.2 * cfg.energy.initial_range[1]:
+            hint = "closing"
+
+        conv.turn_number += 1
+        content = await self._generate_turn(selected_agent, prompt_hint=hint, history=conv.history)
+        if content is None:
+            conv.turn_number -= 1
+            return True  # Skip this turn but keep going
+
+        # Phase 5: Post-turn updates
+        await self._post_turn_updates(conv, selected_agent, content, topic, result, events)
 
         return conv.energy.should_continue
 
@@ -1067,87 +1098,74 @@ class ConversationEngine:
 
     # ── Turn generation ────────────────────────────────────────
 
-    async def _generate_turn(
+    async def _assemble_context_sections(
         self,
         agent: AgentConfig,
-        *,
-        prompt_hint: str | None = None,
-        history: list[dict[str, str]] | None = None,
-    ) -> str | None:
-        """Assemble context, call LLM, pass through Management.
+    ) -> dict[str, Any]:
+        """Build all optional context sections for a turn.
 
-        Returns the final approved content, or None on total failure.
+        Returns a dict of context values; individual section failures are
+        logged and result in None values rather than blocking the turn.
         """
-        conv_history = list(history or [])
+        ctx: dict[str, Any] = {
+            "relationship_context": None,
+            "agent_goals_context": None,
+            "commitment_reminders": None,
+            "internal_state_context": None,
+            "balance_context": None,
+            "alliances_context": None,
+            "recent_dream": None,
+            "shared_state_context": None,
+        }
 
-        # Inject topic avoidance hint into conversation history if present
-        if self._active and self._active.trigger.get("topic_avoidance"):
-            conv_history.append({
-                "role": "user",
-                "content": self._active.trigger["topic_avoidance"],
-            })
-
-        # Build tool schemas if tools are available for this agent
-        agent_tools = self._get_tools_for_agent(agent.id)
-        openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
-
-        # Build optional context sections — each uses _safe_context_build
-        # so individual failures don't block turn generation.
-        relationship_context: str | None = None
         if self._relationship_tracker and self._active:
             other_ids = [pid for pid in self._active.participants if pid != agent.id]
             if other_ids:
-                relationship_context = await self._safe_context_build(
+                ctx["relationship_context"] = await self._safe_context_build(
                     f"relationship:{agent.id}",
                     self._relationship_tracker.get_context_for_agent(agent.id, other_ids),
                 ) or None
 
-        agent_goals_context: str | None = None
-        commitment_reminders: str | None = None
         if self._services and self._services.goal_manager:
-            agent_goals_context = await self._safe_context_build(
+            ctx["agent_goals_context"] = await self._safe_context_build(
                 f"goals:{agent.id}",
                 self._services.goal_manager.get_agenda_context(
                     agent.id, simulation_id=self._simulation_id,
                 ),
             ) or None
-            commitment_reminders = await self._safe_context_build(
+            ctx["commitment_reminders"] = await self._safe_context_build(
                 f"commitments:{agent.id}",
                 self._services.goal_manager.get_commitment_reminders(
                     agent.id, simulation_id=self._simulation_id,
                 ),
             ) or None
 
-        internal_state_context: str | None = None
         if self._services and self._services.agent_state_manager:
             _state = await self._safe_context_build(
                 f"internal_state:{agent.id}",
                 self._services.agent_state_manager.get_state(agent.id),
             )
             if _state is not None:
-                internal_state_context = (
+                ctx["internal_state_context"] = (
                     self._services.agent_state_manager.format_state_for_context(_state)
                 )
 
-        balance_context: str | None = None
         if self._services and self._services.economy_manager:
             balance = await self._safe_context_build(
                 f"balance:{agent.id}",
                 self._services.economy_manager.get_balance(agent.id),
             )
             if balance is not None:
-                balance_context = f"Your current balance: ${balance:.2f}"
+                ctx["balance_context"] = f"Your current balance: ${balance:.2f}"
                 if balance <= 0:
-                    balance_context += " [BROKE — you cannot use paid tools until you earn or receive funds]"
+                    ctx["balance_context"] += " [BROKE — you cannot use paid tools until you earn or receive funds]"
 
-        alliances_context: str | None = None
         if self._services and self._services.alliance_manager:
-            alliances_context = await self._safe_context_build(
+            ctx["alliances_context"] = await self._safe_context_build(
                 f"alliances:{agent.id}",
                 self._services.alliance_manager.get_alliance_context(agent.id, self._simulation_id),
             ) or None
 
-        recent_dream: str | None = None
         if self._services and self._services.memory_repo:
             entries = await self._safe_context_build(
                 f"dream:{agent.id}",
@@ -1157,31 +1175,232 @@ class ConversationEngine:
                 ),
             )
             if entries:
-                recent_dream = entries[0].content
+                ctx["recent_dream"] = entries[0].content
 
-        shared_state_context: str | None = None
         if self._services and self._services.shared_working_state:
-            shared_state_context = await self._safe_context_build(
+            ctx["shared_state_context"] = await self._safe_context_build(
                 "shared_working_state",
                 self._services.shared_working_state.get_summary_for_context(),
             ) or None
 
+        return ctx
+
+    async def _execute_tool_rounds(
+        self,
+        agent: AgentConfig,
+        messages: list[dict[str, Any]],
+        agent_tools: dict[str, Any] | None,
+        openai_tools: list[dict[str, Any]] | None,
+    ) -> tuple[Any, int, int, float, int, bool]:
+        """Execute LLM call with tool-call loop.
+
+        Returns (response, total_input_tokens, total_output_tokens,
+                 total_cost, total_latency_ms, turn_used_tools).
+        """
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_cost = 0.0
+        total_latency_ms = 0
+        turn_used_tools = False
+
+        for _tool_round in range(MAX_TOOL_ROUNDS + 1):
+            # Check if trigger requests a specific tool (first round only)
+            tc = None
+            if _tool_round == 0 and self._active and self._active.trigger:
+                tc = self._active.trigger.get("tool_choice")
+                if tc and agent_tools:
+                    forced_name = (
+                        tc.get("function", {}).get("name")
+                        if isinstance(tc, dict) else None
+                    )
+                    if forced_name and forced_name not in agent_tools:
+                        tc = None
+                elif tc and not agent_tools:
+                    tc = None
+
+            response = await self._llm.complete(
+                messages=messages,
+                model=agent.model_conversation,
+                agent_id=agent.id,
+                tools=openai_tools,
+                tool_choice=tc,
+                temperature=0.9,
+                simulation_id=self._simulation_id,
+            )
+
+            total_input_tokens += response.input_tokens
+            total_output_tokens += response.output_tokens
+            total_cost += float(response.estimated_cost)
+            total_latency_ms += response.latency_ms
+
+            if not response.tool_calls or not agent_tools:
+                break
+
+            # Execute tool calls
+            turn_used_tools = True
+            logger.info(
+                "Agent %s requested %d tool call(s): %s",
+                agent.id,
+                len(response.tool_calls),
+                [tc.name for tc in response.tool_calls],
+            )
+            conv_id = self._active.id if self._active else None
+
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": response.content or "",
+            }
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments, default=str),
+                    },
+                }
+                for tc in response.tool_calls
+            ]
+            messages.append(assistant_msg)
+
+            tool_results = await execute_tool_calls(
+                response.tool_calls,
+                agent_tools,
+                agent.id,
+                simulation_id=self._simulation_id,
+                conversation_id=conv_id,
+            )
+            messages.extend(tool_results)
+        else:
+            logger.warning(
+                "Max tool rounds (%d) reached for %s",
+                MAX_TOOL_ROUNDS,
+                agent.id,
+            )
+
+        return (response, total_input_tokens, total_output_tokens,
+                total_cost, total_latency_ms, turn_used_tools)
+
+    async def _apply_post_processing(
+        self,
+        agent: AgentConfig,
+        content: str,
+        messages: list[dict[str, Any]],
+        openai_tools: list[dict[str, Any]] | None,
+        total_input_tokens: int,
+        total_output_tokens: int,
+        total_cost: float,
+        total_latency_ms: int,
+    ) -> str | None:
+        """Handle repetition detection and Management review.
+
+        Returns final content, None to skip the turn, or raises to signal retry.
+        """
+        # Repetition detection
+        if content and self._is_repetitive(content):
+            logger.info(
+                "Repetition detected for %s, regenerating with nudge",
+                agent.id,
+            )
+            messages.append({
+                "role": "user",
+                "content": (
+                    "[SYSTEM: Your response is very similar to something "
+                    "said recently. Take a completely different angle, "
+                    "bring up a new topic, or ask someone a question.]"
+                ),
+            })
+            retry_resp = await self._llm.complete(
+                messages=messages,
+                model=agent.model_conversation,
+                agent_id=agent.id,
+                tools=openai_tools,
+                simulation_id=self._simulation_id,
+            )
+            total_input_tokens += retry_resp.input_tokens
+            total_output_tokens += retry_resp.output_tokens
+            total_cost += float(retry_resp.estimated_cost)
+            total_latency_ms += retry_resp.latency_ms
+            if retry_resp.content and retry_resp.content.strip():
+                content = retry_resp.content.strip()
+
+            if self._is_repetitive(content):
+                logger.warning(
+                    "Repetition persists for %s after retry — skipping turn",
+                    agent.id,
+                )
+                return None
+
+        # Management review (can be disabled for testing)
+        if not self._management_enabled:
+            return content
+        conv_id = self._active.id if self._active else None
+        review = await self._management.review(
+            agent.id, content,
+            conversation_id=conv_id,
+            simulation_id=self._simulation_id,
+        )
+        if review.approved:
+            return content
+
+        # Rejected — intervene
+        logger.info(
+            "Management rejected %s output (severity=%d): %s",
+            agent.id,
+            review.severity,
+            review.reason,
+        )
+        await self._management.intervene(review.severity, agent.id, review.reason)
+
+        if review.severity >= 4:
+            return review.replacement
+        # Lower severity: signal caller to retry
+        return ""  # Empty string signals retry
+
+    async def _generate_turn(
+        self,
+        agent: AgentConfig,
+        *,
+        prompt_hint: str | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> str | None:
+        """Assemble context, call LLM, pass through Management.
+
+        Orchestrates: context assembly -> LLM + tool rounds ->
+        post-processing (repetition, Management review).
+        Returns the final approved content, or None on total failure.
+        """
+        conv_history = list(history or [])
+
+        # Inject topic avoidance hint
+        if self._active and self._active.trigger.get("topic_avoidance"):
+            conv_history.append({
+                "role": "user",
+                "content": self._active.trigger["topic_avoidance"],
+            })
+
+        agent_tools = self._get_tools_for_agent(agent.id)
+        openai_tools = tools_to_openai_schema(agent_tools) if agent_tools else None
+
+        # Build optional context sections
+        ctx = await self._assemble_context_sections(agent)
+
         for attempt in range(MAX_GENERATE_RETRIES):
             try:
-                # Assemble context
+                # Assemble full prompt
                 context_result = await self._context.assemble_context(
                     agent_id=agent.id,
                     conversation_history=conv_history,
                     prompt_hint=prompt_hint,
                     recent_conversation_summaries=self._recent_summaries or None,
-                    relationship_context=relationship_context,
-                    shared_state_context=shared_state_context,
-                    agent_goals_context=agent_goals_context,
-                    commitment_reminders=commitment_reminders,
-                    internal_state_context=internal_state_context,
-                    balance_context=balance_context,
-                    recent_dream=recent_dream,
-                    alliances_context=alliances_context,
+                    relationship_context=ctx["relationship_context"],
+                    shared_state_context=ctx["shared_state_context"],
+                    agent_goals_context=ctx["agent_goals_context"],
+                    commitment_reminders=ctx["commitment_reminders"],
+                    internal_state_context=ctx["internal_state_context"],
+                    balance_context=ctx["balance_context"],
+                    recent_dream=ctx["recent_dream"],
+                    alliances_context=ctx["alliances_context"],
                     simulation_id=self._simulation_id,
                 )
                 messages = context_result.messages
@@ -1207,133 +1426,13 @@ class ConversationEngine:
                             exc_info=True,
                         )
 
-                # Call LLM (with tool-call loop)
-                total_input_tokens = 0
-                total_output_tokens = 0
-                total_cost = 0.0
-                total_latency_ms = 0
-                turn_used_tools = False
-
-                for _tool_round in range(MAX_TOOL_ROUNDS + 1):
-                    # Check if trigger requests a specific tool (first round only)
-                    # Only apply tool_choice if the tool is in this agent's set
-                    tc = None
-                    if _tool_round == 0 and self._active and self._active.trigger:
-                        tc = self._active.trigger.get("tool_choice")
-                        if tc and agent_tools:
-                            # Extract tool name from tool_choice structure
-                            forced_name = (
-                                tc.get("function", {}).get("name")
-                                if isinstance(tc, dict) else None
-                            )
-                            if forced_name and forced_name not in agent_tools:
-                                tc = None  # Tool not available for this agent
-                        elif tc and not agent_tools:
-                            tc = None  # Agent has no tools at all
-
-                    response = await self._llm.complete(
-                        messages=messages,
-                        model=agent.model_conversation,
-                        agent_id=agent.id,
-                        tools=openai_tools,
-                        tool_choice=tc,
-                        temperature=0.9,
-                        simulation_id=self._simulation_id,
-                    )
-
-                    total_input_tokens += response.input_tokens
-                    total_output_tokens += response.output_tokens
-                    total_cost += float(response.estimated_cost)
-                    total_latency_ms += response.latency_ms
-
-                    # No tool calls — we have the final text response
-                    if not response.tool_calls or not agent_tools:
-                        break
-
-                    # Execute tool calls
-                    turn_used_tools = True
-                    logger.info(
-                        "Agent %s requested %d tool call(s): %s",
-                        agent.id,
-                        len(response.tool_calls),
-                        [tc.name for tc in response.tool_calls],
-                    )
-                    conv_id = self._active.id if self._active else None
-
-                    # Append assistant message with tool calls
-                    assistant_msg: dict[str, Any] = {
-                        "role": "assistant",
-                        "content": response.content or "",
-                    }
-                    assistant_msg["tool_calls"] = [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(
-                                    tc.arguments, default=str
-                                ),
-                            },
-                        }
-                        for tc in response.tool_calls
-                    ]
-                    messages.append(assistant_msg)
-
-                    # Execute tools and append results
-                    tool_results = await execute_tool_calls(
-                        response.tool_calls,
-                        agent_tools,
-                        agent.id,
-                        simulation_id=self._simulation_id,
-                        conversation_id=conv_id,
-                    )
-                    messages.extend(tool_results)
-                else:
-                    logger.warning(
-                        "Max tool rounds (%d) reached for %s",
-                        MAX_TOOL_ROUNDS,
-                        agent.id,
-                    )
+                # Execute LLM + tool rounds
+                (response, total_input_tokens, total_output_tokens,
+                 total_cost, total_latency_ms, turn_used_tools) = await self._execute_tool_rounds(
+                    agent, messages, agent_tools, openai_tools,
+                )
 
                 content = response.content.strip()
-
-                # Repetition detection — check against recent outputs
-                if content and self._is_repetitive(content):
-                    logger.info(
-                        "Repetition detected for %s, regenerating with nudge",
-                        agent.id,
-                    )
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "[SYSTEM: Your response is very similar to something "
-                            "said recently. Take a completely different angle, "
-                            "bring up a new topic, or ask someone a question.]"
-                        ),
-                    })
-                    retry_resp = await self._llm.complete(
-                        messages=messages,
-                        model=agent.model_conversation,
-                        agent_id=agent.id,
-                        tools=openai_tools,
-                        simulation_id=self._simulation_id,
-                    )
-                    total_input_tokens += retry_resp.input_tokens
-                    total_output_tokens += retry_resp.output_tokens
-                    total_cost += float(retry_resp.estimated_cost)
-                    total_latency_ms += retry_resp.latency_ms
-                    if retry_resp.content and retry_resp.content.strip():
-                        content = retry_resp.content.strip()
-
-                    # Escalated repetition block: if retry is ALSO repetitive,
-                    # skip this turn entirely rather than accepting stale content
-                    if self._is_repetitive(content):
-                        logger.warning(
-                            "Repetition persists for %s after retry — skipping turn",
-                            agent.id,
-                        )
-                        return None
 
                 # Empty response — retry
                 if not content:
@@ -1345,7 +1444,7 @@ class ConversationEngine:
                     )
                     continue
 
-                # Save token/cost metadata (accumulated across tool rounds)
+                # Save token/cost metadata
                 self._last_llm_meta = {
                     "model": response.model,
                     "input_tokens": total_input_tokens,
@@ -1353,39 +1452,23 @@ class ConversationEngine:
                     "cost": total_cost,
                     "latency_ms": total_latency_ms,
                 }
-
-                # Track output for cross-phase repetition detection
-                self._recent_outputs.append(content)
-
-                # Track tool usage for conversation progression (#248)
                 self._last_turn_had_tools = turn_used_tools
 
-                # Management review (can be disabled for testing)
-                if not self._management_enabled:
-                    return content
-                conv_id = self._active.id if self._active else None
-                review = await self._management.review(
-                    agent.id, content,
-                    conversation_id=conv_id,
-                    simulation_id=self._simulation_id,
+                # Post-processing: repetition + Management review
+                result = await self._apply_post_processing(
+                    agent, content, messages, openai_tools,
+                    total_input_tokens, total_output_tokens,
+                    total_cost, total_latency_ms,
                 )
-                if review.approved:
-                    return content
+                if result is None:
+                    return None  # Skip turn (persistent repetition)
+                if result == "":
+                    prompt_hint = None  # Management rejection, retry
+                    continue
 
-                # Rejected -- intervene and retry with modified hint
-                logger.info(
-                    "Management rejected %s output (severity=%d): %s",
-                    agent.id,
-                    review.severity,
-                    review.reason,
-                )
-                await self._management.intervene(review.severity, agent.id, review.reason)
-
-                # If severity is high, don't retry
-                if review.severity >= 4:
-                    return review.replacement
-                # Lower severity: retry with different hint
-                prompt_hint = None
+                # Track output for cross-phase repetition detection
+                self._recent_outputs.append(result)
+                return result
 
             except asyncio.CancelledError:
                 raise
