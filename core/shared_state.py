@@ -16,6 +16,10 @@ DECISIONS_KEY = "shared:decisions"
 PRIORITIES_KEY = "shared:priorities"
 BUDGET_KEY = "shared:budget_status"
 
+# Completed tasks older than this are pruned to prevent context bloat
+_COMPLETED_TASK_TTL = 3600  # 1 hour
+_MAX_COMPLETED_TASKS = 10
+
 
 @dataclass
 class SharedTask:
@@ -60,12 +64,37 @@ class SharedWorkingState:
             if owner:
                 data["owner"] = owner
             await self._redis.hset(TASK_KEY, task_id, json.dumps(data))
+            # Auto-prune old completed tasks when new ones are finished
+            if status == "done":
+                await self.prune_completed_tasks()
             return True
         return False
 
     async def get_tasks(self) -> list[SharedTask]:
         raw_all = await self._redis.hgetall(TASK_KEY)
         return [SharedTask(**json.loads(v)) for v in raw_all.values()]
+
+    async def prune_completed_tasks(self) -> int:
+        """Remove old completed tasks to prevent unbounded growth.
+
+        Keeps at most _MAX_COMPLETED_TASKS completed tasks, and removes any
+        completed task older than _COMPLETED_TASK_TTL seconds.
+        Returns the number of tasks pruned.
+        """
+        tasks = await self.get_tasks()
+        done = sorted(
+            [t for t in tasks if t.status == "done"],
+            key=lambda t: t.created_at,
+        )
+        now = time.time()
+        pruned = 0
+        for t in done:
+            age = now - t.created_at
+            excess = len(done) - pruned > _MAX_COMPLETED_TASKS
+            if age > _COMPLETED_TASK_TTL or excess:
+                await self._redis.hdel(TASK_KEY, t.id)
+                pruned += 1
+        return pruned
 
     async def add_decision(self, decision: Decision) -> None:
         await self._redis.rpush(DECISIONS_KEY, json.dumps(asdict(decision)))

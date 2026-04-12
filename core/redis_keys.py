@@ -86,6 +86,9 @@ class ScopedRedis:
     async def hgetall(self, key: str) -> dict[str, str]:
         return await self._redis.hgetall(self._key(key))
 
+    async def hdel(self, key: str, *fields: str) -> int:
+        return await self._redis.hdel(self._key(key), *fields)
+
     # ── Scan (prefixes the match pattern) ──────────────────────
 
     async def scan(

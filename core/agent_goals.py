@@ -230,6 +230,90 @@ class AgentGoalManager:
         """Mark a goal as done."""
         return await self.update_goal(agent_id, goal_id, status="done")
 
+    async def retire_stale_goals(
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None = None,
+        stale_hours: float = 6.0,
+        max_active: int = 8,
+    ) -> int:
+        """Abandon stale or excess active goals to prevent context bloat.
+
+        A goal is considered stale if it has been active/blocked for longer than
+        *stale_hours* without being completed. If the agent still has more than
+        *max_active* goals after stale pruning, the lowest-priority extras are
+        also abandoned.
+
+        Returns the number of goals retired.
+        """
+        if self._use_db:
+            return await self._retire_stale_db(
+                agent_id, simulation_id, stale_hours, max_active,
+            )
+        return await self._retire_stale_redis(agent_id, stale_hours, max_active)
+
+    async def _retire_stale_db(
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None,
+        stale_hours: float,
+        max_active: int,
+    ) -> int:
+        assert self._goal_repo is not None
+        goals = await self._goal_repo.get_active_goals(
+            agent_id, limit=50, simulation_id=simulation_id,
+        )
+        now = time.time()
+        threshold = stale_hours * 3600
+        retired = 0
+
+        for g in goals:
+            age = now - (g.created_at.timestamp() if g.created_at else now)
+            if age > threshold:
+                await self._goal_repo.update_status(g.id, "abandoned", simulation_id)
+                retired += 1
+
+        # Re-fetch after stale pruning and cap by max_active
+        if retired > 0:
+            goals = await self._goal_repo.get_active_goals(
+                agent_id, limit=50, simulation_id=simulation_id,
+            )
+        if len(goals) > max_active:
+            # Abandon lowest-priority (highest number) excess goals
+            excess = sorted(goals, key=lambda g: -g.priority)[: len(goals) - max_active]
+            for g in excess:
+                await self._goal_repo.update_status(g.id, "abandoned", simulation_id)
+                retired += 1
+
+        return retired
+
+    async def _retire_stale_redis(
+        self, agent_id: str, stale_hours: float, max_active: int,
+    ) -> int:
+        goals = await self._get_goals_redis(agent_id)
+        now = time.time()
+        threshold = stale_hours * 3600
+        retired = 0
+        active = [g for g in goals if g.status not in ("done", "completed")]
+
+        for g in active:
+            if (now - g.created) > threshold:
+                g.status = "done"
+                g.updated = now
+                retired += 1
+
+        still_active = [g for g in goals if g.status not in ("done", "completed")]
+        if len(still_active) > max_active:
+            still_active.sort(key=lambda g: -g.priority)
+            for g in still_active[max_active:]:
+                g.status = "done"
+                g.updated = now
+                retired += 1
+
+        if retired > 0:
+            await self._save_goals_redis(agent_id, goals)
+        return retired
+
     async def get_agenda_context(
         self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
     ) -> str:

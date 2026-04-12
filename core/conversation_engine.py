@@ -51,6 +51,29 @@ BACKOFF_BASE_SECONDS = 1.0
 # Trigger check interval when idle
 TRIGGER_CHECK_INTERVAL = 1.0
 
+# Default arguments for forced tool calls when LLMs ignore tool_choice.
+# Tools not listed here work fine with empty {}.
+_FORCED_TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "check_email_responses": {"draft_id": "latest"},
+    "check_post_performance": {"draft_id": "latest"},
+    "create_poll": {"title": "Quick poll", "options": ["Yes", "No"], "duration": 120},
+    "draft_email": {
+        "to": "team@show.ai", "subject": "Update",
+        "body": "Status update from the show.",
+    },
+    "draft_social_post": {"platform": "twitter", "content": "Live from the show!"},
+    "execute_code": {"language": "python", "code": "print('hello from the show')"},
+    "fetch_url": {"url": "https://example.com"},
+    "generate_tilemap": {
+        "name": "test_area",
+        "description": "A small test area",
+        "code": "import json; print(json.dumps([[1,1],[1,1]]))",
+    },
+    "send_chat_message": {"message": "Hey chat!"},
+    "update_core_memory": {"section": "key_learnings", "content": "Noted.", "reason": "update"},
+    "web_search": {"query": "AI news today"},
+}
+
 
 class _ActiveConversation:
     """Holds state for a single active conversation."""
@@ -241,8 +264,13 @@ class ConversationEngine:
         await self._proximity.get_group(location)
 
         # Get eligible agents (in the area, active, not muted)
+        # Ensure the starter agent is always included if specified
         all_agents = self._agents.get_all_agents()
-        eligible = await self._proximity.get_eligible_speakers(location, all_agents)
+        starter_id = trigger.get("starter_agent_id")
+        required = {starter_id} if starter_id else None
+        eligible = await self._proximity.get_eligible_speakers(
+            location, all_agents, required_agents=required,
+        )
         eligible = [a for a in eligible if not self._is_muted(a)]
 
         if not eligible:
@@ -971,13 +999,21 @@ class ConversationEngine:
                         c["agent_id"],
                     )
                     continue
-                goal = await goal_mgr.add_goal(
-                    agent_id=c["agent_id"],
-                    goal_text=c["commitment"],
-                    priority=2,
-                    related_agent=c.get("related_to_agent") or None,
-                    simulation_id=self._simulation_id,
-                )
+                try:
+                    goal = await goal_mgr.add_goal(
+                        agent_id=c["agent_id"],
+                        goal_text=c["commitment"],
+                        priority=2,
+                        related_agent=c.get("related_to_agent") or None,
+                        simulation_id=self._simulation_id,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to add commitment goal for %s: %s",
+                        c["agent_id"], c["commitment"][:100],
+                        exc_info=True,
+                    )
+                    continue
 
                 # Create shared task from commitment (#249)
                 sws = self._services.shared_working_state
@@ -1184,20 +1220,20 @@ class ConversationEngine:
         total_latency_ms = 0
         turn_used_tools = False
 
+        # Resolve forced tool name once (if trigger requests a specific tool)
+        forced_tool_name: str | None = None
+        if self._active and self._active.trigger:
+            _tc_spec = self._active.trigger.get("tool_choice")
+            if isinstance(_tc_spec, dict) and agent_tools:
+                _fn = _tc_spec.get("function", {}).get("name")
+                if _fn and _fn in agent_tools:
+                    forced_tool_name = _fn
+
         for _tool_round in range(MAX_TOOL_ROUNDS + 1):
-            # Check if trigger requests a specific tool (first round only)
+            # Apply tool_choice forcing on first round only
             tc = None
-            if _tool_round == 0 and self._active and self._active.trigger:
-                tc = self._active.trigger.get("tool_choice")
-                if tc and agent_tools:
-                    forced_name = (
-                        tc.get("function", {}).get("name")
-                        if isinstance(tc, dict) else None
-                    )
-                    if forced_name and forced_name not in agent_tools:
-                        tc = None
-                elif tc and not agent_tools:
-                    tc = None
+            if _tool_round == 0 and forced_tool_name:
+                tc = {"type": "function", "function": {"name": forced_tool_name}}
 
             response = await self._llm.complete(
                 messages=messages,
@@ -1213,6 +1249,40 @@ class ConversationEngine:
             total_output_tokens += response.output_tokens
             total_cost += float(response.estimated_cost)
             total_latency_ms += response.latency_ms
+
+            # If we forced a tool, ensure it appears in the tool calls
+            if _tool_round == 0 and forced_tool_name and agent_tools:
+                from core.models import ToolCall as ToolCallModel
+
+                calls = response.tool_calls or []
+                has_forced = any(tc_.name == forced_tool_name for tc_ in calls)
+
+                if not has_forced:
+                    if calls:
+                        logger.warning(
+                            "Model ignored tool_choice=%s for %s, got %s — injecting forced call",
+                            forced_tool_name,
+                            agent.id,
+                            [tc_.name for tc_ in calls],
+                        )
+                    else:
+                        logger.warning(
+                            "Model returned no tool calls despite tool_choice=%s for %s — injecting forced call",
+                            forced_tool_name,
+                            agent.id,
+                        )
+
+                    forced_args = _FORCED_TOOL_DEFAULTS.get(forced_tool_name, {})
+                    forced_call = ToolCallModel(
+                        id=f"forced_{forced_tool_name}",
+                        name=forced_tool_name,
+                        arguments=forced_args,
+                    )
+                    calls.insert(0, forced_call)
+                    response.tool_calls = calls
+
+                # Clear forced_tool_name so subsequent speakers aren't forced
+                forced_tool_name = None
 
             if not response.tool_calls or not agent_tools:
                 break
@@ -1453,7 +1523,7 @@ class ConversationEngine:
 
             except asyncio.CancelledError:
                 raise
-            except (LLMError, TransientError, OSError) as exc:
+            except (LLMError, TransientError, OSError, TypeError, AttributeError, RuntimeError) as exc:
                 logger.exception(
                     "LLM call failed for %s (attempt %d/%d): %s",
                     agent.id,
