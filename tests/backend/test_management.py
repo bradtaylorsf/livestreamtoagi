@@ -275,8 +275,8 @@ async def test_intervene_severity_5_mutes_and_sets_kill_switch(
 ) -> None:
     """Severity 5 mutes agent, sets kill switch, emits intervention."""
     await management.intervene(5, "grok", "self-harm content")
-    # Kill switch set
-    mock_redis.set.assert_any_call("kill_switch", "active")
+    # Kill switch set with TTL
+    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)
     # Agent muted
     mock_redis.set.assert_any_call("mute:grok", "muted", ex=300)
     # Event emitted
@@ -614,3 +614,14 @@ async def test_circuit_breaker_resets_on_success(
     result = await management.review("rex", "Good content")
     assert result.approved is True
     assert management._consecutive_llm_failures == 0
+
+
+# -- Kill switch TTL ---------------------------------------------------
+
+
+async def test_kill_switch_has_ttl(
+    management: Management, mock_redis: MagicMock, mock_event_bus: MagicMock
+) -> None:
+    """Severity 5 intervention sets kill switch with a 4-hour TTL."""
+    await management.intervene(5, "grok", "extreme content")
+    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)

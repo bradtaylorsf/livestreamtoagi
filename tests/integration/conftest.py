@@ -21,7 +21,7 @@ load_dotenv()
 DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
 )
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6381")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://:devpassword@localhost:6381")
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")

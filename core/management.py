@@ -202,7 +202,7 @@ class Management:
             )
         else:  # severity 5
             await self.mute(agent_id)
-            await self._redis.set("kill_switch", "active")
+            await self._redis.set("kill_switch", "active", ex=14400)  # 4-hour TTL
             await self._event_bus.emit(
                 EventType.MANAGEMENT_INTERVENTION.value,
                 {

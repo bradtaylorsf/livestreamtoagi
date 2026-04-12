@@ -14,6 +14,7 @@ from core.admin.config_routes import router as config_router
 from core.admin.conversation_routes import router as conversation_router
 from core.admin.dependencies import require_admin
 from core.admin.eval_routes import _background_tasks, router as eval_router
+from core.admin.kill_switch_routes import router as kill_switch_router
 from core.admin.simulation_routes import router as simulation_router
 
 admin_router = APIRouter(
@@ -28,4 +29,9 @@ admin_router.include_router(conversation_router)
 admin_router.include_router(eval_router)
 admin_router.include_router(simulation_router)
 
-__all__ = ["admin_router", "_background_tasks"]
+# Kill switch uses its own KILL_SWITCH_API_KEY auth, mounted separately
+# so it doesn't require the general admin password.
+kill_switch_api = APIRouter(prefix="/api/admin")
+kill_switch_api.include_router(kill_switch_router)
+
+__all__ = ["admin_router", "kill_switch_api", "_background_tasks"]

@@ -89,11 +89,12 @@ def mock_app():
         patch("core.public_routes._get_registry", return_value=mock_registry),
         patch("core.public_routes._get_redis", return_value=mock_redis),
     ):
-        from core.admin.dependencies import get_db, get_llm, get_registry, require_admin
+        from core.admin.dependencies import get_db, get_llm, get_redis, get_registry, require_admin
         from core.main import app
 
         # Override admin sub-router dependencies (admin_routes.py was split into core/admin/)
         app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_redis] = lambda: mock_redis
         app.dependency_overrides[get_registry] = lambda: mock_registry
         app.dependency_overrides[get_llm] = lambda: MagicMock()
         app.dependency_overrides[require_admin] = lambda: None

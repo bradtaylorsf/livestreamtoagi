@@ -45,6 +45,11 @@ def get_registry(request: Request) -> Any:
     return request.app.state.services.agent_registry
 
 
+def get_redis(request: Request) -> Any:
+    """Get Redis client from app state."""
+    return request.app.state.services.redis
+
+
 def get_config_version_repo(request: Request) -> Any:
     """Get config version repo from app state."""
     return request.app.state.services.config_version_repo
