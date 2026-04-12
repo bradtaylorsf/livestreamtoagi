@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
-from core.admin_routes import router as admin_router
+from core.admin import admin_router
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
 from core.event_bus import event_bus
 from core.public_routes import router as public_router
@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
         if idle_behavior is not None:
             idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
-        from core.admin_routes import _background_tasks
+        from core.admin import _background_tasks
         if _background_tasks:
             logger.info("Waiting for %d background eval task(s) to finish...", len(_background_tasks))
             await asyncio.gather(*_background_tasks, return_exceptions=True)
