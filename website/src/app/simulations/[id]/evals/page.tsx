@@ -28,7 +28,7 @@ export default function SimulationEvalsPage() {
       .then((s) => setSimName(s.name))
       .catch(() => {});
     getSimulationEvals(id)
-      .then((data) => setRuns(data as EvalRunResult[]))
+      .then((data) => setRuns(data as unknown as EvalRunResult[]))
       .catch((err) =>
         setError(
           err instanceof Error ? err.message : "Failed to load evals",

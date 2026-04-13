@@ -24,7 +24,7 @@ export default function SimulationSnapshotsPage() {
       .then((s) => setSimName(s.name))
       .catch(() => {});
     getSimulationSnapshots(id)
-      .then((data) => setSnapshots(data as SnapshotEntry[]))
+      .then((data) => setSnapshots(data as unknown as SnapshotEntry[]))
       .catch((err) =>
         setError(
           err instanceof Error ? err.message : "Failed to load snapshots",

@@ -32,7 +32,7 @@ export default function SimulationRelationshipsPage() {
       .then((s) => setSimName(s.name))
       .catch(() => {});
     getSimulationSocialGraph(id)
-      .then((data) => setRelationships(data as Relationship[]))
+      .then((data) => setRelationships(data as unknown as Relationship[]))
       .catch((err) =>
         setError(
           err instanceof Error
