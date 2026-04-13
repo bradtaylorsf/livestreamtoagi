@@ -113,7 +113,7 @@ export default function ToolUsageSection({
       )}
 
       {/* Agent tool usage */}
-      {data.by_agent &&
+      {data.by_agent != null &&
         Object.keys(data.by_agent as Record<string, unknown>).length > 0 && (
           <div>
             <div className="text-xs text-foreground/50 mb-2 font-medium">

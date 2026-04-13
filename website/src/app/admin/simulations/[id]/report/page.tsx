@@ -186,13 +186,13 @@ function MemoryEvolutionSection({ data }: { data: Record<string, unknown> }) {
                     <span className="font-mono text-foreground/70">{String(diff.total_versions)}</span>
                   </div>
                 )}
-                {diff.first_reason && (
+                {diff.first_reason != null && (
                   <div className="rounded border border-border bg-surface-light p-2">
                     <span className="text-foreground/50">First reason:</span>{" "}
                     <span className="text-foreground/70">{String(diff.first_reason)}</span>
                   </div>
                 )}
-                {diff.last_reason && (
+                {diff.last_reason != null && (
                   <div className="rounded border border-border bg-surface-light p-2">
                     <span className="text-foreground/50">Last reason:</span>{" "}
                     <span className="text-foreground/70">{String(diff.last_reason)}</span>
