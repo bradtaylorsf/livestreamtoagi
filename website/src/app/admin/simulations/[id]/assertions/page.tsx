@@ -74,13 +74,19 @@ export default function SimulationAssertionsPage() {
         )}
       </div>
 
-      {/* Summary Bar */}
-      {summary && <AssertionSummaryBar summary={summary} />}
+      {/* Summary Bar — only show when we have assertions */}
+      {summary && assertions.length > 0 && <AssertionSummaryBar summary={summary} />}
 
       {/* Empty state */}
       {assertions.length === 0 ? (
         <div className="text-center py-12 text-foreground/40">
-          <p>No assertion results found for this simulation.</p>
+          {sim?.status === "completed" ? (
+            <p>No assertions were configured for this simulation.</p>
+          ) : sim?.status === "running" ? (
+            <p>Assertions will appear after the simulation completes.</p>
+          ) : (
+            <p>No assertion results found for this simulation.</p>
+          )}
         </div>
       ) : (
         <>

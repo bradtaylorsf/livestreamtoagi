@@ -432,7 +432,20 @@ async def get_simulation_assertions(
     """All assertion results for a simulation."""
     from core.repos.assertion_repo import AssertionRepo
     repo = AssertionRepo(db)
-    return await repo.get_by_simulation(sim_id)
+    rows = await repo.get_by_simulation(sim_id)
+    # Transform DB fields to match frontend AssertionResult interface
+    for row in rows:
+        passed = row.pop("passed", False)
+        severity = row.get("severity", "warning")
+        if passed:
+            row["status"] = "pass"
+        elif severity == "warning" or severity == "info":
+            row["status"] = "warning"
+        else:
+            row["status"] = "fail"
+        if "error_message" in row:
+            row["message"] = row.pop("error_message")
+    return rows
 
 
 @router.get("/simulations/{sim_id}/assertions/summary")
@@ -443,7 +456,13 @@ async def get_simulation_assertions_summary(
     """Pass/fail/warn summary for simulation assertions."""
     from core.repos.assertion_repo import AssertionRepo
     repo = AssertionRepo(db)
-    return await repo.get_pass_rates(sim_id)
+    rates = await repo.get_pass_rates(sim_id)
+    # Transform to match frontend AssertionSummary interface
+    return {
+        "passed": rates.get("passed", 0),
+        "failed": rates.get("failed_error", 0),
+        "warnings": rates.get("failed_warning", 0) + rates.get("failed_info", 0),
+    }
 
 
 @router.get("/simulations/{sim_id}/social-graph")
