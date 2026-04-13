@@ -427,22 +427,22 @@ export default function EvalsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-foreground/50">
-                  <th className="px-4 py-2 font-medium">Compare</th>
-                  <th className="px-4 py-2 font-medium">Date</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Compare</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Date</th>
                   {isAdmin && (
-                    <th className="px-4 py-2 font-medium">Simulation</th>
+                    <th scope="col" className="px-4 py-2 font-medium">Simulation</th>
                   )}
                   {isAdmin && (
-                    <th className="px-4 py-2 font-medium">Suite</th>
+                    <th scope="col" className="px-4 py-2 font-medium">Suite</th>
                   )}
-                  <th className="px-4 py-2 font-medium text-right">Score</th>
-                  <th className="px-4 py-2 font-medium text-right">Cost</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Score</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
                   {isAdmin && (
-                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th scope="col" className="px-4 py-2 font-medium">Status</th>
                   )}
-                  <th className="px-4 py-2 font-medium">Model Versions</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Model Versions</th>
                   {isAdmin && (
-                    <th className="px-4 py-2 font-medium">Actions</th>
+                    <th scope="col" className="px-4 py-2 font-medium">Actions</th>
                   )}
                 </tr>
               </thead>

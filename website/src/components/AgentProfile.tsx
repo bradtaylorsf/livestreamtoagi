@@ -11,6 +11,8 @@ export default function AgentProfile({ agent }: Props) {
       <div
         className="w-32 h-32 sm:w-48 sm:h-48 rounded shrink-0 flex items-center justify-center font-pixel text-3xl text-white/80 mx-auto sm:mx-0"
         style={{ backgroundColor: agent.color }}
+        role="img"
+        aria-label={`${agent.name} avatar`}
       >
         {agent.name[0]}
       </div>
