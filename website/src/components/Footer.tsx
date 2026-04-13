@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/agents", label: "Agents" },
   { href: "/world", label: "World" },
   { href: "/contribute", label: "Contribute" },
+  { href: "/donate", label: "Donate" },
   { href: "https://github.com/bradtaylor/livestreamtoagi", label: "GitHub", external: true },
 ];
 

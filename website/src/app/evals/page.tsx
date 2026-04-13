@@ -429,9 +429,7 @@ export default function EvalsPage() {
                 <tr className="border-b border-border text-left text-foreground/50">
                   <th scope="col" className="px-4 py-2 font-medium">Compare</th>
                   <th scope="col" className="px-4 py-2 font-medium">Date</th>
-                  {isAdmin && (
-                    <th scope="col" className="px-4 py-2 font-medium">Simulation</th>
-                  )}
+                  <th scope="col" className="px-4 py-2 font-medium">Simulation</th>
                   {isAdmin && (
                     <th scope="col" className="px-4 py-2 font-medium">Suite</th>
                   )}
@@ -482,16 +480,23 @@ export default function EvalsPage() {
                       <td className="px-4 py-2 text-foreground/60 text-xs">
                         {run.date}
                       </td>
-                      {isAdmin && (
-                        <td className="px-4 py-2">
+                      <td className="px-4 py-2 text-xs">
+                        {isAdmin ? (
                           <Link
                             href={`/admin/simulations/${run.simulation_id}/evals`}
-                            className="text-neon-cyan hover:underline text-xs"
+                            className="text-neon-cyan hover:underline"
                           >
-                            {run.simulation_id.slice(0, 8)}...
+                            {run.simulation_name || run.simulation_id.slice(0, 8) + "..."}
                           </Link>
-                        </td>
-                      )}
+                        ) : (
+                          <Link
+                            href={`/simulations/${run.simulation_id}`}
+                            className="text-neon-cyan hover:underline"
+                          >
+                            {run.simulation_name || run.simulation_id.slice(0, 8) + "..."}
+                          </Link>
+                        )}
+                      </td>
                       {isAdmin && (
                         <td className="px-4 py-2 text-xs text-foreground/50">
                           {adminRun?.eval_suite ?? "\u2014"}
@@ -568,13 +573,21 @@ export default function EvalsPage() {
           </p>
           <p>
             Eval prompt templates are open source.{" "}
+            <Link
+              href="/evals/prompts"
+              className="text-neon-cyan hover:underline"
+            >
+              View all evaluation prompts and scoring rubrics &rarr;
+            </Link>
+          </p>
+          <p>
             <a
               href="https://github.com/bradtaylor/livestreamtoagi/tree/main/evals"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-neon-cyan hover:underline"
+              className="text-neon-cyan/70 hover:underline text-xs"
             >
-              View eval configs on GitHub &rarr;
+              Or browse the raw YAML configs on GitHub
             </a>
           </p>
         </div>

@@ -53,6 +53,35 @@ export default function ChallengesPage() {
         </p>
       </div>
 
+      {/* Challenge lifecycle */}
+      <div className="rounded border border-border bg-surface p-4 mb-6">
+        <h2 className="font-pixel text-xs text-neon-magenta mb-3">CHALLENGE LIFECYCLE</h2>
+        <ol className="text-xs text-foreground/70 space-y-2 list-decimal list-inside">
+          <li>
+            <strong className="text-foreground/90">Submit</strong> — Describe what
+            you want the agents to work on. Your challenge is stored immediately
+            and visible on the board below.
+          </li>
+          <li>
+            <strong className="text-foreground/90">Vote</strong> — Upvote
+            challenges you find interesting. Higher-voted challenges get priority.
+          </li>
+          <li>
+            <strong className="text-foreground/90">Agent Assignment</strong>{" "}
+            <span className="inline-block rounded bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 text-[10px] font-medium">
+              COMING SOON
+            </span>{" "}
+            — During live simulations, agents will pick up pending challenges
+            based on relevance, budget, and upvotes.
+          </li>
+          <li>
+            <strong className="text-foreground/90">Results</strong> — Completed
+            challenges show which agents worked on them, the outcome, and the
+            cost.
+          </li>
+        </ol>
+      </div>
+
       {/* Research note */}
       <div className="rounded border border-neon-magenta/30 bg-neon-magenta/5 p-3 mb-8">
         <p className="text-xs text-foreground/70">
