@@ -75,10 +75,10 @@ export default function AdminDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-foreground/50">
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium text-right">Cost</th>
+                <th scope="col" className="px-4 py-2 font-medium">Name</th>
+                <th scope="col" className="px-4 py-2 font-medium">Status</th>
+                <th scope="col" className="px-4 py-2 font-medium">Date</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
               </tr>
             </thead>
             <tbody>

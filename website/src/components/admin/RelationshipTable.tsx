@@ -60,9 +60,10 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-foreground/50">
-            <th className="px-4 py-2 font-medium">Agent A</th>
-            <th className="px-4 py-2 font-medium">Agent B</th>
+            <th scope="col" className="px-4 py-2 font-medium">Agent A</th>
+            <th scope="col" className="px-4 py-2 font-medium">Agent B</th>
             <th
+              scope="col"
               className="px-4 py-2 font-medium cursor-pointer select-none hover:text-foreground/70"
               onClick={() => handleSort("sentiment_score")}
             >
@@ -70,6 +71,7 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
               <SortIndicator col="sentiment_score" />
             </th>
             <th
+              scope="col"
               className="px-4 py-2 font-medium cursor-pointer select-none hover:text-foreground/70"
               onClick={() => handleSort("trust_score")}
             >
@@ -77,13 +79,14 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
               <SortIndicator col="trust_score" />
             </th>
             <th
+              scope="col"
               className="px-4 py-2 font-medium cursor-pointer select-none hover:text-foreground/70 text-right"
               onClick={() => handleSort("interaction_count")}
             >
               Interactions
               <SortIndicator col="interaction_count" />
             </th>
-            <th className="px-4 py-2 font-medium">Summary</th>
+            <th scope="col" className="px-4 py-2 font-medium">Summary</th>
           </tr>
         </thead>
         <tbody>

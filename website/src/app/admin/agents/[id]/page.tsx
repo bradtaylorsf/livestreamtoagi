@@ -564,11 +564,11 @@ function ConversationsTab({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-foreground/50">
-                <th className="px-4 py-2 font-medium">Topic</th>
-                <th className="px-4 py-2 font-medium">Participants</th>
-                <th className="px-4 py-2 font-medium text-right">Turns</th>
-                <th className="px-4 py-2 font-medium text-right">Agent Turns</th>
-                <th className="px-4 py-2 font-medium">Date</th>
+                <th scope="col" className="px-4 py-2 font-medium">Topic</th>
+                <th scope="col" className="px-4 py-2 font-medium">Participants</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Turns</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Agent Turns</th>
+                <th scope="col" className="px-4 py-2 font-medium">Date</th>
               </tr>
             </thead>
             <tbody>
@@ -804,8 +804,8 @@ function CostsTab({ data }: { data: AgentCostBreakdown | null }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-foreground/50">
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 font-medium text-right">Cost</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Date</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -838,9 +838,9 @@ function CostsTab({ data }: { data: AgentCostBreakdown | null }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-foreground/50">
-                  <th className="px-4 py-2 font-medium">Type</th>
-                  <th className="px-4 py-2 font-medium text-right">Tokens</th>
-                  <th className="px-4 py-2 font-medium text-right">Cost</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Type</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Tokens</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
                 </tr>
               </thead>
               <tbody>

@@ -144,14 +144,14 @@ export default function SimulationsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-foreground/50">
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Duration</th>
-                <th className="px-4 py-2 font-medium text-right">Convos</th>
-                <th className="px-4 py-2 font-medium text-right">Turns</th>
-                <th className="px-4 py-2 font-medium text-right">Cost</th>
-                <th className="px-4 py-2 font-medium text-right">Flags</th>
+                <th scope="col" className="px-4 py-2 font-medium">Name</th>
+                <th scope="col" className="px-4 py-2 font-medium">Status</th>
+                <th scope="col" className="px-4 py-2 font-medium">Date</th>
+                <th scope="col" className="px-4 py-2 font-medium">Duration</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Convos</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Turns</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Flags</th>
               </tr>
             </thead>
             <tbody>

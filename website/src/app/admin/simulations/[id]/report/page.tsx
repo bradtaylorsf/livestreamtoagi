@@ -82,11 +82,11 @@ function DayByDaySection({ data }: { data: Record<string, unknown> }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-foreground/50">
-            <th className="px-4 py-2 font-medium">Day</th>
-            <th className="px-4 py-2 font-medium text-right">Conversations</th>
-            <th className="px-4 py-2 font-medium text-right">Turns</th>
-            <th className="px-4 py-2 font-medium text-right">Cost</th>
-            <th className="px-4 py-2 font-medium text-right">Tools Used</th>
+            <th scope="col" className="px-4 py-2 font-medium">Day</th>
+            <th scope="col" className="px-4 py-2 font-medium text-right">Conversations</th>
+            <th scope="col" className="px-4 py-2 font-medium text-right">Turns</th>
+            <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+            <th scope="col" className="px-4 py-2 font-medium text-right">Tools Used</th>
           </tr>
         </thead>
         <tbody>
@@ -174,9 +174,9 @@ function ToolUsageSection({ data }: { data: Record<string, unknown> }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-foreground/50">
-            <th className="px-4 py-2 font-medium">Tool</th>
-            <th className="px-4 py-2 font-medium text-right">Count</th>
-            <th className="px-4 py-2 font-medium text-right">Total Cost</th>
+            <th scope="col" className="px-4 py-2 font-medium">Tool</th>
+            <th scope="col" className="px-4 py-2 font-medium text-right">Count</th>
+            <th scope="col" className="px-4 py-2 font-medium text-right">Total Cost</th>
           </tr>
         </thead>
         <tbody>
@@ -237,8 +237,8 @@ function CostAnalysisSection({ data }: { data: Record<string, unknown> }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-foreground/50">
-                <th className="px-4 py-2 font-medium">Day</th>
-                <th className="px-4 py-2 font-medium text-right">Cost</th>
+                <th scope="col" className="px-4 py-2 font-medium">Day</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -348,10 +348,10 @@ function ScorecardSection({ data }: { data: Record<string, unknown> }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-foreground/50">
-                <th className="px-4 py-2 font-medium">Criterion</th>
-                <th className="px-4 py-2 font-medium text-center">Status</th>
-                <th className="px-4 py-2 font-medium text-center">Required</th>
-                <th className="px-4 py-2 font-medium">Evidence</th>
+                <th scope="col" className="px-4 py-2 font-medium">Criterion</th>
+                <th scope="col" className="px-4 py-2 font-medium text-center">Status</th>
+                <th scope="col" className="px-4 py-2 font-medium text-center">Required</th>
+                <th scope="col" className="px-4 py-2 font-medium">Evidence</th>
               </tr>
             </thead>
             <tbody>

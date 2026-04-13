@@ -133,11 +133,11 @@ export default function CategoryDetailPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-foreground/50">
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 font-medium text-right">
+                  <th scope="col" className="px-4 py-2 font-medium">Date</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">
                     {displayName} Score
                   </th>
-                  <th className="px-4 py-2 font-medium text-right">
+                  <th scope="col" className="px-4 py-2 font-medium text-right">
                     Overall Score
                   </th>
                 </tr>

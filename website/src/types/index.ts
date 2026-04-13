@@ -137,14 +137,6 @@ export interface WorldMilestone {
   description: string;
 }
 
-export interface AgentRelationship {
-  targetId: string;
-  targetName: string;
-  sentiment: number;
-  trust: number;
-  interactionCount: number;
-}
-
 export interface AgentEvolutionEvent {
   date: string;
   type: "config_change" | "personality_drift" | "self_modification";

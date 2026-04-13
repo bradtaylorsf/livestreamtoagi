@@ -41,6 +41,12 @@ export default function RootLayout({
   return (
     <html lang="en" className={`h-full ${pixelFont.variable}`}>
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans antialiased">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:rounded focus:bg-neon-cyan focus:px-4 focus:py-2 focus:text-background focus:font-medium"
+        >
+          Skip to main content
+        </a>
         <JsonLd
           data={{
             "@context": "https://schema.org",
@@ -52,7 +58,7 @@ export default function RootLayout({
           }}
         />
         <Navigation />
-        <main className="flex-1">{children}</main>
+        <main id="main-content" className="flex-1">{children}</main>
         <Footer />
       </body>
     </html>

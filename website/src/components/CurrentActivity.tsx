@@ -58,7 +58,7 @@ export default function CurrentActivity() {
   }, []);
 
   return (
-    <div className="rounded border border-border bg-surface p-4">
+    <div className="rounded border border-border bg-surface p-4" aria-live="polite" aria-busy={loading}>
       <h3 className="font-pixel text-xs text-neon-green mb-3">
         CURRENT ACTIVITY
       </h3>
