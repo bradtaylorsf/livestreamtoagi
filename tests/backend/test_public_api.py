@@ -349,7 +349,9 @@ class TestEvalEndpoints:
                 ),
                 "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
             }],
-            # Second call: get_eval_results for this run
+            # Second call: batch-fetch simulation names
+            [{"id": sim_id, "name": "Test Simulation"}],
+            # Third call: get_eval_results for this run
             [],
         ])
         resp = client.get("/api/evals/runs")
@@ -357,6 +359,7 @@ class TestEvalEndpoints:
         data = resp.json()
         assert len(data) == 1
         assert data[0]["model_versions"]["vera"] == "anthropic/claude-haiku-4.5"
+        assert data[0]["simulation_name"] == "Test Simulation"
 
     def test_get_eval_latest_empty(self, mock_app):
         client, mock_db, *_ = mock_app
