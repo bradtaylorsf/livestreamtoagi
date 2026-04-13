@@ -151,7 +151,11 @@ export default function ArtifactsPage() {
 
   return (
     <div className="max-w-7xl">
-      <h1 className="font-pixel text-lg text-foreground mb-6">Artifacts</h1>
+      <h1 className="font-pixel text-lg text-foreground mb-2">Artifacts</h1>
+      <p className="text-sm text-foreground/50 mb-6">
+        Artifacts are things agents created during simulations — social posts, code, emails, polls,
+        memory updates, and more. Browse and filter to inspect what agents produced.
+      </p>
 
       {/* Filter Bar */}
       <div className="rounded-lg border border-border bg-surface p-4 mb-6 space-y-4">
@@ -430,8 +434,46 @@ export default function ArtifactsPage() {
 }
 
 function getTablePreview(artifact: AgentArtifact): string {
+  const input = artifact.tool_input ?? {};
+  // Try to extract meaningful text based on type
+  switch (artifact.artifact_type) {
+    case "social_post": {
+      const text = input.content ?? input.text ?? input.message;
+      if (typeof text === "string") return text.slice(0, 200);
+      break;
+    }
+    case "email": {
+      const subject = input.subject;
+      const body = input.body ?? input.content;
+      if (typeof subject === "string") return `[${subject}] ${typeof body === "string" ? body.slice(0, 150) : ""}`;
+      break;
+    }
+    case "code_execution": {
+      const code = input.code ?? input.source;
+      if (typeof code === "string") return code.slice(0, 200);
+      break;
+    }
+    case "message": {
+      const msg = input.content ?? input.text ?? input.body ?? input.message;
+      if (typeof msg === "string") return msg.slice(0, 200);
+      break;
+    }
+    case "memory_operation": {
+      const mem = input.content ?? input.memory;
+      if (typeof mem === "string") return mem.slice(0, 200);
+      break;
+    }
+    default:
+      break;
+  }
+  // Fallback to output
   const output = artifact.tool_output;
   if (output == null) return "(no output)";
   if (typeof output === "string") return output.slice(0, 200);
+  // Try common output fields before raw JSON
+  const outObj = output as Record<string, unknown>;
+  for (const key of ["result", "content", "text", "output", "description"]) {
+    if (typeof outObj[key] === "string") return (outObj[key] as string).slice(0, 200);
+  }
   return JSON.stringify(output).slice(0, 200);
 }
