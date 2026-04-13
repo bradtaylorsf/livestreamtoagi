@@ -260,6 +260,23 @@ export async function getConversationSelections(
   return request<SelectionLogEntry[]>(`/api/conversations/${id}/selections`);
 }
 
+// Eval prompts
+export interface EvalPrompt {
+  name: string;
+  description: string;
+  system: string;
+  rubric: Record<string, string>;
+  sub_scores: (string | Record<string, string>)[];
+  output_schema: Record<string, unknown>;
+  model: string;
+  temperature: number | null;
+  max_tokens: number | null;
+}
+
+export async function getEvalPrompts(): Promise<EvalPrompt[]> {
+  return request<EvalPrompt[]>("/api/evals/prompts");
+}
+
 // Evals (public read-only)
 export interface PublicEvalRun {
   id: string;

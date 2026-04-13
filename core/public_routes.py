@@ -598,6 +598,57 @@ async def get_blog_post(slug: str) -> BlogPostDetail:
     return post
 
 
+# ── Eval Prompt Endpoints ──────────────────────────────────────
+
+
+@router.get("/evals/prompts")
+async def get_eval_prompts() -> list[dict[str, Any]]:
+    """Return all eval category prompts for public display."""
+    from core.eval.prompt_loader import discover_categories, load_prompt
+
+    categories = discover_categories()
+    result = []
+    for cat in categories:
+        try:
+            data = load_prompt(cat)
+            result.append({
+                "name": data.get("name", cat),
+                "description": data.get("description", ""),
+                "system": data.get("system", ""),
+                "rubric": data.get("rubric", {}),
+                "sub_scores": data.get("sub_scores", []),
+                "output_schema": data.get("output_schema", {}),
+                "model": data.get("model", ""),
+                "temperature": data.get("temperature"),
+                "max_tokens": data.get("max_tokens"),
+            })
+        except Exception:
+            logger.warning("Failed to load eval prompt for %s", cat)
+    return result
+
+
+@router.get("/evals/prompts/{category}")
+async def get_eval_prompt(category: str) -> dict[str, Any]:
+    """Return a single eval category prompt."""
+    from core.eval.prompt_loader import load_prompt
+
+    try:
+        data = load_prompt(category)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Eval prompt '{category}' not found")
+    return {
+        "name": data.get("name", category),
+        "description": data.get("description", ""),
+        "system": data.get("system", ""),
+        "rubric": data.get("rubric", {}),
+        "sub_scores": data.get("sub_scores", []),
+        "output_schema": data.get("output_schema", {}),
+        "model": data.get("model", ""),
+        "temperature": data.get("temperature"),
+        "max_tokens": data.get("max_tokens"),
+    }
+
+
 # ── Eval Endpoints ──────────────────────────────────────────────
 
 

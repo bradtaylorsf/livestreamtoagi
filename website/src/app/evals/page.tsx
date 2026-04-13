@@ -568,13 +568,21 @@ export default function EvalsPage() {
           </p>
           <p>
             Eval prompt templates are open source.{" "}
+            <Link
+              href="/evals/prompts"
+              className="text-neon-cyan hover:underline"
+            >
+              View all evaluation prompts and scoring rubrics &rarr;
+            </Link>
+          </p>
+          <p>
             <a
               href="https://github.com/bradtaylor/livestreamtoagi/tree/main/evals"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-neon-cyan hover:underline"
+              className="text-neon-cyan/70 hover:underline text-xs"
             >
-              View eval configs on GitHub &rarr;
+              Or browse the raw YAML configs on GitHub
             </a>
           </p>
         </div>
