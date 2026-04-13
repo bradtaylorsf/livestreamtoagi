@@ -216,6 +216,36 @@ def test_scorecard_result_not_ready():
     assert d["required_passed"] == 1
 
 
+def test_scorecard_report_completeness_pass():
+    from core.reporting.scorecard import LaunchScorecard
+
+    scorecard = LaunchScorecard.__new__(LaunchScorecard)
+    scorecard._report_sections = [
+        {"title": "Tool Usage", "data": {"by_tool": {"web_search": {"count": 5}}, "total_invocations": 5}},
+        {"title": "Memory Evolution", "data": {"core_memory_changes": {"rex": 2}}},
+        {"title": "Relationship Evolution", "data": {"available": True, "matrix": {"rex": {"fork": {}}}}},
+        {"title": "Cost Analysis", "data": {"by_day": {"2026-01-05": "0.01"}}},
+    ]
+    result = scorecard._check_report_completeness()
+    assert result.passed is True
+
+
+def test_scorecard_report_completeness_fail():
+    from core.reporting.scorecard import LaunchScorecard
+
+    scorecard = LaunchScorecard.__new__(LaunchScorecard)
+    scorecard._report_sections = [
+        {"title": "Tool Usage", "data": {"by_tool": {}, "total_invocations": 0}},
+        {"title": "Memory Evolution", "data": {}},
+        {"title": "Relationship Evolution", "data": {"available": False}},
+        {"title": "Cost Analysis", "data": {}},
+    ]
+    result = scorecard._check_report_completeness()
+    assert result.passed is False
+    assert "tool usage" in result.evidence
+    assert "memory evolution" in result.evidence
+
+
 def test_scorecard_optional_failures_dont_block():
     result = ScorecardResult(
         ready=True,

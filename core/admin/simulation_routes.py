@@ -619,6 +619,7 @@ async def get_simulation_report(
         simulation_id=str(sim_id),
         assertion_repo=assertion_repo,
         relationship_repo=relationship_repo,
+        report_sections=[{"title": s.title, "data": s.data} for s in report.sections],
     )
     scorecard_result = await scorecard.evaluate()
     report.sections.append(ReportSection(

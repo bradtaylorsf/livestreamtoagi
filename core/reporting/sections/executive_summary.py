@@ -34,8 +34,8 @@ def generate_executive_summary(
         trajectory = "insufficient_data"
 
     return {
-        "simulated_duration": str(sim.get("simulated_duration", "N/A")),
-        "real_duration": str(sim.get("real_duration", "N/A")),
+        "simulated_duration": str(sim.get("simulated_duration") or "N/A"),
+        "real_duration": str(sim.get("real_duration") or "N/A"),
         "total_cost": str(total_cost),
         "total_conversations": len(conversations),
         "total_turns": total_turns,
