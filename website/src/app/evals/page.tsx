@@ -13,8 +13,11 @@ import {
   type PublicEvalRun,
   type EvalHistoryPoint,
 } from "@/lib/api";
+import { fetchAllEvalRuns, exportEval, compareEvals } from "@/lib/admin-api";
+import type { EvalRun } from "@/types/admin";
 import { scoreColor } from "@/lib/score-utils";
 import { exportAsJSON, exportAsCSV } from "@/lib/export";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "How original and varied are agent outputs? Measures novelty in dialogue, artifacts, and problem-solving.",
@@ -43,49 +46,75 @@ function calculateTrend(history: EvalHistoryPoint[]): "up" | "down" | "flat" {
 }
 
 export default function EvalsPage() {
+  const { isAdmin } = useIsAdmin();
   const [categories, setCategories] = useState<EvalCategoryCardProps[]>([]);
   const [runs, setRuns] = useState<PublicEvalRun[]>([]);
+  const [adminRuns, setAdminRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [compareA, setCompareA] = useState<string | null>(null);
   const [compareB, setCompareB] = useState<string | null>(null);
+  const [comparisonData, setComparisonData] = useState<{run_a: EvalRun; run_b: EvalRun} | null>(null);
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterModel, setFilterModel] = useState<string>("");
 
+  // Admin comparison using the admin API for detailed run data
   useEffect(() => {
-    Promise.all([
-      getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
-      getEvalRuns().catch(() => []),
-    ])
-      .then(async ([cats, evalRuns]) => {
-        setRuns(evalRuns);
+    if (isAdmin && compareA && compareB) {
+      compareEvals(compareA, compareB)
+        .then(setComparisonData)
+        .catch(() => setComparisonData(null));
+    } else {
+      setComparisonData(null);
+    }
+  }, [isAdmin, compareA, compareB]);
 
-        // Build category cards from history data
-        const cards: EvalCategoryCardProps[] = [];
-        for (const cat of cats) {
-          let history: EvalHistoryPoint[] = [];
-          try {
-            history = await getEvalHistory(cat);
-          } catch {
-            // No history available
-          }
-          const latestScore =
-            history.length > 0 ? (history[history.length - 1].score ?? null) : null;
-          cards.push({
-            name: cat,
-            score: latestScore,
-            trend: calculateTrend(history),
-            description:
-              CATEGORY_DESCRIPTIONS[cat] ?? `Evaluation scores for ${cat.replace(/_/g, " ")}.`,
-          });
+  useEffect(() => {
+    const loadData = async () => {
+      const [cats, evalRuns] = await Promise.all([
+        getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
+        getEvalRuns().catch(() => []),
+      ]);
+
+      setRuns(evalRuns);
+
+      // If admin, also fetch admin runs for extra columns
+      if (isAdmin) {
+        fetchAllEvalRuns().then(setAdminRuns).catch(() => {});
+      }
+
+      // Build category cards from history data
+      const cards: EvalCategoryCardProps[] = [];
+      for (const cat of cats) {
+        let history: EvalHistoryPoint[] = [];
+        try {
+          history = await getEvalHistory(cat);
+        } catch {
+          // No history available
         }
-        setCategories(cards);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+        const latestScore =
+          history.length > 0 ? (history[history.length - 1].score ?? null) : null;
+        cards.push({
+          name: cat,
+          score: latestScore,
+          trend: calculateTrend(history),
+          description:
+            CATEGORY_DESCRIPTIONS[cat] ?? `Evaluation scores for ${cat.replace(/_/g, " ")}.`,
+        });
+      }
+      setCategories(cards);
+      setLoading(false);
+    };
+
+    loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   const latestRun = runs[0] ?? null;
   const runAData = compareA ? runs.find((r) => r.id === compareA) : null;
   const runBData = compareB ? runs.find((r) => r.id === compareB) : null;
+
+  // Map admin run data by ID for extra columns
+  const adminRunMap = new Map(adminRuns.map((r) => [r.id, r]));
 
   const handleExport = (format: "json" | "csv") => {
     if (runs.length === 0) return;
@@ -107,6 +136,23 @@ export default function EvalsPage() {
         ),
       }));
       exportAsCSV(flat, "eval-data.csv");
+    }
+  };
+
+  const handleExportRun = async (evalId: string) => {
+    try {
+      const data = await exportEval(evalId);
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `eval-${evalId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Export failed silently
     }
   };
 
@@ -237,8 +283,8 @@ export default function EvalsPage() {
         </div>
       </section>
 
-      {/* A/B Comparison */}
-      {runAData && runBData && (
+      {/* A/B Comparison — public view */}
+      {!isAdmin && runAData && runBData && (
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-pixel text-xs text-neon-magenta">
@@ -255,6 +301,57 @@ export default function EvalsPage() {
             </button>
           </div>
           <ABComparisonView runA={runAData} runB={runBData} />
+        </section>
+      )}
+
+      {/* A/B Comparison — admin detailed view with per-category breakdowns */}
+      {isAdmin && comparisonData && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-pixel text-xs text-neon-magenta">
+              A/B COMPARISON
+            </h2>
+            <button
+              onClick={() => {
+                setCompareA(null);
+                setCompareB(null);
+              }}
+              className="text-xs text-foreground/40 hover:text-foreground/60"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="rounded-lg border border-neon-cyan/30 bg-neon-cyan/5 p-4">
+            <div className="grid grid-cols-2 gap-4">
+              {[comparisonData.run_a, comparisonData.run_b].map((run) => (
+                <div key={run.id} className="space-y-1">
+                  <div className="text-xs text-foreground/50">
+                    {run.started_at
+                      ? new Date(run.started_at).toLocaleString()
+                      : run.id.slice(0, 8)}
+                  </div>
+                  <div className="font-mono text-lg">
+                    {run.overall_score != null
+                      ? Number(run.overall_score).toFixed(1)
+                      : "\u2014"}
+                  </div>
+                  {run.results?.map((r) => (
+                    <div
+                      key={r.category}
+                      className="flex justify-between text-xs text-foreground/60"
+                    >
+                      <span className="capitalize">
+                        {r.category.replace(/_/g, " ")}
+                      </span>
+                      <span className="font-mono">
+                        {r.score != null ? Number(r.score).toFixed(1) : "\u2014"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
       )}
 
@@ -332,9 +429,21 @@ export default function EvalsPage() {
                 <tr className="border-b border-border text-left text-foreground/50">
                   <th className="px-4 py-2 font-medium">Compare</th>
                   <th className="px-4 py-2 font-medium">Date</th>
+                  {isAdmin && (
+                    <th className="px-4 py-2 font-medium">Simulation</th>
+                  )}
+                  {isAdmin && (
+                    <th className="px-4 py-2 font-medium">Suite</th>
+                  )}
                   <th className="px-4 py-2 font-medium text-right">Score</th>
                   <th className="px-4 py-2 font-medium text-right">Cost</th>
+                  {isAdmin && (
+                    <th className="px-4 py-2 font-medium">Status</th>
+                  )}
                   <th className="px-4 py-2 font-medium">Model Versions</th>
+                  {isAdmin && (
+                    <th className="px-4 py-2 font-medium">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -346,6 +455,7 @@ export default function EvalsPage() {
                   const isSelected =
                     run.id === compareA || run.id === compareB;
                   const changedModels = getChangedModels(idx, filteredRuns);
+                  const adminRun = adminRunMap.get(run.id);
                   return (
                     <tr
                       key={run.id}
@@ -372,6 +482,21 @@ export default function EvalsPage() {
                       <td className="px-4 py-2 text-foreground/60 text-xs">
                         {run.date}
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-2">
+                          <Link
+                            href={`/admin/simulations/${run.simulation_id}/evals`}
+                            className="text-neon-cyan hover:underline text-xs"
+                          >
+                            {run.simulation_id.slice(0, 8)}...
+                          </Link>
+                        </td>
+                      )}
+                      {isAdmin && (
+                        <td className="px-4 py-2 text-xs text-foreground/50">
+                          {adminRun?.eval_suite ?? "\u2014"}
+                        </td>
+                      )}
                       <td className="px-4 py-2 text-right font-mono">
                         {score != null ? (
                           <span className={scoreColor(score)}>
@@ -384,6 +509,11 @@ export default function EvalsPage() {
                       <td className="px-4 py-2 text-right font-mono text-foreground/50">
                         ${Number(run.cost).toFixed(4)}
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-2 text-xs text-foreground/50">
+                          {adminRun?.status ?? "\u2014"}
+                        </td>
+                      )}
                       <td className="px-4 py-2" data-testid="model-versions">
                         <div className="flex flex-wrap gap-1">
                           {Object.entries(run.model_versions ?? {}).map(
@@ -407,6 +537,16 @@ export default function EvalsPage() {
                           )}
                         </div>
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-2">
+                          <button
+                            onClick={() => handleExportRun(run.id)}
+                            className="text-xs text-foreground/40 hover:text-foreground/60"
+                          >
+                            Export
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
