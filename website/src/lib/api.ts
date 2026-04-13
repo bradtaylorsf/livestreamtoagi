@@ -11,9 +11,11 @@ import type {
   Clip,
   ConversationDetail,
   ConversationSummary,
+  CoreMemoryPublic,
   JournalEntry,
   LoreEvent,
   PaginatedResponse,
+  RecallMemoryPublic,
   SelectionLogEntry,
   Stats,
   WorldChunk,
@@ -139,6 +141,25 @@ export async function getAgentArtifacts(
   const qs = searchParams.toString();
   return request<PaginatedResponse<AgentArtifactResponse>>(
     `/api/agents/${id}/artifacts${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getAgentCoreMemory(
+  id: string,
+): Promise<CoreMemoryPublic> {
+  return request<CoreMemoryPublic>(`/api/agents/${id}/core-memory`);
+}
+
+export async function getAgentRecallMemories(
+  id: string,
+  params?: { limit?: number; offset?: number },
+): Promise<PaginatedResponse<RecallMemoryPublic>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<RecallMemoryPublic>>(
+    `/api/agents/${id}/recall-memories${qs ? `?${qs}` : ""}`,
   );
 }
 

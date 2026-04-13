@@ -398,6 +398,52 @@ async def get_agent_artifacts(
     }
 
 
+@router.get("/agents/{agent_id}/core-memory")
+async def get_agent_core_memory(agent_id: str) -> dict[str, Any]:
+    """Current core memory content (read-only, no version history)."""
+    db = _get_db()
+    from core.repos.memory_repo import MemoryRepo
+    memory_repo = MemoryRepo(db)
+
+    current = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
+    return {
+        "current_content": current.content if current else "",
+        "last_updated": current.last_updated.isoformat() if current and current.last_updated else None,
+    }
+
+
+@router.get("/agents/{agent_id}/recall-memories")
+async def get_agent_recall_memories(
+    agent_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Paginated recall memories (read-only, embeddings hidden)."""
+    db = _get_db()
+    from core.repos.memory_repo import MemoryRepo
+    memory_repo = MemoryRepo(db)
+
+    memories, total = await memory_repo.get_recall_memories_paginated(
+        agent_id, limit=limit, offset=offset, simulation_id=LIVE_SIMULATION_ID,
+    )
+
+    items = []
+    for m in memories:
+        d = m.model_dump()
+        d.pop("embedding", None)
+        # Serialize datetimes
+        for key in ("created_at", "updated_at", "last_accessed"):
+            if key in d and hasattr(d[key], "isoformat"):
+                d[key] = d[key].isoformat()
+        # Serialize UUIDs
+        for key in ("id", "simulation_id"):
+            if key in d and d[key] is not None:
+                d[key] = str(d[key])
+        items.append(d)
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @router.get("/agents/{agent_id}/evolution")
 async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
     svc = _get_services()
