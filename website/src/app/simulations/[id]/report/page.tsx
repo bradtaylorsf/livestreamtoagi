@@ -4,10 +4,15 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getSimulationReport } from "@/lib/api";
+import ToolUsageSection from "@/components/ToolUsageSection";
 
 interface ReportSection {
   title: string;
   data: Record<string, unknown>;
+}
+
+function isToolUsageSection(title: string): boolean {
+  return title.toLowerCase().includes("tool");
 }
 
 export default function SimulationReportPage() {
@@ -120,9 +125,13 @@ export default function SimulationReportPage() {
             </button>
             {!collapsed && (
               <div className="px-4 pb-4">
-                <pre className="text-xs text-foreground/60 font-mono whitespace-pre-wrap overflow-x-auto max-h-96">
-                  {JSON.stringify(section.data, null, 2)}
-                </pre>
+                {isToolUsageSection(section.title) ? (
+                  <ToolUsageSection data={section.data} />
+                ) : (
+                  <pre className="text-xs text-foreground/60 font-mono whitespace-pre-wrap overflow-x-auto max-h-96">
+                    {JSON.stringify(section.data, null, 2)}
+                  </pre>
+                )}
               </div>
             )}
           </div>
