@@ -37,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: "/safety", label: "Safety" },
       { href: "/ethics", label: "Ethics" },
       { href: "/contribute", label: "Contribute" },
+      { href: "/donate", label: "Donate" },
     ],
   },
 ];
