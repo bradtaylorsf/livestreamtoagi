@@ -27,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: "Challenges", href: "/challenges" },
+  { label: "Simulations", href: "/simulations" },
   { label: "Evals", href: "/evals" },
   { label: "Blog", href: "/blog" },
   {

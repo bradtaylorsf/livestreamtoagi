@@ -976,3 +976,249 @@ async def get_lore(
     ]
 
     return {"items": items, "total": total or 0, "limit": limit, "offset": offset}
+
+
+# ── Public Simulation Endpoints (read-only) ─────────────────────
+
+
+@router.get("/simulations")
+async def get_simulations(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """List simulations (completed and running only, public read-only)."""
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+    sim_repo = SimulationRepo(db)
+
+    simulations = await sim_repo.list(
+        status=None, limit=limit, offset=offset,
+    )
+    # Filter to only completed/running for public view
+    public_statuses = {"completed", "running"}
+    filtered = [s for s in simulations if s.status in public_statuses]
+    total = await sim_repo.count()
+
+    return {
+        "items": [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "description": s.description,
+                "status": s.status,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                "real_duration": str(s.real_duration) if s.real_duration else None,
+                "total_conversations": s.total_conversations,
+                "total_turns": s.total_turns,
+                "total_cost": s.total_cost,
+                "total_artifacts": s.total_artifacts,
+                "agents_participated": s.agents_participated,
+            }
+            for s in filtered
+        ],
+        "total": total or 0,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/simulations/{sim_id}")
+async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
+    """Public simulation detail."""
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+    sim_repo = SimulationRepo(db)
+
+    sim = await sim_repo.get(uuid.UUID(sim_id))
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    return {
+        "id": str(sim.id),
+        "name": sim.name,
+        "description": sim.description,
+        "config": sim.config,
+        "status": sim.status,
+        "started_at": sim.started_at.isoformat() if sim.started_at else None,
+        "completed_at": sim.completed_at.isoformat() if sim.completed_at else None,
+        "real_duration": str(sim.real_duration) if sim.real_duration else None,
+        "simulated_duration": str(sim.simulated_duration) if sim.simulated_duration else None,
+        "total_conversations": sim.total_conversations,
+        "total_turns": sim.total_turns,
+        "total_tokens": sim.total_tokens,
+        "total_cost": sim.total_cost,
+        "total_artifacts": sim.total_artifacts,
+        "total_overseer_flags": sim.total_overseer_flags,
+        "agents_participated": sim.agents_participated,
+    }
+
+
+@router.get("/simulations/{sim_id}/report")
+async def get_simulation_report(
+    sim_id: str,
+    days: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Public simulation report."""
+    db = _get_db()
+
+    from core.repos.relationship_repo import RelationshipRepo
+    from core.reporting.timeline_reporter import TimelineReporter
+
+    relationship_repo = RelationshipRepo(db)
+    reporter = TimelineReporter(
+        db=db,
+        simulation_id=sim_id,
+        relationship_repo=relationship_repo,
+    )
+    day_list = None
+    if days:
+        try:
+            day_list = [int(d.strip()) for d in days.split(",")]
+        except ValueError:
+            pass
+    report = await reporter.generate(days=day_list, format="json")
+
+    from core.reporting.scorecard import LaunchScorecard
+    from core.reporting.timeline_reporter import ReportSection
+    from core.repos.assertion_repo import AssertionRepo
+
+    assertion_repo = AssertionRepo(db)
+    scorecard = LaunchScorecard(
+        db=db,
+        simulation_id=sim_id,
+        assertion_repo=assertion_repo,
+        relationship_repo=relationship_repo,
+    )
+    scorecard_result = await scorecard.evaluate()
+    report.sections.append(ReportSection(
+        title="Launch Readiness Scorecard",
+        data=scorecard_result.to_dict(),
+    ))
+
+    return report.to_dict()
+
+
+@router.get("/simulations/{sim_id}/assertions")
+async def get_simulation_assertions(sim_id: str) -> list[dict[str, Any]]:
+    """Public assertion results for a simulation."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+    repo = AssertionRepo(db)
+    return await repo.get_by_simulation(uuid.UUID(sim_id))
+
+
+@router.get("/simulations/{sim_id}/assertions/summary")
+async def get_simulation_assertions_summary(sim_id: str) -> dict[str, Any]:
+    """Public pass/fail/warn summary for simulation assertions."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+    repo = AssertionRepo(db)
+    return await repo.get_pass_rates(uuid.UUID(sim_id))
+
+
+@router.get("/simulations/{sim_id}/evals")
+async def get_simulation_evals(sim_id: str) -> list[dict[str, Any]]:
+    """Public eval results for a simulation."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+    eval_repo = EvalRepo(db)
+
+    runs = await eval_repo.get_eval_runs(uuid.UUID(sim_id))
+    result = []
+    for run in runs:
+        results = await eval_repo.get_eval_results(run.id)
+        result.append({
+            "id": str(run.id),
+            "simulation_id": str(run.simulation_id),
+            "status": run.status,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "overall_score": float(run.overall_score) if run.overall_score is not None else None,
+            "cost": float(run.cost),
+            "results": [
+                {
+                    "category": r.category,
+                    "score": float(r.score) if r.score is not None else None,
+                    "reasoning": r.reasoning,
+                }
+                for r in results
+            ],
+        })
+    return result
+
+
+@router.get("/simulations/{sim_id}/social-graph")
+async def get_simulation_social_graph(sim_id: str) -> list[dict[str, Any]]:
+    """Public social graph for a simulation."""
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+    repo = RelationshipRepo(db)
+    relationships = await repo.get_social_graph(uuid.UUID(sim_id))
+    return [r.model_dump(mode="json") for r in relationships]
+
+
+@router.get("/simulations/{sim_id}/snapshots")
+async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
+    """Public list of memory snapshots for a simulation."""
+    import json as _json
+    from pathlib import Path
+
+    snapshots_dir = Path("snapshots")
+    results: list[dict[str, Any]] = []
+    if not snapshots_dir.exists():
+        return results
+
+    for f in sorted(snapshots_dir.glob("*.json"), reverse=True):
+        try:
+            data = _json.loads(f.read_text())
+            source_id = data.get("source_simulation_id", "")
+            if source_id == sim_id or not source_id:
+                agents = data.get("agents", {})
+                results.append({
+                    "filename": f.name,
+                    "simulation_id": source_id,
+                    "snapshot_at": data.get("snapshot_at", ""),
+                    "agent_count": len(agents),
+                })
+        except Exception:
+            continue
+    return results
+
+
+@router.get("/artifacts")
+async def get_public_artifacts(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    agent_id: str | None = Query(None),
+    artifact_type: str | None = Query(None, alias="type"),
+) -> dict[str, Any]:
+    """Public artifact gallery (read-only)."""
+    svc = _get_services()
+    if not svc.artifact_repo:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    agent_ids = [agent_id] if agent_id else None
+    artifacts, total = await svc.artifact_repo.get_all_artifacts(
+        simulation_id=None,
+        agent_ids=agent_ids,
+        artifact_type=artifact_type,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [
+            {
+                "id": str(a.id),
+                "agent_id": a.agent_id,
+                "tool_name": a.tool_name,
+                "artifact_type": a.artifact_type,
+                "status": a.status,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in artifacts
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
