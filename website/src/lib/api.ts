@@ -281,6 +281,7 @@ export async function getEvalPrompts(): Promise<EvalPrompt[]> {
 export interface PublicEvalRun {
   id: string;
   simulation_id: string;
+  simulation_name: string | null;
   date: string;
   overall_score: number | null;
   cost: number;

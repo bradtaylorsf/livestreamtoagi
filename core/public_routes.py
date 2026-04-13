@@ -176,6 +176,7 @@ class EvalHistoryItem(BaseModel):
 class PublicEvalRun(BaseModel):
     id: str
     simulation_id: str
+    simulation_name: str | None = None
     date: str
     overall_score: float | None = None
     cost: float = 0
@@ -661,9 +662,7 @@ async def get_evals_summary() -> list[EvalSummaryItem]:
         """SELECT DISTINCT ON (category) category, score
            FROM eval_results er
            JOIN eval_runs e ON e.id = er.eval_run_id
-           WHERE e.simulation_id = $1
            ORDER BY category, er.created_at DESC""",
-        LIVE_SIMULATION_ID,
     )
     return [
         EvalSummaryItem(
@@ -686,17 +685,16 @@ async def get_evals_history(
         rows = await db.fetch(
             """SELECT er.score, er.created_at FROM eval_results er
                JOIN eval_runs e ON e.id = er.eval_run_id
-               WHERE er.category = $1 AND e.simulation_id = $2
-               ORDER BY er.created_at DESC LIMIT $3""",
-            category, LIVE_SIMULATION_ID, limit,
+               WHERE er.category = $1
+               ORDER BY er.created_at DESC LIMIT $2""",
+            category, limit,
         )
     else:
         rows = await db.fetch(
             """SELECT er.score, er.created_at FROM eval_results er
                JOIN eval_runs e ON e.id = er.eval_run_id
-               WHERE e.simulation_id = $1
-               ORDER BY er.created_at DESC LIMIT $2""",
-            LIVE_SIMULATION_ID, limit,
+               ORDER BY er.created_at DESC LIMIT $1""",
+            limit,
         )
     return [
         EvalHistoryItem(
@@ -714,10 +712,7 @@ async def get_eval_categories() -> list[str]:
         return []
     rows = await db.fetch(
         """SELECT DISTINCT er.category FROM eval_results er
-           JOIN eval_runs e ON e.id = er.eval_run_id
-           WHERE e.simulation_id = $1
            ORDER BY er.category""",
-        LIVE_SIMULATION_ID,
     )
     return [r["category"] for r in rows]
 
@@ -733,7 +728,18 @@ async def get_eval_runs(
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    runs = await eval_repo.get_eval_runs(LIVE_SIMULATION_ID)
+    runs = await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
+
+    # Batch-fetch simulation names for all unique simulation IDs
+    sim_ids = list({run.simulation_id for run in runs})
+    sim_names: dict[uuid.UUID, str] = {}
+    if sim_ids:
+        name_rows = await db.fetch(
+            "SELECT id, name FROM simulations WHERE id = ANY($1::uuid[])",
+            sim_ids,
+        )
+        sim_names = {r["id"]: r["name"] for r in name_rows}
+
     result = []
     for run in runs:
         results = await eval_repo.get_eval_results(run.id)
@@ -751,6 +757,7 @@ async def get_eval_runs(
         result.append(PublicEvalRun(
             id=str(run.id),
             simulation_id=str(run.simulation_id),
+            simulation_name=sim_names.get(run.simulation_id),
             date=run.started_at.isoformat() if run.started_at else "",
             overall_score=float(run.overall_score) if run.overall_score is not None else None,
             cost=float(run.cost),
@@ -768,9 +775,18 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    run = await eval_repo.get_latest_eval_run(LIVE_SIMULATION_ID)
-    if run is None:
+    # Get most recent eval run across all simulations
+    runs = await eval_repo.get_all_eval_runs(limit=1, offset=0)
+    if not runs:
         return None
+    run = runs[0]
+
+    # Fetch simulation name
+    sim_row = await db.fetchrow(
+        "SELECT name FROM simulations WHERE id = $1", run.simulation_id,
+    )
+    sim_name = sim_row["name"] if sim_row else None
+
     results = await eval_repo.get_eval_results(run.id)
     flat_versions: dict[str, str] = {}
     for agent_id, models in (run.model_versions or {}).items():
@@ -785,6 +801,7 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
     return PublicEvalRun(
         id=str(run.id),
         simulation_id=str(run.simulation_id),
+        simulation_name=sim_name,
         date=run.started_at.isoformat() if run.started_at else "",
         overall_score=float(run.overall_score) if run.overall_score is not None else None,
         cost=float(run.cost),
@@ -798,15 +815,18 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
     db = _get_db()
     if not db:
         raise HTTPException(status_code=503, detail="Database unavailable")
-    from core.constants import LIVE_SIMULATION_ID
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
     run = await eval_repo.get_eval_run(uuid.UUID(run_id))
     if run is None:
         raise HTTPException(status_code=404, detail="Eval run not found")
-    if run.simulation_id != LIVE_SIMULATION_ID:
-        raise HTTPException(status_code=404, detail="Eval run not found")
+
+    sim_row = await db.fetchrow(
+        "SELECT name FROM simulations WHERE id = $1", run.simulation_id,
+    )
+    sim_name = sim_row["name"] if sim_row else None
+
     results = await eval_repo.get_eval_results(run.id)
     flat_versions: dict[str, str] = {}
     for agent_id, models in (run.model_versions or {}).items():
@@ -818,6 +838,7 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
     return PublicEvalRunDetail(
         id=str(run.id),
         simulation_id=str(run.simulation_id),
+        simulation_name=sim_name,
         date=run.started_at.isoformat() if run.started_at else "",
         overall_score=float(run.overall_score) if run.overall_score is not None else None,
         cost=float(run.cost),
