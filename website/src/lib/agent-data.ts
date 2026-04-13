@@ -252,6 +252,11 @@ const AGENTS_DATA: Record<string, AgentData> = {
   },
 };
 
+/** Canonical hex color map for all agents — derived from AGENTS_DATA. */
+export const AGENT_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(AGENTS_DATA).map(([id, data]) => [id, data.color]),
+);
+
 export function getAgentData(id: string): AgentData | undefined {
   return AGENTS_DATA[id];
 }
