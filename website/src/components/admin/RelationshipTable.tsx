@@ -33,8 +33,8 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
   }
 
   const sorted = [...relationships].sort((a, b) => {
-    const av = a[sortKey] as number;
-    const bv = b[sortKey] as number;
+    const av = (a[sortKey] as number) ?? 0;
+    const bv = (b[sortKey] as number) ?? 0;
     return sortDir === "asc" ? av - bv : bv - av;
   });
 
@@ -91,9 +91,11 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
         </thead>
         <tbody>
           {sorted.map((r, i) => {
-            const color = sentimentColor(r.sentiment_score);
-            const barWidth = Math.abs(r.sentiment_score) * 100;
-            const barLeft = r.sentiment_score < 0 ? (1 - Math.abs(r.sentiment_score)) * 50 : 50;
+            const sentiment = Number(r.sentiment_score ?? 0);
+            const trust = Number(r.trust_score ?? 0);
+            const color = sentimentColor(sentiment);
+            const barWidth = Math.abs(sentiment) * 100;
+            const barLeft = sentiment < 0 ? (1 - Math.abs(sentiment)) * 50 : 50;
 
             return (
               <tr
@@ -113,8 +115,8 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
                       className="font-mono text-xs tabular-nums"
                       style={{ color }}
                     >
-                      {r.sentiment_score >= 0 ? "+" : ""}
-                      {r.sentiment_score.toFixed(2)}
+                      {sentiment >= 0 ? "+" : ""}
+                      {sentiment.toFixed(2)}
                     </span>
                     <div className="relative w-16 h-2 rounded-full bg-foreground/10 overflow-hidden">
                       <div
@@ -129,7 +131,7 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
                   </div>
                 </td>
                 <td className="px-4 py-2 font-mono text-xs text-foreground/60">
-                  {r.trust_score.toFixed(2)}
+                  {trust.toFixed(2)}
                 </td>
                 <td className="px-4 py-2 text-right font-mono text-foreground/60">
                   {r.interaction_count}
