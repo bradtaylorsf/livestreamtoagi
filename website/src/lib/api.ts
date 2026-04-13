@@ -251,7 +251,8 @@ export interface PublicEvalRun {
   results?: { category: string; score: number | null }[];
 }
 
-export type { EvalHistoryPoint } from "@/types/admin";
+import type { EvalHistoryPoint } from "@/types/admin";
+export type { EvalHistoryPoint };
 
 export async function getEvalCategories(): Promise<string[]> {
   return request<string[]>("/api/evals/categories");
