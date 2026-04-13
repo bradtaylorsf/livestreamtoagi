@@ -11,9 +11,11 @@ import type {
   Clip,
   ConversationDetail,
   ConversationSummary,
+  CoreMemoryPublic,
   JournalEntry,
   LoreEvent,
   PaginatedResponse,
+  RecallMemoryPublic,
   SelectionLogEntry,
   Stats,
   WorldChunk,
@@ -139,6 +141,25 @@ export async function getAgentArtifacts(
   const qs = searchParams.toString();
   return request<PaginatedResponse<AgentArtifactResponse>>(
     `/api/agents/${id}/artifacts${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getAgentCoreMemory(
+  id: string,
+): Promise<CoreMemoryPublic> {
+  return request<CoreMemoryPublic>(`/api/agents/${id}/core-memory`);
+}
+
+export async function getAgentRecallMemories(
+  id: string,
+  params?: { limit?: number; offset?: number },
+): Promise<PaginatedResponse<RecallMemoryPublic>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<RecallMemoryPublic>>(
+    `/api/agents/${id}/recall-memories${qs ? `?${qs}` : ""}`,
   );
 }
 
@@ -303,6 +324,107 @@ export async function getClips(params?: {
   if (params?.category) searchParams.set("category", params.category);
   const qs = searchParams.toString();
   return request<Clip[]>(`/api/clips${qs ? `?${qs}` : ""}`);
+}
+
+// Simulations (public read-only)
+export interface PublicSimulation {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  real_duration: string | null;
+  total_conversations: number;
+  total_turns: number;
+  total_cost: string;
+  total_artifacts: number;
+  agents_participated: string[];
+}
+
+export interface PublicSimulationDetail extends PublicSimulation {
+  config: Record<string, unknown>;
+  simulated_duration: string | null;
+  total_tokens: number;
+  total_overseer_flags: number;
+}
+
+export async function getSimulations(
+  limit = 20,
+  offset = 0,
+): Promise<PaginatedResponse<PublicSimulation>> {
+  return request<PaginatedResponse<PublicSimulation>>(
+    `/api/simulations?limit=${limit}&offset=${offset}`,
+  );
+}
+
+export async function getSimulation(
+  id: string,
+): Promise<PublicSimulationDetail> {
+  return request<PublicSimulationDetail>(`/api/simulations/${id}`);
+}
+
+export async function getSimulationReport(
+  id: string,
+): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/api/simulations/${id}/report`);
+}
+
+export async function getSimulationAssertions(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(
+    `/api/simulations/${id}/assertions`,
+  );
+}
+
+export async function getSimulationAssertionsSummary(
+  id: string,
+): Promise<{ passed: number; failed: number; warnings: number }> {
+  return request<{ passed: number; failed: number; warnings: number }>(
+    `/api/simulations/${id}/assertions/summary`,
+  );
+}
+
+export async function getSimulationEvals(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(
+    `/api/simulations/${id}/evals`,
+  );
+}
+
+export async function getSimulationSocialGraph(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(
+    `/api/simulations/${id}/social-graph`,
+  );
+}
+
+export async function getSimulationSnapshots(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(
+    `/api/simulations/${id}/snapshots`,
+  );
+}
+
+export async function getArtifacts(params?: {
+  limit?: number;
+  offset?: number;
+  agent_id?: string;
+  type?: string;
+}): Promise<PaginatedResponse<AgentArtifactResponse>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  if (params?.agent_id) searchParams.set("agent_id", params.agent_id);
+  if (params?.type) searchParams.set("type", params.type);
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<AgentArtifactResponse>>(
+    `/api/artifacts${qs ? `?${qs}` : ""}`,
+  );
 }
 
 export { ApiRequestError };

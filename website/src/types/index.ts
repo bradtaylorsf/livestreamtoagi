@@ -187,6 +187,20 @@ export interface AgentEvolutionResponse {
   created_at: string | null;
 }
 
+export interface CoreMemoryPublic {
+  current_content: string;
+  last_updated: string | null;
+}
+
+export interface RecallMemoryPublic {
+  id: string;
+  agent_id: string;
+  summary: string;
+  event_type: string | null;
+  importance_score: number | null;
+  created_at: string | null;
+}
+
 export type ClipCategory = "funny" | "dramatic" | "technical" | "philosophical";
 
 export interface Clip {
