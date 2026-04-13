@@ -19,7 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Home", href: "/" },
   { label: "Agents", href: "/agents" },
   {
-    label: "Watch",
+    label: "Explore",
     children: [
       { href: "/world", label: "World" },
       { href: "/conversations", label: "Conversations" },
@@ -138,7 +138,7 @@ function DropdownMenu({
           ref={menuRef}
           role="menu"
           onKeyDown={handleMenuKeyDown}
-          className="absolute right-0 top-full mt-1 w-44 rounded border border-border bg-surface shadow-lg py-1 z-50"
+          className="absolute left-1/2 -translate-x-1/2 top-full mt-1 w-44 rounded border border-border bg-surface shadow-lg py-1 z-50"
         >
           {item.children!.map((child) => {
             const active = pathname.startsWith(child.href);
