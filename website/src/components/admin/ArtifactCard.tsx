@@ -5,12 +5,50 @@ import type { AgentArtifact } from "@/types/admin";
 
 
 function getPreview(artifact: AgentArtifact): string {
+  const input = artifact.tool_input ?? {};
+
+  // Try to extract meaningful text based on artifact type
+  let text: string | null = null;
+  switch (artifact.artifact_type) {
+    case "social_post":
+      text = (input.content ?? input.text ?? input.message) as string | null;
+      break;
+    case "email":
+      text = input.subject
+        ? `[${input.subject}] ${String(input.body ?? input.content ?? "")}`
+        : (input.body ?? input.content) as string | null;
+      break;
+    case "code_execution":
+      text = (input.code ?? input.source) as string | null;
+      break;
+    case "message":
+      text = (input.content ?? input.text ?? input.body ?? input.message) as string | null;
+      break;
+    case "memory_operation":
+      text = (input.content ?? input.memory) as string | null;
+      break;
+    default:
+      break;
+  }
+
+  if (typeof text === "string" && text.length > 0) {
+    return text.length > 200 ? text.slice(0, 200) + "..." : text;
+  }
+
+  // Fallback to output
   const output = artifact.tool_output;
-  let text: string;
-  if (output == null) text = "(no output)";
-  else if (typeof output === "string") text = output;
-  else text = JSON.stringify(output);
-  return text.length > 200 ? text.slice(0, 200) + "..." : text;
+  let fallback: string;
+  if (output == null) fallback = "(no output)";
+  else if (typeof output === "string") fallback = output;
+  else {
+    // Try common output fields
+    const outObj = output as Record<string, unknown>;
+    const found = ["result", "content", "text", "output", "description"]
+      .map((k) => outObj[k])
+      .find((v) => typeof v === "string" && v.length > 0);
+    fallback = typeof found === "string" ? found : JSON.stringify(output);
+  }
+  return fallback.length > 200 ? fallback.slice(0, 200) + "..." : fallback;
 }
 
 interface Props {

@@ -14,7 +14,7 @@ export default function AssertionSummaryBar({
         <p className="text-xs text-green-400/70 mb-1">Passed</p>
         <p className="text-xl font-mono text-green-400 flex items-center gap-2">
           <span aria-hidden="true">&#10003;</span>
-          {summary.passed}
+          {summary.passed ?? 0}
         </p>
       </div>
 
@@ -23,7 +23,7 @@ export default function AssertionSummaryBar({
         <p className="text-xs text-red-400/70 mb-1">Failed</p>
         <p className="text-xl font-mono text-red-400 flex items-center gap-2">
           <span aria-hidden="true">&#10007;</span>
-          {summary.failed}
+          {summary.failed ?? 0}
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export default function AssertionSummaryBar({
         <p className="text-xs text-yellow-400/70 mb-1">Warnings</p>
         <p className="text-xl font-mono text-yellow-400 flex items-center gap-2">
           <span aria-hidden="true">&#9888;</span>
-          {summary.warnings}
+          {summary.warnings ?? 0}
         </p>
       </div>
     </div>

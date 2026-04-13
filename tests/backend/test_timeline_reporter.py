@@ -98,6 +98,14 @@ def test_executive_summary_insufficient_data():
     assert result["trajectory"] == "insufficient_data"
 
 
+def test_executive_summary_none_durations():
+    """Duration fields should show 'N/A' when DB value is None, not 'None'."""
+    sim = _make_sim(simulated_duration=None, real_duration=None)
+    result = generate_executive_summary(sim, [], [], [], [])
+    assert result["simulated_duration"] == "N/A"
+    assert result["real_duration"] == "N/A"
+
+
 # ── Daily Breakdown tests ──────────────────────────────────────
 
 
@@ -254,6 +262,23 @@ def test_key_moments_high_energy():
     # Should include top conversations sorted by turn count
     assert result["total_moments"] >= 3
     assert any(m["type"] == "high_energy_conversation" for m in result["moments"])
+
+
+def test_key_moments_participating_agents_string():
+    """Ensure participating_agents as string doesn't iterate characters."""
+    convs = [_make_conversation(turn_count=10, participating_agents="vera")]
+    result = generate_key_moments(convs, [], [])
+    desc = result["moments"][0]["description"]
+    assert "participants: vera" in desc
+    # Should NOT have "v, e, r, a"
+    assert "v, e" not in desc
+
+
+def test_key_moments_participating_agents_none():
+    """Ensure None participating_agents doesn't crash."""
+    convs = [_make_conversation(turn_count=10, participating_agents=None)]
+    result = generate_key_moments(convs, [], [])
+    assert "participants:" in result["moments"][0]["description"]
 
 
 def test_key_moments_first_tool_usage():

@@ -256,14 +256,111 @@ function AlphaDispatchDetail({ artifact }: { artifact: AgentArtifact }) {
   );
 }
 
-function GenericDetail({ artifact }: { artifact: AgentArtifact }) {
+function MessageDetail({ artifact }: { artifact: AgentArtifact }) {
+  const input = getInput(artifact);
+  const content = str(input.content || input.text || input.body || input.message || "");
+  const recipient = str(input.to || input.recipient || input.channel || "");
   return (
     <>
-      <Section label="Input">
-        <CodeBlock>{JSON.stringify(artifact.tool_input, null, 2)}</CodeBlock>
+      <Section label="Message">
+        <div className="rounded bg-surface-light p-3 text-sm text-foreground/80 whitespace-pre-wrap">
+          {content || str(artifact.tool_output)}
+        </div>
+      </Section>
+      {recipient && (
+        <Section label="Recipient / Channel">
+          <p className="text-sm font-mono text-foreground/70">{recipient}</p>
+        </Section>
+      )}
+      <Section label="From">
+        <p className="text-sm text-foreground/70">
+          <span style={{ color: AGENT_COLORS[artifact.agent_id] }}>{artifact.agent_id}</span>
+        </p>
+      </Section>
+    </>
+  );
+}
+
+function TilemapDetail({ artifact }: { artifact: AgentArtifact }) {
+  const input = getInput(artifact);
+  const output = getOutput(artifact);
+  const outputObj = typeof output === "object" && output != null ? output : {};
+  const width = input.width ?? outputObj.width ?? input.map_width;
+  const height = input.height ?? outputObj.height ?? input.map_height;
+  return (
+    <>
+      {(width != null || height != null) && (
+        <Section label="Dimensions">
+          <p className="text-sm font-mono text-foreground/70">
+            {width != null ? `${width}` : "?"} x {height != null ? `${height}` : "?"}
+          </p>
+        </Section>
+      )}
+      <Section label="Tile Data">
+        <CodeBlock>{str(input.tiles || input.tile_data || input.data || artifact.tool_input)}</CodeBlock>
+      </Section>
+      {Object.keys(outputObj).length > 0 && (
+        <Section label="Output">
+          <CodeBlock>{str(output)}</CodeBlock>
+        </Section>
+      )}
+    </>
+  );
+}
+
+function SelfModificationDetail({ artifact }: { artifact: AgentArtifact }) {
+  const input = getInput(artifact);
+  const target = str(input.target || input.file || input.config || "");
+  const change = str(input.change || input.modification || input.content || "");
+  const reason = str(input.reason || input.justification || "");
+  return (
+    <>
+      {target && (
+        <Section label="Target">
+          <p className="text-sm font-mono text-foreground/70">{target}</p>
+        </Section>
+      )}
+      <Section label="Change">
+        <CodeBlock>{change || str(artifact.tool_input)}</CodeBlock>
+      </Section>
+      {reason && (
+        <Section label="Reason">
+          <p className="text-sm text-foreground/70">{reason}</p>
+        </Section>
+      )}
+      <Section label="Result">
+        <CodeBlock>{str(artifact.tool_output)}</CodeBlock>
+      </Section>
+    </>
+  );
+}
+
+function GenericDetail({ artifact }: { artifact: AgentArtifact }) {
+  const input = artifact.tool_input ?? {};
+  const output = artifact.tool_output;
+
+  // Try to extract common meaningful fields
+  const contentField = input.content ?? input.text ?? input.description ?? input.result;
+  const hasContent = typeof contentField === "string" && contentField.length > 0;
+
+  return (
+    <>
+      {hasContent && (
+        <Section label="Content">
+          <div className="rounded bg-surface-light p-3 text-sm text-foreground/80 whitespace-pre-wrap">
+            {contentField as string}
+          </div>
+        </Section>
+      )}
+      <Section label={hasContent ? "Full Input" : "Input"}>
+        <pre className="text-xs font-mono bg-surface-light text-foreground/70 rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap">
+          {JSON.stringify(input, null, 2)}
+        </pre>
       </Section>
       <Section label="Output">
-        <CodeBlock>{str(artifact.tool_output)}</CodeBlock>
+        <pre className="text-xs font-mono bg-surface-light text-foreground/70 rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap">
+          {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
+        </pre>
       </Section>
     </>
   );
@@ -279,6 +376,9 @@ const TYPE_RENDERERS: Record<string, React.ComponentType<{ artifact: AgentArtifa
   poll: PollDetail,
   memory_operation: MemoryOperationDetail,
   alpha_dispatch: AlphaDispatchDetail,
+  message: MessageDetail,
+  tilemap: TilemapDetail,
+  self_modification: SelfModificationDetail,
 };
 
 interface Props {

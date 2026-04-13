@@ -64,11 +64,16 @@ function ExecutiveSummarySection({
 }
 
 interface DayEntry {
+  date?: string;
   day_number?: number;
   conversations?: number;
   turns?: number;
   cost?: number | string;
+  unique_tools?: number;
   tools?: number | string;
+  tools_used?: string[];
+  agents_active?: string[];
+  most_active_agent?: string | null;
   [key: string]: unknown;
 }
 
@@ -87,6 +92,7 @@ function DayByDaySection({ data }: { data: Record<string, unknown> }) {
             <th scope="col" className="px-4 py-2 font-medium text-right">Turns</th>
             <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
             <th scope="col" className="px-4 py-2 font-medium text-right">Tools Used</th>
+            <th scope="col" className="px-4 py-2 font-medium">Most Active</th>
           </tr>
         </thead>
         <tbody>
@@ -95,7 +101,7 @@ function DayByDaySection({ data }: { data: Record<string, unknown> }) {
               key={idx}
               className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
             >
-              <td className="px-4 py-2 font-mono">{day.day_number ?? idx + 1}</td>
+              <td className="px-4 py-2 font-mono">{day.date ?? day.day_number ?? idx + 1}</td>
               <td className="px-4 py-2 font-mono text-right">
                 {day.conversations ?? "—"}
               </td>
@@ -108,7 +114,10 @@ function DayByDaySection({ data }: { data: Record<string, unknown> }) {
                   : "—"}
               </td>
               <td className="px-4 py-2 font-mono text-right">
-                {day.tools ?? "—"}
+                {day.unique_tools ?? day.tools ?? "—"}
+              </td>
+              <td className="px-4 py-2 text-xs text-foreground/60">
+                {day.most_active_agent ?? "—"}
               </td>
             </tr>
           ))}
@@ -119,25 +128,87 @@ function DayByDaySection({ data }: { data: Record<string, unknown> }) {
 }
 
 function MemoryEvolutionSection({ data }: { data: Record<string, unknown> }) {
-  const agents = (data.agents as Record<string, unknown> | undefined) ?? {};
-  const agentKeys = Object.keys(agents);
-  if (agentKeys.length === 0) {
+  const coreChanges = (data.core_memory_changes as Record<string, number> | undefined) ?? {};
+  const coreDiffs = (data.core_memory_diffs as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const recallCounts = (data.recall_memory_counts as Record<string, number> | undefined) ?? {};
+  const journalCounts = (data.journal_entries_by_agent as Record<string, number> | undefined) ?? {};
+  const noChanges = (data.agents_with_no_changes as string[] | undefined) ?? [];
+
+  const agentIds = Array.from(new Set([
+    ...Object.keys(coreChanges),
+    ...Object.keys(recallCounts),
+    ...Object.keys(journalCounts),
+  ]));
+
+  if (agentIds.length === 0) {
     return (
       <p className="text-sm text-foreground/50">No memory data available.</p>
     );
   }
+
   return (
-    <div className="space-y-3">
-      {agentKeys.map((agent) => {
-        const agentData = agents[agent] as Record<string, unknown>;
-        return (
-          <ReportSectionView key={agent} title={agent} defaultOpen={false}>
-            <pre className="text-xs font-mono text-foreground/70 whitespace-pre-wrap break-words">
-              {JSON.stringify(agentData, null, 2)}
-            </pre>
-          </ReportSectionView>
-        );
-      })}
+    <div className="space-y-4">
+      {/* Summary table */}
+      <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-foreground/50">
+              <th scope="col" className="px-4 py-2 font-medium">Agent</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Core Memory Changes</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Recall Memories</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Journal Entries</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agentIds.map((agent) => (
+              <tr key={agent} className="border-b border-border last:border-0 hover:bg-surface-light transition-colors">
+                <td className="px-4 py-2 font-mono text-foreground/80">{agent}</td>
+                <td className="px-4 py-2 font-mono text-right">{coreChanges[agent] ?? 0}</td>
+                <td className="px-4 py-2 font-mono text-right">{recallCounts[agent] ?? 0}</td>
+                <td className="px-4 py-2 font-mono text-right">{journalCounts[agent] ?? 0}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Core memory diffs detail */}
+      {Object.keys(coreDiffs).length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-xs text-foreground/50 font-medium uppercase tracking-wide">Core Memory Diffs</h3>
+          {Object.entries(coreDiffs).map(([agent, diff]) => (
+            <ReportSectionView key={agent} title={agent} defaultOpen={false}>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {diff.total_versions != null && (
+                  <div className="rounded border border-border bg-surface-light p-2">
+                    <span className="text-foreground/50">Versions:</span>{" "}
+                    <span className="font-mono text-foreground/70">{String(diff.total_versions)}</span>
+                  </div>
+                )}
+                {diff.first_reason && (
+                  <div className="rounded border border-border bg-surface-light p-2">
+                    <span className="text-foreground/50">First reason:</span>{" "}
+                    <span className="text-foreground/70">{String(diff.first_reason)}</span>
+                  </div>
+                )}
+                {diff.last_reason && (
+                  <div className="rounded border border-border bg-surface-light p-2">
+                    <span className="text-foreground/50">Last reason:</span>{" "}
+                    <span className="text-foreground/70">{String(diff.last_reason)}</span>
+                  </div>
+                )}
+              </div>
+            </ReportSectionView>
+          ))}
+        </div>
+      )}
+
+      {/* Agents with no changes */}
+      {noChanges.length > 0 && (
+        <p className="text-xs text-foreground/40">
+          No memory changes: {noChanges.join(", ")}
+        </p>
+      )}
     </div>
   );
 }
@@ -147,111 +218,162 @@ function RelationshipEvolutionSection({
 }: {
   data: Record<string, unknown>;
 }) {
+  if (data.available === false) {
+    return (
+      <p className="text-sm text-foreground/50">
+        {(data.note as string) ?? "Relationship data not available."}
+      </p>
+    );
+  }
+
+  const matrix = (data.matrix as Record<string, Record<string, { sentiment?: string | null; trust?: string | null; interactions?: number; summary?: string }>> | undefined) ?? {};
+  const biggestChanges = (data.biggest_changes as Array<{ from: string; to: string; sentiment_start: number; sentiment_end: number; delta: number; direction: string }> | undefined) ?? [];
+
+  // Flatten matrix into rows
+  const rows: { from: string; to: string; sentiment: string; trust: string; interactions: number; summary: string }[] = [];
+  for (const [from, targets] of Object.entries(matrix)) {
+    for (const [to, info] of Object.entries(targets)) {
+      rows.push({
+        from,
+        to,
+        sentiment: String(info.sentiment ?? "N/A"),
+        trust: String(info.trust ?? "N/A"),
+        interactions: info.interactions ?? 0,
+        summary: info.summary ?? "",
+      });
+    }
+  }
+
+  if (rows.length === 0) {
+    return <p className="text-sm text-foreground/50">No relationship data available.</p>;
+  }
+
   return (
-    <pre className="text-xs font-mono text-foreground/70 whitespace-pre-wrap break-words">
-      {JSON.stringify(data, null, 2)}
-    </pre>
+    <div className="space-y-4">
+      {data.total_relationships != null && (
+        <p className="text-xs text-foreground/50">
+          {String(data.total_relationships)} total relationships tracked
+        </p>
+      )}
+
+      <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-foreground/50">
+              <th scope="col" className="px-4 py-2 font-medium">From</th>
+              <th scope="col" className="px-4 py-2 font-medium">To</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Sentiment</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Trust</th>
+              <th scope="col" className="px-4 py-2 font-medium text-right">Interactions</th>
+              <th scope="col" className="px-4 py-2 font-medium">Summary</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, idx) => (
+              <tr key={idx} className="border-b border-border last:border-0 hover:bg-surface-light transition-colors">
+                <td className="px-4 py-2 font-mono text-foreground/80">{r.from}</td>
+                <td className="px-4 py-2 font-mono text-foreground/80">{r.to}</td>
+                <td className="px-4 py-2 font-mono text-right">{r.sentiment}</td>
+                <td className="px-4 py-2 font-mono text-right">{r.trust}</td>
+                <td className="px-4 py-2 font-mono text-right">{r.interactions}</td>
+                <td className="px-4 py-2 text-xs text-foreground/50 max-w-xs truncate">{r.summary || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Biggest changes */}
+      {biggestChanges.length > 0 && (
+        <div>
+          <h3 className="text-xs text-foreground/50 font-medium uppercase tracking-wide mb-2">Biggest Changes</h3>
+          <div className="space-y-2">
+            {biggestChanges.map((change, idx) => (
+              <div key={idx} className="rounded border border-border bg-surface-light p-2 text-xs">
+                <span className="font-mono text-foreground/80">{change.from}</span>
+                {" → "}
+                <span className="font-mono text-foreground/80">{change.to}</span>
+                {": "}
+                <span className={change.direction === "improved" ? "text-green-400" : "text-red-400"}>
+                  {change.direction} ({change.sentiment_start.toFixed(2)} → {change.sentiment_end.toFixed(2)}, Δ{change.delta.toFixed(2)})
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
 interface ToolEntry {
-  tool_name?: string;
-  count?: number;
-  total_cost?: number | string;
-  [key: string]: unknown;
+  tool_name: string;
+  count: number;
+  success_rate?: number;
+  statuses?: Record<string, number>;
 }
 
 function ToolUsageSection({ data }: { data: Record<string, unknown> }) {
-  const raw = (data.tools as ToolEntry[] | undefined) ?? [];
-  const tools = [...raw].sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
-  if (tools.length === 0) {
+  // Backend sends by_tool dict, transform to array
+  const byTool = (data.by_tool as Record<string, { count: number; success_rate?: number; statuses?: Record<string, number> }> | undefined) ?? {};
+  const tools: ToolEntry[] = Object.entries(byTool)
+    .map(([name, info]) => ({
+      tool_name: name,
+      count: info.count ?? 0,
+      success_rate: info.success_rate,
+      statuses: info.statuses,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const totalInvocations = (data.total_invocations as number | undefined) ?? 0;
+  const overallSuccessRate = (data.success_rate as number | undefined);
+
+  if (tools.length === 0 && totalInvocations === 0) {
     return (
       <p className="text-sm text-foreground/50">No tool data available.</p>
     );
   }
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-foreground/50">
-            <th scope="col" className="px-4 py-2 font-medium">Tool</th>
-            <th scope="col" className="px-4 py-2 font-medium text-right">Count</th>
-            <th scope="col" className="px-4 py-2 font-medium text-right">Total Cost</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tools.map((tool, idx) => (
-            <tr
-              key={idx}
-              className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
-            >
-              <td className="px-4 py-2 font-mono text-xs">
-                {tool.tool_name ?? "—"}
-              </td>
-              <td className="px-4 py-2 font-mono text-right">{tool.count ?? "—"}</td>
-              <td className="px-4 py-2 font-mono text-right">
-                {tool.total_cost !== undefined && tool.total_cost !== null
-                  ? `$${Number(tool.total_cost).toFixed(4)}`
-                  : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-interface DailyCostEntry {
-  day?: number | string;
-  cost?: number | string;
-  [key: string]: unknown;
-}
-
-function CostAnalysisSection({ data }: { data: Record<string, unknown> }) {
-  const dailyCosts = (data.daily_costs as DailyCostEntry[] | undefined) ?? [];
-  return (
     <div className="space-y-4">
+      {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {data.total_cost !== undefined && (
+        <div className="rounded border border-border bg-surface-light p-3">
+          <div className="text-xs text-foreground/50 mb-1">Total Invocations</div>
+          <div className="font-mono text-sm text-foreground">{totalInvocations}</div>
+        </div>
+        <div className="rounded border border-border bg-surface-light p-3">
+          <div className="text-xs text-foreground/50 mb-1">Unique Tools</div>
+          <div className="font-mono text-sm text-foreground">{tools.length}</div>
+        </div>
+        {overallSuccessRate != null && (
           <div className="rounded border border-border bg-surface-light p-3">
-            <div className="text-xs text-foreground/50 mb-1">Total Cost</div>
-            <div className="font-mono text-sm text-foreground">
-              ${Number(data.total_cost).toFixed(4)}
-            </div>
-          </div>
-        )}
-        {data.cost_per_conversation !== undefined && (
-          <div className="rounded border border-border bg-surface-light p-3">
-            <div className="text-xs text-foreground/50 mb-1">
-              Cost / Conversation
-            </div>
-            <div className="font-mono text-sm text-foreground">
-              ${Number(data.cost_per_conversation).toFixed(4)}
-            </div>
+            <div className="text-xs text-foreground/50 mb-1">Success Rate</div>
+            <div className="font-mono text-sm text-foreground">{overallSuccessRate.toFixed(1)}%</div>
           </div>
         )}
       </div>
-      {dailyCosts.length > 0 && (
+
+      {/* Tool table */}
+      {tools.length > 0 && (
         <div className="rounded-lg border border-border bg-surface overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-foreground/50">
-                <th scope="col" className="px-4 py-2 font-medium">Day</th>
-                <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                <th scope="col" className="px-4 py-2 font-medium">Tool</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Count</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Success Rate</th>
               </tr>
             </thead>
             <tbody>
-              {dailyCosts.map((entry, idx) => (
+              {tools.map((tool, idx) => (
                 <tr
                   key={idx}
                   className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
                 >
-                  <td className="px-4 py-2 font-mono">{entry.day ?? idx + 1}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{tool.tool_name}</td>
+                  <td className="px-4 py-2 font-mono text-right">{tool.count}</td>
                   <td className="px-4 py-2 font-mono text-right">
-                    {entry.cost !== undefined && entry.cost !== null
-                      ? `$${Number(entry.cost).toFixed(4)}`
-                      : "—"}
+                    {tool.success_rate != null ? `${tool.success_rate.toFixed(1)}%` : "—"}
                   </td>
                 </tr>
               ))}
@@ -263,23 +385,168 @@ function CostAnalysisSection({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+function CostAnalysisSection({ data }: { data: Record<string, unknown> }) {
+  // Backend sends by_day, by_agent, by_type as dicts — transform to arrays
+  const byDay = (data.by_day as Record<string, string> | undefined) ?? {};
+  const byAgent = (data.by_agent as Record<string, string> | undefined) ?? {};
+  const byType = (data.by_type as Record<string, string> | undefined) ?? {};
+  const projection = data.projection as Record<string, unknown> | undefined;
+
+  const dailyCosts = Object.entries(byDay).map(([day, cost]) => ({ day, cost }));
+  const agentCosts = Object.entries(byAgent)
+    .map(([agent, cost]) => ({ agent, cost: Number(cost) }))
+    .sort((a, b) => b.cost - a.cost);
+  const typeCosts = Object.entries(byType)
+    .map(([type, cost]) => ({ type, cost: Number(cost) }))
+    .sort((a, b) => b.cost - a.cost);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {data.total_cost !== undefined && (
+          <div className="rounded border border-border bg-surface-light p-3">
+            <div className="text-xs text-foreground/50 mb-1">Total Cost</div>
+            <div className="font-mono text-sm text-foreground">
+              ${Number(data.total_cost).toFixed(4)}
+            </div>
+          </div>
+        )}
+        {projection?.avg_daily_cost != null && (
+          <div className="rounded border border-border bg-surface-light p-3">
+            <div className="text-xs text-foreground/50 mb-1">Avg Daily Cost</div>
+            <div className="font-mono text-sm text-foreground">
+              ${Number(projection.avg_daily_cost).toFixed(4)}
+            </div>
+          </div>
+        )}
+        {projection?.weekly_estimate != null && (
+          <div className="rounded border border-border bg-surface-light p-3">
+            <div className="text-xs text-foreground/50 mb-1">Weekly Estimate</div>
+            <div className="font-mono text-sm text-foreground">
+              ${Number(projection.weekly_estimate).toFixed(4)}
+            </div>
+          </div>
+        )}
+        {projection?.monthly_estimate != null && (
+          <div className="rounded border border-border bg-surface-light p-3">
+            <div className="text-xs text-foreground/50 mb-1">Monthly Estimate</div>
+            <div className="font-mono text-sm text-foreground">
+              ${Number(projection.monthly_estimate).toFixed(4)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Daily costs */}
+      {dailyCosts.length > 0 && (
+        <div>
+          <h3 className="text-xs text-foreground/50 font-medium uppercase tracking-wide mb-2">Cost by Day</h3>
+          <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-foreground/50">
+                  <th scope="col" className="px-4 py-2 font-medium">Day</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyCosts.map((entry, idx) => (
+                  <tr key={idx} className="border-b border-border last:border-0 hover:bg-surface-light transition-colors">
+                    <td className="px-4 py-2 font-mono">{entry.day}</td>
+                    <td className="px-4 py-2 font-mono text-right">
+                      ${Number(entry.cost).toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Cost by agent */}
+      {agentCosts.length > 0 && (
+        <div>
+          <h3 className="text-xs text-foreground/50 font-medium uppercase tracking-wide mb-2">Cost by Agent</h3>
+          <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-foreground/50">
+                  <th scope="col" className="px-4 py-2 font-medium">Agent</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agentCosts.map((entry, idx) => (
+                  <tr key={idx} className="border-b border-border last:border-0 hover:bg-surface-light transition-colors">
+                    <td className="px-4 py-2 font-mono text-foreground/80">{entry.agent}</td>
+                    <td className="px-4 py-2 font-mono text-right">${entry.cost.toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Cost by type */}
+      {typeCosts.length > 0 && (
+        <div>
+          <h3 className="text-xs text-foreground/50 font-medium uppercase tracking-wide mb-2">Cost by Type</h3>
+          <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-foreground/50">
+                  <th scope="col" className="px-4 py-2 font-medium">Type</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {typeCosts.map((entry, idx) => (
+                  <tr key={idx} className="border-b border-border last:border-0 hover:bg-surface-light transition-colors">
+                    <td className="px-4 py-2 font-mono text-foreground/80">{entry.type}</td>
+                    <td className="px-4 py-2 font-mono text-right">${entry.cost.toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface MomentEntry {
   timestamp?: string;
   description?: string;
-  significance?: string | number;
+  significance?: number;
   type?: string;
+  details?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
 function KeyMomentsSection({ data }: { data: Record<string, unknown> }) {
   const moments = (data.moments as MomentEntry[] | undefined) ?? [];
+  const totalMoments = (data.total_moments as number | undefined);
   if (moments.length === 0) {
     return (
       <p className="text-sm text-foreground/50">No key moments recorded.</p>
     );
   }
+
+  const TYPE_COLORS: Record<string, string> = {
+    high_energy_conversation: "border-yellow-500/40 text-yellow-400",
+    management_flag: "border-red-500/40 text-red-400",
+    first_tool_usage: "border-green-500/40 text-green-400",
+  };
+
   return (
     <div className="space-y-3">
+      {totalMoments != null && (
+        <p className="text-xs text-foreground/40">{totalMoments} moments captured</p>
+      )}
       {moments.map((moment, idx) => (
         <div
           key={idx}
@@ -292,18 +559,22 @@ function KeyMomentsSection({ data }: { data: Record<string, unknown> }) {
                 : `#${idx + 1}`}
             </span>
             {moment.type && (
-              <span className="rounded border border-neon-cyan/40 px-1.5 py-0.5 text-xs text-neon-cyan">
-                {moment.type}
+              <span className={`rounded border px-1.5 py-0.5 text-xs ${TYPE_COLORS[moment.type] ?? "border-neon-cyan/40 text-neon-cyan"}`}>
+                {moment.type.replace(/_/g, " ")}
               </span>
             )}
           </div>
           {moment.description && (
-            <p className="text-sm text-foreground">{moment.description}</p>
+            <p className="text-sm text-foreground">{String(moment.description)}</p>
           )}
-          {moment.significance !== undefined && (
-            <p className="text-xs text-foreground/50 mt-1">
-              Significance: {String(moment.significance)}
-            </p>
+          {moment.details && Object.keys(moment.details).length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-1">
+              {Object.entries(moment.details).map(([key, val]) => (
+                <span key={key} className="text-xs text-foreground/40">
+                  {key}: <span className="font-mono text-foreground/60">{Array.isArray(val) ? val.join(", ") : String(val ?? "")}</span>
+                </span>
+              ))}
+            </div>
           )}
         </div>
       ))}

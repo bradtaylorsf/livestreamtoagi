@@ -20,12 +20,17 @@ def generate_key_moments(
         reverse=True,
     )
     for conv in sorted_convs[:3]:
+        agents = conv.get("participating_agents", [])
+        if isinstance(agents, str):
+            agents = [agents]
+        elif not isinstance(agents, list):
+            agents = list(agents) if agents else []
         moments.append({
             "type": "high_energy_conversation",
             "timestamp": str(conv.get("started_at", "")),
             "description": (
                 f"Conversation with {conv.get('turn_count', 0)} turns, "
-                f"participants: {', '.join(conv.get('participating_agents', []))}"
+                f"participants: {', '.join(agents)}"
             ),
             "details": {
                 "turn_count": conv.get("turn_count", 0),
