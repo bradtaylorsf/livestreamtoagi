@@ -1,18 +1,7 @@
 "use client";
 
 import type { Relationship } from "@/types/admin";
-
-const AGENT_COLORS: Record<string, string> = {
-  vera: "#00f0ff",
-  rex: "#ff6b35",
-  aurora: "#ff69b4",
-  pixel: "#7cfc00",
-  fork: "#ffd700",
-  sentinel: "#8a2be2",
-  grok: "#ff4500",
-  management: "#808080",
-  alpha: "#c0c0c0",
-};
+import { AGENT_COLORS } from "@/lib/agent-data";
 
 const DEFAULT_COLOR = "#666666";
 
