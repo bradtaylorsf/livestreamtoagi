@@ -167,6 +167,7 @@ export interface AgentArtifactResponse {
   tool_name: string;
   artifact_type: string;
   status: string;
+  summary: string | null;
   created_at: string | null;
 }
 

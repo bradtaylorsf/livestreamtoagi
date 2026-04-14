@@ -58,13 +58,15 @@ describe("RelationshipTable null safety", () => {
   });
 
   it("renders sentiment safely when null", () => {
-    const sentiment = Number(null ?? 0);
+    const nullableValue: number | null = null;
+    const sentiment = Number(nullableValue ?? 0);
     expect(sentiment).toBe(0);
     expect(sentiment.toFixed(2)).toBe("0.00");
   });
 
   it("renders trust safely when null", () => {
-    const trust = Number(null ?? 0);
+    const nullableValue: number | null = null;
+    const trust = Number(nullableValue ?? 0);
     expect(trust).toBe(0);
     expect(trust.toFixed(2)).toBe("0.00");
   });

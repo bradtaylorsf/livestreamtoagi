@@ -61,7 +61,7 @@ const SIM_FIXTURE = {
   total_tokens: 10000,
   total_cost: "0.1234",
   total_artifacts: 3,
-  total_overseer_flags: 1,
+  total_management_flags: 1,
   agents_participated: ["vera", "rex"],
   config: {},
 };

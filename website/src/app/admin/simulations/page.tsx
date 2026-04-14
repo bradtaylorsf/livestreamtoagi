@@ -5,6 +5,7 @@ import Link from "next/link";
 import StatusBadge from "@/components/admin/StatusBadge";
 import { fetchSimulations, createSimulation } from "@/lib/admin-api";
 import type { Simulation, SimulationStatus } from "@/types/admin";
+import { formatDuration } from "@/components/simulation";
 
 const STATUS_OPTIONS: (SimulationStatus | "all")[] = [
   "all",
@@ -13,18 +14,6 @@ const STATUS_OPTIONS: (SimulationStatus | "all")[] = [
   "failed",
   "cancelled",
 ];
-
-function formatDuration(iso: string | null): string {
-  if (!iso) return "—";
-  // Python timedelta serializes as "HH:MM:SS" or seconds float
-  const seconds = parseFloat(iso);
-  if (!isNaN(seconds)) {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  }
-  return iso;
-}
 
 const CONVO_TYPES = ["freeform", "standup", "debate", "idle"] as const;
 
@@ -189,9 +178,9 @@ export default function SimulationsPage() {
                     ${parseFloat(sim.total_cost || "0").toFixed(4)}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    {sim.total_overseer_flags > 0 ? (
+                    {sim.total_management_flags > 0 ? (
                       <span className="text-red-400 font-mono">
-                        {sim.total_overseer_flags}
+                        {sim.total_management_flags}
                       </span>
                     ) : (
                       <span className="text-foreground/40">0</span>

@@ -4,23 +4,13 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getSimulation, getSimulationEvals } from "@/lib/api";
-
-interface EvalRunResult {
-  id: string;
-  simulation_id: string;
-  status: string;
-  started_at: string | null;
-  completed_at: string | null;
-  overall_score: number | null;
-  cost: number;
-  results: { category: string; score: number | null; reasoning: string | null }[];
-}
+import type { SimulationEvalRun } from "@/lib/api";
 
 export default function SimulationEvalsPage() {
   const params = useParams();
   const id = params.id as string;
   const [simName, setSimName] = useState("");
-  const [runs, setRuns] = useState<EvalRunResult[]>([]);
+  const [runs, setRuns] = useState<SimulationEvalRun[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,7 +18,7 @@ export default function SimulationEvalsPage() {
       .then((s) => setSimName(s.name))
       .catch(() => {});
     getSimulationEvals(id)
-      .then((data) => setRuns(data as unknown as EvalRunResult[]))
+      .then(setRuns)
       .catch((err) =>
         setError(
           err instanceof Error ? err.message : "Failed to load evals",
@@ -82,7 +72,7 @@ export default function SimulationEvalsPage() {
                       : "Unknown date"}
                   </span>
                   <span className="text-xs text-foreground/40 ml-3">
-                    {run.status}
+                    {run.status ?? "unknown"}
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
@@ -92,12 +82,12 @@ export default function SimulationEvalsPage() {
                     </span>
                   )}
                   <span className="text-xs text-foreground/40">
-                    ${run.cost.toFixed(4)}
+                    ${(run.cost ?? 0).toFixed(4)}
                   </span>
                 </div>
               </div>
 
-              {run.results.length > 0 && (
+              {run.results && run.results.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                   {run.results.map((r) => (
                     <div
@@ -105,11 +95,16 @@ export default function SimulationEvalsPage() {
                       className="rounded border border-border bg-surface-light p-3"
                     >
                       <p className="text-xs text-foreground/50 mb-1">
-                        {r.category}
+                        {r.category ?? "unknown"}
                       </p>
                       <p className="font-mono text-sm text-foreground">
                         {r.score != null ? r.score.toFixed(1) : "\u2014"}
                       </p>
+                      {r.reasoning && (
+                        <p className="text-xs text-foreground/40 mt-1 line-clamp-2">
+                          {r.reasoning}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -5,7 +5,8 @@ import type { Relationship } from "@/types/admin";
 import { AGENT_COLORS } from "@/lib/agent-data";
 
 const DEFAULT_COLOR = "#666666";
-const MIN_INTERACTION_THRESHOLD = 2;
+const MIN_INTERACTION_THRESHOLD = 3;
+const MIN_SENTIMENT_THRESHOLD = 0.05;
 
 function sentimentColor(score: number): string {
   if (score > 0.3) return "#4ade80";
@@ -73,11 +74,11 @@ export default function SocialGraph({ relationships, onSelectPair }: Props) {
   }
   const allEdges = Array.from(edgeMap.values());
 
-  // Filter low-signal edges: remove edges with minimal interaction AND no sentiment evolution
+  // Filter low-signal edges: require BOTH meaningful interaction AND non-trivial sentiment
   const edges = allEdges.filter(
     (r) =>
-      r.interaction_count >= MIN_INTERACTION_THRESHOLD ||
-      Math.abs(Number(r.sentiment_score ?? 0)) > 0,
+      r.interaction_count >= MIN_INTERACTION_THRESHOLD &&
+      Math.abs(Number(r.sentiment_score ?? 0)) > MIN_SENTIMENT_THRESHOLD,
   );
   const filteredCount = allEdges.length - edges.length;
 

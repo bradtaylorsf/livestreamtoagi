@@ -389,6 +389,7 @@ async def get_agent_artifacts(
                 "tool_name": a.tool_name,
                 "artifact_type": a.artifact_type,
                 "status": a.status,
+                "summary": _artifact_summary(a.artifact_type, a.tool_input),
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             }
             for a in artifacts
@@ -1121,7 +1122,7 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
         "total_tokens": sim.total_tokens,
         "total_cost": sim.total_cost,
         "total_artifacts": sim.total_artifacts,
-        "total_overseer_flags": sim.total_overseer_flags,
+        "total_management_flags": sim.total_management_flags,
         "agents_participated": sim.agents_participated,
     }
 
@@ -1276,6 +1277,33 @@ async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
     return results
 
 
+def _artifact_summary(artifact_type: str, tool_input: dict[str, Any] | None) -> str | None:
+    """Extract a short content preview from tool_input for public display."""
+    if not tool_input:
+        return None
+    text: str | None = None
+    match artifact_type:
+        case "social_post":
+            text = tool_input.get("content") or tool_input.get("text") or tool_input.get("message")
+        case "email":
+            subject = tool_input.get("subject", "")
+            body = tool_input.get("body") or tool_input.get("content") or ""
+            text = f"[{subject}] {body}" if subject else str(body)
+        case "code_execution":
+            text = tool_input.get("code") or tool_input.get("source")
+        case "message":
+            text = tool_input.get("content") or tool_input.get("text") or tool_input.get("body") or tool_input.get("message")
+        case "memory_operation":
+            text = tool_input.get("content") or tool_input.get("memory")
+        case "web_search":
+            text = tool_input.get("query")
+        case "poll":
+            text = tool_input.get("question")
+    if isinstance(text, str) and text:
+        return text[:200]
+    return None
+
+
 @router.get("/artifacts")
 async def get_public_artifacts(
     limit: int = Query(20, ge=1, le=100),
@@ -1304,6 +1332,7 @@ async def get_public_artifacts(
                 "tool_name": a.tool_name,
                 "artifact_type": a.artifact_type,
                 "status": a.status,
+                "summary": _artifact_summary(a.artifact_type, a.tool_input),
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             }
             for a in artifacts

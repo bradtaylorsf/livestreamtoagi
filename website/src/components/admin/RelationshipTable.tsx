@@ -32,9 +32,14 @@ export default function RelationshipTable({ relationships, onSelectPair }: Props
     }
   }
 
-  const sorted = [...relationships].sort((a, b) => {
-    const av = (a[sortKey] as number) ?? 0;
-    const bv = (b[sortKey] as number) ?? 0;
+  // Filter out malformed entries that lack required fields
+  const valid = relationships.filter(
+    (r) => r && typeof r.agent_id === "string" && typeof r.target_agent_id === "string",
+  );
+
+  const sorted = [...valid].sort((a, b) => {
+    const av = Number(a[sortKey] ?? 0);
+    const bv = Number(b[sortKey] ?? 0);
     return sortDir === "asc" ? av - bv : bv - av;
   });
 

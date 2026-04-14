@@ -9,7 +9,7 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   conversation_start: "▶",
   conversation_end: "■",
   tool_invocation: "⚙",
-  overseer_flag: "⚠",
+  management_flag: "⚠",
   journal_entry: "✎",
   error: "✕",
 };
@@ -19,7 +19,7 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
   conversation_start: "text-neon-green",
   conversation_end: "text-foreground/50",
   tool_invocation: "text-agent-aurora",
-  overseer_flag: "text-red-400",
+  management_flag: "text-red-400",
   journal_entry: "text-agent-vera",
   error: "text-red-500",
 };
@@ -36,7 +36,7 @@ const EVENT_TYPES = [
   "conversation_start",
   "conversation_end",
   "tool_invocation",
-  "overseer_flag",
+  "management_flag",
   "journal_entry",
   "error",
 ];

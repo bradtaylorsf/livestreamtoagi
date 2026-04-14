@@ -117,6 +117,11 @@ export default function ArtifactsPage() {
                   </span>
                 </div>
               </div>
+              {artifact.summary && (
+                <p className="text-xs text-foreground/50 mt-2 line-clamp-2">
+                  {artifact.summary}
+                </p>
+              )}
               {artifact.created_at && (
                 <p className="text-xs text-foreground/30 mt-1">
                   {new Date(artifact.created_at).toLocaleString()}

@@ -7,6 +7,7 @@ import TabNav from "@/components/admin/TabNav";
 import SocialGraph from "@/components/admin/SocialGraph";
 import RelationshipTable from "@/components/admin/RelationshipTable";
 import RelationshipTimeline from "@/components/admin/RelationshipTimeline";
+import ErrorBoundary from "@/components/admin/ErrorBoundary";
 import { fetchSimulation, fetchSocialGraph } from "@/lib/admin-api";
 import type { Relationship, Simulation } from "@/types/admin";
 
@@ -109,10 +110,12 @@ export default function RelationshipsPage() {
                 </p>
               </div>
             ) : (
-              <RelationshipTable
-                relationships={relationships}
-                onSelectPair={handleSelectPair}
-              />
+              <ErrorBoundary>
+                <RelationshipTable
+                  relationships={relationships}
+                  onSelectPair={handleSelectPair}
+                />
+              </ErrorBoundary>
             )}
           </div>
 

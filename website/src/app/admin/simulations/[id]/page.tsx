@@ -3,11 +3,15 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import StatusBadge from "@/components/admin/StatusBadge";
-import SummaryCard from "@/components/admin/SummaryCard";
 import TimelineView from "@/components/admin/TimelineView";
 import CostChart from "@/components/admin/CostChart";
 import ConfigViewer from "@/components/admin/ConfigViewer";
+import {
+  SimulationHeader,
+  SectionNav,
+  SummaryGrid,
+  AgentList,
+} from "@/components/simulation";
 import {
   fetchSimulation,
   fetchSimulationConversations,
@@ -16,21 +20,6 @@ import {
   deleteSimulation,
 } from "@/lib/admin-api";
 import type { AgentConversation, Simulation } from "@/types/admin";
-
-function formatDuration(iso: string | null): string {
-  if (!iso) return "—";
-  const seconds = parseFloat(iso);
-  if (!isNaN(seconds)) {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    if (mins >= 60) {
-      const hrs = Math.floor(mins / 60);
-      return `${hrs}h ${mins % 60}m`;
-    }
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  }
-  return iso;
-}
 
 export default function SimulationDetailPage() {
   const params = useParams();
@@ -66,73 +55,26 @@ export default function SimulationDetailPage() {
 
   return (
     <div className="max-w-6xl space-y-8">
-      {/* Breadcrumb */}
-      <div className="text-xs text-foreground/40">
-        <Link href="/admin/simulations" className="hover:text-foreground/60">
-          Simulations
-        </Link>
-        {" / "}
-        <span className="text-foreground/60">{sim.name}</span>
-      </div>
+      <SimulationHeader
+        name={sim.name}
+        status={sim.status}
+        description={sim.description}
+        started_at={sim.started_at}
+        completed_at={sim.completed_at}
+        real_duration={sim.real_duration}
+        simulated_duration={sim.simulated_duration}
+        breadcrumbHref="/admin/simulations"
+      />
 
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="font-pixel text-lg text-foreground">{sim.name}</h1>
-          <StatusBadge status={sim.status} />
-        </div>
-        {sim.description && (
-          <p className="text-sm text-foreground/60">{sim.description}</p>
-        )}
-        <div className="flex gap-4 mt-2 text-xs text-foreground/40">
-          {sim.started_at && (
-            <span>
-              Started: {new Date(sim.started_at).toLocaleString()}
-            </span>
-          )}
-          {sim.completed_at && (
-            <span>
-              Completed: {new Date(sim.completed_at).toLocaleString()}
-            </span>
-          )}
-          <span>Real: {formatDuration(sim.real_duration)}</span>
-          <span>Simulated: {formatDuration(sim.simulated_duration)}</span>
-        </div>
-      </div>
-
-      {/* Navigation Links */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Link
-          href={`/admin/simulations/${id}/evals`}
-          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
-        >
-          View Eval Results
-        </Link>
-        <Link
-          href={`/admin/simulations/${id}/assertions`}
-          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
-        >
-          Assertions
-        </Link>
-        <Link
-          href={`/admin/simulations/${id}/relationships`}
-          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
-        >
-          Social Graph
-        </Link>
-        <Link
-          href={`/admin/simulations/${id}/report`}
-          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
-        >
-          Report
-        </Link>
-        <Link
-          href={`/admin/simulations/${id}/snapshots`}
-          className="inline-flex items-center gap-2 rounded border border-neon-cyan px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/10 transition-colors"
-        >
-          Snapshots
-        </Link>
-      </div>
+      <SectionNav
+        links={[
+          { href: `/admin/simulations/${id}/evals`, label: "View Eval Results" },
+          { href: `/admin/simulations/${id}/assertions`, label: "Assertions" },
+          { href: `/admin/simulations/${id}/relationships`, label: "Social Graph" },
+          { href: `/admin/simulations/${id}/report`, label: "Report" },
+          { href: `/admin/simulations/${id}/snapshots`, label: "Snapshots" },
+        ]}
+      />
 
       {/* Actions */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -199,37 +141,16 @@ export default function SimulationDetailPage() {
         )}
       </div>
 
-      {/* Summary Panel */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-        <SummaryCard label="Conversations" value={sim.total_conversations} />
-        <SummaryCard label="Turns" value={sim.total_turns} />
-        <SummaryCard label="Tokens" value={sim.total_tokens.toLocaleString()} />
-        <SummaryCard
-          label="Cost"
-          value={`$${parseFloat(sim.total_cost || "0").toFixed(4)}`}
-        />
-        <SummaryCard label="Artifacts" value={sim.total_artifacts} />
-        <SummaryCard label="Management Flags" value={sim.total_overseer_flags} />
-      </div>
+      <SummaryGrid
+        total_conversations={sim.total_conversations}
+        total_turns={sim.total_turns}
+        total_tokens={sim.total_tokens}
+        total_cost={sim.total_cost}
+        total_artifacts={sim.total_artifacts}
+        total_management_flags={sim.total_management_flags}
+      />
 
-      {/* Agent Participation */}
-      {sim.agents_participated.length > 0 && (
-        <div>
-          <h2 className="text-sm font-medium text-foreground/70 mb-2">
-            Agents Participated
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {sim.agents_participated.map((agent) => (
-              <span
-                key={agent}
-                className="rounded border border-border bg-surface-light px-2 py-1 text-xs text-foreground/70"
-              >
-                {agent}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      <AgentList agents={sim.agents_participated} />
 
       {/* Conversations */}
       {convos.length > 0 && (

@@ -8,6 +8,7 @@ import {
   getSimulationAssertions,
   getSimulationAssertionsSummary,
 } from "@/lib/api";
+import type { PublicSimulationDetail } from "@/lib/api";
 
 const STATUS_COLORS: Record<string, string> = {
   pass: "text-neon-green bg-neon-green/10 border-neon-green/30",
@@ -18,29 +19,29 @@ const STATUS_COLORS: Record<string, string> = {
 export default function SimulationAssertionsPage() {
   const params = useParams();
   const id = params.id as string;
-  const [simName, setSimName] = useState("");
+  const [sim, setSim] = useState<PublicSimulationDetail | null>(null);
   const [assertions, setAssertions] = useState<Record<string, unknown>[]>([]);
   const [summary, setSummary] = useState<{
     passed: number;
     failed: number;
     warnings: number;
   } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSimulation(id)
-      .then((s) => setSimName(s.name))
-      .catch(() => {});
-    getSimulationAssertions(id)
-      .then(setAssertions)
+    setLoading(true);
+    Promise.all([
+      getSimulation(id).then(setSim),
+      getSimulationAssertions(id).then(setAssertions),
+      getSimulationAssertionsSummary(id).then(setSummary),
+    ])
       .catch((err) =>
         setError(
           err instanceof Error ? err.message : "Failed to load assertions",
         ),
-      );
-    getSimulationAssertionsSummary(id)
-      .then(setSummary)
-      .catch(() => {});
+      )
+      .finally(() => setLoading(false));
   }, [id]);
 
   if (error) {
@@ -49,6 +50,14 @@ export default function SimulationAssertionsPage() {
         <div className="rounded border border-red-500/40 bg-red-500/10 p-4 text-red-400">
           {error}
         </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-12">
+        <p className="text-sm text-foreground/50">Loading...</p>
       </div>
     );
   }
@@ -64,15 +73,22 @@ export default function SimulationAssertionsPage() {
           href={`/simulations/${id}`}
           className="hover:text-foreground/60"
         >
-          {simName || id.slice(0, 8)}
+          {sim?.name || id.slice(0, 8)}
         </Link>
         {" / "}
         <span className="text-foreground/60">Assertions</span>
       </div>
 
-      <h1 className="font-pixel text-lg text-neon-cyan">Assertions</h1>
+      <div>
+        <h1 className="font-pixel text-lg text-neon-cyan">Assertions</h1>
+        {sim && (
+          <p className="mt-1 text-xs text-foreground/40">
+            Simulation status: {sim.status}
+          </p>
+        )}
+      </div>
 
-      {/* Summary Bar */}
+      {/* Summary Bar — always show when summary data is available */}
       {summary && (
         <div className="flex gap-4">
           <div className="rounded border border-neon-green/30 bg-neon-green/10 px-4 py-2">
@@ -96,9 +112,17 @@ export default function SimulationAssertionsPage() {
         </div>
       )}
 
-      {/* Assertions Table */}
+      {/* Content */}
       {assertions.length === 0 ? (
-        <p className="text-sm text-foreground/40">No assertion results yet.</p>
+        <div className="text-center py-12 text-foreground/40">
+          {sim?.status === "completed" ? (
+            <p>No assertions were configured for this simulation.</p>
+          ) : sim?.status === "running" ? (
+            <p>Assertions will appear after the simulation completes.</p>
+          ) : (
+            <p>No assertion results found for this simulation.</p>
+          )}
+        </div>
       ) : (
         <div className="rounded border border-border bg-surface overflow-x-auto">
           <table className="w-full text-sm">

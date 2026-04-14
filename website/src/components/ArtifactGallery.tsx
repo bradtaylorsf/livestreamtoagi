@@ -109,7 +109,12 @@ export default function ArtifactGallery({ agentId }: Props) {
             <h3 className="text-sm text-foreground font-medium">
               {artifact.tool_name}
             </h3>
-            <p className="text-xs text-foreground/50 mt-1">
+            {artifact.summary && (
+              <p className="text-xs text-foreground/50 mt-1 line-clamp-2">
+                {artifact.summary}
+              </p>
+            )}
+            <p className="text-xs text-foreground/40 mt-1">
               {artifact.status}
             </p>
             {artifact.created_at && (

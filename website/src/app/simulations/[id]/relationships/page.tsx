@@ -101,43 +101,47 @@ export default function SimulationRelationshipsPage() {
               </tr>
             </thead>
             <tbody>
-              {relationships.map((r, idx) => (
-                <tr
-                  key={idx}
-                  className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
-                >
-                  <td className="px-4 py-2">
-                    <Link
-                      href={`/agents/${r.agent_id}`}
-                      className="text-neon-cyan hover:underline"
-                    >
-                      {r.agent_id}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">
-                    <Link
-                      href={`/agents/${r.target_agent_id}`}
-                      className="text-neon-cyan hover:underline"
-                    >
-                      {r.target_agent_id}
-                    </Link>
-                  </td>
-                  <td
-                    className={`px-4 py-2 text-right font-mono ${sentimentColor(r.sentiment_score)}`}
+              {relationships.map((r, idx) => {
+                const sentiment = Number(r.sentiment_score ?? 0);
+                const trust = Number(r.trust_score ?? 0);
+                return (
+                  <tr
+                    key={idx}
+                    className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
                   >
-                    {r.sentiment_score.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono text-foreground/60">
-                    {r.trust_score.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono">
-                    {r.interaction_count}
-                  </td>
-                  <td className="px-4 py-2 text-foreground/50 text-xs max-w-xs truncate">
-                    {r.relationship_summary ?? "\u2014"}
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/agents/${r.agent_id}`}
+                        className="text-neon-cyan hover:underline"
+                      >
+                        {r.agent_id}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/agents/${r.target_agent_id}`}
+                        className="text-neon-cyan hover:underline"
+                      >
+                        {r.target_agent_id}
+                      </Link>
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right font-mono ${sentimentColor(sentiment)}`}
+                    >
+                      {sentiment.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono text-foreground/60">
+                      {trust.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {r.interaction_count ?? 0}
+                    </td>
+                    <td className="px-4 py-2 text-foreground/50 text-xs max-w-xs truncate">
+                      {r.relationship_summary ?? "\u2014"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -364,7 +364,7 @@ export interface PublicSimulationDetail extends PublicSimulation {
   config: Record<string, unknown>;
   simulated_duration: string | null;
   total_tokens: number;
-  total_overseer_flags: number;
+  total_management_flags: number;
 }
 
 export async function getSimulations(
@@ -404,10 +404,27 @@ export async function getSimulationAssertionsSummary(
   );
 }
 
+export interface SimulationEvalResult {
+  category: string;
+  score: number | null;
+  reasoning: string | null;
+}
+
+export interface SimulationEvalRun {
+  id: string;
+  simulation_id: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  overall_score: number | null;
+  cost: number;
+  results: SimulationEvalResult[];
+}
+
 export async function getSimulationEvals(
   id: string,
-): Promise<Record<string, unknown>[]> {
-  return request<Record<string, unknown>[]>(
+): Promise<SimulationEvalRun[]> {
+  return request<SimulationEvalRun[]>(
     `/api/simulations/${id}/evals`,
   );
 }
