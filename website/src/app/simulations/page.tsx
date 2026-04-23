@@ -9,17 +9,24 @@ import { formatDuration } from "@/components/simulation";
 const STATUS_STYLES: Record<string, string> = {
   running: "bg-neon-green/20 text-neon-green border-neon-green/40",
   completed: "bg-neon-cyan/20 text-neon-cyan border-neon-cyan/40",
+  failed: "bg-red-500/20 text-red-400 border-red-500/40",
+  cancelled: "bg-yellow-500/20 text-yellow-400 border-yellow-500/40",
 };
+
+const STATUS_FILTERS = ["all", "running", "completed", "failed", "cancelled"] as const;
 
 export default function SimulationsPage() {
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await getSimulations();
+      const res = await getSimulations({
+        status: statusFilter === "all" ? undefined : statusFilter,
+      });
       setSimulations(res.items);
     } catch (err) {
       setError(
@@ -28,7 +35,7 @@ export default function SimulationsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
     load();
@@ -41,6 +48,22 @@ export default function SimulationsPage() {
         All simulation runs — explore agent conversations, eval scores,
         relationships, and reports.
       </p>
+
+      <div className="flex gap-2 mb-6">
+        {STATUS_FILTERS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`rounded border px-3 py-1 text-xs font-medium transition-colors ${
+              statusFilter === s
+                ? "bg-neon-cyan/20 text-neon-cyan border-neon-cyan/40"
+                : "bg-surface text-foreground/50 border-border hover:bg-surface-light"
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
 
       {error && (
         <div className="rounded border border-red-500/40 bg-red-500/10 p-4 text-red-400 mb-4">

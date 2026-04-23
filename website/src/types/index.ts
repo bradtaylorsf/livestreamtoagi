@@ -90,7 +90,9 @@ export interface ConversationSummary {
 
 export interface ConversationDetail {
   id: string;
+  simulation_id: string | null;
   trigger_type: string;
+  trigger_details: Record<string, unknown> | null;
   participating_agents: string[];
   topics_discussed: string[] | null;
   turn_count: number;
@@ -99,6 +101,11 @@ export interface ConversationDetail {
   final_energy: number | null;
   started_at: string | null;
   ended_at: string | null;
+  closed_by: string | null;
+  transcript: string | null;
+  energy_history: Record<string, unknown>[];
+  total_tokens: number;
+  total_cost: string;
 }
 
 export interface SelectionLogEntry {
@@ -171,11 +178,13 @@ export interface AgentArtifactResponse {
   created_at: string | null;
 }
 
+// Decimal fields are serialized as strings by the backend (Pydantic Decimal → str).
+// Coerce with Number() at call sites before numeric operations.
 export interface AgentRelationshipResponse {
   id: string;
   target_agent_id: string;
-  sentiment_score: number;
-  trust_score: number;
+  sentiment_score: number | string;
+  trust_score: number | string;
   interaction_count: number;
   relationship_summary: string | null;
 }
@@ -188,9 +197,19 @@ export interface AgentEvolutionResponse {
   created_at: string | null;
 }
 
+export interface CoreMemoryVersion {
+  version: number;
+  content: string;
+  changed_at: string | null;
+  change_reason: string | null;
+}
+
 export interface CoreMemoryPublic {
   current_content: string;
+  current_version: number;
+  token_count: number;
   last_updated: string | null;
+  version_history: CoreMemoryVersion[];
 }
 
 export interface RecallMemoryPublic {
@@ -200,6 +219,13 @@ export interface RecallMemoryPublic {
   event_type: string | null;
   importance_score: number | null;
   created_at: string | null;
+}
+
+export interface EvalHistoryPoint {
+  score: number | null;
+  created_at: string | null;
+  simulation_id: string;
+  eval_run_id: string;
 }
 
 export type ClipCategory = "funny" | "dramatic" | "technical" | "philosophical";

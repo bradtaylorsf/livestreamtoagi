@@ -106,8 +106,14 @@ export async function getAgents(): Promise<Agent[]> {
 
 export async function getAgentJournal(
   id: string,
+  params?: { simulation_id?: string; limit?: number; offset?: number },
 ): Promise<JournalEntry[]> {
-  return request<JournalEntry[]>(`/api/agents/${id}/journal`);
+  const searchParams = new URLSearchParams();
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<JournalEntry[]>(`/api/agents/${id}/journal${qs ? `?${qs}` : ""}`);
 }
 
 export async function getAgentRelationships(
@@ -120,9 +126,10 @@ export async function getAgentRelationships(
 
 export async function getAgentConversations(
   id: string,
-  params?: { limit?: number; offset?: number },
+  params?: { simulation_id?: string; limit?: number; offset?: number },
 ): Promise<PaginatedResponse<AgentConversation>> {
   const searchParams = new URLSearchParams();
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   if (params?.limit != null) searchParams.set("limit", String(params.limit));
   if (params?.offset != null) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();
@@ -133,9 +140,11 @@ export async function getAgentConversations(
 
 export async function getAgentArtifacts(
   id: string,
-  params?: { limit?: number; offset?: number },
+  params?: { type?: string; simulation_id?: string; limit?: number; offset?: number },
 ): Promise<PaginatedResponse<AgentArtifactResponse>> {
   const searchParams = new URLSearchParams();
+  if (params?.type) searchParams.set("type", params.type);
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   if (params?.limit != null) searchParams.set("limit", String(params.limit));
   if (params?.offset != null) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();
@@ -152,9 +161,11 @@ export async function getAgentCoreMemory(
 
 export async function getAgentRecallMemories(
   id: string,
-  params?: { limit?: number; offset?: number },
+  params?: { search?: string; simulation_id?: string; limit?: number; offset?: number },
 ): Promise<PaginatedResponse<RecallMemoryPublic>> {
   const searchParams = new URLSearchParams();
+  if (params?.search) searchParams.set("search", params.search);
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   if (params?.limit != null) searchParams.set("limit", String(params.limit));
   if (params?.offset != null) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();
@@ -167,6 +178,58 @@ export async function getAgentEvolution(
   id: string,
 ): Promise<AgentEvolutionResponse[]> {
   return request<AgentEvolutionResponse[]>(`/api/agents/${id}/evolution`);
+}
+
+// Agent system prompt
+export interface SystemPromptLayer {
+  name: string;
+  content: string;
+  token_count: number;
+}
+
+export interface SystemPromptResponse {
+  assembled_prompt: string;
+  layers: SystemPromptLayer[];
+  total_tokens: number;
+}
+
+export async function getAgentSystemPrompt(
+  id: string,
+): Promise<SystemPromptResponse> {
+  return request<SystemPromptResponse>(`/api/agents/${id}/system-prompt`);
+}
+
+// Agent costs
+export interface CostByDay {
+  date: string;
+  cost: string;
+}
+
+export interface CostByType {
+  type: string;
+  cost: string;
+  tokens: number;
+}
+
+export interface AgentCostBreakdown {
+  by_day: CostByDay[];
+  by_type: CostByType[];
+  total: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+export async function getAgentCosts(
+  id: string,
+  params?: { from?: string; to?: string },
+): Promise<AgentCostBreakdown> {
+  const searchParams = new URLSearchParams();
+  if (params?.from) searchParams.set("from", params.from);
+  if (params?.to) searchParams.set("to", params.to);
+  const qs = searchParams.toString();
+  return request<AgentCostBreakdown>(
+    `/api/agents/${id}/costs${qs ? `?${qs}` : ""}`,
+  );
 }
 
 export async function chatWithAgent(
@@ -260,6 +323,41 @@ export async function getConversationSelections(
   return request<SelectionLogEntry[]>(`/api/conversations/${id}/selections`);
 }
 
+export interface TurnDetail {
+  turn_number: number;
+  selected_agent_id: string;
+  was_interrupt: boolean;
+  agent_scores: Record<string, Record<string, number>>;
+  detected_topic: string | null;
+  previous_speaker_id: string | null;
+  conversation_energy: number | null;
+  timestamp: string | null;
+}
+
+export async function getConversationTurns(
+  id: string,
+): Promise<TurnDetail[]> {
+  return request<TurnDetail[]>(`/api/conversations/${id}/turns`);
+}
+
+export async function getConversationManagementFlags(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(`/api/conversations/${id}/management-flags`);
+}
+
+export async function getConversationArtifacts(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(`/api/conversations/${id}/artifacts`);
+}
+
+export async function getConversationInterrupts(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  return request<Record<string, unknown>[]>(`/api/conversations/${id}/interrupts`);
+}
+
 // Eval prompts
 export interface EvalPrompt {
   name: string;
@@ -290,7 +388,7 @@ export interface PublicEvalRun {
   results?: { category: string; score: number | null }[];
 }
 
-import type { EvalHistoryPoint } from "@/types/admin";
+import type { EvalHistoryPoint } from "@/types";
 export type { EvalHistoryPoint };
 
 export async function getEvalCategories(): Promise<string[]> {
@@ -368,11 +466,14 @@ export interface PublicSimulationDetail extends PublicSimulation {
 }
 
 export async function getSimulations(
-  limit = 20,
-  offset = 0,
+  params?: { status?: string; limit?: number; offset?: number },
 ): Promise<PaginatedResponse<PublicSimulation>> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set("status", params.status);
+  searchParams.set("limit", String(params?.limit ?? 20));
+  searchParams.set("offset", String(params?.offset ?? 0));
   return request<PaginatedResponse<PublicSimulation>>(
-    `/api/simulations?limit=${limit}&offset=${offset}`,
+    `/api/simulations?${searchParams.toString()}`,
   );
 }
 
@@ -442,6 +543,55 @@ export async function getSimulationSnapshots(
 ): Promise<Record<string, unknown>[]> {
   return request<Record<string, unknown>[]>(
     `/api/simulations/${id}/snapshots`,
+  );
+}
+
+// Simulation conversations
+export async function getSimulationConversations(
+  id: string,
+  params?: { limit?: number; offset?: number },
+): Promise<PaginatedResponse<ConversationSummary>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  return request<PaginatedResponse<ConversationSummary>>(
+    `/api/simulations/${id}/conversations${qs ? `?${qs}` : ""}`,
+  );
+}
+
+// Simulation costs
+export interface SimulationCostResponse {
+  by_agent: { agent_id: string; total: string }[];
+  total: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+export async function getSimulationCosts(
+  id: string,
+): Promise<SimulationCostResponse> {
+  return request<SimulationCostResponse>(`/api/simulations/${id}/costs`);
+}
+
+// Simulation timeline
+export interface TimelineEvent {
+  timestamp: string | null;
+  event_type: string;
+  agent_id: string | null;
+  details: Record<string, unknown>;
+}
+
+export async function getSimulationTimeline(
+  id: string,
+  params?: { agent_id?: string; event_type?: string },
+): Promise<TimelineEvent[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.agent_id) searchParams.set("agent_id", params.agent_id);
+  if (params?.event_type) searchParams.set("event_type", params.event_type);
+  const qs = searchParams.toString();
+  return request<TimelineEvent[]>(
+    `/api/simulations/${id}/timeline${qs ? `?${qs}` : ""}`,
   );
 }
 

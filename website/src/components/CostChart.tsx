@@ -10,8 +10,8 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { fetchSimulationCosts } from "@/lib/admin-api";
-import type { SimulationCostResponse } from "@/types/admin";
+import { getSimulationCosts } from "@/lib/api";
+import type { SimulationCostResponse } from "@/lib/api";
 
 interface Props {
   simulationId: string;
@@ -21,7 +21,7 @@ export default function CostChart({ simulationId }: Props) {
   const [costs, setCosts] = useState<SimulationCostResponse | null>(null);
 
   useEffect(() => {
-    fetchSimulationCosts(simulationId).then(setCosts).catch(() => setCosts(null));
+    getSimulationCosts(simulationId).then(setCosts).catch(() => setCosts(null));
   }, [simulationId]);
 
   if (!costs || costs.by_agent.length === 0) {

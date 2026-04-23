@@ -67,13 +67,14 @@ export default function RelationshipGraph({ agentId }: Props) {
   if (relationships.length === 0) {
     return (
       <p className="text-sm text-foreground/40 text-center py-8">
-        Relationship data not available for this agent.
+        No relationships tracked yet.
       </p>
     );
   }
 
+  // API may serialize Decimal sentiment_score as a string — coerce before math.
   const sorted = [...relationships].sort(
-    (a, b) => b.sentiment_score - a.sentiment_score,
+    (a, b) => Number(b.sentiment_score) - Number(a.sentiment_score),
   );
 
   return (
@@ -82,7 +83,13 @@ export default function RelationshipGraph({ agentId }: Props) {
         const target = allAgents.find((a) => a.id === rel.target_agent_id);
         if (!target) return null;
 
-        const barWidth = Math.round(Math.abs(rel.sentiment_score) * 100);
+        const sentiment = Number(rel.sentiment_score);
+        const barWidth = Number.isFinite(sentiment)
+          ? Math.round(Math.abs(sentiment) * 100)
+          : 0;
+        const sentimentLabel = Number.isFinite(sentiment)
+          ? sentiment.toFixed(1)
+          : "—";
 
         return (
           <Link
@@ -105,7 +112,7 @@ export default function RelationshipGraph({ agentId }: Props) {
                   {target.name}
                 </span>
                 <span className="text-xs text-foreground/40">
-                  {rel.sentiment_score.toFixed(1)}
+                  {sentimentLabel}
                 </span>
               </div>
               <div className="h-1.5 bg-surface-light rounded overflow-hidden">

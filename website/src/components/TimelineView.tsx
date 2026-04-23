@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchSimulationTimeline } from "@/lib/admin-api";
-import type { TimelineEvent } from "@/types/admin";
+import { getSimulationTimeline } from "@/lib/api";
+import type { TimelineEvent } from "@/lib/api";
 
 const EVENT_TYPE_ICONS: Record<string, string> = {
   phase_transition: "◇",
@@ -56,10 +56,9 @@ export default function TimelineView({ simulationId, agents }: Props) {
     async function load() {
       setLoading(true);
       try {
-        const data = await fetchSimulationTimeline(
+        const data = await getSimulationTimeline(
           simulationId,
-          agentFilter || undefined,
-          typeFilter || undefined,
+          { agent_id: agentFilter || undefined, event_type: typeFilter || undefined },
         );
         setEvents(data);
       } catch {
