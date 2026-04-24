@@ -40,15 +40,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Pin Turbopack's workspace root to the repo root. Without this, Next
-  // warns about multiple lockfiles (pnpm-lock.yaml at repo root and
-  // website/package-lock.json) and the auto-inferred root can shift on
-  // the fly — producing spurious restarts and, combined with macOS's
-  // default 256 FD cap, EMFILE watcher failures that drop route
-  // registrations (→ 404 on every page).
-  turbopack: {
-    root: path.resolve(__dirname, ".."),
-  },
+  // Pin the file-tracing root to this package's directory.
+  // With both pnpm-lock.yaml at the repo root and package-lock.json here,
+  // Next.js would otherwise infer the workspace root as the repo root and
+  // warn; pinning it silences the warning without affecting module resolution.
+  outputFileTracingRoot: path.resolve(__dirname),
   async headers() {
     return [
       {
