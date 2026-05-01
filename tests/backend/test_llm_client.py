@@ -12,7 +12,6 @@ import pytest
 from core.llm_client import (
     MODEL_REGISTRY,
     LLMError,
-    ModelConfig,
     OpenRouterClient,
     estimate_cost,
     refresh_pricing,
@@ -278,7 +277,7 @@ async def test_cost_event_schema():
     assert isinstance(cost_event.details, dict)
     required_keys = {
         "model", "input_tokens", "output_tokens",
-        "latency_ms", "stream", "openrouter_id",
+        "latency_ms", "stream", "openrouter_id", "provider", "runtime_model",
     }
     assert required_keys == set(cost_event.details.keys())
 
@@ -413,6 +412,96 @@ async def test_langfuse_none_no_error():
         model="claude-haiku-4-5",
     )
     assert result.content == "Hello!"
+
+
+async def test_local_provider_uses_configured_runtime_model_and_zero_cost():
+    cost_repo = make_mock_cost_repo()
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(
+        return_value=FakeResponse(200, make_openrouter_response())
+    )
+
+    client = OpenRouterClient(
+        api_key="lm-studio",
+        cost_repo=cost_repo,
+        http_client=mock_client,
+        provider="lmstudio",
+        base_url="http://localhost:1234/v1",
+        local_model="qwen-local",
+    )
+    result = await client.complete(
+        [{"role": "user", "content": "Hi"}],
+        model="claude-haiku-4-5",
+        agent_id="vera",
+    )
+
+    assert result.estimated_cost == Decimal("0")
+    assert mock_client.post.call_args.kwargs["json"]["model"] == "qwen-local"
+    cost_event = cost_repo.add_cost.call_args[0][0]
+    assert cost_event.amount == Decimal("0")
+    assert cost_event.details["provider"] == "lmstudio"
+    assert cost_event.details["runtime_model"] == "qwen-local"
+
+
+def test_local_provider_allows_custom_model_names():
+    client = OpenRouterClient(
+        api_key="lm-studio",
+        cost_repo=make_mock_cost_repo(),
+        http_client=MagicMock(),
+        provider="lmstudio",
+    )
+
+    assert client.runtime_model_id("custom-local-model") == "custom-local-model"
+
+
+def test_local_provider_routes_building_tier_to_separate_model():
+    client = OpenRouterClient(
+        api_key="lm-studio",
+        cost_repo=make_mock_cost_repo(),
+        http_client=MagicMock(),
+        provider="lmstudio",
+        local_model="small-local",
+        local_model_building="big-local",
+    )
+
+    # Conversation-tier canonical models go to the small local model
+    assert client.runtime_model_id("claude-haiku-4-5") == "small-local"
+    assert client.runtime_model_id("gemini-flash") == "small-local"
+
+    # Building-tier canonical models go to the big local model
+    assert client.runtime_model_id("claude-sonnet-4-6") == "big-local"
+    assert client.runtime_model_id("gemini-2.5-pro") == "big-local"
+    assert client.runtime_model_id("gpt-5.2") == "big-local"
+    assert client.runtime_model_id("grok-3") == "big-local"
+
+    # Provider-prefixed aliases also route to the building model
+    assert client.runtime_model_id("anthropic/claude-sonnet-4.6") == "big-local"
+
+
+async def test_local_provider_downgrades_dict_tool_choice():
+    """LM Studio rejects dict tool_choice; we downgrade to 'required'."""
+    cost_repo = make_mock_cost_repo()
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(
+        return_value=FakeResponse(200, make_openrouter_response())
+    )
+
+    client = OpenRouterClient(
+        api_key="lm-studio",
+        cost_repo=cost_repo,
+        http_client=mock_client,
+        provider="lmstudio",
+        local_model="qwen-local",
+    )
+    await client.complete(
+        [{"role": "user", "content": "Hi"}],
+        model="claude-haiku-4-5",
+        tools=[{"type": "function", "function": {"name": "x"}}],
+        tool_choice={"type": "function", "function": {"name": "x"}},
+    )
+
+    sent_payload = mock_client.post.call_args.kwargs["json"]
+    assert sent_payload["tool_choice"] == "required"
 
 
 # ── Integration Test ──────────────────────────────────────────

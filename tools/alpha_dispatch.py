@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Alpha uses DeepSeek V3.2 via OpenRouter
+# Alpha uses the configured LLM provider; OpenRouter maps this to DeepSeek V3.2.
 ALPHA_MODEL = "deepseek/deepseek-v3.2"
 
 # Hard timeout for Alpha tasks

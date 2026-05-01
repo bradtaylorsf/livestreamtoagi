@@ -9,18 +9,22 @@ After every event (conversation, building session, challenge), the compactor:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 
 from core.memory.embeddings import generate_embedding
 
 if TYPE_CHECKING:
-    import httpx
     import uuid
+
+    import httpx
 
     from core.llm_client import OpenRouterClient
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.recall_memory import RecallMemoryManager
     from core.models import RecallMemory, Transcript
+
+EmbeddingFn = Callable[[str], Coroutine[object, object, list[float]]]
 
 # Cheap model for summary generation (~$0.001 per call)
 SUMMARY_MODEL = "anthropic/claude-haiku-4.5"
@@ -57,6 +61,7 @@ class MemoryCompactor:
         llm_client: OpenRouterClient,
         http_client: httpx.AsyncClient,
         openrouter_api_key: str,
+        embedding_fn: EmbeddingFn | None = None,
         simulation_id: uuid.UUID | None = None,
     ) -> None:
         self._archival = archival
@@ -64,6 +69,7 @@ class MemoryCompactor:
         self._llm = llm_client
         self._http = http_client
         self._api_key = openrouter_api_key
+        self._embedding_fn = embedding_fn
         self._simulation_id = simulation_id
 
     async def compact_interaction(
@@ -96,7 +102,7 @@ class MemoryCompactor:
         summary = await self._generate_summary(agent_id, interaction, event_type)
 
         # Step 3: Generate embedding from summary
-        embedding = await generate_embedding(summary, self._http, self._api_key)
+        embedding = await self._generate_embedding(summary)
 
         # Step 4: Store in Tier 2
         recall_memory = await self._recall.store_recall_memory(
@@ -131,7 +137,7 @@ class MemoryCompactor:
             participants = [agent_id]
 
         summary = await self._generate_summary(agent_id, interaction, event_type)
-        embedding = await generate_embedding(summary, self._http, self._api_key)
+        embedding = await self._generate_embedding(summary)
 
         return await self._recall.store_recall_memory(
             agent_id=agent_id,
@@ -190,6 +196,11 @@ class MemoryCompactor:
             simulation_id=self._simulation_id,
         )
         return response.content
+
+    async def _generate_embedding(self, text: str) -> list[float]:
+        if self._embedding_fn is not None:
+            return await self._embedding_fn(text)
+        return await generate_embedding(text, self._http, self._api_key)
 
     @staticmethod
     def _format_buffer_messages(messages: list[dict[str, str]]) -> str:

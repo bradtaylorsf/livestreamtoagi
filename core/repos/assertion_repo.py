@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from core.repos.utils import serialize_jsonb
-
 if TYPE_CHECKING:
     import uuid
 
     from core.database import Database
+
+
+def _to_jsonb(val: Any) -> str | None:
+    """Encode any value (including raw strings) to a valid JSONB literal."""
+    if val is None:
+        return None
+    return json.dumps(val, default=str)
 
 
 class AssertionRepo:
@@ -34,8 +39,8 @@ class AssertionRepo:
                 phase_name,
                 r.get("name", "unknown"),
                 r.get("passed", False),
-                serialize_jsonb(r.get("expected")),
-                serialize_jsonb(r.get("actual")),
+                _to_jsonb(r.get("expected")),
+                _to_jsonb(r.get("actual")),
                 r.get("severity", "warning"),
                 r.get("error_message"),
             )

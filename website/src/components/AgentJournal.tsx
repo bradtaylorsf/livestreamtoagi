@@ -92,6 +92,14 @@ export default function AgentJournal({ agentId }: Props) {
               </span>
             )}
           </div>
+          {entry.image_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={entry.image_url}
+              alt={`${entry.reflection_type ?? "journal"} illustration`}
+              className="mb-3 max-w-full rounded border border-border"
+            />
+          )}
           <p className="text-sm text-foreground/70 leading-relaxed">
             {entry.content}
           </p>

@@ -249,6 +249,7 @@ export interface JournalEntry {
   simulation_id: string | null;
   content: string;
   reflection_type: string;
+  image_url: string | null;
   created_at: string;
 }
 

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from core.event_bus import EventType
-from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import SimulationCreate, SimulationStatus
 from core.simulation.clock import SimulationClock
@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from core.conversation.triggers import TriggerSystem
     from core.database import Database
     from core.event_bus import EventBus
-    from core.llm_client import OpenRouterClient
     from core.management import Management
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.compaction import MemoryCompactor
@@ -376,6 +375,12 @@ class SimulationOrchestrator:
                 continue
             conv_model = agent.model_conversation
             build_model = agent.model_building
+            if isinstance(self._llm, OpenRouterClient):
+                versions[agent_id] = {
+                    "conversation": self._llm.model_provenance(conv_model),
+                    "building": self._llm.model_provenance(build_model),
+                }
+                continue
             # Resolve to OpenRouter IDs for exact reproducibility
             conv_canonical = MODEL_NAME_ALIASES.get(conv_model, conv_model)
             build_canonical = MODEL_NAME_ALIASES.get(build_model, build_model)
@@ -404,7 +409,14 @@ class SimulationOrchestrator:
         self._start_time = time.monotonic()
 
         # Create simulation record (include clock state in config snapshot)
-        config_snapshot = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        config_snapshot = {
+            **self._config.to_dict(),
+            "clock_state": self.clock.to_dict(),
+            "llm_provider": (
+                self._llm.provider
+                if isinstance(self._llm, OpenRouterClient) else "openrouter"
+            ),
+        }
         model_versions = self._build_model_versions()
         sim = await self._sim_repo.create(SimulationCreate(
             name=self._config.name,
@@ -614,7 +626,14 @@ class SimulationOrchestrator:
         """Run in autonomous mode — trigger system drives all conversations."""
         self._start_time = time.monotonic()
 
-        config_snapshot = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        config_snapshot = {
+            **self._config.to_dict(),
+            "clock_state": self.clock.to_dict(),
+            "llm_provider": (
+                self._llm.provider
+                if isinstance(self._llm, OpenRouterClient) else "openrouter"
+            ),
+        }
         model_versions = self._build_model_versions()
         sim = await self._sim_repo.create(SimulationCreate(
             name=self._config.name,

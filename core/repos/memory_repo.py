@@ -292,23 +292,42 @@ class MemoryRepo:
         offset: int = 0,
         simulation_id: _uuid.UUID | None = None,
     ) -> tuple[list[JournalEntry], int]:
-        """Return paginated journal entries with total count."""
+        """Return paginated journal entries with total count.
+
+        When ``simulation_id`` is None, returns entries from every simulation
+        (including the live one).
+        """
         limit = min(limit, MAX_LIMIT)
-        count = await self.db.fetchval(
-            f"SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1 AND {_sim_filter(2)}",
-            agent_id,
-            simulation_id,
-        )
-        rows = await self.db.fetch(
-            f"""SELECT * FROM journal_entries
-               WHERE agent_id = $1 AND {_sim_filter(4)}
-               ORDER BY created_at DESC
-               LIMIT $2 OFFSET $3""",
-            agent_id,
-            limit,
-            offset,
-            simulation_id,
-        )
+        if simulation_id is None:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1",
+                agent_id,
+            )
+            rows = await self.db.fetch(
+                """SELECT * FROM journal_entries
+                   WHERE agent_id = $1
+                   ORDER BY created_at DESC
+                   LIMIT $2 OFFSET $3""",
+                agent_id,
+                limit,
+                offset,
+            )
+        else:
+            count = await self.db.fetchval(
+                f"SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1 AND {_sim_filter(2)}",
+                agent_id,
+                simulation_id,
+            )
+            rows = await self.db.fetch(
+                f"""SELECT * FROM journal_entries
+                   WHERE agent_id = $1 AND {_sim_filter(4)}
+                   ORDER BY created_at DESC
+                   LIMIT $2 OFFSET $3""",
+                agent_id,
+                limit,
+                offset,
+                simulation_id,
+            )
         return [JournalEntry(**dict(r)) for r in rows], count or 0
 
     async def get_recent_journal_entries(

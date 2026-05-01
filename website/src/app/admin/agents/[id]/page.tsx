@@ -8,6 +8,7 @@ import SummaryCard from "@/components/admin/SummaryCard";
 import PersonalityChart from "@/components/admin/PersonalityChart";
 import MemoryDiffView from "@/components/admin/MemoryDiffView";
 import ArtifactDetail from "@/components/admin/ArtifactDetail";
+import SimulationFilterSelect from "@/components/admin/SimulationFilterSelect";
 import {
   fetchAgent,
   fetchAgentSystemPrompt,
@@ -540,20 +541,13 @@ function ConversationsTab({
     <div className="space-y-4">
       {/* Filter */}
       <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="Filter by simulation ID..."
+        <SimulationFilterSelect
           value={simFilter}
-          onChange={(e) => onSimFilterChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onFilterChange()}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground placeholder:text-foreground/30"
+          onChange={(v) => {
+            onSimFilterChange(v);
+            onFilterChange();
+          }}
         />
-        <button
-          onClick={onFilterChange}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-        >
-          Filter
-        </button>
       </div>
 
       {/* Table */}
@@ -659,20 +653,13 @@ function ArtifactsTab({
             </option>
           ))}
         </select>
-        <input
-          type="text"
-          placeholder="Simulation ID..."
+        <SimulationFilterSelect
           value={simFilter}
-          onChange={(e) => onSimFilterChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onFilterChange()}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground placeholder:text-foreground/30"
+          onChange={(v) => {
+            onSimFilterChange(v);
+            onFilterChange();
+          }}
         />
-        <button
-          onClick={onFilterChange}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-        >
-          Filter
-        </button>
       </div>
 
       {/* Artifacts list */}
@@ -719,20 +706,13 @@ function JournalTab({
     <div className="space-y-4">
       {/* Filter */}
       <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="Filter by simulation ID..."
+        <SimulationFilterSelect
           value={simFilter}
-          onChange={(e) => onSimFilterChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onFilterChange()}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground placeholder:text-foreground/30"
+          onChange={(v) => {
+            onSimFilterChange(v);
+            onFilterChange();
+          }}
         />
-        <button
-          onClick={onFilterChange}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-        >
-          Filter
-        </button>
       </div>
 
       {/* Entries */}
@@ -753,6 +733,14 @@ function JournalTab({
                   {new Date(entry.created_at).toLocaleString()}
                 </span>
               </div>
+              {entry.image_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={entry.image_url}
+                  alt={`${entry.reflection_type} journal illustration`}
+                  className="mb-3 max-w-md rounded border border-border"
+                />
+              )}
               <pre className="text-sm text-foreground/70 whitespace-pre-wrap font-mono">
                 {entry.content}
               </pre>

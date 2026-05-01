@@ -9,6 +9,8 @@ import pytest
 from core.memory.embeddings import (
     EMBEDDING_DIMENSION,
     MAX_RETRIES,
+    embedding_config_from_env,
+    generate_deterministic_embedding,
     generate_embedding,
 )
 
@@ -127,3 +129,35 @@ class TestGenerateEmbedding:
             await generate_embedding("test", client, "key")
 
         assert client.post.call_count == MAX_RETRIES + 1
+
+
+def test_deterministic_embedding_is_stable_and_nonzero() -> None:
+    first = generate_deterministic_embedding("memory fragment")
+    second = generate_deterministic_embedding("memory fragment")
+
+    assert first == second
+    assert len(first) == EMBEDDING_DIMENSION
+    assert any(value != 0 for value in first)
+
+
+def test_local_llm_defaults_to_deterministic_embeddings() -> None:
+    with patch.dict("os.environ", {"LLM_PROVIDER": "lmstudio", "EMBEDDING_PROVIDER": ""}):
+        cfg = embedding_config_from_env("")
+
+    assert cfg.provider == "deterministic"
+
+
+def test_lmstudio_embedding_config_uses_local_endpoint() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "EMBEDDING_PROVIDER": "lmstudio",
+            "LOCAL_EMBEDDING_BASE_URL": "http://localhost:1234/v1",
+            "LOCAL_EMBEDDING_MODEL": "nomic-local",
+        },
+    ):
+        cfg = embedding_config_from_env("")
+
+    assert cfg.provider == "lmstudio"
+    assert cfg.url == "http://localhost:1234/v1/embeddings"
+    assert cfg.model == "nomic-local"
