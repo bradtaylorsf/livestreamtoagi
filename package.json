@@ -6,7 +6,7 @@
     "dev:docker": "docker compose up -d --wait && bash scripts/check-services.sh && echo '✓ Services ready' && tail -f /dev/null",
     "dev:backend": "sleep 3 && .venv/bin/uvicorn core.main:app --reload --port 8010 --env-file .env",
     "dev:frontend": "sleep 5 && VITE_WS_URL=ws://localhost:8010/ws npm --prefix frontend run dev",
-    "dev:website": "sleep 5 && BACKEND_URL=http://localhost:8010 npm --prefix website run dev -- --port 4000",
+    "dev:website": "sleep 5 && cd website && BACKEND_URL=http://localhost:8010 npx next dev --webpack --port 4000",
     "pretest": "npm --prefix frontend install --silent && npm --prefix website install --silent",
     "test": "concurrently -g -n pytest,frontend,website -c yellow,cyan,magenta \".venv/bin/pytest\" \"npm --prefix frontend test\" \"npm --prefix website test\"",
     "test:python": ".venv/bin/pytest",

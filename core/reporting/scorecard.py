@@ -57,6 +57,7 @@ class LaunchScorecard:
         simulation_id: str,
         assertion_repo: AssertionRepo | None = None,
         relationship_repo: RelationshipRepo | None = None,
+        report_sections: list[dict[str, Any]] | None = None,
     ) -> None:
         import uuid as uuid_mod
         self._db = db
@@ -64,6 +65,7 @@ class LaunchScorecard:
         self._sim_uuid = uuid_mod.UUID(simulation_id)
         self._assertion_repo = assertion_repo
         self._relationship_repo = relationship_repo
+        self._report_sections = report_sections or []
 
     async def evaluate(self) -> ScorecardResult:
         """Run all scorecard criteria and return result."""
@@ -86,6 +88,9 @@ class LaunchScorecard:
 
         # 6. No critical management issues
         criteria.append(await self._check_management_critical())
+
+        # 7. Report data completeness
+        criteria.append(self._check_report_completeness())
 
         # Overall: READY if all required criteria pass
         ready = all(c.passed for c in criteria if c.required)
@@ -247,4 +252,35 @@ class LaunchScorecard:
             passed=count == 0,
             evidence=f"{count} critical management flags",
             required=True,
+        )
+
+    def _check_report_completeness(self) -> ScorecardCriterion:
+        """Check that report sections contain meaningful data."""
+        missing: list[str] = []
+        for section in self._report_sections:
+            title = section.get("title", "").lower()
+            data = section.get("data", {})
+            if "tool" in title:
+                by_tool = data.get("by_tool", {})
+                if not by_tool and data.get("total_invocations", 0) == 0:
+                    missing.append("tool usage")
+            elif "memory" in title:
+                changes = data.get("core_memory_changes", {})
+                if not changes and not data.get("journal_entries_by_agent", {}):
+                    missing.append("memory evolution")
+            elif "relationship" in title and "readiness" not in title:
+                if not data.get("available", True) or not data.get("matrix", {}):
+                    missing.append("relationship data")
+            elif "cost" in title:
+                if not data.get("by_day", {}) and not data.get("by_agent", {}):
+                    missing.append("cost breakdown")
+
+        if not self._report_sections:
+            missing.append("all sections")
+
+        return ScorecardCriterion(
+            name="report_completeness",
+            passed=len(missing) == 0,
+            evidence=f"Missing data: {', '.join(missing)}" if missing else "All sections have data",
+            required=False,
         )

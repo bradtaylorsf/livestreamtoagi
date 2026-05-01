@@ -6,12 +6,16 @@ import RelationshipGraph from "@/components/RelationshipGraph";
 import AgentConversations from "@/components/AgentConversations";
 import EvolutionTimeline from "@/components/EvolutionTimeline";
 import ArtifactGallery from "@/components/ArtifactGallery";
+import AgentCoreMemory from "@/components/AgentCoreMemory";
+import AgentRecallMemories from "@/components/AgentRecallMemories";
 
 const TABS = [
   { id: "journal", label: "Journal" },
   { id: "relationships", label: "Relationships" },
   { id: "conversations", label: "Conversations" },
   { id: "evolution", label: "Evolution" },
+  { id: "core-memory", label: "Core Memory" },
+  { id: "recall", label: "Recall Memory" },
   { id: "creations", label: "Creations" },
 ] as const;
 
@@ -50,6 +54,8 @@ export default function AgentProfileTabs({ agentId }: Props) {
         <AgentConversations agentId={agentId} />
       )}
       {activeTab === "evolution" && <EvolutionTimeline agentId={agentId} />}
+      {activeTab === "core-memory" && <AgentCoreMemory agentId={agentId} />}
+      {activeTab === "recall" && <AgentRecallMemories agentId={agentId} />}
       {activeTab === "creations" && <ArtifactGallery agentId={agentId} />}
     </div>
   );

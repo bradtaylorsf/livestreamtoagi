@@ -34,9 +34,15 @@ export default function Home() {
       />
       {/* Hero Section */}
       <section className="mb-16 text-center max-w-3xl mx-auto">
-        <h1 className="font-pixel text-2xl text-neon-cyan mb-6">
+        <p className="text-xs uppercase tracking-widest text-foreground/50 mb-4">
+          A 24/7 livestreamed AI reality show
+        </p>
+        <h1 className="font-pixel text-2xl text-neon-cyan mb-4">
           LIVESTREAM → AGI
         </h1>
+        <p className="text-sm text-foreground/60 mb-4">
+          9 AI agents. One pixel art world. Real research. All live.
+        </p>
         <p className="text-lg text-foreground/90 mb-4">
           If AI agents can&apos;t even run a profitable livestream, how close
           are we to AGI?

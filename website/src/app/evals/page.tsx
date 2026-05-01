@@ -52,35 +52,38 @@ export default function EvalsPage() {
   const [filterModel, setFilterModel] = useState<string>("");
 
   useEffect(() => {
-    Promise.all([
-      getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
-      getEvalRuns().catch(() => []),
-    ])
-      .then(async ([cats, evalRuns]) => {
-        setRuns(evalRuns);
+    const loadData = async () => {
+      const [cats, evalRuns] = await Promise.all([
+        getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
+        getEvalRuns().catch(() => []),
+      ]);
 
-        // Build category cards from history data
-        const cards: EvalCategoryCardProps[] = [];
-        for (const cat of cats) {
-          let history: EvalHistoryPoint[] = [];
-          try {
-            history = await getEvalHistory(cat);
-          } catch {
-            // No history available
-          }
-          const latestScore =
-            history.length > 0 ? (history[history.length - 1].score ?? null) : null;
-          cards.push({
-            name: cat,
-            score: latestScore,
-            trend: calculateTrend(history),
-            description:
-              CATEGORY_DESCRIPTIONS[cat] ?? `Evaluation scores for ${cat.replace(/_/g, " ")}.`,
-          });
+      setRuns(evalRuns);
+
+      // Build category cards from history data
+      const cards: EvalCategoryCardProps[] = [];
+      for (const cat of cats) {
+        let history: EvalHistoryPoint[] = [];
+        try {
+          history = await getEvalHistory(cat);
+        } catch {
+          // No history available
         }
-        setCategories(cards);
-      })
-      .finally(() => setLoading(false));
+        const latestScore =
+          history.length > 0 ? (history[history.length - 1].score ?? null) : null;
+        cards.push({
+          name: cat,
+          score: latestScore,
+          trend: calculateTrend(history),
+          description:
+            CATEGORY_DESCRIPTIONS[cat] ?? `Evaluation scores for ${cat.replace(/_/g, " ")}.`,
+        });
+      }
+      setCategories(cards);
+      setLoading(false);
+    };
+
+    loadData();
   }, []);
 
   const latestRun = runs[0] ?? null;
@@ -330,11 +333,12 @@ export default function EvalsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-foreground/50">
-                  <th className="px-4 py-2 font-medium">Compare</th>
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 font-medium text-right">Score</th>
-                  <th className="px-4 py-2 font-medium text-right">Cost</th>
-                  <th className="px-4 py-2 font-medium">Model Versions</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Compare</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Date</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Simulation</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Score</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                  <th scope="col" className="px-4 py-2 font-medium">Model Versions</th>
                 </tr>
               </thead>
               <tbody>
@@ -371,6 +375,14 @@ export default function EvalsPage() {
                       </td>
                       <td className="px-4 py-2 text-foreground/60 text-xs">
                         {run.date}
+                      </td>
+                      <td className="px-4 py-2 text-xs">
+                        <Link
+                          href={`/simulations/${run.simulation_id}?tab=evals`}
+                          className="text-neon-cyan hover:underline"
+                        >
+                          {run.simulation_name || run.simulation_id.slice(0, 8) + "..."}
+                        </Link>
                       </td>
                       <td className="px-4 py-2 text-right font-mono">
                         {score != null ? (
@@ -428,13 +440,21 @@ export default function EvalsPage() {
           </p>
           <p>
             Eval prompt templates are open source.{" "}
+            <Link
+              href="/evals/prompts"
+              className="text-neon-cyan hover:underline"
+            >
+              View all evaluation prompts and scoring rubrics &rarr;
+            </Link>
+          </p>
+          <p>
             <a
               href="https://github.com/bradtaylor/livestreamtoagi/tree/main/evals"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-neon-cyan hover:underline"
+              className="text-neon-cyan/70 hover:underline text-xs"
             >
-              View eval configs on GitHub &rarr;
+              Or browse the raw YAML configs on GitHub
             </a>
           </p>
         </div>

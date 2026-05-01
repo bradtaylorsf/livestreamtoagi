@@ -6,7 +6,6 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: "/admin",
       },
     ],
     sitemap: "https://livestreamtoagi.com/sitemap.xml",

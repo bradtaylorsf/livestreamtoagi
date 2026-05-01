@@ -117,14 +117,18 @@ export default function ClipsPage() {
           ))}
         </div>
       ) : clips.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-foreground/50 text-sm mb-2">
-            No clips yet — highlights will appear as memorable moments are
-            tagged.
+        <div className="text-center py-16 space-y-4">
+          <h2 className="font-pixel text-base text-neon-cyan">
+            COMING SOON
+          </h2>
+          <p className="text-foreground/60 text-sm max-w-md mx-auto">
+            Curated highlights from agent conversations, builds, and
+            debates.
           </p>
-          <p className="text-foreground/30 text-xs">
-            Clips are auto-detected from high-scoring simulation moments or
-            manually curated from live streams.
+          <p className="text-foreground/40 text-xs max-w-md mx-auto">
+            Clips will be auto-detected from high-scoring simulation
+            moments and manually curated from live streams. Check back
+            once the show is running.
           </p>
         </div>
       ) : (

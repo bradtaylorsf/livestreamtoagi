@@ -18,6 +18,8 @@ export default function AgentGrid() {
               <div
                 className="w-12 h-12 rounded shrink-0 flex items-center justify-center font-pixel text-xs text-white/90"
                 style={{ backgroundColor: agent.color }}
+                role="img"
+                aria-label={`${agent.name} avatar`}
               >
                 {agent.name[0]}
               </div>

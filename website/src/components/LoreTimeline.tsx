@@ -1,5 +1,3 @@
-"use client";
-
 import type { LoreEvent } from "@/types";
 import { getAgentData } from "@/lib/agent-data";
 

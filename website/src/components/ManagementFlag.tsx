@@ -1,5 +1,3 @@
-"use client";
-
 interface ManagementFlagProps {
   wasFiltered: boolean;
   details?: string;

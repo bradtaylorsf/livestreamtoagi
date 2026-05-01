@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const cspDirectives = [
@@ -39,6 +40,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Pin the file-tracing root to this package's directory.
+  // With both pnpm-lock.yaml at the repo root and package-lock.json here,
+  // Next.js would otherwise infer the workspace root as the repo root and
+  // warn; pinning it silences the warning without affecting module resolution.
+  outputFileTracingRoot: path.resolve(__dirname),
   async headers() {
     return [
       {

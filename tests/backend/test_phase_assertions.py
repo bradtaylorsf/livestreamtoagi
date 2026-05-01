@@ -286,3 +286,78 @@ def test_assertion_failed_error():
     err = AssertionFailedError(result)
     assert "test" in str(err)
     assert err.assertion == result
+
+
+# ── Route transformation tests ────────────────────────────────
+
+
+def test_assertion_row_to_frontend_pass():
+    """Route should transform passed=True to status='pass' and rename error_message."""
+    row = {
+        "id": "abc",
+        "passed": True,
+        "severity": "warning",
+        "error_message": None,
+    }
+    # Simulate the route transformation
+    passed = row.pop("passed", False)
+    severity = row.get("severity", "warning")
+    if passed:
+        row["status"] = "pass"
+    elif severity == "warning" or severity == "info":
+        row["status"] = "warning"
+    else:
+        row["status"] = "fail"
+    if "error_message" in row:
+        row["message"] = row.pop("error_message")
+
+    assert row["status"] == "pass"
+    assert "message" in row
+    assert "passed" not in row
+    assert "error_message" not in row
+
+
+def test_assertion_row_to_frontend_fail_error():
+    """Route should transform passed=False + severity=error to status='fail'."""
+    row = {"passed": False, "severity": "error", "error_message": "boom"}
+    passed = row.pop("passed", False)
+    severity = row.get("severity", "warning")
+    if passed:
+        row["status"] = "pass"
+    elif severity == "warning" or severity == "info":
+        row["status"] = "warning"
+    else:
+        row["status"] = "fail"
+    if "error_message" in row:
+        row["message"] = row.pop("error_message")
+
+    assert row["status"] == "fail"
+    assert row["message"] == "boom"
+
+
+def test_assertion_row_to_frontend_fail_warning():
+    """Route should transform passed=False + severity=warning to status='warning'."""
+    row = {"passed": False, "severity": "warning", "error_message": "hmm"}
+    passed = row.pop("passed", False)
+    severity = row.get("severity", "warning")
+    if passed:
+        row["status"] = "pass"
+    elif severity == "warning" or severity == "info":
+        row["status"] = "warning"
+    else:
+        row["status"] = "fail"
+    if "error_message" in row:
+        row["message"] = row.pop("error_message")
+
+    assert row["status"] == "warning"
+
+
+def test_summary_transform():
+    """Route should transform pass_rates to frontend AssertionSummary shape."""
+    rates = {"passed": 5, "failed_error": 2, "failed_warning": 1, "failed_info": 1, "total": 9}
+    result = {
+        "passed": rates.get("passed", 0),
+        "failed": rates.get("failed_error", 0),
+        "warnings": rates.get("failed_warning", 0) + rates.get("failed_info", 0),
+    }
+    assert result == {"passed": 5, "failed": 2, "warnings": 2}

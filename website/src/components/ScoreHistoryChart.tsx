@@ -41,8 +41,12 @@ export default function ScoreHistoryChart() {
   const [cats, setCats] = useState<string[]>(DEFAULT_CATEGORIES);
   const [history, setHistory] = useState<Record<string, HistoryPoint[]>>({});
   const [selectedCat, setSelectedCat] = useState<string>(DEFAULT_CATEGORIES[0]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     getEvalCategories()
       .then((fetched) => {
         if (fetched.length > 0) {
@@ -52,17 +56,53 @@ export default function ScoreHistoryChart() {
           );
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setError("Failed to load eval categories. The API may be unavailable.");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
+    let pending = cats.length;
+    if (pending === 0) return;
+    let hasError = false;
+
     cats.forEach((cat) => {
       getEvalHistory(cat)
         .then((data) => setHistory((prev) => ({ ...prev, [cat]: data })))
-        .catch(() => {});
+        .catch(() => {
+          hasError = true;
+        })
+        .finally(() => {
+          pending--;
+          if (pending === 0 && hasError) {
+            setError("Failed to load eval history for some categories.");
+          }
+        });
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cats.join(",")]);
+
+  if (loading) {
+    return (
+      <div className="text-sm text-foreground/40 text-center py-8 animate-pulse" data-testid="score-chart-loading">
+        Loading eval data...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div
+        className="rounded border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-400 text-center"
+        data-testid="score-chart-error"
+      >
+        {error}
+      </div>
+    );
+  }
 
   const data = history[selectedCat] ?? [];
   if (data.length === 0) {

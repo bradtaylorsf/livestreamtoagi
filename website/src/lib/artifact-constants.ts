@@ -1,10 +1,14 @@
 /**
  * Shared constants for artifact display components.
  *
- * Canonical source for TYPE_ICONS, AGENT_COLORS (hex), and
+ * TYPE_ICONS, AGENT_COLORS (re-exported from agent-data), and
  * artifact STATUS_STYLES used across ArtifactCard, ArtifactDetailModal,
  * ArtifactDetail, and the artifacts page.
  */
+
+import { AGENT_COLORS } from "@/lib/agent-data";
+
+export { AGENT_COLORS };
 
 /** Emoji icons for each artifact type. */
 export const TYPE_ICONS: Record<string, string> = {
@@ -22,19 +26,6 @@ export const TYPE_ICONS: Record<string, string> = {
   self_modification: "🔧",
   message: "💬",
   file_write: "📄",
-};
-
-/** Hex colors per agent — for use with inline style={{ color }}. */
-export const AGENT_COLORS: Record<string, string> = {
-  vera: "#9b59b6",
-  rex: "#e74c3c",
-  aurora: "#f1c40f",
-  pixel: "#3498db",
-  fork: "#2ecc71",
-  sentinel: "#e67e22",
-  grok: "#1abc9c",
-  management: "#95a5a6",
-  alpha: "#8e44ad",
 };
 
 /** Tailwind classes for artifact status badges. */

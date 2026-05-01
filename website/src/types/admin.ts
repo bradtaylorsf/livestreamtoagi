@@ -18,7 +18,7 @@ export interface Simulation {
   total_tokens: number;
   total_cost: string;
   total_artifacts: number;
-  total_overseer_flags: number;
+  total_management_flags: number;
   agents_participated: string[];
   error_log: Record<string, unknown> | unknown[] | null;
   created_at: string | null;
