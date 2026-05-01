@@ -122,7 +122,37 @@ def mock_app():
         "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
     }
-    with patch.dict(os.environ, env_overrides):
+
+    # Build a Services-like stub the FastAPI lifespan can use without ever
+    # touching a real DB / Redis / LLM. The endpoints don't read from
+    # `app.state.services` directly — they go through dependency-injection
+    # overrides set below — but the lifespan still needs *something* with the
+    # right shape to avoid attribute errors on shutdown.
+    mock_services = MagicMock()
+    mock_services.db = mock_db
+    mock_services.redis = mock_redis
+    mock_services.agent_registry = mock_registry
+    mock_services.llm_client = mock_llm
+    mock_services.core_memory = None
+    mock_services.config_loader = MagicMock(
+        start_watching=AsyncMock(), stop_watching=AsyncMock(),
+    )
+    mock_services.cost_repo = MagicMock()
+    mock_services.memory_repo = MagicMock()
+    mock_services.token_counter = MagicMock()
+    mock_services.goal_manager = MagicMock()
+    mock_services.agent_state_manager = MagicMock()
+    mock_services.dream_manager = MagicMock()
+    mock_services.event_bus = MagicMock()
+
+    with (
+        patch.dict(os.environ, env_overrides),
+        patch("core.main.bootstrap_services", AsyncMock(return_value=mock_services)),
+        patch("core.main.shutdown_services", AsyncMock()),
+        patch("core.main.init_core_memories", AsyncMock(return_value=[])),
+        patch("core.main.start_scheduler"),
+        patch("core.main.stop_scheduler"),
+    ):
         from core.admin.dependencies import get_db, get_llm, get_registry, require_admin
         from core.main import app
 

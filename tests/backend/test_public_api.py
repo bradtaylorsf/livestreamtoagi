@@ -82,12 +82,37 @@ def mock_app():
         "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
     }
+    # Mock services object for the FastAPI lifespan to use instead of a real
+    # bootstrap. Dependency-injection overrides below are what the route
+    # handlers actually consume; this is just enough shape for startup/shutdown.
+    mock_lifespan_services = MagicMock()
+    mock_lifespan_services.db = mock_db
+    mock_lifespan_services.redis = mock_redis
+    mock_lifespan_services.agent_registry = mock_registry
+    mock_lifespan_services.llm_client = None
+    mock_lifespan_services.core_memory = None
+    mock_lifespan_services.config_loader = MagicMock(
+        start_watching=AsyncMock(), stop_watching=AsyncMock(),
+    )
+    mock_lifespan_services.cost_repo = MagicMock()
+    mock_lifespan_services.memory_repo = MagicMock()
+    mock_lifespan_services.token_counter = MagicMock()
+    mock_lifespan_services.goal_manager = MagicMock()
+    mock_lifespan_services.agent_state_manager = MagicMock()
+    mock_lifespan_services.dream_manager = MagicMock()
+    mock_lifespan_services.event_bus = MagicMock()
+
     with (
         patch.dict(os.environ, env_overrides),
         patch("core.public_routes._get_services", return_value=mock_services),
         patch("core.public_routes._get_db", return_value=mock_db),
         patch("core.public_routes._get_registry", return_value=mock_registry),
         patch("core.public_routes._get_redis", return_value=mock_redis),
+        patch("core.main.bootstrap_services", AsyncMock(return_value=mock_lifespan_services)),
+        patch("core.main.shutdown_services", AsyncMock()),
+        patch("core.main.init_core_memories", AsyncMock(return_value=[])),
+        patch("core.main.start_scheduler"),
+        patch("core.main.stop_scheduler"),
     ):
         from core.admin.dependencies import get_db, get_llm, get_redis, get_registry, require_admin
         from core.main import app
