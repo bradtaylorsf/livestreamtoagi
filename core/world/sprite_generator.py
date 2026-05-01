@@ -99,10 +99,7 @@ class SpriteGenerator:
     def is_cached(self, agent_id: str) -> bool:
         """Check if sprite sheet and metadata exist for an agent."""
         agent_dir = self._sprites_dir / agent_id
-        return (
-            (agent_dir / "metadata.json").exists()
-            and (agent_dir / "spritesheet.png").exists()
-        )
+        return (agent_dir / "metadata.json").exists() and (agent_dir / "spritesheet.png").exists()
 
     def is_portrait_cached(self, agent_id: str) -> bool:
         """Check if portrait exists for an agent."""
@@ -166,10 +163,7 @@ class SpriteGenerator:
             "agent_id": agent_id,
             "frame_size": 32,
             "frame_count": frame_count,
-            "animations": {
-                name: {"start": i, "end": i}
-                for i, name in enumerate(AGENT_ANIMATIONS)
-            },
+            "animations": {name: {"start": i, "end": i} for i, name in enumerate(AGENT_ANIMATIONS)},
             "spritesheet": str(dest),
         }
         metadata_path.write_text(json.dumps(metadata, indent=2))
@@ -213,10 +207,7 @@ class SpriteGenerator:
             "agent_id": "alpha",
             "frame_size": 24,
             "frame_count": frame_count,
-            "animations": {
-                name: {"start": i, "end": i}
-                for i, name in enumerate(ALPHA_ANIMATIONS)
-            },
+            "animations": {name: {"start": i, "end": i} for i, name in enumerate(ALPHA_ANIMATIONS)},
             "spritesheet": str(dest),
         }
         metadata_path.write_text(json.dumps(metadata, indent=2))

@@ -58,12 +58,14 @@ MODEL_NAME_ALIASES = {
 
 # Canonical models that represent the "building" tier (heavier, JSON-capable).
 # Used by local providers to route reflection/dream calls to a larger local model.
-BUILDING_TIER_MODELS = frozenset({
-    "claude-sonnet-4-6",
-    "gemini-2.5-pro",
-    "gpt-5.2",
-    "grok-3",
-})
+BUILDING_TIER_MODELS = frozenset(
+    {
+        "claude-sonnet-4-6",
+        "gemini-2.5-pro",
+        "gpt-5.2",
+        "grok-3",
+    }
+)
 
 
 @dataclass
@@ -136,8 +138,7 @@ def _normalize_provider(provider: str) -> str:
     if normalized in LOCAL_PROVIDER_ALIASES:
         return LOCAL_PROVIDER_ALIASES[normalized]
     raise ValueError(
-        f"Unknown LLM provider '{provider}'. "
-        "Use 'openrouter', 'lmstudio', or 'openai-compatible'."
+        f"Unknown LLM provider '{provider}'. Use 'openrouter', 'lmstudio', or 'openai-compatible'."
     )
 
 
@@ -155,7 +156,8 @@ async def refresh_pricing(
     changes: dict[str, tuple[Decimal, Decimal]] = {}
     try:
         resp = await client.get(
-            f"{OPENROUTER_BASE_URL}/models", timeout=10.0,
+            f"{OPENROUTER_BASE_URL}/models",
+            timeout=10.0,
         )
         if resp.status_code != 200:
             logger.warning(
@@ -186,7 +188,9 @@ async def refresh_pricing(
             except (InvalidOperation, TypeError):
                 logger.warning(
                     "Bad pricing data for %s: prompt=%r completion=%r",
-                    model_id, prompt_raw, completion_raw,
+                    model_id,
+                    prompt_raw,
+                    completion_raw,
                 )
                 continue
 
@@ -201,8 +205,11 @@ async def refresh_pricing(
                 new = MODEL_REGISTRY[name]
                 logger.info(
                     "Price updated %s: $%s/$%s -> $%s/$%s per 1M tokens",
-                    name, old_in, old_out,
-                    new.input_price_per_1m, new.output_price_per_1m,
+                    name,
+                    old_in,
+                    old_out,
+                    new.input_price_per_1m,
+                    new.output_price_per_1m,
                 )
         else:
             logger.info("All model prices match OpenRouter — no updates needed")
@@ -225,9 +232,7 @@ class LLMError(Exception):
         self.transient = status_code in RETRYABLE_STATUS_CODES
 
 
-def estimate_cost(
-    model_config: ModelConfig, input_tokens: int, output_tokens: int
-) -> Decimal:
+def estimate_cost(model_config: ModelConfig, input_tokens: int, output_tokens: int) -> Decimal:
     return (
         Decimal(input_tokens) * model_config.input_price_per_1m
         + Decimal(output_tokens) * model_config.output_price_per_1m
@@ -261,9 +266,7 @@ class OpenRouterClient:
             self._base_url = (base_url or LOCAL_LLM_BASE_URL).rstrip("/")
 
         self._local_model = (
-            local_model.strip()
-            if isinstance(local_model, str) and local_model.strip()
-            else None
+            local_model.strip() if isinstance(local_model, str) and local_model.strip() else None
         )
         self._local_model_building = (
             local_model_building.strip()
@@ -283,10 +286,12 @@ class OpenRouterClient:
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         if self._provider == "openrouter":
-            headers.update({
-                "HTTP-Referer": "https://livestreamtoagi.com",
-                "X-Title": "Livestream AGI",
-            })
+            headers.update(
+                {
+                    "HTTP-Referer": "https://livestreamtoagi.com",
+                    "X-Title": "Livestream AGI",
+                }
+            )
         self._client = http_client or httpx.AsyncClient(
             base_url=self._base_url,
             headers=headers,
@@ -297,7 +302,11 @@ class OpenRouterClient:
             await self._client.aclose()
 
     def record_fallback(
-        self, agent_id: str, requested_model: str, actual_model: str, reason: str,
+        self,
+        agent_id: str,
+        requested_model: str,
+        actual_model: str,
+        reason: str,
     ) -> None:
         """Record when a model fallback occurs (e.g., requested model unavailable)."""
         entry = {
@@ -338,8 +347,7 @@ class OpenRouterClient:
                     output_price_per_1m=Decimal("0"),
                 )
             raise ValueError(
-                f"Unknown model '{model}'. "
-                f"Available: {', '.join(sorted(MODEL_REGISTRY))}"
+                f"Unknown model '{model}'. Available: {', '.join(sorted(MODEL_REGISTRY))}"
             )
         return MODEL_REGISTRY[canonical_model]
 
@@ -351,10 +359,7 @@ class OpenRouterClient:
         if self._passthrough_model:
             return model
         canonical = MODEL_NAME_ALIASES.get(model, model)
-        if (
-            self._local_model_building
-            and canonical in BUILDING_TIER_MODELS
-        ):
+        if self._local_model_building and canonical in BUILDING_TIER_MODELS:
             return self._local_model_building
         if self._local_model:
             return self._local_model
@@ -423,16 +428,21 @@ class OpenRouterClient:
                 if attempt < max_attempts - 1:
                     logger.debug(
                         "Cost event retry %d/%d failed for model=%s agent=%s",
-                        attempt + 1, max_attempts, model, agent_id,
+                        attempt + 1,
+                        max_attempts,
+                        model,
+                        agent_id,
                         exc_info=True,
                     )
-                    await asyncio.sleep(0.5 * (2 ** attempt))
+                    await asyncio.sleep(0.5 * (2**attempt))
                 else:
                     self._lost_cost_events += 1
                     self._last_cost_failure_ts = time.time()
                     logger.warning(
                         "Cost event lost (total lost: %d) for model=%s agent=%s",
-                        self._lost_cost_events, model, agent_id,
+                        self._lost_cost_events,
+                        model,
+                        agent_id,
                     )
 
     def diagnostics(self) -> dict[str, Any]:
@@ -506,11 +516,13 @@ class OpenRouterClient:
                 delay = max(retry_after, BACKOFF_BASE * (2**attempt))
                 logger.warning(
                     "%s %d on attempt %d/%d, retrying in %.1fs",
-                    self._provider, resp.status_code, attempt + 1, MAX_RETRIES, delay,
+                    self._provider,
+                    resp.status_code,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
-                last_exc = LLMError(
-                    f"HTTP {resp.status_code}", status_code=resp.status_code
-                )
+                last_exc = LLMError(f"HTTP {resp.status_code}", status_code=resp.status_code)
                 await asyncio.sleep(delay)
             except (httpx.TimeoutException, httpx.ReadError) as exc:
                 last_exc = exc
@@ -518,8 +530,11 @@ class OpenRouterClient:
                     delay = BACKOFF_BASE * (2**attempt)
                     logger.warning(
                         "%s %s on attempt %d/%d, retrying in %.1fs",
-                        self._provider, type(exc).__name__,
-                        attempt + 1, MAX_RETRIES, delay,
+                        self._provider,
+                        type(exc).__name__,
+                        attempt + 1,
+                        MAX_RETRIES,
+                        delay,
                     )
                     await asyncio.sleep(delay)
         raise LLMError(
@@ -590,14 +605,17 @@ class OpenRouterClient:
             except json.JSONDecodeError:
                 logger.warning(
                     "Malformed tool call JSON from LLM (tool=%s): %s",
-                    fn.get("name", "?"), args_raw[:200],
+                    fn.get("name", "?"),
+                    args_raw[:200],
                 )
                 args = {"_raw": args_raw}
-            tool_calls.append(ToolCall(
-                id=tc.get("id", ""),
-                name=fn.get("name", ""),
-                arguments=args,
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=tc.get("id", ""),
+                    name=fn.get("name", ""),
+                    arguments=args,
+                )
+            )
 
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
@@ -606,8 +624,14 @@ class OpenRouterClient:
         cost = self._estimate_call_cost(model_config, input_tokens, output_tokens)
 
         await self._log_cost(
-            agent_id, model, input_tokens, output_tokens, cost, latency_ms,
-            stream=False, openrouter_id=openrouter_id,
+            agent_id,
+            model,
+            input_tokens,
+            output_tokens,
+            cost,
+            latency_ms,
+            stream=False,
+            openrouter_id=openrouter_id,
             simulation_id=simulation_id or self._simulation_id,
             provider=self._provider,
             runtime_model=runtime_model,
@@ -657,7 +681,10 @@ class OpenRouterClient:
             await resp.aclose()
             body_str = body.decode(errors="replace")[:500]
             logger.warning(
-                "%s stream error %d: %s", self._provider, resp.status_code, body_str,
+                "%s stream error %d: %s",
+                self._provider,
+                resp.status_code,
+                body_str,
             )
             raise LLMError(
                 f"{self._provider} returned {resp.status_code}: {body_str}",
@@ -705,8 +732,14 @@ class OpenRouterClient:
             cost = self._estimate_call_cost(model_config, input_tokens, output_tokens)
 
             await self._log_cost(
-                agent_id, model, input_tokens, output_tokens, cost, latency_ms,
-                stream=True, openrouter_id=openrouter_id,
+                agent_id,
+                model,
+                input_tokens,
+                output_tokens,
+                cost,
+                latency_ms,
+                stream=True,
+                openrouter_id=openrouter_id,
                 simulation_id=simulation_id or self._simulation_id,
                 provider=self._provider,
                 runtime_model=runtime_model,

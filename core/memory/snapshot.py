@@ -115,26 +115,34 @@ class MemorySnapshotExporter:
 
             # Recall memories (paginated retrieval)
             recall_mems_raw, _ = await self._memory_repo.get_recall_memories_paginated(
-                agent_id, limit=500, simulation_id=sim_uuid,
+                agent_id,
+                limit=500,
+                simulation_id=sim_uuid,
             )
             recall_mems = recall_mems_raw
             for mem in recall_mems:
-                agent_snap.recall_memories.append({
-                    "summary": mem.summary,
-                    "importance_score": mem.importance_score,
-                    "event_type": mem.event_type,
-                    "participants": mem.participants,
-                    "embedding": mem.embedding,
-                })
+                agent_snap.recall_memories.append(
+                    {
+                        "summary": mem.summary,
+                        "importance_score": mem.importance_score,
+                        "event_type": mem.event_type,
+                        "participants": mem.participants,
+                        "embedding": mem.embedding,
+                    }
+                )
 
             # Journal entries
-            entries, _ = await self._memory_repo.get_journal_entries(agent_id, limit=500, simulation_id=sim_uuid)
+            entries, _ = await self._memory_repo.get_journal_entries(
+                agent_id, limit=500, simulation_id=sim_uuid
+            )
             for entry in entries:
-                agent_snap.journal_entries.append({
-                    "reflection_type": entry.reflection_type,
-                    "content": entry.content,
-                    "token_count": entry.token_count,
-                })
+                agent_snap.journal_entries.append(
+                    {
+                        "reflection_type": entry.reflection_type,
+                        "content": entry.content,
+                        "token_count": entry.token_count,
+                    }
+                )
 
             snapshot.agents[agent_id] = agent_snap
 
@@ -143,14 +151,18 @@ class MemorySnapshotExporter:
             try:
                 relationships = await self._relationship_repo.get_social_graph(sim_uuid)
                 for rel in relationships:
-                    snapshot.relationships.append({
-                        "agent": rel.agent_id,
-                        "target": rel.target_agent_id,
-                        "sentiment": float(rel.sentiment_score) if rel.sentiment_score else None,
-                        "trust": float(rel.trust_score) if rel.trust_score else None,
-                        "interaction_count": rel.interaction_count,
-                        "summary": rel.relationship_summary,
-                    })
+                    snapshot.relationships.append(
+                        {
+                            "agent": rel.agent_id,
+                            "target": rel.target_agent_id,
+                            "sentiment": float(rel.sentiment_score)
+                            if rel.sentiment_score
+                            else None,
+                            "trust": float(rel.trust_score) if rel.trust_score else None,
+                            "interaction_count": rel.interaction_count,
+                            "summary": rel.relationship_summary,
+                        }
+                    )
             except Exception:
                 logger.warning("Failed to export relationships", exc_info=True)
 
@@ -171,9 +183,7 @@ class MemorySnapshotExporter:
                 return sorted(row["agents_participated"])
 
         # Fallback: all agents with core memory
-        rows = await self._db.fetch(
-            "SELECT DISTINCT agent_id FROM core_memory ORDER BY agent_id"
-        )
+        rows = await self._db.fetch("SELECT DISTINCT agent_id FROM core_memory ORDER BY agent_id")
         return [r["agent_id"] for r in rows]
 
 
@@ -245,7 +255,9 @@ class MemorySnapshotImporter:
             # Restore core memory
             if agent_snap.core_memory:
                 try:
-                    existing = await self._core_memory.get_core_memory(agent_id, simulation_id=sim_uuid)
+                    existing = await self._core_memory.get_core_memory(
+                        agent_id, simulation_id=sim_uuid
+                    )
                     if existing is None:
                         await self._core_memory.initialize_agent_memory(
                             agent_id, agent_snap.core_memory
@@ -253,9 +265,7 @@ class MemorySnapshotImporter:
                     else:
                         # Use upsert_core_memory via the repo
                         if self._token_counter:
-                            token_count = self._token_counter.count_tokens(
-                                agent_snap.core_memory
-                            )
+                            token_count = self._token_counter.count_tokens(agent_snap.core_memory)
                         else:
                             # Fallback: rough estimate (~1.3 tokens per word)
                             token_count = int(len(agent_snap.core_memory.split()) * 1.3)
@@ -267,9 +277,7 @@ class MemorySnapshotImporter:
                         )
                     result.core_memories_restored += 1
                 except Exception as exc:
-                    result.warnings.append(
-                        f"Failed to restore core memory for {agent_id}: {exc}"
-                    )
+                    result.warnings.append(f"Failed to restore core memory for {agent_id}: {exc}")
 
             # Restore recall memories
             for mem_data in agent_snap.recall_memories:
@@ -297,9 +305,7 @@ class MemorySnapshotImporter:
                     )
                     result.recall_memories_restored += 1
                 except Exception as exc:
-                    result.warnings.append(
-                        f"Failed to restore recall memory for {agent_id}: {exc}"
-                    )
+                    result.warnings.append(f"Failed to restore recall memory for {agent_id}: {exc}")
 
             # Restore journal entries
             for entry_data in agent_snap.journal_entries:
@@ -316,9 +322,7 @@ class MemorySnapshotImporter:
                     )
                     result.journal_entries_restored += 1
                 except Exception as exc:
-                    result.warnings.append(
-                        f"Failed to restore journal entry for {agent_id}: {exc}"
-                    )
+                    result.warnings.append(f"Failed to restore journal entry for {agent_id}: {exc}")
 
             result.agents_restored.append(agent_id)
 
@@ -350,12 +354,8 @@ class MemorySnapshotImporter:
     async def _clear_agent_state(self, agent_id: str) -> None:
         """Clear existing memory state for an agent."""
         try:
-            await self._db.execute(
-                "DELETE FROM recall_memory WHERE agent_id = $1", agent_id
-            )
-            await self._db.execute(
-                "DELETE FROM journal_entries WHERE agent_id = $1", agent_id
-            )
+            await self._db.execute("DELETE FROM recall_memory WHERE agent_id = $1", agent_id)
+            await self._db.execute("DELETE FROM journal_entries WHERE agent_id = $1", agent_id)
             # Don't delete core_memory — it will be overwritten
         except Exception:
             logger.warning("Failed to clear state for %s", agent_id, exc_info=True)

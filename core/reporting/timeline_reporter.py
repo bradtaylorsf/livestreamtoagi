@@ -45,9 +45,7 @@ class Report:
         return {
             "simulation_id": self.simulation_id,
             "simulation_name": self.simulation_name,
-            "sections": [
-                {"title": s.title, "data": s.data} for s in self.sections
-            ],
+            "sections": [{"title": s.title, "data": s.data} for s in self.sections],
         }
 
 
@@ -78,6 +76,7 @@ class TimelineReporter:
         relationship_repo: RelationshipRepo | None = None,
     ) -> None:
         import uuid as uuid_mod
+
         self._db = db
         self._simulation_id = simulation_id
         self._simulation_uuid = uuid_mod.UUID(simulation_id)
@@ -87,7 +86,7 @@ class TimelineReporter:
         self,
         *,
         days: list[int] | None = None,
-        format: str = "terminal",
+        format: str = "terminal",  # noqa: A002 — public API name; renaming is a breaking change
     ) -> Report:
         """Generate the full timeline report."""
         sim = await self._load_simulation()
@@ -114,18 +113,26 @@ class TimelineReporter:
             cost_events = self._filter_cost_by_days(cost_events, days, sim_start)
 
         # 1. Executive Summary
-        report.sections.append(ReportSection(
-            title="Executive Summary",
-            data=generate_executive_summary(
-                sim, conversations, cost_events, artifacts, management_log,
-            ),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Executive Summary",
+                data=generate_executive_summary(
+                    sim,
+                    conversations,
+                    cost_events,
+                    artifacts,
+                    management_log,
+                ),
+            )
+        )
 
         # 2. Daily Breakdown
-        report.sections.append(ReportSection(
-            title="Day-by-Day Breakdown",
-            data=generate_daily_breakdown(conversations, cost_events, artifacts),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Day-by-Day Breakdown",
+                data=generate_daily_breakdown(conversations, cost_events, artifacts),
+            )
+        )
 
         # 3. Memory Evolution (scoped to simulation agents and time range)
         sim_agents = sim.get("agents_participated", [])
@@ -134,13 +141,17 @@ class TimelineReporter:
         core_memory_history = await self._load_core_memory_history(sim_agents, sim_start, sim_end)
         recall_counts = await self._load_recall_memory_counts(sim_agents)
         journal_entries = await self._load_journal_entries(sim_agents, sim_start, sim_end)
-        report.sections.append(ReportSection(
-            title="Memory Evolution",
-            data=generate_memory_evolution(
-                core_memory_history, recall_counts, journal_entries,
-                sim.get("agents_participated", []),
-            ),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Memory Evolution",
+                data=generate_memory_evolution(
+                    core_memory_history,
+                    recall_counts,
+                    journal_entries,
+                    sim.get("agents_participated", []),
+                ),
+            )
+        )
 
         # 4. Relationship Evolution
         relationship_data = None
@@ -153,28 +164,36 @@ class TimelineReporter:
             except Exception:
                 logger.warning("Failed to load relationship data", exc_info=True)
 
-        report.sections.append(ReportSection(
-            title="Relationship Evolution",
-            data=generate_relationship_evolution(relationship_data),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Relationship Evolution",
+                data=generate_relationship_evolution(relationship_data),
+            )
+        )
 
         # 5. Tool Usage
-        report.sections.append(ReportSection(
-            title="Tool Usage",
-            data=generate_tool_usage(artifacts, cost_events),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Tool Usage",
+                data=generate_tool_usage(artifacts, cost_events),
+            )
+        )
 
         # 6. Cost Analysis
-        report.sections.append(ReportSection(
-            title="Cost Analysis",
-            data=generate_cost_analysis(cost_events, sim),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Cost Analysis",
+                data=generate_cost_analysis(cost_events, sim),
+            )
+        )
 
         # 7. Key Moments
-        report.sections.append(ReportSection(
-            title="Key Moments",
-            data=generate_key_moments(conversations, management_log, artifacts),
-        ))
+        report.sections.append(
+            ReportSection(
+                title="Key Moments",
+                data=generate_key_moments(conversations, management_log, artifacts),
+            )
+        )
 
         return report
 
@@ -309,7 +328,8 @@ class TimelineReporter:
         return [dict(r) for r in rows]
 
     async def _load_recall_memory_counts(
-        self, agents: list[str] | None = None,
+        self,
+        agents: list[str] | None = None,
     ) -> dict[str, int]:
         if agents:
             rows = await self._db.fetch(

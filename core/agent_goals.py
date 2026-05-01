@@ -16,7 +16,7 @@ import logging
 import time
 import uuid as uuid_mod
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -66,7 +66,9 @@ class AgentGoalManager:
         return f"{_GOALS_KEY_PREFIX}{agent_id}"
 
     async def get_goals(
-        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> list[AgentGoalLegacy]:
         """Get all active goals for an agent, sorted by priority."""
         if self._use_db:
@@ -74,12 +76,15 @@ class AgentGoalManager:
         return await self._get_goals_redis(agent_id)
 
     async def _get_goals_db(
-        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> list[AgentGoalLegacy]:
         """Get goals from DB, converting to legacy format for compatibility."""
         assert self._goal_repo is not None
         db_goals = await self._goal_repo.get_active_goals(
-            agent_id, simulation_id=simulation_id,
+            agent_id,
+            simulation_id=simulation_id,
         )
         return [
             AgentGoalLegacy(
@@ -131,37 +136,59 @@ class AgentGoalManager:
         """Add a new goal to an agent's queue."""
         if self._use_db:
             return await self._add_goal_db(
-                agent_id, goal_text, priority, source, category,
+                agent_id,
+                goal_text,
+                priority,
+                source,
+                category,
                 simulation_id=simulation_id,
             )
         return await self._add_goal_redis(agent_id, goal_text, priority, related_agent)
 
     async def _add_goal_db(
-        self, agent_id: str, goal_text: str, priority: int, source: str,
-        category: str | None = None, simulation_id: uuid_mod.UUID | None = None,
+        self,
+        agent_id: str,
+        goal_text: str,
+        priority: int,
+        source: str,
+        category: str | None = None,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> AgentGoalLegacy:
         assert self._goal_repo is not None
         # Deduplicate — exact match or high similarity
         existing = await self._goal_repo.get_active_goals(
-            agent_id, simulation_id=simulation_id,
+            agent_id,
+            simulation_id=simulation_id,
         )
         for g in existing:
             if _is_similar_goal(g.goal, goal_text):
                 return AgentGoalLegacy(
-                    id=str(g.id), goal=g.goal, priority=g.priority,
+                    id=str(g.id),
+                    goal=g.goal,
+                    priority=g.priority,
                     status=_db_status_to_legacy(g.status),
                 )
         db_goal = await self._goal_repo.add_goal(
-            agent_id, goal_text, priority=priority, source=source,
-            category=category, simulation_id=simulation_id,
+            agent_id,
+            goal_text,
+            priority=priority,
+            source=source,
+            category=category,
+            simulation_id=simulation_id,
         )
         return AgentGoalLegacy(
-            id=str(db_goal.id), goal=db_goal.goal, priority=db_goal.priority,
+            id=str(db_goal.id),
+            goal=db_goal.goal,
+            priority=db_goal.priority,
             status=_db_status_to_legacy(db_goal.status),
         )
 
     async def _add_goal_redis(
-        self, agent_id: str, goal_text: str, priority: int, related_agent: str | None,
+        self,
+        agent_id: str,
+        goal_text: str,
+        priority: int,
+        related_agent: str | None,
     ) -> AgentGoalLegacy:
         goals = await self._get_goals_redis(agent_id)
         # Deduplicate
@@ -169,7 +196,9 @@ class AgentGoalManager:
             if existing.goal.lower() == goal_text.lower() and existing.status != "done":
                 return existing
         new_goal = AgentGoalLegacy(
-            goal=goal_text, priority=priority, related_agent=related_agent,
+            goal=goal_text,
+            priority=priority,
+            related_agent=related_agent,
         )
         goals.append(new_goal)
         if len(goals) > _MAX_GOALS_PER_AGENT:
@@ -195,7 +224,10 @@ class AgentGoalManager:
         return await self._update_goal_redis(agent_id, goal_id, status, blocked_reason)
 
     async def _update_goal_db(
-        self, goal_id: str, status: str | None, blocked_reason: str | None,
+        self,
+        goal_id: str,
+        status: str | None,
+        blocked_reason: str | None,
     ) -> bool:
         assert self._goal_repo is not None
         try:
@@ -212,7 +244,11 @@ class AgentGoalManager:
         return updated
 
     async def _update_goal_redis(
-        self, agent_id: str, goal_id: str, status: str | None, blocked_reason: str | None,
+        self,
+        agent_id: str,
+        goal_id: str,
+        status: str | None,
+        blocked_reason: str | None,
     ) -> bool:
         goals = await self._get_goals_redis(agent_id)
         for g in goals:
@@ -248,7 +284,10 @@ class AgentGoalManager:
         """
         if self._use_db:
             return await self._retire_stale_db(
-                agent_id, simulation_id, stale_hours, max_active,
+                agent_id,
+                simulation_id,
+                stale_hours,
+                max_active,
             )
         return await self._retire_stale_redis(agent_id, stale_hours, max_active)
 
@@ -261,7 +300,9 @@ class AgentGoalManager:
     ) -> int:
         assert self._goal_repo is not None
         goals = await self._goal_repo.get_active_goals(
-            agent_id, limit=50, simulation_id=simulation_id,
+            agent_id,
+            limit=50,
+            simulation_id=simulation_id,
         )
         now = time.time()
         threshold = stale_hours * 3600
@@ -276,7 +317,9 @@ class AgentGoalManager:
         # Re-fetch after stale pruning and cap by max_active
         if retired > 0:
             goals = await self._goal_repo.get_active_goals(
-                agent_id, limit=50, simulation_id=simulation_id,
+                agent_id,
+                limit=50,
+                simulation_id=simulation_id,
             )
         if len(goals) > max_active:
             # Abandon lowest-priority (highest number) excess goals
@@ -288,7 +331,10 @@ class AgentGoalManager:
         return retired
 
     async def _retire_stale_redis(
-        self, agent_id: str, stale_hours: float, max_active: int,
+        self,
+        agent_id: str,
+        stale_hours: float,
+        max_active: int,
     ) -> int:
         goals = await self._get_goals_redis(agent_id)
         now = time.time()
@@ -315,7 +361,9 @@ class AgentGoalManager:
         return retired
 
     async def get_agenda_context(
-        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> str:
         """Build a formatted agenda string for injection into context."""
         goals = await self.get_goals(agent_id, simulation_id=simulation_id)
@@ -342,7 +390,9 @@ class AgentGoalManager:
         return "\n".join(lines)
 
     async def generate_morning_agenda(
-        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> str:
         """Generate a morning agenda summarizing current goals."""
         goals = await self.get_goals(agent_id, simulation_id=simulation_id)
@@ -367,7 +417,9 @@ class AgentGoalManager:
         return "\n".join(lines)
 
     async def get_commitment_reminders(
-        self, agent_id: str, simulation_id: uuid_mod.UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: uuid_mod.UUID | None = None,
     ) -> str:
         """Get formatted reminders for commitments assigned to this agent.
 
@@ -375,19 +427,13 @@ class AgentGoalManager:
         or empty string if none.
         """
         goals = await self.get_goals(agent_id, simulation_id=simulation_id)
-        assigned = [
-            g for g in goals
-            if g.related_agent and g.status not in ("done", "completed")
-        ]
+        assigned = [g for g in goals if g.related_agent and g.status not in ("done", "completed")]
         if not assigned:
             return ""
 
         lines = ["## Pending commitments from others"]
         for g in assigned[:5]:
-            lines.append(
-                f"- {g.related_agent} committed to: {g.goal}. "
-                "Follow up if not done."
-            )
+            lines.append(f"- {g.related_agent} committed to: {g.goal}. Follow up if not done.")
         return "\n".join(lines)
 
     async def seed_story_goals(self, simulation_id: uuid_mod.UUID | None = None) -> None:
@@ -416,7 +462,11 @@ class AgentGoalManager:
             ],
             "sentinel": [
                 ("Get to know the team and understand what everyone does", 1, None),
-                ("Review the team's budget — we have $1,000/month, which is a great start", 2, None),
+                (
+                    "Review the team's budget — we have $1,000/month, which is a great start",
+                    2,
+                    None,
+                ),
             ],
             "pixel": [
                 ("Introduce yourself to the team and find out what excites everyone", 1, None),
@@ -435,8 +485,10 @@ class AgentGoalManager:
                 continue
             for goal_text, priority, related in goals:
                 await self.add_goal(
-                    agent_id, goal_text,
-                    priority=priority, related_agent=related,
+                    agent_id,
+                    goal_text,
+                    priority=priority,
+                    related_agent=related,
                     simulation_id=simulation_id,
                 )
 
@@ -476,6 +528,7 @@ def parse_commitments(llm_output: str) -> list[dict[str, str]]:
     Expected format: [{"agent_id": "...", "commitment": "...", "related_to_agent": "..."}]
     Returns empty list on parse failure.
     """
+
     def _extract_items(data: list) -> list[dict[str, str]]:
         return [
             {
@@ -517,11 +570,13 @@ def parse_commitments(llm_output: str) -> list[dict[str, str]]:
                     continue
             if salvaged:
                 logger.info(
-                    "Salvaged %d commitments from truncated JSON", len(salvaged),
+                    "Salvaged %d commitments from truncated JSON",
+                    len(salvaged),
                 )
                 return _extract_items(salvaged)
 
         logger.warning(
-            "Commitment parse failed. Raw output: %s", llm_output[:500],
+            "Commitment parse failed. Raw output: %s",
+            llm_output[:500],
         )
     return []

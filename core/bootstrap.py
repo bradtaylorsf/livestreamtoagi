@@ -134,7 +134,8 @@ class Services:
 
 
 def make_embedding_fn(
-    http_client: httpx.AsyncClient, api_key: str,
+    http_client: httpx.AsyncClient,
+    api_key: str,
 ) -> EmbeddingFn:
     """Create an embedding function from environment-backed provider config."""
     from core.memory.embeddings import (
@@ -204,7 +205,9 @@ def make_llm_client(
     local_model = os.environ.get("LOCAL_LLM_MODEL") or None
     local_model_building = os.environ.get("LOCAL_LLM_MODEL_BUILDING") or None
     passthrough = os.environ.get("LOCAL_LLM_PASSTHROUGH_MODEL", "").lower() in {
-        "1", "true", "yes",
+        "1",
+        "true",
+        "yes",
     }
     return OpenRouterClient(
         api_key=api_key,
@@ -286,7 +289,8 @@ async def bootstrap_services(
         embedding_fn=embedding_fn,
     )
     archival_memory = ArchivalMemoryManager(
-        transcript_repo=transcript_repo, token_counter=token_counter,
+        transcript_repo=transcript_repo,
+        token_counter=token_counter,
     )
     compactor = MemoryCompactor(
         archival=archival_memory,
@@ -326,10 +330,7 @@ async def bootstrap_services(
 
     # Initialize economy accounts — exclude management and alpha (non-participant agents)
     economy_excluded = {"management", "alpha"}
-    agent_ids = [
-        a.id for a in agent_registry.get_all_agents()
-        if a.id not in economy_excluded
-    ]
+    agent_ids = [a.id for a in agent_registry.get_all_agents() if a.id not in economy_excluded]
     if agent_ids:
         try:
             await economy_manager.initialize_accounts(agent_ids)
@@ -430,7 +431,8 @@ async def bootstrap_services(
 
 
 async def _bootstrap_dry_run(
-    token_counter: TokenCounter, config_loader: ConfigLoader,
+    token_counter: TokenCounter,
+    config_loader: ConfigLoader,
 ) -> Services:
     """Lightweight bootstrap for --dry-run: no DB/Redis needed."""
     agent_registry = AgentRegistry(redis_client=None)
@@ -442,7 +444,11 @@ async def _bootstrap_dry_run(
 
     class _StubRecallMemory:
         async def retrieve_recall_memories(
-            self, agent_id: str, query: str, limit: int = 3, **kwargs: object,
+            self,
+            agent_id: str,
+            query: str,
+            limit: int = 3,
+            **kwargs: object,
         ) -> str:
             return ""
 
@@ -521,11 +527,12 @@ async def init_core_memories(
         existing = await core_memory.get_core_memory(agent.id, simulation_id=simulation_id)
         if existing is None:
             identity = (
-                f"I am {agent.display_name}. "
-                f"My conversation model is {agent.model_conversation}."
+                f"I am {agent.display_name}. My conversation model is {agent.model_conversation}."
             )
             await core_memory.initialize_agent_memory(
-                agent.id, identity, simulation_id=simulation_id,
+                agent.id,
+                identity,
+                simulation_id=simulation_id,
             )
             initialized.append(agent.id)
     return initialized

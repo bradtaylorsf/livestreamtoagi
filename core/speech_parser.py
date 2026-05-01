@@ -14,14 +14,14 @@ _ACTION_PATTERN = re.compile(r"\[action\](.*?)\[/action\]", re.DOTALL | re.IGNOR
 
 # Ordered: bold before italic so **text** is handled before *text*
 _MARKDOWN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\*\*(.+?)\*\*", re.DOTALL), r"\1"),   # **bold**
-    (re.compile(r"__(.+?)__", re.DOTALL), r"\1"),        # __bold__
-    (re.compile(r"\*(.+?)\*", re.DOTALL), r"\1"),        # *italic*
-    (re.compile(r"_(.+?)_", re.DOTALL), r"\1"),          # _italic_
-    (re.compile(r"`(.+?)`", re.DOTALL), r"\1"),          # `code`
-    (re.compile(r"^#{1,6}\s+", re.MULTILINE), ""),       # ## headers
-    (re.compile(r"^[-*_]{3,}$", re.MULTILINE), ""),      # horizontal rules
-    (re.compile(r"[*_]"), ""),                            # stray asterisks/underscores
+    (re.compile(r"\*\*(.+?)\*\*", re.DOTALL), r"\1"),  # **bold**
+    (re.compile(r"__(.+?)__", re.DOTALL), r"\1"),  # __bold__
+    (re.compile(r"\*(.+?)\*", re.DOTALL), r"\1"),  # *italic*
+    (re.compile(r"_(.+?)_", re.DOTALL), r"\1"),  # _italic_
+    (re.compile(r"`(.+?)`", re.DOTALL), r"\1"),  # `code`
+    (re.compile(r"^#{1,6}\s+", re.MULTILINE), ""),  # ## headers
+    (re.compile(r"^[-*_]{3,}$", re.MULTILINE), ""),  # horizontal rules
+    (re.compile(r"[*_]"), ""),  # stray asterisks/underscores
 ]
 
 

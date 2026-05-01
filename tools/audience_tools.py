@@ -43,7 +43,9 @@ class SendChatMessageTool(BaseTool):
             return {"status": "rejected", "reason": f"Agent {self._agent_id!r} not authorized"}
 
         review = await self._management.review(
-            self._agent_id, message, simulation_id=kwargs.get("simulation_id"),
+            self._agent_id,
+            message,
+            simulation_id=kwargs.get("simulation_id"),
         )
         if not review.approved:
             return {"status": "rejected", "reason": review.reason}
@@ -151,11 +153,13 @@ class GetPollResultsTool(BaseTool):
         results = []
         for opt in options:
             pct = (opt["votes"] / total_votes * 100) if total_votes > 0 else 0.0
-            results.append({
-                "name": opt["name"],
-                "votes": opt["votes"],
-                "percentage": round(pct, 1),
-            })
+            results.append(
+                {
+                    "name": opt["name"],
+                    "votes": opt["votes"],
+                    "percentage": round(pct, 1),
+                }
+            )
 
         winner = max(options, key=lambda o: o["votes"])["name"] if total_votes > 0 else None
 

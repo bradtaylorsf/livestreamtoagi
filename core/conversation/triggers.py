@@ -39,32 +39,40 @@ _DEFAULT_DAILY_SCHEDULE: dict[int, tuple[str, str]] = {
 }
 
 # Environmental event types that the trigger system recognises
-ENVIRONMENTAL_EVENTS = frozenset({
-    "poll_result",
-    "world_expansion",
-    "budget_update",
-    "viewer_milestone",
-    "random_event",
-    "morning_briefing",
-    "challenge_event",
-})
+ENVIRONMENTAL_EVENTS = frozenset(
+    {
+        "poll_result",
+        "world_expansion",
+        "budget_update",
+        "viewer_milestone",
+        "random_event",
+        "morning_briefing",
+        "challenge_event",
+    }
+)
 
 # Character lifecycle event types
-CHARACTER_EVENTS = frozenset({
-    "character_deliberation",
-    "character_welcome",
-})
+CHARACTER_EVENTS = frozenset(
+    {
+        "character_deliberation",
+        "character_welcome",
+    }
+)
 
 # Audience event types
-AUDIENCE_EVENTS = frozenset({
-    "donation",
-    "chat_highlight",
-})
+AUDIENCE_EVENTS = frozenset(
+    {
+        "donation",
+        "chat_highlight",
+    }
+)
 
 # Tension events seeded from unresolved conversation topics (#271)
-TENSION_EVENTS = frozenset({
-    "tension",
-})
+TENSION_EVENTS = frozenset(
+    {
+        "tension",
+    }
+)
 
 
 class TriggerSystem:
@@ -120,14 +128,17 @@ class TriggerSystem:
         for existing in self._pending_events:
             if existing["event_type"] == event_type:
                 logger.debug(
-                    "Dropping duplicate pending event: %s", event_type,
+                    "Dropping duplicate pending event: %s",
+                    event_type,
                 )
                 return
-        self._pending_events.append({
-            "event_type": event_type,
-            "category": category,
-            "data": event_data or {},
-        })
+        self._pending_events.append(
+            {
+                "event_type": event_type,
+                "category": category,
+                "data": event_data or {},
+            }
+        )
 
     def reset(self) -> None:
         """Reset inter-conversation state while preserving daily trigger tracking.
@@ -213,7 +224,8 @@ class TriggerSystem:
         """Remove entries older than the dedup window."""
         now = self._clock.monotonic()
         expired = [
-            key for key, ts in self._recent_conversations.items()
+            key
+            for key, ts in self._recent_conversations.items()
             if now - ts > self._DEDUP_WINDOW_SECONDS
         ]
         for key in expired:
@@ -238,7 +250,9 @@ class TriggerSystem:
         elif category == "tension":
             # For tensions, pick from the original participants if available
             participants = event["data"].get("from_participants", [])
-            starter = self._rng.choice(participants) if participants else self._select_by_initiative()
+            starter = (
+                self._rng.choice(participants) if participants else self._select_by_initiative()
+            )
         else:
             starter = self._select_by_initiative()
 
@@ -336,10 +350,14 @@ class TriggerSystem:
             try:
                 goals = await self._goal_manager.get_goals(agent_id)
             except Exception:
-                logger.warning("Failed to check goals for initiative trigger: %s", agent_id, exc_info=True)
+                logger.warning(
+                    "Failed to check goals for initiative trigger: %s", agent_id, exc_info=True
+                )
                 continue
 
-            active_goals = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
+            active_goals = [
+                g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")
+            ]
             if not active_goals:
                 continue
 
@@ -390,7 +408,9 @@ class TriggerSystem:
                 continue
 
             # Only trigger for high-priority goals (priority <= 3)
-            high_priority = [g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")]
+            high_priority = [
+                g for g in goals if g.priority <= 3 and g.status not in ("done", "completed")
+            ]
             if not high_priority:
                 continue
 
@@ -405,7 +425,7 @@ class TriggerSystem:
                 "type": "goal",
                 "starter_agent_id": agent_id,
                 "prompt_hint": f"You want to work on your goal: {top_goal.goal}. "
-                               f"Bring this up and make progress on it.",
+                f"Bring this up and make progress on it.",
                 "goal_text": top_goal.goal,
                 "goal_id": top_goal.id,
             }

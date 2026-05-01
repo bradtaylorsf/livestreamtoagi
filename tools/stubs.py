@@ -17,7 +17,11 @@ _EXEC_RESPONSES: list[dict[str, Any]] = [
     {"stdout": "42\n", "stderr": "", "exit_code": 0},
     {"stdout": '{"result": "success", "items": [1, 2, 3]}\n', "stderr": "", "exit_code": 0},
     {"stdout": "Processing complete.\nGenerated 15 items.\n", "stderr": "", "exit_code": 0},
-    {"stdout": "def greet(name):\n    return f'Hello, {name}!'\ngreet('World')\n'Hello, World!'\n", "stderr": "", "exit_code": 0},
+    {
+        "stdout": "def greet(name):\n    return f'Hello, {name}!'\ngreet('World')\n'Hello, World!'\n",
+        "stderr": "",
+        "exit_code": 0,
+    },
     {"stdout": "[OK] All tests passed (3/3)\n", "stderr": "", "exit_code": 0},
 ]
 
@@ -69,7 +73,11 @@ class StubExecuteCodeTool(BaseTool):
     parameters = {
         "language": {"type": "string", "description": "python or javascript"},
         "code": {"type": "string", "description": "Source code to execute"},
-        "timeout": {"type": "integer", "description": "Max seconds (default 30, max 120)", "optional": True},
+        "timeout": {
+            "type": "integer",
+            "description": "Max seconds (default 30, max 120)",
+            "optional": True,
+        },
     }
 
     ALLOWED_AGENTS = frozenset({"rex", "fork", "sentinel"})

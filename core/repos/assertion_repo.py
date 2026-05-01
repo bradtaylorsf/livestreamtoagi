@@ -45,9 +45,7 @@ class AssertionRepo:
                 r.get("error_message"),
             )
 
-    async def get_by_simulation(
-        self, simulation_id: uuid.UUID
-    ) -> list[dict[str, Any]]:
+    async def get_by_simulation(self, simulation_id: uuid.UUID) -> list[dict[str, Any]]:
         rows = await self.db.fetch(
             """SELECT * FROM phase_assertions
                WHERE simulation_id = $1
@@ -56,9 +54,7 @@ class AssertionRepo:
         )
         return [self._parse_row(r) for r in rows]
 
-    async def get_by_phase(
-        self, simulation_id: uuid.UUID, phase_name: str
-    ) -> list[dict[str, Any]]:
+    async def get_by_phase(self, simulation_id: uuid.UUID, phase_name: str) -> list[dict[str, Any]]:
         rows = await self.db.fetch(
             """SELECT * FROM phase_assertions
                WHERE simulation_id = $1 AND phase_name = $2
@@ -68,9 +64,7 @@ class AssertionRepo:
         )
         return [self._parse_row(r) for r in rows]
 
-    async def get_pass_rates(
-        self, simulation_id: uuid.UUID
-    ) -> dict[str, Any]:
+    async def get_pass_rates(self, simulation_id: uuid.UUID) -> dict[str, Any]:
         """Get assertion pass/fail/warn summary for a simulation."""
         row = await self.db.fetchrow(
             """SELECT
@@ -85,8 +79,11 @@ class AssertionRepo:
         )
         if row is None:
             return {
-                "passed": 0, "failed_error": 0, "failed_warning": 0,
-                "failed_info": 0, "total": 0,
+                "passed": 0,
+                "failed_error": 0,
+                "failed_warning": 0,
+                "failed_info": 0,
+                "total": 0,
             }
         return dict(row)
 

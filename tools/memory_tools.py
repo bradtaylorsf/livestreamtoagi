@@ -35,9 +35,7 @@ class RecallMemoryTool(BaseTool):
         },
     }
 
-    def __init__(
-        self, recall_manager: RecallMemoryManager, agent_id: str
-    ) -> None:
+    def __init__(self, recall_manager: RecallMemoryManager, agent_id: str) -> None:
         self._recall_manager = recall_manager
         self._agent_id = agent_id
 
@@ -46,7 +44,9 @@ class RecallMemoryTool(BaseTool):
         limit: int = kwargs.get("limit", 3)
 
         result = await self._recall_manager.retrieve_recall_memories(
-            self._agent_id, query, limit=limit,
+            self._agent_id,
+            query,
+            limit=limit,
             simulation_id=kwargs.get("simulation_id"),
         )
 
@@ -78,9 +78,7 @@ class RetrieveTranscriptTool(BaseTool):
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         transcript_id: int = kwargs["transcript_id"]
 
-        transcript = await self._archival_manager.retrieve_full_transcript(
-            transcript_id
-        )
+        transcript = await self._archival_manager.retrieve_full_transcript(transcript_id)
 
         if transcript is None:
             return {
@@ -123,9 +121,7 @@ class UpdateCoreMemoryTool(BaseTool):
         },
     }
 
-    def __init__(
-        self, core_manager: CoreMemoryManager, agent_id: str
-    ) -> None:
+    def __init__(self, core_manager: CoreMemoryManager, agent_id: str) -> None:
         self._core_manager = core_manager
         self._agent_id = agent_id
 

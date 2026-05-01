@@ -131,7 +131,9 @@ class ChangeApplier:
             eval_run_id=eval_run_id,
             simulation_id=self._simulation_id,
         )
-        await self._repo.set_active_prompt_version(agent_id, version.version, simulation_id=self._simulation_id)
+        await self._repo.set_active_prompt_version(
+            agent_id, version.version, simulation_id=self._simulation_id
+        )
 
     async def _apply_param_changes(
         self,
@@ -150,7 +152,9 @@ class ChangeApplier:
             if change.param_path and change.proposed_value is not None:
                 # Enforce safety rail
                 current_val = new_params.get(change.param_path)
-                if isinstance(current_val, (int, float)) and isinstance(change.proposed_value, (int, float)):
+                if isinstance(current_val, (int, float)) and isinstance(
+                    change.proposed_value, (int, float)
+                ):
                     delta = abs(change.proposed_value - current_val)
                     if delta > MAX_PARAM_DELTA:
                         direction = 1 if change.proposed_value > current_val else -1
@@ -170,7 +174,9 @@ class ChangeApplier:
             eval_run_id=eval_run_id,
             simulation_id=self._simulation_id,
         )
-        await self._repo.set_active_prompt_version(agent_id, version.version, simulation_id=self._simulation_id)
+        await self._repo.set_active_prompt_version(
+            agent_id, version.version, simulation_id=self._simulation_id
+        )
 
     async def _apply_config_changes(
         self,
@@ -198,7 +204,9 @@ class ChangeApplier:
             eval_run_id=eval_run_id,
             simulation_id=self._simulation_id,
         )
-        await self._repo.set_active_conversation_version(version.version, simulation_id=self._simulation_id)
+        await self._repo.set_active_conversation_version(
+            version.version, simulation_id=self._simulation_id
+        )
 
 
 def _set_nested(d: dict, path: str, value: Any) -> None:

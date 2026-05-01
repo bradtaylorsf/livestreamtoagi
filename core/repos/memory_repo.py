@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 MAX_LIMIT = 500
 
+
 def _sim_filter(param_num: int) -> str:
     """Return SQL fragment for simulation_id filtering."""
     return f"simulation_id = ${param_num}"
@@ -210,9 +211,7 @@ class MemoryRepo:
         )
         return [ConversationBuffer(**dict(r)) for r in rows]
 
-    async def clear_buffer(
-        self, agent_id: str, simulation_id: _uuid.UUID | None = None
-    ) -> None:
+    async def clear_buffer(self, agent_id: str, simulation_id: _uuid.UUID | None = None) -> None:
         await self.db.execute(
             f"DELETE FROM conversation_buffer WHERE agent_id = $1 AND {_sim_filter(2)}",
             agent_id,
@@ -475,7 +474,10 @@ class MemoryRepo:
         return [SelfModificationProposal(**dict(r)) for r in rows]
 
     async def update_proposal_status(
-        self, proposal_id: int, status: str, reviewed_by: str,
+        self,
+        proposal_id: int,
+        status: str,
+        reviewed_by: str,
         simulation_id: _uuid.UUID | None = None,
     ) -> None:
         await self.db.execute(
@@ -505,7 +507,8 @@ class MemoryRepo:
         return [SelfModificationProposal(**dict(r)) for r in rows]
 
     async def check_and_auto_approve(
-        self, auto_approval_enabled: bool = False,
+        self,
+        auto_approval_enabled: bool = False,
         simulation_id: _uuid.UUID | None = None,
     ) -> int:
         """Auto-approve proposals older than 4 hours when enabled.

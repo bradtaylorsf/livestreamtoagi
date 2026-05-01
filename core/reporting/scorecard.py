@@ -60,6 +60,7 @@ class LaunchScorecard:
         report_sections: list[dict[str, Any]] | None = None,
     ) -> None:
         import uuid as uuid_mod
+
         self._db = db
         self._sim_id = simulation_id
         self._sim_uuid = uuid_mod.UUID(simulation_id)
@@ -121,9 +122,7 @@ class LaunchScorecard:
                 required=False,
             )
         try:
-            relationships = await self._relationship_repo.get_social_graph(
-                self._sim_uuid
-            )
+            relationships = await self._relationship_repo.get_social_graph(self._sim_uuid)
             if not relationships:
                 return ScorecardCriterion(
                     name="relationship_evolution",
@@ -134,7 +133,8 @@ class LaunchScorecard:
 
             # Check if sentiment scores are non-zero (evolved from default)
             non_zero = sum(
-                1 for r in relationships
+                1
+                for r in relationships
                 if r.sentiment_score is not None and float(r.sentiment_score) != 0.0
             )
             return ScorecardCriterion(
@@ -193,9 +193,7 @@ class LaunchScorecard:
                 evidence="Assertion repo not available — skipped",
                 required=False,
             )
-        rates = await self._assertion_repo.get_pass_rates(
-            self._sim_uuid
-        )
+        rates = await self._assertion_repo.get_pass_rates(self._sim_uuid)
         error_failures = rates.get("failed_error", 0)
         return ScorecardCriterion(
             name="assertion_pass_rate",

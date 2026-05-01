@@ -139,12 +139,14 @@ class SimulationConfig:
             config = {k: v for k, v in entry.items() if k not in ("name", "type")}
             required = config.pop("required_agents", [])
 
-            self.phases.append(Phase(
-                name=entry.get("name", f"phase_{len(self.phases)}"),
-                type=ptype,
-                config=config,
-                required_agents=required,
-            ))
+            self.phases.append(
+                Phase(
+                    name=entry.get("name", f"phase_{len(self.phases)}"),
+                    type=ptype,
+                    config=config,
+                    required_agents=required,
+                )
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize config for DB snapshot."""
@@ -293,7 +295,8 @@ class SimulationOrchestrator:
 
         logger.info(
             "Re-scoped Redis for simulation %s (prefix: %s)",
-            sim_id, scoped._prefix,
+            sim_id,
+            scoped._prefix,
         )
 
     def _build_phase_runner(
@@ -381,16 +384,19 @@ class SimulationOrchestrator:
                     "building": self._llm.model_provenance(build_model),
                 }
                 continue
-            # Resolve to OpenRouter IDs for exact reproducibility
+            # Fallback for non-OpenRouterClient mocks/stubs in tests: resolve
+            # to OpenRouter IDs from the local registry.
             conv_canonical = MODEL_NAME_ALIASES.get(conv_model, conv_model)
             build_canonical = MODEL_NAME_ALIASES.get(build_model, build_model)
             conv_openrouter = (
                 MODEL_REGISTRY[conv_canonical].openrouter_id
-                if conv_canonical in MODEL_REGISTRY else conv_model
+                if conv_canonical in MODEL_REGISTRY
+                else conv_model
             )
             build_openrouter = (
                 MODEL_REGISTRY[build_canonical].openrouter_id
-                if build_canonical in MODEL_REGISTRY else build_model
+                if build_canonical in MODEL_REGISTRY
+                else build_model
             )
             versions[agent_id] = {
                 "conversation": conv_openrouter,
@@ -413,19 +419,20 @@ class SimulationOrchestrator:
             **self._config.to_dict(),
             "clock_state": self.clock.to_dict(),
             "llm_provider": (
-                self._llm.provider
-                if isinstance(self._llm, OpenRouterClient) else "openrouter"
+                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
             ),
         }
         model_versions = self._build_model_versions()
-        sim = await self._sim_repo.create(SimulationCreate(
-            name=self._config.name,
-            description=self._config.description,
-            config=config_snapshot,
-            status=SimulationStatus.running,
-            agents_participated=self._config.agents,
-            model_versions=model_versions,
-        ))
+        sim = await self._sim_repo.create(
+            SimulationCreate(
+                name=self._config.name,
+                description=self._config.description,
+                config=config_snapshot,
+                status=SimulationStatus.running,
+                agents_participated=self._config.agents,
+                model_versions=model_versions,
+            )
+        )
         self._simulation_id = sim.id
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
@@ -434,12 +441,15 @@ class SimulationOrchestrator:
         # Collect runtime errors for error_log persistence
         self._errors.clear()
         self._event_bus.on(
-            EventType.SIMULATION_ERROR, self._on_simulation_error,
+            EventType.SIMULATION_ERROR,
+            self._on_simulation_error,
         )
 
         logger.info(
             "Created simulation %s (%s) with model versions: %s",
-            sim.id, sim.name, model_versions,
+            sim.id,
+            sim.name,
+            model_versions,
         )
 
         self._display.show_simulation_start(sim, self._config)
@@ -447,14 +457,17 @@ class SimulationOrchestrator:
         # Initialize core memory for all agents in this simulation
         if self._services and self._services.core_memory:
             from core.bootstrap import init_core_memories
+
             initialized = await init_core_memories(
-                self._agents, self._services.core_memory,
+                self._agents,
+                self._services.core_memory,
                 simulation_id=sim.id,
             )
             if initialized:
                 logger.info(
                     "Initialized core memory for %d agents: %s",
-                    len(initialized), initialized,
+                    len(initialized),
+                    initialized,
                 )
 
         # Create RelationshipTracker and AssertionEngine now that sim_id is known
@@ -473,13 +486,15 @@ class SimulationOrchestrator:
         if self._services and self._services.economy_manager and not self._config.dry_run:
             try:
                 economy_excluded = {"management", "alpha"}
-                agent_ids = [
-                    a for a in self._config.agents if a not in economy_excluded
-                ]
+                agent_ids = [a for a in self._config.agents if a not in economy_excluded]
                 await self._services.economy_manager.initialize_accounts(agent_ids)
-                logger.info("Initialized economy accounts for %d agents in simulation", len(agent_ids))
+                logger.info(
+                    "Initialized economy accounts for %d agents in simulation", len(agent_ids)
+                )
             except Exception:
-                logger.warning("Failed to initialize economy accounts for simulation", exc_info=True)
+                logger.warning(
+                    "Failed to initialize economy accounts for simulation", exc_info=True
+                )
 
         # Start audience simulator if configured
         audience_sim = None
@@ -533,7 +548,9 @@ class SimulationOrchestrator:
                 # Evaluate phase assertions
                 if assertion_engine and not self._config.dry_run:
                     assertion_results = await assertion_engine.evaluate_phase(
-                        phase, result, sim.id,
+                        phase,
+                        result,
+                        sim.id,
                     )
                     result.assertions = assertion_results
 
@@ -630,19 +647,20 @@ class SimulationOrchestrator:
             **self._config.to_dict(),
             "clock_state": self.clock.to_dict(),
             "llm_provider": (
-                self._llm.provider
-                if isinstance(self._llm, OpenRouterClient) else "openrouter"
+                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
             ),
         }
         model_versions = self._build_model_versions()
-        sim = await self._sim_repo.create(SimulationCreate(
-            name=self._config.name,
-            description=self._config.description,
-            config=config_snapshot,
-            status=SimulationStatus.running,
-            agents_participated=self._config.agents,
-            model_versions=model_versions,
-        ))
+        sim = await self._sim_repo.create(
+            SimulationCreate(
+                name=self._config.name,
+                description=self._config.description,
+                config=config_snapshot,
+                status=SimulationStatus.running,
+                agents_participated=self._config.agents,
+                model_versions=model_versions,
+            )
+        )
         self._simulation_id = sim.id
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
@@ -651,12 +669,15 @@ class SimulationOrchestrator:
         # Collect runtime errors for error_log persistence
         self._errors.clear()
         self._event_bus.on(
-            EventType.SIMULATION_ERROR, self._on_simulation_error,
+            EventType.SIMULATION_ERROR,
+            self._on_simulation_error,
         )
 
         logger.info(
             "Created autonomous simulation %s (%s) with model versions: %s",
-            sim.id, sim.name, model_versions,
+            sim.id,
+            sim.name,
+            model_versions,
         )
 
         self._display.show_simulation_start(sim, self._config)
@@ -664,14 +685,17 @@ class SimulationOrchestrator:
         # Initialize core memory for all agents in this simulation
         if self._services and self._services.core_memory:
             from core.bootstrap import init_core_memories
+
             initialized = await init_core_memories(
-                self._agents, self._services.core_memory,
+                self._agents,
+                self._services.core_memory,
                 simulation_id=sim.id,
             )
             if initialized:
                 logger.info(
                     "Initialized core memory for %d agents: %s",
-                    len(initialized), initialized,
+                    len(initialized),
+                    initialized,
                 )
 
         # Create RelationshipTracker and AssertionEngine now that sim_id is known
@@ -751,9 +775,7 @@ class SimulationOrchestrator:
                 if not self._config.dry_run:
                     await self._sim_repo.increment_stats(
                         sim.id,
-                        conversations=result.conversations or (
-                            1 if result.turns > 0 else 0
-                        ),
+                        conversations=result.conversations or (1 if result.turns > 0 else 0),
                         turns=result.turns,
                         tokens=result.tokens,
                         cost=result.cost,
@@ -771,10 +793,10 @@ class SimulationOrchestrator:
                         conv_config = self._config_loader.config.conversation_config
                     except AttributeError:
                         conv_config = {}
-                    assertion_results = (
-                        await assertion_engine.evaluate_conversation_defaults(
-                            result, sim.id, conv_config if isinstance(conv_config, dict) else {},
-                        )
+                    assertion_results = await assertion_engine.evaluate_conversation_defaults(
+                        result,
+                        sim.id,
+                        conv_config if isinstance(conv_config, dict) else {},
                     )
                     result.assertions = assertion_results
 
@@ -796,10 +818,8 @@ class SimulationOrchestrator:
 
                 # Run auto-scheduled reflections
                 if not self._config.dry_run:
-                    reflection_results = (
-                        await reflection_scheduler.check_and_run_all(
-                            self._config.agents
-                        )
+                    reflection_results = await reflection_scheduler.check_and_run_all(
+                        self._config.agents
                     )
                     for rr in reflection_results:
                         if rr.journal_entry:
@@ -814,16 +834,10 @@ class SimulationOrchestrator:
                     await self._check_cost_limit()
 
             # Final day stats
-            self._display.show_day_boundary(
-                self.clock.simulated_day(), day_stats
-            )
+            self._display.show_day_boundary(self.clock.simulated_day(), day_stats)
             if world_sim:
                 await world_sim.stop()
-            status = (
-                SimulationStatus.cancelled
-                if self._cancelled
-                else SimulationStatus.completed
-            )
+            status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
             await self._finalize(status)
 
         except CostLimitExceededError:
@@ -833,9 +847,7 @@ class SimulationOrchestrator:
                 "Cost limit exceeded ($%s), stopping simulation",
                 self._total_cost,
             )
-            self._display.show_cost_exceeded(
-                self._total_cost, self._config.max_cost
-            )
+            self._display.show_cost_exceeded(self._total_cost, self._config.max_cost)
             await self._finalize(
                 SimulationStatus.cancelled,
                 error_log={
@@ -919,9 +931,7 @@ class SimulationOrchestrator:
         if self._simulation_id is None:
             return
         try:
-            actual_cost = await self._sim_repo.get_total_cost_from_events(
-                self._simulation_id
-            )
+            actual_cost = await self._sim_repo.get_total_cost_from_events(self._simulation_id)
             if actual_cost > 0 and actual_cost != self._total_cost:
                 # Sync the in-memory total and persist to DB
                 await self._sim_repo.increment_stats(
@@ -932,7 +942,8 @@ class SimulationOrchestrator:
         except Exception:
             logger.warning(
                 "Cost reconciliation failed for %s, using in-memory total $%s",
-                self._simulation_id, self._total_cost,
+                self._simulation_id,
+                self._total_cost,
                 exc_info=True,
             )
         if self._total_cost > self._config.max_cost:
@@ -965,7 +976,8 @@ class SimulationOrchestrator:
 
         # Unsubscribe error listener
         self._event_bus.off(
-            EventType.SIMULATION_ERROR, self._on_simulation_error,
+            EventType.SIMULATION_ERROR,
+            self._on_simulation_error,
         )
 
         real_duration = timedelta(seconds=time.monotonic() - self._start_time)
@@ -989,9 +1001,7 @@ class SimulationOrchestrator:
 
         # Reconcile total_cost from cost_events (authoritative source)
         try:
-            actual_cost = await self._sim_repo.get_total_cost_from_events(
-                self._simulation_id
-            )
+            actual_cost = await self._sim_repo.get_total_cost_from_events(self._simulation_id)
             if actual_cost > 0:
                 await self._sim_repo.increment_stats(
                     self._simulation_id,

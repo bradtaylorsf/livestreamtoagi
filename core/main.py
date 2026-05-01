@@ -50,15 +50,20 @@ async def lifespan(app: FastAPI):
         # Initialize core memory for all agents at startup
         if svc.core_memory:
             from core.constants import LIVE_SIMULATION_ID
+
             initialized = await init_core_memories(
-                svc.agent_registry, svc.core_memory, simulation_id=LIVE_SIMULATION_ID,
+                svc.agent_registry,
+                svc.core_memory,
+                simulation_id=LIVE_SIMULATION_ID,
             )
             if initialized:
                 logger.info("Initialized core memory for: %s", ", ".join(initialized))
 
             # Health check: verify all agents have core memory
             for agent in svc.agent_registry.get_all_agents():
-                mem = await svc.core_memory.get_core_memory(agent.id, simulation_id=LIVE_SIMULATION_ID)
+                mem = await svc.core_memory.get_core_memory(
+                    agent.id, simulation_id=LIVE_SIMULATION_ID
+                )
                 if mem is None:
                     logger.warning("Agent %s still missing core memory after init", agent.id)
 
@@ -94,10 +99,12 @@ async def lifespan(app: FastAPI):
             idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
         from core.admin import _background_tasks
-        if _background_tasks:
-            logger.info("Waiting for %d background eval task(s) to finish...", len(_background_tasks))
-            await asyncio.gather(*_background_tasks, return_exceptions=True)
 
+        if _background_tasks:
+            logger.info(
+                "Waiting for %d background eval task(s) to finish...", len(_background_tasks)
+            )
+            await asyncio.gather(*_background_tasks, return_exceptions=True)
 
         await tts_pipeline.shutdown()
         if svc is not None:
@@ -197,11 +204,13 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
 
     # Create a tracked simulation record for this dev test
     sim_repo = SimulationRepo(svc.db)
-    sim = await sim_repo.create(SimulationCreate(
-        name=f"dev-test-{req.test_type}",
-        description=f"Dev simulate: {req.test_type}, {req.turns} turns",
-        config={"test_type": req.test_type, "topic": req.topic, "turns": req.turns},
-    ))
+    sim = await sim_repo.create(
+        SimulationCreate(
+            name=f"dev-test-{req.test_type}",
+            description=f"Dev simulate: {req.test_type}, {req.turns} turns",
+            config={"test_type": req.test_type, "topic": req.topic, "turns": req.turns},
+        )
+    )
     simulation_id = sim.id
 
     # Create a simulation-scoped Redis so all keys are isolated
@@ -214,8 +223,18 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
 
     trigger_map: dict[str, dict[str, Any]] = {
         "idle": {"type": "idle", "reason": "Free-form conversation", "location": "town_square"},
-        "standup": {"type": "scheduled", "reason": "Daily standup", "starter_agent_id": "vera", "location": "town_square"},
-        "debate": {"type": "environmental", "reason": "Debate topic", "topic": req.topic or "Should we rewrite everything in Rust?", "location": "workshop"},
+        "standup": {
+            "type": "scheduled",
+            "reason": "Daily standup",
+            "starter_agent_id": "vera",
+            "location": "town_square",
+        },
+        "debate": {
+            "type": "environmental",
+            "reason": "Debate topic",
+            "topic": req.topic or "Should we rewrite everything in Rust?",
+            "location": "workshop",
+        },
         "freeform": {"type": "idle", "reason": "Free-form conversation", "location": "town_square"},
     }
     trigger = dict(trigger_map.get(req.test_type, trigger_map["freeform"]))
@@ -225,8 +244,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
         trigger["topic"] = req.topic
 
     agents = req.agents or [
-        a.id for a in svc.agent_registry.get_all_agents()
-        if a.id not in ("management", "alpha")
+        a.id for a in svc.agent_registry.get_all_agents() if a.id not in ("management", "alpha")
     ]
     task_id = str(_uuid.uuid4())
     max_turns = req.turns
@@ -263,11 +281,21 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
         # Each turn's TTS starts generating as soon as the LLM produces it,
         # running in parallel with the LLM generating subsequent turns.
         class _SilentBus:
-            def on(self, *_: object) -> None: pass
-            def off(self, *_: object) -> None: pass
-            async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
-                evt = {"event_type": event_type, "event_id": str(_uuid_mod.uuid4()),
-                       "timestamp": _time.time(), "data": data or {}}
+            def on(self, *_: object) -> None:
+                pass
+
+            def off(self, *_: object) -> None:
+                pass
+
+            async def emit(
+                self, event_type: str, data: dict[str, Any] | None = None
+            ) -> dict[str, Any]:
+                evt = {
+                    "event_type": event_type,
+                    "event_id": str(_uuid_mod.uuid4()),
+                    "timestamp": _time.time(),
+                    "data": data or {},
+                }
                 await _collect(evt)
                 return evt
 
@@ -314,15 +342,23 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
             await silent_engine._start_conversation(trigger)
 
             if not silent_engine.active_conversation:
-                print(f"[DEV-SIM] {task_id}: WARNING - _start_conversation did not create an active conversation")
+                print(
+                    f"[DEV-SIM] {task_id}: WARNING - _start_conversation did not create an active conversation"
+                )
                 return
 
             turns_done = 0
-            while silent_engine.active_conversation and silent_engine.is_running and turns_done < max_turns:
+            while (
+                silent_engine.active_conversation
+                and silent_engine.is_running
+                and turns_done < max_turns
+            ):
                 print(f"[DEV-SIM] {task_id}: generating turn {turns_done + 1}/{max_turns}")
                 should_continue = await silent_engine._continue_conversation()
                 turns_done += 1
-                print(f"[DEV-SIM] {task_id}: turn {turns_done} done, collected {len(collected_turns)} speaks so far")
+                print(
+                    f"[DEV-SIM] {task_id}: turn {turns_done} done, collected {len(collected_turns)} speaks so far"
+                )
                 if not should_continue:
                     break
             if silent_engine.active_conversation:
@@ -335,28 +371,38 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
             logger.warning("Dev simulate task %s: no turns collected", task_id)
             return
 
-        print(f"[DEV-SIM] {task_id}: conversation done, {len(collected_turns)} turns collected, {len(tts_tasks)} TTS tasks pending")
+        print(
+            f"[DEV-SIM] {task_id}: conversation done, {len(collected_turns)} turns collected, {len(tts_tasks)} TTS tasks pending"
+        )
 
         # ── Phase 2: Replay immediately ──────────────────────────
         # TTS was kicked off during Phase 1 in parallel with LLM generation,
         # so most/all audio is already ready.  Await each in order and play
         # back-to-back with no dead time between speakers.
-        for i, (turn_data, tts_task) in enumerate(zip(collected_turns, tts_tasks)):
+        for i, (turn_data, tts_task) in enumerate(
+            zip(collected_turns, tts_tasks, strict=False),
+        ):
             tts = await tts_task
             emit_data = dict(turn_data)
             duration = 3.0
 
             if tts:
                 duration = float(tts["duration"])
-                emit_data["segments"] = [{
-                    "text": tts["text"],
-                    "audio_url": tts["audio_url"],
-                    "duration": duration,
-                    "action": None,
-                }]
-                print(f"[DEV-SIM] {task_id}: playing turn {i + 1}/{len(collected_turns)} ({turn_data.get('agent_id')}, {duration:.1f}s)")
+                emit_data["segments"] = [
+                    {
+                        "text": tts["text"],
+                        "audio_url": tts["audio_url"],
+                        "duration": duration,
+                        "action": None,
+                    }
+                ]
+                print(
+                    f"[DEV-SIM] {task_id}: playing turn {i + 1}/{len(collected_turns)} ({turn_data.get('agent_id')}, {duration:.1f}s)"
+                )
             else:
-                print(f"[DEV-SIM] {task_id}: WARNING - turn {i + 1}/{len(collected_turns)} has no TTS")
+                print(
+                    f"[DEV-SIM] {task_id}: WARNING - turn {i + 1}/{len(collected_turns)} has no TTS"
+                )
 
             await event_bus.emit("agent_speak", emit_data)
             await asyncio.sleep(duration + 0.5)
@@ -365,6 +411,7 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
 
         # Finalize simulation as completed
         from datetime import datetime
+
         await sim_repo.update_status(simulation_id, "completed", completed_at=datetime.now(UTC))
         await sim_repo.update_agents_participated(simulation_id, agents)
 
@@ -373,9 +420,11 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
             await _run()
         except Exception:  # Broad catch: must finalize simulation status on any failure
             from datetime import datetime
+
             logger.exception("Dev simulate task %s failed", task_id)
             await sim_repo.update_status(
-                simulation_id, "failed",
+                simulation_id,
+                "failed",
                 completed_at=datetime.now(UTC),
                 error_log={"task_id": task_id, "error": "unhandled exception"},
             )
@@ -387,7 +436,10 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
         elif t.exception():
             print(f"[DEV-SIM] {task_id}: UNHANDLED EXCEPTION: {t.exception()!r}")
             import traceback
-            traceback.print_exception(type(t.exception()), t.exception(), t.exception().__traceback__)
+
+            traceback.print_exception(
+                type(t.exception()), t.exception(), t.exception().__traceback__
+            )
 
     task = asyncio.create_task(_run_with_finalize())
     _sim_tasks.add(task)
@@ -417,7 +469,12 @@ async def dev_emit(req: EmitRequest) -> dict[str, Any]:
     # Generate TTS server-side only when the caller hasn't already done it.
     # If "duration" is present, the CLI already generated audio and timed the
     # bubble — skip server-side TTS to avoid double generation and stale timing.
-    if req.event_type == "agent_speak" and "text" in data and "agent_id" in data and "duration" not in data:
+    if (
+        req.event_type == "agent_speak"
+        and "text" in data
+        and "agent_id" in data
+        and "duration" not in data
+    ):
         tts: TTSPipeline | None = getattr(app.state, "tts_pipeline", None)
         if tts is not None:
             try:

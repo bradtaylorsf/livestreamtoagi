@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 def _sim_filter(param_num: int) -> str:
     """Return SQL fragment for simulation_id filtering."""
     return f"simulation_id = ${param_num}"

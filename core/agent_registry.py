@@ -8,12 +8,11 @@ Redis for cross-process sharing.
 from __future__ import annotations
 
 import logging
+import uuid as _uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-
-import uuid as _uuid
 
 from core.constants import LIVE_SIMULATION_ID
 from core.llm_client import MODEL_REGISTRY
@@ -86,7 +85,9 @@ class AgentRegistry:
         agents: dict[str, AgentConfig] = {}
 
         try:
-            active_configs = await self._config_repo.get_all_active_configs(simulation_id=self._simulation_id)
+            active_configs = await self._config_repo.get_all_active_configs(
+                simulation_id=self._simulation_id
+            )
         except Exception:
             logger.warning("Failed to load active configs from DB, will fall back to YAML")
             return agents
@@ -94,7 +95,8 @@ class AgentRegistry:
         for ac in active_configs:
             try:
                 prompt_ver = await self._config_repo.get_prompt_version(
-                    ac.agent_id, ac.prompt_version,
+                    ac.agent_id,
+                    ac.prompt_version,
                     simulation_id=self._simulation_id,
                 )
                 if prompt_ver is None:
@@ -167,14 +169,14 @@ class AgentRegistry:
                 if adj_id not in agent_ids:
                     logger.warning(
                         "Agent %s adjacency references unknown agent %s",
-                        agent_id, adj_id,
+                        agent_id,
+                        adj_id,
                     )
-        tool_counts = {
-            aid: len(cfg.tools) for aid, cfg in agents.items()
-        }
+        tool_counts = {aid: len(cfg.tools) for aid, cfg in agents.items()}
         logger.info(
             "Agent roster: %s (tool counts: %s)",
-            sorted(agent_ids), tool_counts,
+            sorted(agent_ids),
+            tool_counts,
         )
 
     async def reload_agent(self, agent_id: str) -> None:
@@ -184,12 +186,15 @@ class AgentRegistry:
             return
 
         try:
-            ac = await self._config_repo.get_active_config(agent_id, simulation_id=self._simulation_id)
+            ac = await self._config_repo.get_active_config(
+                agent_id, simulation_id=self._simulation_id
+            )
             if ac is None:
                 return
 
             prompt_ver = await self._config_repo.get_prompt_version(
-                agent_id, ac.prompt_version,
+                agent_id,
+                ac.prompt_version,
                 simulation_id=self._simulation_id,
             )
             if prompt_ver is None:
@@ -242,8 +247,7 @@ class AgentRegistry:
         # Validate raw YAML structure
         if not isinstance(raw, dict):
             raise ValueError(
-                f"config.yaml in {agent_dir.name} must be a YAML mapping, "
-                f"got {type(raw).__name__}"
+                f"config.yaml in {agent_dir.name} must be a YAML mapping, got {type(raw).__name__}"
             )
         required_keys = {"id", "display_name", "model_conversation", "model_building"}
         missing = required_keys - set(raw.keys())
@@ -292,7 +296,9 @@ class AgentRegistry:
             else:
                 logger.warning(
                     "Extra YAML %s in %s is not a dict (got %s), skipping",
-                    extra_path.name, agent_dir.name, type(extra).__name__,
+                    extra_path.name,
+                    agent_dir.name,
+                    type(extra).__name__,
                 )
 
         # Handle YAML null for voice_id
@@ -337,37 +343,24 @@ class AgentRegistry:
     def get_role_bonuses(self) -> dict[str, float]:
         """Build role priority bonus map from agent configs."""
         return {
-            a.id: a.role_priority_bonus
-            for a in self._agents.values()
-            if a.role_priority_bonus > 0
+            a.id: a.role_priority_bonus for a in self._agents.values() if a.role_priority_bonus > 0
         }
 
     def get_cross_agent_writers(self) -> frozenset[str]:
         """Build set of agents allowed to write other agents' core memory."""
-        return frozenset(
-            a.id for a in self._agents.values() if a.cross_agent_writer
-        )
+        return frozenset(a.id for a in self._agents.values() if a.cross_agent_writer)
 
     def get_allowed_agents_for_tool(self, tool_name: str) -> frozenset[str]:
         """Build ALLOWED_AGENTS set for a given tool name."""
-        return frozenset(
-            a.id for a in self._agents.values() if tool_name in a.tools
-        )
+        return frozenset(a.id for a in self._agents.values() if tool_name in a.tools)
 
     def get_conversation_participants(self) -> list[AgentConfig]:
         """Return agents that participate in conversations (non-zero chattiness or initiative)."""
-        return [
-            a for a in self._agents.values()
-            if a.chattiness > 0 or a.initiative > 0
-        ]
+        return [a for a in self._agents.values() if a.chattiness > 0 or a.initiative > 0]
 
     def build_closer_weights(self) -> dict[str, float]:
         """Build closer_weights dict from agent configs."""
-        return {
-            a.id: a.closing_weight
-            for a in self._agents.values()
-            if a.closing_weight > 0
-        }
+        return {a.id: a.closing_weight for a in self._agents.values() if a.closing_weight > 0}
 
     def build_interrupt_tendency(self) -> dict[str, float]:
         """Build agent_interrupt_tendency dict from agent configs."""
@@ -376,18 +369,12 @@ class AgentRegistry:
     def build_eavesdrop_tendency(self) -> dict[str, float]:
         """Build eavesdrop_tendency dict from agent configs."""
         return {
-            a.id: a.eavesdrop_tendency
-            for a in self._agents.values()
-            if a.eavesdrop_tendency > 0
+            a.id: a.eavesdrop_tendency for a in self._agents.values() if a.eavesdrop_tendency > 0
         }
 
     def build_initiative(self) -> dict[str, float]:
         """Build agent_initiative dict from agent configs."""
-        return {
-            a.id: a.initiative
-            for a in self._agents.values()
-            if a.initiative > 0
-        }
+        return {a.id: a.initiative for a in self._agents.values() if a.initiative > 0}
 
     def build_relevance_map(self) -> dict[str, dict[str, float]]:
         """Build topic relevance_map from agent configs."""
@@ -401,11 +388,7 @@ class AgentRegistry:
 
     def build_adjacency(self) -> dict[str, dict[str, float]]:
         """Build adjacency map from agent configs."""
-        return {
-            a.id: dict(a.adjacency)
-            for a in self._agents.values()
-            if a.adjacency
-        }
+        return {a.id: dict(a.adjacency) for a in self._agents.values() if a.adjacency}
 
     async def set_status(self, agent_id: str, status: AgentStatus) -> None:
         """Update an agent's status in Redis (if available) then in-memory."""

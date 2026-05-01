@@ -77,9 +77,7 @@ def _validate_password(provided: str) -> bool:
     plaintext = os.environ.get("ADMIN_PASSWORD", "")
     if not plaintext:
         return False
-    logger.warning(
-        "Using plaintext ADMIN_PASSWORD — set ADMIN_PASSWORD_HASH (bcrypt) instead"
-    )
+    logger.warning("Using plaintext ADMIN_PASSWORD — set ADMIN_PASSWORD_HASH (bcrypt) instead")
     return hmac.compare_digest(provided, plaintext)
 
 

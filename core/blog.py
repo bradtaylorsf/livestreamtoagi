@@ -73,8 +73,11 @@ _POST_MAP: dict[str, BlogPostDetail] = {p.slug: p for p in _POSTS}
 def list_posts() -> list[BlogPostSummary]:
     return [
         BlogPostSummary(
-            slug=p.slug, title=p.title, date=p.date,
-            excerpt=p.excerpt, tags=p.tags,
+            slug=p.slug,
+            title=p.title,
+            date=p.date,
+            excerpt=p.excerpt,
+            tags=p.tags,
         )
         for p in _POSTS
     ]

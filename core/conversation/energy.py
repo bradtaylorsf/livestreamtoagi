@@ -114,7 +114,9 @@ class ConversationEnergy:
 
         logger.debug(
             "energy tick turn=%d net=%.1f remaining=%.1f",
-            self._turn_count, net, self._energy,
+            self._turn_count,
+            net,
+            self._energy,
         )
 
         return breakdown

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -62,9 +61,7 @@ class EvolutionRepo:
         )
         return EvolutionCycle(**dict(row))
 
-    async def get_loop_history(
-        self, loop_run_id: uuid.UUID
-    ) -> list[EvolutionCycle]:
+    async def get_loop_history(self, loop_run_id: uuid.UUID) -> list[EvolutionCycle]:
         """Get all cycles for a loop run."""
         rows = await self.db.fetch(
             """SELECT * FROM evolution_cycles
@@ -74,9 +71,7 @@ class EvolutionRepo:
         )
         return [EvolutionCycle(**dict(r)) for r in rows]
 
-    async def get_all_loops(
-        self, *, limit: int = 20, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    async def get_all_loops(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         """Get summary of all loop runs."""
         rows = await self.db.fetch(
             """SELECT loop_run_id,
@@ -97,16 +92,12 @@ class EvolutionRepo:
 
     async def get_cycle(self, cycle_id: uuid.UUID) -> EvolutionCycle | None:
         """Get a specific cycle by ID."""
-        row = await self.db.fetchrow(
-            "SELECT * FROM evolution_cycles WHERE id = $1", cycle_id
-        )
+        row = await self.db.fetchrow("SELECT * FROM evolution_cycles WHERE id = $1", cycle_id)
         if row is None:
             return None
         return EvolutionCycle(**dict(row))
 
-    async def compare_cycles(
-        self, id_a: uuid.UUID, id_b: uuid.UUID
-    ) -> dict[str, Any]:
+    async def compare_cycles(self, id_a: uuid.UUID, id_b: uuid.UUID) -> dict[str, Any]:
         """Compare two cycles side by side."""
         cycle_a = await self.get_cycle(id_a)
         cycle_b = await self.get_cycle(id_b)

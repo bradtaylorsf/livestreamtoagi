@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.agent_state import AgentStateManager
-    from core.memory.dreams import DreamManager, DreamResult
+    from core.memory.dreams import DreamManager
     from core.memory.reflection import ReflectionManager
     from core.models import ReflectionResult
     from core.simulation.clock import SimulationClock
@@ -77,7 +77,9 @@ class ReflectionScheduler:
         ):
             logger.info(
                 "Weekly reflection due for %s (day %d, simulated %s)",
-                agent_id, current_day, now.isoformat(),
+                agent_id,
+                current_day,
+                now.isoformat(),
             )
             try:
                 result = await self._reflection.run_weekly_reflection(agent_id)
@@ -92,13 +94,12 @@ class ReflectionScheduler:
 
         # Daily reflection (at configured hour, once per simulated day)
         today_str = now.strftime("%Y-%m-%d")
-        if (
-            now.hour >= self._daily_hour
-            and self._last_daily.get(agent_id) != today_str
-        ):
+        if now.hour >= self._daily_hour and self._last_daily.get(agent_id) != today_str:
             logger.info(
                 "Daily reflection due for %s (hour %d, simulated %s)",
-                agent_id, now.hour, now.isoformat(),
+                agent_id,
+                now.hour,
+                now.isoformat(),
             )
             try:
                 result = await self._reflection.run_6hour_reflection(agent_id)
@@ -115,7 +116,9 @@ class ReflectionScheduler:
         if elapsed >= self._six_hour_interval * 0.8:
             logger.info(
                 "6-hour reflection due for %s (%.1fh elapsed, simulated %s)",
-                agent_id, elapsed.total_seconds() / 3600, now.isoformat(),
+                agent_id,
+                elapsed.total_seconds() / 3600,
+                now.isoformat(),
             )
             try:
                 result = await self._reflection.run_6hour_reflection(agent_id)
@@ -129,9 +132,7 @@ class ReflectionScheduler:
 
         return results
 
-    async def check_and_run_all(
-        self, agent_ids: list[str]
-    ) -> list[ReflectionResult]:
+    async def check_and_run_all(self, agent_ids: list[str]) -> list[ReflectionResult]:
         """Run check_and_run for all agents in parallel."""
         tasks = [self.check_and_run(agent_id) for agent_id in agent_ids]
         nested = await asyncio.gather(*tasks, return_exceptions=True)
@@ -144,7 +145,9 @@ class ReflectionScheduler:
         return results
 
     async def _check_and_run_dream(
-        self, agent_id: str, now: datetime,
+        self,
+        agent_id: str,
+        now: datetime,
     ) -> None:
         """Check if a dream cycle is due and run it.
 
@@ -163,15 +166,17 @@ class ReflectionScheduler:
                 state = await self._agent_state_manager.get_state(agent_id)
                 if state.boredom > 0.8:
                     should_dream = True
-                    logger.info("Boredom-triggered dream for %s (boredom=%.2f)",
-                                agent_id, state.boredom)
+                    logger.info(
+                        "Boredom-triggered dream for %s (boredom=%.2f)", agent_id, state.boredom
+                    )
             except Exception:
                 pass
 
         if should_dream:
             logger.info(
                 "Dream cycle due for %s (%.1fh since last dream)",
-                agent_id, dream_elapsed.total_seconds() / 3600,
+                agent_id,
+                dream_elapsed.total_seconds() / 3600,
             )
             try:
                 await self._dream_manager.run_dream(agent_id)

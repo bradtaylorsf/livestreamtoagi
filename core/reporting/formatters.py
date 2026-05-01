@@ -72,18 +72,11 @@ def format_comparison_terminal(report: ComparisonReport) -> str:
     turns_b = b.get("avg_turns", 0)
 
     lines.append(f"  {'Name':<25} {name_a:<15} {name_b:<15}")
+    lines.append(f"  {'Total Cost':<25} ${cost_a:<14} ${cost_b:<14} {comp.get('cost_delta', '0')}")
     lines.append(
-        f"  {'Total Cost':<25} ${cost_a:<14} ${cost_b:<14} "
-        f"{comp.get('cost_delta', '0')}"
+        f"  {'Conversations':<25} {conv_a:<15} {conv_b:<15} {comp.get('conversation_delta', 0)}"
     )
-    lines.append(
-        f"  {'Conversations':<25} {conv_a:<15} {conv_b:<15} "
-        f"{comp.get('conversation_delta', 0)}"
-    )
-    lines.append(
-        f"  {'Avg Turns':<25} {turns_a:<15} {turns_b:<15} "
-        f"{comp.get('turns_delta', 0)}"
-    )
+    lines.append(f"  {'Avg Turns':<25} {turns_a:<15} {turns_b:<15} {comp.get('turns_delta', 0)}")
 
     return "\n".join(lines)
 

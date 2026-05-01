@@ -14,9 +14,7 @@ from core.models import TimingConfig
 
 # Detection patterns
 _JOKE_PATTERNS = re.compile(r"\b(haha|lol|lmao)\b", re.IGNORECASE)
-_EMOTIONAL_PATTERNS = re.compile(
-    r"\b(feel|miss|worry|scared|sorry)\b", re.IGNORECASE
-)
+_EMOTIONAL_PATTERNS = re.compile(r"\b(feel|miss|worry|scared|sorry)\b", re.IGNORECASE)
 
 
 def _detect_content_type(response: str, *, is_interrupt: bool = False) -> str:

@@ -83,7 +83,9 @@ class AllianceManager:
         if len(current) >= MAX_ALLIANCES_PER_AGENT:
             logger.info(
                 "%s already in %d alliances (max %d)",
-                proposer_id, len(current), MAX_ALLIANCES_PER_AGENT,
+                proposer_id,
+                len(current),
+                MAX_ALLIANCES_PER_AGENT,
             )
             return None
 
@@ -167,8 +169,7 @@ class AllianceManager:
                 pid,
             )
 
-            logger.info("Alliance '%s' formed with members: %s",
-                        updated["alliance_name"], members)
+            logger.info("Alliance '%s' formed with members: %s", updated["alliance_name"], members)
 
             return Alliance(
                 id=str(alliance_id),
@@ -214,7 +215,9 @@ class AllianceManager:
         return True
 
     async def get_alliance_context(
-        self, agent_id: str, simulation_id: UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: UUID | None = None,
     ) -> str:
         """Format active alliances for injection into agent context."""
         simulation_id = simulation_id or self.simulation_id
@@ -237,7 +240,8 @@ class AllianceManager:
         return "\n".join(lines)
 
     async def get_active_alliances(
-        self, simulation_id: UUID | None = None,
+        self,
+        simulation_id: UUID | None = None,
     ) -> list[Alliance]:
         """Get all active alliances."""
         simulation_id = simulation_id or self.simulation_id
@@ -250,19 +254,24 @@ class AllianceManager:
             members = r.get("members") or []
             # Filter out None values from array_agg
             members = [m for m in members if m is not None]
-            result.append(Alliance(
-                id=str(r["id"]),
-                name=r["name"],
-                members=members,
-                founded_by=r["founded_by"],
-                purpose=r.get("purpose", ""),
-                shared_treasury=float(r.get("shared_treasury", 0)),
-                created_at=r.get("created_at"),
-            ))
+            result.append(
+                Alliance(
+                    id=str(r["id"]),
+                    name=r["name"],
+                    members=members,
+                    founded_by=r["founded_by"],
+                    purpose=r.get("purpose", ""),
+                    shared_treasury=float(r.get("shared_treasury", 0)),
+                    created_at=r.get("created_at"),
+                )
+            )
         return result
 
     async def are_allies(
-        self, agent_a: str, agent_b: str, simulation_id: UUID | None = None,
+        self,
+        agent_a: str,
+        agent_b: str,
+        simulation_id: UUID | None = None,
     ) -> bool:
         """Check if two agents are in the same alliance."""
         simulation_id = simulation_id or self.simulation_id
@@ -290,8 +299,11 @@ class AllianceManager:
         # Deduct from agent's economy account first
         if self._economy is not None:
             from decimal import Decimal
+
             deducted = await self._economy.deduct_cost(
-                agent_id, Decimal(str(amount)), f"alliance treasury contribution: {alliance_id}",
+                agent_id,
+                Decimal(str(amount)),
+                f"alliance treasury contribution: {alliance_id}",
             )
             if not deducted:
                 return False

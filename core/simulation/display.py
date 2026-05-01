@@ -57,25 +57,26 @@ class SimulationDisplay:
     def show_simulation_start(self, sim: Any, config: SimulationConfig) -> None:
         """Display simulation header."""
         console.print()
-        console.print(Panel(
-            f"[bold bright_cyan]Simulation: {config.name}[/bold bright_cyan]\n"
-            f"[dim]{config.description or 'No description'}[/dim]\n"
-            f"[dim]ID: {sim.id}[/dim]\n"
-            f"[dim]Agents: {', '.join(config.agents)}[/dim]\n"
-            f"[dim]Phases: {len(config.phases)} | "
-            f"Max cost: ${config.max_cost} | "
-            f"Dry run: {config.dry_run}[/dim]",
-            border_style="bright_cyan",
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                f"[bold bright_cyan]Simulation: {config.name}[/bold bright_cyan]\n"
+                f"[dim]{config.description or 'No description'}[/dim]\n"
+                f"[dim]ID: {sim.id}[/dim]\n"
+                f"[dim]Agents: {', '.join(config.agents)}[/dim]\n"
+                f"[dim]Phases: {len(config.phases)} | "
+                f"Max cost: ${config.max_cost} | "
+                f"Dry run: {config.dry_run}[/dim]",
+                border_style="bright_cyan",
+                padding=(1, 2),
+            )
+        )
         console.print()
 
     def show_phase_start(self, name: str, index: int, total: int) -> None:
         """Display phase start indicator."""
         progress = f"[{index + 1}/{total}]"
         console.print(
-            f"  [bold bright_cyan]{progress}[/bold bright_cyan] "
-            f"[bold]Starting phase:[/bold] {name}"
+            f"  [bold bright_cyan]{progress}[/bold bright_cyan] [bold]Starting phase:[/bold] {name}"
         )
 
     def show_phase_complete(self, result: PhaseResult, name: str) -> None:
@@ -116,11 +117,13 @@ class SimulationDisplay:
     def show_cost_exceeded(self, current: Decimal, limit: Decimal) -> None:
         """Display cost limit exceeded warning."""
         console.print()
-        console.print(Panel(
-            f"[bold red]Cost limit exceeded![/bold red]\n"
-            f"Spent: ${current:.4f} | Limit: ${limit:.2f}",
-            border_style="red",
-        ))
+        console.print(
+            Panel(
+                f"[bold red]Cost limit exceeded![/bold red]\n"
+                f"Spent: ${current:.4f} | Limit: ${limit:.2f}",
+                border_style="red",
+            )
+        )
 
     def show_reflection_triggered(
         self, agent_id: str, reflection_type: str, simulated_time: datetime
@@ -136,9 +139,7 @@ class SimulationDisplay:
     def show_day_boundary(self, day_num: int, stats: dict[str, Any]) -> None:
         """Display day boundary marker with per-day stats."""
         console.print()
-        console.print(
-            f"  [bold bright_cyan]=== Day {day_num} ===[/bold bright_cyan]"
-        )
+        console.print(f"  [bold bright_cyan]=== Day {day_num} ===[/bold bright_cyan]")
         if stats:
             parts = []
             if stats.get("conversations"):
@@ -151,9 +152,7 @@ class SimulationDisplay:
                 console.print(f"  [dim]{' | '.join(parts)}[/dim]")
         console.print()
 
-    def show_autonomous_status(
-        self, trigger_type: str, conversation_num: int
-    ) -> None:
+    def show_autonomous_status(self, trigger_type: str, conversation_num: int) -> None:
         """Display autonomous mode conversation start."""
         icon = PHASE_ICONS.get(trigger_type, "??")
         console.print(
@@ -164,10 +163,12 @@ class SimulationDisplay:
     def show_summary(self, sim: Simulation, real_duration: timedelta) -> None:
         """Display final simulation summary table."""
         console.print()
-        console.print(Panel(
-            "[bold]Simulation Summary[/bold]",
-            border_style="bright_cyan",
-        ))
+        console.print(
+            Panel(
+                "[bold]Simulation Summary[/bold]",
+                border_style="bright_cyan",
+            )
+        )
 
         table = Table(show_header=False, border_style="dim", padding=(0, 2))
         table.add_column("Metric", style="bold")

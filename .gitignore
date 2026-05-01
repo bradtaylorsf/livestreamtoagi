@@ -66,3 +66,6 @@ review-session.json
 # Assets (large binaries — track with Git LFS or download separately)
 # frontend/public/assets/tilesets/*.png
 # frontend/public/assets/sprites/*.png
+
+# Claude Code session runtime artifacts
+.claude/scheduled_tasks.lock

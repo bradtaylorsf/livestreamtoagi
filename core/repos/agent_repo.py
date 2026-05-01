@@ -26,9 +26,7 @@ class AgentRepo:
 
     async def list(self, status: str | None = None) -> list[Agent]:
         if status:
-            rows = await self.db.fetch(
-                "SELECT * FROM agents WHERE status = $1 ORDER BY id", status
-            )
+            rows = await self.db.fetch("SELECT * FROM agents WHERE status = $1 ORDER BY id", status)
         else:
             rows = await self.db.fetch("SELECT * FROM agents ORDER BY id")
         return [_row_to_agent(r) for r in rows]

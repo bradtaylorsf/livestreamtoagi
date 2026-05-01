@@ -69,14 +69,18 @@ def generate_relationship_evolution(
             if s_before is not None and s_after is not None:
                 delta = abs(float(s_after) - float(s_before))
                 if delta > 0.1:
-                    biggest_changes.append({
-                        "from": agent,
-                        "to": target,
-                        "sentiment_start": float(s_before),
-                        "sentiment_end": float(s_after),
-                        "delta": round(delta, 2),
-                        "direction": "improved" if float(s_after) > float(s_before) else "worsened",
-                    })
+                    biggest_changes.append(
+                        {
+                            "from": agent,
+                            "to": target,
+                            "sentiment_start": float(s_before),
+                            "sentiment_end": float(s_after),
+                            "delta": round(delta, 2),
+                            "direction": "improved"
+                            if float(s_after) > float(s_before)
+                            else "worsened",
+                        }
+                    )
 
     biggest_changes.sort(key=lambda x: x["delta"], reverse=True)
 

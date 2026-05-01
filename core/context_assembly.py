@@ -179,7 +179,10 @@ class ContextAssembler:
         if query_text:
             try:
                 recall_text = await self._recall_memory.retrieve_recall_memories(
-                    agent_id, query_text, limit=3, simulation_id=simulation_id,
+                    agent_id,
+                    query_text,
+                    limit=3,
+                    simulation_id=simulation_id,
                 )
             except Exception:
                 logger.warning("Failed to retrieve recall memories for %s", agent_id)
@@ -293,8 +296,7 @@ class ContextAssembler:
             system_sections.append(
                 "## Your current agenda\n"
                 "These are your personal goals and commitments. "
-                "Work toward them and honor your promises.\n\n"
-                + agent_goals_context
+                "Work toward them and honor your promises.\n\n" + agent_goals_context
             )
 
         # Commitment reminders (#249)
@@ -357,14 +359,16 @@ class ContextAssembler:
         messages.extend(labeled_buffer)
 
         # Identity reinforcement before the agent's turn
-        messages.append({
-            "role": "user",
-            "content": (
-                f"[SYSTEM: You are {agent.display_name if agent else agent_id}. "
-                f"Respond only as {agent.display_name if agent else agent_id}. "
-                f"Previous speakers are labeled with [Name]: prefix.]"
-            ),
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"[SYSTEM: You are {agent.display_name if agent else agent_id}. "
+                    f"Respond only as {agent.display_name if agent else agent_id}. "
+                    f"Previous speakers are labeled with [Name]: prefix.]"
+                ),
+            }
+        )
 
         if hint_text:
             messages.append({"role": "user", "content": hint_text})
@@ -377,7 +381,8 @@ class ContextAssembler:
         )
 
     def _label_buffer_messages(
-        self, buffer: list[dict[str, str]],
+        self,
+        buffer: list[dict[str, str]],
     ) -> list[dict[str, str]]:
         """Add speaker labels to buffer messages for LLM identity clarity.
 

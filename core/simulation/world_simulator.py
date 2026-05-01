@@ -144,10 +144,7 @@ class WorldSimulator:
             for key in keys:
                 raw_key = key if isinstance(key, str) else key.decode()
                 draft_id = raw_key.split(":")[-1]
-                already_seen = (
-                    draft_id in self._pending_socials
-                    or draft_id in self._approved_posts
-                )
+                already_seen = draft_id in self._pending_socials or draft_id in self._approved_posts
                 if not already_seen:
                     delay = random.uniform(*_SOCIAL_APPROVAL_DELAY) * 60
                     self._pending_socials[draft_id] = now + delay
@@ -161,10 +158,7 @@ class WorldSimulator:
             for key in keys:
                 raw_key = key if isinstance(key, str) else key.decode()
                 draft_id = raw_key.split(":")[-1]
-                if (
-                    draft_id not in self._pending_emails
-                    and draft_id not in self._sent_emails
-                ):
+                if draft_id not in self._pending_emails and draft_id not in self._sent_emails:
                     delay = random.uniform(*_EMAIL_SEND_DELAY) * 60
                     self._pending_emails[draft_id] = now + delay
             if cursor == 0:
@@ -190,11 +184,14 @@ class WorldSimulator:
             await self._redis.set(f"drafts:social:{draft_id}", json.dumps(draft))
             self._approved_posts.add(draft_id)
 
-            self._add_event("post_approved", {
-                "draft_id": draft_id,
-                "agent_id": draft.get("agent_id"),
-                "platform": draft.get("platform"),
-            })
+            self._add_event(
+                "post_approved",
+                {
+                    "draft_id": draft_id,
+                    "agent_id": draft.get("agent_id"),
+                    "platform": draft.get("platform"),
+                },
+            )
             logger.debug("Approved social post %s", draft_id)
 
     async def _simulate_post_engagement(self, now: float) -> None:
@@ -222,19 +219,23 @@ class WorldSimulator:
                     comment = await self._persona_manager.generate_comment(
                         persona, "Social post by an AI agent"
                     )
-                    comments.append({
-                        "user": persona["name"],
-                        "text": comment,
-                        "timestamp": now,
-                    })
+                    comments.append(
+                        {
+                            "user": persona["name"],
+                            "text": comment,
+                            "timestamp": now,
+                        }
+                    )
 
             # Add one negative comment per ~5 posts for realism
             if random.random() < 0.2:
-                comments.append({
-                    "user": "anonymous_critic",
-                    "text": "This is just AI-generated slop tbh",
-                    "timestamp": now,
-                })
+                comments.append(
+                    {
+                        "user": "anonymous_critic",
+                        "text": "This is just AI-generated slop tbh",
+                        "timestamp": now,
+                    }
+                )
 
             engagement = {
                 "likes": likes,
@@ -245,12 +246,15 @@ class WorldSimulator:
             }
             await self._redis.set(engagement_key, json.dumps(engagement))
 
-            self._add_event("post_engagement", {
-                "draft_id": draft_id,
-                "likes": likes,
-                "comments": len(comments),
-                "shares": shares,
-            })
+            self._add_event(
+                "post_engagement",
+                {
+                    "draft_id": draft_id,
+                    "likes": likes,
+                    "comments": len(comments),
+                    "shares": shares,
+                },
+            )
 
     async def _score_post_quality(self, draft_id: str) -> float:
         """Score a post's quality 0.0-1.0. Uses LLM if available."""
@@ -270,11 +274,14 @@ class WorldSimulator:
         try:
             response = await self._llm.complete(
                 messages=[
-                    {"role": "system", "content": (
-                        "Rate this social media post's quality on a scale of 0.0 to 1.0. "
-                        "Consider: creativity, engagement potential, clarity. "
-                        "Respond with ONLY a number like 0.7"
-                    )},
+                    {
+                        "role": "system",
+                        "content": (
+                            "Rate this social media post's quality on a scale of 0.0 to 1.0. "
+                            "Consider: creativity, engagement potential, clarity. "
+                            "Respond with ONLY a number like 0.7"
+                        ),
+                    },
                     {"role": "user", "content": content[:500]},
                 ],
                 model="claude-haiku-4-5",
@@ -311,11 +318,14 @@ class WorldSimulator:
             response_delay = random.uniform(*_EMAIL_RESPONSE_DELAY) * 60
             self._sent_emails[draft_id] = now + response_delay
 
-            self._add_event("email_sent", {
-                "draft_id": draft_id,
-                "agent_id": draft.get("agent_id"),
-                "to": draft.get("to"),
-            })
+            self._add_event(
+                "email_sent",
+                {
+                    "draft_id": draft_id,
+                    "agent_id": draft.get("agent_id"),
+                    "to": draft.get("to"),
+                },
+            )
 
     async def _generate_email_responses(self, now: float) -> None:
         """Generate responses for sent emails whose response time has elapsed."""
@@ -345,10 +355,13 @@ class WorldSimulator:
             }
             await self._redis.set(f"email:response:{draft_id}", json.dumps(response_data))
 
-            self._add_event("email_received", {
-                "draft_id": draft_id,
-                "sentiment": sentiment,
-            })
+            self._add_event(
+                "email_received",
+                {
+                    "draft_id": draft_id,
+                    "sentiment": sentiment,
+                },
+            )
 
     async def _generate_email_text(self, draft_id: str, sentiment: str) -> str:
         """Generate email response text matching the given sentiment."""
@@ -362,8 +375,7 @@ class WorldSimulator:
                 "to you when we have more information."
             ),
             "rejection": (
-                "We appreciate your interest, but this isn't a fit "
-                "for us right now. Best of luck!"
+                "We appreciate your interest, but this isn't a fit for us right now. Best of luck!"
             ),
         }
 
@@ -384,12 +396,15 @@ class WorldSimulator:
         try:
             response = await self._llm.complete(
                 messages=[
-                    {"role": "system", "content": (
-                        "You are a business contact responding to "
-                        "an email from an AI reality show. "
-                        f"Your sentiment should be: {sentiment}. "
-                        "Write a brief, realistic reply (2-3 sentences)."
-                    )},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a business contact responding to "
+                            "an email from an AI reality show. "
+                            f"Your sentiment should be: {sentiment}. "
+                            "Write a brief, realistic reply (2-3 sentences)."
+                        ),
+                    },
                     {"role": "user", "content": context or "General inquiry about collaboration"},
                 ],
                 model="claude-haiku-4-5",
@@ -439,10 +454,15 @@ class WorldSimulator:
         await self._redis.set("world:revenue_status", json.dumps(budget_data))
         # GetWorldStateTool reads "world:budget" — mirror the data there
         # in the format that tool expects.
-        await self._redis.set("world:budget", json.dumps({
-            "estimated_daily_revenue": round(revenue, 2),
-            "approved_posts_today": approved_count,
-        }))
+        await self._redis.set(
+            "world:budget",
+            json.dumps(
+                {
+                    "estimated_daily_revenue": round(revenue, 2),
+                    "approved_posts_today": approved_count,
+                }
+            ),
+        )
 
     # ── Recurring Characters ─────────────────────────────────
 
@@ -459,12 +479,14 @@ class WorldSimulator:
             if random.random() > 0.3:  # 30% chance per active persona per tick
                 continue
             message = await self._persona_manager.generate_chat_message(persona)
-            chat_entry = json.dumps({
-                "user": persona["name"],
-                "text": message,
-                "timestamp": time.time(),
-                "persona": True,
-            })
+            chat_entry = json.dumps(
+                {
+                    "user": persona["name"],
+                    "text": message,
+                    "timestamp": time.time(),
+                    "persona": True,
+                }
+            )
             await self._redis.rpush("audience:recent_chat", chat_entry)
             await self._redis.ltrim("audience:recent_chat", -50, -1)
 

@@ -76,10 +76,13 @@ def generate_cost_analysis(
     return {
         "total_cost": str(total),
         "by_day": {day: str(cost) for day, cost in sorted(by_day.items())},
-        "by_agent": {agent: str(cost) for agent, cost in sorted(by_agent.items(), key=lambda x: x[1], reverse=True)},
-        "by_type": {t: str(cost) for t, cost in sorted(by_type.items(), key=lambda x: x[1], reverse=True)},
-        "token_trends": {
-            day: tokens for day, tokens in sorted(tokens_by_day.items())
+        "by_agent": {
+            agent: str(cost)
+            for agent, cost in sorted(by_agent.items(), key=lambda x: x[1], reverse=True)
         },
+        "by_type": {
+            t: str(cost) for t, cost in sorted(by_type.items(), key=lambda x: x[1], reverse=True)
+        },
+        "token_trends": {day: tokens for day, tokens in sorted(tokens_by_day.items())},
         "projection": projection,
     }

@@ -57,6 +57,7 @@ class DepartureManager:
     def can_depart(self) -> bool:
         """Check if a departure is allowed (cast size > MIN)."""
         from core.characters.spawner import MIN_CAST_SIZE
+
         return self.get_active_count() > MIN_CAST_SIZE
 
     async def check_departure_conditions(self, agent_id: str) -> bool:
@@ -100,7 +101,9 @@ class DepartureManager:
                 if len(rows) < CONSECUTIVE_SNAPSHOTS_REQUIRED:
                     logger.info(
                         "Not enough state snapshots for %s (%d/%d), skipping departure",
-                        agent_id, len(rows), CONSECUTIVE_SNAPSHOTS_REQUIRED,
+                        agent_id,
+                        len(rows),
+                        CONSECUTIVE_SNAPSHOTS_REQUIRED,
                     )
                     return False
                 for row in rows:
@@ -113,7 +116,8 @@ class DepartureManager:
                 # If history table doesn't exist, fall through to single-check
                 logger.debug(
                     "State history check failed for %s, using current state only",
-                    agent_id, exc_info=True,
+                    agent_id,
+                    exc_info=True,
                 )
 
         return True
@@ -132,7 +136,8 @@ class DepartureManager:
         if not self.can_depart():
             logger.warning(
                 "Cannot process departure for %s — cast too small (%d)",
-                agent_id, self.get_active_count(),
+                agent_id,
+                self.get_active_count(),
             )
             return None
 
@@ -161,17 +166,20 @@ class DepartureManager:
         if self._registry is not None:
             try:
                 from core.models import AgentStatus
+
                 await self._registry.set_status(agent_id, AgentStatus.paused)
                 logger.info("Deactivated agent %s after departure", agent_id)
             except Exception:
                 logger.warning(
                     "Failed to deactivate agent %s after departure",
-                    agent_id, exc_info=True,
+                    agent_id,
+                    exc_info=True,
                 )
 
         # Emit departure event
         if self._event_bus is not None:
             from core.event_bus import EventType
+
             await self._event_bus.emit(
                 EventType.AGENT_ACTION,
                 {

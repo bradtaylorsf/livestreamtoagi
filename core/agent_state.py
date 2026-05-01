@@ -18,10 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-
 import uuid
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +37,7 @@ _STATE_TTL_SECONDS = 7200  # 2 hours — refreshed on every update
 
 
 # ── Mood derivation ───────────────────────────────────────────────
+
 
 # Mood thresholds: (condition_fn, mood_name)
 # Checked in priority order; first match wins.
@@ -266,7 +266,10 @@ class AgentStateManager:
             return state
 
     async def on_novel_event(
-        self, agent_id: str, *, severity: str | None = None,
+        self,
+        agent_id: str,
+        *,
+        severity: str | None = None,
     ) -> AgentState:
         """Update state when something novel/unexpected happens.
 
@@ -295,6 +298,7 @@ class AgentStateManager:
 
     def format_state_for_context(self, state: AgentState) -> str:
         """Format agent state as a context string for the system prompt."""
+
         # Quantify levels for natural language
         def _level(v: float) -> str:
             if v >= 0.8:
@@ -308,7 +312,7 @@ class AgentStateManager:
             return "very low"
 
         lines = [
-            f"## Your current internal state",
+            "## Your current internal state",
             f"Mood: {state.mood}",
             f"Energy: {_level(state.energy)} ({state.energy:.2f})",
             f"Satisfaction: {_level(state.satisfaction)} ({state.satisfaction:.2f})",

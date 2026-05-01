@@ -28,10 +28,10 @@ if TYPE_CHECKING:
     from core.conversation.triggers import TriggerSystem
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
+    from core.management import Management
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.compaction import MemoryCompactor
     from core.memory.reflection import ReflectionManager
-    from core.management import Management
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.memory_repo import MemoryRepo
     from core.simulation.clock import SimulationClock
@@ -70,19 +70,11 @@ def _display_agent_speak(agent_id: str, data: dict) -> None:
 
     # Show actions (stage directions) if present
     if actions:
-        action_str = " ".join(
-            "*{}*".format(a.replace("[", "\\[")) for a in actions
-        )
+        action_str = " ".join("*{}*".format(a.replace("[", "\\[")) for a in actions)
         console.print(f"       [dim]{'':>10}  {action_str}[/dim]")
 
-    console.print(
-        f"       [{color}]{agent_id:>10}[/{color}]  "
-        f"{preview}"
-    )
-    console.print(
-        f"       [dim]{'':>10}  "
-        f"${float(cost):.4f} | {tokens:,} tokens[/dim]"
-    )
+    console.print(f"       [{color}]{agent_id:>10}[/{color}]  {preview}")
+    console.print(f"       [dim]{'':>10}  ${float(cost):.4f} | {tokens:,} tokens[/dim]")
 
 
 def _display_management_flag(data: dict) -> None:
@@ -93,8 +85,7 @@ def _display_management_flag(data: dict) -> None:
     severity = data.get("severity", "?")
     reason = data.get("reason", "")[:100]
     console.print(
-        f"       [yellow]  MANAGEMENT[/yellow]  "
-        f"flagged {agent} (severity {severity}): {reason}"
+        f"       [yellow]  MANAGEMENT[/yellow]  flagged {agent} (severity {severity}): {reason}"
     )
 
 
@@ -282,6 +273,7 @@ class PhaseRunner:
                 result.status = "tool_not_fired"
                 result.errors.append(msg)
                 from core.event_bus import EventType
+
                 await self._event_bus.emit(
                     EventType.SIMULATION_ERROR,
                     {
@@ -298,6 +290,7 @@ class PhaseRunner:
         # Emit SIMULATION_ERROR for any phase that failed with errors
         if result.errors and result.status == "failed":
             from core.event_bus import EventType
+
             await self._event_bus.emit(
                 EventType.SIMULATION_ERROR,
                 {
@@ -328,7 +321,8 @@ class PhaseRunner:
             for agent_id in self._agent_ids:
                 try:
                     retired = await self._services.goal_manager.retire_stale_goals(
-                        agent_id, simulation_id=self._simulation_id,
+                        agent_id,
+                        simulation_id=self._simulation_id,
                     )
                     if retired:
                         logger.info("Retired %d stale goals for %s", retired, agent_id)
@@ -500,9 +494,12 @@ class PhaseRunner:
 
     async def _run_audience_sim(self, phase: Phase) -> None:
         """Inject fake audience messages and trigger Pixel responses."""
-        messages = phase.config.get("messages", [
-            {"user": "SimViewer42", "text": "What are you guys working on?"},
-        ])
+        messages = phase.config.get(
+            "messages",
+            [
+                {"user": "SimViewer42", "text": "What are you guys working on?"},
+            ],
+        )
 
         for msg in messages:
             if self._dry_run:
@@ -590,7 +587,8 @@ class PhaseRunner:
                         )
                     except Exception:
                         logger.warning(
-                            "Failed to add proactivity goal for %s", agent_id,
+                            "Failed to add proactivity goal for %s",
+                            agent_id,
                             exc_info=True,
                         )
 
@@ -651,11 +649,7 @@ class PhaseRunner:
             await engine._start_conversation(trigger)
 
             turn = 0
-            while (
-                engine.active_conversation
-                and engine.is_running
-                and turn < max_turns
-            ):
+            while engine.active_conversation and engine.is_running and turn < max_turns:
                 should_continue = await engine._continue_conversation()
                 turn += 1
                 if not should_continue:
@@ -683,10 +677,13 @@ class PhaseRunner:
 
             # Seed unresolved tensions as trigger events for future conversations
             for tension in record.unresolved_tensions[:2]:
-                self._triggers.queue_event("tension", {
-                    "text": tension,
-                    "from_participants": record.participants,
-                })
+                self._triggers.queue_event(
+                    "tension",
+                    {
+                        "text": tension,
+                        "from_participants": record.participants,
+                    },
+                )
         elif engine.active_conversation is None and engine.last_conversation_summary:
             _raw = engine.last_conversation_summary
             if len(_raw) > 600:

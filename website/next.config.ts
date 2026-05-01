@@ -1,5 +1,13 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+
+// Resolve the directory of this config file in both CJS (Next.js compile) and
+// ESM (Vitest direct require) without relying on the global `__dirname`.
+const HERE =
+  typeof __dirname !== "undefined"
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
 
 const cspDirectives = [
   "default-src 'self'",
@@ -44,7 +52,7 @@ const nextConfig: NextConfig = {
   // With both pnpm-lock.yaml at the repo root and package-lock.json here,
   // Next.js would otherwise infer the workspace root as the repo root and
   // warn; pinning it silences the warning without affecting module resolution.
-  outputFileTracingRoot: path.resolve(__dirname),
+  outputFileTracingRoot: HERE,
   async headers() {
     return [
       {

@@ -18,7 +18,7 @@ jobs:
       - name: Install bandit
         run: pip install bandit
       - name: Run bandit
-        run: bandit -r core/ tools/ -ll -x tests/
+        run: bandit -r core/ tools/ -ll -x tests/ -c pyproject.toml
 
   python-audit:
     name: Python Dependency Audit
@@ -33,7 +33,10 @@ jobs:
       - name: Install project deps
         run: uv pip install --system -e ".[dev]" pip-audit
       - name: Run pip-audit
-        run: pip-audit
+        # CVE-2026-3219 lives in the `pip` runtime that GitHub-hosted
+        # runners ship; it is not in our application dependencies. Ignore
+        # it here so the audit reflects shipped code only.
+        run: pip-audit --ignore-vuln CVE-2026-3219
 
   npm-audit:
     name: NPM Dependency Audit

@@ -23,7 +23,9 @@ def generate_executive_summary(
         first_half = conversations[: len(conversations) // 2]
         second_half = conversations[len(conversations) // 2 :]
         avg_turns_first = sum(c.get("turn_count", 0) for c in first_half) / max(len(first_half), 1)
-        avg_turns_second = sum(c.get("turn_count", 0) for c in second_half) / max(len(second_half), 1)
+        avg_turns_second = sum(c.get("turn_count", 0) for c in second_half) / max(
+            len(second_half), 1
+        )
         if avg_turns_second > avg_turns_first * 1.1:
             trajectory = "improving"
         elif avg_turns_second < avg_turns_first * 0.9:

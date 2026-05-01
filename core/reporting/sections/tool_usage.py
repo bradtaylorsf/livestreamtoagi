@@ -53,14 +53,14 @@ def generate_tool_usage(
 
     # All known tools vs used tools
     from core.models import ARTIFACT_TYPE_MAP
+
     all_tools = set(ARTIFACT_TYPE_MAP.keys())
     used_tools = set(tool_counts.keys())
     never_used = sorted(all_tools - used_tools)
 
     # Build by_agent summary: agent -> {tool -> count}
     by_agent = {
-        agent: dict(counts.most_common())
-        for agent, counts in sorted(agent_tool_counts.items())
+        agent: dict(counts.most_common()) for agent, counts in sorted(agent_tool_counts.items())
     }
 
     return {
@@ -69,13 +69,11 @@ def generate_tool_usage(
         "tools_never_used": never_used,
         "by_tool": by_tool,
         "by_agent": by_agent,
-        "by_day": {
-            day: dict(counts)
-            for day, counts in sorted(tool_by_day.items())
-        },
+        "by_day": {day: dict(counts) for day, counts in sorted(tool_by_day.items())},
         "success_rate": round(
             sum(1 for a in artifacts if a.get("status") in ("executed", "completed"))
-            / max(len(artifacts), 1) * 100,
+            / max(len(artifacts), 1)
+            * 100,
             1,
         ),
     }

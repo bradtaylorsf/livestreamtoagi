@@ -52,7 +52,8 @@ class BaseTool(ABC):
         _error_msg: str | None = None
         try:
             result = await self.execute(
-                simulation_id=simulation_id, **kwargs,
+                simulation_id=simulation_id,
+                **kwargs,
             )
         except Exception as exc:
             status = "failed"
@@ -64,7 +65,9 @@ class BaseTool(ABC):
             elif isinstance(result, dict) and result.get("simulated"):
                 status = "simulated"
             elif isinstance(result, dict) and result.get("status") in (
-                "error", "rejected", "rate_limited",
+                "error",
+                "rejected",
+                "rate_limited",
             ):
                 status = "error"
             return result
@@ -78,7 +81,7 @@ class BaseTool(ABC):
                 if status == "failed":
                     tool_output = {"error": _error_msg} if _error_msg else None
                 else:
-                    tool_output = result  # type: ignore[possibly-undefined]
+                    tool_output = result  # type: ignore[used-before-def]
                     # Enrich metadata for code execution
                     if self.name == "execute_code" and tool_output is not None:
                         for key in ("stdout", "stderr", "exit_code"):
@@ -88,9 +91,7 @@ class BaseTool(ABC):
                     # strip it from the LLM-visible tool result
                     if isinstance(tool_output, dict) and "_internal" in tool_output:
                         meta["_internal"] = tool_output["_internal"]
-                        tool_output = {
-                            k: v for k, v in tool_output.items() if k != "_internal"
-                        }
+                        tool_output = {k: v for k, v in tool_output.items() if k != "_internal"}
                         result = tool_output  # type: ignore[possibly-undefined]
 
                 artifact = ArtifactCreate(
@@ -124,7 +125,8 @@ class BaseTool(ABC):
                     if status in ("failed", "error"):
                         _reason = _error_msg or (
                             tool_output.get("reason", "unknown")
-                            if isinstance(tool_output, dict) else "unknown"
+                            if isinstance(tool_output, dict)
+                            else "unknown"
                         )
                         asyncio.create_task(
                             self.event_bus.emit(

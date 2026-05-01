@@ -26,7 +26,9 @@ class LoginRequest(BaseModel):
 
 @router.post("/login")
 async def admin_login(
-    body: LoginRequest, request: Request, response: Response,
+    body: LoginRequest,
+    request: Request,
+    response: Response,
 ) -> dict[str, str]:
     """Validate password and set an httpOnly JWT session cookie."""
     await _check_admin_rate_limit(request)

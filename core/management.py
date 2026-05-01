@@ -94,7 +94,8 @@ class Management:
             return await self._review_normal(agent_id, content)
 
         return await self._review_shadow(
-            agent_id, content,
+            agent_id,
+            content,
             conversation_id=conversation_id,
             simulation_id=simulation_id,
         )
@@ -280,13 +281,15 @@ class Management:
         if self._db is None:
             logger.warning(
                 "Shadow log not persisted -- no database connection (agent=%s, layer=%d)",
-                agent_id, filter_layer,
+                agent_id,
+                filter_layer,
             )
         elif conversation_id is None:
             logger.warning(
                 "Shadow log not persisted -- conversation_id is None (agent=%s, layer=%d). "
                 "Caller should pass conversation_id for audit completeness.",
-                agent_id, filter_layer,
+                agent_id,
+                filter_layer,
             )
         else:
             try:
@@ -314,7 +317,11 @@ class Management:
         await self._event_bus.emit(EventType.MANAGEMENT_SHADOW.value, shadow_data)
         logger.info(
             "Shadow: would %s agent %s (layer=%d, severity=%d): %s",
-            action, agent_id, filter_layer, severity, reason,
+            action,
+            agent_id,
+            filter_layer,
+            severity,
+            reason,
         )
 
     @staticmethod
@@ -334,9 +341,7 @@ class Management:
 
     async def mute(self, agent_id: str, duration_seconds: int = DEFAULT_MUTE_TTL) -> None:
         """Mute an agent via Redis key with TTL."""
-        await self._redis.set(
-            f"{MUTE_KEY_PREFIX}{agent_id}", "muted", ex=duration_seconds
-        )
+        await self._redis.set(f"{MUTE_KEY_PREFIX}{agent_id}", "muted", ex=duration_seconds)
 
     async def is_muted(self, agent_id: str) -> bool:
         """Check if an agent is currently muted."""
@@ -363,7 +368,8 @@ class Management:
         if self._circuit_open_until is not None:
             if time.monotonic() < self._circuit_open_until:
                 logger.warning(
-                    "Circuit breaker open — blocking agent %s without LLM review", agent_id,
+                    "Circuit breaker open — blocking agent %s without LLM review",
+                    agent_id,
                 )
                 return ContentReviewResult(
                     approved=False,
@@ -412,14 +418,16 @@ class Management:
             self._consecutive_llm_failures += 1
             logger.error(
                 "LLM review failed for agent %s (consecutive failures: %d)",
-                agent_id, self._consecutive_llm_failures,
+                agent_id,
+                self._consecutive_llm_failures,
             )
             if self._consecutive_llm_failures >= self._circuit_breaker_threshold:
                 self._circuit_open_until = time.monotonic() + self._circuit_breaker_cooldown
                 logger.critical(
                     "Circuit breaker OPEN — %d consecutive LLM failures, "
                     "blocking all content for %.0fs",
-                    self._consecutive_llm_failures, self._circuit_breaker_cooldown,
+                    self._consecutive_llm_failures,
+                    self._circuit_breaker_cooldown,
                 )
             return ContentReviewResult(
                 approved=False,
@@ -436,8 +444,7 @@ class Management:
             twitch = pattern.get("twitch_section", "")
             youtube = pattern.get("youtube_section", "")
             lines.append(
-                f"- {name} (severity {sev}): {desc} "
-                f"[Twitch: {twitch}, YouTube: {youtube}]"
+                f"- {name} (severity {sev}): {desc} [Twitch: {twitch}, YouTube: {youtube}]"
             )
         for name, rule in self._custom_rules.items():
             desc = rule.get("description", "")

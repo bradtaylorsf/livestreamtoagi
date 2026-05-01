@@ -42,12 +42,14 @@ class AllianceRepo:
 
     async def get_alliance(self, alliance_id: UUID) -> dict[str, Any] | None:
         row = await self.db.fetchrow(
-            "SELECT * FROM alliances WHERE id = $1", alliance_id,
+            "SELECT * FROM alliances WHERE id = $1",
+            alliance_id,
         )
         return dict(row) if row else None
 
     async def get_active_alliances(
-        self, simulation_id: UUID | None = None,
+        self,
+        simulation_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
         """Get all non-dissolved alliances."""
         rows = await self.db.fetch(
@@ -63,7 +65,9 @@ class AllianceRepo:
         return [dict(r) for r in rows]
 
     async def get_agent_alliances(
-        self, agent_id: str, simulation_id: UUID | None = None,
+        self,
+        agent_id: str,
+        simulation_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
         """Get all active alliances an agent belongs to."""
         rows = await self.db.fetch(
@@ -80,7 +84,10 @@ class AllianceRepo:
         return [dict(r) for r in rows]
 
     async def add_member(
-        self, alliance_id: UUID, agent_id: str, simulation_id: UUID | None = None,
+        self,
+        alliance_id: UUID,
+        agent_id: str,
+        simulation_id: UUID | None = None,
     ) -> None:
         await self.db.execute(
             """INSERT INTO alliance_members (alliance_id, agent_id, simulation_id)
@@ -121,7 +128,9 @@ class AllianceRepo:
         )
 
     async def update_treasury(
-        self, alliance_id: UUID, amount: float,
+        self,
+        alliance_id: UUID,
+        amount: float,
     ) -> None:
         """Add (or subtract) from the alliance treasury."""
         await self.db.execute(
@@ -154,7 +163,8 @@ class AllianceRepo:
         return dict(row)
 
     async def get_pending_proposals(
-        self, simulation_id: UUID | None = None,
+        self,
+        simulation_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
         rows = await self.db.fetch(
             """SELECT * FROM alliance_proposals
@@ -173,7 +183,8 @@ class AllianceRepo:
 
     async def get_proposal(self, proposal_id: UUID) -> dict[str, Any] | None:
         row = await self.db.fetchrow(
-            "SELECT * FROM alliance_proposals WHERE id = $1", proposal_id,
+            "SELECT * FROM alliance_proposals WHERE id = $1",
+            proposal_id,
         )
         if row is None:
             return None
@@ -193,24 +204,23 @@ class AllianceRepo:
         Uses SELECT FOR UPDATE inside a transaction to prevent lost votes
         when multiple agents vote concurrently.
         """
-        async with self.db.acquire() as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    "SELECT votes FROM alliance_proposals WHERE id = $1 FOR UPDATE",
-                    proposal_id,
-                )
-                if row is None:
-                    return None
+        async with self.db.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT votes FROM alliance_proposals WHERE id = $1 FOR UPDATE",
+                proposal_id,
+            )
+            if row is None:
+                return None
 
-                votes = row["votes"] or {}
-                if isinstance(votes, str):
-                    votes = json.loads(votes)
-                votes[agent_id] = accept
+            votes = row["votes"] or {}
+            if isinstance(votes, str):
+                votes = json.loads(votes)
+            votes[agent_id] = accept
 
-                await conn.execute(
-                    "UPDATE alliance_proposals SET votes = $1::jsonb WHERE id = $2",
-                    json.dumps(votes),
-                    proposal_id,
-                )
+            await conn.execute(
+                "UPDATE alliance_proposals SET votes = $1::jsonb WHERE id = $2",
+                json.dumps(votes),
+                proposal_id,
+            )
 
         return await self.get_proposal(proposal_id)

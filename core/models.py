@@ -70,6 +70,7 @@ class AgentConfig(BaseModel):
 
 # ── Core Memory ─────────────────────────────────────────────────
 
+
 class CoreMemory(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     agent_id: str
@@ -92,6 +93,7 @@ class CoreMemoryHistory(BaseModel):
 
 
 # ── Recall Memory ───────────────────────────────────────────────
+
 
 class RecallMemory(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -121,6 +123,7 @@ class RecallMemoryCreate(BaseModel):
 
 # ── Conversation Buffer ─────────────────────────────────────────
 
+
 class ConversationBuffer(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -141,6 +144,7 @@ class ConversationBufferCreate(BaseModel):
 
 
 # ── Transcripts ─────────────────────────────────────────────────
+
 
 class Transcript(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -188,6 +192,7 @@ class PromptLogCreate(BaseModel):
 
 # ── Journal Entries ─────────────────────────────────────────────
 
+
 class JournalEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -210,6 +215,7 @@ class JournalEntryCreate(BaseModel):
 
 
 # ── Self-Modification Proposals ─────────────────────────────────
+
 
 class SelfModificationProposal(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -241,6 +247,7 @@ class SelfModificationProposalCreate(BaseModel):
 
 # ── Reflection Result ───────────────────────────────────────────
 
+
 class ReflectionResult(BaseModel):
     promoted_count: int = 0
     importance_updates: int = 0
@@ -249,6 +256,7 @@ class ReflectionResult(BaseModel):
 
 
 # ── Conversations ───────────────────────────────────────────────
+
 
 class Conversation(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -281,6 +289,7 @@ class ConversationCreate(BaseModel):
 
 
 # ── Selection Log ───────────────────────────────────────────────
+
 
 class SelectionLog(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -315,6 +324,7 @@ class SelectionLogCreate(BaseModel):
 
 
 # ── Interrupt Log ───────────────────────────────────────────────
+
 
 class InterruptLog(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -361,6 +371,7 @@ class EnergyLogCreate(BaseModel):
 
 # ── World Chunks ────────────────────────────────────────────────
 
+
 class WorldChunk(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -395,6 +406,7 @@ class WorldChunkCreate(BaseModel):
 
 # ── World Events ────────────────────────────────────────────────
 
+
 class WorldEvent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -415,6 +427,7 @@ class WorldEventCreate(BaseModel):
 
 
 # ── Expansion Proposals ─────────────────────────────────────────
+
 
 class ExpansionProposal(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -438,6 +451,7 @@ class ExpansionProposalCreate(BaseModel):
 
 # ── Cost Events ─────────────────────────────────────────────────
 
+
 class CostEvent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -459,6 +473,7 @@ class CostEventCreate(BaseModel):
 
 # ── Revenue Events ──────────────────────────────────────────────
 
+
 class RevenueEvent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -477,6 +492,7 @@ class RevenueEventCreate(BaseModel):
 
 
 # ── Challenges ──────────────────────────────────────────────────
+
 
 class Challenge(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -519,6 +535,7 @@ class ContentReviewResult(BaseModel):
 
 
 # ── LLM Client ─────────────────────────────────────────────────
+
 
 class ToolCall(BaseModel):
     """A single tool/function call requested by the LLM."""
@@ -567,9 +584,7 @@ class SelectionWeights(BaseModel):
             + self.random_jitter
         )
         if abs(total - 1.0) > 0.001:
-            raise ValueError(
-                f"selection_weights must sum to 1.0 (got {total:.4f})"
-            )
+            raise ValueError(f"selection_weights must sum to 1.0 (got {total:.4f})")
         return self
 
 
@@ -969,6 +984,7 @@ class EvalResult(BaseModel):
 
 class EvalRunDetail(BaseModel):
     """Eval run with nested results for API responses."""
+
     id: uuid.UUID
     simulation_id: uuid.UUID
     eval_suite: str
@@ -984,12 +1000,14 @@ class EvalRunDetail(BaseModel):
 
 class EvalComparisonResponse(BaseModel):
     """Side-by-side comparison of two eval runs."""
+
     run_a: EvalRunDetail
     run_b: EvalRunDetail
 
 
 class EvalHistoryPoint(BaseModel):
     """Single data point for eval score history charts."""
+
     score: float | None = None
     created_at: str | None = None
     simulation_id: str
@@ -998,6 +1016,7 @@ class EvalHistoryPoint(BaseModel):
 
 class EvalExportResponse(BaseModel):
     """Full eval export payload."""
+
     eval_run: EvalRun
     results: list[EvalResult]
 

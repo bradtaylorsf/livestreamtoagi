@@ -45,8 +45,15 @@ class EvalIssueGenerator:
         """
         run = await self._eval_repo.get_eval_run(self._eval_run_id)
         if run is None:
-            return [{"category": "N/A", "title": "N/A", "url": None, "status": "error",
-                     "reason": f"Eval run {self._eval_run_id} not found"}]
+            return [
+                {
+                    "category": "N/A",
+                    "title": "N/A",
+                    "url": None,
+                    "status": "error",
+                    "reason": f"Eval run {self._eval_run_id} not found",
+                }
+            ]
 
         results = await self._eval_repo.get_eval_results(self._eval_run_id)
         if not results:
@@ -63,13 +70,15 @@ class EvalIssueGenerator:
 
             # Check for duplicates
             if self._check_duplicate(category):
-                issues.append({
-                    "category": category,
-                    "title": title,
-                    "url": None,
-                    "status": "skipped",
-                    "reason": "Duplicate issue exists",
-                })
+                issues.append(
+                    {
+                        "category": category,
+                        "title": title,
+                        "url": None,
+                        "status": "skipped",
+                        "reason": "Duplicate issue exists",
+                    }
+                )
                 continue
 
             # Build issue body
@@ -78,20 +87,24 @@ class EvalIssueGenerator:
             # Create via gh CLI
             url = self._create_github_issue(title, body)
             if url:
-                issues.append({
-                    "category": category,
-                    "title": title,
-                    "url": url,
-                    "status": "created",
-                })
+                issues.append(
+                    {
+                        "category": category,
+                        "title": title,
+                        "url": url,
+                        "status": "created",
+                    }
+                )
             else:
-                issues.append({
-                    "category": category,
-                    "title": title,
-                    "url": None,
-                    "status": "error",
-                    "reason": "gh issue create failed",
-                })
+                issues.append(
+                    {
+                        "category": category,
+                        "title": title,
+                        "url": None,
+                        "status": "error",
+                        "reason": "gh issue create failed",
+                    }
+                )
 
         return issues
 
@@ -100,11 +113,17 @@ class EvalIssueGenerator:
         try:
             result = subprocess.run(
                 [
-                    "gh", "issue", "list",
-                    "--label", "eval-finding",
-                    "--search", category,
-                    "--state", "open",
-                    "--json", "number,title",
+                    "gh",
+                    "issue",
+                    "list",
+                    "--label",
+                    "eval-finding",
+                    "--search",
+                    category,
+                    "--state",
+                    "open",
+                    "--json",
+                    "number,title",
                 ],
                 capture_output=True,
                 text=True,
@@ -149,10 +168,12 @@ class EvalIssueGenerator:
                 lines.append(f"- {key}: {value}")
             lines.append("")
 
-        lines.extend([
-            "---",
-            f"*Auto-generated from eval run `{str(self._eval_run_id)[:8]}`*",
-        ])
+        lines.extend(
+            [
+                "---",
+                f"*Auto-generated from eval run `{str(self._eval_run_id)[:8]}`*",
+            ]
+        )
         return "\n".join(lines)
 
     def _create_github_issue(self, title: str, body: str) -> str | None:
@@ -160,10 +181,15 @@ class EvalIssueGenerator:
         try:
             result = subprocess.run(
                 [
-                    "gh", "issue", "create",
-                    "--title", title,
-                    "--body", body,
-                    "--label", "eval-finding",
+                    "gh",
+                    "issue",
+                    "create",
+                    "--title",
+                    title,
+                    "--body",
+                    body,
+                    "--label",
+                    "eval-finding",
                 ],
                 capture_output=True,
                 text=True,

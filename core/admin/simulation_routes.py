@@ -97,37 +97,43 @@ async def create_simulation(
     from pathlib import Path
 
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
     sim_name = body.name or f"dashboard-{body.convo_type}-{_time_str()}"
 
     agents = body.agents or [
-        a.id for a in registry.get_all_agents()
-        if a.id not in ("management", "alpha")
+        a.id for a in registry.get_all_agents() if a.id not in ("management", "alpha")
     ]
 
     from core.models import SimulationCreate
-    sim = await sim_repo.create(SimulationCreate(
-        name=sim_name,
-        config={
-            "convo_type": body.convo_type,
-            "turns": body.turns,
-            "topic": body.topic,
-            "management_shadow": body.management_shadow,
-            "agents": agents,
-            "source": "dashboard",
-        },
-        agents_participated=agents,
-    ))
+
+    sim = await sim_repo.create(
+        SimulationCreate(
+            name=sim_name,
+            config={
+                "convo_type": body.convo_type,
+                "turns": body.turns,
+                "topic": body.topic,
+                "management_shadow": body.management_shadow,
+                "agents": agents,
+                "source": "dashboard",
+            },
+            agents_participated=agents,
+        )
+    )
 
     project_root = Path(__file__).resolve().parent.parent.parent
     cmd = [
         sys.executable,
         str(project_root / "scripts" / "watch_conversations.py"),
         "--test",
-        "--test-type", body.convo_type,
-        "--agents", ",".join(agents),
-        "--sim-id", str(sim.id),
+        "--test-type",
+        body.convo_type,
+        "--agents",
+        ",".join(agents),
+        "--sim-id",
+        str(sim.id),
     ]
     if body.turns is not None:
         cmd += ["--turns", str(body.turns)]
@@ -159,6 +165,7 @@ async def list_simulations(
 ) -> PaginatedResponse[Simulation]:
     """List all simulations with summary stats."""
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
     simulations = await sim_repo.list(status=status, limit=limit, offset=offset)
@@ -173,8 +180,8 @@ async def compare_simulations(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Side-by-side comparison of two simulation runs."""
-    from core.repos.relationship_repo import RelationshipRepo
     from core.reporting.comparison import CrossRunComparison
+    from core.repos.relationship_repo import RelationshipRepo
 
     relationship_repo = RelationshipRepo(db)
     cross = CrossRunComparison(
@@ -192,9 +199,7 @@ async def compare_simulations(
                GROUP BY DATE(created_at) ORDER BY day""",
             sim_id,
         )
-        daily_costs[label] = [
-            {"day": str(r["day"]), "cost": str(r["daily_cost"])} for r in rows
-        ]
+        daily_costs[label] = [{"day": str(r["day"]), "cost": str(r["daily_cost"])} for r in rows]
 
     data = result.to_dict()
     data["daily_costs"] = daily_costs
@@ -208,6 +213,7 @@ async def get_simulation(
 ) -> Simulation:
     """Full simulation detail: config, stats, phases, timing."""
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
     sim = await sim_repo.get(sim_id)
@@ -237,20 +243,24 @@ async def clone_simulation(
     from core.models import SimulationCreate
 
     clone_name = body.name or f"clone-{source.name}-{_time_str()}"
-    new_sim = await sim_repo.create(SimulationCreate(
-        name=clone_name,
-        description=f"Cloned from {source.name} ({sim_id})",
-        config={
-            "source": "clone",
-            "source_simulation_id": str(sim_id),
-            **(source.config or {}),
-        },
-        agents_participated=list(snapshot_data.get("agents", {}).keys()),
-    ))
+    new_sim = await sim_repo.create(
+        SimulationCreate(
+            name=clone_name,
+            description=f"Cloned from {source.name} ({sim_id})",
+            config={
+                "source": "clone",
+                "source_simulation_id": str(sim_id),
+                **(source.config or {}),
+            },
+            agents_participated=list(snapshot_data.get("agents", {}).keys()),
+        )
+    )
 
     importer = SimulationSnapshotImporter(db)
     restore_result = await importer.restore(
-        snapshot_data, str(new_sim.id), agents=body.agents,
+        snapshot_data,
+        str(new_sim.id),
+        agents=body.agents,
     )
 
     return CloneSimulationResponse(
@@ -299,7 +309,7 @@ async def export_simulation_snapshot(
 
     snapshots_dir = Path(__file__).resolve().parent.parent.parent / "snapshots"
     snapshots_dir.mkdir(exist_ok=True)
-    safe_name = re.sub(r'[^\w\-]', '_', source.name)
+    safe_name = re.sub(r"[^\w\-]", "_", source.name)
     filename = f"full-{safe_name}-{_time_str()}.json"
     filepath = snapshots_dir / filename
     filepath.write_text(_json.dumps(snapshot_data, indent=2, default=str))
@@ -310,9 +320,7 @@ async def export_simulation_snapshot(
         agent_count=len(snapshot_data.get("agents", {})),
         world_chunk_count=len(snapshot_data.get("world_chunks", [])),
         relationship_count=len(snapshot_data.get("relationships", [])),
-        goal_count=sum(
-            len(goals) for goals in snapshot_data.get("agent_goals", {}).values()
-        ),
+        goal_count=sum(len(goals) for goals in snapshot_data.get("agent_goals", {}).values()),
         transaction_count=len(snapshot_data.get("transactions", [])),
         challenge_count=len(snapshot_data.get("challenges", [])),
         world_event_count=len(snapshot_data.get("world_events", [])),
@@ -357,11 +365,10 @@ async def get_simulation_timeline(
 ) -> list[TimelineEvent]:
     """Chronological event stream for a simulation."""
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
-    events = await sim_repo.get_timeline_events(
-        sim_id, agent_id=agent_id, event_type=event_type
-    )
+    events = await sim_repo.get_timeline_events(sim_id, agent_id=agent_id, event_type=event_type)
     return [TimelineEvent(**e) for e in events]
 
 
@@ -374,6 +381,7 @@ async def get_simulation_conversations(
 ) -> PaginatedResponse[Conversation]:
     """All conversations in this simulation."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     conversations, total = await conv_repo.get_conversations_by_simulation(
@@ -391,6 +399,7 @@ async def get_simulation_artifacts(
 ) -> list[Artifact]:
     """All artifacts from this simulation."""
     from core.repos.artifact_repo import ArtifactRepo
+
     artifact_repo = ArtifactRepo(db)
 
     return await artifact_repo.get_artifacts_by_simulation(
@@ -406,6 +415,7 @@ async def get_simulation_management_log(
 ) -> list[dict[str, Any]]:
     """All Management shadow flags from this simulation."""
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
     return await sim_repo.get_management_log(sim_id, severity_min=severity_min)
@@ -418,6 +428,7 @@ async def get_simulation_costs(
 ) -> SimulationCostResponse:
     """Cost breakdown by agent, by tool type, total."""
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
 
     data = await cost_repo.get_costs_by_simulation(sim_id)
@@ -431,6 +442,7 @@ async def get_simulation_assertions(
 ) -> list[dict[str, Any]]:
     """All assertion results for a simulation."""
     from core.repos.assertion_repo import AssertionRepo
+
     repo = AssertionRepo(db)
     rows = await repo.get_by_simulation(sim_id)
     # Transform DB fields to match frontend AssertionResult interface
@@ -455,6 +467,7 @@ async def get_simulation_assertions_summary(
 ) -> dict[str, Any]:
     """Pass/fail/warn summary for simulation assertions."""
     from core.repos.assertion_repo import AssertionRepo
+
     repo = AssertionRepo(db)
     rates = await repo.get_pass_rates(sim_id)
     # Transform to match frontend AssertionSummary interface
@@ -472,6 +485,7 @@ async def get_social_graph(
 ) -> list[dict[str, Any]]:
     """Full relationship matrix for a simulation."""
     from core.repos.relationship_repo import RelationshipRepo
+
     repo = RelationshipRepo(db)
     relationships = await repo.get_social_graph(sim_id)
     return [r.model_dump(mode="json") for r in relationships]
@@ -499,12 +513,14 @@ async def list_snapshots(
             source_id = data.get("source_simulation_id", "")
             if source_id == str(sim_id) or not source_id:
                 agents = data.get("agents", {})
-                results.append({
-                    "filename": f.name,
-                    "simulation_id": source_id,
-                    "snapshot_at": data.get("snapshot_at", ""),
-                    "agent_count": len(agents),
-                })
+                results.append(
+                    {
+                        "filename": f.name,
+                        "simulation_id": source_id,
+                        "snapshot_at": data.get("snapshot_at", ""),
+                        "agent_count": len(agents),
+                    }
+                )
         except Exception:
             continue
     return results
@@ -527,7 +543,7 @@ async def get_snapshot(
         data = json.loads(snapshot_path.read_text())
         return data
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/simulations/{sim_id}/snapshots")
@@ -541,14 +557,17 @@ async def create_snapshot(
     """
     import json
     from pathlib import Path
+
+    from core.memory.snapshot import MemorySnapshotExporter
     from core.repos.memory_repo import MemoryRepo
     from core.repos.relationship_repo import RelationshipRepo
-    from core.memory.snapshot import MemorySnapshotExporter
 
     memory_repo = MemoryRepo(db)
     relationship_repo = RelationshipRepo(db)
     exporter = MemorySnapshotExporter(
-        db=db, memory_repo=memory_repo, relationship_repo=relationship_repo,
+        db=db,
+        memory_repo=memory_repo,
+        relationship_repo=relationship_repo,
     )
     snapshot_data = await exporter.export(str(sim_id))
 
@@ -574,11 +593,10 @@ async def get_current_memory_state(
 ) -> dict[str, Any]:
     """Return current memory state for comparison with snapshots."""
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
 
-    row = await db.fetchrow(
-        "SELECT agents_participated FROM simulations WHERE id = $1", sim_id
-    )
+    row = await db.fetchrow("SELECT agents_participated FROM simulations WHERE id = $1", sim_id)
     if not row:
         raise HTTPException(status_code=404, detail="Simulation not found")
 
@@ -592,11 +610,15 @@ async def get_current_memory_state(
             agent_data["core_memory"] = core.content
 
         recall, total_recall = await memory_repo.get_recall_memories_paginated(
-            agent_id, limit=0, simulation_id=sim_id,
+            agent_id,
+            limit=0,
+            simulation_id=sim_id,
         )
         agent_data["recall_count"] = total_recall
 
-        entries, total_journal = await memory_repo.get_journal_entries(agent_id, limit=0, simulation_id=sim_id)
+        entries, total_journal = await memory_repo.get_journal_entries(
+            agent_id, limit=0, simulation_id=sim_id
+        )
         agent_data["journal_count"] = total_journal
 
         result["agents"][agent_id] = agent_data
@@ -611,8 +633,8 @@ async def get_simulation_report(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Generate structured timeline report for a simulation."""
-    from core.repos.relationship_repo import RelationshipRepo
     from core.reporting.timeline_reporter import TimelineReporter
+    from core.repos.relationship_repo import RelationshipRepo
 
     relationship_repo = RelationshipRepo(db)
     reporter = TimelineReporter(
@@ -641,10 +663,12 @@ async def get_simulation_report(
         report_sections=[{"title": s.title, "data": s.data} for s in report.sections],
     )
     scorecard_result = await scorecard.evaluate()
-    report.sections.append(ReportSection(
-        title="Launch Readiness Scorecard",
-        data=scorecard_result.to_dict(),
-    ))
+    report.sections.append(
+        ReportSection(
+            title="Launch Readiness Scorecard",
+            data=scorecard_result.to_dict(),
+        )
+    )
 
     return report.to_dict()
 
@@ -674,6 +698,7 @@ async def get_chunk_tileset(
 ) -> RedirectResponse:
     """Serve or redirect to the tileset image for a chunk."""
     from fastapi.responses import RedirectResponse
+
     from core.repos.world_repo import WorldRepo
 
     repo = WorldRepo(db)

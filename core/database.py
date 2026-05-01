@@ -10,6 +10,7 @@ import asyncpg
 
 logger = logging.getLogger(__name__)
 
+
 async def _init_connection(conn: asyncpg.Connection) -> None:
     """Register custom codecs on each new connection (e.g. pgvector)."""
     try:
@@ -61,7 +62,8 @@ class Database:
                 )
                 logger.info(
                     "Database pool created (%d-%d connections)",
-                    self.min_size, self.max_size,
+                    self.min_size,
+                    self.max_size,
                 )
                 return
             except (OSError, asyncpg.PostgresError) as exc:
@@ -90,13 +92,19 @@ class Database:
             return await conn.execute(query, *args, timeout=timeout)
 
     async def fetch(
-        self, query: str, *args: Any, timeout: float | None = None,
+        self,
+        query: str,
+        *args: Any,
+        timeout: float | None = None,
     ) -> list[asyncpg.Record]:
         async with self.acquire() as conn:
             return await conn.fetch(query, *args, timeout=timeout)
 
     async def fetchrow(
-        self, query: str, *args: Any, timeout: float | None = None,
+        self,
+        query: str,
+        *args: Any,
+        timeout: float | None = None,
     ) -> asyncpg.Record | None:
         async with self.acquire() as conn:
             return await conn.fetchrow(query, *args, timeout=timeout)

@@ -225,9 +225,7 @@ class SimulationSnapshotExporter:
         # This ensures all SELECT queries see a single consistent point-in-time,
         # even if the simulation is actively writing data during export.
         async with self._db.acquire() as conn:
-            await conn.execute(
-                "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
-            )
+            await conn.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             try:
                 await self._export_state(conn, sim_uuid, all_agent_ids, snapshot)
             finally:
@@ -252,7 +250,8 @@ class SimulationSnapshotExporter:
             # Core memory
             row = await conn.fetchrow(
                 "SELECT content FROM core_memory WHERE agent_id = $1 AND simulation_id = $2",
-                agent_id, sim_uuid,
+                agent_id,
+                sim_uuid,
             )
             if row:
                 agent_snap.core_memory = row["content"]
@@ -263,35 +262,41 @@ class SimulationSnapshotExporter:
                           embedding, timestamp, recalled_count
                    FROM recall_memory WHERE agent_id = $1 AND simulation_id = $2
                    ORDER BY timestamp DESC LIMIT 500""",
-                agent_id, sim_uuid,
+                agent_id,
+                sim_uuid,
             )
             for r in rows:
                 emb = r["embedding"]
                 if isinstance(emb, str):
                     emb = [float(x) for x in emb.strip("[]").split(",")]
-                agent_snap.recall_memories.append({
-                    "summary": r["summary"],
-                    "importance_score": r["importance_score"],
-                    "event_type": r["event_type"],
-                    "participants": r["participants"],
-                    "embedding": emb,
-                    "timestamp": r["timestamp"].isoformat() if r["timestamp"] else None,
-                    "recalled_count": r["recalled_count"] or 0,
-                })
+                agent_snap.recall_memories.append(
+                    {
+                        "summary": r["summary"],
+                        "importance_score": r["importance_score"],
+                        "event_type": r["event_type"],
+                        "participants": r["participants"],
+                        "embedding": emb,
+                        "timestamp": r["timestamp"].isoformat() if r["timestamp"] else None,
+                        "recalled_count": r["recalled_count"] or 0,
+                    }
+                )
 
             # Journal entries
             rows = await conn.fetch(
                 """SELECT reflection_type, content, token_count
                    FROM journal_entries WHERE agent_id = $1 AND simulation_id = $2
                    ORDER BY created_at DESC LIMIT 500""",
-                agent_id, sim_uuid,
+                agent_id,
+                sim_uuid,
             )
             for r in rows:
-                agent_snap.journal_entries.append({
-                    "reflection_type": r["reflection_type"],
-                    "content": r["content"],
-                    "token_count": r["token_count"],
-                })
+                agent_snap.journal_entries.append(
+                    {
+                        "reflection_type": r["reflection_type"],
+                        "content": r["content"],
+                        "token_count": r["token_count"],
+                    }
+                )
 
             snapshot.agents[agent_id] = agent_snap
 
@@ -345,14 +350,16 @@ class SimulationSnapshotExporter:
                 continue
             if aid not in snapshot.agent_goals:
                 snapshot.agent_goals[aid] = []
-            snapshot.agent_goals[aid].append(AgentGoalSnapshot(
-                goal=r["goal"],
-                priority=r["priority"],
-                status=r["status"],
-                source=r["source"],
-                category=r["category"],
-                progress_notes=r["progress_notes"],
-            ))
+            snapshot.agent_goals[aid].append(
+                AgentGoalSnapshot(
+                    goal=r["goal"],
+                    priority=r["priority"],
+                    status=r["status"],
+                    source=r["source"],
+                    category=r["category"],
+                    progress_notes=r["progress_notes"],
+                )
+            )
 
         # Export world chunks
         rows = await conn.fetch(
@@ -364,18 +371,20 @@ class SimulationSnapshotExporter:
             for key in ("tile_data", "objects"):
                 if isinstance(d.get(key), str):
                     d[key] = json.loads(d[key])
-            snapshot.world_chunks.append(WorldChunkSnapshot(
-                name=d.get("name", ""),
-                x_offset=d.get("x_offset", 0),
-                y_offset=d.get("y_offset", 0),
-                width=d.get("width", 16),
-                height=d.get("height", 16),
-                tile_data=d.get("tile_data"),
-                objects=d.get("objects"),
-                built_by=d.get("built_by"),
-                description=d.get("description"),
-                tileset_url=d.get("tileset_url"),
-            ))
+            snapshot.world_chunks.append(
+                WorldChunkSnapshot(
+                    name=d.get("name", ""),
+                    x_offset=d.get("x_offset", 0),
+                    y_offset=d.get("y_offset", 0),
+                    width=d.get("width", 16),
+                    height=d.get("height", 16),
+                    tile_data=d.get("tile_data"),
+                    objects=d.get("objects"),
+                    built_by=d.get("built_by"),
+                    description=d.get("description"),
+                    tileset_url=d.get("tileset_url"),
+                )
+            )
 
         # Export relationships
         rows = await conn.fetch(
@@ -389,14 +398,16 @@ class SimulationSnapshotExporter:
             target = r["target_agent_id"]
             if agent not in agent_id_set or target not in agent_id_set:
                 continue
-            snapshot.relationships.append(RelationshipSnapshot(
-                agent=agent,
-                target=target,
-                sentiment=float(r["sentiment_score"]) if r["sentiment_score"] else None,
-                trust=float(r["trust_score"]) if r["trust_score"] else None,
-                interaction_count=r["interaction_count"],
-                summary=r["relationship_summary"],
-            ))
+            snapshot.relationships.append(
+                RelationshipSnapshot(
+                    agent=agent,
+                    target=target,
+                    sentiment=float(r["sentiment_score"]) if r["sentiment_score"] else None,
+                    trust=float(r["trust_score"]) if r["trust_score"] else None,
+                    interaction_count=r["interaction_count"],
+                    summary=r["relationship_summary"],
+                )
+            )
 
         # Export transactions
         rows = await conn.fetch(
@@ -408,14 +419,16 @@ class SimulationSnapshotExporter:
         for r in rows:
             if r["agent_id"] not in agent_id_set:
                 continue
-            snapshot.transactions.append(TransactionSnapshot(
-                agent_id=r["agent_id"],
-                type=r["type"],
-                amount=float(r["amount"]),
-                counterparty_agent_id=r["counterparty_agent_id"],
-                description=r["description"],
-                created_at=r["created_at"].isoformat() if r["created_at"] else None,
-            ))
+            snapshot.transactions.append(
+                TransactionSnapshot(
+                    agent_id=r["agent_id"],
+                    type=r["type"],
+                    amount=float(r["amount"]),
+                    counterparty_agent_id=r["counterparty_agent_id"],
+                    description=r["description"],
+                    created_at=r["created_at"].isoformat() if r["created_at"] else None,
+                )
+            )
 
         # Export challenges
         rows = await conn.fetch(
@@ -426,15 +439,17 @@ class SimulationSnapshotExporter:
             sim_uuid,
         )
         for r in rows:
-            snapshot.challenges.append(ChallengeSnapshot(
-                description=r["description"],
-                submitted_by=r["submitted_by"],
-                status=r["status"],
-                assigned_agents=r["assigned_agents"],
-                result=r["result"],
-                upvotes=r["upvotes"] or 0,
-                created_at=r["created_at"].isoformat() if r["created_at"] else None,
-            ))
+            snapshot.challenges.append(
+                ChallengeSnapshot(
+                    description=r["description"],
+                    submitted_by=r["submitted_by"],
+                    status=r["status"],
+                    assigned_agents=r["assigned_agents"],
+                    result=r["result"],
+                    upvotes=r["upvotes"] or 0,
+                    created_at=r["created_at"].isoformat() if r["created_at"] else None,
+                )
+            )
 
         # Export world events
         rows = await conn.fetch(
@@ -447,14 +462,16 @@ class SimulationSnapshotExporter:
             md = r["metadata"]
             if isinstance(md, str):
                 md = json.loads(md)
-            snapshot.world_events.append(WorldEventSnapshot(
-                event_type=r["event_type"],
-                description=r["description"],
-                location=r["location"],
-                agents_involved=r["agents_involved"],
-                metadata=md,
-                created_at=r["created_at"].isoformat() if r["created_at"] else None,
-            ))
+            snapshot.world_events.append(
+                WorldEventSnapshot(
+                    event_type=r["event_type"],
+                    description=r["description"],
+                    location=r["location"],
+                    agents_involved=r["agents_involved"],
+                    metadata=md,
+                    created_at=r["created_at"].isoformat() if r["created_at"] else None,
+                )
+            )
 
         # Export alliances with members
         alliance_rows = await conn.fetch(
@@ -466,7 +483,8 @@ class SimulationSnapshotExporter:
             member_rows = await conn.fetch(
                 """SELECT agent_id, joined_at, left_at
                    FROM alliance_members WHERE alliance_id = $1 AND simulation_id = $2""",
-                ar["id"], sim_uuid,
+                ar["id"],
+                sim_uuid,
             )
             members = [
                 {
@@ -476,15 +494,17 @@ class SimulationSnapshotExporter:
                 }
                 for m in member_rows
             ]
-            snapshot.alliances.append(AllianceSnapshot(
-                name=ar["name"],
-                founded_by=ar["founded_by"],
-                purpose=ar["purpose"],
-                shared_treasury=float(ar["shared_treasury"]) if ar["shared_treasury"] else 0.0,
-                status=ar["status"] or "active",
-                members=members,
-                created_at=ar["created_at"].isoformat() if ar["created_at"] else None,
-            ))
+            snapshot.alliances.append(
+                AllianceSnapshot(
+                    name=ar["name"],
+                    founded_by=ar["founded_by"],
+                    purpose=ar["purpose"],
+                    shared_treasury=float(ar["shared_treasury"]) if ar["shared_treasury"] else 0.0,
+                    status=ar["status"] or "active",
+                    members=members,
+                    created_at=ar["created_at"].isoformat() if ar["created_at"] else None,
+                )
+            )
 
         # Export self-modification proposals
         rows = await conn.fetch(
@@ -496,14 +516,16 @@ class SimulationSnapshotExporter:
         for r in rows:
             if r["agent_id"] not in agent_id_set:
                 continue
-            snapshot.self_modification_proposals.append(SelfModProposalSnapshot(
-                agent_id=r["agent_id"],
-                proposal_type=r["proposal_type"],
-                description=r["description"],
-                reasoning=r["reasoning"],
-                status=r["status"],
-                created_at=r["created_at"].isoformat() if r["created_at"] else None,
-            ))
+            snapshot.self_modification_proposals.append(
+                SelfModProposalSnapshot(
+                    agent_id=r["agent_id"],
+                    proposal_type=r["proposal_type"],
+                    description=r["description"],
+                    reasoning=r["reasoning"],
+                    status=r["status"],
+                    created_at=r["created_at"].isoformat() if r["created_at"] else None,
+                )
+            )
 
     async def _get_agent_ids(self, sim_uuid: uuid_mod.UUID) -> list[str]:
         """Get agent IDs for a simulation.
@@ -581,7 +603,10 @@ class SimulationSnapshotImporter:
                            DO UPDATE SET content = $2, token_count = $3,
                                      version = core_memory.version + 1,
                                      last_updated = NOW()""",
-                        agent_id, agent_snap.core_memory, token_count, sim_uuid,
+                        agent_id,
+                        agent_snap.core_memory,
+                        token_count,
+                        sim_uuid,
                     )
                     result.core_memories_restored += 1
                 except Exception as exc:
@@ -605,10 +630,15 @@ class SimulationSnapshotImporter:
                             importance_score, simulation_id, timestamp, recalled_count)
                            VALUES ($1, $2, $3::vector, $4, $5, $6, $7,
                                    COALESCE($8, NOW()), $9)""",
-                        agent_id, mem["summary"], emb_str,
-                        mem.get("event_type"), mem.get("participants"),
-                        mem.get("importance_score", 0.5), sim_uuid,
-                        ts, mem.get("recalled_count", 0),
+                        agent_id,
+                        mem["summary"],
+                        emb_str,
+                        mem.get("event_type"),
+                        mem.get("participants"),
+                        mem.get("importance_score", 0.5),
+                        sim_uuid,
+                        ts,
+                        mem.get("recalled_count", 0),
                     )
                     result.recall_memories_restored += 1
                 except Exception as exc:
@@ -621,8 +651,11 @@ class SimulationSnapshotImporter:
                         """INSERT INTO journal_entries
                            (agent_id, reflection_type, content, token_count, simulation_id)
                            VALUES ($1, $2, $3, $4, $5)""",
-                        agent_id, entry.get("reflection_type", "snapshot"),
-                        entry["content"], entry.get("token_count", 0), sim_uuid,
+                        agent_id,
+                        entry.get("reflection_type", "snapshot"),
+                        entry["content"],
+                        entry.get("token_count", 0),
+                        sim_uuid,
                     )
                     result.journal_entries_restored += 1
                 except Exception as exc:
@@ -644,9 +677,15 @@ class SimulationSnapshotImporter:
                        DO UPDATE SET energy = $2, satisfaction = $3, boredom = $4,
                                      frustration = $5, creativity = $6,
                                      social_need = $7, focus = $8""",
-                    agent_id, state.energy, state.satisfaction, state.boredom,
-                    state.frustration, state.creativity, state.social_need,
-                    state.focus, sim_uuid,
+                    agent_id,
+                    state.energy,
+                    state.satisfaction,
+                    state.boredom,
+                    state.frustration,
+                    state.creativity,
+                    state.social_need,
+                    state.focus,
+                    sim_uuid,
                 )
                 result.agent_states_restored += 1
             except Exception as exc:
@@ -665,8 +704,12 @@ class SimulationSnapshotImporter:
                        ON CONFLICT (agent_id, simulation_id)
                        DO UPDATE SET balance = $2, weekly_allocation = $3,
                                      total_earned = $4, total_spent = $5""",
-                    agent_id, acct.balance, acct.weekly_allocation,
-                    acct.total_earned, acct.total_spent, sim_uuid,
+                    agent_id,
+                    acct.balance,
+                    acct.weekly_allocation,
+                    acct.total_earned,
+                    acct.total_spent,
+                    sim_uuid,
                 )
                 result.agent_accounts_restored += 1
             except Exception as exc:
@@ -683,8 +726,14 @@ class SimulationSnapshotImporter:
                            (agent_id, goal, priority, status, source, category,
                             progress_notes, simulation_id)
                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
-                        agent_id, g.goal, g.priority, g.status, g.source,
-                        g.category, g.progress_notes, sim_uuid,
+                        agent_id,
+                        g.goal,
+                        g.priority,
+                        g.status,
+                        g.source,
+                        g.category,
+                        g.progress_notes,
+                        sim_uuid,
                     )
                     result.goals_restored += 1
                 except Exception as exc:
@@ -701,9 +750,17 @@ class SimulationSnapshotImporter:
                         objects, built_by, description, tileset_url, simulation_id)
                        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb,
                                $8, $9, $10, $11)""",
-                    chunk.name, chunk.x_offset, chunk.y_offset,
-                    chunk.width, chunk.height, td, objs,
-                    chunk.built_by, chunk.description, chunk.tileset_url, sim_uuid,
+                    chunk.name,
+                    chunk.x_offset,
+                    chunk.y_offset,
+                    chunk.width,
+                    chunk.height,
+                    td,
+                    objs,
+                    chunk.built_by,
+                    chunk.description,
+                    chunk.tileset_url,
+                    sim_uuid,
                 )
                 result.world_chunks_restored += 1
             except Exception as exc:
@@ -724,8 +781,13 @@ class SimulationSnapshotImporter:
                        ON CONFLICT (agent_id, target_agent_id, simulation_id)
                        DO UPDATE SET sentiment_score = $3, trust_score = $4,
                                      interaction_count = $5, relationship_summary = $6""",
-                    agent, target, rel.sentiment, rel.trust,
-                    rel.interaction_count, rel.summary, sim_uuid,
+                    agent,
+                    target,
+                    rel.sentiment,
+                    rel.trust,
+                    rel.interaction_count,
+                    rel.summary,
+                    sim_uuid,
                 )
                 result.relationships_restored += 1
             except Exception as exc:
@@ -744,9 +806,13 @@ class SimulationSnapshotImporter:
                        (agent_id, type, amount, counterparty_agent_id, description,
                         simulation_id, created_at)
                        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()))""",
-                    tx.agent_id, tx.type, tx.amount,
-                    tx.counterparty_agent_id, tx.description,
-                    sim_uuid, ts,
+                    tx.agent_id,
+                    tx.type,
+                    tx.amount,
+                    tx.counterparty_agent_id,
+                    tx.description,
+                    sim_uuid,
+                    ts,
                 )
                 result.transactions_restored += 1
             except Exception as exc:
@@ -763,9 +829,14 @@ class SimulationSnapshotImporter:
                        (description, submitted_by, status, assigned_agents, result,
                         upvotes, simulation_id, created_at)
                        VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()))""",
-                    ch.description, ch.submitted_by, ch.status,
-                    ch.assigned_agents, ch.result, ch.upvotes,
-                    sim_uuid, ts,
+                    ch.description,
+                    ch.submitted_by,
+                    ch.status,
+                    ch.assigned_agents,
+                    ch.result,
+                    ch.upvotes,
+                    sim_uuid,
+                    ts,
                 )
                 result.challenges_restored += 1
             except Exception as exc:
@@ -783,9 +854,13 @@ class SimulationSnapshotImporter:
                        (event_type, description, location, agents_involved, metadata,
                         simulation_id, created_at)
                        VALUES ($1, $2, $3, $4, $5::jsonb, $6, COALESCE($7, NOW()))""",
-                    evt.event_type, evt.description, evt.location,
-                    evt.agents_involved, md,
-                    sim_uuid, ts,
+                    evt.event_type,
+                    evt.description,
+                    evt.location,
+                    evt.agents_involved,
+                    md,
+                    sim_uuid,
+                    ts,
                 )
                 result.world_events_restored += 1
             except Exception as exc:
@@ -803,9 +878,13 @@ class SimulationSnapshotImporter:
                         simulation_id, created_at)
                        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()))
                        RETURNING id""",
-                    alliance.name, alliance.founded_by, alliance.purpose,
-                    alliance.shared_treasury, alliance.status,
-                    sim_uuid, ts,
+                    alliance.name,
+                    alliance.founded_by,
+                    alliance.purpose,
+                    alliance.shared_treasury,
+                    alliance.status,
+                    sim_uuid,
+                    ts,
                 )
                 if rows:
                     alliance_id = rows[0]["id"]
@@ -820,7 +899,11 @@ class SimulationSnapshotImporter:
                             """INSERT INTO alliance_members
                                (alliance_id, agent_id, joined_at, left_at, simulation_id)
                                VALUES ($1, $2, COALESCE($3, NOW()), $4, $5)""",
-                            alliance_id, member["agent_id"], joined, left, sim_uuid,
+                            alliance_id,
+                            member["agent_id"],
+                            joined,
+                            left,
+                            sim_uuid,
                         )
                 result.alliances_restored += 1
             except Exception as exc:
@@ -839,9 +922,13 @@ class SimulationSnapshotImporter:
                        (agent_id, proposal_type, description, reasoning, status,
                         simulation_id, created_at)
                        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()))""",
-                    prop.agent_id, prop.proposal_type, prop.description,
-                    prop.reasoning, prop.status,
-                    sim_uuid, ts,
+                    prop.agent_id,
+                    prop.proposal_type,
+                    prop.description,
+                    prop.reasoning,
+                    prop.status,
+                    sim_uuid,
+                    ts,
                 )
                 result.self_mod_proposals_restored += 1
             except Exception as exc:
@@ -849,22 +936,26 @@ class SimulationSnapshotImporter:
 
         return result
 
-    async def _clear_simulation_state(
-        self, sim_uuid: uuid_mod.UUID, agent_ids: list[str]
-    ) -> None:
+    async def _clear_simulation_state(self, sim_uuid: uuid_mod.UUID, agent_ids: list[str]) -> None:
         """Clear existing state for agents in the target simulation."""
         # Tables with agent_id + simulation_id scope
         agent_tables = (
-            "recall_memory", "journal_entries", "agent_goals",
-            "core_memory", "agent_internal_state", "agent_accounts",
-            "agent_transactions", "self_modification_proposals",
+            "recall_memory",
+            "journal_entries",
+            "agent_goals",
+            "core_memory",
+            "agent_internal_state",
+            "agent_accounts",
+            "agent_transactions",
+            "self_modification_proposals",
         )
         for agent_id in agent_ids:
             for table in agent_tables:
                 try:
                     await self._db.execute(
                         f"DELETE FROM {table} WHERE agent_id = $1 AND simulation_id = $2",  # noqa: S608
-                        agent_id, sim_uuid,
+                        agent_id,
+                        sim_uuid,
                     )
                 except Exception:
                     logger.warning("Failed to clear %s for %s", table, agent_id, exc_info=True)
@@ -878,13 +969,17 @@ class SimulationSnapshotImporter:
             logger.warning("Failed to clear agent_relationships", exc_info=True)
         # Clear simulation-scoped tables (no agent_id filter)
         sim_only_tables = (
-            "world_chunks", "world_events", "challenges",
-            "alliance_members", "alliances",
+            "world_chunks",
+            "world_events",
+            "challenges",
+            "alliance_members",
+            "alliances",
         )
         for table in sim_only_tables:
             try:
                 await self._db.execute(
-                    f"DELETE FROM {table} WHERE simulation_id = $1", sim_uuid,  # noqa: S608
+                    f"DELETE FROM {table} WHERE simulation_id = $1",
+                    sim_uuid,  # noqa: S608
                 )
             except Exception:
                 logger.warning("Failed to clear %s", table, exc_info=True)

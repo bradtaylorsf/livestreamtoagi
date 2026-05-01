@@ -54,10 +54,19 @@ def embedding_config_from_env(openrouter_api_key: str = "") -> EmbeddingProvider
     semantic embeddings.
     """
     llm_provider = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
-    default_provider = "deterministic" if llm_provider in {
-        "local", "lmstudio", "lm-studio", "lm_studio", "openai-compatible",
-        "openai_compatible",
-    } else "openrouter"
+    default_provider = (
+        "deterministic"
+        if llm_provider
+        in {
+            "local",
+            "lmstudio",
+            "lm-studio",
+            "lm_studio",
+            "openai-compatible",
+            "openai_compatible",
+        }
+        else "openrouter"
+    )
     provider_raw = os.environ.get("EMBEDDING_PROVIDER")
     provider = (
         provider_raw.strip().lower()
@@ -103,7 +112,8 @@ def embedding_config_from_env(openrouter_api_key: str = "") -> EmbeddingProvider
 
 
 def generate_deterministic_embedding(
-    text: str, dimension: int = EMBEDDING_DIMENSION,
+    text: str,
+    dimension: int = EMBEDDING_DIMENSION,
 ) -> list[float]:
     """Generate a stable nonzero embedding for local pipeline smoke tests.
 
@@ -166,27 +176,31 @@ async def generate_embedding(
                 return embedding
 
             if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
-                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                delay = RETRY_BASE_DELAY * (2**attempt)
                 logger.warning(
                     "Embedding API returned %d, retrying in %.1fs (attempt %d/%d)",
-                    response.status_code, delay, attempt + 1, MAX_RETRIES,
+                    response.status_code,
+                    delay,
+                    attempt + 1,
+                    MAX_RETRIES,
                 )
                 await asyncio.sleep(delay)
                 continue
 
-            raise RuntimeError(
-                f"Embedding API returned {response.status_code}: {response.text}"
-            )
+            raise RuntimeError(f"Embedding API returned {response.status_code}: {response.text}")
 
         except RuntimeError:
             raise
         except Exception as exc:
             last_error = exc
             if attempt < MAX_RETRIES:
-                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                delay = RETRY_BASE_DELAY * (2**attempt)
                 logger.warning(
                     "Embedding API connection error, retrying in %.1fs (attempt %d/%d): %s",
-                    delay, attempt + 1, MAX_RETRIES, exc,
+                    delay,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    exc,
                 )
                 await asyncio.sleep(delay)
             else:

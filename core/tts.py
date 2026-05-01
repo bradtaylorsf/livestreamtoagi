@@ -52,7 +52,9 @@ class TTSPipeline:
                 return agent.audio_effects
         return None
 
-    async def generate(self, agent_id: str, text: str, *, cleanup_ttl: int | None = None) -> dict[str, Any] | None:
+    async def generate(
+        self, agent_id: str, text: str, *, cleanup_ttl: int | None = None
+    ) -> dict[str, Any] | None:
         """Generate TTS audio and return the result WITHOUT emitting any event.
 
         Use this when you want to pre-generate audio (e.g. batch mode) and will
@@ -79,7 +81,9 @@ class TTSPipeline:
                 break
             except Exception:
                 if attempt < 2:
-                    logger.warning("Edge TTS failed for %s (attempt %d/3), retrying", agent_id, attempt + 1)
+                    logger.warning(
+                        "Edge TTS failed for %s (attempt %d/3), retrying", agent_id, attempt + 1
+                    )
                     await asyncio.sleep(1.0)
                     continue
                 logger.warning("Edge TTS failed for %s after 3 attempts", agent_id)
@@ -124,9 +128,7 @@ class TTSPipeline:
         await event_bus.emit(EventType.TTS_PLAY.value, result)
         return result
 
-    async def speak_segmented(
-        self, agent_id: str, text: str
-    ) -> list[dict[str, Any]] | None:
+    async def speak_segmented(self, agent_id: str, text: str) -> list[dict[str, Any]] | None:
         """Generate TTS audio per dialogue segment and return segment descriptors.
 
         Splits *text* on [action] tags so each short dialogue chunk becomes its
@@ -164,9 +166,7 @@ class TTSPipeline:
                     break
                 except Exception:
                     if attempt == 0:
-                        logger.warning(
-                            "Edge TTS segment failed for %s, retrying", agent_id
-                        )
+                        logger.warning("Edge TTS segment failed for %s, retrying", agent_id)
                         continue
                     logger.warning(
                         "Edge TTS segment failed for %s after retry, skipping segment",

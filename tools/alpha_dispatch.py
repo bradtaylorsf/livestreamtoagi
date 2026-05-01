@@ -32,9 +32,7 @@ ALPHA_SYSTEM_PROMPT = (
 )
 
 # All agents that may dispatch Alpha (everyone except Alpha itself)
-ALLOWED_AGENTS = frozenset(
-    {"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"}
-)
+ALLOWED_AGENTS = frozenset({"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"})
 
 
 class DispatchAlphaTool(BaseTool):

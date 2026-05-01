@@ -3,6 +3,23 @@ line-length = 100
 
 [lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "TCH"]
+ignore = [
+    # Long lines exist throughout legacy code; tracked separately.
+    "E501",
+    # FastAPI's `Depends()` is the canonical pattern in route signatures.
+    "B008",
+    # Stylistic typing-block reorganization is not worth the diff churn here.
+    "TC001",
+    "TC002",
+    "TC003",
+    # Stylistic refactors flagged by SIM rules — not bugs.
+    "SIM102",
+    "SIM105",
+    "SIM108",
+    "SIM117",
+    # str-enum migration is a separate refactor.
+    "UP042",
+]
 
 [lint.isort]
 known-first-party = ["core", "tools", "agents"]

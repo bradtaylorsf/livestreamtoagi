@@ -34,6 +34,7 @@ router = APIRouter(prefix="/api")
 
 def _get_services():
     from core.main import app
+
     return app.state.services
 
 
@@ -50,7 +51,10 @@ def _get_registry():
 
 
 async def _check_rate_limit(
-    redis, key: str, max_requests: int, window_seconds: int,
+    redis,
+    key: str,
+    max_requests: int,
+    window_seconds: int,
 ) -> bool:
     """Return True if request is allowed, False if rate-limited."""
     if redis is None:
@@ -298,30 +302,33 @@ async def get_agents() -> list[AgentPublicProfile]:
     agents = registry.get_all_agents()
 
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
 
     result = []
     for a in agents:
         costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
         total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
-        result.append(AgentPublicProfile(
-            id=a.id,
-            display_name=a.display_name,
-            role=a.role,
-            color=a.color_hex,
-            status=a.status.value if hasattr(a.status, "value") else str(a.status),
-            conversation_model=a.model_conversation,
-            building_model=a.model_building,
-            chattiness=a.chattiness,
-            initiative=a.initiative,
-            voice=a.voice_id,
-            behaviors=list(a.behaviors.keys()) if a.behaviors else [],
-            interrupt_tendency=a.interrupt_tendency,
-            eavesdrop_tendency=a.eavesdrop_tendency,
-            closing_weight=a.closing_weight,
-            total_cost=f"{total_cost:.6f}",
-            message_count=len(costs) if costs else 0,
-        ))
+        result.append(
+            AgentPublicProfile(
+                id=a.id,
+                display_name=a.display_name,
+                role=a.role,
+                color=a.color_hex,
+                status=a.status.value if hasattr(a.status, "value") else str(a.status),
+                conversation_model=a.model_conversation,
+                building_model=a.model_building,
+                chattiness=a.chattiness,
+                initiative=a.initiative,
+                voice=a.voice_id,
+                behaviors=list(a.behaviors.keys()) if a.behaviors else [],
+                interrupt_tendency=a.interrupt_tendency,
+                eavesdrop_tendency=a.eavesdrop_tendency,
+                closing_weight=a.closing_weight,
+                total_cost=f"{total_cost:.6f}",
+                message_count=len(costs) if costs else 0,
+            )
+        )
     return result
 
 
@@ -335,6 +342,7 @@ async def get_agent(agent_id: str) -> AgentPublicProfile:
     a = agent
 
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
     costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
     total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
@@ -370,6 +378,7 @@ async def get_agent_system_prompt(agent_id: str) -> dict[str, Any]:
 
     from core.repos.memory_repo import MemoryRepo
     from core.system_prompt import INFRASTRUCTURE_PROMPT
+
     memory_repo = MemoryRepo(db)
     core_mem = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
 
@@ -408,18 +417,20 @@ async def get_agent_costs(
 
     db = _get_db()
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
 
     parsed_from = dt.fromisoformat(from_date) if from_date else None
     parsed_to = dt.fromisoformat(to_date) if to_date else None
 
     data = await cost_repo.get_costs_by_agent_grouped(
-        agent_id, from_date=parsed_from, to_date=parsed_to,
+        agent_id,
+        from_date=parsed_from,
+        to_date=parsed_to,
     )
 
     by_day = [
-        {"date": d.get("day", ""), "cost": d.get("total", "0")}
-        for d in data.get("by_day", [])
+        {"date": d.get("day", ""), "cost": d.get("total", "0")} for d in data.get("by_day", [])
     ]
     by_type = [
         {"type": d.get("type", ""), "cost": d.get("total", "0"), "tokens": int(d.get("tokens", 0))}
@@ -449,7 +460,10 @@ async def get_agent_journal(
            WHERE agent_id = $1 AND simulation_id = $4
            ORDER BY created_at DESC
            LIMIT $2 OFFSET $3""",
-        agent_id, limit, offset, sim_id,
+        agent_id,
+        limit,
+        offset,
+        sim_id,
     )
     return [
         {
@@ -470,7 +484,8 @@ async def get_agent_relationships(agent_id: str) -> list[dict[str, Any]]:
     if not svc.relationship_repo:
         return []
     relationships = await svc.relationship_repo.get_all_for_agent(
-        LIVE_SIMULATION_ID, agent_id,
+        LIVE_SIMULATION_ID,
+        agent_id,
     )
     return [
         {
@@ -496,7 +511,10 @@ async def get_agent_conversations(
     repo = ConversationRepo(db)
     sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
     convs, total = await repo.get_conversations_by_agent(
-        agent_id, simulation_id=sim_id, limit=limit, offset=offset,
+        agent_id,
+        simulation_id=sim_id,
+        limit=limit,
+        offset=offset,
     )
     return {
         "items": [_conversation_to_summary(c) for c in convs],
@@ -552,6 +570,7 @@ async def get_agent_core_memory(
     """Current core memory content with version history."""
     db = _get_db()
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
 
     sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
@@ -573,8 +592,7 @@ async def get_agent_core_memory(
         "current_version": current.version if current else 0,
         "token_count": current.token_count if current else 0,
         "last_updated": (
-            current.last_updated.isoformat()
-            if current and current.last_updated else None
+            current.last_updated.isoformat() if current and current.last_updated else None
         ),
         "version_history": version_history,
     }
@@ -591,17 +609,25 @@ async def get_agent_recall_memories(
     """Paginated recall memories (read-only, embeddings hidden). Supports keyword search."""
     db = _get_db()
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
 
     sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
 
     if search:
         memories, total = await memory_repo.search_recall_memories_by_keyword(
-            agent_id, search, limit=limit, offset=offset, simulation_id=sim_id,
+            agent_id,
+            search,
+            limit=limit,
+            offset=offset,
+            simulation_id=sim_id,
         )
     else:
         memories, total = await memory_repo.get_recall_memories_paginated(
-            agent_id, limit=limit, offset=offset, simulation_id=sim_id,
+            agent_id,
+            limit=limit,
+            offset=offset,
+            simulation_id=sim_id,
         )
 
     items = []
@@ -627,7 +653,8 @@ async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
     if not svc.config_version_repo:
         return []
     versions = await svc.config_version_repo.get_prompt_history(
-        agent_id, simulation_id=LIVE_SIMULATION_ID,
+        agent_id,
+        simulation_id=LIVE_SIMULATION_ID,
     )
     return [
         {
@@ -644,12 +671,17 @@ async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
 
 @router.post("/agents/{agent_id}/chat")
 async def chat_with_agent(
-    agent_id: str, req: ChatRequest, request: Request,
+    agent_id: str,
+    req: ChatRequest,
+    request: Request,
 ) -> ChatResponse:
     svc = _get_services()
     ip = _client_ip(request)
     allowed = await _check_rate_limit(
-        svc.redis, f"ratelimit:chat:{ip}:{agent_id}", 10, 3600,
+        svc.redis,
+        f"ratelimit:chat:{ip}:{agent_id}",
+        10,
+        3600,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Rate limit exceeded (10/hr)")
@@ -663,6 +695,7 @@ async def chat_with_agent(
         raise HTTPException(status_code=503, detail="LLM client not available")
 
     from datetime import UTC, datetime
+
     response = await svc.llm_client.chat(
         model=agent.model_conversation,
         messages=[
@@ -703,7 +736,9 @@ async def get_conversations(
            WHERE simulation_id = $3
            ORDER BY started_at DESC
            LIMIT $1 OFFSET $2""",
-        limit, offset, sim_id,
+        limit,
+        offset,
+        sim_id,
     )
     items = []
     for r in rows:
@@ -724,7 +759,8 @@ async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     conv = await repo.get(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
     if not conv:
@@ -732,6 +768,7 @@ async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
 
     # Fetch transcript
     from core.repos.transcript_repo import TranscriptRepo
+
     transcript_repo = TranscriptRepo(db)
     transcript_record = await transcript_repo.get_by_conversation(conv_uuid)
     transcript_text = transcript_record.content if transcript_record else None
@@ -758,7 +795,8 @@ async def get_conversation_selections(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     logs = await repo.get_selection_log(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
     return [
@@ -786,7 +824,8 @@ async def get_conversation_turns(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     logs = await repo.get_selection_log(conv_uuid)
     return [
@@ -799,9 +838,7 @@ async def get_conversation_turns(
             "previous_speaker_id": log.previous_speaker_id,
             "conversation_energy": log.conversation_energy,
             "timestamp": (
-                log.timestamp.isoformat()
-                if hasattr(log, "timestamp") and log.timestamp
-                else None
+                log.timestamp.isoformat() if hasattr(log, "timestamp") and log.timestamp else None
             ),
         }
         for log in logs
@@ -819,7 +856,8 @@ async def get_conversation_management_flags(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     return await repo.get_management_flags(conv_uuid)
 
@@ -835,7 +873,8 @@ async def get_conversation_artifacts(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     return await repo.get_artifacts(conv_uuid)
 
@@ -851,7 +890,8 @@ async def get_conversation_interrupts(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     return await repo.get_interrupts(conv_uuid)
 
@@ -862,12 +902,14 @@ async def get_conversation_interrupts(
 @router.get("/blog")
 async def get_blog_posts() -> list[BlogPostSummary]:
     from core.blog import list_posts
+
     return list_posts()
 
 
 @router.get("/blog/{slug}")
 async def get_blog_post(slug: str) -> BlogPostDetail:
     from core.blog import get_post
+
     post = get_post(slug)
     if not post:
         raise HTTPException(status_code=404, detail="Blog post not found")
@@ -887,17 +929,19 @@ async def get_eval_prompts() -> list[dict[str, Any]]:
     for cat in categories:
         try:
             data = load_prompt(cat)
-            result.append({
-                "name": data.get("name", cat),
-                "description": data.get("description", ""),
-                "system": data.get("system", ""),
-                "rubric": data.get("rubric", {}),
-                "sub_scores": data.get("sub_scores", []),
-                "output_schema": data.get("output_schema", {}),
-                "model": data.get("model", ""),
-                "temperature": data.get("temperature"),
-                "max_tokens": data.get("max_tokens"),
-            })
+            result.append(
+                {
+                    "name": data.get("name", cat),
+                    "description": data.get("description", ""),
+                    "system": data.get("system", ""),
+                    "rubric": data.get("rubric", {}),
+                    "sub_scores": data.get("sub_scores", []),
+                    "output_schema": data.get("output_schema", {}),
+                    "model": data.get("model", ""),
+                    "temperature": data.get("temperature"),
+                    "max_tokens": data.get("max_tokens"),
+                }
+            )
         except Exception:
             logger.warning("Failed to load eval prompt for %s", cat)
     return result
@@ -910,8 +954,11 @@ async def get_eval_prompt(category: str) -> dict[str, Any]:
 
     try:
         data = load_prompt(category)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Eval prompt '{category}' not found")
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Eval prompt '{category}' not found",
+        ) from exc
     return {
         "name": data.get("name", category),
         "description": data.get("description", ""),
@@ -962,7 +1009,8 @@ async def get_evals_history(
                JOIN eval_runs e ON e.id = er.eval_run_id
                WHERE er.category = $1
                ORDER BY er.created_at DESC LIMIT $2""",
-            category, limit,
+            category,
+            limit,
         )
     else:
         rows = await db.fetch(
@@ -1026,19 +1074,20 @@ async def get_eval_runs(
             else:
                 flat_versions[agent_id] = str(models)
         category_scores = {
-            r.category: float(r.score) if r.score is not None else None
-            for r in results
+            r.category: float(r.score) if r.score is not None else None for r in results
         }
-        result.append(PublicEvalRun(
-            id=str(run.id),
-            simulation_id=str(run.simulation_id),
-            simulation_name=sim_names.get(run.simulation_id),
-            date=run.started_at.isoformat() if run.started_at else "",
-            overall_score=float(run.overall_score) if run.overall_score is not None else None,
-            cost=float(run.cost),
-            model_versions=flat_versions,
-            category_scores=category_scores,
-        ))
+        result.append(
+            PublicEvalRun(
+                id=str(run.id),
+                simulation_id=str(run.simulation_id),
+                simulation_name=sim_names.get(run.simulation_id),
+                date=run.started_at.isoformat() if run.started_at else "",
+                overall_score=float(run.overall_score) if run.overall_score is not None else None,
+                cost=float(run.cost),
+                model_versions=flat_versions,
+                category_scores=category_scores,
+            )
+        )
     return result
 
 
@@ -1058,7 +1107,8 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
 
     # Fetch simulation name
     sim_row = await db.fetchrow(
-        "SELECT name FROM simulations WHERE id = $1", run.simulation_id,
+        "SELECT name FROM simulations WHERE id = $1",
+        run.simulation_id,
     )
     sim_name = sim_row["name"] if sim_row else None
 
@@ -1069,10 +1119,7 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
             flat_versions[agent_id] = models.get("conversation", "unknown")
         else:
             flat_versions[agent_id] = str(models)
-    category_scores = {
-        r.category: float(r.score) if r.score is not None else None
-        for r in results
-    }
+    category_scores = {r.category: float(r.score) if r.score is not None else None for r in results}
     return PublicEvalRun(
         id=str(run.id),
         simulation_id=str(run.simulation_id),
@@ -1098,7 +1145,8 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
         raise HTTPException(status_code=404, detail="Eval run not found")
 
     sim_row = await db.fetchrow(
-        "SELECT name FROM simulations WHERE id = $1", run.simulation_id,
+        "SELECT name FROM simulations WHERE id = $1",
+        run.simulation_id,
     )
     sim_name = sim_row["name"] if sim_row else None
 
@@ -1145,16 +1193,18 @@ async def get_world_chunks() -> list[dict[str, Any]]:
             if isinstance(d.get(key), str):
                 d[key] = json.loads(d[key])
         chunk = WorldChunk(**d)
-        results.append({
-            "id": chunk.id,
-            "name": chunk.name,
-            "x": chunk.x_offset,
-            "y": chunk.y_offset,
-            "width": chunk.width,
-            "height": chunk.height,
-            "tiles": chunk.tile_data,
-            "objects": chunk.objects or [],
-        })
+        results.append(
+            {
+                "id": chunk.id,
+                "name": chunk.name,
+                "x": chunk.x_offset,
+                "y": chunk.y_offset,
+                "width": chunk.width,
+                "height": chunk.height,
+                "tiles": chunk.tile_data,
+                "objects": chunk.objects or [],
+            }
+        )
     return results
 
 
@@ -1200,12 +1250,16 @@ async def get_challenges(
 
 @router.post("/challenges")
 async def submit_challenge(
-    req: ChallengeSubmitRequest, request: Request,
+    req: ChallengeSubmitRequest,
+    request: Request,
 ) -> ChallengeResponse:
     svc = _get_services()
     ip = _client_ip(request)
     allowed = await _check_rate_limit(
-        svc.redis, f"ratelimit:challenge:{ip}", 5, 3600,
+        svc.redis,
+        f"ratelimit:challenge:{ip}",
+        5,
+        3600,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Rate limit exceeded (5/hr)")
@@ -1226,7 +1280,8 @@ async def submit_challenge(
 
 @router.post("/challenges/{challenge_id}/upvote")
 async def upvote_challenge(
-    challenge_id: int, request: Request,
+    challenge_id: int,
+    request: Request,
 ) -> ChallengeResponse:
     svc = _get_services()
     ip = _client_ip(request)
@@ -1265,10 +1320,13 @@ async def get_stats() -> StatsResponse:
     total_agents = len(svc.agent_registry.get_all_agents())
 
     sims = await db.fetchval("SELECT COUNT(*) FROM simulations") or 0
-    convs = await db.fetchval(
-        "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
-        LIVE_SIMULATION_ID,
-    ) or 0
+    convs = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+            LIVE_SIMULATION_ID,
+        )
+        or 0
+    )
     total_cost_val = await db.fetchval(
         "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE simulation_id = $1",
         LIVE_SIMULATION_ID,
@@ -1317,10 +1375,7 @@ async def get_lore(
     )
     rows = await db.fetch(query, *params, limit, offset)
 
-    items = [
-        _event_to_response(WorldEvent(**dict(r)))
-        for r in rows
-    ]
+    items = [_event_to_response(WorldEvent(**dict(r))) for r in rows]
 
     return {"items": items, "total": total or 0, "limit": limit, "offset": offset}
 
@@ -1337,10 +1392,13 @@ async def get_simulations(
     """List all simulations (public read-only). Optionally filter by status."""
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
     simulations = await sim_repo.list(
-        status=status, limit=limit, offset=offset,
+        status=status,
+        limit=limit,
+        offset=offset,
     )
     total = await sim_repo.count(status=status)
 
@@ -1378,6 +1436,7 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
     """
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
 
     sim_uuid = uuid.UUID(sim_id)
@@ -1385,30 +1444,42 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
     if sim is None:
         raise HTTPException(status_code=404, detail="Simulation not found")
 
-    total_conversations = await db.fetchval(
-        "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
-        sim_uuid,
-    ) or 0
-    total_turns = await db.fetchval(
-        """
+    total_conversations = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+            sim_uuid,
+        )
+        or 0
+    )
+    total_turns = (
+        await db.fetchval(
+            """
         SELECT COALESCE(SUM(turn_count), 0) FROM conversations
         WHERE simulation_id = $1
         """,
-        sim_uuid,
-    ) or 0
+            sim_uuid,
+        )
+        or 0
+    )
     total_cost_val = await db.fetchval(
         "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE simulation_id = $1",
         sim_uuid,
     )
     total_cost = str(total_cost_val) if total_cost_val is not None else "0"
-    total_artifacts = await db.fetchval(
-        "SELECT COUNT(*) FROM artifacts WHERE simulation_id = $1",
-        sim_uuid,
-    ) or 0
-    total_management_flags = await db.fetchval(
-        "SELECT COUNT(*) FROM management_shadow_log WHERE simulation_id = $1",
-        sim_uuid,
-    ) or 0
+    total_artifacts = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM artifacts WHERE simulation_id = $1",
+            sim_uuid,
+        )
+        or 0
+    )
+    total_management_flags = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM management_shadow_log WHERE simulation_id = $1",
+            sim_uuid,
+        )
+        or 0
+    )
 
     return {
         "id": str(sim.id),
@@ -1441,7 +1512,9 @@ async def get_simulation_conversations(
     repo = ConversationRepo(db)
     sim_uuid = uuid.UUID(sim_id)
     conversations, total = await repo.get_conversations_by_simulation(
-        sim_uuid, limit=limit, offset=offset,
+        sim_uuid,
+        limit=limit,
+        offset=offset,
     )
     return {
         "items": [_conversation_to_summary(c) for c in conversations],
@@ -1456,6 +1529,7 @@ async def get_simulation_costs(sim_id: str) -> dict[str, Any]:
     """Cost breakdown by agent for a simulation."""
     db = _get_db()
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
     sim_uuid = uuid.UUID(sim_id)
     data = await cost_repo.get_costs_by_simulation(sim_uuid)
@@ -1471,10 +1545,13 @@ async def get_simulation_timeline(
     """Chronological event stream for a simulation."""
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
+
     sim_repo = SimulationRepo(db)
     sim_uuid = uuid.UUID(sim_id)
     events = await sim_repo.get_timeline_events(
-        sim_uuid, agent_id=agent_id, event_type=event_type,
+        sim_uuid,
+        agent_id=agent_id,
+        event_type=event_type,
     )
     return events
 
@@ -1487,8 +1564,8 @@ async def get_simulation_report(
     """Public simulation report."""
     db = _get_db()
 
-    from core.repos.relationship_repo import RelationshipRepo
     from core.reporting.timeline_reporter import TimelineReporter
+    from core.repos.relationship_repo import RelationshipRepo
 
     relationship_repo = RelationshipRepo(db)
     reporter = TimelineReporter(
@@ -1516,10 +1593,12 @@ async def get_simulation_report(
         relationship_repo=relationship_repo,
     )
     scorecard_result = await scorecard.evaluate()
-    report.sections.append(ReportSection(
-        title="Launch Readiness Scorecard",
-        data=scorecard_result.to_dict(),
-    ))
+    report.sections.append(
+        ReportSection(
+            title="Launch Readiness Scorecard",
+            data=scorecard_result.to_dict(),
+        )
+    )
 
     return report.to_dict()
 
@@ -1529,6 +1608,7 @@ async def get_simulation_assertions(sim_id: str) -> list[dict[str, Any]]:
     """Public assertion results for a simulation."""
     db = _get_db()
     from core.repos.assertion_repo import AssertionRepo
+
     repo = AssertionRepo(db)
     rows = await repo.get_by_simulation(uuid.UUID(sim_id))
     # Transform DB fields to match frontend AssertionResult interface
@@ -1551,6 +1631,7 @@ async def get_simulation_assertions_summary(sim_id: str) -> dict[str, Any]:
     """Public pass/fail/warn summary for simulation assertions."""
     db = _get_db()
     from core.repos.assertion_repo import AssertionRepo
+
     repo = AssertionRepo(db)
     rates = await repo.get_pass_rates(uuid.UUID(sim_id))
     return {
@@ -1565,29 +1646,34 @@ async def get_simulation_evals(sim_id: str) -> list[dict[str, Any]]:
     """Public eval results for a simulation."""
     db = _get_db()
     from core.repos.eval_repo import EvalRepo
+
     eval_repo = EvalRepo(db)
 
     runs = await eval_repo.get_eval_runs(uuid.UUID(sim_id))
     result = []
     for run in runs:
         results = await eval_repo.get_eval_results(run.id)
-        result.append({
-            "id": str(run.id),
-            "simulation_id": str(run.simulation_id),
-            "status": run.status,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-            "overall_score": float(run.overall_score) if run.overall_score is not None else None,
-            "cost": float(run.cost),
-            "results": [
-                {
-                    "category": r.category,
-                    "score": float(r.score) if r.score is not None else None,
-                    "reasoning": r.reasoning,
-                }
-                for r in results
-            ],
-        })
+        result.append(
+            {
+                "id": str(run.id),
+                "simulation_id": str(run.simulation_id),
+                "status": run.status,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                "overall_score": float(run.overall_score)
+                if run.overall_score is not None
+                else None,
+                "cost": float(run.cost),
+                "results": [
+                    {
+                        "category": r.category,
+                        "score": float(r.score) if r.score is not None else None,
+                        "reasoning": r.reasoning,
+                    }
+                    for r in results
+                ],
+            }
+        )
     return result
 
 
@@ -1596,6 +1682,7 @@ async def get_simulation_social_graph(sim_id: str) -> list[dict[str, Any]]:
     """Public social graph for a simulation."""
     db = _get_db()
     from core.repos.relationship_repo import RelationshipRepo
+
     repo = RelationshipRepo(db)
     relationships = await repo.get_social_graph(uuid.UUID(sim_id))
     return [r.model_dump(mode="json") for r in relationships]
@@ -1618,12 +1705,14 @@ async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
             source_id = data.get("source_simulation_id", "")
             if source_id == sim_id or not source_id:
                 agents = data.get("agents", {})
-                results.append({
-                    "filename": f.name,
-                    "simulation_id": source_id,
-                    "snapshot_at": data.get("snapshot_at", ""),
-                    "agent_count": len(agents),
-                })
+                results.append(
+                    {
+                        "filename": f.name,
+                        "simulation_id": source_id,
+                        "snapshot_at": data.get("snapshot_at", ""),
+                        "agent_count": len(agents),
+                    }
+                )
         except Exception:
             continue
     return results
@@ -1644,7 +1733,12 @@ def _artifact_summary(artifact_type: str, tool_input: dict[str, Any] | None) -> 
         case "code_execution":
             text = tool_input.get("code") or tool_input.get("source")
         case "message":
-            text = tool_input.get("content") or tool_input.get("text") or tool_input.get("body") or tool_input.get("message")
+            text = (
+                tool_input.get("content")
+                or tool_input.get("text")
+                or tool_input.get("body")
+                or tool_input.get("message")
+            )
         case "memory_operation":
             text = tool_input.get("content") or tool_input.get("memory")
         case "web_search":

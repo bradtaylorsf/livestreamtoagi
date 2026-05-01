@@ -93,18 +93,20 @@ def tools_to_openai_schema(tools: dict[str, BaseTool]) -> list[dict[str, Any]]:
             if not param_def.get("optional", False):
                 required.append(param_name)
 
-        schemas.append({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": tool.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
+        schemas.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
                 },
-            },
-        })
+            }
+        )
     return schemas
 
 
@@ -121,9 +123,7 @@ async def execute_tool_calls(
     for tc in tool_calls:
         tool = tools.get(tc.name)
         if tool is None:
-            result_content = json.dumps(
-                {"status": "error", "reason": f"Unknown tool: {tc.name}"}
-            )
+            result_content = json.dumps({"status": "error", "reason": f"Unknown tool: {tc.name}"})
         else:
             try:
                 logger.debug("Executing tool %s for %s", tc.name, agent_id)
@@ -136,13 +136,13 @@ async def execute_tool_calls(
                 result_content = json.dumps(result, default=str)
             except Exception as exc:
                 logger.warning("Tool %s failed for %s: %s", tc.name, agent_id, exc)
-                result_content = json.dumps(
-                    {"status": "error", "reason": str(exc)}
-                )
+                result_content = json.dumps({"status": "error", "reason": str(exc)})
 
-        results.append({
-            "role": "tool",
-            "tool_call_id": tc.id,
-            "content": result_content,
-        })
+        results.append(
+            {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": result_content,
+            }
+        )
     return results

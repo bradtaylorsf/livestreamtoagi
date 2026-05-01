@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid as _uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from core.memory.validation import validate_agent_id
@@ -112,17 +112,14 @@ class CoreMemoryManager:
         token_count = self._tc.count_tokens(new_content)
         if token_count > TOKEN_LIMIT:
             raise CoreMemoryExceededError(
-                f"Update would result in {token_count} tokens "
-                f"(limit: {TOKEN_LIMIT})"
+                f"Update would result in {token_count} tokens (limit: {TOKEN_LIMIT})"
             )
 
         return await self._repo.upsert_core_memory(
             agent_id, new_content, token_count, reason, simulation_id=simulation_id
         )
 
-    async def get_token_count(
-        self, agent_id: str, simulation_id: _uuid.UUID | None = None
-    ) -> int:
+    async def get_token_count(self, agent_id: str, simulation_id: _uuid.UUID | None = None) -> int:
         """Return the stored token count for an agent's core memory."""
         record = await self._repo.get_core_memory(agent_id, simulation_id=simulation_id)
         if record is None:
@@ -133,9 +130,7 @@ class CoreMemoryManager:
         self, agent_id: str, limit: int = 50, simulation_id: _uuid.UUID | None = None
     ) -> list[CoreMemoryHistory]:
         """Return version history for an agent's core memory."""
-        history = await self._repo.get_core_memory_history(
-            agent_id, simulation_id=simulation_id
-        )
+        history = await self._repo.get_core_memory_history(agent_id, simulation_id=simulation_id)
         return history[:limit]
 
     async def initialize_agent_memory(
@@ -143,7 +138,7 @@ class CoreMemoryManager:
     ) -> CoreMemory:
         """Create initial core memory from template with identity filled in."""
         validate_agent_id(agent_id)
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = datetime.now(UTC).strftime("%Y-%m-%d")
         content = CORE_MEMORY_TEMPLATE.format(date=date_str, identity=identity)
         token_count = self._tc.count_tokens(content)
         return await self._repo.upsert_core_memory(

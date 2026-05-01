@@ -217,8 +217,11 @@ class CharacterSpawner:
         Returns None if cast is full or LLM client unavailable.
         """
         if not self.can_add_character():
-            logger.info("Cast is full (%d/%d), skipping concept generation",
-                        self.get_active_count(), MAX_CAST_SIZE)
+            logger.info(
+                "Cast is full (%d/%d), skipping concept generation",
+                self.get_active_count(),
+                MAX_CAST_SIZE,
+            )
             return None
 
         if self._llm is None:
@@ -226,9 +229,7 @@ class CharacterSpawner:
             return None
 
         agents = self._registry.get_all_agents()
-        cast_summary = "\n".join(
-            f"- {a.display_name}: {a.role}" for a in agents
-        )
+        cast_summary = "\n".join(f"- {a.display_name}: {a.role}" for a in agents)
 
         prompt = CONCEPT_GENERATION_PROMPT.format(
             cast_summary=cast_summary,
@@ -316,13 +317,8 @@ class CharacterSpawner:
         # Generate personality-tuned config values via LLM or use defaults
         config_values = await self._generate_config_values(application)
 
-        # Read template and fill in values
-        template_path = self._template_dir / "config.yaml"
-        if template_path.exists():
-            template = template_path.read_text()
-        else:
-            template = ""
-
+        # Note: template_path may exist but is currently not consumed; the
+        # config_data dict below is the source of truth for the new agent.
         config_data = {
             "id": agent_id,
             "display_name": application.display_name or f"{agent_id.capitalize()} — New Agent",
@@ -379,8 +375,13 @@ class CharacterSpawner:
             "y": 100 + row * 100,
             "desk_number": existing_count + 1,
         }
-        logger.info("Assigned desk %d to %s at (%d, %d)",
-                     position["desk_number"], agent_id, position["x"], position["y"])
+        logger.info(
+            "Assigned desk %d to %s at (%d, %d)",
+            position["desk_number"],
+            agent_id,
+            position["x"],
+            position["y"],
+        )
         return position
 
     async def onboard(

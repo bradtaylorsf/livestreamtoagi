@@ -76,7 +76,9 @@ class RecallMemoryManager:
 
         # Over-fetch candidates so blended scoring can re-rank
         candidates = await self._repo.search_recall(
-            agent_id, query_embedding, limit=limit * CANDIDATE_MULTIPLIER,
+            agent_id,
+            query_embedding,
+            limit=limit * CANDIDATE_MULTIPLIER,
             simulation_id=simulation_id,
         )
 
