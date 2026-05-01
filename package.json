@@ -19,6 +19,7 @@
     "sim:auto": ".venv/bin/python scripts/chat.py sim autonomous",
     "eval": ".venv/bin/python scripts/chat.py eval",
     "coverage": ".venv/bin/python scripts/chat.py coverage",
+    "llm:local": ".venv/bin/python scripts/check_local_llm.py",
     "reflect": ".venv/bin/python scripts/test_agent.py --reflect --all",
     "reflect:agent": ".venv/bin/python scripts/test_agent.py --reflect --agent",
     "report": ".venv/bin/python scripts/report_simulation.py",

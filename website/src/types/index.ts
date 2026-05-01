@@ -15,6 +15,8 @@ export interface JournalEntry {
   timestamp: string;
   content: string;
   mood: string;
+  image_url: string | null;
+  reflection_type: string;
 }
 
 export interface ChatResponse {

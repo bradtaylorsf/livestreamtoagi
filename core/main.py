@@ -64,8 +64,6 @@ async def lifespan(app: FastAPI):
 
         await svc.config_loader.start_watching()
 
-        api_key = os.environ.get("OPENROUTER_API_KEY", "")
-
         journal_image_gen = JournalImageGenerator(cost_repo=svc.cost_repo)
 
         reflection_mgr = ReflectionManager(
@@ -81,7 +79,7 @@ async def lifespan(app: FastAPI):
             event_bus=svc.event_bus,
         )
 
-        if api_key:
+        if svc.llm_client:
             start_scheduler(reflection_mgr, svc.agent_registry)
 
         idle_behavior = IdleBehaviorSystem(svc.agent_registry)

@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -28,7 +27,7 @@ from core.context_assembly import ContextAssembler
 from core.database import Database
 from core.event_bus import EventBus
 from core.events.event_generator import EventGenerator
-from core.llm_client import OpenRouterClient, refresh_pricing
+from core.llm_client import LOCAL_LLM_BASE_URL, OpenRouterClient, refresh_pricing
 from core.management import Management
 from core.memory.archival_memory import ArchivalMemoryManager
 from core.memory.compaction import MemoryCompactor
@@ -49,6 +48,9 @@ from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
 from core.shared_state import SharedWorkingState
 from core.social.alliances import AllianceManager
+
+if TYPE_CHECKING:
+    import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -134,18 +136,86 @@ class Services:
 def make_embedding_fn(
     http_client: httpx.AsyncClient, api_key: str,
 ) -> EmbeddingFn:
-    """Create an embedding function using the real OpenRouter API."""
-    if not api_key:
+    """Create an embedding function from environment-backed provider config."""
+    from core.memory.embeddings import (
+        embedding_config_from_env,
+        generate_deterministic_embedding,
+        generate_embedding,
+    )
+
+    cfg = embedding_config_from_env(api_key)
+    if cfg.provider == "deterministic":
         logger.warning(
-            "OPENROUTER_API_KEY not set — recall memory embeddings will fail",
+            "Using deterministic local embeddings — recall persistence is testable, "
+            "but semantic recall quality is not being verified",
+        )
+    elif not cfg.api_key:
+        logger.warning(
+            "%s embedding API key not set — recall memory embeddings may fail",
+            cfg.provider,
         )
 
-    from core.memory.embeddings import generate_embedding
-
     async def embedding_fn(text: str) -> list[float]:
-        return await generate_embedding(text, http_client, api_key)
+        if cfg.provider == "deterministic":
+            return generate_deterministic_embedding(text, cfg.dimension)
+        return await generate_embedding(
+            text,
+            http_client,
+            cfg.api_key,
+            url=cfg.url,
+            model=cfg.model,
+            expected_dimension=cfg.dimension,
+        )
 
     return embedding_fn
+
+
+def make_llm_client(
+    *,
+    cost_repo: CostRepo,
+    http_client: httpx.AsyncClient | None = None,
+) -> OpenRouterClient:
+    """Create the configured chat LLM client.
+
+    Environment:
+      LLM_PROVIDER=openrouter|lmstudio|openai-compatible
+      LOCAL_LLM_BASE_URL=http://localhost:1234/v1
+      LOCAL_LLM_MODEL=<loaded LM Studio model id>
+    """
+    provider = os.environ.get("LLM_PROVIDER", "openrouter")
+    provider_key = provider.strip().lower()
+    if provider_key == "openrouter":
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        return OpenRouterClient(
+            api_key=api_key,
+            cost_repo=cost_repo,
+            http_client=http_client,
+            provider="openrouter",
+        )
+
+    api_key = os.environ.get(
+        "LOCAL_LLM_API_KEY",
+        os.environ.get("LLM_API_KEY", "lm-studio"),
+    )
+    base_url = os.environ.get(
+        "LOCAL_LLM_BASE_URL",
+        os.environ.get("LLM_BASE_URL", LOCAL_LLM_BASE_URL),
+    )
+    local_model = os.environ.get("LOCAL_LLM_MODEL") or None
+    local_model_building = os.environ.get("LOCAL_LLM_MODEL_BUILDING") or None
+    passthrough = os.environ.get("LOCAL_LLM_PASSTHROUGH_MODEL", "").lower() in {
+        "1", "true", "yes",
+    }
+    return OpenRouterClient(
+        api_key=api_key,
+        cost_repo=cost_repo,
+        http_client=http_client,
+        provider=provider,
+        base_url=base_url,
+        local_model=local_model,
+        local_model_building=local_model_building,
+        passthrough_model=passthrough,
+    )
 
 
 async def bootstrap_services(
@@ -205,12 +275,15 @@ async def bootstrap_services(
     transcript_repo = TranscriptRepo(db)
     http_client = httpx.AsyncClient()
 
-    await refresh_pricing(http_client)
-    llm_client = OpenRouterClient(api_key=api_key, cost_repo=cost_repo)
+    provider = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+    if provider == "openrouter":
+        await refresh_pricing(http_client)
+    llm_client = make_llm_client(cost_repo=cost_repo)
+    embedding_fn = make_embedding_fn(http_client, api_key)
     core_memory = CoreMemoryManager(memory_repo=memory_repo, token_counter=token_counter)
     recall_memory = RecallMemoryManager(
         memory_repo=memory_repo,
-        embedding_fn=make_embedding_fn(http_client, api_key),
+        embedding_fn=embedding_fn,
     )
     archival_memory = ArchivalMemoryManager(
         transcript_repo=transcript_repo, token_counter=token_counter,
@@ -221,6 +294,7 @@ async def bootstrap_services(
         llm_client=llm_client,
         http_client=http_client,
         openrouter_api_key=api_key,
+        embedding_fn=embedding_fn,
         simulation_id=LIVE_SIMULATION_ID,
     )
 
@@ -251,10 +325,10 @@ async def bootstrap_services(
     economy_manager = AgentEconomyManager(db, simulation_id=LIVE_SIMULATION_ID)
 
     # Initialize economy accounts — exclude management and alpha (non-participant agents)
-    _ECONOMY_EXCLUDED = {"management", "alpha"}
+    economy_excluded = {"management", "alpha"}
     agent_ids = [
         a.id for a in agent_registry.get_all_agents()
-        if a.id not in _ECONOMY_EXCLUDED
+        if a.id not in economy_excluded
     ]
     if agent_ids:
         try:
@@ -298,7 +372,7 @@ async def bootstrap_services(
         agent_state_manager=agent_state_manager,
         agent_registry=agent_registry,
         token_counter=token_counter,
-        embedding_fn=make_embedding_fn(http_client, api_key),
+        embedding_fn=embedding_fn,
         simulation_id=LIVE_SIMULATION_ID,
     )
 

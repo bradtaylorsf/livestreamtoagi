@@ -1,0 +1,113 @@
+# Local LLM Validation — fast proof run for LM Studio/OpenAI-compatible models
+#
+# Purpose:
+#   Verify the fundamentals without paid token usage:
+#   conversation turns, speaker selection, energy logs, internal state changes,
+#   tool calls, transcript archival, recall memory, reflection journals, dreams,
+#   dream goals, and post-dream behavioral context.
+#
+# Recommended run:
+#   LLM_PROVIDER=lmstudio \
+#   LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
+#   EMBEDDING_PROVIDER=deterministic \
+#   python scripts/run_simulation.py \
+#     --name "local-llm-validation" \
+#     --seed-file scenarios/local_llm_validation.yaml \
+#     --agents vera,rex,aurora,pixel \
+#     --max-cost 0.01 \
+#     --verbose
+#
+# Verify:
+#   python scripts/verify_simulation.py \
+#     --name "local-llm-validation" \
+#     --profile local-smoke
+
+audience:
+  initial_viewers: 3
+  growth_rate: none
+  chat_frequency: quiet
+
+seed_tasks: true
+seed_goals: true
+
+phases:
+  - name: local_standup
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    topic: "Local-model systems check: decide what proof we need that this show is alive."
+    location: town_square
+    max_turns: 5
+    assertions:
+      - type: conversation
+        min_turns: 2
+        severity: error
+
+  - name: repeated_pressure
+    type: organic
+    count: 2
+    required_agents: [vera, rex]
+    topics:
+      - "Keep discussing the same validation checklist until it starts to feel repetitive."
+      - "Revisit that exact validation checklist again and notice what changes in energy."
+    location: town_square
+    max_turns: 4
+    assertions:
+      - type: conversation
+        min_turns: 2
+        severity: error
+      - type: relationship
+        interaction_count_increased: true
+        severity: warning
+
+  - name: local_tool_world_state
+    type: tool_exercise
+    agent: pixel
+    required_agents: [pixel]
+    tool: get_world_state
+    context: "Use get_world_state to inspect the current world and report what changed."
+    location: town_square
+    max_turns: 3
+    assertions:
+      - type: tool
+        any_of: [get_world_state]
+        severity: error
+
+  - name: local_tool_memory_update
+    type: tool_exercise
+    agent: aurora
+    required_agents: [aurora]
+    tool: update_core_memory
+    context: "Use update_core_memory to record one concrete lesson from this local validation run."
+    location: town_square
+    max_turns: 3
+    assertions:
+      - type: tool
+        any_of: [update_core_memory]
+        severity: error
+
+  - name: reflection_checkpoint
+    type: reflection
+    reflection_type: 6hour
+    agents: [vera, rex, aurora, pixel]
+
+  - name: dream_checkpoint
+    type: reflection
+    reflection_type: dream
+    agents: [vera, rex, aurora, pixel]
+
+  - name: post_dream_behavior
+    type: organic
+    count: 1
+    required_agents: [vera, aurora]
+    topics:
+      - "Wake up and talk about whether last night's dream changed what you want to build next."
+    location: town_square
+    max_turns: 5
+    assertions:
+      - type: conversation
+        min_turns: 2
+        severity: error
+      - type: memory
+        recall_created: true
+        severity: warning

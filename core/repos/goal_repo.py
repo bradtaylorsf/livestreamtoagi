@@ -92,8 +92,8 @@ class GoalRepo:
         """Update a goal's status. Returns True if found."""
         result = await self.db.execute(
             f"""UPDATE agent_goals
-               SET status = $1,
-                   completed_at = CASE WHEN $1 IN ('completed', 'abandoned')
+               SET status = $1::text,
+                   completed_at = CASE WHEN $1::text IN ('completed', 'abandoned')
                                        THEN now() ELSE completed_at END
                WHERE id = $2 AND {_sim_filter(3)}""",
             status,
