@@ -79,19 +79,21 @@ class EvalAnalyzer:
             if run.id == eval_run_id:
                 continue
             results = await self._eval_repo.get_eval_results(run.id)
-            previous_results.append({
-                "run_id": str(run.id),
-                "overall_score": float(run.overall_score) if run.overall_score else None,
-                "results": [
-                    {
-                        "category": r.category,
-                        "score": float(r.score) if r.score else None,
-                        "reasoning": r.reasoning,
-                        "sub_scores": r.sub_scores,
-                    }
-                    for r in results
-                ],
-            })
+            previous_results.append(
+                {
+                    "run_id": str(run.id),
+                    "overall_score": float(run.overall_score) if run.overall_score else None,
+                    "results": [
+                        {
+                            "category": r.category,
+                            "score": float(r.score) if r.score else None,
+                            "reasoning": r.reasoning,
+                            "sub_scores": r.sub_scores,
+                        }
+                        for r in results
+                    ],
+                }
+            )
 
         # Build the analysis prompt
         prompt_config = _load_analyzer_prompt()
@@ -124,7 +126,9 @@ class EvalAnalyzer:
             proposals=[ProposedChange(**p) for p in validated_proposals],
             trend_data={
                 "previous_runs": len(previous_results),
-                "current_overall": float(current_run.overall_score) if current_run.overall_score else None,
+                "current_overall": float(current_run.overall_score)
+                if current_run.overall_score
+                else None,
                 "is_first_run": len(previous_results) == 0,
             },
         )
@@ -134,9 +138,7 @@ class EvalAnalyzer:
 
         return result
 
-    async def _store_analysis(
-        self, eval_run_id: uuid.UUID, result: AnalysisResult
-    ) -> None:
+    async def _store_analysis(self, eval_run_id: uuid.UUID, result: AnalysisResult) -> None:
         """Store analysis results in the eval_analyses table."""
         try:
             await self._db.execute(
@@ -212,9 +214,7 @@ def _build_user_prompt(
             parts.append("")
     else:
         parts.append("## First Run — No Previous Data")
-        parts.append(
-            "This is the first eval run. There is no prior data for trend analysis."
-        )
+        parts.append("This is the first eval run. There is no prior data for trend analysis.")
         parts.append(
             "Score based on absolute quality of current results only. "
             "Focus on identifying the most impactful improvements rather than trends."
@@ -223,8 +223,10 @@ def _build_user_prompt(
 
     parts.append("## Instructions")
     parts.append("Analyze these results and propose specific, actionable changes.")
-    parts.append("Classify each proposal as prompt_change, param_change, "
-                 "conversation_config_change, or technical_issue.")
+    parts.append(
+        "Classify each proposal as prompt_change, param_change, "
+        "conversation_config_change, or technical_issue."
+    )
     parts.append("Be conservative — small targeted changes are better than sweeping rewrites.")
 
     return "\n".join(parts)
@@ -258,12 +260,16 @@ def _parse_analysis_response(content: str) -> dict[str, Any]:
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
         try:
-            return json.loads(text[start:end + 1])
+            return json.loads(text[start : end + 1])
         except json.JSONDecodeError:
             pass
 
     logger.warning("Could not parse analyzer response as JSON")
-    return {"summary": "Analysis failed — could not parse response", "confidence": 0.0, "proposals": []}
+    return {
+        "summary": "Analysis failed — could not parse response",
+        "confidence": 0.0,
+        "proposals": [],
+    }
 
 
 def _apply_safety_rails(proposals: list[dict[str, Any]]) -> list[dict[str, Any]]:

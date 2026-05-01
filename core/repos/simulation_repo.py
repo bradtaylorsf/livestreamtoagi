@@ -48,9 +48,7 @@ class SimulationRepo:
         return Simulation(**_parse_row(dict(row)))
 
     async def get(self, simulation_id: uuid.UUID) -> Simulation | None:
-        row = await self.db.fetchrow(
-            "SELECT * FROM simulations WHERE id = $1", simulation_id
-        )
+        row = await self.db.fetchrow("SELECT * FROM simulations WHERE id = $1", simulation_id)
         if row is None:
             return None
         return Simulation(**_parse_row(dict(row)))
@@ -205,9 +203,7 @@ class SimulationRepo:
         return Simulation(**_parse_row(dict(row)))
 
     async def delete(self, simulation_id: uuid.UUID) -> bool:
-        result = await self.db.execute(
-            "DELETE FROM simulations WHERE id = $1", simulation_id
-        )
+        result = await self.db.execute("DELETE FROM simulations WHERE id = $1", simulation_id)
         return result == "DELETE 1"
 
     async def count(self, *, status: str | None = None) -> int:
@@ -267,24 +263,28 @@ class SimulationRepo:
                 agents = d["participating_agents"]
                 if isinstance(agents, str):
                     agents = json.loads(agents)
-                events.append({
-                    "timestamp": d["started_at"].isoformat() if d["started_at"] else None,
-                    "event_type": "conversation_started",
-                    "agent_id": None,
-                    "details": {
-                        "conversation_id": str(d["id"]),
-                        "participants": agents,
-                        "trigger_type": d["trigger_type"],
-                        "turn_count": d["turn_count"],
-                    },
-                })
-                if d["ended_at"]:
-                    events.append({
-                        "timestamp": d["ended_at"].isoformat(),
-                        "event_type": "conversation_ended",
+                events.append(
+                    {
+                        "timestamp": d["started_at"].isoformat() if d["started_at"] else None,
+                        "event_type": "conversation_started",
                         "agent_id": None,
-                        "details": {"conversation_id": str(d["id"])},
-                    })
+                        "details": {
+                            "conversation_id": str(d["id"]),
+                            "participants": agents,
+                            "trigger_type": d["trigger_type"],
+                            "turn_count": d["turn_count"],
+                        },
+                    }
+                )
+                if d["ended_at"]:
+                    events.append(
+                        {
+                            "timestamp": d["ended_at"].isoformat(),
+                            "event_type": "conversation_ended",
+                            "agent_id": None,
+                            "details": {"conversation_id": str(d["id"])},
+                        }
+                    )
 
         # Artifacts (tool usage)
         if event_type is None or event_type == "tool_use":
@@ -302,16 +302,18 @@ class SimulationRepo:
             )
             for r in rows:
                 d = dict(r)
-                events.append({
-                    "timestamp": d["created_at"].isoformat() if d["created_at"] else None,
-                    "event_type": "tool_use",
-                    "agent_id": d["agent_id"],
-                    "details": {
-                        "artifact_id": str(d["id"]),
-                        "tool_name": d["tool_name"],
-                        "artifact_type": d["artifact_type"],
-                    },
-                })
+                events.append(
+                    {
+                        "timestamp": d["created_at"].isoformat() if d["created_at"] else None,
+                        "event_type": "tool_use",
+                        "agent_id": d["agent_id"],
+                        "details": {
+                            "artifact_id": str(d["id"]),
+                            "tool_name": d["tool_name"],
+                            "artifact_type": d["artifact_type"],
+                        },
+                    }
+                )
 
         # Sort all events chronologically
         events.sort(key=lambda e: e["timestamp"] or "")

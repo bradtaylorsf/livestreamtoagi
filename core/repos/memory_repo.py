@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 MAX_LIMIT = 500
 
+
 def _sim_filter(param_num: int) -> str:
     """Return SQL fragment for simulation_id filtering."""
     return f"simulation_id = ${param_num}"
@@ -210,9 +211,7 @@ class MemoryRepo:
         )
         return [ConversationBuffer(**dict(r)) for r in rows]
 
-    async def clear_buffer(
-        self, agent_id: str, simulation_id: _uuid.UUID | None = None
-    ) -> None:
+    async def clear_buffer(self, agent_id: str, simulation_id: _uuid.UUID | None = None) -> None:
         await self.db.execute(
             f"DELETE FROM conversation_buffer WHERE agent_id = $1 AND {_sim_filter(2)}",
             agent_id,
@@ -292,23 +291,42 @@ class MemoryRepo:
         offset: int = 0,
         simulation_id: _uuid.UUID | None = None,
     ) -> tuple[list[JournalEntry], int]:
-        """Return paginated journal entries with total count."""
+        """Return paginated journal entries with total count.
+
+        When ``simulation_id`` is None, returns entries from every simulation
+        (including the live one).
+        """
         limit = min(limit, MAX_LIMIT)
-        count = await self.db.fetchval(
-            f"SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1 AND {_sim_filter(2)}",
-            agent_id,
-            simulation_id,
-        )
-        rows = await self.db.fetch(
-            f"""SELECT * FROM journal_entries
-               WHERE agent_id = $1 AND {_sim_filter(4)}
-               ORDER BY created_at DESC
-               LIMIT $2 OFFSET $3""",
-            agent_id,
-            limit,
-            offset,
-            simulation_id,
-        )
+        if simulation_id is None:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1",
+                agent_id,
+            )
+            rows = await self.db.fetch(
+                """SELECT * FROM journal_entries
+                   WHERE agent_id = $1
+                   ORDER BY created_at DESC
+                   LIMIT $2 OFFSET $3""",
+                agent_id,
+                limit,
+                offset,
+            )
+        else:
+            count = await self.db.fetchval(
+                f"SELECT COUNT(*) FROM journal_entries WHERE agent_id = $1 AND {_sim_filter(2)}",
+                agent_id,
+                simulation_id,
+            )
+            rows = await self.db.fetch(
+                f"""SELECT * FROM journal_entries
+                   WHERE agent_id = $1 AND {_sim_filter(4)}
+                   ORDER BY created_at DESC
+                   LIMIT $2 OFFSET $3""",
+                agent_id,
+                limit,
+                offset,
+                simulation_id,
+            )
         return [JournalEntry(**dict(r)) for r in rows], count or 0
 
     async def get_recent_journal_entries(
@@ -456,7 +474,10 @@ class MemoryRepo:
         return [SelfModificationProposal(**dict(r)) for r in rows]
 
     async def update_proposal_status(
-        self, proposal_id: int, status: str, reviewed_by: str,
+        self,
+        proposal_id: int,
+        status: str,
+        reviewed_by: str,
         simulation_id: _uuid.UUID | None = None,
     ) -> None:
         await self.db.execute(
@@ -486,7 +507,8 @@ class MemoryRepo:
         return [SelfModificationProposal(**dict(r)) for r in rows]
 
     async def check_and_auto_approve(
-        self, auto_approval_enabled: bool = False,
+        self,
+        auto_approval_enabled: bool = False,
         simulation_id: _uuid.UUID | None = None,
     ) -> int:
         """Auto-approve proposals older than 4 hours when enabled.

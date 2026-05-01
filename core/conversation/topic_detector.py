@@ -145,10 +145,7 @@ class TopicDetector:
             "Classify this conversation snippet into exactly one topic.\n"
             f"Options: {', '.join(allowed)}, general\n"
             "Conversation:\n"
-            + "\n".join(
-                f"{m.get('agent_id', '?')}: {m.get('content', '')}"
-                for m in messages
-            )
+            + "\n".join(f"{m.get('agent_id', '?')}: {m.get('content', '')}" for m in messages)
             + "\n\nTopic (one word):"
         )
 

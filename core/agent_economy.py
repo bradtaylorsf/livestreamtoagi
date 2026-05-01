@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Default weekly budget split
 DEFAULT_WEEKLY_TOTAL = Decimal("45.0")
 INDIVIDUAL_SHARE = Decimal("0.6")  # 60% split equally among agents
-COMMONS_SHARE = Decimal("0.4")     # 40% to commons pool
+COMMONS_SHARE = Decimal("0.4")  # 40% to commons pool
 
 
 class AgentEconomyManager:
@@ -92,7 +92,8 @@ class AgentEconomyManager:
         """Get the full account for an agent."""
         row = await self._db.fetchrow(
             "SELECT * FROM agent_accounts WHERE agent_id = $1 AND simulation_id = $2",
-            agent_id, self.simulation_id,
+            agent_id,
+            self.simulation_id,
         )
         if row is None:
             return AgentAccount(agent_id=agent_id)
@@ -102,7 +103,8 @@ class AgentEconomyManager:
         """Read current balance for an agent."""
         row = await self._db.fetchrow(
             "SELECT balance FROM agent_accounts WHERE agent_id = $1 AND simulation_id = $2",
-            agent_id, self.simulation_id,
+            agent_id,
+            self.simulation_id,
         )
         if row is None:
             return Decimal("0")
@@ -113,7 +115,10 @@ class AgentEconomyManager:
         return (await self.get_balance(agent_id)) <= 0
 
     async def deduct_cost(
-        self, agent_id: str, amount: Decimal, description: str,
+        self,
+        agent_id: str,
+        amount: Decimal,
+        description: str,
     ) -> bool:
         """Deduct a tool cost from the agent's balance.
 
@@ -149,7 +154,11 @@ class AgentEconomyManager:
         return True
 
     async def transfer(
-        self, from_agent: str, to_agent: str, amount: Decimal, reason: str,
+        self,
+        from_agent: str,
+        to_agent: str,
+        amount: Decimal,
+        reason: str,
     ) -> bool:
         """Transfer funds between two agents atomically.
 
@@ -189,9 +198,7 @@ class AgentEconomyManager:
                     self.simulation_id,
                 )
                 if "UPDATE 0" in result2:
-                    raise ValueError(
-                        f"Transfer failed: receiver {to_agent} has no account"
-                    )
+                    raise ValueError(f"Transfer failed: receiver {to_agent} has no account")
 
                 # Record both sides
                 await conn.execute(
@@ -225,7 +232,8 @@ class AgentEconomyManager:
                     rows = await conn.fetch(
                         """SELECT agent_id, weekly_allocation FROM agent_accounts
                            WHERE agent_id = ANY($1) AND simulation_id = $2""",
-                        agent_ids, self.simulation_id,
+                        agent_ids,
+                        self.simulation_id,
                     )
                 else:
                     rows = await conn.fetch(
@@ -255,7 +263,9 @@ class AgentEconomyManager:
                     )
 
     async def get_transactions(
-        self, agent_id: str, limit: int = 20,
+        self,
+        agent_id: str,
+        limit: int = 20,
     ) -> list[AgentTransaction]:
         """Get recent transactions for an agent."""
         rows = await self._db.fetch(

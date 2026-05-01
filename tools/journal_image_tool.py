@@ -70,8 +70,12 @@ class JournalImageGenerator:
         api_key: str | None = None,
         gcs_bucket: str | None = None,
     ) -> None:
-        self._api_key = api_key if api_key is not None else os.environ.get("GOOGLE_IMAGEN_API_KEY", "")
-        self._gcs_bucket = gcs_bucket if gcs_bucket is not None else os.environ.get("GCS_BUCKET_NAME", "")
+        self._api_key = (
+            api_key if api_key is not None else os.environ.get("GOOGLE_IMAGEN_API_KEY", "")
+        )
+        self._gcs_bucket = (
+            gcs_bucket if gcs_bucket is not None else os.environ.get("GCS_BUCKET_NAME", "")
+        )
         self._cost_repo = cost_repo
 
     @property
@@ -106,9 +110,7 @@ class JournalImageGenerator:
             return image_url
 
         except Exception:
-            logger.exception(
-                "Failed to generate journal illustration for agent=%s", agent_id
-            )
+            logger.exception("Failed to generate journal illustration for agent=%s", agent_id)
             return None
 
     async def _call_imagen_api(self, prompt: str) -> bytes | None:
@@ -145,7 +147,10 @@ class JournalImageGenerator:
         parts = candidates[0].get("content", {}).get("parts", [])
         for part in parts:
             inline_data = part.get("inlineData") or part.get("inline_data")
-            if inline_data and inline_data.get("mimeType", inline_data.get("mime_type", "")) == "image/png":
+            if (
+                inline_data
+                and inline_data.get("mimeType", inline_data.get("mime_type", "")) == "image/png"
+            ):
                 b64_image = inline_data.get("data", "")
                 if b64_image:
                     return base64.b64decode(b64_image)
@@ -176,9 +181,7 @@ class JournalImageGenerator:
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                upload_url, content=image_bytes, headers=headers
-            )
+            resp = await client.post(upload_url, content=image_bytes, headers=headers)
             resp.raise_for_status()
 
         return f"https://storage.googleapis.com/{self._gcs_bucket}/{filename}"

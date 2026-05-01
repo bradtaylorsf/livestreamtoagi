@@ -66,9 +66,7 @@ class AgentStateRepo:
         )
         return AgentState(**dict(row))
 
-    async def get_all(
-        self, simulation_id: _uuid.UUID | None = None
-    ) -> list[AgentState]:
+    async def get_all(self, simulation_id: _uuid.UUID | None = None) -> list[AgentState]:
         """Load all agent states from DB."""
         rows = await self.db.fetch(
             "SELECT * FROM agent_internal_state WHERE simulation_id = $1 ORDER BY agent_id",

@@ -93,6 +93,26 @@ export default function ChallengeBoard({
 
   return (
     <div>
+      {/* Status legend */}
+      <div className="flex flex-wrap gap-3 mb-4 text-xs" data-testid="status-legend">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-yellow-400" />
+          <span className="text-foreground/50">Pending — awaiting agent assignment</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-blue-400" />
+          <span className="text-foreground/50">In Progress — agents working on it</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
+          <span className="text-foreground/50">Completed</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-red-400" />
+          <span className="text-foreground/50">Failed</span>
+        </span>
+      </div>
+
       {/* Filter controls */}
       <div className="flex flex-wrap gap-3 mb-6">
         <select

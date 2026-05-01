@@ -7,7 +7,7 @@ import logging
 import uuid as _uuid
 from typing import TYPE_CHECKING, Any
 
-from core.models import AgentPromptVersion, ConversationParamVersion, ActiveConfig
+from core.models import ActiveConfig, AgentPromptVersion, ConversationParamVersion
 
 if TYPE_CHECKING:
     from core.database import Database
@@ -24,7 +24,10 @@ class ConfigVersionRepo:
     # ── Agent prompt versions ────────────────────────────────
 
     async def get_active_prompt(
-        self, agent_id: str, *, simulation_id: _uuid.UUID | None = None,
+        self,
+        agent_id: str,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> AgentPromptVersion | None:
         """Get the active prompt version for an agent."""
         row = await self.db.fetchrow(
@@ -41,8 +44,11 @@ class ConfigVersionRepo:
         return AgentPromptVersion(**_parse_jsonb_row(dict(row)))
 
     async def get_prompt_version(
-        self, agent_id: str, version: int,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        agent_id: str,
+        version: int,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> AgentPromptVersion | None:
         """Get a specific prompt version."""
         row = await self.db.fetchrow(
@@ -57,7 +63,10 @@ class ConfigVersionRepo:
         return AgentPromptVersion(**_parse_jsonb_row(dict(row)))
 
     async def get_prompt_history(
-        self, agent_id: str, *, limit: int = 20,
+        self,
+        agent_id: str,
+        *,
+        limit: int = 20,
         simulation_id: _uuid.UUID | None = None,
     ) -> list[AgentPromptVersion]:
         """Get version history for an agent's prompts."""
@@ -112,8 +121,11 @@ class ConfigVersionRepo:
         return AgentPromptVersion(**_parse_jsonb_row(dict(row)))
 
     async def set_active_prompt_version(
-        self, agent_id: str, version: int,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        agent_id: str,
+        version: int,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         """Point the active config to a specific prompt version."""
         await self.db.execute(
@@ -127,8 +139,11 @@ class ConfigVersionRepo:
         )
 
     async def rollback_prompt(
-        self, agent_id: str, version: int,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        agent_id: str,
+        version: int,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         """Rollback to a previous prompt version (just updates the pointer)."""
         # Verify the version exists
@@ -139,15 +154,15 @@ class ConfigVersionRepo:
             simulation_id,
         )
         if not exists:
-            raise ValueError(
-                f"Version {version} not found for agent {agent_id}"
-            )
+            raise ValueError(f"Version {version} not found for agent {agent_id}")
         await self.set_active_prompt_version(agent_id, version, simulation_id=simulation_id)
 
     # ── Conversation param versions ──────────────────────────
 
     async def get_active_conversation_params(
-        self, *, simulation_id: _uuid.UUID | None = None,
+        self,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> ConversationParamVersion | None:
         """Get the active conversation params version.
 
@@ -167,8 +182,10 @@ class ConfigVersionRepo:
         return ConversationParamVersion(**_parse_jsonb_row(dict(row)))
 
     async def get_conversation_param_version(
-        self, version: int,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        version: int,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> ConversationParamVersion | None:
         """Get a specific conversation param version."""
         row = await self.db.fetchrow(
@@ -181,7 +198,9 @@ class ConfigVersionRepo:
         return ConversationParamVersion(**_parse_jsonb_row(dict(row)))
 
     async def get_conversation_param_history(
-        self, *, limit: int = 20,
+        self,
+        *,
+        limit: int = 20,
         simulation_id: _uuid.UUID | None = None,
     ) -> list[ConversationParamVersion]:
         """Get version history for conversation params."""
@@ -226,8 +245,10 @@ class ConfigVersionRepo:
         return ConversationParamVersion(**_parse_jsonb_row(dict(row)))
 
     async def set_active_conversation_version(
-        self, version: int,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        version: int,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         """Update all active_config rows for this simulation to point to a conversation param version."""
         await self.db.execute(
@@ -237,8 +258,10 @@ class ConfigVersionRepo:
         )
 
     async def rollback_conversation_params(
-        self, version: int,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        version: int,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> None:
         """Rollback to a previous conversation param version."""
         exists = await self.db.fetchval(
@@ -253,8 +276,10 @@ class ConfigVersionRepo:
     # ── Active config ────────────────────────────────────────
 
     async def get_active_config(
-        self, agent_id: str,
-        *, simulation_id: _uuid.UUID | None = None,
+        self,
+        agent_id: str,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> ActiveConfig | None:
         """Get the active config pointer for an agent."""
         row = await self.db.fetchrow(
@@ -267,7 +292,9 @@ class ConfigVersionRepo:
         return ActiveConfig(**dict(row))
 
     async def get_all_active_configs(
-        self, *, simulation_id: _uuid.UUID | None = None,
+        self,
+        *,
+        simulation_id: _uuid.UUID | None = None,
     ) -> list[ActiveConfig]:
         """Get all active config pointers for a simulation."""
         rows = await self.db.fetch(

@@ -63,9 +63,7 @@ class RedisClient:
     async def get(self, key: str) -> str | None:
         return await self.client.get(key)
 
-    async def set(
-        self, key: str, value: str, *, ex: int | None = None
-    ) -> bool:
+    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
         return await self.client.set(key, value, ex=ex)
 
     async def delete(self, *keys: str) -> int:

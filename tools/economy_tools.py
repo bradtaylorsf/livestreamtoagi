@@ -47,7 +47,10 @@ class TransferBudgetTool(BaseTool):
             return {"status": "rejected", "reason": "Cannot transfer to yourself"}
 
         success = await self._economy.transfer(
-            self._agent_id, to_agent, amount, reason,
+            self._agent_id,
+            to_agent,
+            amount,
+            reason,
         )
         if not success:
             balance = await self._economy.get_balance(self._agent_id)

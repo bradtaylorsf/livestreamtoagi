@@ -114,9 +114,7 @@ class EvalRepo:
         return [EvalRun(**_parse_jsonb(dict(r))) for r in rows]
 
     async def get_eval_run(self, run_id: uuid.UUID) -> EvalRun | None:
-        row = await self.db.fetchrow(
-            "SELECT * FROM eval_runs WHERE id = $1", run_id
-        )
+        row = await self.db.fetchrow("SELECT * FROM eval_runs WHERE id = $1", run_id)
         if row is None:
             return None
         return EvalRun(**_parse_jsonb(dict(row)))
@@ -130,9 +128,7 @@ class EvalRepo:
         )
         return [EvalResult(**_parse_jsonb(dict(r))) for r in rows]
 
-    async def get_latest_eval_run(
-        self, simulation_id: uuid.UUID
-    ) -> EvalRun | None:
+    async def get_latest_eval_run(self, simulation_id: uuid.UUID) -> EvalRun | None:
         row = await self.db.fetchrow(
             """SELECT * FROM eval_runs
                WHERE simulation_id = $1
@@ -161,14 +157,10 @@ class EvalRepo:
 
     async def get_eval_categories(self) -> list[str]:
         """Return distinct category names from all eval results."""
-        rows = await self.db.fetch(
-            "SELECT DISTINCT category FROM eval_results ORDER BY category"
-        )
+        rows = await self.db.fetch("SELECT DISTINCT category FROM eval_results ORDER BY category")
         return [r["category"] for r in rows]
 
-    async def get_eval_history(
-        self, category: str
-    ) -> list[dict[str, Any]]:
+    async def get_eval_history(self, category: str) -> list[dict[str, Any]]:
         """Score history for a category across all eval runs, for charting."""
         rows = await self.db.fetch(
             """SELECT er.score, er.created_at, e.simulation_id, e.id AS eval_run_id

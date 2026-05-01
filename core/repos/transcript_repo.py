@@ -43,14 +43,10 @@ class TranscriptRepo:
         return _row_to_transcript(row) if row else None
 
     async def get(self, transcript_id: int) -> Transcript | None:
-        row = await self.db.fetchrow(
-            "SELECT * FROM transcripts WHERE id = $1", transcript_id
-        )
+        row = await self.db.fetchrow("SELECT * FROM transcripts WHERE id = $1", transcript_id)
         return _row_to_transcript(row) if row else None
 
-    async def search_by_participant(
-        self, agent_id: str, limit: int = 100
-    ) -> list[Transcript]:
+    async def search_by_participant(self, agent_id: str, limit: int = 100) -> list[Transcript]:
         limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
             """SELECT * FROM transcripts
@@ -62,9 +58,7 @@ class TranscriptRepo:
         )
         return [_row_to_transcript(r) for r in rows]
 
-    async def search_by_event_type(
-        self, event_type: str, limit: int = 100
-    ) -> list[Transcript]:
+    async def search_by_event_type(self, event_type: str, limit: int = 100) -> list[Transcript]:
         limit = min(limit, MAX_LIMIT)
         rows = await self.db.fetch(
             """SELECT * FROM transcripts

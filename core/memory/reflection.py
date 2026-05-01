@@ -182,7 +182,10 @@ class ReflectionManager:
         self._event_bus = event_bus
 
     async def _parse_and_track(
-        self, content: str, agent_id: str, context: str,
+        self,
+        content: str,
+        agent_id: str,
+        context: str,
     ) -> dict:
         """Parse JSON from LLM response and emit error event on failure."""
         result = _parse_json_response(content)
@@ -213,7 +216,9 @@ class ReflectionManager:
         validate_agent_id(agent_id)
         since = datetime.now(UTC) - timedelta(hours=6)
         recall_memories = await self._repo.get_recent_recall_memories(
-            agent_id, since, simulation_id=self._simulation_id,
+            agent_id,
+            since,
+            simulation_id=self._simulation_id,
         )
 
         if not recall_memories:
@@ -223,9 +228,13 @@ class ReflectionManager:
             )
             return ReflectionResult(journal_entry=journal)
 
-        core_memory = await self._core.get_core_memory(
-            agent_id, simulation_id=self._simulation_id,
-        ) or ""
+        core_memory = (
+            await self._core.get_core_memory(
+                agent_id,
+                simulation_id=self._simulation_id,
+            )
+            or ""
+        )
         recall_text = "\n".join(
             f"- [ID:{m.id}] ({m.event_type}) {m.summary}" for m in recall_memories
         )
@@ -250,7 +259,9 @@ class ReflectionManager:
         )
 
         analysis = await self._parse_and_track(
-            response.content, agent_id, "6hour_reflection",
+            response.content,
+            agent_id,
+            "6hour_reflection",
         )
         importance_updates = 0
         promoted_count = 0
@@ -263,12 +274,14 @@ class ReflectionManager:
                 cleaned_id = str(mem_id_str).strip()
                 for prefix in ("ID:", "id:", "ID_", "id_", "#"):
                     if cleaned_id.startswith(prefix):
-                        cleaned_id = cleaned_id[len(prefix):]
+                        cleaned_id = cleaned_id[len(prefix) :]
                         break
                 mem_id = int(cleaned_id)
                 score = max(0.0, min(1.0, float(score)))
                 await self._repo.update_importance_score(
-                    mem_id, score, simulation_id=self._simulation_id,
+                    mem_id,
+                    score,
+                    simulation_id=self._simulation_id,
                 )
                 importance_updates += 1
             except (ValueError, TypeError):
@@ -305,16 +318,20 @@ class ReflectionManager:
         if self._relationship_tracker and promoted_count > 0:
             try:
                 core_mem = await self._core.get_core_memory(
-                    agent_id, simulation_id=self._simulation_id,
+                    agent_id,
+                    simulation_id=self._simulation_id,
                 )
                 if core_mem:
                     await self._relationship_tracker.update_from_reflection(
-                        agent_id, analysis, core_mem,
+                        agent_id,
+                        analysis,
+                        core_mem,
                     )
             except Exception:
                 logger.warning(
                     "Relationship update from 6h reflection failed for %s",
-                    agent_id, exc_info=True,
+                    agent_id,
+                    exc_info=True,
                 )
 
         # Review goals: update progress and identify new goals from reflection
@@ -322,17 +339,17 @@ class ReflectionManager:
         if self._goal_manager is not None:
             try:
                 goals = await self._goal_manager.get_goals(
-                    agent_id, simulation_id=self._simulation_id,
+                    agent_id,
+                    simulation_id=self._simulation_id,
                 )
                 active_goals = [g for g in goals if g.status not in ("done", "completed")]
                 if active_goals:
-                    goal_context = (
-                        f" Active goals: {', '.join(g.goal for g in active_goals[:3])}."
-                    )
+                    goal_context = f" Active goals: {', '.join(g.goal for g in active_goals[:3])}."
             except Exception:
                 logger.warning(
                     "Failed to review goals during 6h reflection for %s",
-                    agent_id, exc_info=True,
+                    agent_id,
+                    exc_info=True,
                 )
 
         # Snapshot internal state to DB during reflection (#267)
@@ -342,12 +359,15 @@ class ReflectionManager:
             except Exception:
                 logger.warning(
                     "Failed to snapshot internal state for %s during 6h reflection",
-                    agent_id, exc_info=True,
+                    agent_id,
+                    exc_info=True,
                 )
 
         # Generate autonomous goals from reflection (#269)
         goals_generated = await self._generate_goals(
-            agent_id, recall_text, model,
+            agent_id,
+            recall_text,
+            model,
         )
 
         # Run dream cycle after reflection (#272)
@@ -386,9 +406,13 @@ class ReflectionManager:
     async def run_weekly_reflection(self, agent_id: str) -> ReflectionResult:
         """Full Tier 1 review, relationship refresh, pruning, and self-modification proposals."""
         validate_agent_id(agent_id)
-        core_memory = await self._core.get_core_memory(
-            agent_id, simulation_id=self._simulation_id,
-        ) or ""
+        core_memory = (
+            await self._core.get_core_memory(
+                agent_id,
+                simulation_id=self._simulation_id,
+            )
+            or ""
+        )
         model = self._get_building_model(agent_id)
 
         prompt = WEEKLY_SYSTEM_PROMPT.format(
@@ -410,7 +434,9 @@ class ReflectionManager:
         )
 
         analysis = await self._parse_and_track(
-            response.content, agent_id, "weekly_reflection",
+            response.content,
+            agent_id,
+            "weekly_reflection",
         )
         promoted_count = 0
         proposals = []
@@ -439,12 +465,15 @@ class ReflectionManager:
         # Verify token count is under limit, trim if needed
         try:
             token_count = await self._core.get_token_count(
-                agent_id, simulation_id=self._simulation_id,
+                agent_id,
+                simulation_id=self._simulation_id,
             )
             if token_count > TOKEN_LIMIT:
                 logger.warning(
                     "Core memory for %s is %d tokens (limit %d), requesting trim",
-                    agent_id, token_count, TOKEN_LIMIT,
+                    agent_id,
+                    token_count,
+                    TOKEN_LIMIT,
                 )
                 await self._trim_core_memory(agent_id, model)
         except ValueError:
@@ -458,7 +487,8 @@ class ReflectionManager:
             if not all([proposal_type, description, reasoning]):
                 logger.warning(
                     "Skipping incomplete self-modification proposal for %s: %s",
-                    agent_id, mod,
+                    agent_id,
+                    mod,
                 )
                 continue
             try:
@@ -478,21 +508,28 @@ class ReflectionManager:
         if self._relationship_tracker and promoted_count > 0:
             try:
                 core_mem = await self._core.get_core_memory(
-                    agent_id, simulation_id=self._simulation_id,
+                    agent_id,
+                    simulation_id=self._simulation_id,
                 )
                 if core_mem:
                     await self._relationship_tracker.update_from_reflection(
-                        agent_id, analysis, core_mem,
+                        agent_id,
+                        analysis,
+                        core_mem,
                     )
             except Exception:
                 logger.warning(
                     "Relationship update from weekly reflection failed for %s",
-                    agent_id, exc_info=True,
+                    agent_id,
+                    exc_info=True,
                 )
 
         # Weekly goal generation — broader, more ambitious goals (#269)
         goals_generated = await self._generate_goals(
-            agent_id, core_memory, model, max_goals=3,
+            agent_id,
+            core_memory,
+            model,
+            max_goals=3,
         )
 
         # Generate journal entry
@@ -559,20 +596,26 @@ class ReflectionManager:
         # Generate illustration (fire-and-forget — never blocks journal creation)
         if self._journal_image_generator is not None:
             try:
-                sim_id = self._simulation_id if isinstance(self._simulation_id, _uuid.UUID) else None
+                sim_id = (
+                    self._simulation_id if isinstance(self._simulation_id, _uuid.UUID) else None
+                )
                 image_url = await self._journal_image_generator.generate(
-                    response.content, agent_id, simulation_id=sim_id,
+                    response.content,
+                    agent_id,
+                    simulation_id=sim_id,
                 )
                 if image_url:
                     await self._repo.update_journal_entry_image(
-                        journal.id, image_url,
+                        journal.id,
+                        image_url,
                         simulation_id=self._simulation_id,
                     )
                     journal.image_url = image_url
             except Exception:
                 logger.exception(
                     "Journal illustration failed for agent=%s entry=%s (non-blocking)",
-                    agent_id, journal.id,
+                    agent_id,
+                    journal.id,
                 )
 
         return journal
@@ -608,13 +651,15 @@ class ReflectionManager:
         # Check goal cap — skip if agent already has enough goals
         try:
             existing_goals = await self._goal_manager.get_goals(
-                agent_id, simulation_id=self._simulation_id,
+                agent_id,
+                simulation_id=self._simulation_id,
             )
             active_goals = [g for g in existing_goals if g.status not in ("done", "completed")]
             if len(active_goals) >= self._GOAL_CAP:
                 logger.info(
                     "Skipping goal generation for %s — already has %d active goals",
-                    agent_id, len(active_goals),
+                    agent_id,
+                    len(active_goals),
                 )
                 return 0
         except Exception:
@@ -629,12 +674,20 @@ class ReflectionManager:
                 state = await self._agent_state_manager.get_state(agent_id)
                 state_text = self._agent_state_manager.format_state_for_context(state)
                 # Identify high-value state variables for priority influence
-                for attr in ("boredom", "frustration", "social_need", "creative_need", "recognition_need"):
+                for attr in (
+                    "boredom",
+                    "frustration",
+                    "social_need",
+                    "creative_need",
+                    "recognition_need",
+                ):
                     val = getattr(state, attr, 0.0)
                     if val >= 0.6:
                         state_high[attr] = val
             except Exception:
-                logger.warning("Failed to get state for goal generation: %s", agent_id, exc_info=True)
+                logger.warning(
+                    "Failed to get state for goal generation: %s", agent_id, exc_info=True
+                )
 
         # Build personality summary from agent config
         agent_cfg = self._registry.get_agent(agent_id)
@@ -648,9 +701,9 @@ class ReflectionManager:
             if agent_cfg.system_prompt:
                 personality_summary += f"\n{agent_cfg.system_prompt[:200]}"
 
-        current_goals_text = "\n".join(
-            f"- [{g.status}] {g.goal}" for g in active_goals[:5]
-        ) or "No current goals."
+        current_goals_text = (
+            "\n".join(f"- [{g.status}] {g.goal}" for g in active_goals[:5]) or "No current goals."
+        )
 
         prompt = GOAL_GENERATION_PROMPT.format(
             agent_id=agent_id,
@@ -677,7 +730,9 @@ class ReflectionManager:
             return 0
 
         parsed = await self._parse_and_track(
-            response.content, agent_id, "goal_generation",
+            response.content,
+            agent_id,
+            "goal_generation",
         )
         goals = parsed.get("goals", [])
         if not isinstance(goals, list):
@@ -719,7 +774,9 @@ class ReflectionManager:
             except Exception:
                 logger.warning(
                     "Failed to add reflection-generated goal for %s: %s",
-                    agent_id, goal_text[:100], exc_info=True,
+                    agent_id,
+                    goal_text[:100],
+                    exc_info=True,
                 )
 
         if created:
@@ -728,9 +785,13 @@ class ReflectionManager:
 
     async def _trim_core_memory(self, agent_id: str, model: str) -> None:
         """Ask the LLM to trim core memory to fit under the token limit."""
-        core_memory = await self._core.get_core_memory(
-            agent_id, simulation_id=self._simulation_id,
-        ) or ""
+        core_memory = (
+            await self._core.get_core_memory(
+                agent_id,
+                simulation_id=self._simulation_id,
+            )
+            or ""
+        )
         response = await self._llm.complete(
             messages=[
                 {
@@ -753,7 +814,9 @@ class ReflectionManager:
             simulation_id=self._simulation_id,
         )
         trimmed = await self._parse_and_track(
-            response.content, agent_id, "memory_trimming",
+            response.content,
+            agent_id,
+            "memory_trimming",
         )
         for update in trimmed.get("updates", []):
             section = update.get("section", "")
@@ -761,7 +824,10 @@ class ReflectionManager:
             if section in VALID_SECTIONS and content:
                 try:
                     await self._core.update_core_memory(
-                        agent_id, section, content, "weekly_reflection: token trimming",
+                        agent_id,
+                        section,
+                        content,
+                        "weekly_reflection: token trimming",
                         simulation_id=self._simulation_id,
                     )
                 except Exception:
@@ -784,7 +850,7 @@ def _repair_truncated_json(text: str) -> str:
     in_string = False
     escape = False
     stack: list[str] = []  # tracks open { and [
-    last_comma_pos = 0      # position after the last top-level comma (safe rollback)
+    last_comma_pos = 0  # position after the last top-level comma (safe rollback)
 
     for i, ch in enumerate(text):
         if escape:
@@ -901,7 +967,8 @@ def _parse_json_response(content: str) -> dict:
         if not isinstance(result, dict):
             logger.warning(
                 "LLM response parsed as %s instead of dict: %.200s",
-                type(result).__name__, content,
+                type(result).__name__,
+                content,
             )
             return {}
         return result
@@ -927,6 +994,7 @@ def _parse_json_response(content: str) -> dict:
         except (json.JSONDecodeError, ValueError):
             pass
         logger.warning(
-            "Failed to parse JSON from LLM response: %.200s", content,
+            "Failed to parse JSON from LLM response: %.200s",
+            content,
         )
         return {}

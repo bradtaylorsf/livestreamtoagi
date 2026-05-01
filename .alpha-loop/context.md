@@ -22,5 +22,5 @@ Here's the project context:
 - **Cost tracking must be 100% accurate** — every LLM call goes through `core/llm_client.py` with Langfuse tracing; never bypass for eval integrity
 
 ## Active State
-- Test status: (will be filled in by the loop)
-- Recent changes: (will be filled in by the loop)
+- Test status: _(to be filled by loop)_
+- Recent changes: simulation isolation fixes, error logging for evals, DB-backed eval analysis (commits around #252)

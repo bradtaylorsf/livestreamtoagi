@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import random
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -124,10 +124,7 @@ class EventGenerator:
         category = self._select_category()
 
         # Pick a template
-        templates = [
-            t for t in EVENT_TEMPLATES.get(category, [])
-            if t["severity"] == severity
-        ]
+        templates = [t for t in EVENT_TEMPLATES.get(category, []) if t["severity"] == severity]
         if not templates:
             # Fall back to any template in the category
             templates = EVENT_TEMPLATES.get(category, [])
@@ -138,6 +135,7 @@ class EventGenerator:
 
         # Build the event
         import uuid
+
         now = datetime.now()
         expires_at = None
         if template.get("duration_hours"):
@@ -162,37 +160,47 @@ class EventGenerator:
         # Persist to world_events table
         if self._world_repo is not None:
             from core.models import WorldEventCreate
-            await self._world_repo.create_event(WorldEventCreate(
-                event_type=f"random_{category}",
-                description=f"[{event.severity.upper()}] {event.title}: {event.description}",
-                agents_involved=event.affected_agents or [],
-                audience_participation=False,
-                simulation_id=self.simulation_id,
-            ))
+
+            await self._world_repo.create_event(
+                WorldEventCreate(
+                    event_type=f"random_{category}",
+                    description=f"[{event.severity.upper()}] {event.title}: {event.description}",
+                    agents_involved=event.affected_agents or [],
+                    audience_participation=False,
+                    simulation_id=self.simulation_id,
+                )
+            )
 
         # Inject into trigger system
         if self._triggers is not None:
             event_type = "challenge_event" if category == "challenge" else "random_event"
-            self._triggers.queue_event(event_type, {
-                "event_id": event.event_id,
-                "title": event.title,
-                "description": event.description,
-                "severity": event.severity,
-                "category": category,
-                "affected_agents": event.affected_agents,
-                "requires_response": event.requires_response,
-            })
+            self._triggers.queue_event(
+                event_type,
+                {
+                    "event_id": event.event_id,
+                    "title": event.title,
+                    "description": event.description,
+                    "severity": event.severity,
+                    "category": category,
+                    "affected_agents": event.affected_agents,
+                    "requires_response": event.requires_response,
+                },
+            )
 
         # Emit for stream overlay
         if self._event_bus is not None:
             from core.event_bus import EventType
-            await self._event_bus.emit(EventType.WORLD_EXPANSION, {
-                "event_type": "random_event",
-                "title": event.title,
-                "description": event.description,
-                "severity": event.severity,
-                "category": category,
-            })
+
+            await self._event_bus.emit(
+                EventType.WORLD_EXPANSION,
+                {
+                    "event_type": "random_event",
+                    "title": event.title,
+                    "description": event.description,
+                    "severity": event.severity,
+                    "category": category,
+                },
+            )
 
         # Update agent states for affected agents
         if self._state_mgr is not None:
@@ -200,7 +208,9 @@ class EventGenerator:
 
         logger.info(
             "Generated %s event: [%s] %s",
-            event.severity, event.category, event.title,
+            event.severity,
+            event.category,
+            event.title,
         )
         return event
 
@@ -277,7 +287,9 @@ class EventGenerator:
             agent_ids = event.affected_agents
         else:
             # All agents — get IDs from state manager's cache
-            agent_ids = list(self._state_mgr._cache.keys()) if hasattr(self._state_mgr, '_cache') else []
+            agent_ids = (
+                list(self._state_mgr._cache.keys()) if hasattr(self._state_mgr, "_cache") else []
+            )
             if not agent_ids:
                 return
 

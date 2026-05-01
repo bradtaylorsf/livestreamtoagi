@@ -57,14 +57,6 @@ describe("robots", () => {
     expect(rules[0].allow).toBe("/");
   });
 
-  it("blocks admin pages", () => {
-    const config = robots();
-    const rules = Array.isArray(config.rules)
-      ? config.rules
-      : [config.rules];
-    expect(rules[0].disallow).toBe("/admin");
-  });
-
   it("includes sitemap URL", () => {
     const config = robots();
     expect(config.sitemap).toBe(

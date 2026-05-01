@@ -45,6 +45,16 @@ ALL_TOOLS = sorted([
 ])
 
 CONVERSATION_AGENTS = {"aurora", "fork", "grok", "pixel", "rex", "sentinel", "vera"}
+LOCAL_PROVIDERS = {"lmstudio", "openai-compatible"}
+STATE_DEFAULTS = {
+    "energy": 0.7,
+    "satisfaction": 0.5,
+    "boredom": 0.2,
+    "frustration": 0.1,
+    "social_need": 0.5,
+    "creative_need": 0.3,
+    "recognition_need": 0.3,
+}
 
 
 @dataclass
@@ -73,8 +83,6 @@ class VerificationReport:
 
         for c in self.checks:
             marker = "PASS" if c.passed else ("WARN" if c.severity == "warning" else "FAIL")
-            color_start = ""
-            color_end = ""
             print(f"  [{marker}] {c.name}")
             if not c.passed or c.details:
                 for line in c.details.split("\n"):
@@ -128,6 +136,11 @@ async def verify(args: argparse.Namespace) -> bool:
 
     print(f"Verifying simulation: {sim.name} ({simulation_id})")
     print(f"Status: {sim.status}")
+    profile = args.profile
+    llm_provider = _infer_llm_provider(sim.config, sim.model_versions)
+    is_local = llm_provider in LOCAL_PROVIDERS
+    print(f"Profile: {profile}")
+    print(f"LLM provider: {llm_provider}")
 
     # ── 1. Simulation completed successfully ────────────────────
     report.add(
@@ -148,12 +161,40 @@ async def verify(args: argparse.Namespace) -> bool:
         "No runtime errors",
         len(runtime_errors) == 0,
         f"{len(runtime_errors)} runtime errors found:\n" + "\n".join(
-            f"  - [{e.get('error_type', '?')}] {e.get('source', '?')}: {str(e.get('detail', ''))[:100]}"
+            "  - "
+            f"[{e.get('error_type', '?')}] {e.get('source', '?')}: "
+            f"{str(e.get('detail', ''))[:100]}"
             for e in runtime_errors[:10]
         ) if runtime_errors else "Clean",
     )
 
-    # ── 3. Tool coverage — all 31 tools exercised ──────────────
+    # ── 3. Model provenance ────────────────────────────────────
+    model_values = [
+        value
+        for agent_versions in (sim.model_versions or {}).values()
+        for value in agent_versions.values()
+    ]
+    if is_local:
+        non_local_models = [
+            value for value in model_values
+            if not any(str(value).startswith(f"{p}:") for p in LOCAL_PROVIDERS)
+        ]
+        report.add(
+            "Local model provenance",
+            len(model_values) > 0 and len(non_local_models) == 0,
+            "All model versions point at the local provider"
+            if model_values and not non_local_models else
+            f"Non-local model entries: {non_local_models[:5]}",
+        )
+    else:
+        report.add(
+            "Model provenance recorded",
+            len(model_values) > 0,
+            f"{len(model_values)} model version entries",
+            severity="warning",
+        )
+
+    # ── 4. Tool coverage — all tools exercised for comprehensive profiles ─
     artifact_rows = await svc.db.fetch(
         """SELECT tool_name, agent_id, status, tool_output
            FROM artifacts
@@ -173,14 +214,23 @@ async def verify(args: argparse.Namespace) -> bool:
             "output": row["tool_output"],
         })
 
-    missing_tools = [t for t in ALL_TOOLS if t not in found_tools]
-    report.add(
-        f"Tool coverage ({len(ALL_TOOLS) - len(missing_tools)}/{len(ALL_TOOLS)})",
-        len(missing_tools) == 0,
-        f"Missing: {', '.join(missing_tools)}" if missing_tools else "All tools exercised",
-    )
+    if profile in {"comprehensive", "tool-coverage"}:
+        missing_tools = [t for t in ALL_TOOLS if t not in found_tools]
+        report.add(
+            f"Tool coverage ({len(ALL_TOOLS) - len(missing_tools)}/{len(ALL_TOOLS)})",
+            len(missing_tools) == 0,
+            f"Missing: {', '.join(missing_tools)}" if missing_tools else "All tools exercised",
+        )
+    else:
+        report.add(
+            f"Tool activity ({len(found_tools)} distinct tools)",
+            len(found_tools) >= 1,
+            f"Tools observed: {', '.join(sorted(found_tools)[:8])}"
+            if found_tools else "No tools fired",
+            severity="warning",
+        )
 
-    # ── 4. Tool execution status — all should be "executed" ────
+    # ── 5. Tool execution status — all should be "executed" ────
     failed_tools = []
     for tool_name, entries in found_tools.items():
         for entry in entries:
@@ -194,7 +244,7 @@ async def verify(args: argparse.Namespace) -> bool:
         if failed_tools else "All tools executed successfully",
     )
 
-    # ── 5. Tool outputs — check for error payloads ─────────────
+    # ── 6. Tool outputs — check for error payloads ─────────────
     error_outputs = []
     for tool_name, entries in found_tools.items():
         for entry in entries:
@@ -205,11 +255,12 @@ async def verify(args: argparse.Namespace) -> bool:
     report.add(
         "Tool output correctness",
         len(error_outputs) == 0,
-        f"{len(error_outputs)} tools returned errors:\n" + "\n".join(f"  - {e}" for e in error_outputs[:10])
+        f"{len(error_outputs)} tools returned errors:\n"
+        + "\n".join(f"  - {e}" for e in error_outputs[:10])
         if error_outputs else "No error payloads in tool outputs",
     )
 
-    # ── 6. Conversations happened ──────────────────────────────
+    # ── 7. Conversations happened ──────────────────────────────
     conv_rows = await svc.db.fetch(
         """SELECT id, trigger_type, turn_count, participating_agents
            FROM conversations
@@ -217,10 +268,11 @@ async def verify(args: argparse.Namespace) -> bool:
         simulation_id,
     )
 
+    min_conversations = 2 if profile == "local-smoke" else 5
     report.add(
         f"Conversations created ({len(conv_rows)})",
-        len(conv_rows) >= 5,  # At least the organic breaks + some tool exercises
-        f"Expected >= 5, got {len(conv_rows)}",
+        len(conv_rows) >= min_conversations,
+        f"Expected >= {min_conversations}, got {len(conv_rows)}",
     )
 
     zero_turn_convs = [r for r in conv_rows if (r["turn_count"] or 0) == 0]
@@ -231,7 +283,7 @@ async def verify(args: argparse.Namespace) -> bool:
         severity="warning" if len(zero_turn_convs) <= 5 else "error",
     )
 
-    # ── 7. Cost tracking — costs recorded and match simulation ─
+    # ── 8. Cost / LLM-call tracking ────────────────────────────
     cost_rows = await svc.db.fetch(
         """SELECT cost_type, SUM(amount) as total, COUNT(*) as count
            FROM cost_events
@@ -241,13 +293,30 @@ async def verify(args: argparse.Namespace) -> bool:
     )
 
     total_cost_from_events = sum(Decimal(str(r["total"])) for r in cost_rows)
+    llm_call_count = sum(r["count"] for r in cost_rows if r["cost_type"] == "llm_call")
     report.add(
-        f"Cost events recorded (${total_cost_from_events:.4f})",
-        total_cost_from_events > 0,
-        f"No cost events found — LLM calls not tracked!"
-        if total_cost_from_events == 0 else
+        f"LLM calls tracked ({llm_call_count}, ${total_cost_from_events:.4f})",
+        llm_call_count > 0 and (is_local or total_cost_from_events > 0),
+        "No LLM call events found — LLM calls not tracked!"
+        if llm_call_count == 0 else
         f"Cost types: {', '.join(r['cost_type'] + '=' + str(r['count']) for r in cost_rows)}",
     )
+
+    if is_local:
+        local_call_count = await svc.db.fetchval(
+            """SELECT COUNT(*) FROM cost_events
+               WHERE simulation_id = $1
+                 AND cost_type = 'llm_call'
+                 AND details->>'provider' = ANY($2::text[])""",
+            simulation_id,
+            list(LOCAL_PROVIDERS),
+        )
+        report.add(
+            f"Local provider LLM calls ({local_call_count})",
+            local_call_count > 0,
+            "LLM calls include local provider provenance"
+            if local_call_count else "No llm_call rows had local provider details",
+        )
 
     # Check cost reconciliation with simulation record
     if sim.total_cost is not None and total_cost_from_events > 0:
@@ -256,11 +325,33 @@ async def verify(args: argparse.Namespace) -> bool:
         report.add(
             "Cost reconciliation",
             diff < Decimal("0.01"),
-            f"Sim record: ${sim_cost:.4f}, cost_events: ${total_cost_from_events:.4f}, diff: ${diff:.4f}",
+            f"Sim record: ${sim_cost:.4f}, "
+            f"cost_events: ${total_cost_from_events:.4f}, diff: ${diff:.4f}",
             severity="warning",
         )
 
-    # ── 8. Relationships created ───────────────────────────────
+    # ── 9. Energy model evidence ───────────────────────────────
+    energy_rows = await svc.db.fetch(
+        """SELECT changes
+           FROM energy_change_log
+           WHERE simulation_id = $1""",
+        simulation_id,
+    )
+    nonzero_energy = 0
+    for row in energy_rows:
+        changes = row["changes"]
+        if isinstance(changes, str):
+            import json as _json
+            changes = _json.loads(changes)
+        if abs(float(changes.get("net", 0))) > 0.0001:
+            nonzero_energy += 1
+    report.add(
+        f"Conversation energy logged ({len(energy_rows)} ticks)",
+        len(energy_rows) > 0 and nonzero_energy > 0,
+        f"{nonzero_energy} ticks changed energy" if energy_rows else "No energy log rows",
+    )
+
+    # ── 10. Relationships created ──────────────────────────────
     rel_rows = await svc.db.fetch(
         """SELECT agent_id, target_agent_id, sentiment_score, interaction_count
            FROM agent_relationships
@@ -276,7 +367,7 @@ async def verify(args: argparse.Namespace) -> bool:
         f"Pairs: {', '.join(r['agent_id'] + '->' + r['target_agent_id'] for r in rel_rows[:5])}...",
     )
 
-    # ── 9. Journal entries from reflection ─────────────────────
+    # ── 11. Journal entries from reflection ────────────────────
     journal_rows = await svc.db.fetch(
         """SELECT agent_id, reflection_type, image_url
            FROM journal_entries
@@ -308,7 +399,7 @@ async def verify(args: argparse.Namespace) -> bool:
         severity="warning",
     )
 
-    # ── 10. Core memory was updated ────────────────────────────
+    # ── 12. Core memory was updated ────────────────────────────
     core_mem_rows = await svc.db.fetch(
         """SELECT agent_id, LENGTH(content) as content_len
            FROM core_memory
@@ -322,7 +413,7 @@ async def verify(args: argparse.Namespace) -> bool:
         f"Expected {len(CONVERSATION_AGENTS)} agents, got {len(core_mem_rows)}",
     )
 
-    # ── 11. Recall memories created ────────────────────────────
+    # ── 13. Recall memories created ────────────────────────────
     recall_count = await svc.db.fetchval(
         "SELECT COUNT(*) FROM recall_memory WHERE simulation_id = $1",
         simulation_id,
@@ -335,7 +426,7 @@ async def verify(args: argparse.Namespace) -> bool:
         if recall_count == 0 else f"{recall_count} recall memories stored",
     )
 
-    # ── 12. Agent goals seeded and tracked ─────────────────────
+    # ── 14. Agent goals seeded and tracked ─────────────────────
     goal_rows = await svc.db.fetch(
         """SELECT agent_id, COUNT(*) as count
            FROM agent_goals
@@ -351,7 +442,20 @@ async def verify(args: argparse.Namespace) -> bool:
         "No goals were created — seed_goals may not have fired",
     )
 
-    # ── 13. Economy accounts exist ─────────────────────────────
+    dream_goal_count = await svc.db.fetchval(
+        """SELECT COUNT(*) FROM agent_goals
+           WHERE simulation_id = $1 AND source = 'dream'""",
+        simulation_id,
+    )
+    report.add(
+        f"Dream-generated goals ({dream_goal_count})",
+        profile != "local-smoke" or dream_goal_count >= 1,
+        "Dreams produced at least one goal"
+        if dream_goal_count else "No dream goals were persisted",
+        severity="warning" if profile != "local-smoke" else "error",
+    )
+
+    # ── 15. Economy accounts exist ─────────────────────────────
     account_rows = await svc.db.fetch(
         """SELECT agent_id, balance
            FROM agent_accounts
@@ -366,9 +470,10 @@ async def verify(args: argparse.Namespace) -> bool:
         f"Expected ~{len(expected_econ_agents)}, got {len(account_rows)}",
     )
 
-    # ── 14. Agent internal state was tracked ───────────────────
+    # ── 16. Agent internal state was tracked ───────────────────
     state_rows = await svc.db.fetch(
-        """SELECT agent_id, energy, mood, satisfaction
+        """SELECT agent_id, energy, satisfaction, boredom, frustration,
+                  social_need, creative_need, recognition_need, mood
            FROM agent_internal_state
            WHERE simulation_id = $1""",
         simulation_id,
@@ -380,8 +485,22 @@ async def verify(args: argparse.Namespace) -> bool:
         "No agent state snapshots — AgentStateManager may not be persisting",
         severity="warning",
     )
+    changed_states = 0
+    moods = set()
+    for row in state_rows:
+        state = dict(row)
+        moods.add(state["mood"])
+        for key, default in STATE_DEFAULTS.items():
+            if key in state and abs(float(state[key]) - default) > 0.0001:
+                changed_states += 1
+                break
+    report.add(
+        f"Agent emotional state changed ({changed_states} agents)",
+        changed_states >= 1,
+        f"Moods observed: {', '.join(sorted(moods))}" if moods else "No moods observed",
+    )
 
-    # ── 15. Management shadow logs ─────────────────────────────
+    # ── 17. Management shadow logs ─────────────────────────────
     mgmt_rows = await svc.db.fetch(
         """SELECT COUNT(*) as count FROM management_shadow_log
            WHERE simulation_id = $1""",
@@ -396,7 +515,7 @@ async def verify(args: argparse.Namespace) -> bool:
         severity="warning",
     )
 
-    # ── 16. Transcripts stored ─────────────────────────────────
+    # ── 18. Transcripts stored ─────────────────────────────────
     transcript_count = await svc.db.fetchval(
         """SELECT COUNT(*) FROM transcripts t
            JOIN conversations c ON t.conversation_id = c.id
@@ -410,7 +529,7 @@ async def verify(args: argparse.Namespace) -> bool:
         "No transcripts stored — archival memory not running",
     )
 
-    # ── 17. Cost diagnostics from LLM client ──────────────────
+    # ── 19. Cost diagnostics from LLM client ──────────────────
     diag = svc.llm_client.diagnostics()
     lost = diag.get("lost_cost_events", 0)
     report.add(
@@ -420,7 +539,7 @@ async def verify(args: argparse.Namespace) -> bool:
         if lost > 0 else "No cost events lost",
     )
 
-    # ── 18. Per-agent participation ────────────────────────────
+    # ── 20. Per-agent participation ────────────────────────────
     agent_turns = await svc.db.fetch(
         """SELECT ce.agent_id, COUNT(*) as turns
            FROM cost_events ce
@@ -430,7 +549,19 @@ async def verify(args: argparse.Namespace) -> bool:
     )
 
     participating = {r["agent_id"] for r in agent_turns}
-    missing_agents = CONVERSATION_AGENTS - participating - {"management", "alpha"}
+    expected_participants = CONVERSATION_AGENTS
+    if profile == "local-smoke":
+        import json as _json
+        expected_participants = set()
+        for row in conv_rows:
+            participants = row["participating_agents"] or []
+            if isinstance(participants, str):
+                participants = _json.loads(participants)
+            expected_participants.update(participants)
+        expected_participants -= {"management", "alpha"}
+        if not expected_participants:
+            expected_participants = CONVERSATION_AGENTS
+    missing_agents = expected_participants - participating - {"management", "alpha", "system"}
     report.add(
         f"Agent participation ({len(participating)} agents active)",
         len(missing_agents) == 0,
@@ -444,12 +575,32 @@ async def verify(args: argparse.Namespace) -> bool:
     return report.passed
 
 
+def _infer_llm_provider(config: dict | None, model_versions: dict | None) -> str:
+    """Infer the provider used by a simulation record."""
+    if isinstance(config, dict) and config.get("llm_provider"):
+        return str(config["llm_provider"])
+    if isinstance(model_versions, dict):
+        for agent_versions in model_versions.values():
+            if isinstance(agent_versions, dict):
+                for value in agent_versions.values():
+                    text = str(value)
+                    if ":" in text:
+                        return text.split(":", 1)[0]
+    return "openrouter"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Comprehensive simulation verification"
     )
     parser.add_argument("--name", type=str, help="Simulation name")
     parser.add_argument("--simulation-id", type=str, help="Simulation UUID")
+    parser.add_argument(
+        "--profile",
+        choices=["comprehensive", "tool-coverage", "local-smoke"],
+        default="comprehensive",
+        help="Verification profile (default: comprehensive)",
+    )
 
     args = parser.parse_args()
     if not args.name and not args.simulation_id:

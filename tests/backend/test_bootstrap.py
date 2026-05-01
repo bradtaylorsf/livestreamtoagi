@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -66,11 +67,15 @@ def testmake_embedding_fn_warns_on_missing_api_key(caplog):
 
     from core.bootstrap import make_embedding_fn
 
-    with caplog.at_level(logging.WARNING, logger="core.bootstrap"):
+    env = {"LLM_PROVIDER": "openrouter", "EMBEDDING_PROVIDER": "openrouter"}
+    with (
+        patch.dict("os.environ", env),
+        caplog.at_level(logging.WARNING, logger="core.bootstrap"),
+    ):
         make_embedding_fn(httpx.AsyncClient(), "")
 
     assert any(
-        "OPENROUTER_API_KEY not set" in msg for msg in caplog.messages
+        "openrouter embedding API key not set" in msg for msg in caplog.messages
     ), f"Expected warning about missing API key, got: {caplog.messages}"
 
 
@@ -82,12 +87,55 @@ def testmake_embedding_fn_no_warning_with_api_key(caplog):
 
     from core.bootstrap import make_embedding_fn
 
-    with caplog.at_level(logging.WARNING, logger="core.bootstrap"):
+    env = {"LLM_PROVIDER": "openrouter", "EMBEDDING_PROVIDER": "openrouter"}
+    with (
+        patch.dict("os.environ", env),
+        caplog.at_level(logging.WARNING, logger="core.bootstrap"),
+    ):
         make_embedding_fn(httpx.AsyncClient(), "sk-test-key")
 
     assert not any(
-        "OPENROUTER_API_KEY not set" in msg for msg in caplog.messages
+        "embedding API key not set" in msg for msg in caplog.messages
     ), f"Unexpected warning with valid API key: {caplog.messages}"
+
+
+def testmake_embedding_fn_uses_deterministic_for_local_provider(caplog):
+    """Local LLM smoke runs default to deterministic zero-cost embeddings."""
+    import logging
+
+    import httpx
+
+    from core.bootstrap import make_embedding_fn
+
+    with (
+        patch.dict("os.environ", {"LLM_PROVIDER": "lmstudio", "EMBEDDING_PROVIDER": ""}),
+        caplog.at_level(logging.WARNING, logger="core.bootstrap"),
+    ):
+        make_embedding_fn(httpx.AsyncClient(), "")
+
+    assert any(
+        "Using deterministic local embeddings" in msg for msg in caplog.messages
+    ), f"Expected deterministic embedding warning, got: {caplog.messages}"
+
+
+def test_make_llm_client_uses_lmstudio_env() -> None:
+    """make_llm_client wires local provider settings from env."""
+    from unittest.mock import MagicMock
+
+    from core.bootstrap import make_llm_client
+
+    env = {
+        "LLM_PROVIDER": "lmstudio",
+        "LOCAL_LLM_BASE_URL": "http://localhost:1234/v1",
+        "LOCAL_LLM_MODEL": "qwen-local",
+    }
+    with patch.dict("os.environ", env):
+        client = make_llm_client(cost_repo=MagicMock())
+
+    assert client.provider == "lmstudio"
+    assert client.base_url == "http://localhost:1234/v1"
+    assert client.runtime_model_id("claude-haiku-4-5") == "qwen-local"
+    asyncio.run(client.close())
 
 
 def test_no_dummy_embed_anywhere():

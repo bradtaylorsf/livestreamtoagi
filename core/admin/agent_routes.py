@@ -42,8 +42,12 @@ router = APIRouter(tags=["agents"])
 
 
 def _agent_summary_from_config(
-    a: AgentConfig, *, total_cost: float = 0, message_count: int = 0,
-    conversation_count: int = 0, artifact_count: int = 0,
+    a: AgentConfig,
+    *,
+    total_cost: float = 0,
+    message_count: int = 0,
+    conversation_count: int = 0,
+    artifact_count: int = 0,
 ) -> AgentSummary:
     """Build AgentSummary from an AgentConfig object."""
     status = a.status.value if hasattr(a.status, "value") else str(a.status)
@@ -76,6 +80,7 @@ async def list_agents(
 ) -> list[AgentSummary]:
     """List all agents with current status, total cost, message count."""
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
 
     agents = registry.get_all_agents()
@@ -83,9 +88,13 @@ async def list_agents(
     for a in agents:
         costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
         total = sum(c.amount for c in costs if c.amount) if costs else 0
-        result.append(_agent_summary_from_config(
-            a, total_cost=total, message_count=len(costs) if costs else 0,
-        ))
+        result.append(
+            _agent_summary_from_config(
+                a,
+                total_cost=total,
+                message_count=len(costs) if costs else 0,
+            )
+        )
     return result
 
 
@@ -101,12 +110,15 @@ async def get_agent(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
     costs = await cost_repo.get_costs_by_agent(agent_id, simulation_id=LIVE_SIMULATION_ID)
     total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
 
     summary = _agent_summary_from_config(
-        agent, total_cost=total_cost, message_count=len(costs) if costs else 0,
+        agent,
+        total_cost=total_cost,
+        message_count=len(costs) if costs else 0,
     )
     return AgentDetail(
         **summary.model_dump(),
@@ -127,6 +139,7 @@ async def get_agent_system_prompt(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
     core_mem = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
 
@@ -145,7 +158,7 @@ async def get_agent_system_prompt(
         for name, content in raw_layers.items()
         if content
     ]
-    total_tokens = sum(l.token_count for l in layers)
+    total_tokens = sum(layer.token_count for layer in layers)
 
     return SystemPromptResponse(
         assembled_prompt=assembled,
@@ -161,6 +174,7 @@ async def get_agent_core_memory(
 ) -> CoreMemoryResponse:
     """Current core memory contents + version history."""
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
 
     current = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
@@ -196,15 +210,23 @@ async def get_agent_recall_memories(
 ) -> PaginatedResponse[dict[str, Any]]:
     """Paginated recall memories (embeddings hidden, content shown)."""
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
 
     if search:
         memories, total = await memory_repo.search_recall_memories_by_keyword(
-            agent_id, search, limit=limit, offset=offset, simulation_id=simulation_id,
+            agent_id,
+            search,
+            limit=limit,
+            offset=offset,
+            simulation_id=simulation_id,
         )
     else:
         memories, total = await memory_repo.get_recall_memories_paginated(
-            agent_id, limit=limit, offset=offset, simulation_id=simulation_id,
+            agent_id,
+            limit=limit,
+            offset=offset,
+            simulation_id=simulation_id,
         )
 
     items = []
@@ -226,6 +248,7 @@ async def get_agent_conversations(
 ) -> PaginatedResponse[Conversation]:
     """Paginated conversation history for this agent."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     conversations, total = await conv_repo.get_conversations_by_agent(
@@ -245,6 +268,7 @@ async def get_agent_artifacts(
 ) -> PaginatedResponse[Artifact]:
     """All artifacts produced by this agent."""
     from core.repos.artifact_repo import ArtifactRepo
+
     artifact_repo = ArtifactRepo(db)
 
     artifacts, total = await artifact_repo.get_artifacts_by_agent(
@@ -266,6 +290,7 @@ async def get_agent_costs(
 ) -> CostBreakdownResponse:
     """Cost breakdown: by day, by type, total."""
     from core.repos.cost_repo import CostRepo
+
     cost_repo = CostRepo(db)
 
     data = await cost_repo.get_costs_by_agent_grouped(
@@ -273,8 +298,7 @@ async def get_agent_costs(
     )
 
     by_day = [
-        CostByDay(date=d.get("day", ""), cost=d.get("total", "0"))
-        for d in data.get("by_day", [])
+        CostByDay(date=d.get("day", ""), cost=d.get("total", "0")) for d in data.get("by_day", [])
     ]
     by_type = [
         CostByType(
@@ -304,10 +328,14 @@ async def get_agent_journal(
 ) -> PaginatedResponse[JournalEntry]:
     """Journal entries with full content."""
     from core.repos.memory_repo import MemoryRepo
+
     memory_repo = MemoryRepo(db)
 
     entries, total = await memory_repo.get_journal_entries(
-        agent_id, limit=limit, offset=offset, simulation_id=simulation_id,
+        agent_id,
+        limit=limit,
+        offset=offset,
+        simulation_id=simulation_id,
     )
     return PaginatedResponse(items=entries, total=total, limit=limit, offset=offset)
 
@@ -322,6 +350,7 @@ async def get_agent_relationships(
     if simulation_id is None:
         raise HTTPException(status_code=400, detail="simulation_id query parameter required")
     from core.repos.relationship_repo import RelationshipRepo
+
     repo = RelationshipRepo(db)
     relationships = await repo.get_all_for_agent(simulation_id, agent_id)
     return [r.model_dump(mode="json") for r in relationships]
@@ -338,6 +367,7 @@ async def get_agent_relationship_detail(
     if simulation_id is None:
         raise HTTPException(status_code=400, detail="simulation_id query parameter required")
     from core.repos.relationship_repo import RelationshipRepo
+
     repo = RelationshipRepo(db)
     rel = await repo.get(simulation_id, agent_id, target_id)
     if rel is None:

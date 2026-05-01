@@ -83,6 +83,7 @@ class VotingManager:
             return
 
         import json
+
         votes = row["agent_votes"] or {}
         if isinstance(votes, str):
             votes = json.loads(votes)
@@ -110,6 +111,7 @@ class VotingManager:
 
         if self._event_bus is not None:
             from core.event_bus import EventType
+
             await self._event_bus.emit(
                 EventType.POLL_CREATED,
                 {
@@ -157,6 +159,7 @@ class VotingManager:
             return "rejected"
 
         import json
+
         votes = row["agent_votes"] or {}
         if isinstance(votes, str):
             votes = json.loads(votes)
@@ -186,7 +189,11 @@ class VotingManager:
 
         logger.info(
             "Vote tally for %s: agent=%.2f, audience=%.2f, combined=%.2f → %s",
-            application_id, agent_score, audience_score, combined, result,
+            application_id,
+            agent_score,
+            audience_score,
+            combined,
+            result,
         )
         return result
 

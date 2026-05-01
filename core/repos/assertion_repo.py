@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from core.repos.utils import serialize_jsonb
-
 if TYPE_CHECKING:
     import uuid
 
     from core.database import Database
+
+
+def _to_jsonb(val: Any) -> str | None:
+    """Encode any value (including raw strings) to a valid JSONB literal."""
+    if val is None:
+        return None
+    return json.dumps(val, default=str)
 
 
 class AssertionRepo:
@@ -34,15 +39,13 @@ class AssertionRepo:
                 phase_name,
                 r.get("name", "unknown"),
                 r.get("passed", False),
-                serialize_jsonb(r.get("expected")),
-                serialize_jsonb(r.get("actual")),
+                _to_jsonb(r.get("expected")),
+                _to_jsonb(r.get("actual")),
                 r.get("severity", "warning"),
                 r.get("error_message"),
             )
 
-    async def get_by_simulation(
-        self, simulation_id: uuid.UUID
-    ) -> list[dict[str, Any]]:
+    async def get_by_simulation(self, simulation_id: uuid.UUID) -> list[dict[str, Any]]:
         rows = await self.db.fetch(
             """SELECT * FROM phase_assertions
                WHERE simulation_id = $1
@@ -51,9 +54,7 @@ class AssertionRepo:
         )
         return [self._parse_row(r) for r in rows]
 
-    async def get_by_phase(
-        self, simulation_id: uuid.UUID, phase_name: str
-    ) -> list[dict[str, Any]]:
+    async def get_by_phase(self, simulation_id: uuid.UUID, phase_name: str) -> list[dict[str, Any]]:
         rows = await self.db.fetch(
             """SELECT * FROM phase_assertions
                WHERE simulation_id = $1 AND phase_name = $2
@@ -63,9 +64,7 @@ class AssertionRepo:
         )
         return [self._parse_row(r) for r in rows]
 
-    async def get_pass_rates(
-        self, simulation_id: uuid.UUID
-    ) -> dict[str, Any]:
+    async def get_pass_rates(self, simulation_id: uuid.UUID) -> dict[str, Any]:
         """Get assertion pass/fail/warn summary for a simulation."""
         row = await self.db.fetchrow(
             """SELECT
@@ -80,8 +79,11 @@ class AssertionRepo:
         )
         if row is None:
             return {
-                "passed": 0, "failed_error": 0, "failed_warning": 0,
-                "failed_info": 0, "total": 0,
+                "passed": 0,
+                "failed_error": 0,
+                "failed_warning": 0,
+                "failed_info": 0,
+                "total": 0,
             }
         return dict(row)
 

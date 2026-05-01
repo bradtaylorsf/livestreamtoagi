@@ -16,7 +16,6 @@ from core.models import (
     CycleResult,
     EvolutionConfig,
     EvolutionReport,
-    ProposedChange,
 )
 
 if TYPE_CHECKING:
@@ -24,10 +23,8 @@ if TYPE_CHECKING:
     from core.eval.analyzer import EvalAnalyzer
     from core.eval.change_applier import ChangeApplier
     from core.eval.engine import EvalEngine
-    from core.eval.issue_generator import EvalIssueGenerator
     from core.repos.config_version_repo import ConfigVersionRepo
     from core.repos.evolution_repo import EvolutionRepo
-    from core.simulation.orchestrator import SimulationOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +63,9 @@ class EvolutionLoop:
 
         logger.info(
             "Starting evolution loop %s: max_cycles=%d, auto_apply=%s",
-            loop_run_id, config.max_cycles, config.auto_apply,
+            loop_run_id,
+            config.max_cycles,
+            config.auto_apply,
         )
 
         for cycle_num in range(config.max_cycles):
@@ -125,7 +124,8 @@ class EvolutionLoop:
 
         logger.info(
             "Evolution loop complete: %d cycles, $%.4f total, %s → %s (%s)",
-            len(history), total_cost,
+            len(history),
+            total_cost,
             f"{baseline_score:.1f}" if baseline_score else "N/A",
             f"{final_score:.1f}" if final_score else "N/A",
             stop_reason,
@@ -164,12 +164,8 @@ class EvolutionLoop:
             analysis = await self._analyzer.analyze(eval_run_id)
 
             # 4. Separate technical issues from tunable changes
-            technical_issues = [
-                p for p in analysis.proposals if p.type == "technical_issue"
-            ]
-            tunable_changes = [
-                p for p in analysis.proposals if p.type != "technical_issue"
-            ]
+            technical_issues = [p for p in analysis.proposals if p.type == "technical_issue"]
+            tunable_changes = [p for p in analysis.proposals if p.type != "technical_issue"]
 
             # 5. File GitHub issues for technical problems
             if technical_issues and self._issue_generator_factory:
@@ -182,9 +178,7 @@ class EvolutionLoop:
 
             # 6. Apply prompt/param changes
             if config.auto_apply and tunable_changes:
-                apply_result = await self._change_applier.apply(
-                    tunable_changes, eval_run_id
-                )
+                apply_result = await self._change_applier.apply(tunable_changes, eval_run_id)
                 changes_applied = apply_result.get("applied", 0)
                 # Hot-swap configs
                 await self._registry.reload()
@@ -238,13 +232,11 @@ class EvolutionLoop:
         )
 
     @staticmethod
-    def _has_converged(
-        history: list[CycleResult], config: EvolutionConfig
-    ) -> bool:
+    def _has_converged(history: list[CycleResult], config: EvolutionConfig) -> bool:
         """Stop if scores plateau (< threshold improvement over window cycles)."""
         if len(history) < config.convergence_window:
             return False
-        recent = history[-config.convergence_window:]
+        recent = history[-config.convergence_window :]
         scores = [c.overall_score for c in recent if c.overall_score is not None]
         if len(scores) < config.convergence_window:
             return False

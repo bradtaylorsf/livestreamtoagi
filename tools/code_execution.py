@@ -14,7 +14,6 @@ from .base import BaseTool
 
 if TYPE_CHECKING:
     import docker
-
     from core.event_bus import EventBus
 
 logger = logging.getLogger(__name__)

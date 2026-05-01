@@ -54,9 +54,7 @@ class OfficeGenerator:
 
         if self.is_cached():
             logger.info("Office tiles cached, skipping generation")
-            return json.loads(
-                (self._output_dir / "tilemap.json").read_text()
-            )
+            return json.loads((self._output_dir / "tilemap.json").read_text())
 
         tile_size = layout["grid"]["tile_size"]
 
@@ -104,9 +102,7 @@ class OfficeGenerator:
         areas = layout["areas"]
 
         # Build tile ID lookup
-        tile_ids: dict[str, int] = {
-            k: v["id"] for k, v in tile_types.items()
-        }
+        tile_ids: dict[str, int] = {k: v["id"] for k, v in tile_types.items()}
 
         # Initialize layers with zeros
         ground = [0] * (w * h)

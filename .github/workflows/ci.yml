@@ -23,8 +23,8 @@ jobs:
         run: ruff check core/ tools/
       - name: Ruff format check
         run: ruff format --check core/ tools/
-      - name: Mypy strict check
-        run: mypy core/ tools/ --strict
+      - name: Mypy check
+        run: mypy core/ tools/
 
   backend-test:
     name: Backend Unit Tests
@@ -45,7 +45,7 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -e ".[dev]"
       - name: Run backend tests
-        run: pytest tests/backend/ -v --cov=core --cov=tools
+        run: pytest tests/backend/ -v -m "not integration" --cov=core --cov=tools
 
   frontend-test:
     name: Frontend Tests

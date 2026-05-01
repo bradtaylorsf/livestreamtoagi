@@ -257,9 +257,7 @@ class ConversationRepo:
         )
         return [_row_to_conversation(r) for r in rows], count or 0
 
-    async def get_energy_log(
-        self, conversation_id: uuid.UUID
-    ) -> list[dict[str, object]]:
+    async def get_energy_log(self, conversation_id: uuid.UUID) -> list[dict[str, object]]:
         """Return energy change log entries for a conversation."""
         rows = await self.db.fetch(
             """SELECT * FROM energy_change_log
@@ -275,9 +273,7 @@ class ConversationRepo:
             result.append(d)
         return result
 
-    async def get_management_flags(
-        self, conversation_id: uuid.UUID
-    ) -> list[dict[str, object]]:
+    async def get_management_flags(self, conversation_id: uuid.UUID) -> list[dict[str, object]]:
         """Return management shadow flags for a conversation."""
         rows = await self.db.fetch(
             """SELECT * FROM management_shadow_log
@@ -288,24 +284,22 @@ class ConversationRepo:
         result = []
         for r in rows:
             d = dict(r)
-            result.append({
-                "id": str(d["id"]),
-                "agent_id": d["agent_id"],
-                "original_content": d["original_content"],
-                "filter_layer": d["filter_layer"],
-                "severity": d["severity"],
-                "action_would_take": d["action_would_take"],
-                "reason": d["reason"],
-                "flagged_keywords": d.get("flagged_keywords") or [],
-                "created_at": (
-                    d["created_at"].isoformat() if d["created_at"] else None
-                ),
-            })
+            result.append(
+                {
+                    "id": str(d["id"]),
+                    "agent_id": d["agent_id"],
+                    "original_content": d["original_content"],
+                    "filter_layer": d["filter_layer"],
+                    "severity": d["severity"],
+                    "action_would_take": d["action_would_take"],
+                    "reason": d["reason"],
+                    "flagged_keywords": d.get("flagged_keywords") or [],
+                    "created_at": (d["created_at"].isoformat() if d["created_at"] else None),
+                }
+            )
         return result
 
-    async def get_artifacts(
-        self, conversation_id: uuid.UUID
-    ) -> list[dict[str, object]]:
+    async def get_artifacts(self, conversation_id: uuid.UUID) -> list[dict[str, object]]:
         """Return artifacts (tool invocations) for a conversation."""
         rows = await self.db.fetch(
             """SELECT * FROM artifacts
@@ -319,24 +313,22 @@ class ConversationRepo:
             for key in ("tool_input", "tool_output", "metadata"):
                 if isinstance(d.get(key), str):
                     d[key] = json.loads(d[key])
-            result.append({
-                "id": str(d["id"]),
-                "agent_id": d["agent_id"],
-                "tool_name": d["tool_name"],
-                "tool_input": d.get("tool_input") or {},
-                "tool_output": d.get("tool_output"),
-                "artifact_type": d["artifact_type"],
-                "status": d["status"],
-                "metadata": d.get("metadata"),
-                "created_at": (
-                    d["created_at"].isoformat() if d["created_at"] else None
-                ),
-            })
+            result.append(
+                {
+                    "id": str(d["id"]),
+                    "agent_id": d["agent_id"],
+                    "tool_name": d["tool_name"],
+                    "tool_input": d.get("tool_input") or {},
+                    "tool_output": d.get("tool_output"),
+                    "artifact_type": d["artifact_type"],
+                    "status": d["status"],
+                    "metadata": d.get("metadata"),
+                    "created_at": (d["created_at"].isoformat() if d["created_at"] else None),
+                }
+            )
         return result
 
-    async def get_interrupts(
-        self, conversation_id: uuid.UUID
-    ) -> list[dict[str, object]]:
+    async def get_interrupts(self, conversation_id: uuid.UUID) -> list[dict[str, object]]:
         """Return interrupt log entries for a conversation."""
         rows = await self.db.fetch(
             """SELECT * FROM interrupt_log
@@ -347,16 +339,16 @@ class ConversationRepo:
         result = []
         for r in rows:
             d = dict(r)
-            result.append({
-                "id": d["id"],
-                "attempting_agent_id": d["attempting_agent_id"],
-                "would_have_spoken_id": d["would_have_spoken_id"],
-                "interrupt_score": d["interrupt_score"],
-                "threshold_at_time": d["threshold_at_time"],
-                "succeeded": d["succeeded"],
-                "reason": d.get("reason"),
-                "timestamp": (
-                    d["timestamp"].isoformat() if d["timestamp"] else None
-                ),
-            })
+            result.append(
+                {
+                    "id": d["id"],
+                    "attempting_agent_id": d["attempting_agent_id"],
+                    "would_have_spoken_id": d["would_have_spoken_id"],
+                    "interrupt_score": d["interrupt_score"],
+                    "threshold_at_time": d["threshold_at_time"],
+                    "succeeded": d["succeeded"],
+                    "reason": d.get("reason"),
+                    "timestamp": (d["timestamp"].isoformat() if d["timestamp"] else None),
+                }
+            )
         return result

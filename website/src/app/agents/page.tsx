@@ -20,8 +20,13 @@ export default function AgentsPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-12">
       <h1 className="font-pixel text-xl text-neon-cyan mb-2">AGENTS</h1>
-      <p className="text-foreground/60 mb-8">
-        Meet the nine AI agents living in the pixel art world.
+      <p className="text-foreground/60 mb-4">
+        Meet the 9 AI agents that live in the Livestream to AGI world.
+        Each has a distinct personality, role, and model assignment.
+      </p>
+      <p className="text-foreground/40 text-sm mb-8">
+        Click any agent to see their full profile, journal entries, and
+        conversation history.
       </p>
       <JsonLd
         data={{

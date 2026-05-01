@@ -124,9 +124,7 @@ class EventBus:
 
         encoded_size = len(message.encode())
         if encoded_size > MAX_MESSAGE_BYTES:
-            logger.warning(
-                "Event %s payload exceeds 1MB (%d bytes)", event_type, encoded_size
-            )
+            logger.warning("Event %s payload exceeds 1MB (%d bytes)", event_type, encoded_size)
 
         self._history.append(event)
 

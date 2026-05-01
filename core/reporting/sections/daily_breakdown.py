@@ -21,15 +21,17 @@ def generate_daily_breakdown(
     artifacts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Generate per-day statistics and trends."""
-    days: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        "conversations": 0,
-        "turns": 0,
-        "cost": Decimal("0"),
-        "tools_used": set(),
-        "unique_tools": 0,
-        "agents_active": set(),
-        "most_active_agent": None,
-    })
+    days: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "conversations": 0,
+            "turns": 0,
+            "cost": Decimal("0"),
+            "tools_used": set(),
+            "unique_tools": 0,
+            "agents_active": set(),
+            "most_active_agent": None,
+        }
+    )
 
     # Conversations by day
     agent_turns_by_day: dict[str, Counter] = defaultdict(Counter)
@@ -40,6 +42,7 @@ def generate_daily_breakdown(
         agents = conv.get("participating_agents", [])
         if isinstance(agents, str):
             import json
+
             try:
                 agents = json.loads(agents)
             except (json.JSONDecodeError, TypeError):
@@ -65,16 +68,18 @@ def generate_daily_breakdown(
     for day in sorted_days:
         d = days[day]
         most_active = agent_turns_by_day[day].most_common(1)
-        result_days.append({
-            "date": day,
-            "conversations": d["conversations"],
-            "turns": d["turns"],
-            "cost": str(d["cost"]),
-            "unique_tools": len(d["tools_used"]),
-            "tools_used": sorted(d["tools_used"]),
-            "agents_active": sorted(d["agents_active"]),
-            "most_active_agent": most_active[0][0] if most_active else None,
-        })
+        result_days.append(
+            {
+                "date": day,
+                "conversations": d["conversations"],
+                "turns": d["turns"],
+                "cost": str(d["cost"]),
+                "unique_tools": len(d["tools_used"]),
+                "tools_used": sorted(d["tools_used"]),
+                "agents_active": sorted(d["agents_active"]),
+                "most_active_agent": most_active[0][0] if most_active else None,
+            }
+        )
 
     # Day-over-day trends
     trends = {}
@@ -84,9 +89,7 @@ def generate_daily_breakdown(
         first_cost = Decimal(first["cost"])
         last_cost = Decimal(last["cost"])
         if first_cost > 0:
-            trends["cost_change_pct"] = str(
-                round(((last_cost - first_cost) / first_cost) * 100, 1)
-            )
+            trends["cost_change_pct"] = str(round(((last_cost - first_cost) / first_cost) * 100, 1))
         first_turns = first["turns"]
         last_turns = last["turns"]
         if first_turns > 0:
@@ -117,7 +120,9 @@ def _compute_day_over_day_metrics(
     turns_series = [d["turns"] / max(d["conversations"], 1) for d in result_days]
     first_avg = turns_series[0]
     last_avg = turns_series[-1]
-    depth_trend = "up" if last_avg > first_avg * 1.1 else ("down" if last_avg < first_avg * 0.9 else "flat")
+    depth_trend = (
+        "up" if last_avg > first_avg * 1.1 else ("down" if last_avg < first_avg * 0.9 else "flat")
+    )
 
     # Tool diversity trend (cumulative new tools)
     cumulative_tools: list[int] = []
@@ -131,8 +136,10 @@ def _compute_day_over_day_metrics(
     cost_series = [Decimal(d["cost"]) for d in result_days]
     first_cost = cost_series[0]
     last_cost = cost_series[-1]
-    cost_trend = "up" if last_cost > first_cost * Decimal("1.1") else (
-        "down" if last_cost < first_cost * Decimal("0.9") else "flat"
+    cost_trend = (
+        "up"
+        if last_cost > first_cost * Decimal("1.1")
+        else ("down" if last_cost < first_cost * Decimal("0.9") else "flat")
     )
 
     # Agent participation balance (stddev of turns per agent)
@@ -144,7 +151,7 @@ def _compute_day_over_day_metrics(
             values = list(agent_counts.values())
             mean = sum(values) / len(values)
             variance = sum((v - mean) ** 2 for v in values) / len(values)
-            balance_series.append(round(variance ** 0.5, 1))
+            balance_series.append(round(variance**0.5, 1))
         else:
             balance_series.append(0)
 

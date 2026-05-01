@@ -50,9 +50,7 @@ class ScopedRedis:
     async def get(self, key: str) -> str | None:
         return await self._redis.get(self._key(key))
 
-    async def set(
-        self, key: str, value: str, *, ex: int | None = None
-    ) -> bool:
+    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
         return await self._redis.set(self._key(key), value, ex=ex)
 
     async def delete(self, *keys: str) -> int:
@@ -100,7 +98,9 @@ class ScopedRedis:
     ) -> tuple[int, list[str]]:
         prefixed_match = self._key(match) if match else None
         result_cursor, keys = await self._redis.scan(
-            cursor, match=prefixed_match, count=count,
+            cursor,
+            match=prefixed_match,
+            count=count,
         )
         # Strip prefix from returned keys so callers see raw key names
         prefix_len = len(self._prefix) + 1  # +1 for the ':'

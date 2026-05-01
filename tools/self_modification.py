@@ -32,8 +32,7 @@ class ProposeSelfModificationTool(BaseTool):
         "file": {
             "type": "string",
             "description": (
-                "Path to the configuration file to modify "
-                "(must be your own agent config)"
+                "Path to the configuration file to modify (must be your own agent config)"
             ),
         },
         "change_description": {
@@ -72,7 +71,8 @@ class ProposeSelfModificationTool(BaseTool):
         if "management" in file_lower:
             logger.warning(
                 "Agent %s attempted to modify Management file: %s",
-                self.agent_id, file,
+                self.agent_id,
+                file,
             )
             return {
                 "status": "rejected",
@@ -83,7 +83,8 @@ class ProposeSelfModificationTool(BaseTool):
         if any(pat in file_lower for pat in _PERMISSION_PATTERNS):
             logger.warning(
                 "Agent %s attempted to modify permissions file: %s",
-                self.agent_id, file,
+                self.agent_id,
+                file,
             )
             return {
                 "status": "rejected",
@@ -95,7 +96,8 @@ class ProposeSelfModificationTool(BaseTool):
         if not self._is_own_file(file):
             logger.warning(
                 "Agent %s attempted to modify another agent's file: %s",
-                self.agent_id, file,
+                self.agent_id,
+                file,
             )
             return {
                 "status": "rejected",
@@ -120,7 +122,9 @@ class ProposeSelfModificationTool(BaseTool):
 
         logger.info(
             "Agent %s created self-modification proposal %d for file %s",
-            self.agent_id, result.id, file,
+            self.agent_id,
+            result.id,
+            file,
         )
 
         return {
@@ -169,7 +173,9 @@ class ViewEvolutionLogTool(BaseTool):
     }
 
     def __init__(
-        self, agent_id: str, memory_repo: MemoryRepo,
+        self,
+        agent_id: str,
+        memory_repo: MemoryRepo,
         simulation_id: _uuid.UUID | None = None,
     ) -> None:
         self.agent_id = agent_id

@@ -53,7 +53,7 @@ async def rollback_agent_config(
     try:
         await repo.rollback_prompt(agent_id, body.version, simulation_id=simulation_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     await registry.reload_agent(agent_id)
     return {"status": "ok", "agent_id": agent_id, "version": body.version}
 
@@ -83,7 +83,7 @@ async def rollback_conversation_config(
     try:
         await repo.rollback_conversation_params(body.version, simulation_id=simulation_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "ok", "version": body.version}
 
 
@@ -113,7 +113,7 @@ async def compare_evolution_cycles(
     try:
         return await repo.compare_cycles(cycle_a, cycle_b)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/evolution/{loop_run_id}")

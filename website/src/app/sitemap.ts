@@ -13,6 +13,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/challenges",
     "/clips",
     "/conversations",
+    "/donate",
     "/evals",
     "/ethics",
     "/lore",

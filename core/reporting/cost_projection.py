@@ -79,9 +79,7 @@ def project_costs(
     # Sustainability: flag if growth > 10% per day-half
     is_sustainable = growth_rate < 10.0
     if not is_sustainable:
-        warnings.append(
-            f"Cost growth rate of {growth_rate:.1f}% is above 10% threshold"
-        )
+        warnings.append(f"Cost growth rate of {growth_rate:.1f}% is above 10% threshold")
 
     # Token growth check
     if daily_token_counts and len(daily_token_counts) >= 2:

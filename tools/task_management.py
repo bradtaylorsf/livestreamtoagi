@@ -77,7 +77,9 @@ class ManageTaskTool(BaseTool):
             if not task_id or not status:
                 return {"status": "error", "reason": "task_id and status are required"}
             return await self._update_status(
-                task_id, status, kwargs.get("blocked_reason"),
+                task_id,
+                status,
+                kwargs.get("blocked_reason"),
             )
         else:
             return {"status": "error", "reason": f"Unknown action: {action}"}
@@ -108,14 +110,19 @@ class ManageTaskTool(BaseTool):
 
     async def _claim_task(self, task_id: str) -> dict[str, Any]:
         found = await self._shared_state.update_task_status(
-            task_id, "in_progress", owner=self._agent_id,
+            task_id,
+            "in_progress",
+            owner=self._agent_id,
         )
         if not found:
             return {"status": "error", "reason": f"Task {task_id!r} not found"}
         return {"status": "ok", "task_id": task_id, "new_owner": self._agent_id}
 
     async def _update_status(
-        self, task_id: str, status: str, blocked_reason: str | None,
+        self,
+        task_id: str,
+        status: str,
+        blocked_reason: str | None,
     ) -> dict[str, Any]:
         found = await self._shared_state.update_task_status(task_id, status, blocked_reason)
         if not found:

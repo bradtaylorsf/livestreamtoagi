@@ -40,10 +40,10 @@ if TYPE_CHECKING:
     from core.characters.voting import VotingManager
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
+    from core.management import Management
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.recall_memory import RecallMemoryManager
-    from core.management import Management
     from core.redis_client import RedisClient
     from core.repos.artifact_repo import ArtifactRepo
     from core.repos.cost_repo import CostRepo
@@ -144,14 +144,15 @@ def get_core_tools(
     if management is not None:
         tools.append(
             SendChatMessageTool(
-                management=management, event_bus=event_bus, redis_client=redis_client, agent_id=agent_id
+                management=management,
+                event_bus=event_bus,
+                redis_client=redis_client,
+                agent_id=agent_id,
             )
         )
 
     # Poll creation (no Management needed)
-    tools.append(
-        CreatePollTool(redis_client=redis_client, event_bus=event_bus, agent_id=agent_id)
-    )
+    tools.append(CreatePollTool(redis_client=redis_client, event_bus=event_bus, agent_id=agent_id))
 
     # Code execution sandbox (or simulation stub)
     if simulation_mode:
@@ -160,7 +161,9 @@ def get_core_tools(
         tools.append(StubExecuteCodeTool(event_bus=event_bus, agent_id=agent_id))
         tools.append(StubGenerateTilemapTool(event_bus=event_bus, agent_id=agent_id))
     else:
-        exec_tool = ExecuteCodeTool(event_bus=event_bus, agent_id=agent_id, docker_client=docker_client)
+        exec_tool = ExecuteCodeTool(
+            event_bus=event_bus, agent_id=agent_id, docker_client=docker_client
+        )
         tools.append(exec_tool)
 
         # Tilemap generation (requires world_repo for chunk storage)
@@ -176,10 +179,13 @@ def get_core_tools(
 
     # Revenue and marketing tools
     if cost_repo is not None:
-        tools.append(GetRevenueStatusTool(
-            cost_repo=cost_repo, agent_id=agent_id,
-            economy_manager=economy_manager,
-        ))
+        tools.append(
+            GetRevenueStatusTool(
+                cost_repo=cost_repo,
+                agent_id=agent_id,
+                economy_manager=economy_manager,
+            )
+        )
     tools.append(DraftSocialPostTool(redis_client=redis_client, agent_id=agent_id))
     tools.append(DraftEmailTool(redis_client=redis_client, agent_id=agent_id))
     tools.append(CheckPostPerformanceTool(redis_client=redis_client, agent_id=agent_id))
@@ -234,18 +240,12 @@ def get_core_tools(
 
     # Task management tool
     if shared_working_state is not None:
-        tools.append(
-            ManageTaskTool(shared_state=shared_working_state, agent_id=agent_id)
-        )
+        tools.append(ManageTaskTool(shared_state=shared_working_state, agent_id=agent_id))
 
     # Self-modification tools (available to all agents)
     if memory_repo is not None:
-        tools.append(
-            ProposeSelfModificationTool(agent_id=agent_id, memory_repo=memory_repo)
-        )
-        tools.append(
-            ViewEvolutionLogTool(agent_id=agent_id, memory_repo=memory_repo)
-        )
+        tools.append(ProposeSelfModificationTool(agent_id=agent_id, memory_repo=memory_repo))
+        tools.append(ViewEvolutionLogTool(agent_id=agent_id, memory_repo=memory_repo))
 
     if artifact_repo is not None:
         for tool in tools:
@@ -262,15 +262,11 @@ def get_core_tools(
             # Use agent config's tools list as the source of truth
             agent_cfg = agent_registry.get_agent(agent_id)
             agent_tools = set(agent_cfg.tools) if agent_cfg else set()
-            tools = [
-                t for t in tools
-                if not hasattr(t, "ALLOWED_AGENTS") or t.name in agent_tools
-            ]
+            tools = [t for t in tools if not hasattr(t, "ALLOWED_AGENTS") or t.name in agent_tools]
         else:
             # Fallback: use hardcoded ALLOWED_AGENTS on tool classes
             tools = [
-                t for t in tools
-                if not hasattr(t, "ALLOWED_AGENTS") or agent_id in t.ALLOWED_AGENTS
+                t for t in tools if not hasattr(t, "ALLOWED_AGENTS") or agent_id in t.ALLOWED_AGENTS
             ]
 
     return tools

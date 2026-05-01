@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from tools.base import BaseTool
 
 if TYPE_CHECKING:
-    from core.characters.spawner import CharacterApplication, CharacterSpawner
+    from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,8 @@ class ProposeCharacterTool(BaseTool):
 
         simulation_id = kwargs.get("simulation_id")
         saved = await self._spawner.submit_application(
-            application, simulation_id=simulation_id,
+            application,
+            simulation_id=simulation_id,
         )
         if saved is None:
             return {"status": "error", "reason": "Failed to save character application"}
@@ -78,7 +79,7 @@ class ProposeCharacterTool(BaseTool):
             "character_name": saved.name,
             "role": saved.role,
             "message": f"Character '{saved.name}' has been proposed. "
-                       f"The team will deliberate and vote.",
+            f"The team will deliberate and vote.",
         }
 
 
@@ -120,6 +121,7 @@ class VoteCharacterTool(BaseTool):
             return {"status": "error", "reason": "Voting system not available"}
 
         import uuid as _uuid
+
         try:
             _uuid.UUID(kwargs["application_id"])
         except (ValueError, AttributeError):
@@ -136,5 +138,5 @@ class VoteCharacterTool(BaseTool):
         return {
             "status": "voted",
             "vote": "yes" if vote_bool else "no",
-            "message": f"Your vote has been recorded.",
+            "message": "Your vote has been recorded.",
         }

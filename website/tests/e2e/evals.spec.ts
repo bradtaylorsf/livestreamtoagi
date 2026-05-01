@@ -49,13 +49,22 @@ test.describe("Evals Dashboard", () => {
     ).toBeVisible();
   });
 
-  test("model version info visible on simulation runs", async ({ page }) => {
+  test("simulation runs table shows with simulation column", async ({ page }) => {
     await page.goto("/evals");
 
     // The runs table should exist (might be empty)
     await expect(
       page.getByRole("heading", { name: /SIMULATION RUNS/i }),
     ).toBeVisible();
+
+    // Simulation column should be visible in the table header
+    const table = page.locator("table");
+    const tableExists = await table.isVisible().catch(() => false);
+    if (tableExists) {
+      await expect(
+        table.getByRole("columnheader", { name: /Simulation/ }),
+      ).toBeVisible();
+    }
   });
 
   test("raw data export buttons exist", async ({ page }) => {

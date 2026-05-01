@@ -100,7 +100,8 @@ class RelationshipTracker:
                 except Exception:
                     logger.warning(
                         "Failed to increment interaction count for %s <-> %s",
-                        agent_a, agent_b,
+                        agent_a,
+                        agent_b,
                         exc_info=True,
                     )
 
@@ -177,9 +178,13 @@ class RelationshipTracker:
                     to_id,
                 )
                 old_sentiment = (
-                    float(existing.sentiment_score) if existing and existing.sentiment_score else None
+                    float(existing.sentiment_score)
+                    if existing and existing.sentiment_score
+                    else None
                 )
-                old_trust = float(existing.trust_score) if existing and existing.trust_score else None
+                old_trust = (
+                    float(existing.trust_score) if existing and existing.trust_score else None
+                )
 
                 await self._repo.upsert(
                     self._simulation_id,
@@ -208,7 +213,8 @@ class RelationshipTracker:
             except Exception:
                 logger.warning(
                     "Failed to update relationship %s -> %s",
-                    from_id, to_id,
+                    from_id,
+                    to_id,
                     exc_info=True,
                 )
 
@@ -271,7 +277,9 @@ class RelationshipTracker:
                     # Only update if record exists (created by conversation)
                     continue
 
-                old_sentiment = float(existing.sentiment_score) if existing.sentiment_score else None
+                old_sentiment = (
+                    float(existing.sentiment_score) if existing.sentiment_score else None
+                )
 
                 await self._repo.upsert(
                     self._simulation_id,
@@ -296,7 +304,8 @@ class RelationshipTracker:
             except Exception:
                 logger.warning(
                     "Failed to update relationship from reflection: %s -> %s",
-                    agent_id, target_id,
+                    agent_id,
+                    target_id,
                     exc_info=True,
                 )
 

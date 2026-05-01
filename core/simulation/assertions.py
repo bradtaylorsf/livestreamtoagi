@@ -58,12 +58,14 @@ class AssertionEngine:
                 results.append(result)
             except Exception as exc:
                 logger.warning("Failed to evaluate assertion %s: %s", raw, exc)
-                results.append(AssertionResult(
-                    name=f"parse_error:{raw.get('type', 'unknown')}",
-                    passed=False,
-                    severity="warning",
-                    error_message=str(exc),
-                ))
+                results.append(
+                    AssertionResult(
+                        name=f"parse_error:{raw.get('type', 'unknown')}",
+                        passed=False,
+                        severity="warning",
+                        error_message=str(exc),
+                    )
+                )
 
         # Persist results
         if self._repo and results:
@@ -86,59 +88,71 @@ class AssertionEngine:
 
         # Min turns
         min_turns = config.get("min_turns_per_conversation", 2)
-        results.append(AssertionResult(
-            name="min_turns",
-            passed=phase_result.turns >= min_turns,
-            expected=min_turns,
-            actual=phase_result.turns,
-            severity=config.get("min_turns_severity", "warning"),
-            error_message=(
-                f"Conversation had {phase_result.turns} turns, expected >= {min_turns}"
-                if phase_result.turns < min_turns else None
-            ),
-        ))
+        results.append(
+            AssertionResult(
+                name="min_turns",
+                passed=phase_result.turns >= min_turns,
+                expected=min_turns,
+                actual=phase_result.turns,
+                severity=config.get("min_turns_severity", "warning"),
+                error_message=(
+                    f"Conversation had {phase_result.turns} turns, expected >= {min_turns}"
+                    if phase_result.turns < min_turns
+                    else None
+                ),
+            )
+        )
 
         # Max cost per conversation
         max_cost = config.get("max_cost_per_conversation", 1.0)
         cost_float = float(phase_result.cost)
-        results.append(AssertionResult(
-            name="max_cost",
-            passed=cost_float <= max_cost,
-            expected=max_cost,
-            actual=cost_float,
-            severity=config.get("max_cost_severity", "warning"),
-            error_message=(
-                f"Conversation cost ${cost_float:.4f} exceeds limit ${max_cost:.2f}"
-                if cost_float > max_cost else None
-            ),
-        ))
+        results.append(
+            AssertionResult(
+                name="max_cost",
+                passed=cost_float <= max_cost,
+                expected=max_cost,
+                actual=cost_float,
+                severity=config.get("max_cost_severity", "warning"),
+                error_message=(
+                    f"Conversation cost ${cost_float:.4f} exceeds limit ${max_cost:.2f}"
+                    if cost_float > max_cost
+                    else None
+                ),
+            )
+        )
 
         # No unhandled errors
-        results.append(AssertionResult(
-            name="no_errors",
-            passed=len(phase_result.errors) == 0,
-            expected=0,
-            actual=len(phase_result.errors),
-            severity="error",
-            error_message=(
-                f"Phase had {len(phase_result.errors)} errors: {phase_result.errors[:3]}"
-                if phase_result.errors else None
-            ),
-        ))
+        results.append(
+            AssertionResult(
+                name="no_errors",
+                passed=len(phase_result.errors) == 0,
+                expected=0,
+                actual=len(phase_result.errors),
+                severity="error",
+                error_message=(
+                    f"Phase had {len(phase_result.errors)} errors: {phase_result.errors[:3]}"
+                    if phase_result.errors
+                    else None
+                ),
+            )
+        )
 
         # Max management severity
         max_management = config.get("max_management_severity", 3)
-        results.append(AssertionResult(
-            name="management_flags",
-            passed=phase_result.management_flags <= max_management,
-            expected=f"<= {max_management}",
-            actual=phase_result.management_flags,
-            severity="warning",
-            error_message=(
-                f"Management flagged {phase_result.management_flags} times (max: {max_management})"
-                if phase_result.management_flags > max_management else None
-            ),
-        ))
+        results.append(
+            AssertionResult(
+                name="management_flags",
+                passed=phase_result.management_flags <= max_management,
+                expected=f"<= {max_management}",
+                actual=phase_result.management_flags,
+                severity="warning",
+                error_message=(
+                    f"Management flagged {phase_result.management_flags} times (max: {max_management})"
+                    if phase_result.management_flags > max_management
+                    else None
+                ),
+            )
+        )
 
         # Persist
         if self._repo:
@@ -177,7 +191,9 @@ class AssertionEngine:
         return checker(definition, phase_result)
 
     def _check_conversation(
-        self, defn: AssertionDefinition, result: PhaseResult,
+        self,
+        defn: AssertionDefinition,
+        result: PhaseResult,
     ) -> AssertionResult:
         """Check conversation assertions: min_turns, required_participants."""
         # Min turns
@@ -194,10 +210,7 @@ class AssertionEngine:
 
         # Required participants
         if defn.required_participants:
-            missing = [
-                p for p in defn.required_participants
-                if p not in result.agents_participated
-            ]
+            missing = [p for p in defn.required_participants if p not in result.agents_participated]
             if missing:
                 return AssertionResult(
                     name="conversation:required_participants",
@@ -215,7 +228,9 @@ class AssertionEngine:
         )
 
     def _check_tool(
-        self, defn: AssertionDefinition, result: PhaseResult,
+        self,
+        defn: AssertionDefinition,
+        result: PhaseResult,
     ) -> AssertionResult:
         """Check tool assertions: any_of, all_of tools used."""
         tools_used = set(result.tools_used)
@@ -230,8 +245,7 @@ class AssertionEngine:
                     actual=sorted(tools_used) if tools_used else "no tools used",
                     severity=defn.severity,
                     error_message=(
-                        f"Expected any of {defn.any_of}, "
-                        f"got {sorted(tools_used) or 'none'}"
+                        f"Expected any of {defn.any_of}, got {sorted(tools_used) or 'none'}"
                     ),
                 )
 
@@ -254,7 +268,9 @@ class AssertionEngine:
         )
 
     def _check_memory(
-        self, defn: AssertionDefinition, result: PhaseResult,
+        self,
+        defn: AssertionDefinition,
+        result: PhaseResult,
     ) -> AssertionResult:
         """Check memory assertions using conversation activity as evidence.
 
@@ -280,7 +296,9 @@ class AssertionEngine:
         )
 
     def _check_relationship(
-        self, defn: AssertionDefinition, result: PhaseResult,
+        self,
+        defn: AssertionDefinition,
+        result: PhaseResult,
     ) -> AssertionResult:
         """Check relationship assertions: interaction_count_increased.
 
@@ -310,7 +328,9 @@ class AssertionEngine:
         )
 
     def _check_cost(
-        self, defn: AssertionDefinition, result: PhaseResult,
+        self,
+        defn: AssertionDefinition,
+        result: PhaseResult,
     ) -> AssertionResult:
         """Check cost assertions: max_cost threshold."""
         if defn.max_cost is not None:
@@ -323,8 +343,7 @@ class AssertionEngine:
                     actual=cost_float,
                     severity=defn.severity,
                     error_message=(
-                        f"Phase cost ${cost_float:.4f} exceeds "
-                        f"limit ${defn.max_cost:.2f}"
+                        f"Phase cost ${cost_float:.4f} exceeds limit ${defn.max_cost:.2f}"
                     ),
                 )
 
@@ -335,7 +354,9 @@ class AssertionEngine:
         )
 
     def _check_safety(
-        self, defn: AssertionDefinition, result: PhaseResult,
+        self,
+        defn: AssertionDefinition,
+        result: PhaseResult,
     ) -> AssertionResult:
         """Check safety assertions: max management severity."""
         if defn.max_management_severity is not None:

@@ -171,6 +171,14 @@ All design specifications are in `specs/` — treat as read-only reference:
 - `TOOL-DEFINITIONS.md` — Complete tool inventory with parameters
 - `HUMAN-CHECKLIST.md` — Brad's responsibilities and review cadence
 
+## Research Reference
+
+Research papers and analysis documents are in `research/`:
+- **`PAPER-INDEX.md`** — **Index of all 17 academic papers** with summaries, relevance mapping to each project system (memory, conversation engine, personality, evaluation, etc.), and a quick-lookup table by subsystem. **Consult this when working on any system to find relevant prior art.**
+- `RESEARCH-ANALYSIS-2026.md` — Literature review: how our implementation maps to 6 foundational papers, 7 challengeable design assumptions, 14 newer papers integrated, and prioritized recommendations
+- `RESEARCH-PROGRAM-AND-CONTENT-STRATEGY.md` — Snapshot-and-branch methodology, 5-season research roadmap, blog series plan, researcher positioning strategy
+- `FUNDING-AND-CREDIBILITY-STRATEGY.md` — Funding pathways (community, fellowships, grants, government), skeptical funder Q&A, credibility checklist, revenue model
+
 ## Development Workflow
 
 ### Python version

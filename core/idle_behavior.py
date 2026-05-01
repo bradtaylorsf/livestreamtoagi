@@ -42,21 +42,21 @@ def _px(tiles: float) -> int:
 # These are the center tiles of each furniture cluster.
 AREA_POSITIONS: dict[str, dict[str, float]] = {
     "coffee_machine": {"x": 19.5, "y": 2.5},
-    "meeting_area":   {"x": 16.5, "y": 9.5},
-    "workshop":       {"x": 16.5, "y": 14.5},
-    "whiteboard":     {"x": 33.5, "y": 17.5},
+    "meeting_area": {"x": 16.5, "y": 9.5},
+    "workshop": {"x": 16.5, "y": 14.5},
+    "whiteboard": {"x": 33.5, "y": 17.5},
 }
 
 # Agent desk positions in tile coordinates, matching frontend agents.ts.
 # Desk images are 3 tiles wide (96 px); agents stand at desk center-x + 0 offset.
 DESK_POSITIONS: dict[str, dict[str, float]] = {
-    "vera":     {"x": 3.5, "y": 6.0},
-    "aurora":   {"x": 11.5, "y": 6.0},
+    "vera": {"x": 3.5, "y": 6.0},
+    "aurora": {"x": 11.5, "y": 6.0},
     "sentinel": {"x": 25.5, "y": 6.0},
-    "grok":     {"x": 34.5, "y": 6.0},
-    "rex":      {"x": 3.5,  "y": 16.0},
-    "fork":     {"x": 11.5, "y": 16.0},
-    "pixel":    {"x": 25.5, "y": 16.0},
+    "grok": {"x": 34.5, "y": 6.0},
+    "rex": {"x": 3.5, "y": 16.0},
+    "fork": {"x": 11.5, "y": 16.0},
+    "pixel": {"x": 25.5, "y": 16.0},
 }
 
 # Behavior types with relative weights
@@ -111,11 +111,7 @@ class IdleBehaviorSystem:
 
     def _pick_agent(self) -> str | None:
         """Pick an active agent weighted by initiative."""
-        agents = [
-            a
-            for a in self._registry.get_active_agents()
-            if a.id not in EXCLUDED_AGENTS
-        ]
+        agents = [a for a in self._registry.get_active_agents() if a.id not in EXCLUDED_AGENTS]
         if not agents:
             return None
 
@@ -144,9 +140,7 @@ class IdleBehaviorSystem:
         elif behavior == "wander":
             await self._wander(agent_id, desk)
 
-    async def _coffee_run(
-        self, agent_id: str, desk: dict[str, float]
-    ) -> None:
+    async def _coffee_run(self, agent_id: str, desk: dict[str, float]) -> None:
         """Walk to coffee machine, pause, walk back."""
         target = AREA_POSITIONS["coffee_machine"]
         await self._emit_action(agent_id, "getting_coffee")
@@ -154,9 +148,7 @@ class IdleBehaviorSystem:
         await asyncio.sleep(random.uniform(5, 10))
         await self._emit_move(agent_id, target, desk)
 
-    async def _visit_agent(
-        self, agent_id: str, desk: dict[str, float]
-    ) -> None:
+    async def _visit_agent(self, agent_id: str, desk: dict[str, float]) -> None:
         """Walk to another agent's desk, pause, walk back."""
         others = [aid for aid in DESK_POSITIONS if aid != agent_id]
         if not others:
@@ -171,9 +163,7 @@ class IdleBehaviorSystem:
         await asyncio.sleep(random.uniform(5, 15))
         await self._emit_move(agent_id, near, desk)
 
-    async def _whiteboard(
-        self, agent_id: str, desk: dict[str, float]
-    ) -> None:
+    async def _whiteboard(self, agent_id: str, desk: dict[str, float]) -> None:
         """Walk to whiteboard, think, walk back."""
         target = AREA_POSITIONS["whiteboard"]
         await self._emit_action(agent_id, "thinking")
@@ -181,9 +171,7 @@ class IdleBehaviorSystem:
         await asyncio.sleep(random.uniform(5, 12))
         await self._emit_move(agent_id, target, desk)
 
-    async def _wander(
-        self, agent_id: str, desk: dict[str, float]
-    ) -> None:
+    async def _wander(self, agent_id: str, desk: dict[str, float]) -> None:
         """Wander to a random area and back."""
         area_name = random.choice(list(AREA_POSITIONS.keys()))
         target = AREA_POSITIONS[area_name]
@@ -206,7 +194,7 @@ class IdleBehaviorSystem:
             {
                 "agent_id": agent_id,
                 "from": {"x": _px(from_pos["x"]), "y": _px(from_pos["y"])},
-                "to":   {"x": _px(to_pos["x"]),   "y": _px(to_pos["y"])},
+                "to": {"x": _px(to_pos["x"]), "y": _px(to_pos["y"])},
             },
         )
 

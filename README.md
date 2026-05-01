@@ -57,7 +57,7 @@ The agents build projects, interact with audiences on Twitch and YouTube, manage
 
 | Layer | Technology | Language |
 |-------|-----------|----------|
-| Agent orchestration | CrewAI + OpenRouter | Python |
+| Agent orchestration | CrewAI + OpenRouter/local OpenAI-compatible LLMs | Python |
 | Backend API | FastAPI | Python |
 | Memory system | PostgreSQL + pgvector | Python |
 | TTS | Edge TTS | Python |
@@ -177,6 +177,32 @@ cd website && npm run test:e2e  # Playwright E2E
 # Integration (requires Docker)
 docker compose -f docker-compose.test.yml up --abort-on-container-exit
 ```
+
+## Local LLM Simulation
+
+This project can run simulations against LM Studio or another OpenAI-compatible
+local server so core behavior can be validated without cloud token spend.
+
+```bash
+# Check LM Studio / local server
+pnpm llm:local --list-only
+
+# Run a focused validation scenario
+LLM_PROVIDER=lmstudio \
+LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
+EMBEDDING_PROVIDER=deterministic \
+python scripts/run_simulation.py \
+  --name "local-llm-validation" \
+  --seed-file scenarios/local_llm_validation.yaml \
+  --agents vera,rex,aurora,pixel \
+  --max-cost 0.01 \
+  --verbose
+
+python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
+```
+
+See [Local LLM Validation Plan](specs/LOCAL-LLM-VALIDATION-PLAN.md) for the full
+research verification matrix.
 
 ## Monthly Cost Estimate
 

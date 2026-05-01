@@ -11,12 +11,11 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import uuid as _uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
-
-import uuid as _uuid
 
 from core.constants import LIVE_SIMULATION_ID
 from core.event_bus import event_bus
@@ -67,9 +66,7 @@ class ConfigLoader:
         raw_bytes = self._path.read_bytes()
         raw = yaml.safe_load(raw_bytes)
         if not isinstance(raw, dict):
-            raise ValueError(
-                f"Config file must be a YAML mapping, got {type(raw).__name__}"
-            )
+            raise ValueError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
 
         config = ConversationConfig(**raw)
         file_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
@@ -95,14 +92,14 @@ class ConfigLoader:
             return None
 
         try:
-            version = await self._config_repo.get_active_conversation_params(simulation_id=self._simulation_id)
+            version = await self._config_repo.get_active_conversation_params(
+                simulation_id=self._simulation_id
+            )
             if version is None:
                 return None
 
             config = ConversationConfig(**version.params)
-            file_hash = hashlib.sha256(
-                str(version.params).encode()
-            ).hexdigest()[:16]
+            file_hash = hashlib.sha256(str(version.params).encode()).hexdigest()[:16]
 
             self._config = config
             self._config_hash = file_hash
@@ -115,8 +112,7 @@ class ConfigLoader:
             return config
         except Exception:
             logger.warning(
-                "Failed to load conversation config from DB, "
-                "will fall back to YAML",
+                "Failed to load conversation config from DB, will fall back to YAML",
                 exc_info=True,
             )
             return None
@@ -221,9 +217,7 @@ class ConfigLoader:
             return
 
         if self._config_hash != previous_hash:
-            logger.info(
-                "Config reloaded: %s -> %s", previous_hash, self._config_hash
-            )
+            logger.info("Config reloaded: %s -> %s", previous_hash, self._config_hash)
             await event_bus.emit(
                 "config_reloaded",
                 {

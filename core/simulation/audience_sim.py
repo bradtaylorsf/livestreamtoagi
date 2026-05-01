@@ -179,11 +179,13 @@ class AudienceSimulator:
         pool = _CHAT_POOLS.get(style, _CHAT_POOLS["curious newcomer"])
         message = random.choice(pool)
 
-        chat_entry = json.dumps({
-            "user": name,
-            "text": message,
-            "timestamp": time.time(),
-        })
+        chat_entry = json.dumps(
+            {
+                "user": name,
+                "text": message,
+                "timestamp": time.time(),
+            }
+        )
 
         await self._redis.rpush("audience:recent_chat", chat_entry)
         await self._redis.ltrim("audience:recent_chat", -50, -1)

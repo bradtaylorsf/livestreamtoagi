@@ -45,20 +45,14 @@ class ArchivalMemoryManager:
         )
         return await self._repo.create(create)
 
-    async def retrieve_full_transcript(
-        self, transcript_id: int
-    ) -> Transcript | None:
+    async def retrieve_full_transcript(self, transcript_id: int) -> Transcript | None:
         """Retrieve a complete transcript by ID."""
         return await self._repo.get(transcript_id)
 
-    async def get_transcripts_by_agent(
-        self, agent_id: str, limit: int = 100
-    ) -> list[Transcript]:
+    async def get_transcripts_by_agent(self, agent_id: str, limit: int = 100) -> list[Transcript]:
         """Get transcripts where the given agent participated."""
         return await self._repo.search_by_participant(agent_id, limit)
 
-    async def get_transcripts_by_type(
-        self, event_type: str, limit: int = 100
-    ) -> list[Transcript]:
+    async def get_transcripts_by_type(self, event_type: str, limit: int = 100) -> list[Transcript]:
         """Get transcripts filtered by event type."""
         return await self._repo.search_by_event_type(event_type, limit)

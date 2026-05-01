@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from core.agent_state import AgentStateManager
     from core.llm_client import OpenRouterClient
     from core.memory.core_memory import CoreMemoryManager
-    from core.memory.token_counter import TokenCounter
     from core.repos.memory_repo import MemoryRepo
 
 EmbeddingFn = Callable[[str], Coroutine[Any, Any, list[float]]]
@@ -181,7 +180,10 @@ class DreamManager:
 
         logger.info(
             "Dream completed for %s: mood_shift=%s, goals=%d, insights=%d",
-            agent_id, dream.mood_shift, len(dream.new_goals), len(dream.insights),
+            agent_id,
+            dream.mood_shift,
+            len(dream.new_goals),
+            len(dream.insights),
         )
         return dream
 
@@ -193,7 +195,9 @@ class DreamManager:
         try:
             # Get recent journal entries and recall memories
             entries = await self._repo.get_recent_journal_entries(
-                agent_id, limit=10, simulation_id=self._simulation_id,
+                agent_id,
+                limit=10,
+                simulation_id=self._simulation_id,
             )
             texts = [e.content for e in entries] if entries else []
 
@@ -243,9 +247,13 @@ class DreamManager:
         if self._core is None:
             return ""
         try:
-            return await self._core.get_core_memory(
-                agent_id, simulation_id=self._simulation_id,
-            ) or ""
+            return (
+                await self._core.get_core_memory(
+                    agent_id,
+                    simulation_id=self._simulation_id,
+                )
+                or ""
+            )
         except Exception:
             logger.warning("Failed to get core memory for dream: %s", agent_id, exc_info=True)
             return ""
@@ -267,11 +275,13 @@ class DreamManager:
                     category = g.get("category", "creative")
                     if category not in _valid_categories:
                         category = "creative"
-                    goals.append(DreamGoal(
-                        description=g["description"],
-                        category=category,
-                        priority=min(5, max(1, int(g.get("priority", 3)))),
-                    ))
+                    goals.append(
+                        DreamGoal(
+                            description=g["description"],
+                            category=category,
+                            priority=min(5, max(1, int(g.get("priority", 3)))),
+                        )
+                    )
 
             mood = data.get("mood_shift", "inspired")
             if mood not in MOOD_SHIFT_EFFECTS:
@@ -310,23 +320,28 @@ class DreamManager:
                         simulation_id=self._simulation_id,
                     )
                 except Exception as exc:
-                    logger.warning("Failed to add dream goal for %s: %s", agent_id, exc, exc_info=True)
+                    logger.warning(
+                        "Failed to add dream goal for %s: %s", agent_id, exc, exc_info=True
+                    )
 
         # Store dream narrative as journal entry
         if self._repo is not None:
             try:
                 from core.models import JournalEntryCreate
+
                 token_count = 0
                 if self._tc is not None:
                     token_count = self._tc.count_tokens(dream.dream_narrative)
 
-                await self._repo.create_journal_entry(JournalEntryCreate(
-                    agent_id=agent_id,
-                    reflection_type="dream",
-                    content=dream.dream_narrative,
-                    token_count=token_count,
-                    simulation_id=self._simulation_id,
-                ))
+                await self._repo.create_journal_entry(
+                    JournalEntryCreate(
+                        agent_id=agent_id,
+                        reflection_type="dream",
+                        content=dream.dream_narrative,
+                        token_count=token_count,
+                        simulation_id=self._simulation_id,
+                    )
+                )
             except Exception:
                 logger.warning("Failed to store dream journal for %s", agent_id, exc_info=True)
 
@@ -335,16 +350,19 @@ class DreamManager:
             for insight in dream.insights:
                 try:
                     from core.models import RecallMemoryCreate
+
                     text = f"[Dream insight] {insight}"
                     embedding = await self._embedding_fn(text)
-                    await self._repo.add_recall(RecallMemoryCreate(
-                        agent_id=agent_id,
-                        summary=text,
-                        embedding=embedding,
-                        event_type="dream",
-                        importance_score=0.8,
-                        simulation_id=self._simulation_id,
-                    ))
+                    await self._repo.add_recall(
+                        RecallMemoryCreate(
+                            agent_id=agent_id,
+                            summary=text,
+                            embedding=embedding,
+                            event_type="dream",
+                            importance_score=0.8,
+                            simulation_id=self._simulation_id,
+                        )
+                    )
                 except Exception:
                     logger.warning("Failed to store dream insight for %s", agent_id, exc_info=True)
 

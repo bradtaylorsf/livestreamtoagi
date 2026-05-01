@@ -37,9 +37,7 @@ class SendMessageTool(BaseTool):
         tone: str = kwargs.get("tone", "casual")
 
         if tone not in VALID_TONES:
-            raise ValueError(
-                f"Invalid tone {tone!r}. Must be one of: {sorted(VALID_TONES)}"
-            )
+            raise ValueError(f"Invalid tone {tone!r}. Must be one of: {sorted(VALID_TONES)}")
 
         event = await self._event_bus.emit(
             EventType.AGENT_SPEAK,

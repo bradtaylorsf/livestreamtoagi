@@ -18,9 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-STYLE_OPTIONS = frozenset(
-    {"tileset", "sprite", "sprite_sheet", "object", "decoration", "portrait"}
-)
+STYLE_OPTIONS = frozenset({"tileset", "sprite", "sprite_sheet", "object", "decoration", "portrait"})
 
 SIZE_OPTIONS: dict[str, tuple[int, int]] = {
     "16x16": (16, 16),
@@ -97,9 +95,7 @@ class PixelLabClient:
             return self._cache[cache_key]
 
         async with self._semaphore:
-            result = await self._call_api(
-                full_prompt, style, width, height, palette
-            )
+            result = await self._call_api(full_prompt, style, width, height, palette)
 
         asset_id = cache_key[:16]
         local_path = self._assets_dir / f"{asset_id}.png"
@@ -137,9 +133,7 @@ class PixelLabClient:
                 f"{total_width}px (max {MAX_DIMENSION}px)"
             )
         if frame_h > MAX_DIMENSION:
-            raise ValueError(
-                f"Frame height {frame_h}px exceeds max {MAX_DIMENSION}px"
-            )
+            raise ValueError(f"Frame height {frame_h}px exceeds max {MAX_DIMENSION}px")
 
         total_size = f"{total_width}x{frame_h}"
         sheet_prompt = (
@@ -150,9 +144,7 @@ class PixelLabClient:
             sheet_prompt, "sprite_sheet", total_size, palette, agent_id
         )
 
-    async def batch_generate(
-        self, requests: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    async def batch_generate(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Generate multiple assets concurrently (respects Tier 2 limit).
 
         Each request dict should have keys matching generate_asset params:
@@ -174,9 +166,7 @@ class PixelLabClient:
     @staticmethod
     def _validate_style(style: str) -> None:
         if style not in STYLE_OPTIONS:
-            raise ValueError(
-                f"Invalid style '{style}'. Valid: {sorted(STYLE_OPTIONS)}"
-            )
+            raise ValueError(f"Invalid style '{style}'. Valid: {sorted(STYLE_OPTIONS)}")
 
     @staticmethod
     def _validate_size(size: str) -> tuple[int, int]:
@@ -188,13 +178,10 @@ class PixelLabClient:
             w, h = int(w_str), int(h_str)
         except (ValueError, AttributeError) as exc:
             raise ValueError(
-                f"Invalid size '{size}'. Supported: {sorted(SIZE_OPTIONS)} "
-                f"or WxH format"
+                f"Invalid size '{size}'. Supported: {sorted(SIZE_OPTIONS)} or WxH format"
             ) from exc
         if w > MAX_DIMENSION or h > MAX_DIMENSION:
-            raise ValueError(
-                f"Size {size} exceeds Tier 2 max {MAX_DIMENSION}x{MAX_DIMENSION}"
-            )
+            raise ValueError(f"Size {size} exceeds Tier 2 max {MAX_DIMENSION}x{MAX_DIMENSION}")
         if w <= 0 or h <= 0:
             raise ValueError(f"Size dimensions must be positive: {size}")
         return w, h
@@ -202,9 +189,7 @@ class PixelLabClient:
     # ── Internal helpers ────────────────────────────────────
 
     @staticmethod
-    def _cache_key(
-        prompt: str, style: str, size: str, palette: str | None
-    ) -> str:
+    def _cache_key(prompt: str, style: str, size: str, palette: str | None) -> str:
         raw = f"{prompt}|{style}|{size}|{palette or ''}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
@@ -233,9 +218,7 @@ class PixelLabClient:
             )
 
         if resp.status_code != 200:
-            raise PixelLabError(
-                f"PixelLab API error {resp.status_code}: {resp.text}"
-            )
+            raise PixelLabError(f"PixelLab API error {resp.status_code}: {resp.text}")
         return resp.json()
 
     async def _download_image(self, url: str, path: Path) -> None:

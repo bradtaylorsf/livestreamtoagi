@@ -21,10 +21,7 @@ def discover_categories(prompts_dir: Path | None = None) -> list[str]:
     d = prompts_dir or PROMPTS_DIR
     if not d.exists():
         return []
-    return sorted(
-        p.stem for p in d.glob("*.yaml")
-        if not p.name.startswith("_")
-    )
+    return sorted(p.stem for p in d.glob("*.yaml") if not p.name.startswith("_"))
 
 
 def load_prompt(category: str, prompts_dir: Path | None = None) -> dict[str, Any]:
@@ -45,9 +42,7 @@ def validate_prompt_schema(data: dict[str, Any], category: str = "") -> None:
     """Raise ValueError if prompt is missing required fields."""
     missing = REQUIRED_FIELDS - set(data.keys())
     if missing:
-        raise ValueError(
-            f"Eval prompt '{category}' missing required fields: {missing}"
-        )
+        raise ValueError(f"Eval prompt '{category}' missing required fields: {missing}")
 
 
 def render_user_prompt(

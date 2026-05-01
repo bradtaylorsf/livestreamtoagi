@@ -20,31 +20,40 @@ def generate_key_moments(
         reverse=True,
     )
     for conv in sorted_convs[:3]:
-        moments.append({
-            "type": "high_energy_conversation",
-            "timestamp": str(conv.get("started_at", "")),
-            "description": (
-                f"Conversation with {conv.get('turn_count', 0)} turns, "
-                f"participants: {', '.join(conv.get('participating_agents', []))}"
-            ),
-            "details": {
-                "turn_count": conv.get("turn_count", 0),
-                "trigger_type": conv.get("trigger_type", ""),
-                "topics": conv.get("topics_discussed", []),
-            },
-        })
+        agents = conv.get("participating_agents", [])
+        if isinstance(agents, str):
+            agents = [agents]
+        elif not isinstance(agents, list):
+            agents = list(agents) if agents else []
+        moments.append(
+            {
+                "type": "high_energy_conversation",
+                "timestamp": str(conv.get("started_at", "")),
+                "description": (
+                    f"Conversation with {conv.get('turn_count', 0)} turns, "
+                    f"participants: {', '.join(agents)}"
+                ),
+                "details": {
+                    "turn_count": conv.get("turn_count", 0),
+                    "trigger_type": conv.get("trigger_type", ""),
+                    "topics": conv.get("topics_discussed", []),
+                },
+            }
+        )
 
     # Management flags
     for flag in management_log[:5]:
-        moments.append({
-            "type": "management_flag",
-            "timestamp": str(flag.get("created_at", "")),
-            "description": f"Management flag: {flag.get('reason', 'unknown')}",
-            "details": {
-                "severity": flag.get("severity", 0),
-                "agent_id": flag.get("agent_id", ""),
-            },
-        })
+        moments.append(
+            {
+                "type": "management_flag",
+                "timestamp": str(flag.get("created_at", "")),
+                "description": f"Management flag: {flag.get('reason', 'unknown')}",
+                "details": {
+                    "severity": flag.get("severity", 0),
+                    "agent_id": flag.get("agent_id", ""),
+                },
+            }
+        )
 
     # First usage of each tool type
     seen_tools: set[str] = set()
@@ -52,16 +61,18 @@ def generate_key_moments(
         tool = artifact.get("tool_name", "")
         if tool and tool not in seen_tools:
             seen_tools.add(tool)
-            moments.append({
-                "type": "first_tool_usage",
-                "timestamp": str(artifact.get("created_at", "")),
-                "description": f"First use of {tool} by {artifact.get('agent_id', 'unknown')}",
-                "details": {
-                    "tool_name": tool,
-                    "agent_id": artifact.get("agent_id", ""),
-                    "status": artifact.get("status", ""),
-                },
-            })
+            moments.append(
+                {
+                    "type": "first_tool_usage",
+                    "timestamp": str(artifact.get("created_at", "")),
+                    "description": f"First use of {tool} by {artifact.get('agent_id', 'unknown')}",
+                    "details": {
+                        "tool_name": tool,
+                        "agent_id": artifact.get("agent_id", ""),
+                        "status": artifact.get("status", ""),
+                    },
+                }
+            )
 
     # Sort by timestamp
     moments.sort(key=lambda m: m.get("timestamp", ""))

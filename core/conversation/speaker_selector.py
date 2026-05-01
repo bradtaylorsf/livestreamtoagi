@@ -126,9 +126,7 @@ class SpeakerSelector:
         previous_speaker_id = self._get_previous_speaker(conversation_history)
 
         # Filter out previous speaker
-        candidates = [
-            a for a in eligible_agents if a.id != previous_speaker_id
-        ]
+        candidates = [a for a in eligible_agents if a.id != previous_speaker_id]
 
         # Edge case: only 1 eligible agent (or all filtered out)
         if len(candidates) == 0:
@@ -160,7 +158,8 @@ class SpeakerSelector:
 
         # Count consecutive turns by previous speaker
         consecutive_count = self._count_consecutive_turns(
-            conversation_history, previous_speaker_id,
+            conversation_history,
+            previous_speaker_id,
         )
 
         _required = required_agents or set()
@@ -189,8 +188,11 @@ class SpeakerSelector:
 
         for agent in candidates:
             factors = self._score_agent(
-                agent, previous_speaker_id, detected_topic,
-                conversation_history, now,
+                agent,
+                previous_speaker_id,
+                detected_topic,
+                conversation_history,
+                now,
             )
             total = self._weighted_sum(factors, weights)
 
@@ -252,12 +254,12 @@ class SpeakerSelector:
         # Hard floor (#247): force-select any agent silent for 5+ turns
         selected_id: str | None = None
         force_candidates = [
-            a for a in candidates
-            if _turns_since_last_spoke.get(a.id, turn_number) >= 5
+            a for a in candidates if _turns_since_last_spoke.get(a.id, turn_number) >= 5
         ]
         if force_candidates:
             selected_id = max(
-                force_candidates, key=lambda a: scores.get(a.id, 0),
+                force_candidates,
+                key=lambda a: scores.get(a.id, 0),
             ).id
 
         # Minimum-participation guarantee: if agent is in participants and
@@ -269,10 +271,7 @@ class SpeakerSelector:
 
         # Force-select a silent required agent past mid-conversation
         if selected_id is None and _required and turn_number >= (max_turns // 2):
-            silent_required = [
-                a for a in candidates
-                if a.id in _required and a.id not in _spoke
-            ]
+            silent_required = [a for a in candidates if a.id in _required and a.id not in _spoke]
             if silent_required:
                 # Pick the silent required agent with highest base score
                 selected_id = max(silent_required, key=lambda a: scores.get(a.id, 0)).id
@@ -285,10 +284,7 @@ class SpeakerSelector:
         interrupted_agent_id: str | None = None
         interrupt_attempts: list[InterruptAttempt] = []
 
-        if (
-            interrupt_state is not None
-            and self._config.interrupts.enabled
-        ):
+        if interrupt_state is not None and self._config.interrupts.enabled:
             # Prevent the previous speaker from interrupting their own
             # successor — this eliminates the "double-turn" artifact
             interrupt_attempts = self._check_interrupts(
@@ -345,7 +341,8 @@ class SpeakerSelector:
                 continue
             topic_rel = self._calc_topic_relevance(agent.id, detected_topic)
             tendency = cfg.agent_interrupt_tendency.get(
-                agent.id, agent.interrupt_tendency,
+                agent.id,
+                agent.interrupt_tendency,
             )
             # Additive weighted score: tendency drives willingness,
             # topic relevance gates appropriateness
@@ -357,9 +354,7 @@ class SpeakerSelector:
                 pair = frozenset({agent.id, selected_agent_id})
                 if pair not in self._alliance_pairs:
                     # Check if agent is in ANY alliance (i.e., has faction loyalty)
-                    agent_in_alliance = any(
-                        agent.id in p for p in self._alliance_pairs
-                    )
+                    agent_in_alliance = any(agent.id in p for p in self._alliance_pairs)
                     if agent_in_alliance:
                         score += 0.15  # Opposing faction interrupt boost
 
@@ -369,42 +364,47 @@ class SpeakerSelector:
         scored.sort(key=lambda t: t[1], reverse=True)
 
         for agent, score, _tendency in scored:
-
             # Gate 1: score >= threshold
             if score < threshold:
-                attempts.append(InterruptAttempt(
-                    attempting_agent_id=agent.id,
-                    would_have_spoken_id=selected_agent_id,
-                    interrupt_score=score,
-                    threshold=threshold,
-                    succeeded=False,
-                    reason="below_threshold",
-                ))
+                attempts.append(
+                    InterruptAttempt(
+                        attempting_agent_id=agent.id,
+                        would_have_spoken_id=selected_agent_id,
+                        interrupt_score=score,
+                        threshold=threshold,
+                        succeeded=False,
+                        reason="below_threshold",
+                    )
+                )
                 continue
 
             # Gate 2: conversation cap
             if state.interrupt_count >= cfg.max_interrupts_per_conversation:
-                attempts.append(InterruptAttempt(
-                    attempting_agent_id=agent.id,
-                    would_have_spoken_id=selected_agent_id,
-                    interrupt_score=score,
-                    threshold=threshold,
-                    succeeded=False,
-                    reason="conversation_cap_reached",
-                ))
+                attempts.append(
+                    InterruptAttempt(
+                        attempting_agent_id=agent.id,
+                        would_have_spoken_id=selected_agent_id,
+                        interrupt_score=score,
+                        threshold=threshold,
+                        succeeded=False,
+                        reason="conversation_cap_reached",
+                    )
+                )
                 continue
 
             # Gate 3: per-agent cooldown
             last = state.last_interrupt_time.get(agent.id)
             if last is not None and (now - last) < cfg.cooldown_seconds:
-                attempts.append(InterruptAttempt(
-                    attempting_agent_id=agent.id,
-                    would_have_spoken_id=selected_agent_id,
-                    interrupt_score=score,
-                    threshold=threshold,
-                    succeeded=False,
-                    reason="cooldown",
-                ))
+                attempts.append(
+                    InterruptAttempt(
+                        attempting_agent_id=agent.id,
+                        would_have_spoken_id=selected_agent_id,
+                        interrupt_score=score,
+                        threshold=threshold,
+                        succeeded=False,
+                        reason="cooldown",
+                    )
+                )
                 continue
 
             # All gates passed — first qualifying agent wins
@@ -412,23 +412,27 @@ class SpeakerSelector:
                 winner_found = True
                 state.interrupt_count += 1
                 state.last_interrupt_time[agent.id] = now
-                attempts.append(InterruptAttempt(
-                    attempting_agent_id=agent.id,
-                    would_have_spoken_id=selected_agent_id,
-                    interrupt_score=score,
-                    threshold=threshold,
-                    succeeded=True,
-                ))
+                attempts.append(
+                    InterruptAttempt(
+                        attempting_agent_id=agent.id,
+                        would_have_spoken_id=selected_agent_id,
+                        interrupt_score=score,
+                        threshold=threshold,
+                        succeeded=True,
+                    )
+                )
             else:
                 # Another agent already won this turn
-                attempts.append(InterruptAttempt(
-                    attempting_agent_id=agent.id,
-                    would_have_spoken_id=selected_agent_id,
-                    interrupt_score=score,
-                    threshold=threshold,
-                    succeeded=False,
-                    reason="another_agent_interrupted",
-                ))
+                attempts.append(
+                    InterruptAttempt(
+                        attempting_agent_id=agent.id,
+                        would_have_spoken_id=selected_agent_id,
+                        interrupt_score=score,
+                        threshold=threshold,
+                        succeeded=False,
+                        reason="another_agent_interrupted",
+                    )
+                )
 
         return attempts
 
@@ -470,14 +474,18 @@ class SpeakerSelector:
         """Compute the 5 raw factor scores for a single agent."""
         return {
             "time_since_spoke": self._calc_time_since_spoke(
-                agent.id, conversation_history, now,
+                agent.id,
+                conversation_history,
+                now,
             ),
             "topic_relevance": self._calc_topic_relevance(
-                agent.id, detected_topic,
+                agent.id,
+                detected_topic,
             ),
             "chattiness": agent.chattiness,
             "adjacency_fit": self._calc_adjacency_fit(
-                agent.id, previous_speaker_id,
+                agent.id,
+                previous_speaker_id,
             ),
             "random_jitter": random.random(),
         }
@@ -509,7 +517,9 @@ class SpeakerSelector:
         return min(elapsed / _MAX_SILENCE_SECONDS, 1.0)
 
     def _calc_topic_relevance(
-        self, agent_id: str, detected_topic: str | None,
+        self,
+        agent_id: str,
+        detected_topic: str | None,
     ) -> float:
         """Lookup from relevance_map, default 0.3."""
         if detected_topic is None:
@@ -518,7 +528,9 @@ class SpeakerSelector:
         return topic_scores.get(agent_id, 0.3)
 
     def _calc_adjacency_fit(
-        self, agent_id: str, previous_speaker_id: str | None,
+        self,
+        agent_id: str,
+        previous_speaker_id: str | None,
     ) -> float:
         """Lookup from adjacency config, default 0.3. No previous → 0.5."""
         if previous_speaker_id is None:

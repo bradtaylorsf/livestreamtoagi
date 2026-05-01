@@ -82,7 +82,7 @@ class CostRepo:
         clauses = ["agent_id = $1"]
         params: list[object] = [agent_id]
         if simulation_id is not None:
-            clauses.append(f"simulation_id = $2")
+            clauses.append("simulation_id = $2")
             params.append(simulation_id)
         where = " AND ".join(clauses)
         rows = await self.db.fetch(
@@ -178,8 +178,7 @@ class CostRepo:
 
         return {
             "by_agent": [
-                {"agent_id": r["agent_id"], "total": str(r["total"])}
-                for r in by_agent_rows
+                {"agent_id": r["agent_id"], "total": str(r["total"])} for r in by_agent_rows
             ],
             "total": str(total),
             "total_input_tokens": total_input,

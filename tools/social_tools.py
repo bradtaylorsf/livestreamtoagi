@@ -109,6 +109,7 @@ class VoteAllianceTool(BaseTool):
         accept = kwargs["accept"].lower() == "yes"
         try:
             from uuid import UUID
+
             UUID(kwargs["proposal_id"])
         except (ValueError, AttributeError):
             return {"status": "error", "reason": "Invalid proposal_id (not a valid UUID)"}
@@ -123,6 +124,7 @@ class VoteAllianceTool(BaseTool):
             return {"status": "error", "reason": "Proposal not found"}
 
         from core.social.alliances import Alliance
+
         if isinstance(result, Alliance):
             return {
                 "status": "alliance_formed",

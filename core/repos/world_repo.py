@@ -16,8 +16,9 @@ from core.models import (
 from core.repos.utils import serialize_jsonb
 
 if TYPE_CHECKING:
-    import asyncpg
     import uuid as _uuid
+
+    import asyncpg
 
     from core.database import Database
 

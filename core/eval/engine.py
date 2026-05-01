@@ -69,7 +69,9 @@ class EvalEngine:
             run_id = existing_run_id
         else:
             eval_run = await self._eval_repo.create_eval_run(
-                simulation_id, suite, model_versions=model_versions,
+                simulation_id,
+                suite,
+                model_versions=model_versions,
             )
             run_id = eval_run.id
 
@@ -100,7 +102,10 @@ class EvalEngine:
         for cat in to_run:
             try:
                 result = await self._run_category(
-                    run_id, cat, category_data.get(cat, {}), data,
+                    run_id,
+                    cat,
+                    category_data.get(cat, {}),
+                    data,
                     simulation_id=simulation_id,
                 )
                 if result["score"] is not None:
@@ -124,20 +129,15 @@ class EvalEngine:
                     )
                 except Exception:
                     logger.exception(
-                        "Failed to save error result for category '%s'", cat,
+                        "Failed to save error result for category '%s'",
+                        cat,
                     )
 
         # Compute overall score — always update run status even on failure
         try:
-            overall = (
-                sum(total_scores) / len(total_scores)
-                if total_scores
-                else None
-            )
+            overall = sum(total_scores) / len(total_scores) if total_scores else None
 
-            status = "completed" if not had_failure else (
-                "completed" if total_scores else "failed"
-            )
+            status = "completed" if not had_failure else ("completed" if total_scores else "failed")
 
             await self._eval_repo.update_eval_run(
                 run_id,

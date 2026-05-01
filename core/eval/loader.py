@@ -22,9 +22,7 @@ async def load_simulation_data(
 ) -> dict[str, Any]:
     """Fetch all simulation data needed for eval prompts."""
     # Simulation record
-    sim_row = await db.fetchrow(
-        "SELECT * FROM simulations WHERE id = $1", simulation_id
-    )
+    sim_row = await db.fetchrow("SELECT * FROM simulations WHERE id = $1", simulation_id)
     if sim_row is None:
         raise ValueError(f"Simulation {simulation_id} not found")
     sim = dict(sim_row)
@@ -114,7 +112,8 @@ async def load_simulation_data(
                FROM agent_internal_state
                WHERE updated_at >= $1 AND updated_at <= $2
                ORDER BY agent_id""",
-            sim_started, sim_ended,
+            sim_started,
+            sim_ended,
         )
     else:
         internal_state_rows = await db.fetch(
@@ -135,7 +134,8 @@ async def load_simulation_data(
                FROM agent_transactions
                WHERE created_at >= $1 AND created_at <= $2
                ORDER BY created_at""",
-            sim_started, sim_ended,
+            sim_started,
+            sim_ended,
         )
     else:
         transaction_rows = await db.fetch(
@@ -154,7 +154,8 @@ async def load_simulation_data(
                FROM journal_entries
                WHERE entry_type = 'dream' AND created_at >= $1 AND created_at <= $2
                ORDER BY created_at""",
-            sim_started, sim_ended,
+            sim_started,
+            sim_ended,
         )
     else:
         dream_rows = await db.fetch(
@@ -224,8 +225,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
         "safety": {
             "transcript_text": data["transcript_text"],
             "artifacts": [
-                a for a in data["artifacts"]
-                if a.get("artifact_type") in ("social_post", "email")
+                a for a in data["artifacts"] if a.get("artifact_type") in ("social_post", "email")
             ],
         },
         "dialogue_quality": {
@@ -239,13 +239,11 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "total_artifacts": data["total_artifacts"],
         },
         "errors": {
-            "artifacts": [
-                a for a in data["artifacts"]
-                if a.get("status") == "failed"
-            ],
+            "artifacts": [a for a in data["artifacts"] if a.get("status") == "failed"],
             "management_logs": data["management_logs"],
             "conversations": [
-                c for c in data["conversations"]
+                c
+                for c in data["conversations"]
                 if c.get("turn_count") is not None and c["turn_count"] <= 1
             ],
             "simulation": data["simulation"],
@@ -311,81 +309,94 @@ def _build_timeline(data: dict[str, Any]) -> str:
         started_at = conv.get("started_at")
         if started_at is None:
             continue
-        events.append({
-            "time": started_at,
-            "type": "conversation",
-            "agents": conv.get("participating_agents", []),
-            "trigger": conv.get("trigger_type", "unknown"),
-            "summary": str(conv.get("transcript", ""))[:500],
-        })
+        events.append(
+            {
+                "time": started_at,
+                "type": "conversation",
+                "agents": conv.get("participating_agents", []),
+                "trigger": conv.get("trigger_type", "unknown"),
+                "summary": str(conv.get("transcript", ""))[:500],
+            }
+        )
 
     # Internal state changes
     for state in data.get("agent_internal_state", []):
         updated_at = state.get("updated_at")
         if updated_at is None:
             continue
-        events.append({
-            "time": updated_at,
-            "type": "state_change",
-            "agent": state.get("agent_id"),
-            "mood": state.get("mood"),
-            "energy": state.get("energy"),
-        })
+        events.append(
+            {
+                "time": updated_at,
+                "type": "state_change",
+                "agent": state.get("agent_id"),
+                "mood": state.get("mood"),
+                "energy": state.get("energy"),
+            }
+        )
 
     # Transactions
     for txn in data.get("transactions", []):
         created_at = txn.get("created_at")
         if created_at is None:
             continue
-        events.append({
-            "time": created_at,
-            "type": "transaction",
-            "agent": txn.get("agent_id"),
-            "amount": txn.get("amount"),
-            "description": txn.get("description"),
-        })
+        events.append(
+            {
+                "time": created_at,
+                "type": "transaction",
+                "agent": txn.get("agent_id"),
+                "amount": txn.get("amount"),
+                "description": txn.get("description"),
+            }
+        )
 
     # Alliance formations
     for alliance in data.get("alliance_records", []):
         created_at = alliance.get("created_at")
         if created_at is None:
             continue
-        events.append({
-            "time": created_at,
-            "type": "alliance_formed",
-            "name": alliance.get("name"),
-            "members": alliance.get("members", []),
-        })
+        events.append(
+            {
+                "time": created_at,
+                "type": "alliance_formed",
+                "name": alliance.get("name"),
+                "members": alliance.get("members", []),
+            }
+        )
 
     # Dreams
     for dream in data.get("dream_entries", []):
         created_at = dream.get("created_at")
         if created_at is None:
             continue
-        events.append({
-            "time": created_at,
-            "type": "dream",
-            "agent": dream.get("agent_id"),
-            "content": str(dream.get("content", ""))[:300],
-        })
+        events.append(
+            {
+                "time": created_at,
+                "type": "dream",
+                "agent": dream.get("agent_id"),
+                "content": str(dream.get("content", ""))[:300],
+            }
+        )
 
     # World builds
     for chunk in data.get("world_chunks", []):
         built_date = chunk.get("built_date")
         if built_date is None:
             continue
-        events.append({
-            "time": built_date,
-            "type": "world_build",
-            "name": chunk.get("name"),
-            "built_by": chunk.get("built_by"),
-        })
+        events.append(
+            {
+                "time": built_date,
+                "type": "world_build",
+                "name": chunk.get("name"),
+                "built_by": chunk.get("built_by"),
+            }
+        )
 
     # Sort chronologically
-    events.sort(key=lambda e: (
-        e["time"] if isinstance(e["time"], datetime)
-        else datetime.min.replace(tzinfo=UTC)
-    ))
+    events.sort(
+        key=lambda e: (
+            e["time"] if isinstance(e["time"], datetime) else datetime.min.replace(tzinfo=UTC)
+        )
+    )
 
     return _render_timeline_markdown(events)
 
@@ -420,15 +431,9 @@ def _render_timeline_markdown(events: list[dict[str, Any]]) -> str:
             )
         elif etype == "alliance_formed":
             members = ", ".join(event.get("members", []))
-            line = (
-                f"- **[{timestamp}] Alliance Formed**: {event.get('name')} — "
-                f"members: {members}"
-            )
+            line = f"- **[{timestamp}] Alliance Formed**: {event.get('name')} — members: {members}"
         elif etype == "dream":
-            line = (
-                f"- **[{timestamp}] Dream**: {event.get('agent')} — "
-                f"{event.get('content', '')}"
-            )
+            line = f"- **[{timestamp}] Dream**: {event.get('agent')} — {event.get('content', '')}"
         elif etype == "world_build":
             line = (
                 f"- **[{timestamp}] World Build**: {event.get('name')} — "

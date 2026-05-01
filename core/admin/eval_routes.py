@@ -18,7 +18,6 @@ from core.models import (
     EvalComparisonResponse,
     EvalExportResponse,
     EvalHistoryPoint,
-    EvalResult,
     EvalRun,
     EvalRunDetail,
     EvalRunRequest,
@@ -50,10 +49,12 @@ async def get_simulation_evals(
     result = []
     for run in runs:
         results = await eval_repo.get_eval_results(run.id)
-        result.append(EvalRunDetail(
-            **run.model_dump(),
-            results=results,
-        ))
+        result.append(
+            EvalRunDetail(
+                **run.model_dump(),
+                results=results,
+            )
+        )
     return result
 
 
@@ -78,7 +79,9 @@ async def run_simulation_evals(
     model_versions = sim.model_versions if sim else {}
 
     eval_run = await eval_repo.create_eval_run(
-        sim_id, body.eval_suite or "full", model_versions=model_versions,
+        sim_id,
+        body.eval_suite or "full",
+        model_versions=model_versions,
     )
     run_id = eval_run.id
 
@@ -144,8 +147,11 @@ async def compare_evals(
     try:
         a_id = uuid_mod.UUID(run_a)
         b_id = uuid_mod.UUID(run_b)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid UUID format for run_a or run_b")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid UUID format for run_a or run_b",
+        ) from exc
 
     run_a_obj = await eval_repo.get_eval_run(a_id)
     run_b_obj = await eval_repo.get_eval_run(b_id)
@@ -197,8 +203,8 @@ async def create_issues_from_eval(
     db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Generate GitHub issues from low-scoring eval categories."""
-    from core.repos.eval_repo import EvalRepo
     from core.eval.issue_generator import EvalIssueGenerator
+    from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
     generator = EvalIssueGenerator(
@@ -233,15 +239,15 @@ async def analyze_eval(
     llm: OpenRouterClient = Depends(get_llm),
 ) -> dict[str, Any]:
     """Run eval analyzer on a completed eval run."""
-    from core.repos.eval_repo import EvalRepo
     from core.eval.analyzer import EvalAnalyzer
+    from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
     analyzer = EvalAnalyzer(db=db, eval_repo=eval_repo, llm_client=llm)
     try:
         result = await analyzer.analyze(eval_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return result.model_dump()
 
 
@@ -252,8 +258,8 @@ async def get_eval_analysis(
     llm: OpenRouterClient = Depends(get_llm),
 ) -> dict[str, Any]:
     """Get stored analysis for an eval run."""
-    from core.repos.eval_repo import EvalRepo
     from core.eval.analyzer import EvalAnalyzer
+    from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
     analyzer = EvalAnalyzer(db=db, eval_repo=eval_repo, llm_client=llm)

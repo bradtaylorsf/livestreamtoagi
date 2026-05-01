@@ -32,6 +32,7 @@ async def get_conversation(
     """Full conversation: transcript, participants, trigger, energy history."""
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.transcript_repo import TranscriptRepo
+
     conv_repo = ConversationRepo(db)
     transcript_repo = TranscriptRepo(db)
 
@@ -73,6 +74,7 @@ async def get_conversation_turns(
 ) -> list[TurnDetail]:
     """Turn-by-turn detail with selection scores."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     logs = await conv_repo.get_selection_log(conv_id)
@@ -98,6 +100,7 @@ async def get_conversation_selection_log(
 ) -> list[SelectionLog]:
     """Speaker selection scores for every turn (all candidates scored)."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     return await conv_repo.get_selection_log(conv_id)
@@ -110,6 +113,7 @@ async def get_conversation_management_flags(
 ) -> list[dict[str, Any]]:
     """Management shadow flags for this conversation."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     return await conv_repo.get_management_flags(conv_id)
@@ -122,6 +126,7 @@ async def get_conversation_artifacts(
 ) -> list[dict[str, Any]]:
     """Tool invocation artifacts for this conversation."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     return await conv_repo.get_artifacts(conv_id)
@@ -134,6 +139,7 @@ async def get_conversation_interrupts(
 ) -> list[dict[str, Any]]:
     """Interrupt events for this conversation."""
     from core.repos.conversation_repo import ConversationRepo
+
     conv_repo = ConversationRepo(db)
 
     return await conv_repo.get_interrupts(conv_id)

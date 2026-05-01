@@ -34,6 +34,7 @@ router = APIRouter(prefix="/api")
 
 def _get_services():
     from core.main import app
+
     return app.state.services
 
 
@@ -50,7 +51,10 @@ def _get_registry():
 
 
 async def _check_rate_limit(
-    redis, key: str, max_requests: int, window_seconds: int,
+    redis,
+    key: str,
+    max_requests: int,
+    window_seconds: int,
 ) -> bool:
     """Return True if request is allowed, False if rate-limited."""
     if redis is None:
@@ -112,6 +116,15 @@ class AgentPublicProfile(BaseModel):
     building_model: str = ""
     chattiness: float = 0.0
     initiative: float = 0.0
+    voice: str | None = None
+    behaviors: list[str] = []
+    interrupt_tendency: float = 0.0
+    eavesdrop_tendency: float = 0.0
+    closing_weight: float = 0.0
+    total_cost: str = "0"
+    message_count: int = 0
+    conversation_count: int = 0
+    artifact_count: int = 0
 
 
 class StatsResponse(BaseModel):
@@ -142,15 +155,22 @@ class ConversationSummary(BaseModel):
 
 class ConversationDetailResponse(BaseModel):
     id: str
+    simulation_id: str | None = None
     trigger_type: str
+    trigger_details: dict[str, Any] | None = None
     participating_agents: list[str]
     topics_discussed: list[str] | None = None
     turn_count: int = 0
+    closed_by: str | None = None
     location: str | None = None
     initial_energy: float = 0.0
     final_energy: float | None = None
     started_at: str | None = None
     ended_at: str | None = None
+    energy_history: list[dict[str, Any]] = []
+    transcript: str | None = None
+    total_tokens: int = 0
+    total_cost: str = "0"
 
 
 class SelectionLogResponse(BaseModel):
@@ -176,6 +196,7 @@ class EvalHistoryItem(BaseModel):
 class PublicEvalRun(BaseModel):
     id: str
     simulation_id: str
+    simulation_name: str | None = None
     date: str
     overall_score: float | None = None
     cost: float = 0
@@ -231,18 +252,32 @@ def _conversation_to_summary(c: Conversation) -> ConversationSummary:
     )
 
 
-def _conversation_to_detail(c: Conversation) -> ConversationDetailResponse:
+def _conversation_to_detail(
+    c: Conversation,
+    *,
+    energy_history: list[dict[str, Any]] | None = None,
+    transcript: str | None = None,
+    total_tokens: int = 0,
+    total_cost: str = "0",
+) -> ConversationDetailResponse:
     return ConversationDetailResponse(
         id=str(c.id),
+        simulation_id=str(c.simulation_id) if c.simulation_id else None,
         trigger_type=c.trigger_type,
+        trigger_details=c.trigger_details,
         participating_agents=c.participating_agents,
         topics_discussed=c.topics_discussed,
         turn_count=c.turn_count,
+        closed_by=c.closed_by,
         location=c.location,
         initial_energy=c.initial_energy,
         final_energy=c.final_energy,
         started_at=c.started_at.isoformat() if c.started_at else None,
         ended_at=c.ended_at.isoformat() if c.ended_at else None,
+        energy_history=energy_history or [],
+        transcript=transcript,
+        total_tokens=total_tokens,
+        total_cost=total_cost,
     )
 
 
@@ -263,30 +298,55 @@ def _event_to_response(e: WorldEvent) -> LoreEventResponse:
 @router.get("/agents")
 async def get_agents() -> list[AgentPublicProfile]:
     registry = _get_registry()
+    db = _get_db()
     agents = registry.get_all_agents()
-    return [
-        AgentPublicProfile(
-            id=a.id,
-            display_name=a.display_name,
-            role=a.role,
-            color=a.color_hex,
-            status=a.status.value if hasattr(a.status, "value") else str(a.status),
-            conversation_model=a.model_conversation,
-            building_model=a.model_building,
-            chattiness=a.chattiness,
-            initiative=a.initiative,
+
+    from core.repos.cost_repo import CostRepo
+
+    cost_repo = CostRepo(db)
+
+    result = []
+    for a in agents:
+        costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
+        total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
+        result.append(
+            AgentPublicProfile(
+                id=a.id,
+                display_name=a.display_name,
+                role=a.role,
+                color=a.color_hex,
+                status=a.status.value if hasattr(a.status, "value") else str(a.status),
+                conversation_model=a.model_conversation,
+                building_model=a.model_building,
+                chattiness=a.chattiness,
+                initiative=a.initiative,
+                voice=a.voice_id,
+                behaviors=list(a.behaviors.keys()) if a.behaviors else [],
+                interrupt_tendency=a.interrupt_tendency,
+                eavesdrop_tendency=a.eavesdrop_tendency,
+                closing_weight=a.closing_weight,
+                total_cost=f"{total_cost:.6f}",
+                message_count=len(costs) if costs else 0,
+            )
         )
-        for a in agents
-    ]
+    return result
 
 
 @router.get("/agents/{agent_id}")
 async def get_agent(agent_id: str) -> AgentPublicProfile:
     registry = _get_registry()
+    db = _get_db()
     agent = registry.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     a = agent
+
+    from core.repos.cost_repo import CostRepo
+
+    cost_repo = CostRepo(db)
+    costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
+    total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
+
     return AgentPublicProfile(
         id=a.id,
         display_name=a.display_name,
@@ -297,22 +357,113 @@ async def get_agent(agent_id: str) -> AgentPublicProfile:
         building_model=a.model_building,
         chattiness=a.chattiness,
         initiative=a.initiative,
+        voice=a.voice_id,
+        behaviors=list(a.behaviors.keys()) if a.behaviors else [],
+        interrupt_tendency=a.interrupt_tendency,
+        eavesdrop_tendency=a.eavesdrop_tendency,
+        closing_weight=a.closing_weight,
+        total_cost=f"{total_cost:.6f}",
+        message_count=len(costs) if costs else 0,
     )
+
+
+@router.get("/agents/{agent_id}/system-prompt")
+async def get_agent_system_prompt(agent_id: str) -> dict[str, Any]:
+    """Current assembled system prompt (all 3 layers) with token counts."""
+    registry = _get_registry()
+    db = _get_db()
+    agent = registry.get_agent(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    from core.repos.memory_repo import MemoryRepo
+    from core.system_prompt import INFRASTRUCTURE_PROMPT
+
+    memory_repo = MemoryRepo(db)
+    core_mem = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
+
+    raw_layers = {
+        "Infrastructure": INFRASTRUCTURE_PROMPT,
+        "Character": agent.system_prompt,
+        "Memory Context": core_mem.content if core_mem else "",
+    }
+    assembled = "\n\n".join(v for v in raw_layers.values() if v)
+
+    def _estimate_tokens(text: str) -> int:
+        return len(text) // 4 if text else 0
+
+    layers = [
+        {"name": name, "content": content, "token_count": _estimate_tokens(content)}
+        for name, content in raw_layers.items()
+        if content
+    ]
+    total_tokens = sum(layer["token_count"] for layer in layers)
+
+    return {
+        "assembled_prompt": assembled,
+        "layers": layers,
+        "total_tokens": total_tokens,
+    }
+
+
+@router.get("/agents/{agent_id}/costs")
+async def get_agent_costs(
+    agent_id: str,
+    from_date: str | None = Query(default=None, alias="from"),
+    to_date: str | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    """Cost breakdown: by day, by type, total."""
+    from datetime import datetime as dt
+
+    db = _get_db()
+    from core.repos.cost_repo import CostRepo
+
+    cost_repo = CostRepo(db)
+
+    parsed_from = dt.fromisoformat(from_date) if from_date else None
+    parsed_to = dt.fromisoformat(to_date) if to_date else None
+
+    data = await cost_repo.get_costs_by_agent_grouped(
+        agent_id,
+        from_date=parsed_from,
+        to_date=parsed_to,
+    )
+
+    by_day = [
+        {"date": d.get("day", ""), "cost": d.get("total", "0")} for d in data.get("by_day", [])
+    ]
+    by_type = [
+        {"type": d.get("type", ""), "cost": d.get("total", "0"), "tokens": int(d.get("tokens", 0))}
+        for d in data.get("by_type", [])
+    ]
+
+    return {
+        "by_day": by_day,
+        "by_type": by_type,
+        "total": data.get("total", "0"),
+        "total_input_tokens": data.get("total_input_tokens", 0),
+        "total_output_tokens": data.get("total_output_tokens", 0),
+    }
 
 
 @router.get("/agents/{agent_id}/journal")
 async def get_agent_journal(
     agent_id: str,
+    simulation_id: str | None = Query(default=None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> list[dict[str, Any]]:
     db = _get_db()
+    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
     rows = await db.fetch(
         """SELECT * FROM journal_entries
            WHERE agent_id = $1 AND simulation_id = $4
            ORDER BY created_at DESC
            LIMIT $2 OFFSET $3""",
-        agent_id, limit, offset, LIVE_SIMULATION_ID,
+        agent_id,
+        limit,
+        offset,
+        sim_id,
     )
     return [
         {
@@ -333,7 +484,8 @@ async def get_agent_relationships(agent_id: str) -> list[dict[str, Any]]:
     if not svc.relationship_repo:
         return []
     relationships = await svc.relationship_repo.get_all_for_agent(
-        LIVE_SIMULATION_ID, agent_id,
+        LIVE_SIMULATION_ID,
+        agent_id,
     )
     return [
         {
@@ -351,13 +503,18 @@ async def get_agent_relationships(agent_id: str) -> list[dict[str, Any]]:
 @router.get("/agents/{agent_id}/conversations")
 async def get_agent_conversations(
     agent_id: str,
+    simulation_id: str | None = Query(default=None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     db = _get_db()
     repo = ConversationRepo(db)
+    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
     convs, total = await repo.get_conversations_by_agent(
-        agent_id, simulation_id=LIVE_SIMULATION_ID, limit=limit, offset=offset,
+        agent_id,
+        simulation_id=sim_id,
+        limit=limit,
+        offset=offset,
     )
     return {
         "items": [_conversation_to_summary(c) for c in convs],
@@ -370,15 +527,21 @@ async def get_agent_conversations(
 @router.get("/agents/{agent_id}/artifacts")
 async def get_agent_artifacts(
     agent_id: str,
+    artifact_type: str | None = Query(None, alias="type"),
+    simulation_id: str | None = Query(default=None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     svc = _get_services()
     if not svc.artifact_repo:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
+    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
     artifacts, total = await svc.artifact_repo.get_all_artifacts(
-        simulation_id=LIVE_SIMULATION_ID,
-        agent_ids=[agent_id], limit=limit, offset=offset,
+        simulation_id=sim_id,
+        agent_ids=[agent_id],
+        artifact_type=artifact_type,
+        limit=limit,
+        offset=offset,
     )
     return {
         "items": [
@@ -388,6 +551,7 @@ async def get_agent_artifacts(
                 "tool_name": a.tool_name,
                 "artifact_type": a.artifact_type,
                 "status": a.status,
+                "summary": _artifact_summary(a.artifact_type, a.tool_input),
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             }
             for a in artifacts
@@ -398,13 +562,99 @@ async def get_agent_artifacts(
     }
 
 
+@router.get("/agents/{agent_id}/core-memory")
+async def get_agent_core_memory(
+    agent_id: str,
+    simulation_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Current core memory content with version history."""
+    db = _get_db()
+    from core.repos.memory_repo import MemoryRepo
+
+    memory_repo = MemoryRepo(db)
+
+    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
+    current = await memory_repo.get_core_memory(agent_id, simulation_id=sim_id)
+    history = await memory_repo.get_core_memory_history(agent_id, simulation_id=sim_id)
+
+    version_history = [
+        {
+            "version": h.version,
+            "content": h.content,
+            "changed_at": h.changed_at.isoformat() if h.changed_at else None,
+            "change_reason": h.change_reason,
+        }
+        for h in history
+    ]
+
+    return {
+        "current_content": current.content if current else "",
+        "current_version": current.version if current else 0,
+        "token_count": current.token_count if current else 0,
+        "last_updated": (
+            current.last_updated.isoformat() if current and current.last_updated else None
+        ),
+        "version_history": version_history,
+    }
+
+
+@router.get("/agents/{agent_id}/recall-memories")
+async def get_agent_recall_memories(
+    agent_id: str,
+    search: str | None = Query(default=None),
+    simulation_id: str | None = Query(default=None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Paginated recall memories (read-only, embeddings hidden). Supports keyword search."""
+    db = _get_db()
+    from core.repos.memory_repo import MemoryRepo
+
+    memory_repo = MemoryRepo(db)
+
+    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
+
+    if search:
+        memories, total = await memory_repo.search_recall_memories_by_keyword(
+            agent_id,
+            search,
+            limit=limit,
+            offset=offset,
+            simulation_id=sim_id,
+        )
+    else:
+        memories, total = await memory_repo.get_recall_memories_paginated(
+            agent_id,
+            limit=limit,
+            offset=offset,
+            simulation_id=sim_id,
+        )
+
+    items = []
+    for m in memories:
+        d = m.model_dump()
+        d.pop("embedding", None)
+        # Serialize datetimes
+        for key in ("created_at", "updated_at", "last_accessed"):
+            if key in d and hasattr(d[key], "isoformat"):
+                d[key] = d[key].isoformat()
+        # Serialize UUIDs
+        for key in ("id", "simulation_id"):
+            if key in d and d[key] is not None:
+                d[key] = str(d[key])
+        items.append(d)
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @router.get("/agents/{agent_id}/evolution")
 async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.config_version_repo:
         return []
     versions = await svc.config_version_repo.get_prompt_history(
-        agent_id, simulation_id=LIVE_SIMULATION_ID,
+        agent_id,
+        simulation_id=LIVE_SIMULATION_ID,
     )
     return [
         {
@@ -421,12 +671,17 @@ async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
 
 @router.post("/agents/{agent_id}/chat")
 async def chat_with_agent(
-    agent_id: str, req: ChatRequest, request: Request,
+    agent_id: str,
+    req: ChatRequest,
+    request: Request,
 ) -> ChatResponse:
     svc = _get_services()
     ip = _client_ip(request)
     allowed = await _check_rate_limit(
-        svc.redis, f"ratelimit:chat:{ip}:{agent_id}", 10, 3600,
+        svc.redis,
+        f"ratelimit:chat:{ip}:{agent_id}",
+        10,
+        3600,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Rate limit exceeded (10/hr)")
@@ -440,6 +695,7 @@ async def chat_with_agent(
         raise HTTPException(status_code=503, detail="LLM client not available")
 
     from datetime import UTC, datetime
+
     response = await svc.llm_client.chat(
         model=agent.model_conversation,
         messages=[
@@ -465,20 +721,24 @@ async def chat_with_agent(
 
 @router.get("/conversations")
 async def get_conversations(
+    simulation_id: str | None = Query(default=None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     db = _get_db()
+    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
     total = await db.fetchval(
         "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
-        LIVE_SIMULATION_ID,
+        sim_id,
     )
     rows = await db.fetch(
         """SELECT * FROM conversations
            WHERE simulation_id = $3
            ORDER BY started_at DESC
            LIMIT $1 OFFSET $2""",
-        limit, offset, LIVE_SIMULATION_ID,
+        limit,
+        offset,
+        sim_id,
     )
     items = []
     for r in rows:
@@ -499,12 +759,30 @@ async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     conv = await repo.get(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return _conversation_to_detail(conv)
+
+    # Fetch transcript
+    from core.repos.transcript_repo import TranscriptRepo
+
+    transcript_repo = TranscriptRepo(db)
+    transcript_record = await transcript_repo.get_by_conversation(conv_uuid)
+    transcript_text = transcript_record.content if transcript_record else None
+    total_tokens = len(transcript_text) // 4 if transcript_text else 0
+
+    # Fetch energy history
+    energy_log = await repo.get_energy_log(conv_uuid)
+
+    return _conversation_to_detail(
+        conv,
+        energy_history=energy_log,
+        transcript=transcript_text,
+        total_tokens=total_tokens,
+    )
 
 
 @router.get("/conversations/{conversation_id}/selections")
@@ -517,7 +795,8 @@ async def get_conversation_selections(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400, detail="Invalid conversation ID",
+            status_code=400,
+            detail="Invalid conversation ID",
         ) from exc
     logs = await repo.get_selection_log(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
     return [
@@ -534,22 +813,163 @@ async def get_conversation_selections(
     ]
 
 
+@router.get("/conversations/{conversation_id}/turns")
+async def get_conversation_turns(
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    """Turn-by-turn detail with selection scores."""
+    db = _get_db()
+    repo = ConversationRepo(db)
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID",
+        ) from exc
+    logs = await repo.get_selection_log(conv_uuid)
+    return [
+        {
+            "turn_number": log.turn_number,
+            "selected_agent_id": log.selected_agent_id,
+            "was_interrupt": log.was_interrupt,
+            "agent_scores": log.agent_scores,
+            "detected_topic": log.detected_topic,
+            "previous_speaker_id": log.previous_speaker_id,
+            "conversation_energy": log.conversation_energy,
+            "timestamp": (
+                log.timestamp.isoformat() if hasattr(log, "timestamp") and log.timestamp else None
+            ),
+        }
+        for log in logs
+    ]
+
+
+@router.get("/conversations/{conversation_id}/management-flags")
+async def get_conversation_management_flags(
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    """Management shadow flags for this conversation."""
+    db = _get_db()
+    repo = ConversationRepo(db)
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID",
+        ) from exc
+    return await repo.get_management_flags(conv_uuid)
+
+
+@router.get("/conversations/{conversation_id}/artifacts")
+async def get_conversation_artifacts(
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    """Tool invocation artifacts for this conversation."""
+    db = _get_db()
+    repo = ConversationRepo(db)
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID",
+        ) from exc
+    return await repo.get_artifacts(conv_uuid)
+
+
+@router.get("/conversations/{conversation_id}/interrupts")
+async def get_conversation_interrupts(
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    """Interrupt events for this conversation."""
+    db = _get_db()
+    repo = ConversationRepo(db)
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid conversation ID",
+        ) from exc
+    return await repo.get_interrupts(conv_uuid)
+
+
 # ── Blog Endpoints ──────────────────────────────────────────────
 
 
 @router.get("/blog")
 async def get_blog_posts() -> list[BlogPostSummary]:
     from core.blog import list_posts
+
     return list_posts()
 
 
 @router.get("/blog/{slug}")
 async def get_blog_post(slug: str) -> BlogPostDetail:
     from core.blog import get_post
+
     post = get_post(slug)
     if not post:
         raise HTTPException(status_code=404, detail="Blog post not found")
     return post
+
+
+# ── Eval Prompt Endpoints ──────────────────────────────────────
+
+
+@router.get("/evals/prompts")
+async def get_eval_prompts() -> list[dict[str, Any]]:
+    """Return all eval category prompts for public display."""
+    from core.eval.prompt_loader import discover_categories, load_prompt
+
+    categories = discover_categories()
+    result = []
+    for cat in categories:
+        try:
+            data = load_prompt(cat)
+            result.append(
+                {
+                    "name": data.get("name", cat),
+                    "description": data.get("description", ""),
+                    "system": data.get("system", ""),
+                    "rubric": data.get("rubric", {}),
+                    "sub_scores": data.get("sub_scores", []),
+                    "output_schema": data.get("output_schema", {}),
+                    "model": data.get("model", ""),
+                    "temperature": data.get("temperature"),
+                    "max_tokens": data.get("max_tokens"),
+                }
+            )
+        except Exception:
+            logger.warning("Failed to load eval prompt for %s", cat)
+    return result
+
+
+@router.get("/evals/prompts/{category}")
+async def get_eval_prompt(category: str) -> dict[str, Any]:
+    """Return a single eval category prompt."""
+    from core.eval.prompt_loader import load_prompt
+
+    try:
+        data = load_prompt(category)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Eval prompt '{category}' not found",
+        ) from exc
+    return {
+        "name": data.get("name", category),
+        "description": data.get("description", ""),
+        "system": data.get("system", ""),
+        "rubric": data.get("rubric", {}),
+        "sub_scores": data.get("sub_scores", []),
+        "output_schema": data.get("output_schema", {}),
+        "model": data.get("model", ""),
+        "temperature": data.get("temperature"),
+        "max_tokens": data.get("max_tokens"),
+    }
 
 
 # ── Eval Endpoints ──────────────────────────────────────────────
@@ -564,9 +984,7 @@ async def get_evals_summary() -> list[EvalSummaryItem]:
         """SELECT DISTINCT ON (category) category, score
            FROM eval_results er
            JOIN eval_runs e ON e.id = er.eval_run_id
-           WHERE e.simulation_id = $1
            ORDER BY category, er.created_at DESC""",
-        LIVE_SIMULATION_ID,
     )
     return [
         EvalSummaryItem(
@@ -589,17 +1007,17 @@ async def get_evals_history(
         rows = await db.fetch(
             """SELECT er.score, er.created_at FROM eval_results er
                JOIN eval_runs e ON e.id = er.eval_run_id
-               WHERE er.category = $1 AND e.simulation_id = $2
-               ORDER BY er.created_at DESC LIMIT $3""",
-            category, LIVE_SIMULATION_ID, limit,
+               WHERE er.category = $1
+               ORDER BY er.created_at DESC LIMIT $2""",
+            category,
+            limit,
         )
     else:
         rows = await db.fetch(
             """SELECT er.score, er.created_at FROM eval_results er
                JOIN eval_runs e ON e.id = er.eval_run_id
-               WHERE e.simulation_id = $1
-               ORDER BY er.created_at DESC LIMIT $2""",
-            LIVE_SIMULATION_ID, limit,
+               ORDER BY er.created_at DESC LIMIT $1""",
+            limit,
         )
     return [
         EvalHistoryItem(
@@ -617,10 +1035,7 @@ async def get_eval_categories() -> list[str]:
         return []
     rows = await db.fetch(
         """SELECT DISTINCT er.category FROM eval_results er
-           JOIN eval_runs e ON e.id = er.eval_run_id
-           WHERE e.simulation_id = $1
            ORDER BY er.category""",
-        LIVE_SIMULATION_ID,
     )
     return [r["category"] for r in rows]
 
@@ -636,7 +1051,18 @@ async def get_eval_runs(
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    runs = await eval_repo.get_eval_runs(LIVE_SIMULATION_ID)
+    runs = await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
+
+    # Batch-fetch simulation names for all unique simulation IDs
+    sim_ids = list({run.simulation_id for run in runs})
+    sim_names: dict[uuid.UUID, str] = {}
+    if sim_ids:
+        name_rows = await db.fetch(
+            "SELECT id, name FROM simulations WHERE id = ANY($1::uuid[])",
+            sim_ids,
+        )
+        sim_names = {r["id"]: r["name"] for r in name_rows}
+
     result = []
     for run in runs:
         results = await eval_repo.get_eval_results(run.id)
@@ -648,18 +1074,20 @@ async def get_eval_runs(
             else:
                 flat_versions[agent_id] = str(models)
         category_scores = {
-            r.category: float(r.score) if r.score is not None else None
-            for r in results
+            r.category: float(r.score) if r.score is not None else None for r in results
         }
-        result.append(PublicEvalRun(
-            id=str(run.id),
-            simulation_id=str(run.simulation_id),
-            date=run.started_at.isoformat() if run.started_at else "",
-            overall_score=float(run.overall_score) if run.overall_score is not None else None,
-            cost=float(run.cost),
-            model_versions=flat_versions,
-            category_scores=category_scores,
-        ))
+        result.append(
+            PublicEvalRun(
+                id=str(run.id),
+                simulation_id=str(run.simulation_id),
+                simulation_name=sim_names.get(run.simulation_id),
+                date=run.started_at.isoformat() if run.started_at else "",
+                overall_score=float(run.overall_score) if run.overall_score is not None else None,
+                cost=float(run.cost),
+                model_versions=flat_versions,
+                category_scores=category_scores,
+            )
+        )
     return result
 
 
@@ -671,9 +1099,19 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    run = await eval_repo.get_latest_eval_run(LIVE_SIMULATION_ID)
-    if run is None:
+    # Get most recent eval run across all simulations
+    runs = await eval_repo.get_all_eval_runs(limit=1, offset=0)
+    if not runs:
         return None
+    run = runs[0]
+
+    # Fetch simulation name
+    sim_row = await db.fetchrow(
+        "SELECT name FROM simulations WHERE id = $1",
+        run.simulation_id,
+    )
+    sim_name = sim_row["name"] if sim_row else None
+
     results = await eval_repo.get_eval_results(run.id)
     flat_versions: dict[str, str] = {}
     for agent_id, models in (run.model_versions or {}).items():
@@ -681,13 +1119,11 @@ async def get_latest_eval_run() -> PublicEvalRun | None:
             flat_versions[agent_id] = models.get("conversation", "unknown")
         else:
             flat_versions[agent_id] = str(models)
-    category_scores = {
-        r.category: float(r.score) if r.score is not None else None
-        for r in results
-    }
+    category_scores = {r.category: float(r.score) if r.score is not None else None for r in results}
     return PublicEvalRun(
         id=str(run.id),
         simulation_id=str(run.simulation_id),
+        simulation_name=sim_name,
         date=run.started_at.isoformat() if run.started_at else "",
         overall_score=float(run.overall_score) if run.overall_score is not None else None,
         cost=float(run.cost),
@@ -701,15 +1137,19 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
     db = _get_db()
     if not db:
         raise HTTPException(status_code=503, detail="Database unavailable")
-    from core.constants import LIVE_SIMULATION_ID
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
     run = await eval_repo.get_eval_run(uuid.UUID(run_id))
     if run is None:
         raise HTTPException(status_code=404, detail="Eval run not found")
-    if run.simulation_id != LIVE_SIMULATION_ID:
-        raise HTTPException(status_code=404, detail="Eval run not found")
+
+    sim_row = await db.fetchrow(
+        "SELECT name FROM simulations WHERE id = $1",
+        run.simulation_id,
+    )
+    sim_name = sim_row["name"] if sim_row else None
+
     results = await eval_repo.get_eval_results(run.id)
     flat_versions: dict[str, str] = {}
     for agent_id, models in (run.model_versions or {}).items():
@@ -721,6 +1161,7 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
     return PublicEvalRunDetail(
         id=str(run.id),
         simulation_id=str(run.simulation_id),
+        simulation_name=sim_name,
         date=run.started_at.isoformat() if run.started_at else "",
         overall_score=float(run.overall_score) if run.overall_score is not None else None,
         cost=float(run.cost),
@@ -752,16 +1193,18 @@ async def get_world_chunks() -> list[dict[str, Any]]:
             if isinstance(d.get(key), str):
                 d[key] = json.loads(d[key])
         chunk = WorldChunk(**d)
-        results.append({
-            "id": chunk.id,
-            "name": chunk.name,
-            "x": chunk.x_offset,
-            "y": chunk.y_offset,
-            "width": chunk.width,
-            "height": chunk.height,
-            "tiles": chunk.tile_data,
-            "objects": chunk.objects or [],
-        })
+        results.append(
+            {
+                "id": chunk.id,
+                "name": chunk.name,
+                "x": chunk.x_offset,
+                "y": chunk.y_offset,
+                "width": chunk.width,
+                "height": chunk.height,
+                "tiles": chunk.tile_data,
+                "objects": chunk.objects or [],
+            }
+        )
     return results
 
 
@@ -807,12 +1250,16 @@ async def get_challenges(
 
 @router.post("/challenges")
 async def submit_challenge(
-    req: ChallengeSubmitRequest, request: Request,
+    req: ChallengeSubmitRequest,
+    request: Request,
 ) -> ChallengeResponse:
     svc = _get_services()
     ip = _client_ip(request)
     allowed = await _check_rate_limit(
-        svc.redis, f"ratelimit:challenge:{ip}", 5, 3600,
+        svc.redis,
+        f"ratelimit:challenge:{ip}",
+        5,
+        3600,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Rate limit exceeded (5/hr)")
@@ -833,7 +1280,8 @@ async def submit_challenge(
 
 @router.post("/challenges/{challenge_id}/upvote")
 async def upvote_challenge(
-    challenge_id: int, request: Request,
+    challenge_id: int,
+    request: Request,
 ) -> ChallengeResponse:
     svc = _get_services()
     ip = _client_ip(request)
@@ -872,10 +1320,13 @@ async def get_stats() -> StatsResponse:
     total_agents = len(svc.agent_registry.get_all_agents())
 
     sims = await db.fetchval("SELECT COUNT(*) FROM simulations") or 0
-    convs = await db.fetchval(
-        "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
-        LIVE_SIMULATION_ID,
-    ) or 0
+    convs = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+            LIVE_SIMULATION_ID,
+        )
+        or 0
+    )
     total_cost_val = await db.fetchval(
         "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE simulation_id = $1",
         LIVE_SIMULATION_ID,
@@ -924,9 +1375,415 @@ async def get_lore(
     )
     rows = await db.fetch(query, *params, limit, offset)
 
-    items = [
-        _event_to_response(WorldEvent(**dict(r)))
-        for r in rows
-    ]
+    items = [_event_to_response(WorldEvent(**dict(r))) for r in rows]
 
     return {"items": items, "total": total or 0, "limit": limit, "offset": offset}
+
+
+# ── Public Simulation Endpoints (read-only) ─────────────────────
+
+
+@router.get("/simulations")
+async def get_simulations(
+    status: str | None = Query(default=None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """List all simulations (public read-only). Optionally filter by status."""
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+
+    sim_repo = SimulationRepo(db)
+
+    simulations = await sim_repo.list(
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    total = await sim_repo.count(status=status)
+
+    return {
+        "items": [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "description": s.description,
+                "status": s.status,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                "real_duration": str(s.real_duration) if s.real_duration else None,
+                "total_conversations": s.total_conversations,
+                "total_turns": s.total_turns,
+                "total_cost": s.total_cost,
+                "total_artifacts": s.total_artifacts,
+                "agents_participated": s.agents_participated,
+            }
+            for s in simulations
+        ],
+        "total": total or 0,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/simulations/{sim_id}")
+async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
+    """Public simulation detail.
+
+    Totals (conversations/turns/cost/artifacts/flags) are computed live from
+    source data so they match the executive summary in the report. The
+    denormalized fields on the simulations row can drift.
+    """
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+
+    sim_repo = SimulationRepo(db)
+
+    sim_uuid = uuid.UUID(sim_id)
+    sim = await sim_repo.get(sim_uuid)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    total_conversations = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+            sim_uuid,
+        )
+        or 0
+    )
+    total_turns = (
+        await db.fetchval(
+            """
+        SELECT COALESCE(SUM(turn_count), 0) FROM conversations
+        WHERE simulation_id = $1
+        """,
+            sim_uuid,
+        )
+        or 0
+    )
+    total_cost_val = await db.fetchval(
+        "SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE simulation_id = $1",
+        sim_uuid,
+    )
+    total_cost = str(total_cost_val) if total_cost_val is not None else "0"
+    total_artifacts = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM artifacts WHERE simulation_id = $1",
+            sim_uuid,
+        )
+        or 0
+    )
+    total_management_flags = (
+        await db.fetchval(
+            "SELECT COUNT(*) FROM management_shadow_log WHERE simulation_id = $1",
+            sim_uuid,
+        )
+        or 0
+    )
+
+    return {
+        "id": str(sim.id),
+        "name": sim.name,
+        "description": sim.description,
+        "config": sim.config,
+        "status": sim.status,
+        "started_at": sim.started_at.isoformat() if sim.started_at else None,
+        "completed_at": sim.completed_at.isoformat() if sim.completed_at else None,
+        "real_duration": str(sim.real_duration) if sim.real_duration else None,
+        "simulated_duration": str(sim.simulated_duration) if sim.simulated_duration else None,
+        "total_conversations": int(total_conversations),
+        "total_turns": int(total_turns),
+        "total_tokens": sim.total_tokens,
+        "total_cost": total_cost,
+        "total_artifacts": int(total_artifacts),
+        "total_management_flags": int(total_management_flags),
+        "agents_participated": sim.agents_participated,
+    }
+
+
+@router.get("/simulations/{sim_id}/conversations")
+async def get_simulation_conversations(
+    sim_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """All conversations in a simulation, paginated."""
+    db = _get_db()
+    repo = ConversationRepo(db)
+    sim_uuid = uuid.UUID(sim_id)
+    conversations, total = await repo.get_conversations_by_simulation(
+        sim_uuid,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [_conversation_to_summary(c) for c in conversations],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/simulations/{sim_id}/costs")
+async def get_simulation_costs(sim_id: str) -> dict[str, Any]:
+    """Cost breakdown by agent for a simulation."""
+    db = _get_db()
+    from core.repos.cost_repo import CostRepo
+
+    cost_repo = CostRepo(db)
+    sim_uuid = uuid.UUID(sim_id)
+    data = await cost_repo.get_costs_by_simulation(sim_uuid)
+    return data
+
+
+@router.get("/simulations/{sim_id}/timeline")
+async def get_simulation_timeline(
+    sim_id: str,
+    agent_id: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+) -> list[dict[str, Any]]:
+    """Chronological event stream for a simulation."""
+    db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
+
+    sim_repo = SimulationRepo(db)
+    sim_uuid = uuid.UUID(sim_id)
+    events = await sim_repo.get_timeline_events(
+        sim_uuid,
+        agent_id=agent_id,
+        event_type=event_type,
+    )
+    return events
+
+
+@router.get("/simulations/{sim_id}/report")
+async def get_simulation_report(
+    sim_id: str,
+    days: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Public simulation report."""
+    db = _get_db()
+
+    from core.reporting.timeline_reporter import TimelineReporter
+    from core.repos.relationship_repo import RelationshipRepo
+
+    relationship_repo = RelationshipRepo(db)
+    reporter = TimelineReporter(
+        db=db,
+        simulation_id=sim_id,
+        relationship_repo=relationship_repo,
+    )
+    day_list = None
+    if days:
+        try:
+            day_list = [int(d.strip()) for d in days.split(",")]
+        except ValueError:
+            pass
+    report = await reporter.generate(days=day_list, format="json")
+
+    from core.reporting.scorecard import LaunchScorecard
+    from core.reporting.timeline_reporter import ReportSection
+    from core.repos.assertion_repo import AssertionRepo
+
+    assertion_repo = AssertionRepo(db)
+    scorecard = LaunchScorecard(
+        db=db,
+        simulation_id=sim_id,
+        assertion_repo=assertion_repo,
+        relationship_repo=relationship_repo,
+    )
+    scorecard_result = await scorecard.evaluate()
+    report.sections.append(
+        ReportSection(
+            title="Launch Readiness Scorecard",
+            data=scorecard_result.to_dict(),
+        )
+    )
+
+    return report.to_dict()
+
+
+@router.get("/simulations/{sim_id}/assertions")
+async def get_simulation_assertions(sim_id: str) -> list[dict[str, Any]]:
+    """Public assertion results for a simulation."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+
+    repo = AssertionRepo(db)
+    rows = await repo.get_by_simulation(uuid.UUID(sim_id))
+    # Transform DB fields to match frontend AssertionResult interface
+    for row in rows:
+        passed = row.pop("passed", False)
+        severity = row.get("severity", "warning")
+        if passed:
+            row["status"] = "pass"
+        elif severity == "warning" or severity == "info":
+            row["status"] = "warning"
+        else:
+            row["status"] = "fail"
+        if "error_message" in row:
+            row["message"] = row.pop("error_message")
+    return rows
+
+
+@router.get("/simulations/{sim_id}/assertions/summary")
+async def get_simulation_assertions_summary(sim_id: str) -> dict[str, Any]:
+    """Public pass/fail/warn summary for simulation assertions."""
+    db = _get_db()
+    from core.repos.assertion_repo import AssertionRepo
+
+    repo = AssertionRepo(db)
+    rates = await repo.get_pass_rates(uuid.UUID(sim_id))
+    return {
+        "passed": rates.get("passed", 0),
+        "failed": rates.get("failed_error", 0),
+        "warnings": rates.get("failed_warning", 0) + rates.get("failed_info", 0),
+    }
+
+
+@router.get("/simulations/{sim_id}/evals")
+async def get_simulation_evals(sim_id: str) -> list[dict[str, Any]]:
+    """Public eval results for a simulation."""
+    db = _get_db()
+    from core.repos.eval_repo import EvalRepo
+
+    eval_repo = EvalRepo(db)
+
+    runs = await eval_repo.get_eval_runs(uuid.UUID(sim_id))
+    result = []
+    for run in runs:
+        results = await eval_repo.get_eval_results(run.id)
+        result.append(
+            {
+                "id": str(run.id),
+                "simulation_id": str(run.simulation_id),
+                "status": run.status,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                "overall_score": float(run.overall_score)
+                if run.overall_score is not None
+                else None,
+                "cost": float(run.cost),
+                "results": [
+                    {
+                        "category": r.category,
+                        "score": float(r.score) if r.score is not None else None,
+                        "reasoning": r.reasoning,
+                    }
+                    for r in results
+                ],
+            }
+        )
+    return result
+
+
+@router.get("/simulations/{sim_id}/social-graph")
+async def get_simulation_social_graph(sim_id: str) -> list[dict[str, Any]]:
+    """Public social graph for a simulation."""
+    db = _get_db()
+    from core.repos.relationship_repo import RelationshipRepo
+
+    repo = RelationshipRepo(db)
+    relationships = await repo.get_social_graph(uuid.UUID(sim_id))
+    return [r.model_dump(mode="json") for r in relationships]
+
+
+@router.get("/simulations/{sim_id}/snapshots")
+async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
+    """Public list of memory snapshots for a simulation."""
+    import json as _json
+    from pathlib import Path
+
+    snapshots_dir = Path("snapshots")
+    results: list[dict[str, Any]] = []
+    if not snapshots_dir.exists():
+        return results
+
+    for f in sorted(snapshots_dir.glob("*.json"), reverse=True):
+        try:
+            data = _json.loads(f.read_text())
+            source_id = data.get("source_simulation_id", "")
+            if source_id == sim_id or not source_id:
+                agents = data.get("agents", {})
+                results.append(
+                    {
+                        "filename": f.name,
+                        "simulation_id": source_id,
+                        "snapshot_at": data.get("snapshot_at", ""),
+                        "agent_count": len(agents),
+                    }
+                )
+        except Exception:
+            continue
+    return results
+
+
+def _artifact_summary(artifact_type: str, tool_input: dict[str, Any] | None) -> str | None:
+    """Extract a short content preview from tool_input for public display."""
+    if not tool_input:
+        return None
+    text: str | None = None
+    match artifact_type:
+        case "social_post":
+            text = tool_input.get("content") or tool_input.get("text") or tool_input.get("message")
+        case "email":
+            subject = tool_input.get("subject", "")
+            body = tool_input.get("body") or tool_input.get("content") or ""
+            text = f"[{subject}] {body}" if subject else str(body)
+        case "code_execution":
+            text = tool_input.get("code") or tool_input.get("source")
+        case "message":
+            text = (
+                tool_input.get("content")
+                or tool_input.get("text")
+                or tool_input.get("body")
+                or tool_input.get("message")
+            )
+        case "memory_operation":
+            text = tool_input.get("content") or tool_input.get("memory")
+        case "web_search":
+            text = tool_input.get("query")
+        case "poll":
+            text = tool_input.get("question")
+    if isinstance(text, str) and text:
+        return text[:200]
+    return None
+
+
+@router.get("/artifacts")
+async def get_public_artifacts(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    agent_id: str | None = Query(None),
+    artifact_type: str | None = Query(None, alias="type"),
+) -> dict[str, Any]:
+    """Public artifact gallery (read-only)."""
+    svc = _get_services()
+    if not svc.artifact_repo:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    agent_ids = [agent_id] if agent_id else None
+    artifacts, total = await svc.artifact_repo.get_all_artifacts(
+        simulation_id=None,
+        agent_ids=agent_ids,
+        artifact_type=artifact_type,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [
+            {
+                "id": str(a.id),
+                "agent_id": a.agent_id,
+                "tool_name": a.tool_name,
+                "artifact_type": a.artifact_type,
+                "status": a.status,
+                "summary": _artifact_summary(a.artifact_type, a.tool_input),
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in artifacts
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }

@@ -174,9 +174,7 @@ class ArtifactRepo:
             params.append(until)
             idx += 1
         if search:
-            clauses.append(
-                f"(tool_input::text ILIKE ${idx} OR tool_output::text ILIKE ${idx})"
-            )
+            clauses.append(f"(tool_input::text ILIKE ${idx} OR tool_output::text ILIKE ${idx})")
             params.append(f"%{search}%")
             idx += 1
 

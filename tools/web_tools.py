@@ -97,9 +97,7 @@ class WebSearchTool(BaseTool):
 
         provider = os.getenv("SEARCH_API_PROVIDER", "brave")
         try:
-            results = await self._search(
-                provider, api_key, query, max_results
-            )
+            results = await self._search(provider, api_key, query, max_results)
         except httpx.HTTPError as exc:
             logger.error("Web search failed: %s", exc)
             return {"status": "error", "reason": f"Search request failed: {exc}"}
@@ -140,12 +138,8 @@ class WebSearchTool(BaseTool):
         close_after = self._http is None
         try:
             if provider == "brave":
-                return await self._brave_search(
-                    client, api_key, query, max_results
-                )
-            return await self._brave_search(
-                client, api_key, query, max_results
-            )
+                return await self._brave_search(client, api_key, query, max_results)
+            return await self._brave_search(client, api_key, query, max_results)
         finally:
             if close_after:
                 await client.aclose()
@@ -333,7 +327,10 @@ async def _dns_resolves_to_private(hostname: str) -> bool:
     loop = asyncio.get_running_loop()
     try:
         infos = await loop.getaddrinfo(
-            hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM,
+            hostname,
+            None,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
         )
         for _family, _type, _proto, _canonname, sockaddr in infos:
             addr = ipaddress.ip_address(sockaddr[0])
