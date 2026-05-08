@@ -1573,6 +1573,10 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
         "total_artifacts": int(total_artifacts),
         "total_management_flags": int(total_management_flags),
         "agents_participated": sim.agents_participated,
+        "hypothesis": sim.hypothesis,
+        "outcomes": sim.outcomes,
+        "learnings": sim.learnings,
+        "factions": sim.factions,
     }
 
 
