@@ -1399,6 +1399,7 @@ function SimulationDetailContent() {
 
   const tabParam = searchParams.get("tab");
   const activeTab: TabKey = isValidTab(tabParam) ? tabParam : "overview";
+  const justQueued = searchParams.get("queued") === "1";
 
   const [sim, setSim] = useState<PublicSimulationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1482,6 +1483,18 @@ function SimulationDetailContent() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 space-y-8">
+      {justQueued && sim.status !== "completed" && sim.status !== "failed" && (
+        <div
+          role="status"
+          data-testid="simulation-queued-banner"
+          className="rounded border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-3 text-sm text-neon-cyan"
+        >
+          Your simulation is{" "}
+          <span className="font-semibold">{sim.status}</span>. We&apos;ll
+          surface conversations and a video as it progresses — feel free to
+          leave this tab open or come back later.
+        </div>
+      )}
       <SimulationHeader
         name={sim.name}
         status={sim.status}
