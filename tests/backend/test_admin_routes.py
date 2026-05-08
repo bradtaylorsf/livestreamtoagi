@@ -481,6 +481,138 @@ class TestSimulationEndpoints:
         assert data["total"] == "0"
 
 
+# ── Scenario / Simulation Launcher Tests ───────────────────────
+
+
+def _patch_project_root(monkeypatch, tmp_path):
+    """Point simulation_routes._project_root() at tmp_path with the right layout.
+
+    Returns the scenarios/ directory so callers can drop fixture YAMLs in.
+    """
+    from core.admin import simulation_routes as sr
+
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir(exist_ok=True)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "run_simulation.py").write_text("# stub")
+    (scripts / "watch_conversations.py").write_text("# stub")
+    monkeypatch.setattr(sr, "_project_root", lambda: tmp_path)
+    return scenarios
+
+
+class TestScenarioListing:
+    def test_list_scenarios_returns_yaml_files(self, mock_app, tmp_path, monkeypatch):
+        client, _, _ = mock_app
+        scenarios = _patch_project_root(monkeypatch, tmp_path)
+        (scenarios / "alpha.yaml").write_text(
+            "# Alpha scenario\n# More description\n\nphases: []\n"
+        )
+        (scenarios / "beta.yaml").write_text("phases: []\n")
+        # Subdirs and non-yaml files must be ignored
+        (scenarios / "seeds").mkdir()
+        (scenarios / "notes.txt").write_text("ignore me")
+
+        resp = client.get("/api/admin/scenarios")
+        assert resp.status_code == 200
+        items = resp.json()
+        names = [s["filename"] for s in items]
+        assert "alpha.yaml" in names
+        assert "beta.yaml" in names
+        assert "seeds" not in names
+        assert "notes.txt" not in names
+
+        alpha = next(s for s in items if s["filename"] == "alpha.yaml")
+        assert alpha["name"] == "alpha"
+        assert alpha["description"] is not None
+        assert "Alpha scenario" in alpha["description"]
+        beta = next(s for s in items if s["filename"] == "beta.yaml")
+        assert beta["description"] is None
+
+
+class TestCreateSimulationWithSeedFile:
+    def test_seed_file_outside_scenarios_rejected(self, mock_app, tmp_path, monkeypatch):
+        client, _, _ = mock_app
+        _patch_project_root(monkeypatch, tmp_path)
+
+        resp = client.post(
+            "/api/admin/simulations",
+            json={"seed_file": "../etc/passwd"},
+        )
+        assert resp.status_code == 400
+        assert "scenarios" in resp.json().get("detail", "").lower()
+
+    def test_seed_file_absolute_path_rejected(self, mock_app, tmp_path, monkeypatch):
+        client, _, _ = mock_app
+        _patch_project_root(monkeypatch, tmp_path)
+
+        resp = client.post(
+            "/api/admin/simulations",
+            json={"seed_file": "/etc/passwd"},
+        )
+        assert resp.status_code == 400
+
+    def test_seed_file_missing_returns_400(self, mock_app, tmp_path, monkeypatch):
+        client, _, _ = mock_app
+        _patch_project_root(monkeypatch, tmp_path)
+
+        resp = client.post(
+            "/api/admin/simulations",
+            json={"seed_file": "doesnotexist.yaml"},
+        )
+        assert resp.status_code == 400
+
+    def test_seed_file_launches_run_simulation_subprocess(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        client, _, _ = mock_app
+        scenarios = _patch_project_root(monkeypatch, tmp_path)
+        (scenarios / "smoke.yaml").write_text("phases: []\n")
+
+        sim = _make_simulation(name="dashboard-smoke-x", status="created")
+
+        captured: dict = {}
+
+        def fake_popen(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            class _P:
+                pid = 1234
+            return _P()
+
+        with (
+            patch("core.repos.simulation_repo.SimulationRepo.create",
+                  new_callable=AsyncMock, return_value=sim),
+            patch("subprocess.Popen", side_effect=fake_popen),
+        ):
+            resp = client.post(
+                "/api/admin/simulations",
+                json={"seed_file": "smoke.yaml", "max_cost": 1.5},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["simulation_id"] == str(sim.id)
+        cmd = captured["cmd"]
+        assert any("run_simulation.py" in str(c) for c in cmd)
+        assert "--seed-file" in cmd
+        assert "--sim-id" in cmd
+        assert str(sim.id) in cmd
+        assert "--max-cost" in cmd
+        assert "1.5" in cmd
+
+    def test_max_cost_above_ten_rejected(self, mock_app, tmp_path, monkeypatch):
+        client, _, _ = mock_app
+        scenarios = _patch_project_root(monkeypatch, tmp_path)
+        (scenarios / "smoke.yaml").write_text("phases: []\n")
+
+        resp = client.post(
+            "/api/admin/simulations",
+            json={"seed_file": "smoke.yaml", "max_cost": 50},
+        )
+        assert resp.status_code == 422
+
+
 # ── Conversation Endpoint Tests ────────────────────────────────
 
 

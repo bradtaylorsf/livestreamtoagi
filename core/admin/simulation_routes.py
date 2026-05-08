@@ -43,12 +43,23 @@ class NewSimulationRequest(BaseModel):
     topic: str | None = None
     turns: int | None = None
     management_shadow: bool = True
+    # When set, launch via scripts/run_simulation.py with this scenario YAML
+    # (relative to the project's scenarios/ dir). The convo_type / agents
+    # fields are ignored in that branch.
+    seed_file: str | None = None
+    max_cost: float | None = Field(default=None, ge=0, le=10)
 
 
 class NewSimulationResponse(BaseModel):
     simulation_id: str
     name: str
     status: str
+
+
+class ScenarioInfo(BaseModel):
+    filename: str
+    name: str
+    description: str | None = None
 
 
 class CloneSimulationRequest(BaseModel):
@@ -82,6 +93,17 @@ def _time_str() -> str:
     return _time_mod.strftime("%Y%m%d-%H%M%S")
 
 
+def _project_root() -> Any:
+    """Return the project root path (the directory containing scenarios/, scripts/).
+
+    Extracted so tests can monkey-patch a temporary project layout without
+    juggling ``__file__`` overrides.
+    """
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent.parent
+
+
 # ── Simulation CRUD ──────────────────────────────────────────
 
 
@@ -91,14 +113,82 @@ async def create_simulation(
     registry: AgentRegistry = Depends(get_registry),
     db: Database = Depends(get_db),
 ) -> NewSimulationResponse:
-    """Create a new simulation and launch it as a background subprocess."""
+    """Create a new simulation and launch it as a background subprocess.
+
+    Two launch paths:
+      * ``body.seed_file`` set → run scripts/run_simulation.py against a
+        scenario YAML in scenarios/. Used by the dashboard "Run new
+        simulation" launcher.
+      * otherwise → run scripts/watch_conversations.py in test mode
+        (legacy admin path).
+    """
     import subprocess
     import sys
-    from pathlib import Path
 
     from core.repos.simulation_repo import SimulationRepo
 
     sim_repo = SimulationRepo(db)
+
+    project_root = _project_root()
+
+    if body.seed_file is not None:
+        # Reject path traversal / absolute paths — only accept relative paths
+        # that resolve inside scenarios/.
+        scenarios_dir = (project_root / "scenarios").resolve()
+        candidate = (scenarios_dir / body.seed_file).resolve()
+        try:
+            candidate.relative_to(scenarios_dir)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="seed_file must resolve inside scenarios/",
+            ) from exc
+        if not candidate.exists() or not candidate.is_file():
+            raise HTTPException(status_code=400, detail="seed_file not found")
+
+        from core.models import SimulationCreate
+
+        sim_name = body.name or f"dashboard-{candidate.stem}-{_time_str()}"
+        max_cost = body.max_cost if body.max_cost is not None else 2.0
+        seed_file_rel = str(candidate.relative_to(project_root))
+
+        sim = await sim_repo.create(
+            SimulationCreate(
+                name=sim_name,
+                config={
+                    "seed_file": seed_file_rel,
+                    "max_cost": max_cost,
+                    "source": "dashboard",
+                },
+            )
+        )
+
+        cmd = [
+            sys.executable,
+            str(project_root / "scripts" / "run_simulation.py"),
+            "--name",
+            sim_name,
+            "--seed-file",
+            str(candidate),
+            "--max-cost",
+            str(max_cost),
+            "--sim-id",
+            str(sim.id),
+        ]
+
+        subprocess.Popen(  # noqa: S603
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            cwd=str(project_root),
+        )
+
+        return NewSimulationResponse(
+            simulation_id=str(sim.id),
+            name=sim_name,
+            status="running",
+        )
 
     sim_name = body.name or f"dashboard-{body.convo_type}-{_time_str()}"
 
@@ -123,7 +213,6 @@ async def create_simulation(
         )
     )
 
-    project_root = Path(__file__).resolve().parent.parent.parent
     cmd = [
         sys.executable,
         str(project_root / "scripts" / "watch_conversations.py"),
@@ -154,6 +243,57 @@ async def create_simulation(
         name=sim_name,
         status="running",
     )
+
+
+@router.get("/scenarios", response_model=list[ScenarioInfo])
+async def list_scenarios() -> list[ScenarioInfo]:
+    """List scenario YAMLs in scenarios/ for the dashboard launcher.
+
+    Description is best-effort: if the file starts with comment lines
+    (``# ...``), the first contiguous block is used; otherwise null.
+    """
+    project_root = _project_root()
+    scenarios_dir = project_root / "scenarios"
+    if not scenarios_dir.is_dir():
+        return []
+
+    out: list[ScenarioInfo] = []
+    for path in sorted(scenarios_dir.glob("*.yaml")):
+        if not path.is_file():
+            continue
+        description: str | None = None
+        try:
+            with open(path) as f:
+                lines: list[str] = []
+                for raw in f:
+                    stripped = raw.strip()
+                    if stripped.startswith("#"):
+                        text = stripped.lstrip("#").strip()
+                        # Skip empty comment lines until we have content,
+                        # but stop at the first blank comment after content
+                        # so descriptions stay tight.
+                        if text or lines:
+                            lines.append(text)
+                    elif stripped == "":
+                        if lines:
+                            break
+                    else:
+                        break
+                # Trim trailing blanks
+                while lines and not lines[-1]:
+                    lines.pop()
+                if lines:
+                    description = " ".join(lines).strip() or None
+        except OSError:
+            description = None
+        out.append(
+            ScenarioInfo(
+                filename=path.name,
+                name=path.stem,
+                description=description,
+            )
+        )
+    return out
 
 
 @router.get("/simulations")
