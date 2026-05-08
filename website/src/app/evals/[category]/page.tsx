@@ -17,7 +17,11 @@ import {
   type PublicSimulation,
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
-import { useCurrentSimulationId } from "@/lib/simulation-store";
+import {
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+} from "@/lib/simulation-store";
+import SimulationPicker from "@/components/SimulationPicker";
 import { SkeletonBlock, SkeletonGrid } from "@/components/Skeleton";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
@@ -58,7 +62,30 @@ export default function CategoryDetailPage() {
 
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
   const [selectedSimId, setSelectedSimId] = useState<string>("");
-  const [currentSimId] = useCurrentSimulationId();
+
+  const simParam = searchParams.get("sim");
+  const [hydratedSim, setHydratedSim] = useState<string | null>(null);
+  useEffect(() => {
+    if (simParam == null) {
+      setHydratedSim(getCurrentSimulationId() ?? "");
+    } else {
+      setHydratedSim(simParam);
+    }
+  }, [simParam]);
+  const currentSimId = hydratedSim ?? "";
+
+  const setCurrentSimId = useCallback(
+    (id: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (id) sp.set("sim", id);
+      else sp.delete("sim");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+      setCurrentSimulationId(id || null);
+      setHydratedSim(id);
+    },
+    [router, searchParams],
+  );
+
   const [runStatus, setRunStatus] = useState<
     "idle" | "running" | "completed" | "failed" | "unauthorized"
   >("idle");
@@ -67,7 +94,7 @@ export default function CategoryDetailPage() {
   const refreshScores = useCallback(async () => {
     const [h, r] = await Promise.all([
       getEvalHistory(category).catch(() => []),
-      getEvalRuns({ simulation_id: currentSimId ?? undefined }).catch(() => []),
+      getEvalRuns({ simulation_id: currentSimId || undefined }).catch(() => []),
     ]);
     setHistory(h);
     setRuns(r);
@@ -76,12 +103,12 @@ export default function CategoryDetailPage() {
   useEffect(() => {
     Promise.all([
       getEvalHistory(category).catch(() => []),
-      getEvalRuns({ simulation_id: currentSimId ?? undefined }).catch(() => []),
+      getEvalRuns({ simulation_id: currentSimId || undefined }).catch(() => []),
       getEvalPrompts().catch(() => []),
-      getSimulations({ limit: 50 }).catch(() => ({
+      getSimulations({ limit: 100 }).catch(() => ({
         items: [],
         total: 0,
-        limit: 50,
+        limit: 100,
         offset: 0,
       })),
     ])
@@ -201,6 +228,15 @@ export default function CategoryDetailPage() {
             <span className="text-xs text-foreground/40">latest score</span>
           </div>
         )}
+        <div className="pt-2">
+          <SimulationPicker
+            id="category-sim-filter"
+            value={currentSimId}
+            onChange={setCurrentSimId}
+            label="Simulation"
+            allLabel="All simulations"
+          />
+        </div>
       </section>
 
       {/* Tabs */}

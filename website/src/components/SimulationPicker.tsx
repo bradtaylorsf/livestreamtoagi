@@ -21,7 +21,7 @@ const STATUS_PRIORITY: Record<string, number> = {
   cancelled: 3,
 };
 
-function sortSimulations(sims: PublicSimulation[]): PublicSimulation[] {
+export function sortSimulations(sims: PublicSimulation[]): PublicSimulation[] {
   return [...sims].sort((a, b) => {
     const pa = STATUS_PRIORITY[a.status] ?? 99;
     const pb = STATUS_PRIORITY[b.status] ?? 99;
