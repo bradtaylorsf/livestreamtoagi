@@ -147,13 +147,16 @@ class TestOrchestratorVideoHook:
         orch._sim_repo = MagicMock()
 
         sim = _make_sim(total_turns=10, total_conversations=2)
-        with patch(
-            "core.video.worker.enqueue_render",
-            new=AsyncMock(return_value="started"),
-        ) as enq, patch(
-            "core.video.worker.mark_unrenderable",
-            new=AsyncMock(),
-        ) as skip:
+        with (
+            patch(
+                "core.video.worker.enqueue_render",
+                new=AsyncMock(return_value="started"),
+            ) as enq,
+            patch(
+                "core.video.worker.mark_unrenderable",
+                new=AsyncMock(),
+            ) as skip,
+        ):
             await orch._enqueue_video_render(sim)
 
         enq.assert_awaited_once()
@@ -168,13 +171,16 @@ class TestOrchestratorVideoHook:
 
         sim = _make_sim(total_turns=0, total_conversations=0)
 
-        with patch(
-            "core.video.worker.enqueue_render",
-            new=AsyncMock(),
-        ) as enq, patch(
-            "core.video.worker.mark_unrenderable",
-            new=AsyncMock(),
-        ) as skip:
+        with (
+            patch(
+                "core.video.worker.enqueue_render",
+                new=AsyncMock(),
+            ) as enq,
+            patch(
+                "core.video.worker.mark_unrenderable",
+                new=AsyncMock(),
+            ) as skip,
+        ):
             await orch._enqueue_video_render(sim)
 
         enq.assert_not_called()
@@ -288,6 +294,103 @@ class TestAudioTimeline:
         assert result.cues_rendered == 0
         # Silence path goes through anullsrc
         assert any("anullsrc" in " ".join(c) for c in recorded_cmds)
+
+
+# ── _build_cues row → TurnAudioCue parsing ───────────────────
+
+
+class TestBuildCuesFromRows:
+    """Regression tests for the render-script transcript→cue parser.
+
+    Real transcripts.event_type values are 'idle' / 'environmental' / 'scheduled'
+    / 'coding_challenge' etc. — never 'turn'. The speaker is encoded as a
+    '[name]: …' prefix on `content`, NOT in `participants` (which is the
+    unordered set of attendees). A prior version of the script filtered
+    `event_type = 'turn'` and pulled the speaker from `participants[0]`,
+    which produced empty MP4s with the wrong voices for every sim.
+    """
+
+    def _import(self):
+        from scripts.render_simulation_video import _build_cues_from_rows
+
+        return _build_cues_from_rows
+
+    def test_extracts_speaker_from_content_prefix(self):
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["pixel", "rex", "aurora", "vera"],
+                "content": "[vera]: morning team — let's review the budget",
+                "created_at": base,
+            },
+            {
+                "participants": ["pixel", "rex", "aurora", "vera"],
+                "content": "[rex]: I have concerns about the Q3 spend",
+                "created_at": base.replace(second=12),
+            },
+        ]
+        cues = build(rows)
+        assert [c.agent_id for c in cues] == ["vera", "rex"]
+        assert cues[0].text == "morning team — let's review the budget"
+        assert cues[1].text == "I have concerns about the Q3 spend"
+        assert cues[0].start_seconds == 0.0
+        assert cues[1].start_seconds == 12.0
+
+    def test_skips_rows_without_speaker_prefix(self):
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera"],
+                "content": "system announcement: budget hit cap",
+                "created_at": base,
+            },
+            {
+                "participants": ["vera"],
+                "content": "[vera]: copy that, pausing new spend",
+                "created_at": base.replace(second=2),
+            },
+        ]
+        cues = build(rows)
+        assert len(cues) == 1
+        assert cues[0].agent_id == "vera"
+
+    def test_skips_rows_with_empty_text_after_prefix(self):
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera"],
+                "content": "[vera]:   ",
+                "created_at": base,
+            },
+        ]
+        assert build(rows) == []
+
+    def test_empty_input_returns_empty(self):
+        build = self._import()
+        assert build([]) == []
+
+    def test_speaker_normalized_to_lowercase(self):
+        from datetime import UTC, datetime
+
+        build = self._import()
+        rows = [
+            {
+                "participants": ["VERA"],
+                "content": "[VERA]: hello",
+                "created_at": datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
+            },
+        ]
+        cues = build(rows)
+        assert cues[0].agent_id == "vera"
 
 
 # ── SimulationRepo claim semantics ───────────────────────────
