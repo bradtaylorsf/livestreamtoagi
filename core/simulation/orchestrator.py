@@ -21,7 +21,7 @@ import yaml
 from core.event_bus import EventType
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
-from core.models import FactionConfig, SimulationCreate, SimulationStatus
+from core.models import FactionConfig, MemorySeedConfig, SimulationCreate, SimulationStatus
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
@@ -93,6 +93,7 @@ class SimulationConfig:
         existing_sim_id: str | None = None,
         hypothesis: str | None = None,
         auto_draft_learnings: bool = False,
+        memory_seed: MemorySeedConfig | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -119,6 +120,7 @@ class SimulationConfig:
         self.existing_sim_id = existing_sim_id
         self.hypothesis = hypothesis
         self.auto_draft_learnings = auto_draft_learnings
+        self.memory_seed: MemorySeedConfig | None = memory_seed
 
     @property
     def mode(self) -> str:
@@ -140,6 +142,12 @@ class SimulationConfig:
         self.audience_config = data.get("audience")
         self.seed_tasks = bool(data.get("seed_tasks", False))
         self.seed_goals = bool(data.get("seed_goals", False))
+
+        # Parse memory_seed block if present (CLI overrides take precedence,
+        # so only fill from YAML when the field is unset).
+        raw_seed = data.get("memory_seed")
+        if raw_seed and self.memory_seed is None:
+            self.memory_seed = MemorySeedConfig(**raw_seed)
 
         # Parse factions if present
         raw_factions = data.get("factions") or []
@@ -446,6 +454,47 @@ class SimulationOrchestrator:
         random.seed(seed)
         logger.info("RNG seeded with %d (from simulation %s)", seed, simulation_id)
 
+    async def _apply_memory_seed(self, sim_id: uuid.UUID) -> None:
+        """If the config carries a ``memory_seed`` block, apply it to ``sim_id``.
+
+        Called immediately after the simulation row exists, before the
+        regular ``init_core_memories`` pass. Any seeded core memory satisfies
+        the existence check there, so default identity prompts are skipped.
+        """
+        if (
+            self._config.memory_seed is None
+            or self._config.dry_run
+            or self._services is None
+            or self._services.core_memory is None
+            or self._services.recall_memory is None
+            or self._memory_repo is None
+        ):
+            return
+
+        from core.memory.memory_seed import MemorySeedApplier
+
+        applier = MemorySeedApplier(
+            db=self._db,
+            memory_repo=self._memory_repo,
+            core_memory_mgr=self._services.core_memory,
+            recall_memory_mgr=self._services.recall_memory,
+            agent_registry=self._agents,
+            token_counter=self._services.token_counter,
+            relationship_repo=self._relationship_repo,
+        )
+        seed_result = await applier.apply(self._config.memory_seed, sim_id)
+        logger.info(
+            "Applied memory_seed mode=%s: %d core, %d recall, %d journal "
+            "for agents %s",
+            self._config.memory_seed.mode,
+            seed_result.core_memories_restored,
+            seed_result.recall_memories_restored,
+            seed_result.journal_entries_restored,
+            seed_result.agents_restored,
+        )
+        for w in seed_result.warnings:
+            logger.warning("memory_seed: %s", w)
+
     async def _create_or_attach_simulation(
         self,
         config_snapshot: dict[str, Any],
@@ -523,6 +572,9 @@ class SimulationOrchestrator:
         )
 
         self._display.show_simulation_start(sim, self._config)
+
+        # Apply memory seed BEFORE init_core_memories so seeded values win.
+        await self._apply_memory_seed(sim.id)
 
         # Initialize core memory for all agents in this simulation
         if self._services and self._services.core_memory:
@@ -760,6 +812,9 @@ class SimulationOrchestrator:
         )
 
         self._display.show_simulation_start(sim, self._config)
+
+        # Apply memory seed BEFORE init_core_memories so seeded values win.
+        await self._apply_memory_seed(sim.id)
 
         # Initialize core memory for all agents in this simulation
         if self._services and self._services.core_memory:
