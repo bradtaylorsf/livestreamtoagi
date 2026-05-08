@@ -1,11 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { ConversationSummary } from "@/types";
 import { getConversations, getSimulations, type PublicSimulation } from "@/lib/api";
 import { getAgentData } from "@/lib/agent-data";
-import { useCurrentSimulationId } from "@/lib/simulation-store";
+import {
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+} from "@/lib/simulation-store";
+import SimulationPicker from "@/components/SimulationPicker";
 import { SkeletonCardList } from "@/components/Skeleton";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
@@ -72,15 +77,42 @@ function ConversationCard({ conv }: { conv: ConversationSummary }) {
 }
 
 export default function ConversationsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
-  const [storedSimId, setStoredSimId] = useCurrentSimulationId();
-  const selectedSim = storedSimId ?? "";
+
+  // Read selectedSim from URL (?sim=…), falling back to the simulation-store
+  // value when no URL param is present.
+  const simParam = searchParams.get("sim");
+  const [hydratedSim, setHydratedSim] = useState<string | null>(null);
+  useEffect(() => {
+    if (simParam == null) {
+      setHydratedSim(getCurrentSimulationId() ?? "");
+    } else {
+      setHydratedSim(simParam);
+    }
+  }, [simParam]);
+  const selectedSim = hydratedSim ?? "";
+
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const limit = 20;
   const showSkeleton = useDelayedFlag(loading);
+
+  const setSelectedSim = useCallback(
+    (id: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (id) sp.set("sim", id);
+      else sp.delete("sim");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+      setCurrentSimulationId(id || null);
+      setHydratedSim(id);
+      setPage(0);
+    },
+    [router, searchParams],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -150,28 +182,12 @@ export default function ConversationsPage() {
       </p>
 
       <div className="mb-6">
-        <label
-          htmlFor="sim-filter"
-          className="block text-xs uppercase tracking-wide text-foreground/50 mb-1"
-        >
-          Simulation
-        </label>
-        <select
+        <SimulationPicker
           id="sim-filter"
           value={selectedSim}
-          onChange={(e) => {
-            setStoredSimId(e.target.value || null);
-            setPage(0);
-          }}
-          className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-foreground"
-        >
-          <option value="">All simulations</option>
-          {simulations.map((sim) => (
-            <option key={sim.id} value={sim.id}>
-              {sim.name}
-            </option>
-          ))}
-        </select>
+          onChange={setSelectedSim}
+          label="Simulation"
+        />
       </div>
 
       {loading ? (

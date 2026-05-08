@@ -287,12 +287,15 @@ export async function getLore(params?: {
   offset?: number;
   agent?: string;
   event_type?: string;
+  simulation_id?: string;
 }): Promise<PaginatedResponse<LoreEvent>> {
   const searchParams = new URLSearchParams();
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   if (params?.agent) searchParams.set("agent", params.agent);
   if (params?.event_type) searchParams.set("event_type", params.event_type);
+  if (params?.simulation_id)
+    searchParams.set("simulation_id", params.simulation_id);
   const qs = searchParams.toString();
   return request<PaginatedResponse<LoreEvent>>(`/api/lore${qs ? `?${qs}` : ""}`);
 }

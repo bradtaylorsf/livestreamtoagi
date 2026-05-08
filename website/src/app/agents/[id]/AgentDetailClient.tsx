@@ -20,6 +20,7 @@ import {
   getCurrentSimulationId,
   setCurrentSimulationId,
 } from "@/lib/simulation-store";
+import SimulationPicker from "@/components/SimulationPicker";
 import { SkeletonCardList } from "@/components/Skeleton";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";
 import type {
@@ -93,20 +94,38 @@ export default function AgentDetailClient({ agent }: Props) {
 
   const [conversations, setConversations] = useState<PaginatedResponse<AgentConversation> | null>(null);
   const [convOffset, setConvOffset] = useState(0);
-  const [convSimFilter, setConvSimFilter] = useState(
-    () => getCurrentSimulationId() ?? "",
-  );
 
   const [artifacts, setArtifacts] = useState<PaginatedResponse<AgentArtifactResponse> | null>(null);
   const [artOffset, setArtOffset] = useState(0);
   const [artTypeFilter, setArtTypeFilter] = useState("");
-  const [artSimFilter, setArtSimFilter] = useState(
-    () => getCurrentSimulationId() ?? "",
-  );
 
   const [journal, setJournal] = useState<JournalEntry[] | null>(null);
-  const [journalSimFilter, setJournalSimFilter] = useState(
-    () => getCurrentSimulationId() ?? "",
+
+  // Single shared simulation filter — persisted in URL (`?sim=…`) and mirrored
+  // into the simulation-store so other pages pick up the same selection.
+  const simParam = searchParams.get("sim");
+  const [hydratedSimFilter, setHydratedSimFilter] = useState<string | null>(null);
+  useEffect(() => {
+    if (simParam == null) {
+      setHydratedSimFilter(getCurrentSimulationId() ?? "");
+    } else {
+      setHydratedSimFilter(simParam);
+    }
+  }, [simParam]);
+  const simFilter = hydratedSimFilter ?? "";
+
+  const setSimFilter = useCallback(
+    (v: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (v) sp.set("sim", v);
+      else sp.delete("sim");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+      setCurrentSimulationId(v || null);
+      setHydratedSimFilter(v);
+      setConvOffset(0);
+      setArtOffset(0);
+    },
+    [router, searchParams],
   );
 
   const [costs, setCosts] = useState<AgentCostBreakdown | null>(null);
@@ -188,20 +207,20 @@ export default function AgentDetailClient({ agent }: Props) {
         case "conversations":
           getAgentConversations(id, {
             limit: PAGE_SIZE,
-            simulation_id: convSimFilter || undefined,
+            simulation_id: simFilter || undefined,
           }).then((d) => { setConversations(d); done(); }).catch(onErr);
           break;
         case "artifacts":
           getAgentArtifacts(id, {
             limit: PAGE_SIZE,
-            simulation_id: artSimFilter || undefined,
+            simulation_id: simFilter || undefined,
             type: artTypeFilter || undefined,
           }).then((d) => { setArtifacts(d); done(); }).catch(onErr);
           break;
         case "journal":
           getAgentJournal(id, {
             limit: PAGE_SIZE,
-            simulation_id: journalSimFilter || undefined,
+            simulation_id: simFilter || undefined,
           }).then((d) => { setJournal(d); done(); }).catch(onErr);
           break;
         case "costs":
@@ -210,7 +229,7 @@ export default function AgentDetailClient({ agent }: Props) {
         // relationships + evolution are self-loading components
       }
     },
-    [id, loadedTabs, convSimFilter, artSimFilter, artTypeFilter, journalSimFilter],
+    [id, loadedTabs, simFilter, artTypeFilter],
   );
 
   const handleTabChange = (tab: TabId) => {
@@ -249,7 +268,7 @@ export default function AgentDetailClient({ agent }: Props) {
     setTabError(null);
     markLoading("conversations");
     getAgentConversations(id, {
-      simulation_id: convSimFilter || undefined,
+      simulation_id: simFilter || undefined,
       offset: convOffset,
       limit: PAGE_SIZE,
     })
@@ -258,7 +277,7 @@ export default function AgentDetailClient({ agent }: Props) {
         setTabError(err instanceof Error ? err.message : "Failed to load conversations");
         clearLoading("conversations");
       });
-  }, [id, convSimFilter, convOffset]);
+  }, [id, simFilter, convOffset]);
 
   // -- Artifacts: refetch on filter/pagination ------------------------------
 
@@ -267,7 +286,7 @@ export default function AgentDetailClient({ agent }: Props) {
     markLoading("artifacts");
     getAgentArtifacts(id, {
       type: artTypeFilter || undefined,
-      simulation_id: artSimFilter || undefined,
+      simulation_id: simFilter || undefined,
       offset: artOffset,
       limit: PAGE_SIZE,
     })
@@ -276,7 +295,7 @@ export default function AgentDetailClient({ agent }: Props) {
         setTabError(err instanceof Error ? err.message : "Failed to load artifacts");
         clearLoading("artifacts");
       });
-  }, [id, artTypeFilter, artSimFilter, artOffset]);
+  }, [id, artTypeFilter, simFilter, artOffset]);
 
   // -- Journal: refetch on filter -------------------------------------------
 
@@ -284,7 +303,7 @@ export default function AgentDetailClient({ agent }: Props) {
     setTabError(null);
     markLoading("journal");
     getAgentJournal(id, {
-      simulation_id: journalSimFilter || undefined,
+      simulation_id: simFilter || undefined,
       limit: PAGE_SIZE,
     })
       .then((d) => { setJournal(d); clearLoading("journal"); })
@@ -292,7 +311,7 @@ export default function AgentDetailClient({ agent }: Props) {
         setTabError(err instanceof Error ? err.message : "Failed to load journal");
         clearLoading("journal");
       });
-  }, [id, journalSimFilter]);
+  }, [id, simFilter]);
 
   // Auto-refetch when pagination/filters change
   useEffect(() => {
@@ -300,10 +319,13 @@ export default function AgentDetailClient({ agent }: Props) {
   }, [recallOffset, refreshRecall, loadedTabs]);
   useEffect(() => {
     if (loadedTabs.has("conversations")) refreshConversations();
-  }, [convOffset, refreshConversations, loadedTabs]);
+  }, [convOffset, simFilter, refreshConversations, loadedTabs]);
   useEffect(() => {
     if (loadedTabs.has("artifacts")) refreshArtifacts();
-  }, [artOffset, refreshArtifacts, loadedTabs]);
+  }, [artOffset, simFilter, refreshArtifacts, loadedTabs]);
+  useEffect(() => {
+    if (loadedTabs.has("journal")) refreshJournal();
+  }, [simFilter, refreshJournal, loadedTabs]);
 
   // -- Render ---------------------------------------------------------------
 
@@ -393,13 +415,8 @@ export default function AgentDetailClient({ agent }: Props) {
           <ConversationsTab
             data={conversations}
             loading={tabLoading.has("conversations")}
-            simFilter={convSimFilter}
-            onSimFilterChange={(v) => {
-              setConvSimFilter(v);
-              setCurrentSimulationId(v || null);
-              setConvOffset(0);
-            }}
-            onFilterChange={refreshConversations}
+            simFilter={simFilter}
+            onSimFilterChange={setSimFilter}
             offset={convOffset}
             onOffsetChange={setConvOffset}
           />
@@ -411,12 +428,8 @@ export default function AgentDetailClient({ agent }: Props) {
             loading={tabLoading.has("artifacts")}
             typeFilter={artTypeFilter}
             onTypeFilterChange={(v) => { setArtTypeFilter(v); setArtOffset(0); }}
-            simFilter={artSimFilter}
-            onSimFilterChange={(v) => {
-              setArtSimFilter(v);
-              setCurrentSimulationId(v || null);
-              setArtOffset(0);
-            }}
+            simFilter={simFilter}
+            onSimFilterChange={setSimFilter}
             onFilterChange={refreshArtifacts}
             offset={artOffset}
             onOffsetChange={setArtOffset}
@@ -427,12 +440,8 @@ export default function AgentDetailClient({ agent }: Props) {
           <JournalTab
             data={journal}
             loading={tabLoading.has("journal")}
-            simFilter={journalSimFilter}
-            onSimFilterChange={(v) => {
-              setJournalSimFilter(v);
-              setCurrentSimulationId(v || null);
-            }}
-            onFilterChange={refreshJournal}
+            simFilter={simFilter}
+            onSimFilterChange={setSimFilter}
           />
         )}
 
@@ -877,7 +886,6 @@ function ConversationsTab({
   loading,
   simFilter,
   onSimFilterChange,
-  onFilterChange,
   offset,
   onOffsetChange,
 }: {
@@ -885,7 +893,6 @@ function ConversationsTab({
   loading: boolean;
   simFilter: string;
   onSimFilterChange: (v: string) => void;
-  onFilterChange: () => void;
   offset: number;
   onOffsetChange: (n: number) => void;
 }) {
@@ -895,21 +902,12 @@ function ConversationsTab({
   return (
     <div className="space-y-4">
       {/* Filter */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="Filter by simulation ID..."
+      <div className="flex gap-2 items-end">
+        <SimulationPicker
           value={simFilter}
-          onChange={(e) => onSimFilterChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onFilterChange()}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground placeholder:text-foreground/30"
+          onChange={onSimFilterChange}
+          label="Simulation"
         />
-        <button
-          onClick={onFilterChange}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-        >
-          Filter
-        </button>
       </div>
 
       {/* Table */}
@@ -1003,7 +1001,12 @@ function ArtifactsTab({
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap items-end">
+        <SimulationPicker
+          value={simFilter}
+          onChange={onSimFilterChange}
+          label="Simulation"
+        />
         <select
           value={typeFilter}
           onChange={(e) => {
@@ -1019,20 +1022,6 @@ function ArtifactsTab({
             </option>
           ))}
         </select>
-        <input
-          type="text"
-          placeholder="Simulation ID..."
-          value={simFilter}
-          onChange={(e) => onSimFilterChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onFilterChange()}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground placeholder:text-foreground/30"
-        />
-        <button
-          onClick={onFilterChange}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-        >
-          Filter
-        </button>
       </div>
 
       {/* Artifact cards */}
@@ -1096,13 +1085,11 @@ function JournalTab({
   loading,
   simFilter,
   onSimFilterChange,
-  onFilterChange,
 }: {
   data: JournalEntry[] | null;
   loading: boolean;
   simFilter: string;
   onSimFilterChange: (v: string) => void;
-  onFilterChange: () => void;
 }) {
   if (loading && !data) return <TabSpinner />;
   if (!data) return <TabSpinner />;
@@ -1110,21 +1097,12 @@ function JournalTab({
   return (
     <div className="space-y-4">
       {/* Filter */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="Filter by simulation ID..."
+      <div className="flex gap-2 items-end">
+        <SimulationPicker
           value={simFilter}
-          onChange={(e) => onSimFilterChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onFilterChange()}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground placeholder:text-foreground/30"
+          onChange={onSimFilterChange}
+          label="Simulation"
         />
-        <button
-          onClick={onFilterChange}
-          className="rounded border border-border bg-surface-light px-3 py-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-        >
-          Filter
-        </button>
       </div>
 
       {/* Entries */}

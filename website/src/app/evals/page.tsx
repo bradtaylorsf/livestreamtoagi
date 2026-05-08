@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import EvalCategoryCard from "@/components/EvalCategoryCard";
 import type { EvalCategoryCardProps } from "@/components/EvalCategoryCard";
 import ScoreHistoryChart from "@/components/ScoreHistoryChart";
 import ABComparisonView from "@/components/ABComparisonView";
+import SimulationPicker from "@/components/SimulationPicker";
 import {
   getEvalRuns,
   getEvalCategories,
@@ -15,7 +17,10 @@ import {
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
 import { exportAsJSON, exportAsCSV } from "@/lib/export";
-import { useCurrentSimulationId } from "@/lib/simulation-store";
+import {
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+} from "@/lib/simulation-store";
 import { SkeletonGrid } from "@/components/Skeleton";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
@@ -46,6 +51,8 @@ function calculateTrend(history: EvalHistoryPoint[]): "up" | "down" | "flat" {
 }
 
 export default function EvalsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [categories, setCategories] = useState<EvalCategoryCardProps[]>([]);
   const [runs, setRuns] = useState<PublicEvalRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,14 +60,37 @@ export default function EvalsPage() {
   const [compareB, setCompareB] = useState<string | null>(null);
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterModel, setFilterModel] = useState<string>("");
-  const [currentSimId] = useCurrentSimulationId();
+
+  const simParam = searchParams.get("sim");
+  const [hydratedSim, setHydratedSim] = useState<string | null>(null);
+  useEffect(() => {
+    if (simParam == null) {
+      setHydratedSim(getCurrentSimulationId() ?? "");
+    } else {
+      setHydratedSim(simParam);
+    }
+  }, [simParam]);
+  const currentSimId = hydratedSim ?? "";
+
+  const setCurrentSimId = useCallback(
+    (id: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (id) sp.set("sim", id);
+      else sp.delete("sim");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+      setCurrentSimulationId(id || null);
+      setHydratedSim(id);
+    },
+    [router, searchParams],
+  );
+
   const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     const loadData = async () => {
       const [cats, evalRuns] = await Promise.all([
         getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
-        getEvalRuns({ simulation_id: currentSimId ?? undefined }).catch(
+        getEvalRuns({ simulation_id: currentSimId || undefined }).catch(
           () => [],
         ),
       ]);
@@ -187,6 +217,15 @@ export default function EvalsPage() {
           Transparent, read-only view of how the agent system performs across
           all 12 evaluation categories. Every score is public.
         </p>
+        <div className="pt-2">
+          <SimulationPicker
+            id="evals-sim-filter"
+            value={currentSimId}
+            onChange={setCurrentSimId}
+            label="Simulation"
+            allLabel="All simulations"
+          />
+        </div>
         <div
           className="rounded border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-400/80"
           data-testid="llm-judge-disclaimer"

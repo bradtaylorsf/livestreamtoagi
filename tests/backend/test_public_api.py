@@ -916,6 +916,32 @@ class TestLoreEndpoint:
         resp = client.get("/api/lore?agent=vera&event_type=discovery")
         assert resp.status_code == 200
 
+    def test_get_lore_no_simulation_filter_by_default(self, mock_app):
+        """Without simulation_id, the query should not filter by simulation
+        — letting events from any simulation surface, since live has none."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchval = AsyncMock(return_value=0)
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/lore")
+        assert resp.status_code == 200
+        # Inspect the SQL that was issued — should not reference simulation_id
+        called_sql = mock_db.fetchval.await_args.args[0]
+        assert "simulation_id" not in called_sql
+
+    def test_get_lore_with_simulation_id(self, mock_app):
+        """When simulation_id is supplied, the filter should be applied."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchval = AsyncMock(return_value=0)
+        mock_db.fetch = AsyncMock(return_value=[])
+        sim_id = "00000000-0000-0000-0000-000000000042"
+        resp = client.get(f"/api/lore?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        called_sql = mock_db.fetchval.await_args.args[0]
+        assert "simulation_id" in called_sql
+        # The bound param should be the parsed UUID
+        params = mock_db.fetchval.await_args.args[1:]
+        assert uuid.UUID(sim_id) in params
+
 
 # ── CORS Headers ──────────────────────────────────────────────
 

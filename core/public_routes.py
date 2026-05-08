@@ -1405,12 +1405,20 @@ async def get_lore(
     offset: int = Query(0, ge=0),
     agent: str | None = Query(None),
     event_type: str | None = Query(None),
+    simulation_id: str | None = Query(None),
 ) -> dict[str, Any]:
     db = _get_db()
-    clauses: list[str] = ["simulation_id = $1"]
-    params: list[object] = [LIVE_SIMULATION_ID]
-    idx = 2
+    clauses: list[str] = []
+    params: list[object] = []
+    idx = 1
 
+    if simulation_id:
+        clauses.append(f"simulation_id = ${idx}")
+        try:
+            params.append(uuid.UUID(simulation_id))
+        except ValueError:
+            params.append(simulation_id)
+        idx += 1
     if agent:
         clauses.append(f"${idx} = ANY(agents_involved)")
         params.append(agent)
@@ -1420,7 +1428,7 @@ async def get_lore(
         params.append(event_type)
         idx += 1
 
-    where = " WHERE " + " AND ".join(clauses)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
 
     total = await db.fetchval(
         f"SELECT COUNT(*) FROM world_events{where}",  # noqa: S608

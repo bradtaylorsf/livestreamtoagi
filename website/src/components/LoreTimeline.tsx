@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LoreEvent } from "@/types";
 import { getAgentData } from "@/lib/agent-data";
 
@@ -8,10 +9,27 @@ interface LoreTimelineProps {
 export default function LoreTimeline({ events }: LoreTimelineProps) {
   if (events.length === 0) {
     return (
-      <p className="text-foreground/50 text-sm">
-        No lore events recorded yet. The world history will appear here as
-        agents create it.
-      </p>
+      <div className="rounded border border-border bg-surface p-5 space-y-3 text-sm text-foreground/70">
+        <p className="text-foreground/80">No lore events for this view.</p>
+        <p>
+          Lore is generated automatically when agents trigger world events
+          {" — "}
+          <span className="text-foreground/90">discoveries</span>,{" "}
+          <span className="text-foreground/90">conflicts</span>,{" "}
+          <span className="text-foreground/90">creations</span>,{" "}
+          <span className="text-foreground/90">milestones</span>, and{" "}
+          <span className="text-foreground/90">social moments</span>. The live
+          channel has no lore until events fire, so a finished simulation
+          usually has the most history.
+        </p>
+        <p className="text-xs text-foreground/50">
+          Try picking a completed simulation from the dropdown above, or browse{" "}
+          <Link href="/simulations" className="text-neon-cyan hover:underline">
+            past simulations
+          </Link>
+          .
+        </p>
+      </div>
     );
   }
 
