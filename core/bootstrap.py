@@ -93,6 +93,7 @@ class ConversationOptions:
     required_agents: set[str] | None = None
     topic_history: dict[str, list[float]] | None = None
     prompt_log_repo: object | None = None
+    factions: list[Any] | None = None
 
 
 @dataclass

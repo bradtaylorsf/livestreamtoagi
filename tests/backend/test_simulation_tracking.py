@@ -46,6 +46,7 @@ def make_simulation_row(**overrides: Any) -> dict:
         "hypothesis": None,
         "outcomes": {},
         "learnings": [],
+        "factions": [],
     }
     base.update(overrides)
     return base

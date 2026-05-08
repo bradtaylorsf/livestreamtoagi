@@ -103,7 +103,9 @@ async def run_simulation(args: argparse.Namespace) -> None:
         auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
     )
     sim_config.world_sim = args.world_sim
-    sim_config.load_seed_file()
+    # Validate faction membership against the participating-agents set so
+    # misconfigured scenarios fail loudly at load time.
+    sim_config.load_seed_file(valid_agent_ids=set(agents))
 
     # ── Connect services ──────────────────────────────────
     svc = await bootstrap_services(auto_migrate=True)

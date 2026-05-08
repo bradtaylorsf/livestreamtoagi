@@ -21,7 +21,7 @@ import yaml
 from core.event_bus import EventType
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
-from core.models import SimulationCreate, SimulationStatus
+from core.models import FactionConfig, SimulationCreate, SimulationStatus
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
@@ -111,6 +111,7 @@ class SimulationConfig:
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
         self.seed_goals: bool = False
+        self.factions: list[FactionConfig] = []
         # When provided, the orchestrator attaches to a pre-created
         # simulation row instead of inserting a new one. Used when the
         # admin dashboard pre-creates the row so it can immediately return
@@ -124,8 +125,12 @@ class SimulationConfig:
         """Return 'seeded' if a seed file is set, otherwise 'autonomous'."""
         return "seeded" if self.seed_file else "autonomous"
 
-    def load_seed_file(self) -> None:
-        """Parse the YAML seed file into Phase objects."""
+    def load_seed_file(self, valid_agent_ids: set[str] | None = None) -> None:
+        """Parse the YAML seed file into Phase objects.
+
+        ``valid_agent_ids`` is used to validate faction membership when
+        provided; if None, faction membership is parsed but not checked.
+        """
         if not self.seed_file:
             return
 
@@ -135,6 +140,23 @@ class SimulationConfig:
         self.audience_config = data.get("audience")
         self.seed_tasks = bool(data.get("seed_tasks", False))
         self.seed_goals = bool(data.get("seed_goals", False))
+
+        # Parse factions if present
+        raw_factions = data.get("factions") or []
+        seen_names: set[str] = set()
+        self.factions = []
+        for entry in raw_factions:
+            faction = FactionConfig(**entry)
+            if faction.name in seen_names:
+                raise ValueError(f"duplicate faction name: {faction.name}")
+            seen_names.add(faction.name)
+            if valid_agent_ids is not None:
+                unknown = [m for m in faction.members if m not in valid_agent_ids]
+                if unknown:
+                    raise ValueError(
+                        f"faction '{faction.name}' has unknown members: {unknown}"
+                    )
+            self.factions.append(faction)
 
         raw_phases = data.get("phases", [])
         for entry in raw_phases:
@@ -178,6 +200,8 @@ class SimulationConfig:
         if self.phases:
             d["phase_count"] = len(self.phases)
             d["phase_names"] = [p.name for p in self.phases]
+        if self.factions:
+            d["factions"] = [f.model_dump() for f in self.factions]
         return d
 
 
@@ -362,6 +386,7 @@ class SimulationOrchestrator:
             relationship_tracker=relationship_tracker,
             debug_prompts=self._config.debug_prompts,
             prompt_log_repo=self._prompt_log_repo,
+            factions=list(self._config.factions),
         )
 
     def _idle_gap(self) -> timedelta:
@@ -442,6 +467,10 @@ class SimulationOrchestrator:
             await self._sim_repo.update_config(sim_uuid, config_snapshot)
             await self._sim_repo.update_agents_participated(sim_uuid, self._config.agents)
             await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
+            if self._config.factions:
+                await self._sim_repo.update_factions(
+                    sim_uuid, [f.model_dump() for f in self._config.factions]
+                )
             # Re-read so we have fresh config/agents/status fields
             sim = await self._sim_repo.get(sim_uuid)
             return sim
@@ -455,6 +484,7 @@ class SimulationOrchestrator:
                 agents_participated=self._config.agents,
                 model_versions=model_versions,
                 hypothesis=self._config.hypothesis,
+                factions=[f.model_dump() for f in self._config.factions],
             )
         )
 

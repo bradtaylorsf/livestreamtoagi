@@ -163,6 +163,74 @@ class TestAdjacencyFit:
         for agent_id in result.score_breakdown:
             assert result.score_breakdown[agent_id]["adjacency_fit"] == 0.5
 
+    def test_faction_pairs_boost_adjacency(
+        self, selector: SpeakerSelector,
+    ):
+        """Same-faction agents get a +0.15 boost to adjacency_fit (#419).
+
+        rex's adjacency map in the helper config is ``{fork: 0.8, vera: 0.5}``,
+        so ``aurora`` falls through to the default 0.3 and ``pixel`` does too.
+        Putting aurora in rex's faction should add the bonus to aurora's score
+        but leave pixel untouched.
+        """
+        agents = [
+            _make_agent("rex"),
+            _make_agent("aurora"),
+            _make_agent("pixel"),
+        ]
+        history = [
+            {"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()},
+        ]
+        selector.set_faction_pairs({frozenset({"rex", "aurora"})})
+        random.seed(42)
+        result = selector.select(history, agents, energy=10.0)
+        assert result.score_breakdown["aurora"]["adjacency_fit"] == pytest.approx(
+            0.45, abs=1e-9,
+        )
+        assert result.score_breakdown["pixel"]["adjacency_fit"] == pytest.approx(
+            0.3, abs=1e-9,
+        )
+
+    def test_faction_pairs_no_boost_without_set(
+        self, selector: SpeakerSelector,
+    ):
+        """Without set_faction_pairs, adjacency_fit uses the raw config map."""
+        agents = [
+            _make_agent("rex"),
+            _make_agent("aurora"),
+            _make_agent("pixel"),
+        ]
+        history = [{"speaker": "rex", "timestamp": datetime.now(UTC).isoformat()}]
+        random.seed(42)
+        result = selector.select(history, agents, energy=10.0)
+        # No faction info — both candidates get the default 0.3.
+        assert result.score_breakdown["aurora"]["adjacency_fit"] == 0.3
+        assert result.score_breakdown["pixel"]["adjacency_fit"] == 0.3
+
+    def test_faction_pairs_clamped_at_one(
+        self, selector: SpeakerSelector,
+    ):
+        """Adjacency + faction bonus is clamped to 1.0 — no overflow.
+
+        We force a high base score by stubbing the adjacency map so the +0.15
+        bonus would exceed 1.0 without clamping.
+        """
+        # vera→sentinel raw adjacency = 0.8; +0.15 with clamp → 0.95.
+        # Build a 3-candidate scenario so the single-candidate fast-path
+        # (which hardcodes adjacency_fit=1.0) does not fire.
+        agents = [
+            _make_agent("vera"),
+            _make_agent("sentinel"),
+            _make_agent("aurora"),
+        ]
+        history = [{"speaker": "vera", "timestamp": datetime.now(UTC).isoformat()}]
+        selector.set_faction_pairs({frozenset({"vera", "sentinel"})})
+        random.seed(42)
+        result = selector.select(history, agents, energy=10.0)
+        sentinel_adj = result.score_breakdown["sentinel"]["adjacency_fit"]
+        assert sentinel_adj == pytest.approx(0.95, abs=1e-9)
+        assert sentinel_adj <= 1.0
+
 
 class TestSelectionProbabilistic:
     def test_selection_is_probabilistic(

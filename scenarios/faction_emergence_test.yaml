@@ -28,6 +28,19 @@ audience:
     - name: "ChaosLover"
       style: "confused but engaged"
 
+# Pre-seeded factions (#419) — overrides the "form alliances organically"
+# arc with a structured "team A vs team B" framing so the conversation
+# engine can boost in-faction adjacency from turn 0.
+factions:
+  - name: builders
+    members: [rex, aurora]
+    goal: "ship the new tilemap feature"
+    stance: collaborative
+  - name: skeptics
+    members: [fork, sentinel]
+    goal: "block any change without a budget review"
+    stance: contrarian
+
 seed_tasks: true
 seed_goals: true
 

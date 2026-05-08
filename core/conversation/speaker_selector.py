@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SILENCE_SECONDS = 120.0
 # time_since_spoke is capped at 300s (5 minutes).
 _MAX_SILENCE_SECONDS = 300.0
+# Adjacency-fit bonus when two candidate speakers share a faction.  Picked
+# small enough that it nudges selection toward in-faction replies without
+# overriding the configured adjacency map.
+_FACTION_ADJACENCY_BONUS = 0.15
 
 
 @dataclass
@@ -53,6 +57,9 @@ class SpeakerSelector:
         self._state_scores: dict[str, float] = {}
         # Alliance pairs: set of frozenset({agent_a, agent_b}) for allies
         self._alliance_pairs: set[frozenset[str]] = set()
+        # Faction pairs: same shape, used to boost adjacency_fit between
+        # agents in the same scenario-defined faction (#419).
+        self._faction_pairs: set[frozenset[str]] = set()
 
     @property
     def config(self) -> ConversationConfig:
@@ -77,6 +84,15 @@ class SpeakerSelector:
         Each pair is a frozenset of two agent IDs that are in the same alliance.
         """
         self._alliance_pairs = pairs
+
+    def set_faction_pairs(self, pairs: set[frozenset[str]]) -> None:
+        """Inject faction pair data for faction-aware adjacency scoring.
+
+        Each pair is a frozenset of two agent IDs in the same scenario faction.
+        Same-faction agents get ``_FACTION_ADJACENCY_BONUS`` added to their
+        adjacency_fit so they are slightly more likely to reply to each other.
+        """
+        self._faction_pairs = pairs
 
     def select(
         self,
@@ -532,11 +548,21 @@ class SpeakerSelector:
         agent_id: str,
         previous_speaker_id: str | None,
     ) -> float:
-        """Lookup from adjacency config, default 0.3. No previous → 0.5."""
+        """Lookup from adjacency config, default 0.3. No previous → 0.5.
+
+        When the candidate and previous speaker are in the same faction,
+        add ``_FACTION_ADJACENCY_BONUS`` (clamped to 1.0) so faction
+        members are slightly more likely to reply to each other.
+        """
         if previous_speaker_id is None:
             return 0.5
         prev_map = self._config.adjacency.get(previous_speaker_id, {})
-        return prev_map.get(agent_id, 0.3)
+        score = prev_map.get(agent_id, 0.3)
+        if self._faction_pairs and agent_id != previous_speaker_id:
+            pair = frozenset({agent_id, previous_speaker_id})
+            if pair in self._faction_pairs:
+                score = min(score + _FACTION_ADJACENCY_BONUS, 1.0)
+        return score
 
     @staticmethod
     def _weighted_sum(

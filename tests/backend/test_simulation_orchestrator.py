@@ -55,6 +55,10 @@ def make_simulation_row(**overrides: Any) -> dict:
         "error_log": None,
         "model_versions": {},
         "created_at": datetime(2026, 4, 3, 12, 0, tzinfo=UTC),
+        "hypothesis": None,
+        "outcomes": {},
+        "learnings": [],
+        "factions": [],
     }
     base.update(overrides)
     return base
@@ -606,6 +610,51 @@ class TestSimulationOrchestrator:
         call = services["simulation_repo"].append_learning.call_args
         assert call.kwargs["author"] == "system"
         assert "agents formed cliques quickly" in call.kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_factions_persisted_via_simulation_create(self):
+        """When factions are configured, they flow into SimulationCreate."""
+        path = make_seed_file([{"name": "p1", "type": "scheduled"}])
+        services = make_mock_services()
+        from core.models import FactionConfig
+
+        config = SimulationConfig(
+            name="fact-test",
+            seed_file=path,
+            agents=["vera", "rex"],
+            dry_run=True,
+        )
+        config.load_seed_file()
+        config.factions = [
+            FactionConfig(name="builders", members=["rex"], goal="ship", stance="bold"),
+        ]
+
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            management=services["management"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+        )
+        await orchestrator.run()
+
+        services["simulation_repo"].create.assert_awaited_once()
+        sim_create = services["simulation_repo"].create.call_args[0][0]
+        assert len(sim_create.factions) == 1
+        assert sim_create.factions[0]["name"] == "builders"
+        assert sim_create.factions[0]["goal"] == "ship"
 
     @pytest.mark.asyncio
     async def test_hypothesis_passed_to_simulation_create(self):
