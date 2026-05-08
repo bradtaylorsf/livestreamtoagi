@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -27,39 +28,53 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-async def _build_cues(db, sim_id: uuid.UUID) -> list:
-    """Pull every transcript line for this simulation, ordered by time.
+# Speaker is encoded as a "[name]: ..." prefix on the transcript content;
+# transcripts.participants is the unordered set of attendees, not the speaker.
+_SPEAKER_RE = re.compile(r"^\[([^\]]+)\]:\s*")
 
-    Returns a list of ``TurnAudioCue`` anchored at seconds-from-start.
-    """
+
+def _build_cues_from_rows(rows: list) -> list:
+    """Convert transcript rows into TurnAudioCues. Pure (no DB), testable."""
     from core.video.audio_timeline import TurnAudioCue
 
-    rows = await db.fetch(
-        """SELECT t.participants, t.content, t.created_at
-             FROM transcripts t
-             JOIN conversations c ON c.id = t.conversation_id
-            WHERE c.simulation_id = $1
-              AND t.event_type = 'turn'
-            ORDER BY t.created_at""",
-        sim_id,
-    )
     if not rows:
         return []
     base = rows[0]["created_at"]
     cues: list[TurnAudioCue] = []
     for r in rows:
-        parts = list(r["participants"] or [])
-        if not parts:
+        content = r.get("content") or ""
+        match = _SPEAKER_RE.match(content)
+        if not match:
+            continue
+        agent_id = match.group(1).strip().lower()
+        text = _SPEAKER_RE.sub("", content, count=1).strip()
+        if not text:
             continue
         delta = (r["created_at"] - base).total_seconds()
         cues.append(
             TurnAudioCue(
-                agent_id=parts[0],
-                text=r["content"],
+                agent_id=agent_id,
+                text=text,
                 start_seconds=max(0.0, delta),
             )
         )
     return cues
+
+
+async def _build_cues(db, sim_id: uuid.UUID) -> list:
+    """Pull every transcript line for this simulation, ordered by time.
+
+    Returns a list of ``TurnAudioCue`` anchored at seconds-from-start.
+    """
+    rows = await db.fetch(
+        """SELECT t.participants, t.content, t.created_at
+             FROM transcripts t
+             JOIN conversations c ON c.id = t.conversation_id
+            WHERE c.simulation_id = $1
+            ORDER BY t.created_at""",
+        sim_id,
+    )
+    return _build_cues_from_rows(list(rows))
 
 
 async def _main(sim_id: uuid.UUID) -> int:
@@ -95,9 +110,7 @@ async def _main(sim_id: uuid.UUID) -> int:
     config = load_video_render_config()
 
     try:
-        result = await render_simulation_video(
-            sim_id, cues=cues, tts=tts, config=config
-        )
+        result = await render_simulation_video(sim_id, cues=cues, tts=tts, config=config)
     except RenderError:
         log.exception("Render failed for %s", sim_id)
         await repo.update_video_status(sim_id, status="failed")

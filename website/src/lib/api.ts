@@ -513,11 +513,23 @@ export interface PublicSimulation {
   submitter_display_name: string | null;
 }
 
+export interface LearningEntry {
+  author?: string | null;
+  text?: string | null;
+  body?: string | null;
+  created_at?: string | null;
+  [key: string]: unknown;
+}
+
 export interface PublicSimulationDetail extends PublicSimulation {
   config: Record<string, unknown>;
   simulated_duration: string | null;
   total_tokens: number;
   total_management_flags: number;
+  hypothesis: string | null;
+  outcomes: Record<string, unknown> | null;
+  learnings: LearningEntry[] | null;
+  factions: unknown | null;
 }
 
 export async function getSimulations(
@@ -599,6 +611,83 @@ export async function createSimulation(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+// Public simulation submission (E2-06)
+export interface PublicFaction {
+  name: string;
+  members: string[];
+  goal: string;
+}
+
+export type PublicMemorySeed =
+  | { mode: "none" }
+  | { mode: "inherit"; simulation_id: string }
+  | { mode: "custom"; data: unknown };
+
+export interface PublicSubmitParams {
+  max_cost?: number;
+  agents?: string[];
+  excluded_agents?: string[];
+  factions?: PublicFaction[];
+  memory_seed?: PublicMemorySeed;
+  energy?: Record<string, number>;
+  conversation_cadence?: number;
+}
+
+export interface PublicSubmitRequest {
+  scenario_id: string;
+  name: string;
+  hypothesis?: string;
+  publish_to_youtube?: boolean;
+  params?: PublicSubmitParams;
+}
+
+export interface PublicSubmitResponse {
+  simulation_id: string;
+  status_url: string;
+  estimated_completion_time: string;
+}
+
+export async function submitPublicSimulation(
+  body: PublicSubmitRequest,
+): Promise<PublicSubmitResponse> {
+  return request<PublicSubmitResponse>("/api/simulations/submit", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// Public user auth (magic-link cookie session)
+export interface CurrentUser {
+  id: string;
+  email: string;
+  simulations_submitted: number;
+  total_cost_spent: string;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  try {
+    return await request<CurrentUser>("/api/auth/me");
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 401) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function requestMagicLink(email: string): Promise<void> {
+  await request<{ status: string }>("/api/auth/magic-link", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function logout(): Promise<void> {
+  await request<{ status: string }>("/api/auth/logout", { method: "POST" });
 }
 
 export async function getSimulationReport(
@@ -729,6 +818,53 @@ export async function getSimulationCosts(
   id: string,
 ): Promise<SimulationCostResponse> {
   return request<SimulationCostResponse>(`/api/simulations/${id}/costs`);
+}
+
+// Simulation energy timeline
+export interface EnergyTimelinePoint {
+  t: string;
+  energy: number;
+  turn: number;
+  conversation_id: string;
+}
+
+export async function getSimulationEnergyTimeline(
+  id: string,
+  agentId?: string,
+): Promise<Record<string, EnergyTimelinePoint[]>> {
+  const searchParams = new URLSearchParams();
+  if (agentId) searchParams.set("agent_id", agentId);
+  const qs = searchParams.toString();
+  return request<Record<string, EnergyTimelinePoint[]>>(
+    `/api/simulations/${id}/energy-timeline${qs ? `?${qs}` : ""}`,
+  );
+}
+
+// Simulation research fields (hypothesis / outcomes / learnings)
+export interface UpdateSimulationResearchBody {
+  hypothesis?: string | null;
+  outcomes?: Record<string, unknown> | null;
+  learnings?: LearningEntry[] | null;
+}
+
+export interface UpdateSimulationResearchResponse {
+  id: string;
+  hypothesis: string | null;
+  outcomes: Record<string, unknown> | null;
+  learnings: LearningEntry[] | null;
+}
+
+export async function updateSimulationResearch(
+  id: string,
+  body: UpdateSimulationResearchBody,
+): Promise<UpdateSimulationResearchResponse> {
+  return request<UpdateSimulationResearchResponse>(
+    `/api/simulations/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 // Simulation timeline
