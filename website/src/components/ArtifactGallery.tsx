@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { getAgentArtifacts } from "@/lib/api";
 import type { AgentArtifactResponse } from "@/types";
+import { SkeletonGrid } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const PAGE_SIZE = 20;
 
@@ -24,6 +26,7 @@ export default function ArtifactGallery({ agentId }: Props) {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,11 +51,9 @@ export default function ArtifactGallery({ agentId }: Props) {
   }, [agentId, offset]);
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-8">
-        <span className="text-sm text-foreground/40">Loading creations...</span>
-      </div>
-    );
+    return showSkeleton ? (
+      <SkeletonGrid count={4} className="grid gap-4 sm:grid-cols-2" />
+    ) : null;
   }
 
   if (error) {

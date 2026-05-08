@@ -1446,8 +1446,13 @@ async def get_simulations(
     status: str | None = Query(default=None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    include_live: bool = Query(default=False),
 ) -> dict[str, Any]:
-    """List all simulations (public read-only). Optionally filter by status."""
+    """List all simulations (public read-only). Optionally filter by status.
+
+    The seeded live channel row is excluded by default; pass include_live=true
+    to include it (it represents a permanent channel, not a discrete run).
+    """
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
 
@@ -1457,8 +1462,9 @@ async def get_simulations(
         status=status,
         limit=limit,
         offset=offset,
+        include_live=include_live,
     )
-    total = await sim_repo.count(status=status)
+    total = await sim_repo.count(status=status, include_live=include_live)
 
     return {
         "items": [

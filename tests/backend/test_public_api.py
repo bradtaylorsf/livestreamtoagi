@@ -546,6 +546,40 @@ class TestConversationEndpoints:
         assert "simulation_id" not in query
 
 
+# ── Simulations Endpoints ──────────────────────────────────────
+
+
+class TestSimulationsEndpoint:
+    def test_list_simulations_excludes_live_by_default(self, mock_app):
+        """The seeded live channel row must not show up in /api/simulations."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+
+        # The list query and the count query must both filter out live rows
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "is_live IS NOT TRUE" in list_sql
+        assert "is_live IS NOT TRUE" in count_sql
+
+    def test_list_simulations_include_live_param_drops_filter(self, mock_app):
+        """Pass include_live=true to opt back in to seeing the live channel row."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations?include_live=true")
+        assert resp.status_code == 200
+
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "is_live" not in list_sql
+        assert "is_live" not in count_sql
+
+
 # ── Blog Endpoints ────────────────────────────────────────────
 
 

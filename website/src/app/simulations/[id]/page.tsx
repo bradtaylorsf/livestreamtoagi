@@ -29,6 +29,13 @@ import {
 import { formatDuration } from "@/components/simulation";
 import ToolUsageSection from "@/components/ToolUsageSection";
 import ConfigViewer from "@/components/ConfigViewer";
+import {
+  SkeletonBlock,
+  SkeletonCardList,
+  SkeletonGrid,
+  SkeletonTable,
+} from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 // ── Tab definitions ──────────────────────────────────────────────
 
@@ -632,6 +639,7 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const limit = 50;
+  const showSkeleton = useDelayedFlag(loading && !data);
 
   const fetchData = useCallback(
     (newOffset: number) => {
@@ -658,7 +666,7 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading && !data) {
-    return <p className="text-sm text-foreground/50">Loading conversations...</p>;
+    return showSkeleton ? <SkeletonCardList count={5} /> : null;
   }
 
   if (!data || data.items.length === 0) {
@@ -750,6 +758,7 @@ function ReportTab({ simulationId }: { simulationId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set());
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationReport(simulationId)
@@ -782,7 +791,12 @@ function ReportTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading report...</p>;
+    return showSkeleton ? (
+      <div className="space-y-4">
+        <SkeletonBlock width="w-1/3" height="h-5" />
+        <SkeletonCardList count={3} />
+      </div>
+    ) : null;
   }
 
   if (!report || !report.sections || report.sections.length === 0) {
@@ -827,6 +841,7 @@ function EvalsTab({ simulationId }: { simulationId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationEvals(simulationId)
@@ -851,7 +866,7 @@ function EvalsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading eval results...</p>;
+    return showSkeleton ? <SkeletonGrid count={6} /> : null;
   }
 
   if (!evalRuns || evalRuns.length === 0) {
@@ -941,6 +956,7 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
   const [data, setData] = useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationSocialGraph(simulationId)
@@ -956,7 +972,14 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading social graph...</p>;
+    return showSkeleton ? (
+      <div className="space-y-4">
+        <SkeletonBlock width="w-1/4" height="h-5" />
+        <div className="rounded border border-border bg-surface p-6">
+          <SkeletonBlock width="w-full" height="h-64" />
+        </div>
+      </div>
+    ) : null;
   }
 
   if (!data || data.length === 0) {
@@ -1043,6 +1066,7 @@ function AssertionsTab({ simulationId }: { simulationId: string }) {
   const [assertions, setAssertions] = useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationAssertions(simulationId)
@@ -1058,7 +1082,7 @@ function AssertionsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading assertions...</p>;
+    return showSkeleton ? <SkeletonCardList count={4} /> : null;
   }
 
   if (!assertions || assertions.length === 0) {
@@ -1152,6 +1176,7 @@ function CostsTab({ simulationId }: { simulationId: string }) {
   const [data, setData] = useState<SimulationCostResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationCosts(simulationId)
@@ -1167,7 +1192,9 @@ function CostsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading cost data...</p>;
+    return showSkeleton ? (
+      <SkeletonTable rows={6} columnWidths={["w-32", "w-20", "w-16", "w-16"]} />
+    ) : null;
   }
 
   if (!data) {
@@ -1255,6 +1282,7 @@ function SnapshotsTab({ simulationId }: { simulationId: string }) {
   const [snapshots, setSnapshots] = useState<SnapshotSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationSnapshots(simulationId)
@@ -1270,7 +1298,7 @@ function SnapshotsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading snapshots...</p>;
+    return showSkeleton ? <SkeletonCardList count={3} /> : null;
   }
 
   if (!snapshots || snapshots.length === 0) {

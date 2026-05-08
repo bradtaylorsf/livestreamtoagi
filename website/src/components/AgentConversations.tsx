@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { getAgentConversations } from "@/lib/api";
 import type { AgentConversation } from "@/types";
+import { SkeletonCardList } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const PAGE_SIZE = 20;
 
@@ -16,6 +18,7 @@ export default function AgentConversations({ agentId }: Props) {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,11 +43,7 @@ export default function AgentConversations({ agentId }: Props) {
   }, [agentId, offset]);
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-8">
-        <span className="text-sm text-foreground/40">Loading conversations...</span>
-      </div>
-    );
+    return showSkeleton ? <SkeletonCardList count={3} /> : null;
   }
 
   if (error) {

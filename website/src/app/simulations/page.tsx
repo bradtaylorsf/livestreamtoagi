@@ -10,6 +10,8 @@ import {
 } from "@/lib/api";
 import type { PublicSimulation, ScenarioInfo } from "@/lib/api";
 import { formatDuration } from "@/components/simulation";
+import { SkeletonTable } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const STATUS_STYLES: Record<string, string> = {
   running: "bg-neon-green/20 text-neon-green border-neon-green/40",
@@ -27,6 +29,7 @@ export default function SimulationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showLauncher, setShowLauncher] = useState(false);
+  const showSkeleton = useDelayedFlag(loading);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,7 +97,12 @@ export default function SimulationsPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-foreground/50">Loading simulations...</p>
+        showSkeleton ? (
+          <SkeletonTable
+            rows={5}
+            columnWidths={["w-32", "w-16", "w-20", "w-16", "w-10", "w-10", "w-14"]}
+          />
+        ) : null
       ) : simulations.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-foreground/40">

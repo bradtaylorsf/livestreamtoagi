@@ -16,6 +16,8 @@ import {
 import { scoreColor } from "@/lib/score-utils";
 import { exportAsJSON, exportAsCSV } from "@/lib/export";
 import { useCurrentSimulationId } from "@/lib/simulation-store";
+import { SkeletonGrid } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "How original and varied are agent outputs? Measures novelty in dialogue, artifacts, and problem-solving.",
@@ -52,6 +54,7 @@ export default function EvalsPage() {
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterModel, setFilterModel] = useState<string>("");
   const [currentSimId] = useCurrentSimulationId();
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     const loadData = async () => {
@@ -159,8 +162,16 @@ export default function EvalsPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-12">
-        <p className="text-sm text-foreground/50">Loading evaluation data...</p>
+      <div className="mx-auto max-w-6xl px-4 py-12 space-y-12">
+        {showSkeleton ? (
+          <>
+            <div className="space-y-3">
+              <div className="h-6 w-72 rounded bg-surface-light/60 animate-pulse [animation-duration:1.8s]" />
+              <div className="h-4 w-full max-w-2xl rounded bg-surface-light/60 animate-pulse [animation-duration:1.8s]" />
+            </div>
+            <SkeletonGrid count={12} />
+          </>
+        ) : null}
       </div>
     );
   }

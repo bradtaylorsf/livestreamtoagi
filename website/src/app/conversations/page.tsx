@@ -6,6 +6,8 @@ import type { ConversationSummary } from "@/types";
 import { getConversations, getSimulations, type PublicSimulation } from "@/lib/api";
 import { getAgentData } from "@/lib/agent-data";
 import { useCurrentSimulationId } from "@/lib/simulation-store";
+import { SkeletonCardList } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 function ConversationCard({ conv }: { conv: ConversationSummary }) {
   return (
@@ -78,6 +80,7 @@ export default function ConversationsPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const limit = 20;
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,7 +175,7 @@ export default function ConversationsPage() {
       </div>
 
       {loading ? (
-        <p className="text-foreground/50 text-sm">Loading conversations...</p>
+        showSkeleton ? <SkeletonCardList count={5} /> : null
       ) : conversations.length === 0 ? (
         <p className="text-foreground/50 text-sm">
           No conversations recorded yet.
