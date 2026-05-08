@@ -115,6 +115,15 @@ async def verify_magic_link(
     if not token:
         raise HTTPException(status_code=400, detail="Missing token")
 
+    # Check signing secret BEFORE consuming the token. Otherwise a
+    # misconfigured deploy burns the user's magic link on every click.
+    secret = os.environ.get("AUTH_JWT_SECRET", "")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="AUTH_JWT_SECRET not configured — cannot issue session cookie",
+        )
+
     services = request.app.state.services
     db = services.db
     token_repo = MagicLinkTokenRepo(db)
@@ -127,13 +136,6 @@ async def verify_magic_link(
 
     now = datetime.now(UTC)
     user = await user_repo.upsert_on_login(email, login_at=now)
-
-    secret = os.environ.get("AUTH_JWT_SECRET", "")
-    if not secret:
-        raise HTTPException(
-            status_code=503,
-            detail="AUTH_JWT_SECRET not configured — cannot issue session cookie",
-        )
 
     jwt_token = jwt.encode(
         {"sub": str(user.id), "exp": now + timedelta(days=USER_JWT_TTL_DAYS)},
