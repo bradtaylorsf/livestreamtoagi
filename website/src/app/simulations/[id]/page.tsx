@@ -19,6 +19,7 @@ import type {
   SimulationCostResponse,
 } from "@/lib/api";
 import type { ConversationSummary, PaginatedResponse } from "@/types";
+import { conversationTopicLabel } from "@/lib/conversation-display";
 import {
   SimulationHeader,
   SummaryGrid,
@@ -699,9 +700,9 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-foreground/50">
-              <th scope="col" className="px-4 py-2 font-medium">Title / ID</th>
+              <th scope="col" className="px-4 py-2 font-medium">Topic</th>
+              <th scope="col" className="px-4 py-2 font-medium">Status</th>
               <th scope="col" className="px-4 py-2 font-medium">Participants</th>
-              <th scope="col" className="px-4 py-2 font-medium">Topics</th>
               <th scope="col" className="px-4 py-2 font-medium text-right">Turns</th>
               <th scope="col" className="px-4 py-2 font-medium">Started At</th>
             </tr>
@@ -715,16 +716,18 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
                 <td className="px-4 py-2">
                   <Link
                     href={`/conversations/${c.id}`}
-                    className="text-neon-cyan hover:underline font-mono text-xs"
+                    className="text-neon-cyan hover:underline"
                   >
-                    {c.trigger_type}
+                    {conversationTopicLabel(c.topics_discussed)}
                   </Link>
+                </td>
+                <td className="px-4 py-2">
+                  <span className="inline-block rounded border border-border bg-surface-light px-2 py-0.5 text-xs font-medium text-foreground/70">
+                    {c.trigger_type}
+                  </span>
                 </td>
                 <td className="px-4 py-2 text-foreground/50 text-xs">
                   {c.participating_agents.join(", ")}
-                </td>
-                <td className="px-4 py-2 text-foreground/50 text-xs">
-                  {c.topics_discussed?.join(", ") ?? "\u2014"}
                 </td>
                 <td className="px-4 py-2 text-right font-mono">{c.turn_count}</td>
                 <td className="px-4 py-2 text-foreground/40 text-xs">
