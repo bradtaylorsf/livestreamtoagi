@@ -9,7 +9,7 @@
 PY := .venv/bin/python
 PW := .venv/bin/playwright
 
-.PHONY: render-install render-smoke
+.PHONY: render-install render-smoke render-verify
 
 # Install the render extra and download the Chromium binaries playwright
 # needs to actually launch a browser. Idempotent.
@@ -24,3 +24,12 @@ render-install:
 render-smoke:
 	$(PY) -c "import playwright.async_api; print('playwright import: ok')"
 	$(PY) scripts/render_simulation_video.py --help
+
+# End-to-end verification: pick a real sim with transcripts (or use SIM=<uuid>),
+# render to MP4, and ffprobe-confirm both video + audio streams are present.
+# The shell wrapper sources `.env` (so DATABASE_URL is set even when the caller
+# didn't export it) and pins to `.venv/bin/python`, so a stale `python` shim
+# earlier on PATH cannot intercept the call. This is the canonical entrypoint
+# for issue #463's verification step.
+render-verify:
+	bash scripts/verify-render.sh $(SIM)

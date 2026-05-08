@@ -76,8 +76,10 @@ ruff format core/ tools/
 # simulation → MP4 pipeline. Skip unless you're working on core/video/.
 # The Makefile targets pin `.venv/bin/python` and `.venv/bin/playwright`
 # so a stale `python` shim earlier on PATH cannot intercept the call.
-make render-install   # `uv pip install -e ".[render]" && playwright install chromium`
-make render-smoke     # imports playwright + runs `--help` against the entrypoint
+make render-install                # `uv pip install -e ".[render]" && playwright install chromium`
+make render-smoke                  # imports playwright + runs `--help` against the entrypoint
+make render-verify                 # auto-pick a real sim, render, ffprobe-confirm streams
+make render-verify SIM=<sim-uuid>  # render a specific sim end-to-end
 ```
 
 ### Frontend (Phaser.js)

@@ -6,8 +6,13 @@ the orchestrator finalize path stays fast. Loads the simulation's transcript,
 drives the headless replay capture, stitches TTS audio, and writes the final
 file to local disk or S3 via the storage backend.
 
-Usage:
-    python scripts/render_simulation_video.py --sim-id <uuid>
+Usage (canonical — bypasses stale ``python`` shims, sources ``.env``):
+    make render-verify SIM=<uuid>            # or, with auto-pick:
+    make render-verify
+    bash scripts/verify-render.sh <uuid>
+
+Usage (low-level, requires DATABASE_URL exported and ``.venv/bin/python`` on PATH):
+    .venv/bin/python scripts/render_simulation_video.py --sim-id <uuid>
 """
 
 from __future__ import annotations

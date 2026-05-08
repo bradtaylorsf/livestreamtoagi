@@ -151,6 +151,9 @@ cp .env.example .env  # Fill in API keys
 #     shim earlier on PATH cannot intercept the calls.
 make render-install      # uv pip install -e ".[render]" + playwright install chromium
 make render-smoke        # quick import + --help check on the entrypoint
+make render-verify       # render a real sim end-to-end, ffprobe-confirm streams
+                         #   (auto-picks a completed sim with transcripts;
+                         #    pass SIM=<uuid> to target a specific simulation)
 
 # 4. Frontend setup
 cd frontend && npm install && cd ..
