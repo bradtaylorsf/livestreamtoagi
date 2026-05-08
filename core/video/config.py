@@ -26,7 +26,7 @@ def load_video_render_config() -> VideoRenderConfig:
         storage_backend=os.environ.get("VIDEO_STORAGE", "local").lower(),
         s3_bucket=os.environ.get("VIDEO_S3_BUCKET") or None,
         output_dir=os.environ.get("VIDEO_OUTPUT_DIR", "videos"),
-        public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),
+        public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:3000").rstrip("/"),
         replay_url_template=os.environ.get(
             "VIDEO_REPLAY_URL_TEMPLATE",
             "{base_url}/simulations/{sim_id}/replay?renderMode=1",

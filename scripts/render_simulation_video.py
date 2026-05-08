@@ -16,7 +16,6 @@ import argparse
 import asyncio
 import logging
 import os
-import re
 import sys
 import uuid
 from pathlib import Path
@@ -96,37 +95,8 @@ def _preflight_render_dependencies(log: logging.Logger) -> int | None:
     return None
 
 
-# Speaker is encoded as a "[name]: ..." prefix on the transcript content;
-# transcripts.participants is the unordered set of attendees, not the speaker.
-_SPEAKER_RE = re.compile(r"^\[([^\]]+)\]:\s*")
-
-
-def _build_cues_from_rows(rows: list) -> list:
-    """Convert transcript rows into TurnAudioCues. Pure (no DB), testable."""
-    from core.video.audio_timeline import TurnAudioCue
-
-    if not rows:
-        return []
-    base = rows[0]["created_at"]
-    cues: list[TurnAudioCue] = []
-    for r in rows:
-        content = r.get("content") or ""
-        match = _SPEAKER_RE.match(content)
-        if not match:
-            continue
-        agent_id = match.group(1).strip().lower()
-        text = _SPEAKER_RE.sub("", content, count=1).strip()
-        if not text:
-            continue
-        delta = (r["created_at"] - base).total_seconds()
-        cues.append(
-            TurnAudioCue(
-                agent_id=agent_id,
-                text=text,
-                start_seconds=max(0.0, delta),
-            )
-        )
-    return cues
+from core.video.cue_parser import SPEAKER_RE as _SPEAKER_RE  # noqa: F401, E402
+from core.video.cue_parser import build_cues_from_rows as _build_cues_from_rows  # noqa: E402
 
 
 async def _build_cues(db, sim_id: uuid.UUID) -> list:
