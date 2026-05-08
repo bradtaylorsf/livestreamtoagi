@@ -781,6 +781,7 @@ class ArtifactCreate(BaseModel):
 
 
 class SimulationStatus(enum.StrEnum):
+    queued = "queued"
     running = "running"
     completed = "completed"
     failed = "failed"
@@ -850,6 +851,7 @@ class SimulationCreate(BaseModel):
     outcomes: dict[str, Any] = Field(default_factory=dict)
     learnings: list[dict[str, Any]] = Field(default_factory=list)
     factions: list[dict[str, Any]] = Field(default_factory=list)
+    submitted_by_user_id: uuid.UUID | None = None
 
 
 class SimulationUpdate(BaseModel):
@@ -886,6 +888,7 @@ class Simulation(BaseModel):
     outcomes: dict[str, Any] = Field(default_factory=dict)
     learnings: list[dict[str, Any]] = Field(default_factory=list)
     factions: list[dict[str, Any]] = Field(default_factory=list)
+    submitted_by_user_id: uuid.UUID | None = None
 
 
 # ── Public Users (magic-link auth) ──────────────────────────────

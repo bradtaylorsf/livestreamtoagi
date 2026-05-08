@@ -49,9 +49,9 @@ class SimulationRepo:
                (name, description, config, status,
                 simulated_duration, agents_participated, error_log,
                 model_versions, hypothesis, outcomes, learnings,
-                factions)
+                factions, submitted_by_user_id)
                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb,
-                       $9, $10::jsonb, $11::jsonb, $12::jsonb)
+                       $9, $10::jsonb, $11::jsonb, $12::jsonb, $13)
                RETURNING *""",
             sim.name,
             sim.description,
@@ -65,8 +65,29 @@ class SimulationRepo:
             serialize_jsonb(sim.outcomes),
             serialize_jsonb(sim.learnings),
             serialize_jsonb(sim.factions),
+            sim.submitted_by_user_id,
         )
         return Simulation(**_parse_row(dict(row)))
+
+    async def count_active_for_user(self, user_id: uuid.UUID) -> int:
+        """Count this user's simulations that are still queued or running."""
+        val = await self.db.fetchval(
+            """SELECT COUNT(*) FROM simulations
+               WHERE submitted_by_user_id = $1
+                 AND status IN ('queued', 'running')""",
+            user_id,
+        )
+        return val or 0
+
+    async def count_today_for_user(self, user_id: uuid.UUID) -> int:
+        """Count submissions in the last 24 hours for the daily rate limit."""
+        val = await self.db.fetchval(
+            """SELECT COUNT(*) FROM simulations
+               WHERE submitted_by_user_id = $1
+                 AND started_at >= now() - interval '1 day'""",
+            user_id,
+        )
+        return val or 0
 
     async def update_factions(
         self,
