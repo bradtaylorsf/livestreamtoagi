@@ -855,6 +855,7 @@ class SimulationCreate(BaseModel):
     learnings: list[dict[str, Any]] = Field(default_factory=list)
     factions: list[dict[str, Any]] = Field(default_factory=list)
     submitted_by_user_id: uuid.UUID | None = None
+    publish_to_youtube: bool = False
 
 
 class SimulationUpdate(BaseModel):
@@ -897,6 +898,12 @@ class Simulation(BaseModel):
     video_rendered_at: datetime | None = None
     is_featured: bool = False
     shared_as_challenge: bool = False
+    publish_to_youtube: bool = False
+    youtube_url: str | None = None
+    youtube_publish_status: str | None = None
+    youtube_published_at: datetime | None = None
+    youtube_publish_attempts: int = 0
+    youtube_failure_reason: str | None = None
     # Populated only by joins in list queries (e.g. /api/simulations); the
     # local-part of the submitter's email if signed in. None means anonymous.
     submitter_display_name: str | None = None

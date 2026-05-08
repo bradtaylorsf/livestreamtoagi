@@ -614,6 +614,44 @@ function renderReportSection(section: ReportSection) {
 
 // ── Tab content components ───────────────────────────────────────
 
+function YoutubePublishStatus({ sim }: { sim: PublicSimulationDetail }) {
+  if (sim.youtube_url) {
+    return (
+      <div className="space-y-2">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-foreground/50">
+          YouTube
+        </h3>
+        <a
+          href={sim.youtube_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-neon-cyan hover:underline"
+        >
+          {sim.youtube_url}
+        </a>
+      </div>
+    );
+  }
+  if (!sim.publish_to_youtube) return null;
+  const status = sim.youtube_publish_status ?? "pending";
+  const label =
+    status === "publishing"
+      ? "Uploading to YouTube…"
+      : status === "failed"
+        ? "YouTube publish failed"
+        : "Queued for YouTube";
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-medium uppercase tracking-wide text-foreground/50">
+        YouTube
+      </h3>
+      <span className="inline-block rounded border border-border bg-surface-light px-2 py-0.5 text-xs font-medium text-foreground/70">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function OverviewTab({ sim }: { sim: PublicSimulationDetail }) {
   return (
     <div className="space-y-8">
@@ -627,6 +665,8 @@ function OverviewTab({ sim }: { sim: PublicSimulationDetail }) {
       />
 
       <AgentList agents={sim.agents_participated} linkPrefix="/agents" />
+
+      <YoutubePublishStatus sim={sim} />
 
       <ConfigViewer config={sim.config} />
     </div>

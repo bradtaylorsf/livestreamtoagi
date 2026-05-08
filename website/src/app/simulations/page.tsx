@@ -195,6 +195,7 @@ function RunSimulationModal({
   const [scenarios, setScenarios] = useState<ScenarioInfo[] | null>(null);
   const [selectedFile, setSelectedFile] = useState<string>("");
   const [maxCost, setMaxCost] = useState<number>(2.0);
+  const [publishToYoutube, setPublishToYoutube] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -226,6 +227,7 @@ function RunSimulationModal({
       const result = await createSimulation({
         seed_file: selectedFile,
         max_cost: maxCost,
+        publish_to_youtube: publishToYoutube,
       });
       onLaunched(result.simulation_id);
     } catch (err) {
@@ -304,6 +306,16 @@ function RunSimulationModal({
                 className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground"
               />
             </div>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-foreground/70">
+              <input
+                type="checkbox"
+                checked={publishToYoutube}
+                onChange={(e) => setPublishToYoutube(e.target.checked)}
+                className="rounded border-border"
+              />
+              Publish to YouTube when complete
+            </label>
           </>
         )}
 

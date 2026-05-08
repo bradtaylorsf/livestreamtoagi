@@ -506,6 +506,9 @@ export interface PublicSimulation {
   agents_participated: string[];
   is_featured: boolean;
   video_url: string | null;
+  youtube_url?: string | null;
+  youtube_publish_status?: string | null;
+  publish_to_youtube?: boolean;
   // Local-part of the submitter's email if signed in; null = anonymous.
   submitter_display_name: string | null;
 }
@@ -580,6 +583,7 @@ export interface CreateSimulationRequest {
   seed_file: string;
   max_cost?: number;
   name?: string;
+  publish_to_youtube?: boolean;
 }
 
 export interface CreateSimulationResponse {
