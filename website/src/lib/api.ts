@@ -601,6 +601,83 @@ export async function createSimulation(
   });
 }
 
+// Public simulation submission (E2-06)
+export interface PublicFaction {
+  name: string;
+  members: string[];
+  goal: string;
+}
+
+export type PublicMemorySeed =
+  | { mode: "none" }
+  | { mode: "inherit"; simulation_id: string }
+  | { mode: "custom"; data: unknown };
+
+export interface PublicSubmitParams {
+  max_cost?: number;
+  agents?: string[];
+  excluded_agents?: string[];
+  factions?: PublicFaction[];
+  memory_seed?: PublicMemorySeed;
+  energy?: Record<string, number>;
+  conversation_cadence?: number;
+}
+
+export interface PublicSubmitRequest {
+  scenario_id: string;
+  name: string;
+  hypothesis?: string;
+  publish_to_youtube?: boolean;
+  params?: PublicSubmitParams;
+}
+
+export interface PublicSubmitResponse {
+  simulation_id: string;
+  status_url: string;
+  estimated_completion_time: string;
+}
+
+export async function submitPublicSimulation(
+  body: PublicSubmitRequest,
+): Promise<PublicSubmitResponse> {
+  return request<PublicSubmitResponse>("/api/simulations/submit", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// Public user auth (magic-link cookie session)
+export interface CurrentUser {
+  id: string;
+  email: string;
+  simulations_submitted: number;
+  total_cost_spent: string;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  try {
+    return await request<CurrentUser>("/api/auth/me");
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 401) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function requestMagicLink(email: string): Promise<void> {
+  await request<{ status: string }>("/api/auth/magic-link", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function logout(): Promise<void> {
+  await request<{ status: string }>("/api/auth/logout", { method: "POST" });
+}
+
 export async function getSimulationReport(
   id: string,
 ): Promise<Record<string, unknown>> {
