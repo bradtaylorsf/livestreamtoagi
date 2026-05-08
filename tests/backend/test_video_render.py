@@ -544,7 +544,15 @@ class TestRenderPipelineErrors:
 
         fake_module = MagicMock()
         fake_module.async_playwright = fake_async_playwright
-        with patch.dict(sys.modules, {"playwright.async_api": fake_module}):
+        # Stub both the parent ``playwright`` package and the submodule so the
+        # ``from playwright.async_api import async_playwright`` lazy import
+        # resolves even when the real package isn't installed in the venv.
+        fake_parent = MagicMock()
+        fake_parent.async_api = fake_module
+        with patch.dict(
+            sys.modules,
+            {"playwright": fake_parent, "playwright.async_api": fake_module},
+        ):
             with pytest.raises(RenderError) as ei:
                 await _capture_canvas(
                     replay_url="http://example.com/replay",
@@ -575,7 +583,12 @@ class TestRenderPipelineErrors:
 
         fake_module = MagicMock()
         fake_module.async_playwright = lambda: _FakePW()
-        with patch.dict(sys.modules, {"playwright.async_api": fake_module}):
+        fake_parent = MagicMock()
+        fake_parent.async_api = fake_module
+        with patch.dict(
+            sys.modules,
+            {"playwright": fake_parent, "playwright.async_api": fake_module},
+        ):
             with pytest.raises(RuntimeError, match="some unrelated launch failure"):
                 await _capture_canvas(
                     replay_url="http://example.com/replay",
@@ -632,11 +645,18 @@ class TestRenderScriptPreflight:
         )
 
         # Pretend playwright is importable, but no chromium dir exists.
+        # Stub both the parent package and the submodule because
+        # ``import playwright.async_api`` resolves the parent first.
         fake_pw_async = MagicMock()
+        fake_pw_parent = MagicMock()
+        fake_pw_parent.async_api = fake_pw_async
         log = logging.getLogger("test_preflight_missing_chromium")
 
         with (
-            patch.dict(sys.modules, {"playwright.async_api": fake_pw_async}),
+            patch.dict(
+                sys.modules,
+                {"playwright": fake_pw_parent, "playwright.async_api": fake_pw_async},
+            ),
             patch(
                 "scripts.render_simulation_video._chromium_browser_dir_exists",
                 return_value=False,
@@ -652,10 +672,15 @@ class TestRenderScriptPreflight:
         from scripts.render_simulation_video import _preflight_render_dependencies
 
         fake_pw_async = MagicMock()
+        fake_pw_parent = MagicMock()
+        fake_pw_parent.async_api = fake_pw_async
         log = logging.getLogger("test_preflight_ok")
 
         with (
-            patch.dict(sys.modules, {"playwright.async_api": fake_pw_async}),
+            patch.dict(
+                sys.modules,
+                {"playwright": fake_pw_parent, "playwright.async_api": fake_pw_async},
+            ),
             patch(
                 "scripts.render_simulation_video._chromium_browser_dir_exists",
                 return_value=True,
