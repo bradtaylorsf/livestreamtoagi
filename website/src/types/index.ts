@@ -27,6 +27,7 @@ export interface ChatResponse {
 
 export interface WorldChunk {
   id: string;
+  name: string | null;
   x: number;
   y: number;
   width: number;
