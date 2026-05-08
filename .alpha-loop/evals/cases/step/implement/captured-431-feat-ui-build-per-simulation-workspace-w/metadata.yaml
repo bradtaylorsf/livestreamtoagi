@@ -1,0 +1,9 @@
+id: captured-431-feat-ui-build-per-simulation-workspace-w
+description: "feat(ui): build per-simulation workspace with sub-tabs (agents,
+  memories, evals, energy, hypothesis, outcomes, learnings, video)"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 431
+  session: session/epic-435-epic-simulation-first-pivot-make-simulations-the-primary-product
+  date: 2026-05-08
