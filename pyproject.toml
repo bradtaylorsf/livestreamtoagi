@@ -41,6 +41,11 @@ dev = [
     "mypy>=1.0.0",
     "pre-commit>=4.0.0",
 ]
+# Headless Phaser canvas → MP4 render pipeline (core/video, scripts/render_simulation_video.py).
+# Browser binaries are downloaded separately: `playwright install chromium`.
+render = [
+    "playwright>=1.47.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

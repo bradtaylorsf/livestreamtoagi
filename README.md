@@ -145,6 +145,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # Fill in API keys
 
+# 3a. Optional: video render pipeline (Playwright + Chromium).
+#     Skip unless you're working on core/video/ or running scripts/render_simulation_video.py.
+pip install -e ".[render]"
+playwright install chromium
+
 # 4. Frontend setup
 cd frontend && npm install && cd ..
 

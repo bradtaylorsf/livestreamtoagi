@@ -60,13 +60,28 @@ async def _capture_canvas(
     try:
         from playwright.async_api import async_playwright  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RenderError("playwright is not installed; cannot capture canvas") from exc
+        raise RenderError(
+            "playwright is not installed; cannot capture canvas — "
+            'run `uv pip install -e ".[render]"`'
+        ) from exc
 
     truncated = False
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        try:
+            browser = await p.chromium.launch(headless=True)
+        except Exception as exc:
+            # Distinguish "browser binaries missing" from other launch failures.
+            # Playwright raises its own Error subclass with a message like
+            # "Executable doesn't exist at … Looks like Playwright Test or
+            # Playwright was just installed or updated. Please run … playwright install"
+            msg = str(exc)
+            if "Executable doesn't exist" in msg or "playwright install" in msg:
+                raise RenderError(
+                    "playwright Chromium binaries not installed — run `playwright install chromium`"
+                ) from exc
+            raise
         context = await browser.new_context(
             viewport={"width": 1280, "height": 720},
             record_video_dir=str(output_path.parent),

@@ -71,6 +71,11 @@ pytest tests/backend/ --cov=core --cov=tools
 # Lint
 ruff check core/ tools/
 ruff format core/ tools/
+
+# Video render (optional) — installs Playwright + Chromium for the
+# simulation → MP4 pipeline. Skip unless you're working on core/video/.
+uv pip install -e ".[render]"
+playwright install chromium
 ```
 
 ### Frontend (Phaser.js)
