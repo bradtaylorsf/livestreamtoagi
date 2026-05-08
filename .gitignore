@@ -55,7 +55,6 @@ logs/
 
 # Alpha-loop ephemeral data
 .alpha-loop/sessions/
-.alpha-loop/learnings/
 !.alpha-loop/learnings/proposed-updates/
 .alpha-loop/traces/
 
@@ -69,3 +68,7 @@ review-session.json
 
 # Claude Code session runtime artifacts
 .claude/scheduled_tasks.lock
+# Alpha-loop ephemeral data (not shared)
+.alpha-loop/auth/
+.alpha-loop/templates/*.bak
+.worktrees/
