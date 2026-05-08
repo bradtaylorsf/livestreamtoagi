@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiRequestError,
   chatWithAgent,
+  cloneSimulationFromSnapshot,
   createSimulation,
   getAgents,
   getAgentArtifacts,
@@ -16,6 +17,7 @@ import {
   getConversationSelections,
   getLore,
   getScenarios,
+  getSimulationSnapshot,
   getStats,
   getWorldChunks,
   runSimulationEval,
@@ -378,6 +380,77 @@ describe("runSimulationEval", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({}),
+      }),
+    );
+  });
+});
+
+describe("getSimulationSnapshot", () => {
+  it("sends GET to /api/admin/simulations/:id/snapshots/:filename", async () => {
+    const data = { snapshot_at: "2026-05-07", agents: {} };
+    mockFetch.mockReturnValue(jsonResponse(data));
+
+    const result = await getSimulationSnapshot("sim-123", "mature.json");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-123/snapshots/mature.json",
+      expect.anything(),
+    );
+    expect(result).toEqual(data);
+  });
+
+  it("URL-encodes the filename component", async () => {
+    mockFetch.mockReturnValue(jsonResponse({}));
+    await getSimulationSnapshot("sim-123", "snap with spaces.json");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-123/snapshots/snap%20with%20spaces.json",
+      expect.anything(),
+    );
+  });
+});
+
+describe("cloneSimulationFromSnapshot", () => {
+  it("POSTs to /api/admin/simulations/:id/clone with body", async () => {
+    const response = {
+      simulation_id: "sim-new",
+      name: "clone-x",
+      source_simulation_id: "sim-123",
+      restore_result: {},
+    };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await cloneSimulationFromSnapshot("sim-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-123/clone",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(result).toEqual(response);
+  });
+
+  it("forwards optional name + agents in body", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse({
+        simulation_id: "sim-new",
+        name: "my-clone",
+        source_simulation_id: "sim-123",
+        restore_result: {},
+      }),
+    );
+
+    await cloneSimulationFromSnapshot("sim-123", {
+      name: "my-clone",
+      agents: ["vera"],
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-123/clone",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "my-clone", agents: ["vera"] }),
       }),
     );
   });

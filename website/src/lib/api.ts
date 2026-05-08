@@ -596,11 +596,50 @@ export async function getSimulationSocialGraph(
   );
 }
 
+export interface SnapshotSummary {
+  filename: string;
+  simulation_id: string;
+  snapshot_at: string;
+  agent_count: number;
+}
+
 export async function getSimulationSnapshots(
   id: string,
-): Promise<Record<string, unknown>[]> {
-  return request<Record<string, unknown>[]>(
-    `/api/simulations/${id}/snapshots`,
+): Promise<SnapshotSummary[]> {
+  return request<SnapshotSummary[]>(`/api/simulations/${id}/snapshots`);
+}
+
+export async function getSimulationSnapshot(
+  simId: string,
+  filename: string,
+): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(
+    `/api/admin/simulations/${simId}/snapshots/${encodeURIComponent(filename)}`,
+  );
+}
+
+export interface CloneSimulationRequest {
+  name?: string;
+  agents?: string[];
+}
+
+export interface CloneSimulationResponse {
+  simulation_id: string;
+  name: string;
+  source_simulation_id: string;
+  restore_result: Record<string, unknown>;
+}
+
+export async function cloneSimulationFromSnapshot(
+  simId: string,
+  body: CloneSimulationRequest = {},
+): Promise<CloneSimulationResponse> {
+  return request<CloneSimulationResponse>(
+    `/api/admin/simulations/${simId}/clone`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
   );
 }
 
