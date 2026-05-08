@@ -1735,6 +1735,9 @@ async def get_simulations(
                 "agents_participated": s.agents_participated,
                 "is_featured": s.is_featured,
                 "video_url": s.video_url,
+                "youtube_url": s.youtube_url,
+                "youtube_publish_status": s.youtube_publish_status,
+                "publish_to_youtube": s.publish_to_youtube,
                 "submitter_display_name": s.submitter_display_name,
             }
             for s in simulations
@@ -1821,6 +1824,10 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
         "outcomes": sim.outcomes,
         "learnings": sim.learnings,
         "factions": sim.factions,
+        "video_url": sim.video_url,
+        "youtube_url": sim.youtube_url,
+        "youtube_publish_status": sim.youtube_publish_status,
+        "publish_to_youtube": sim.publish_to_youtube,
     }
 
 
@@ -2148,6 +2155,7 @@ class PublicSubmitRequest(BaseModel):
     name: str
     params: dict[str, Any] | None = None
     hypothesis: str | None = Field(default=None, max_length=2000)
+    publish_to_youtube: bool = False
 
 
 class PublicSubmitResponse(BaseModel):
@@ -2288,6 +2296,7 @@ async def submit_public_simulation(
             status="queued",  # type: ignore[arg-type]
             hypothesis=body.hypothesis,
             submitted_by_user_id=user.id,
+            publish_to_youtube=body.publish_to_youtube,
         )
     )
 

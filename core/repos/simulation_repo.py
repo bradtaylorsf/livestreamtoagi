@@ -49,9 +49,9 @@ class SimulationRepo:
                (name, description, config, status,
                 simulated_duration, agents_participated, error_log,
                 model_versions, hypothesis, outcomes, learnings,
-                factions, submitted_by_user_id)
+                factions, submitted_by_user_id, publish_to_youtube)
                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb,
-                       $9, $10::jsonb, $11::jsonb, $12::jsonb, $13)
+                       $9, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14)
                RETURNING *""",
             sim.name,
             sim.description,
@@ -66,6 +66,7 @@ class SimulationRepo:
             serialize_jsonb(sim.learnings),
             serialize_jsonb(sim.factions),
             sim.submitted_by_user_id,
+            sim.publish_to_youtube,
         )
         return Simulation(**_parse_row(dict(row)))
 
@@ -383,6 +384,84 @@ class SimulationRepo:
             simulation_id,
         )
         return existing
+
+    async def claim_for_youtube_publish(
+        self,
+        simulation_id: uuid.UUID,
+    ) -> str | None:
+        """Atomically claim a simulation for YouTube publishing.
+
+        Returns 'claimed' if we transitioned NULL/failed/pending → publishing,
+        or the existing youtube_publish_status (e.g. 'publishing', 'done') if
+        another worker already owns it.
+        """
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET youtube_publish_status = 'publishing'
+               WHERE id = $1
+                 AND (
+                     youtube_publish_status IS NULL
+                     OR youtube_publish_status IN ('pending', 'failed')
+                 )
+               RETURNING youtube_publish_status""",
+            simulation_id,
+        )
+        if row is not None:
+            return "claimed"
+        existing = await self.db.fetchval(
+            "SELECT youtube_publish_status FROM simulations WHERE id = $1",
+            simulation_id,
+        )
+        return existing
+
+    async def update_youtube_status(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        status: str | None,
+        url: str | None = None,
+        failure_reason: str | None = None,
+        increment_attempts: bool = False,
+    ) -> Simulation | None:
+        """Set youtube_publish_status and optionally url/failure/attempts.
+
+        ``youtube_published_at`` is stamped only when status == 'done'.
+        Pass status=None to leave the status untouched (useful when only
+        updating attempts after a retryable failure).
+        """
+        if status is not None and status not in {
+            "pending",
+            "publishing",
+            "done",
+            "failed",
+        }:
+            raise ValueError(f"Invalid youtube_publish_status: {status}")
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET youtube_publish_status = COALESCE($1, youtube_publish_status),
+                   youtube_url = COALESCE($2, youtube_url),
+                   youtube_failure_reason = CASE
+                       WHEN $3::text IS NOT NULL THEN $3
+                       WHEN $1 = 'done' THEN NULL
+                       ELSE youtube_failure_reason
+                   END,
+                   youtube_published_at = CASE
+                       WHEN $1 = 'done' THEN now()
+                       ELSE youtube_published_at
+                   END,
+                   youtube_publish_attempts = youtube_publish_attempts
+                       + CASE WHEN $4 THEN 1 ELSE 0 END
+               WHERE id = $5
+               RETURNING *""",
+            status,
+            url,
+            failure_reason,
+            increment_attempts,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
 
     async def update_config(
         self,

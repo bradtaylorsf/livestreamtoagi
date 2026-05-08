@@ -122,6 +122,18 @@ async def _main(sim_id: uuid.UUID) -> int:
         result.truncated,
         result.cues_rendered,
     )
+
+    # Best-effort YouTube auto-publish for opted-in sims. Never block the
+    # render success path on a publish failure.
+    try:
+        from core.youtube.worker import enqueue_youtube_publish
+
+        fresh = await repo.get(sim_id)
+        if fresh is not None:
+            await enqueue_youtube_publish(sim_id, sim_repo=repo, sim=fresh)
+    except Exception:
+        log.exception("[youtube] enqueue failed for %s", sim_id)
+
     return 0
 
 
