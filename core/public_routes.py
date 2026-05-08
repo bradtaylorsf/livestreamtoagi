@@ -1668,6 +1668,10 @@ async def get_simulation_assertions(sim_id: str) -> list[dict[str, Any]]:
             row["status"] = "fail"
         if "error_message" in row:
             row["message"] = row.pop("error_message")
+        if "phase_name" in row:
+            row["phase"] = row.pop("phase_name")
+        if "assertion_name" in row:
+            row["name"] = row.pop("assertion_name")
     return rows
 
 
