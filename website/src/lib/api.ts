@@ -299,10 +299,12 @@ export async function getLore(params?: {
 
 // Conversations
 export async function getConversations(params?: {
+  simulation_id?: string;
   limit?: number;
   offset?: number;
 }): Promise<PaginatedResponse<ConversationSummary>> {
   const searchParams = new URLSearchParams();
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();

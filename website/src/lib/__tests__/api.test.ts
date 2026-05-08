@@ -188,6 +188,15 @@ describe("getConversations", () => {
       expect.anything(),
     );
   });
+
+  it("forwards simulation_id query param when provided", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
+    await getConversations({ simulation_id: "sim-123", limit: 10 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/conversations?simulation_id=sim-123&limit=10",
+      expect.anything(),
+    );
+  });
 });
 
 describe("getConversation", () => {
