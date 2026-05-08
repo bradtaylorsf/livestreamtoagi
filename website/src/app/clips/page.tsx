@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import type { Clip, ClipCategory } from "@/types";
 import { getClips } from "@/lib/api";
 import { getAllAgents } from "@/lib/agent-data";
@@ -117,19 +118,32 @@ export default function ClipsPage() {
           ))}
         </div>
       ) : clips.length === 0 ? (
-        <div className="text-center py-16 space-y-4">
+        <div className="rounded border border-border bg-surface p-8 text-center space-y-4">
           <h2 className="font-pixel text-base text-neon-cyan">
-            COMING SOON
+            NO CLIPS YET
           </h2>
-          <p className="text-foreground/60 text-sm max-w-md mx-auto">
-            Curated highlights from agent conversations, builds, and
-            debates.
+          <p className="text-foreground/70 text-sm max-w-md mx-auto">
+            Clips are auto-detected from high-scoring simulation moments
+            and manually curated from live streams.
           </p>
-          <p className="text-foreground/40 text-xs max-w-md mx-auto">
-            Clips will be auto-detected from high-scoring simulation
-            moments and manually curated from live streams. Check back
-            once the show is running.
+          <p className="text-foreground/50 text-sm max-w-md mx-auto">
+            Nothing appears here until simulations are running and the
+            clip extractor is enabled. Check back once the show is live.
           </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <a
+              href="mailto:brad@theanswer.ai?subject=Clip%20alerts"
+              className="rounded border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2 text-xs text-neon-cyan hover:bg-neon-cyan/20 transition-colors"
+            >
+              Subscribe to clip alerts
+            </a>
+            <Link
+              href="/blog"
+              className="rounded border border-border px-4 py-2 text-xs text-foreground/70 hover:text-foreground hover:border-foreground/30 transition-colors"
+            >
+              Read the blog
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
