@@ -56,10 +56,11 @@ export default function FeaturedSimulations() {
             <div className="aspect-video bg-surface-light flex items-center justify-center text-foreground/30 text-xs">
               {sim.video_url ? (
                 <video
-                  poster={sim.video_url}
+                  src={sim.video_url}
                   className="w-full h-full object-cover"
                   muted
                   preload="metadata"
+                  aria-label={`${sim.name} video preview`}
                 />
               ) : (
                 <span className="font-pixel">{sim.name.slice(0, 16)}</span>

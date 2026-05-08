@@ -320,7 +320,14 @@ export default function AgentDetailClient({ agent }: Props) {
     <div className="mx-auto max-w-5xl px-4 py-12 space-y-8">
       {/* Breadcrumb */}
       <nav className="text-xs text-foreground/40" aria-label="Breadcrumb">
-        <Link href="/agents" className="hover:text-foreground/60">
+        <Link
+          href={
+            isSimRouteScoped && sim.simulationId
+              ? `/simulations/${sim.simulationId}/agents`
+              : "/agents"
+          }
+          className="hover:text-foreground/60"
+        >
           Agents
         </Link>
         {" / "}
