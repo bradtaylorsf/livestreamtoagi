@@ -22,7 +22,7 @@ import {
   getStats,
   getWorldChunks,
   runSimulationEval,
-  submitChallenge,
+  shareSimulationAsChallenge,
   upvoteChallenge,
 } from "../api";
 
@@ -117,18 +117,18 @@ describe("getChallenges", () => {
   });
 });
 
-describe("submitChallenge", () => {
-  it("sends POST to /api/challenges with body", async () => {
-    const challenge = { description: "A test challenge", category: "building", submitter_name: "viewer1" };
-    mockFetch.mockReturnValue(jsonResponse({ ...challenge, id: 1 }));
+describe("shareSimulationAsChallenge", () => {
+  it("sends POST to /api/simulations/:id/share-as-challenge with body", async () => {
+    const body = { description: "Try a garden", tags: ["creative"] };
+    mockFetch.mockReturnValue(jsonResponse({ id: 1, ...body }));
 
-    await submitChallenge(challenge);
+    await shareSimulationAsChallenge("sim-123", body);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "/api/challenges",
+      "/api/simulations/sim-123/share-as-challenge",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify(challenge),
+        body: JSON.stringify(body),
       }),
     );
   });
@@ -146,11 +146,11 @@ describe("upvoteChallenge", () => {
 });
 
 describe("getChallenges with filters", () => {
-  it("appends query params for status and sort", async () => {
+  it("appends query params for tag and sort", async () => {
     mockFetch.mockReturnValue(jsonResponse([]));
-    await getChallenges({ status: "pending", sort: "most_upvoted" });
+    await getChallenges({ tag: "creative", sort: "most_upvoted" });
     expect(mockFetch).toHaveBeenCalledWith(
-      "/api/challenges?status=pending&sort=most_upvoted",
+      "/api/challenges?tag=creative&sort=most_upvoted",
       expect.anything(),
     );
   });

@@ -186,19 +186,27 @@ class SimulationRepo:
         offset: int = 0,
         include_live: bool = False,
         is_featured: bool | None = None,
+        completed_within_hours: int | None = None,
     ) -> list[Simulation]:
         clauses: list[str] = []
         params: list[object] = []
         idx = 1
         if status is not None:
-            clauses.append(f"status = ${idx}")
+            clauses.append(f"s.status = ${idx}")
             params.append(status)
             idx += 1
         if not include_live:
-            clauses.append("is_live IS NOT TRUE")
+            clauses.append("s.is_live IS NOT TRUE")
         if is_featured is not None:
-            clauses.append(f"is_featured = ${idx}")
+            clauses.append(f"s.is_featured = ${idx}")
             params.append(is_featured)
+            idx += 1
+        if completed_within_hours is not None:
+            clauses.append(
+                f"s.completed_at IS NOT NULL "
+                f"AND s.completed_at >= now() - make_interval(hours => ${idx})"
+            )
+            params.append(completed_within_hours)
             idx += 1
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
@@ -206,10 +214,16 @@ class SimulationRepo:
         idx += 1
         params.append(offset)
         offset_idx = idx
+        # LEFT JOIN users to expose the submitter's display name (email
+        # local-part) without a second round-trip. None == anonymous.
         rows = await self.db.fetch(
-            f"""SELECT * FROM simulations{where}
-               ORDER BY started_at DESC
-               LIMIT ${limit_idx} OFFSET ${offset_idx}""",  # noqa: S608
+            f"""SELECT s.*,
+                       split_part(u.email, '@', 1) AS submitter_display_name
+                  FROM simulations s
+                  LEFT JOIN users u ON u.id = s.submitted_by_user_id
+                  {where}
+                 ORDER BY s.started_at DESC
+                 LIMIT ${limit_idx} OFFSET ${offset_idx}""",  # noqa: S608
             *params,
         )
         return [Simulation(**_parse_row(dict(r))) for r in rows]
@@ -398,6 +412,7 @@ class SimulationRepo:
         status: str | None = None,
         include_live: bool = False,
         is_featured: bool | None = None,
+        completed_within_hours: int | None = None,
     ) -> int:
         """Return total count of simulations, optionally filtered by status."""
         clauses: list[str] = []
@@ -412,6 +427,13 @@ class SimulationRepo:
         if is_featured is not None:
             clauses.append(f"is_featured = ${idx}")
             params.append(is_featured)
+            idx += 1
+        if completed_within_hours is not None:
+            clauses.append(
+                f"completed_at IS NOT NULL "
+                f"AND completed_at >= now() - make_interval(hours => ${idx})"
+            )
+            params.append(completed_within_hours)
             idx += 1
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         val = await self.db.fetchval(

@@ -6,7 +6,6 @@ import type {
   AgentRelationshipResponse,
   ApiError,
   Challenge,
-  ChallengeSubmission,
   ChatResponse,
   Clip,
   ConversationDetail,
@@ -17,6 +16,7 @@ import type {
   PaginatedResponse,
   RecallMemoryPublic,
   SelectionLogEntry,
+  ShareSimulationAsChallengeRequest,
   Stats,
   WorldChunk,
 } from "@/types";
@@ -247,27 +247,35 @@ export async function getWorldChunks(): Promise<WorldChunk[]> {
   return request<WorldChunk[]>("/api/world/chunks");
 }
 
-// Challenges
+// Challenges (now: user-submitted simulations shared with the community)
 export async function getChallenges(params?: {
-  status?: string;
-  category?: string;
+  tag?: string;
   sort?: string;
+  include_legacy?: boolean;
 }): Promise<Challenge[]> {
   const searchParams = new URLSearchParams();
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.category) searchParams.set("category", params.category);
+  if (params?.tag) searchParams.set("tag", params.tag);
   if (params?.sort) searchParams.set("sort", params.sort);
+  if (params?.include_legacy) searchParams.set("include_legacy", "true");
   const qs = searchParams.toString();
   return request<Challenge[]>(`/api/challenges${qs ? `?${qs}` : ""}`);
 }
 
-export async function submitChallenge(
-  challenge: ChallengeSubmission,
+export async function getChallenge(id: number): Promise<Challenge> {
+  return request<Challenge>(`/api/challenges/${id}`);
+}
+
+export async function shareSimulationAsChallenge(
+  simulationId: string,
+  body: ShareSimulationAsChallengeRequest,
 ): Promise<Challenge> {
-  return request<Challenge>("/api/challenges", {
-    method: "POST",
-    body: JSON.stringify(challenge),
-  });
+  return request<Challenge>(
+    `/api/simulations/${simulationId}/share-as-challenge`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function upvoteChallenge(id: number): Promise<Challenge> {
@@ -498,6 +506,8 @@ export interface PublicSimulation {
   agents_participated: string[];
   is_featured: boolean;
   video_url: string | null;
+  // Local-part of the submitter's email if signed in; null = anonymous.
+  submitter_display_name: string | null;
 }
 
 export interface PublicSimulationDetail extends PublicSimulation {
@@ -513,12 +523,19 @@ export async function getSimulations(
     limit?: number;
     offset?: number;
     is_featured?: boolean;
+    completed_within_hours?: number;
   },
 ): Promise<PaginatedResponse<PublicSimulation>> {
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set("status", params.status);
   if (params?.is_featured !== undefined) {
     searchParams.set("is_featured", params.is_featured ? "true" : "false");
+  }
+  if (params?.completed_within_hours !== undefined) {
+    searchParams.set(
+      "completed_within_hours",
+      String(params.completed_within_hours),
+    );
   }
   searchParams.set("limit", String(params?.limit ?? 20));
   searchParams.set("offset", String(params?.offset ?? 0));
