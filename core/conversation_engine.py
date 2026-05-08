@@ -589,6 +589,22 @@ class ConversationEngine:
             changes=energy_changes,
         )
 
+        # Persist per-agent energy point so the workspace can render the
+        # energy timeline. Conversation energy is shared across participants
+        # today; we write one row per active agent at the same value.
+        if self._simulation_id is not None and conv.participants:
+            try:
+                await self._selection_logger.log_agent_energy(
+                    conversation_id=conv.id,
+                    turn_number=conv.turn_number,
+                    simulation_id=self._simulation_id,
+                    agent_energies={
+                        agent_id: conv.energy.energy for agent_id in conv.participants
+                    },
+                )
+            except Exception:
+                logger.warning("Failed to log agent energy timeline", exc_info=True)
+
         # Variable pacing
         pause = calculate_pause(content, self.config.timing, is_interrupt=result.was_interrupt)
         await self._sleep(pause)

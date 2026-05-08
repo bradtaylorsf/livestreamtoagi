@@ -369,6 +369,27 @@ class EnergyLogCreate(BaseModel):
     simulation_id: uuid.UUID | None = None
 
 
+class AgentEnergyLogCreate(BaseModel):
+    """Per-agent, per-turn energy point — feeds the energy timeline chart."""
+
+    simulation_id: uuid.UUID
+    agent_id: str
+    conversation_id: uuid.UUID
+    turn_number: int
+    energy: float
+
+
+class AgentEnergyLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    simulation_id: uuid.UUID
+    agent_id: str
+    conversation_id: uuid.UUID
+    turn_number: int
+    energy: float
+    timestamp: datetime | None = None
+
+
 # ── World Chunks ────────────────────────────────────────────────
 
 
@@ -791,6 +812,29 @@ class FactionConfig(BaseModel):
         if not v or not v.strip():
             raise ValueError("faction goal is required")
         return v
+
+
+class MemorySeedConfig(BaseModel):
+    """Controls what each agent remembers at simulation start.
+
+    - ``none``: every agent gets blank core memory and no recall entries.
+    - ``inherit``: copy core + recall from the most recent state of an
+      existing simulation (referenced by ``inherit_from``).
+    - ``custom``: load a JSON/YAML snapshot file (referenced by
+      ``custom_file``) mapping agent_id → core_memory + recall entries.
+    """
+
+    mode: Literal["none", "inherit", "custom"]
+    inherit_from: str | None = None
+    custom_file: str | None = None
+
+    @model_validator(mode="after")
+    def _check_mode_requirements(self) -> MemorySeedConfig:
+        if self.mode == "inherit" and not self.inherit_from:
+            raise ValueError("memory_seed mode='inherit' requires inherit_from")
+        if self.mode == "custom" and not self.custom_file:
+            raise ValueError("memory_seed mode='custom' requires custom_file")
+        return self
 
 
 class SimulationCreate(BaseModel):

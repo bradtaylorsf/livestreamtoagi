@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from core.models import (
+    AgentEnergyLogCreate,
     Conversation,
     ConversationCreate,
     EnergyLogCreate,
@@ -156,6 +157,76 @@ class ConversationRepo:
             serialize_jsonb(entry.changes),
             entry.simulation_id,
         )
+
+    async def log_agent_energy_bulk(self, entries: list[AgentEnergyLogCreate]) -> int:
+        """Insert one row per (agent, turn) for the agent_energy_log timeline.
+
+        Idempotent: rows that conflict on (simulation_id, agent_id,
+        conversation_id, turn_number) are silently skipped.
+
+        Returns the number of new rows persisted (best-effort — pool.executemany
+        does not return per-statement counts so we trust the input length minus
+        any rows the unique constraint suppresses).
+        """
+        if not entries:
+            return 0
+        records = [
+            (
+                e.simulation_id,
+                e.agent_id,
+                e.conversation_id,
+                e.turn_number,
+                float(e.energy),
+            )
+            for e in entries
+        ]
+        async with self.db.acquire() as conn:
+            await conn.executemany(
+                """INSERT INTO agent_energy_log
+                       (simulation_id, agent_id, conversation_id, turn_number, energy)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (simulation_id, agent_id, conversation_id, turn_number)
+                   DO NOTHING""",
+                records,
+            )
+        return len(records)
+
+    async def get_energy_timeline(
+        self,
+        simulation_id: uuid.UUID,
+        agent_id: str | None = None,
+    ) -> dict[str, list[dict]]:
+        """Return ordered energy time series grouped by agent_id."""
+        if agent_id is not None:
+            rows = await self.db.fetch(
+                """SELECT agent_id, conversation_id, turn_number, energy, timestamp
+                       FROM agent_energy_log
+                       WHERE simulation_id = $1 AND agent_id = $2
+                       ORDER BY agent_id, timestamp ASC""",
+                simulation_id,
+                agent_id,
+            )
+        else:
+            rows = await self.db.fetch(
+                """SELECT agent_id, conversation_id, turn_number, energy, timestamp
+                       FROM agent_energy_log
+                       WHERE simulation_id = $1
+                       ORDER BY agent_id, timestamp ASC""",
+                simulation_id,
+            )
+        timeline: dict[str, list[dict]] = {}
+        for row in rows:
+            d = dict(row)
+            ts = d["timestamp"]
+            timeline.setdefault(d["agent_id"], []).append(
+                {
+                    "t": ts.isoformat() if ts is not None else None,
+                    "energy": float(d["energy"]),
+                    "turn": d["turn_number"],
+                    "conversation_id": str(d["conversation_id"]),
+                }
+            )
+        return timeline
 
     async def cleanup_old_logs(self, retention_days: int) -> None:
         interval = f"{retention_days} days"

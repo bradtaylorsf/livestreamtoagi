@@ -250,7 +250,7 @@ class MemorySnapshotImporter:
             agent_snap = snapshot.agents[agent_id]
 
             if clear_first:
-                await self._clear_agent_state(agent_id)
+                await self._clear_agent_state(agent_id, simulation_id=sim_uuid)
 
             # Restore core memory
             if agent_snap.core_memory:
@@ -260,7 +260,7 @@ class MemorySnapshotImporter:
                     )
                     if existing is None:
                         await self._core_memory.initialize_agent_memory(
-                            agent_id, agent_snap.core_memory
+                            agent_id, agent_snap.core_memory, simulation_id=sim_uuid
                         )
                     else:
                         # Use upsert_core_memory via the repo
@@ -274,6 +274,7 @@ class MemorySnapshotImporter:
                             agent_snap.core_memory,
                             token_count,
                             reason="snapshot_restore",
+                            simulation_id=sim_uuid,
                         )
                     result.core_memories_restored += 1
                 except Exception as exc:
@@ -301,6 +302,7 @@ class MemorySnapshotImporter:
                             event_type=mem_data.get("event_type"),
                             participants=mem_data.get("participants"),
                             importance_score=mem_data.get("importance_score", 0.5),
+                            simulation_id=sim_uuid,
                         )
                     )
                     result.recall_memories_restored += 1
@@ -318,6 +320,7 @@ class MemorySnapshotImporter:
                             reflection_type=entry_data.get("reflection_type", "snapshot"),
                             content=entry_data["content"],
                             token_count=entry_data.get("token_count", 0),
+                            simulation_id=sim_uuid,
                         )
                     )
                     result.journal_entries_restored += 1
@@ -351,11 +354,32 @@ class MemorySnapshotImporter:
 
         return result
 
-    async def _clear_agent_state(self, agent_id: str) -> None:
-        """Clear existing memory state for an agent."""
+    async def _clear_agent_state(
+        self, agent_id: str, simulation_id: Any | None = None
+    ) -> None:
+        """Clear existing memory state for an agent.
+
+        When ``simulation_id`` is provided, scope the delete to that
+        simulation namespace; otherwise clear all rows for the agent (legacy
+        behavior used by snapshot restore without a target simulation).
+        """
         try:
-            await self._db.execute("DELETE FROM recall_memory WHERE agent_id = $1", agent_id)
-            await self._db.execute("DELETE FROM journal_entries WHERE agent_id = $1", agent_id)
+            if simulation_id is not None:
+                await self._db.execute(
+                    "DELETE FROM recall_memory WHERE agent_id = $1 AND simulation_id = $2",
+                    agent_id,
+                    simulation_id,
+                )
+                await self._db.execute(
+                    "DELETE FROM journal_entries WHERE agent_id = $1 AND simulation_id = $2",
+                    agent_id,
+                    simulation_id,
+                )
+            else:
+                await self._db.execute("DELETE FROM recall_memory WHERE agent_id = $1", agent_id)
+                await self._db.execute(
+                    "DELETE FROM journal_entries WHERE agent_id = $1", agent_id
+                )
             # Don't delete core_memory — it will be overwritten
         except Exception:
             logger.warning("Failed to clear state for %s", agent_id, exc_info=True)

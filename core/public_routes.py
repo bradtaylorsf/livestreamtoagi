@@ -1635,6 +1635,25 @@ async def get_simulation_timeline(
     return events
 
 
+@router.get("/simulations/{sim_id}/energy-timeline")
+async def get_simulation_energy_timeline(
+    sim_id: str,
+    agent_id: str | None = Query(default=None),
+) -> dict[str, list[dict[str, Any]]]:
+    """Time-series of conversation energy grouped by agent.
+
+    Returns a mapping of agent_id -> ordered list of
+    ``{t, energy, turn, conversation_id}`` points. Use the optional
+    ``agent_id`` query parameter to filter to a single agent.
+    """
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+
+    repo = ConversationRepo(db)
+    sim_uuid = uuid.UUID(sim_id)
+    return await repo.get_energy_timeline(sim_uuid, agent_id=agent_id)
+
+
 @router.get("/simulations/{sim_id}/report")
 async def get_simulation_report(
     sim_id: str,
