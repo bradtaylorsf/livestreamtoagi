@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
+import HeaderSimulationPicker from "@/components/HeaderSimulationPicker";
 
 interface NavChild {
   href: string;
@@ -190,37 +191,40 @@ export default function Navigation() {
         </Link>
 
         {/* Desktop nav */}
-        <ul className="hidden md:flex gap-1">
-          {NAV_ITEMS.map((item) => {
-            if (item.children) {
+        <div className="hidden md:flex items-center gap-3">
+          <ul className="flex gap-1">
+            {NAV_ITEMS.map((item) => {
+              if (item.children) {
+                return (
+                  <DropdownMenu
+                    key={item.label}
+                    item={item}
+                    pathname={pathname}
+                  />
+                );
+              }
+              const isActive =
+                item.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(item.href!);
               return (
-                <DropdownMenu
-                  key={item.label}
-                  item={item}
-                  pathname={pathname}
-                />
+                <li key={item.href}>
+                  <Link
+                    href={item.href!}
+                    className={`rounded px-3 py-2 text-sm transition-colors ${
+                      isActive
+                        ? "bg-surface-light text-neon-cyan"
+                        : "text-foreground/70 hover:bg-surface-light hover:text-foreground"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
               );
-            }
-            const isActive =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href!);
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href!}
-                  className={`rounded px-3 py-2 text-sm transition-colors ${
-                    isActive
-                      ? "bg-surface-light text-neon-cyan"
-                      : "text-foreground/70 hover:bg-surface-light hover:text-foreground"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+            })}
+          </ul>
+          <HeaderSimulationPicker />
+        </div>
 
         {/* Mobile hamburger button */}
         <button
@@ -257,6 +261,9 @@ export default function Navigation() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden mt-3 border-t border-border pt-3">
+          <div className="px-3 pb-3">
+            <HeaderSimulationPicker />
+          </div>
           <ul className="space-y-1">
             {NAV_ITEMS.map((item) => {
               if (item.children) {
