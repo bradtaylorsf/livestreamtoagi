@@ -73,6 +73,11 @@ function toNumber(value: unknown): number | null {
   return null;
 }
 
+// Sentiment and trust are only meaningful once a pair has interacted enough
+// times for the analyzer to draw a signal from the conversation. Below this
+// threshold the columns render as "—" (or hide entirely if NO row qualifies).
+const SENTIMENT_TRUST_MIN_INTERACTIONS = 3;
+
 // Real agent IDs — used to decide whether to render a cost-row label as a link.
 const REAL_AGENT_IDS = new Set([
   "vera",
@@ -958,9 +963,25 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
     return <p className="text-sm text-foreground/50">No social graph data available.</p>;
   }
 
+  // Hide sentiment/trust columns entirely if NO pair has enough interactions
+  // to make those scores meaningful. Otherwise show columns and render "\u2014"
+  // for sub-threshold rows.
+  const anyQualifies = data.some(
+    (row) =>
+      (toNumber(row.interaction_count ?? row.interactions) ?? 0) >=
+      SENTIMENT_TRUST_MIN_INTERACTIONS,
+  );
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-foreground/40">{data.length} relationships</p>
+
+      {!anyQualifies && (
+        <p className="text-xs text-foreground/50 italic">
+          Sentiment & trust hidden \u2014 fewer than {SENTIMENT_TRUST_MIN_INTERACTIONS} interactions per
+          pair.
+        </p>
+      )}
 
       <div className="rounded-lg border border-border bg-surface overflow-x-auto">
         <table className="w-full text-sm">
@@ -968,8 +989,12 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
             <tr className="border-b border-border text-left text-foreground/50">
               <th scope="col" className="px-4 py-2 font-medium">Agent A</th>
               <th scope="col" className="px-4 py-2 font-medium">Agent B</th>
-              <th scope="col" className="px-4 py-2 font-medium text-right">Sentiment</th>
-              <th scope="col" className="px-4 py-2 font-medium text-right">Trust</th>
+              {anyQualifies && (
+                <>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Sentiment</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Trust</th>
+                </>
+              )}
               <th scope="col" className="px-4 py-2 font-medium text-right">Interactions</th>
             </tr>
           </thead>
@@ -977,6 +1002,9 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
             {data.map((row, idx) => {
               const sentiment = toNumber(row.sentiment_score ?? row.sentiment);
               const trust = toNumber(row.trust_score ?? row.trust);
+              const interactions =
+                toNumber(row.interaction_count ?? row.interactions) ?? 0;
+              const showScores = interactions >= SENTIMENT_TRUST_MIN_INTERACTIONS;
               return (
                 <tr
                   key={idx}
@@ -988,12 +1016,16 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
                   <td className="px-4 py-2 font-mono text-foreground/80">
                     {String(row.target_agent_id ?? row.agent_b ?? row.to ?? "")}
                   </td>
-                  <td className="px-4 py-2 font-mono text-right">
-                    {sentiment != null ? sentiment.toFixed(2) : "\u2014"}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-right">
-                    {trust != null ? trust.toFixed(2) : "\u2014"}
-                  </td>
+                  {anyQualifies && (
+                    <>
+                      <td className="px-4 py-2 font-mono text-right">
+                        {showScores && sentiment != null ? sentiment.toFixed(2) : "\u2014"}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-right">
+                        {showScores && trust != null ? trust.toFixed(2) : "\u2014"}
+                      </td>
+                    </>
+                  )}
                   <td className="px-4 py-2 font-mono text-right">
                     {String(row.interaction_count ?? row.interactions ?? "\u2014")}
                   </td>
