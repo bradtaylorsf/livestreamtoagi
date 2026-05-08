@@ -1175,6 +1175,19 @@ class SimulationOrchestrator:
         if sim:
             self._display.show_summary(sim, real_duration)
 
+        # Kick off MP4 rendering for completed/failed runs. Best-effort:
+        # never block finalize on a video render, and gracefully skip when
+        # there's nothing to render (no transcripts, no events).
+        if sim is not None and sim.status in {"completed", "failed"}:
+            try:
+                await self._enqueue_video_render(sim)
+            except Exception:
+                logger.warning(
+                    "Failed to enqueue video render for %s",
+                    self._simulation_id,
+                    exc_info=True,
+                )
+
         # Notify the public submitter (if any) that their run finished.
         # Wrapped: notification failures must never block finalize.
         if sim is not None and sim.submitted_by_user_id is not None:
@@ -1186,6 +1199,19 @@ class SimulationOrchestrator:
                     self._simulation_id,
                     exc_info=True,
                 )
+
+    async def _enqueue_video_render(self, sim: Any) -> None:
+        """Enqueue the headless video render for ``sim``."""
+        from core.video.worker import enqueue_render, mark_unrenderable
+
+        if sim.total_turns <= 0 or sim.total_conversations <= 0:
+            await mark_unrenderable(
+                sim.id,
+                sim_repo=self._sim_repo,
+                reason="no transcript turns",
+            )
+            return
+        await enqueue_render(sim.id, sim_repo=self._sim_repo)
 
     async def _notify_submitter(self, sim: Any) -> None:
         """Email the public submitter that their simulation finished."""
