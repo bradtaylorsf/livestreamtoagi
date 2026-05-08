@@ -521,8 +521,8 @@ async def get_agent_relationships(
         {
             "id": str(r.id),
             "target_agent_id": r.target_agent_id,
-            "sentiment_score": float(r.sentiment_score) if r.sentiment_score else 0,
-            "trust_score": float(r.trust_score) if r.trust_score else 0,
+            "sentiment_score": float(r.sentiment_score) if r.sentiment_score is not None else 0,
+            "trust_score": float(r.trust_score) if r.trust_score is not None else 0,
             "interaction_count": r.interaction_count,
             "relationship_summary": r.relationship_summary,
         }
@@ -1237,6 +1237,9 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
 
 @router.get("/world/chunks")
 async def get_world_chunks() -> list[dict[str, Any]]:
+    # Intentional: /world is the live-show map only. Do not generalize to a
+    # simulation_id query param without first deciding how non-live sims
+    # should expose their world state (separate endpoint, different schema).
     svc = _get_services()
     if not svc.world_repo:
         return []
@@ -1782,9 +1785,10 @@ async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
             source_id = data.get("source_simulation_id", "")
             if source_id == sim_id or not source_id:
                 agents = data.get("agents", {})
-                snapshot_at = data.get("snapshot_at") or datetime.fromtimestamp(
-                    f.stat().st_mtime, tz=UTC
-                ).isoformat()
+                snapshot_at = (
+                    data.get("snapshot_at")
+                    or datetime.fromtimestamp(f.stat().st_mtime, tz=UTC).isoformat()
+                )
                 results.append(
                     {
                         "filename": f.name,

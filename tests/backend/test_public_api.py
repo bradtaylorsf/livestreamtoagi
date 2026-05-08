@@ -184,6 +184,46 @@ class TestAgentEndpoints:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    @pytest.mark.parametrize(
+        "sentiment_in, trust_in, sentiment_out, trust_out",
+        [
+            # Decimal("0.0") and Decimal("0") are falsy in Python — must still
+            # be reported as 0.0, not silently replaced by the default.
+            ("0.0", "0.0", 0.0, 0.0),
+            ("0", "0", 0.0, 0.0),
+            ("-0.5", "0.5", -0.5, 0.5),
+            (None, None, 0.0, 0.0),
+        ],
+    )
+    def test_get_agent_relationships_preserves_zero_scores(
+        self, mock_app, sentiment_in, trust_in, sentiment_out, trust_out
+    ):
+        from decimal import Decimal
+
+        from core.models import Relationship
+
+        client, *_, mock_services = mock_app
+        rel = Relationship(
+            id=uuid.uuid4(),
+            simulation_id=uuid.uuid4(),
+            agent_id="vera",
+            target_agent_id="rex",
+            sentiment_score=Decimal(sentiment_in) if sentiment_in is not None else None,
+            trust_score=Decimal(trust_in) if trust_in is not None else None,
+            interaction_count=3,
+            relationship_summary="ok",
+        )
+        mock_repo = MagicMock()
+        mock_repo.get_all_for_agent = AsyncMock(return_value=[rel])
+        mock_services.relationship_repo = mock_repo
+
+        resp = client.get("/api/agents/vera/relationships")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["sentiment_score"] == sentiment_out
+        assert data[0]["trust_score"] == trust_out
+
     def test_get_agent_conversations(self, mock_app):
         client, mock_db, *_ = mock_app
         mock_db.fetchval = AsyncMock(return_value=0)

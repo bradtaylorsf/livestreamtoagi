@@ -434,13 +434,9 @@ class SimulationOrchestrator:
             sim_uuid = _uuid.UUID(self._config.existing_sim_id)
             sim = await self._sim_repo.get(sim_uuid)
             if sim is None:
-                raise RuntimeError(
-                    f"existing_sim_id {sim_uuid} not found in simulations table"
-                )
+                raise RuntimeError(f"existing_sim_id {sim_uuid} not found in simulations table")
             await self._sim_repo.update_config(sim_uuid, config_snapshot)
-            await self._sim_repo.update_agents_participated(
-                sim_uuid, self._config.agents
-            )
+            await self._sim_repo.update_agents_participated(sim_uuid, self._config.agents)
             await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
             # Re-read so we have fresh config/agents/status fields
             sim = await self._sim_repo.get(sim_uuid)
@@ -596,13 +592,11 @@ class SimulationOrchestrator:
                         # Always emit baseline conversation assertions so the
                         # Assertions tab is populated even when the seed
                         # scenario omits an `assertions:` block.
-                        baseline_results = (
-                            await assertion_engine.evaluate_conversation_defaults(
-                                result,
-                                sim.id,
-                                config={},
-                                phase_name=phase.name,
-                            )
+                        baseline_results = await assertion_engine.evaluate_conversation_defaults(
+                            result,
+                            sim.id,
+                            config={},
+                            phase_name=phase.name,
                         )
                         result.assertions = assertion_results + baseline_results
                     except Exception:

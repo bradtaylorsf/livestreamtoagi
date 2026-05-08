@@ -654,9 +654,10 @@ async def list_snapshots(
             source_id = data.get("source_simulation_id", "")
             if source_id == str(sim_id) or not source_id:
                 agents = data.get("agents", {})
-                snapshot_at = data.get("snapshot_at") or datetime.fromtimestamp(
-                    f.stat().st_mtime, tz=UTC
-                ).isoformat()
+                snapshot_at = (
+                    data.get("snapshot_at")
+                    or datetime.fromtimestamp(f.stat().st_mtime, tz=UTC).isoformat()
+                )
                 results.append(
                     {
                         "filename": f.name,
@@ -685,9 +686,16 @@ async def get_snapshot(
         raise HTTPException(status_code=404, detail="Snapshot not found")
     try:
         data = json.loads(snapshot_path.read_text())
-        return data
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    source_id = data.get("source_simulation_id") or data.get("simulation_id")
+    if source_id is not None and str(source_id) != str(sim_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Snapshot does not belong to this simulation",
+        )
+    return data
 
 
 @router.post("/simulations/{sim_id}/snapshots")
