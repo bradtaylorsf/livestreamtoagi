@@ -91,6 +91,8 @@ class SimulationConfig:
         management_shadow: bool = True,
         debug_prompts: bool = False,
         existing_sim_id: str | None = None,
+        hypothesis: str | None = None,
+        auto_draft_learnings: bool = False,
     ) -> None:
         self.name = name
         self.description = description
@@ -114,6 +116,8 @@ class SimulationConfig:
         # admin dashboard pre-creates the row so it can immediately return
         # the simulation_id to the client for redirect.
         self.existing_sim_id = existing_sim_id
+        self.hypothesis = hypothesis
+        self.auto_draft_learnings = auto_draft_learnings
 
     @property
     def mode(self) -> str:
@@ -450,6 +454,7 @@ class SimulationOrchestrator:
                 status=SimulationStatus.running,
                 agents_participated=self._config.agents,
                 model_versions=model_versions,
+                hypothesis=self._config.hypothesis,
             )
         )
 
@@ -1069,7 +1074,114 @@ class SimulationOrchestrator:
         final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
         await self._sim_repo.update_config(self._simulation_id, final_config)
 
+        # Build a baseline outcomes object (research artifact) so the
+        # simulation is comparable post-run without requiring manual edits.
+        try:
+            await self._write_baseline_outcomes(real_duration, simulated_duration)
+        except Exception:
+            logger.warning(
+                "Failed to persist baseline outcomes for %s",
+                self._simulation_id,
+                exc_info=True,
+            )
+
         # Fetch final record for summary
         sim = await self._sim_repo.get(self._simulation_id)
         if sim:
             self._display.show_summary(sim, real_duration)
+
+    async def _write_baseline_outcomes(
+        self,
+        real_duration: timedelta,
+        simulated_duration: timedelta,
+    ) -> None:
+        """Populate a baseline outcomes JSONB and (optionally) draft a learning."""
+        if self._simulation_id is None:
+            return
+        sim = await self._sim_repo.get(self._simulation_id)
+        if sim is None:
+            return
+
+        # Pull eval scores if any exist for this run.
+        evals: dict[str, Any] = {}
+        try:
+            from core.repos.eval_repo import EvalRepo
+
+            eval_repo = EvalRepo(self._db)
+            latest = await eval_repo.get_latest_eval_run(self._simulation_id)
+            if latest is not None:
+                evals["eval_run_id"] = str(latest.id)
+                evals["eval_suite"] = latest.eval_suite
+                evals["overall_score"] = (
+                    str(latest.overall_score) if latest.overall_score is not None else None
+                )
+                results = await eval_repo.get_eval_results(latest.id)
+                evals["category_scores"] = {
+                    r.category: (str(r.score) if r.score is not None else None) for r in results
+                }
+        except Exception:
+            logger.debug("No eval data attached to simulation", exc_info=True)
+
+        outcomes: dict[str, Any] = {
+            "key_metrics": {
+                "total_conversations": sim.total_conversations,
+                "total_turns": sim.total_turns,
+                "total_tokens": sim.total_tokens,
+                "total_cost": str(sim.total_cost),
+                "total_artifacts": sim.total_artifacts,
+                "total_management_flags": sim.total_management_flags,
+                "simulated_duration_seconds": simulated_duration.total_seconds(),
+                "real_duration_seconds": real_duration.total_seconds(),
+            },
+            "evals": evals,
+            "surprises": [],
+            "failures": list(self._errors),
+        }
+
+        await self._sim_repo.update_research_fields(
+            self._simulation_id, outcomes=outcomes
+        )
+
+        if self._config.auto_draft_learnings and not self._config.dry_run:
+            try:
+                draft = await self._draft_learning_summary(sim, outcomes)
+                if draft:
+                    await self._sim_repo.append_learning(
+                        self._simulation_id, author="system", text=draft
+                    )
+            except Exception:
+                logger.warning(
+                    "Auto-draft learnings failed for %s",
+                    self._simulation_id,
+                    exc_info=True,
+                )
+
+    async def _draft_learning_summary(
+        self,
+        sim: Any,
+        outcomes: dict[str, Any],
+    ) -> str | None:
+        """Ask the LLM to summarize the run in 2-3 sentences."""
+        prompt = (
+            "Summarize this simulation run in 2-3 sentences as a research learning. "
+            f"Hypothesis: {sim.hypothesis or '(none provided)'}. "
+            f"Key metrics: {outcomes['key_metrics']}. "
+            f"Eval data: {outcomes['evals']}. "
+            f"Failures: {len(outcomes['failures'])}."
+        )
+        try:
+            resp = await self._llm.complete(
+                messages=[{"role": "user", "content": prompt}],
+                model="claude-haiku-4-5",
+                max_tokens=200,
+            )
+        except Exception:
+            logger.debug("LLM draft learnings call failed", exc_info=True)
+            return None
+        content = getattr(resp, "content", None)
+        if content is None and isinstance(resp, dict):
+            content = resp.get("content")
+        if content is None:
+            return None
+        text = str(content).strip()
+        return text or None

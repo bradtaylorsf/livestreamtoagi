@@ -393,6 +393,90 @@ class TestSimulationEndpoints:
         assert data["name"] == "test-sim"
         assert data["total_conversations"] == 10
 
+    def test_get_simulation_returns_research_fields(self, mock_app):
+        client, _, _ = mock_app
+        sim = _make_simulation(
+            hypothesis="builders will dominate",
+            outcomes={"key_metrics": {"total_turns": 12}, "surprises": []},
+            learnings=[
+                {
+                    "author": "system",
+                    "text": "factions formed by phase 2",
+                    "created_at": "2026-05-08T00:00:00Z",
+                }
+            ],
+        )
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.get",
+            new_callable=AsyncMock,
+            return_value=sim,
+        ):
+            resp = client.get(f"/api/admin/simulations/{sim.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["hypothesis"] == "builders will dominate"
+        assert data["outcomes"]["key_metrics"]["total_turns"] == 12
+        assert data["learnings"][0]["text"] == "factions formed by phase 2"
+
+    def test_patch_simulation_updates_research_fields(self, mock_app):
+        client, _, _ = mock_app
+        sim = _make_simulation(
+            hypothesis="initial",
+            outcomes={"key_metrics": {"x": 1}},
+            learnings=[],
+        )
+        updated = sim.model_copy(
+            update={
+                "outcomes": {"key_metrics": {"x": 99}, "surprises": ["unexpected"]},
+                "learnings": [
+                    {
+                        "author": "user",
+                        "text": "ran out of cost",
+                        "created_at": "2026-05-08T00:00:00Z",
+                    }
+                ],
+            }
+        )
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.update_research_fields",
+            new_callable=AsyncMock,
+            return_value=updated,
+        ) as mock_update:
+            resp = client.patch(
+                f"/api/admin/simulations/{sim.id}",
+                json={
+                    "outcomes": {"key_metrics": {"x": 99}, "surprises": ["unexpected"]},
+                    "learnings": [
+                        {
+                            "author": "user",
+                            "text": "ran out of cost",
+                            "created_at": "2026-05-08T00:00:00Z",
+                        }
+                    ],
+                },
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["outcomes"]["key_metrics"]["x"] == 99
+        assert data["learnings"][0]["author"] == "user"
+        mock_update.assert_awaited_once()
+        kwargs = mock_update.call_args.kwargs
+        assert kwargs["hypothesis"] is None
+        assert kwargs["outcomes"]["surprises"] == ["unexpected"]
+
+    def test_patch_simulation_not_found(self, mock_app):
+        client, _, _ = mock_app
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.update_research_fields",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.patch(
+                f"/api/admin/simulations/{uuid.uuid4()}",
+                json={"hypothesis": "anything"},
+            )
+        assert resp.status_code == 404
+
     def test_get_simulation_not_found(self, mock_app):
         client, mock_db, _ = mock_app
 
@@ -600,6 +684,45 @@ class TestCreateSimulationWithSeedFile:
         assert str(sim.id) in cmd
         assert "--max-cost" in cmd
         assert "1.5" in cmd
+
+    def test_seed_file_passes_hypothesis_to_simulation_create(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        """POST /admin/simulations forwards `hypothesis` into SimulationCreate."""
+        client, _, _ = mock_app
+        scenarios = _patch_project_root(monkeypatch, tmp_path)
+        (scenarios / "smoke.yaml").write_text("phases: []\n")
+
+        sim = _make_simulation(name="dashboard-smoke-y", status="created")
+
+        captured: dict = {}
+
+        def fake_popen(cmd, *args, **kwargs):
+            class _P:
+                pid = 7
+            return _P()
+
+        async def fake_create(self, sc):
+            captured["sc"] = sc
+            return sim
+
+        with (
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.create",
+                new=fake_create,
+            ),
+            patch("subprocess.Popen", side_effect=fake_popen),
+        ):
+            resp = client.post(
+                "/api/admin/simulations",
+                json={
+                    "seed_file": "smoke.yaml",
+                    "hypothesis": "alliances will form by hour 12",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert captured["sc"].hypothesis == "alliances will form by hour 12"
 
     def test_max_cost_above_ten_rejected(self, mock_app, tmp_path, monkeypatch):
         client, _, _ = mock_app

@@ -775,6 +775,17 @@ class SimulationCreate(BaseModel):
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SimulationUpdate(BaseModel):
+    """Partial update for the post-completion research fields."""
+
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] | None = None
+    learnings: list[dict[str, Any]] | None = None
 
 
 class Simulation(BaseModel):
@@ -799,6 +810,9 @@ class Simulation(BaseModel):
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     is_live: bool = False
     created_at: datetime | None = None
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ConversationConfig(BaseModel):

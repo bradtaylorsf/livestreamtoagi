@@ -514,6 +514,138 @@ class TestSimulationOrchestrator:
         assert dur_call[1]["real_duration"] >= timedelta(seconds=5)
 
     @pytest.mark.asyncio
+    async def test_baseline_outcomes_written_on_finalize(self):
+        """`_finalize` should populate a baseline outcomes dict via update_research_fields."""
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "p1", "type": "scheduled"}],
+            dry_run=True,
+        )
+        services["simulation_repo"].update_research_fields = AsyncMock(return_value=services["sim"])
+
+        await orchestrator.run()
+
+        services["simulation_repo"].update_research_fields.assert_awaited()
+        call = services["simulation_repo"].update_research_fields.call_args
+        outcomes = call.kwargs.get("outcomes")
+        assert outcomes is not None
+        assert "key_metrics" in outcomes
+        assert "evals" in outcomes
+        assert "surprises" in outcomes
+        assert "failures" in outcomes
+        assert outcomes["surprises"] == []
+
+    @pytest.mark.asyncio
+    async def test_auto_draft_learnings_off_by_default(self):
+        """Without --auto-draft-learnings, no LLM call and no append_learning."""
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "p1", "type": "scheduled"}],
+            dry_run=False,
+        )
+        services["simulation_repo"].update_research_fields = AsyncMock(return_value=services["sim"])
+        services["simulation_repo"].append_learning = AsyncMock(return_value=services["sim"])
+
+        with patch.object(
+            PhaseRunner,
+            "run_phase",
+            new_callable=AsyncMock,
+            return_value=PhaseResult(turns=1),
+        ):
+            await orchestrator.run()
+
+        services["simulation_repo"].append_learning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_draft_learnings_invokes_llm_and_appends(self):
+        path = make_seed_file([{"name": "p1", "type": "scheduled"}])
+        services = make_mock_services()
+        config = SimulationConfig(
+            name="test-run",
+            seed_file=path,
+            agents=["vera", "rex"],
+            dry_run=False,
+            auto_draft_learnings=True,
+        )
+        config.load_seed_file()
+        services["simulation_repo"].update_research_fields = AsyncMock(return_value=services["sim"])
+        services["simulation_repo"].append_learning = AsyncMock(return_value=services["sim"])
+
+        # Mock the LLM client to return a typed-ish response.
+        llm_resp = MagicMock(content="agents formed cliques quickly")
+        services["llm_client"].complete = AsyncMock(return_value=llm_resp)
+
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            management=services["management"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+        )
+
+        with patch.object(
+            PhaseRunner,
+            "run_phase",
+            new_callable=AsyncMock,
+            return_value=PhaseResult(turns=1),
+        ):
+            await orchestrator.run()
+
+        services["llm_client"].complete.assert_awaited()
+        services["simulation_repo"].append_learning.assert_awaited_once()
+        call = services["simulation_repo"].append_learning.call_args
+        assert call.kwargs["author"] == "system"
+        assert "agents formed cliques quickly" in call.kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_hypothesis_passed_to_simulation_create(self):
+        path = make_seed_file([{"name": "p1", "type": "scheduled"}])
+        services = make_mock_services()
+        config = SimulationConfig(
+            name="hyp-test",
+            seed_file=path,
+            agents=["vera", "rex"],
+            dry_run=True,
+            hypothesis="rex will lead the build phase",
+        )
+        config.load_seed_file()
+
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            management=services["management"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+        )
+        await orchestrator.run()
+
+        services["simulation_repo"].create.assert_awaited_once()
+        sim_create = services["simulation_repo"].create.call_args[0][0]
+        assert sim_create.hypothesis == "rex will lead the build phase"
+
+    @pytest.mark.asyncio
     async def test_completed_at_passed_once_to_update_status(self):
         """update_status should receive the same completed_at used for the duration calc."""
         orchestrator, services = self._make_orchestrator(
