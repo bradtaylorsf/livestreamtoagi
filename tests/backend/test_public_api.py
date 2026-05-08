@@ -650,6 +650,64 @@ class TestEvalEndpoints:
         assert resp.status_code == 200
         assert resp.json() is None
 
+    def test_get_eval_runs_unscoped_omits_simulation_filter(self, mock_app):
+        """`GET /api/evals/runs` (no sim_id) must not filter by simulation_id."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/evals/runs")
+        assert resp.status_code == 200
+        # The eval_runs list query must NOT mention simulation_id
+        eval_run_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "FROM eval_runs" in c[0][0]
+        ]
+        assert eval_run_queries, "Expected an eval_runs query"
+        for call in eval_run_queries:
+            assert "simulation_id" not in call[0][0]
+
+    def test_get_eval_runs_scoped_filters_by_simulation_id(self, mock_app):
+        """When simulation_id is provided, the eval_runs query filters by it."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        sim_id = uuid.uuid4()
+        resp = client.get(f"/api/evals/runs?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        eval_run_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "FROM eval_runs" in c[0][0]
+        ]
+        assert eval_run_queries, "Expected an eval_runs query"
+        scoped = [c for c in eval_run_queries if "simulation_id" in c[0][0]]
+        assert scoped, "Expected eval_runs query to filter by simulation_id"
+        # The bound parameter should equal the requested simulation UUID.
+        assert sim_id in scoped[0][0]
+
+    def test_get_eval_latest_unscoped_omits_simulation_filter(self, mock_app):
+        """`GET /api/evals/latest` (no sim_id) must not filter by simulation_id."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/evals/latest")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            if "FROM eval_runs" in call[0][0]:
+                assert "simulation_id" not in call[0][0]
+
+    def test_get_eval_latest_scoped_filters_by_simulation_id(self, mock_app):
+        """When simulation_id is provided, /evals/latest scopes to it."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        sim_id = uuid.uuid4()
+        resp = client.get(f"/api/evals/latest?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        eval_run_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "FROM eval_runs" in c[0][0]
+        ]
+        assert eval_run_queries
+        scoped = [c for c in eval_run_queries if "simulation_id" in c[0][0]]
+        assert scoped, "Expected /evals/latest query to filter by simulation_id"
+        assert sim_id in scoped[0][0]
+
     def test_get_eval_run_detail_not_found(self, mock_app):
         client, mock_db, *_ = mock_app
         mock_db.fetchrow = AsyncMock(return_value=None)

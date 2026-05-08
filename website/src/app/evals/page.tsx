@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
 import { exportAsJSON, exportAsCSV } from "@/lib/export";
+import { useCurrentSimulationId } from "@/lib/simulation-store";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "How original and varied are agent outputs? Measures novelty in dialogue, artifacts, and problem-solving.",
@@ -50,12 +51,15 @@ export default function EvalsPage() {
   const [compareB, setCompareB] = useState<string | null>(null);
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterModel, setFilterModel] = useState<string>("");
+  const [currentSimId] = useCurrentSimulationId();
 
   useEffect(() => {
     const loadData = async () => {
       const [cats, evalRuns] = await Promise.all([
         getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
-        getEvalRuns().catch(() => []),
+        getEvalRuns({ simulation_id: currentSimId ?? undefined }).catch(
+          () => [],
+        ),
       ]);
 
       setRuns(evalRuns);
@@ -84,7 +88,7 @@ export default function EvalsPage() {
     };
 
     loadData();
-  }, []);
+  }, [currentSimId]);
 
   const latestRun = runs[0] ?? null;
   const runAData = compareA ? runs.find((r) => r.id === compareA) : null;

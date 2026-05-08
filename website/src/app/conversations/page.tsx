@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ConversationSummary } from "@/types";
 import { getConversations, getSimulations, type PublicSimulation } from "@/lib/api";
 import { getAgentData } from "@/lib/agent-data";
+import { useCurrentSimulationId } from "@/lib/simulation-store";
 
 function ConversationCard({ conv }: { conv: ConversationSummary }) {
   return (
@@ -71,7 +72,8 @@ function ConversationCard({ conv }: { conv: ConversationSummary }) {
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
-  const [selectedSim, setSelectedSim] = useState<string>("");
+  const [storedSimId, setStoredSimId] = useCurrentSimulationId();
+  const selectedSim = storedSimId ?? "";
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
@@ -155,7 +157,7 @@ export default function ConversationsPage() {
           id="sim-filter"
           value={selectedSim}
           onChange={(e) => {
-            setSelectedSim(e.target.value);
+            setStoredSimId(e.target.value || null);
             setPage(0);
           }}
           className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-foreground"

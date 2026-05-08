@@ -145,14 +145,26 @@ class EvalRepo:
         *,
         limit: int = 50,
         offset: int = 0,
+        simulation_id: uuid.UUID | None = None,
     ) -> list[EvalRun]:
-        rows = await self.db.fetch(
-            """SELECT * FROM eval_runs
-               ORDER BY started_at DESC
-               LIMIT $1 OFFSET $2""",
-            limit,
-            offset,
-        )
+        if simulation_id is None:
+            rows = await self.db.fetch(
+                """SELECT * FROM eval_runs
+                   ORDER BY started_at DESC
+                   LIMIT $1 OFFSET $2""",
+                limit,
+                offset,
+            )
+        else:
+            rows = await self.db.fetch(
+                """SELECT * FROM eval_runs
+                   WHERE simulation_id = $3
+                   ORDER BY started_at DESC
+                   LIMIT $1 OFFSET $2""",
+                limit,
+                offset,
+                simulation_id,
+            )
         return [EvalRun(**_parse_jsonb(dict(r))) for r in rows]
 
     async def get_eval_categories(self) -> list[str]:

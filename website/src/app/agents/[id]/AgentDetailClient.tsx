@@ -16,6 +16,10 @@ import {
   getAgentJournal,
   getAgentCosts,
 } from "@/lib/api";
+import {
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+} from "@/lib/simulation-store";
 import type {
   SystemPromptResponse,
   AgentCostBreakdown,
@@ -87,15 +91,21 @@ export default function AgentDetailClient({ agent }: Props) {
 
   const [conversations, setConversations] = useState<PaginatedResponse<AgentConversation> | null>(null);
   const [convOffset, setConvOffset] = useState(0);
-  const [convSimFilter, setConvSimFilter] = useState("");
+  const [convSimFilter, setConvSimFilter] = useState(
+    () => getCurrentSimulationId() ?? "",
+  );
 
   const [artifacts, setArtifacts] = useState<PaginatedResponse<AgentArtifactResponse> | null>(null);
   const [artOffset, setArtOffset] = useState(0);
   const [artTypeFilter, setArtTypeFilter] = useState("");
-  const [artSimFilter, setArtSimFilter] = useState("");
+  const [artSimFilter, setArtSimFilter] = useState(
+    () => getCurrentSimulationId() ?? "",
+  );
 
   const [journal, setJournal] = useState<JournalEntry[] | null>(null);
-  const [journalSimFilter, setJournalSimFilter] = useState("");
+  const [journalSimFilter, setJournalSimFilter] = useState(
+    () => getCurrentSimulationId() ?? "",
+  );
 
   const [costs, setCosts] = useState<AgentCostBreakdown | null>(null);
 
@@ -372,7 +382,11 @@ export default function AgentDetailClient({ agent }: Props) {
             data={conversations}
             loading={tabLoading.has("conversations")}
             simFilter={convSimFilter}
-            onSimFilterChange={(v) => { setConvSimFilter(v); setConvOffset(0); }}
+            onSimFilterChange={(v) => {
+              setConvSimFilter(v);
+              setCurrentSimulationId(v || null);
+              setConvOffset(0);
+            }}
             onFilterChange={refreshConversations}
             offset={convOffset}
             onOffsetChange={setConvOffset}
@@ -386,7 +400,11 @@ export default function AgentDetailClient({ agent }: Props) {
             typeFilter={artTypeFilter}
             onTypeFilterChange={(v) => { setArtTypeFilter(v); setArtOffset(0); }}
             simFilter={artSimFilter}
-            onSimFilterChange={(v) => { setArtSimFilter(v); setArtOffset(0); }}
+            onSimFilterChange={(v) => {
+              setArtSimFilter(v);
+              setCurrentSimulationId(v || null);
+              setArtOffset(0);
+            }}
             onFilterChange={refreshArtifacts}
             offset={artOffset}
             onOffsetChange={setArtOffset}
@@ -398,7 +416,10 @@ export default function AgentDetailClient({ agent }: Props) {
             data={journal}
             loading={tabLoading.has("journal")}
             simFilter={journalSimFilter}
-            onSimFilterChange={(v) => { setJournalSimFilter(v); }}
+            onSimFilterChange={(v) => {
+              setJournalSimFilter(v);
+              setCurrentSimulationId(v || null);
+            }}
             onFilterChange={refreshJournal}
           />
         )}
