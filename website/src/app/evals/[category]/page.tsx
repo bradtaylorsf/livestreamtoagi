@@ -17,6 +17,7 @@ import {
   type PublicSimulation,
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
+import { useCurrentSimulationId } from "@/lib/simulation-store";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "Measures originality, novelty, and variety in agent outputs — dialogue, artifacts, and problem-solving approaches.",
@@ -54,6 +55,7 @@ export default function CategoryDetailPage() {
 
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
   const [selectedSimId, setSelectedSimId] = useState<string>("");
+  const [currentSimId] = useCurrentSimulationId();
   const [runStatus, setRunStatus] = useState<
     "idle" | "running" | "completed" | "failed" | "unauthorized"
   >("idle");
@@ -62,16 +64,16 @@ export default function CategoryDetailPage() {
   const refreshScores = useCallback(async () => {
     const [h, r] = await Promise.all([
       getEvalHistory(category).catch(() => []),
-      getEvalRuns().catch(() => []),
+      getEvalRuns({ simulation_id: currentSimId ?? undefined }).catch(() => []),
     ]);
     setHistory(h);
     setRuns(r);
-  }, [category]);
+  }, [category, currentSimId]);
 
   useEffect(() => {
     Promise.all([
       getEvalHistory(category).catch(() => []),
-      getEvalRuns().catch(() => []),
+      getEvalRuns({ simulation_id: currentSimId ?? undefined }).catch(() => []),
       getEvalPrompts().catch(() => []),
       getSimulations({ limit: 50 }).catch(() => ({
         items: [],
@@ -92,7 +94,7 @@ export default function CategoryDetailPage() {
         }
       })
       .finally(() => setLoading(false));
-  }, [category]);
+  }, [category, currentSimId]);
 
   const handleRunEval = useCallback(async () => {
     if (!selectedSimId) return;

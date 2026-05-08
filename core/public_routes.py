@@ -1088,6 +1088,7 @@ async def get_eval_categories() -> list[str]:
 async def get_eval_runs(
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    simulation_id: str | None = Query(default=None),
 ) -> list[PublicEvalRun]:
     db = _get_db()
     if not db:
@@ -1095,7 +1096,12 @@ async def get_eval_runs(
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    runs = await eval_repo.get_all_eval_runs(limit=limit, offset=offset)
+    sim_uuid = uuid.UUID(simulation_id) if simulation_id else None
+    runs = await eval_repo.get_all_eval_runs(
+        limit=limit,
+        offset=offset,
+        simulation_id=sim_uuid,
+    )
 
     # Batch-fetch simulation names for all unique simulation IDs
     sim_ids = list({run.simulation_id for run in runs})
@@ -1136,15 +1142,22 @@ async def get_eval_runs(
 
 
 @router.get("/evals/latest")
-async def get_latest_eval_run() -> PublicEvalRun | None:
+async def get_latest_eval_run(
+    simulation_id: str | None = Query(default=None),
+) -> PublicEvalRun | None:
     db = _get_db()
     if not db:
         return None
     from core.repos.eval_repo import EvalRepo
 
     eval_repo = EvalRepo(db)
-    # Get most recent eval run across all simulations
-    runs = await eval_repo.get_all_eval_runs(limit=1, offset=0)
+    sim_uuid = uuid.UUID(simulation_id) if simulation_id else None
+    # Get most recent eval run; scoped if simulation_id provided.
+    runs = await eval_repo.get_all_eval_runs(
+        limit=1,
+        offset=0,
+        simulation_id=sim_uuid,
+    )
     if not runs:
         return None
     run = runs[0]

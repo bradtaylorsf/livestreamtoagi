@@ -3,21 +3,44 @@
 import { useState, useEffect } from "react";
 import { getStats, getEvalCategories } from "@/lib/api";
 
-interface Highlight {
+export interface Highlight {
   value: string;
   label: string;
-  dynamic: boolean;
 }
 
-const DEFAULT_HIGHLIGHTS: Highlight[] = [
-  { value: "12", label: "Eval Categories", dynamic: true },
-  { value: "62+", label: "Simulations Run", dynamic: true },
-  { value: "9 Agents", label: "6 LLM Providers", dynamic: false },
-  { value: "100%", label: "Open Source", dynamic: false },
+export const HIGHLIGHTS_PLACEHOLDER = "—";
+
+const STATIC_HIGHLIGHTS: Highlight[] = [
+  { value: "9 Agents", label: "6 LLM Providers" },
+  { value: "100%", label: "Open Source" },
 ];
 
+export function buildHighlights(
+  simulationsCount: number | null,
+  evalCategoriesCount: number | null,
+): Highlight[] {
+  return [
+    {
+      value:
+        evalCategoriesCount != null
+          ? String(evalCategoriesCount)
+          : HIGHLIGHTS_PLACEHOLDER,
+      label: "Eval Categories",
+    },
+    {
+      value:
+        simulationsCount != null
+          ? String(simulationsCount)
+          : HIGHLIGHTS_PLACEHOLDER,
+      label: "Simulations Run",
+    },
+    ...STATIC_HIGHLIGHTS,
+  ];
+}
+
 export default function ResearchHighlights() {
-  const [highlights, setHighlights] = useState<Highlight[]>(DEFAULT_HIGHLIGHTS);
+  const [evalCategoriesCount, setEvalCategoriesCount] = useState<number | null>(null);
+  const [simulationsCount, setSimulationsCount] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,27 +48,18 @@ export default function ResearchHighlights() {
     Promise.allSettled([getStats(), getEvalCategories()]).then((results) => {
       if (cancelled) return;
 
-      const stats = results[0].status === "fulfilled" ? results[0].value : null;
-      const categories = results[1].status === "fulfilled" ? results[1].value : null;
-
-      setHighlights([
-        {
-          value: categories ? String(categories.length) : DEFAULT_HIGHLIGHTS[0].value,
-          label: "Eval Categories",
-          dynamic: true,
-        },
-        {
-          value: stats ? `${stats.total_simulations}+` : DEFAULT_HIGHLIGHTS[1].value,
-          label: "Simulations Run",
-          dynamic: true,
-        },
-        { value: "9 Agents", label: "6 LLM Providers", dynamic: false },
-        { value: "100%", label: "Open Source", dynamic: false },
-      ]);
+      if (results[0].status === "fulfilled") {
+        setSimulationsCount(results[0].value.total_simulations);
+      }
+      if (results[1].status === "fulfilled") {
+        setEvalCategoriesCount(results[1].value.length);
+      }
     });
 
     return () => { cancelled = true; };
   }, []);
+
+  const highlights = buildHighlights(simulationsCount, evalCategoriesCount);
 
   return (
     <section>

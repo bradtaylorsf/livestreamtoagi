@@ -406,20 +406,30 @@ export async function getEvalHistory(
   );
 }
 
-export async function getLatestEvalRun(): Promise<PublicEvalRun | null> {
+export async function getLatestEvalRun(
+  params?: { simulation_id?: string },
+): Promise<PublicEvalRun | null> {
+  const searchParams = new URLSearchParams();
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
+  const qs = searchParams.toString();
   try {
-    return await request<PublicEvalRun>("/api/evals/latest");
+    return await request<PublicEvalRun>(
+      `/api/evals/latest${qs ? `?${qs}` : ""}`,
+    );
   } catch {
     return null;
   }
 }
 
 export async function getEvalRuns(
-  limit = 20,
-  offset = 0,
+  params?: { limit?: number; offset?: number; simulation_id?: string },
 ): Promise<PublicEvalRun[]> {
+  const searchParams = new URLSearchParams();
+  searchParams.set("limit", String(params?.limit ?? 20));
+  searchParams.set("offset", String(params?.offset ?? 0));
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   return request<PublicEvalRun[]>(
-    `/api/evals/runs?limit=${limit}&offset=${offset}`,
+    `/api/evals/runs?${searchParams.toString()}`,
   );
 }
 
