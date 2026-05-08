@@ -28,6 +28,7 @@ import {
 } from "@/components/simulation";
 import { formatDuration } from "@/components/simulation";
 import ToolUsageSection from "@/components/ToolUsageSection";
+import ConfigViewer from "@/components/ConfigViewer";
 
 // ── Tab definitions ──────────────────────────────────────────────
 
@@ -596,37 +597,6 @@ function renderReportSection(section: ReportSection) {
     <pre className="text-xs text-foreground/60 font-mono whitespace-pre-wrap overflow-x-auto max-h-96">
       {JSON.stringify(section.data, null, 2)}
     </pre>
-  );
-}
-
-// ── Config viewer (inline, no admin dependency) ──────────────────
-
-function ConfigViewer({ config }: { config: Record<string, unknown> }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="rounded-lg border border-border bg-surface">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm text-foreground/70 hover:text-foreground transition-colors"
-      >
-        <span>Configuration Snapshot</span>
-        <svg
-          className={`w-4 h-4 text-foreground/40 transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <pre className="px-4 pb-4 text-xs text-foreground/60 font-mono overflow-x-auto max-h-96">
-          {JSON.stringify(config, null, 2)}
-        </pre>
-      )}
-    </div>
   );
 }
 
