@@ -287,22 +287,27 @@ export async function getLore(params?: {
   offset?: number;
   agent?: string;
   event_type?: string;
+  simulation_id?: string;
 }): Promise<PaginatedResponse<LoreEvent>> {
   const searchParams = new URLSearchParams();
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   if (params?.agent) searchParams.set("agent", params.agent);
   if (params?.event_type) searchParams.set("event_type", params.event_type);
+  if (params?.simulation_id)
+    searchParams.set("simulation_id", params.simulation_id);
   const qs = searchParams.toString();
   return request<PaginatedResponse<LoreEvent>>(`/api/lore${qs ? `?${qs}` : ""}`);
 }
 
 // Conversations
 export async function getConversations(params?: {
+  simulation_id?: string;
   limit?: number;
   offset?: number;
 }): Promise<PaginatedResponse<ConversationSummary>> {
   const searchParams = new URLSearchParams();
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   const qs = searchParams.toString();
@@ -385,6 +390,7 @@ export interface PublicEvalRun {
   cost: number;
   model_versions: Record<string, string>;
   category_scores: Record<string, number | null>;
+  status?: string;
   results?: { category: string; score: number | null }[];
 }
 
@@ -403,20 +409,30 @@ export async function getEvalHistory(
   );
 }
 
-export async function getLatestEvalRun(): Promise<PublicEvalRun | null> {
+export async function getLatestEvalRun(
+  params?: { simulation_id?: string },
+): Promise<PublicEvalRun | null> {
+  const searchParams = new URLSearchParams();
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
+  const qs = searchParams.toString();
   try {
-    return await request<PublicEvalRun>("/api/evals/latest");
+    return await request<PublicEvalRun>(
+      `/api/evals/latest${qs ? `?${qs}` : ""}`,
+    );
   } catch {
     return null;
   }
 }
 
 export async function getEvalRuns(
-  limit = 20,
-  offset = 0,
+  params?: { limit?: number; offset?: number; simulation_id?: string },
 ): Promise<PublicEvalRun[]> {
+  const searchParams = new URLSearchParams();
+  searchParams.set("limit", String(params?.limit ?? 20));
+  searchParams.set("offset", String(params?.offset ?? 0));
+  if (params?.simulation_id) searchParams.set("simulation_id", params.simulation_id);
   return request<PublicEvalRun[]>(
-    `/api/evals/runs?limit=${limit}&offset=${offset}`,
+    `/api/evals/runs?${searchParams.toString()}`,
   );
 }
 
@@ -428,6 +444,30 @@ export async function getEvalRunDetail(
   } catch {
     return null;
   }
+}
+
+// Admin: trigger an eval run for a simulation
+export interface RunSimulationEvalBody {
+  eval_suite?: string;
+  categories?: string[];
+}
+
+export interface RunSimulationEvalResponse {
+  eval_run_id: string;
+  status: string;
+}
+
+export async function runSimulationEval(
+  simId: string,
+  body: RunSimulationEvalBody = {},
+): Promise<RunSimulationEvalResponse> {
+  return request<RunSimulationEvalResponse>(
+    `/api/admin/simulations/${simId}/evals/run`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 // Clips
@@ -481,6 +521,38 @@ export async function getSimulation(
   id: string,
 ): Promise<PublicSimulationDetail> {
   return request<PublicSimulationDetail>(`/api/simulations/${id}`);
+}
+
+// Scenarios + simulation launcher (admin)
+export interface ScenarioInfo {
+  filename: string;
+  name: string;
+  description: string | null;
+}
+
+export async function getScenarios(): Promise<ScenarioInfo[]> {
+  return request<ScenarioInfo[]>("/api/admin/scenarios");
+}
+
+export interface CreateSimulationRequest {
+  seed_file: string;
+  max_cost?: number;
+  name?: string;
+}
+
+export interface CreateSimulationResponse {
+  simulation_id: string;
+  name: string;
+  status: string;
+}
+
+export async function createSimulation(
+  body: CreateSimulationRequest,
+): Promise<CreateSimulationResponse> {
+  return request<CreateSimulationResponse>("/api/admin/simulations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export async function getSimulationReport(
@@ -538,11 +610,50 @@ export async function getSimulationSocialGraph(
   );
 }
 
+export interface SnapshotSummary {
+  filename: string;
+  simulation_id: string;
+  snapshot_at: string;
+  agent_count: number;
+}
+
 export async function getSimulationSnapshots(
   id: string,
-): Promise<Record<string, unknown>[]> {
-  return request<Record<string, unknown>[]>(
-    `/api/simulations/${id}/snapshots`,
+): Promise<SnapshotSummary[]> {
+  return request<SnapshotSummary[]>(`/api/simulations/${id}/snapshots`);
+}
+
+export async function getSimulationSnapshot(
+  simId: string,
+  filename: string,
+): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(
+    `/api/admin/simulations/${simId}/snapshots/${encodeURIComponent(filename)}`,
+  );
+}
+
+export interface CloneSimulationRequest {
+  name?: string;
+  agents?: string[];
+}
+
+export interface CloneSimulationResponse {
+  simulation_id: string;
+  name: string;
+  source_simulation_id: string;
+  restore_result: Record<string, unknown>;
+}
+
+export async function cloneSimulationFromSnapshot(
+  simId: string,
+  body: CloneSimulationRequest = {},
+): Promise<CloneSimulationResponse> {
+  return request<CloneSimulationResponse>(
+    `/api/admin/simulations/${simId}/clone`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
   );
 }
 

@@ -17,8 +17,10 @@ import type {
   PublicSimulationDetail,
   SimulationEvalRun,
   SimulationCostResponse,
+  SnapshotSummary,
 } from "@/lib/api";
 import type { ConversationSummary, PaginatedResponse } from "@/types";
+import { conversationTopicLabel } from "@/lib/conversation-display";
 import {
   SimulationHeader,
   SummaryGrid,
@@ -26,6 +28,14 @@ import {
 } from "@/components/simulation";
 import { formatDuration } from "@/components/simulation";
 import ToolUsageSection from "@/components/ToolUsageSection";
+import ConfigViewer from "@/components/ConfigViewer";
+import {
+  SkeletonBlock,
+  SkeletonCardList,
+  SkeletonGrid,
+  SkeletonTable,
+} from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 // ── Tab definitions ──────────────────────────────────────────────
 
@@ -69,6 +79,11 @@ function toNumber(value: unknown): number | null {
   }
   return null;
 }
+
+// Sentiment and trust are only meaningful once a pair has interacted enough
+// times for the analyzer to draw a signal from the conversation. Below this
+// threshold the columns render as "—" (or hide entirely if NO row qualifies).
+const SENTIMENT_TRUST_MIN_INTERACTIONS = 3;
 
 // Real agent IDs — used to decide whether to render a cost-row label as a link.
 const REAL_AGENT_IDS = new Set([
@@ -597,37 +612,6 @@ function renderReportSection(section: ReportSection) {
   );
 }
 
-// ── Config viewer (inline, no admin dependency) ──────────────────
-
-function ConfigViewer({ config }: { config: Record<string, unknown> }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="rounded-lg border border-border bg-surface">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm text-foreground/70 hover:text-foreground transition-colors"
-      >
-        <span>Configuration Snapshot</span>
-        <svg
-          className={`w-4 h-4 text-foreground/40 transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <pre className="px-4 pb-4 text-xs text-foreground/60 font-mono overflow-x-auto max-h-96">
-          {JSON.stringify(config, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
 // ── Tab content components ───────────────────────────────────────
 
 function OverviewTab({ sim }: { sim: PublicSimulationDetail }) {
@@ -655,6 +639,7 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const limit = 50;
+  const showSkeleton = useDelayedFlag(loading && !data);
 
   const fetchData = useCallback(
     (newOffset: number) => {
@@ -681,7 +666,7 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading && !data) {
-    return <p className="text-sm text-foreground/50">Loading conversations...</p>;
+    return showSkeleton ? <SkeletonCardList count={5} /> : null;
   }
 
   if (!data || data.items.length === 0) {
@@ -699,9 +684,9 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-foreground/50">
-              <th scope="col" className="px-4 py-2 font-medium">Title / ID</th>
+              <th scope="col" className="px-4 py-2 font-medium">Topic</th>
+              <th scope="col" className="px-4 py-2 font-medium">Status</th>
               <th scope="col" className="px-4 py-2 font-medium">Participants</th>
-              <th scope="col" className="px-4 py-2 font-medium">Topics</th>
               <th scope="col" className="px-4 py-2 font-medium text-right">Turns</th>
               <th scope="col" className="px-4 py-2 font-medium">Started At</th>
             </tr>
@@ -715,16 +700,18 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
                 <td className="px-4 py-2">
                   <Link
                     href={`/conversations/${c.id}`}
-                    className="text-neon-cyan hover:underline font-mono text-xs"
+                    className="text-neon-cyan hover:underline"
                   >
-                    {c.trigger_type}
+                    {conversationTopicLabel(c.topics_discussed)}
                   </Link>
+                </td>
+                <td className="px-4 py-2">
+                  <span className="inline-block rounded border border-border bg-surface-light px-2 py-0.5 text-xs font-medium text-foreground/70">
+                    {c.trigger_type}
+                  </span>
                 </td>
                 <td className="px-4 py-2 text-foreground/50 text-xs">
                   {c.participating_agents.join(", ")}
-                </td>
-                <td className="px-4 py-2 text-foreground/50 text-xs">
-                  {c.topics_discussed?.join(", ") ?? "\u2014"}
                 </td>
                 <td className="px-4 py-2 text-right font-mono">{c.turn_count}</td>
                 <td className="px-4 py-2 text-foreground/40 text-xs">
@@ -771,6 +758,7 @@ function ReportTab({ simulationId }: { simulationId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set());
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationReport(simulationId)
@@ -803,7 +791,12 @@ function ReportTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading report...</p>;
+    return showSkeleton ? (
+      <div className="space-y-4">
+        <SkeletonBlock width="w-1/3" height="h-5" />
+        <SkeletonCardList count={3} />
+      </div>
+    ) : null;
   }
 
   if (!report || !report.sections || report.sections.length === 0) {
@@ -848,6 +841,7 @@ function EvalsTab({ simulationId }: { simulationId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationEvals(simulationId)
@@ -872,7 +866,7 @@ function EvalsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading eval results...</p>;
+    return showSkeleton ? <SkeletonGrid count={6} /> : null;
   }
 
   if (!evalRuns || evalRuns.length === 0) {
@@ -962,6 +956,7 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
   const [data, setData] = useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationSocialGraph(simulationId)
@@ -977,16 +972,39 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading social graph...</p>;
+    return showSkeleton ? (
+      <div className="space-y-4">
+        <SkeletonBlock width="w-1/4" height="h-5" />
+        <div className="rounded border border-border bg-surface p-6">
+          <SkeletonBlock width="w-full" height="h-64" />
+        </div>
+      </div>
+    ) : null;
   }
 
   if (!data || data.length === 0) {
     return <p className="text-sm text-foreground/50">No social graph data available.</p>;
   }
 
+  // Hide sentiment/trust columns entirely if NO pair has enough interactions
+  // to make those scores meaningful. Otherwise show columns and render "\u2014"
+  // for sub-threshold rows.
+  const anyQualifies = data.some(
+    (row) =>
+      (toNumber(row.interaction_count ?? row.interactions) ?? 0) >=
+      SENTIMENT_TRUST_MIN_INTERACTIONS,
+  );
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-foreground/40">{data.length} relationships</p>
+
+      {!anyQualifies && (
+        <p className="text-xs text-foreground/50 italic">
+          Sentiment & trust hidden {"\u2014"} fewer than {SENTIMENT_TRUST_MIN_INTERACTIONS} interactions per
+          pair.
+        </p>
+      )}
 
       <div className="rounded-lg border border-border bg-surface overflow-x-auto">
         <table className="w-full text-sm">
@@ -994,8 +1012,12 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
             <tr className="border-b border-border text-left text-foreground/50">
               <th scope="col" className="px-4 py-2 font-medium">Agent A</th>
               <th scope="col" className="px-4 py-2 font-medium">Agent B</th>
-              <th scope="col" className="px-4 py-2 font-medium text-right">Sentiment</th>
-              <th scope="col" className="px-4 py-2 font-medium text-right">Trust</th>
+              {anyQualifies && (
+                <>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Sentiment</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Trust</th>
+                </>
+              )}
               <th scope="col" className="px-4 py-2 font-medium text-right">Interactions</th>
             </tr>
           </thead>
@@ -1003,6 +1025,9 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
             {data.map((row, idx) => {
               const sentiment = toNumber(row.sentiment_score ?? row.sentiment);
               const trust = toNumber(row.trust_score ?? row.trust);
+              const interactions =
+                toNumber(row.interaction_count ?? row.interactions) ?? 0;
+              const showScores = interactions >= SENTIMENT_TRUST_MIN_INTERACTIONS;
               return (
                 <tr
                   key={idx}
@@ -1014,12 +1039,16 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
                   <td className="px-4 py-2 font-mono text-foreground/80">
                     {String(row.target_agent_id ?? row.agent_b ?? row.to ?? "")}
                   </td>
-                  <td className="px-4 py-2 font-mono text-right">
-                    {sentiment != null ? sentiment.toFixed(2) : "\u2014"}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-right">
-                    {trust != null ? trust.toFixed(2) : "\u2014"}
-                  </td>
+                  {anyQualifies && (
+                    <>
+                      <td className="px-4 py-2 font-mono text-right">
+                        {showScores && sentiment != null ? sentiment.toFixed(2) : "\u2014"}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-right">
+                        {showScores && trust != null ? trust.toFixed(2) : "\u2014"}
+                      </td>
+                    </>
+                  )}
                   <td className="px-4 py-2 font-mono text-right">
                     {String(row.interaction_count ?? row.interactions ?? "\u2014")}
                   </td>
@@ -1037,6 +1066,7 @@ function AssertionsTab({ simulationId }: { simulationId: string }) {
   const [assertions, setAssertions] = useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationAssertions(simulationId)
@@ -1052,7 +1082,7 @@ function AssertionsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading assertions...</p>;
+    return showSkeleton ? <SkeletonCardList count={4} /> : null;
   }
 
   if (!assertions || assertions.length === 0) {
@@ -1146,6 +1176,7 @@ function CostsTab({ simulationId }: { simulationId: string }) {
   const [data, setData] = useState<SimulationCostResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationCosts(simulationId)
@@ -1161,7 +1192,9 @@ function CostsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading cost data...</p>;
+    return showSkeleton ? (
+      <SkeletonTable rows={6} columnWidths={["w-32", "w-20", "w-16", "w-16"]} />
+    ) : null;
   }
 
   if (!data) {
@@ -1246,9 +1279,10 @@ function CostsTab({ simulationId }: { simulationId: string }) {
 }
 
 function SnapshotsTab({ simulationId }: { simulationId: string }) {
-  const [snapshots, setSnapshots] = useState<Record<string, unknown>[] | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     getSimulationSnapshots(simulationId)
@@ -1264,7 +1298,7 @@ function SnapshotsTab({ simulationId }: { simulationId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-foreground/50">Loading snapshots...</p>;
+    return showSkeleton ? <SkeletonCardList count={3} /> : null;
   }
 
   if (!snapshots || snapshots.length === 0) {
@@ -1287,15 +1321,20 @@ function SnapshotsTab({ simulationId }: { simulationId: string }) {
           <tbody>
             {snapshots.map((snap, idx) => (
               <tr
-                key={idx}
+                key={snap.filename ?? idx}
                 className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
               >
-                <td className="px-4 py-2 font-mono text-xs text-foreground/80">
-                  {String(snap.filename ?? snap.name ?? snap.id ?? `snapshot-${idx + 1}`)}
+                <td className="px-4 py-2 font-mono text-xs">
+                  <Link
+                    href={`/simulations/${simulationId}/snapshots/${encodeURIComponent(snap.filename)}`}
+                    className="text-neon-cyan hover:underline"
+                  >
+                    {snap.filename}
+                  </Link>
                 </td>
                 <td className="px-4 py-2 text-xs text-foreground/50">
-                  {snap.created_at || snap.date
-                    ? new Date(String(snap.created_at ?? snap.date)).toLocaleString()
+                  {snap.snapshot_at
+                    ? new Date(snap.snapshot_at).toLocaleString()
                     : "\u2014"}
                 </td>
                 <td className="px-4 py-2 font-mono text-right">

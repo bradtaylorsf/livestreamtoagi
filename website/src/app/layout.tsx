@@ -11,6 +11,9 @@ const pixelFont = Press_Start_2P({
   subsets: ["latin"],
   variable: "--font-pixel",
   display: "swap",
+  // Tailwind v4 inlines `--font-pixel` at build time, so next/font's preload
+  // link is never consumed and the browser logs an "unused preload" warning.
+  preload: false,
 });
 
 const SITE_URL = "https://livestreamtoagi.com";

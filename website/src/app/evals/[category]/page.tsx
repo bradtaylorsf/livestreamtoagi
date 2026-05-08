@@ -1,17 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  ApiRequestError,
   getEvalHistory,
+  getEvalRunDetail,
   getEvalRuns,
   getEvalPrompts,
+  getSimulations,
+  runSimulationEval,
   type EvalHistoryPoint,
   type PublicEvalRun,
   type EvalPrompt,
+  type PublicSimulation,
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
+import {
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+} from "@/lib/simulation-store";
+import SimulationPicker from "@/components/SimulationPicker";
+import { SkeletonBlock, SkeletonGrid } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "Measures originality, novelty, and variety in agent outputs — dialogue, artifacts, and problem-solving approaches.",
@@ -46,21 +58,120 @@ export default function CategoryDetailPage() {
   const [prompt, setPrompt] = useState<EvalPrompt | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedSchema, setExpandedSchema] = useState(false);
+  const showSkeleton = useDelayedFlag(loading);
+
+  const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
+  const [selectedSimId, setSelectedSimId] = useState<string>("");
+
+  const simParam = searchParams.get("sim");
+  const [hydratedSim, setHydratedSim] = useState<string | null>(null);
+  useEffect(() => {
+    if (simParam == null) {
+      setHydratedSim(getCurrentSimulationId() ?? "");
+    } else {
+      setHydratedSim(simParam);
+    }
+  }, [simParam]);
+  const currentSimId = hydratedSim ?? "";
+
+  const setCurrentSimId = useCallback(
+    (id: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (id) sp.set("sim", id);
+      else sp.delete("sim");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+      setCurrentSimulationId(id || null);
+      setHydratedSim(id);
+    },
+    [router, searchParams],
+  );
+
+  const [runStatus, setRunStatus] = useState<
+    "idle" | "running" | "completed" | "failed" | "unauthorized"
+  >("idle");
+  const [runMessage, setRunMessage] = useState<string | null>(null);
+
+  const refreshScores = useCallback(async () => {
+    const [h, r] = await Promise.all([
+      getEvalHistory(category).catch(() => []),
+      getEvalRuns({ simulation_id: currentSimId || undefined }).catch(() => []),
+    ]);
+    setHistory(h);
+    setRuns(r);
+  }, [category, currentSimId]);
 
   useEffect(() => {
     Promise.all([
       getEvalHistory(category).catch(() => []),
-      getEvalRuns().catch(() => []),
+      getEvalRuns({ simulation_id: currentSimId || undefined }).catch(() => []),
       getEvalPrompts().catch(() => []),
+      getSimulations({ limit: 100 }).catch(() => ({
+        items: [],
+        total: 0,
+        limit: 100,
+        offset: 0,
+      })),
     ])
-      .then(([h, r, prompts]) => {
+      .then(([h, r, prompts, sims]) => {
         setHistory(h);
         setRuns(r);
         const match = prompts.find((p) => p.name === category);
         setPrompt(match ?? null);
+        const simList = sims.items ?? [];
+        setSimulations(simList);
+        if (simList.length > 0) {
+          setSelectedSimId(simList[0].id);
+        }
       })
       .finally(() => setLoading(false));
-  }, [category]);
+  }, [category, currentSimId]);
+
+  const handleRunEval = useCallback(async () => {
+    if (!selectedSimId) return;
+    setRunStatus("running");
+    setRunMessage(null);
+    let evalRunId: string;
+    try {
+      const resp = await runSimulationEval(selectedSimId, {
+        categories: [category],
+      });
+      evalRunId = resp.eval_run_id;
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 401) {
+        setRunStatus("unauthorized");
+        setRunMessage("Admin login required");
+        return;
+      }
+      setRunStatus("failed");
+      setRunMessage(err instanceof Error ? err.message : "Failed to start eval");
+      return;
+    }
+
+    const POLL_INTERVAL_MS = 3000;
+    const MAX_POLLS = 200;
+    for (let i = 0; i < MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      const detail = await getEvalRunDetail(evalRunId);
+      if (!detail) continue;
+      const status = detail.status;
+      if (status === "completed") {
+        await refreshScores();
+        const score = detail.category_scores?.[category];
+        setRunStatus("completed");
+        setRunMessage(
+          score != null ? `Completed — score: ${score.toFixed(1)}` : "Completed",
+        );
+        return;
+      }
+      if (status === "failed") {
+        setRunStatus("failed");
+        setRunMessage("Eval run failed");
+        return;
+      }
+    }
+    setRunStatus("failed");
+    setRunMessage("Timed out waiting for eval to finish");
+  }, [category, selectedSimId, refreshScores]);
 
   const setTab = (tab: TabId) => {
     const newParams = new URLSearchParams(searchParams.toString());
@@ -73,8 +184,14 @@ export default function CategoryDetailPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-12">
-        <p className="text-sm text-foreground/50">Loading...</p>
+      <div className="mx-auto max-w-4xl px-4 py-12 space-y-6">
+        {showSkeleton ? (
+          <>
+            <SkeletonBlock width="w-1/3" height="h-6" />
+            <SkeletonBlock width="w-2/3" height="h-4" />
+            <SkeletonGrid count={6} />
+          </>
+        ) : null}
       </div>
     );
   }
@@ -111,6 +228,15 @@ export default function CategoryDetailPage() {
             <span className="text-xs text-foreground/40">latest score</span>
           </div>
         )}
+        <div className="pt-2">
+          <SimulationPicker
+            id="category-sim-filter"
+            value={currentSimId}
+            onChange={setCurrentSimId}
+            label="Simulation"
+            allLabel="All simulations"
+          />
+        </div>
       </section>
 
       {/* Tabs */}
@@ -136,6 +262,67 @@ export default function CategoryDetailPage() {
       {/* Scores tab */}
       {activeTab === "scores" && (
         <div id="panel-scores" role="tabpanel" aria-labelledby="tab-scores" className="space-y-8">
+          {/* Run eval control (admin) */}
+          <section className="space-y-3">
+            <h2 className="font-pixel text-xs text-neon-magenta">RUN EVAL</h2>
+            <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex-1 min-w-[200px]">
+                  <label
+                    htmlFor="run-eval-sim"
+                    className="block text-xs text-foreground/50 mb-1"
+                  >
+                    Simulation
+                  </label>
+                  <select
+                    id="run-eval-sim"
+                    value={selectedSimId}
+                    onChange={(e) => setSelectedSimId(e.target.value)}
+                    disabled={runStatus === "running" || simulations.length === 0}
+                    className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground/80"
+                  >
+                    {simulations.length === 0 && (
+                      <option value="">No simulations available</option>
+                    )}
+                    {simulations.map((sim) => (
+                      <option key={sim.id} value={sim.id}>
+                        {sim.name || sim.id.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRunEval}
+                  disabled={runStatus === "running" || !selectedSimId}
+                  className="rounded border border-neon-cyan bg-neon-cyan/10 px-4 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {runStatus === "running" ? "Running…" : "Run eval now"}
+                </button>
+              </div>
+              {runStatus === "running" && (
+                <p className="text-xs text-foreground/60 flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block w-3 h-3 rounded-full border-2 border-neon-cyan border-t-transparent animate-spin"
+                  />
+                  Running eval — this may take a few minutes…
+                </p>
+              )}
+              {runStatus === "completed" && runMessage && (
+                <p className="text-xs text-green-400">{runMessage}</p>
+              )}
+              {runStatus === "failed" && runMessage && (
+                <p className="text-xs text-red-400">{runMessage}</p>
+              )}
+              {runStatus === "unauthorized" && (
+                <p className="text-xs text-yellow-400">
+                  {runMessage ?? "Admin login required"}
+                </p>
+              )}
+            </div>
+          </section>
+
           {/* Score history for this category */}
           <section className="space-y-3">
             <h2 className="font-pixel text-xs text-neon-magenta">SCORE HISTORY</h2>

@@ -90,6 +90,7 @@ class SimulationConfig:
         verbose: bool = False,
         management_shadow: bool = True,
         debug_prompts: bool = False,
+        existing_sim_id: str | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -108,6 +109,11 @@ class SimulationConfig:
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
         self.seed_goals: bool = False
+        # When provided, the orchestrator attaches to a pre-created
+        # simulation row instead of inserting a new one. Used when the
+        # admin dashboard pre-creates the row so it can immediately return
+        # the simulation_id to the client for redirect.
+        self.existing_sim_id = existing_sim_id
 
     @property
     def mode(self) -> str:
@@ -230,6 +236,7 @@ class SimulationOrchestrator:
             self._prompt_log_repo = PromptLogRepo(db)
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
+        self._started_at: datetime | None = None
         self._total_cost = Decimal("0")
         self._cancelled = False
         self._errors: list[dict[str, Any]] = []
@@ -410,6 +417,42 @@ class SimulationOrchestrator:
         random.seed(seed)
         logger.info("RNG seeded with %d (from simulation %s)", seed, simulation_id)
 
+    async def _create_or_attach_simulation(
+        self,
+        config_snapshot: dict[str, Any],
+        model_versions: dict[str, dict[str, str]],
+    ) -> Any:
+        """Create a new simulation row, or attach to one pre-created by the API.
+
+        When ``config.existing_sim_id`` is set the row was inserted by the
+        admin dashboard so the client could be redirected immediately;
+        we fetch it, refresh its config / agents / status, and reuse it.
+        """
+        import uuid as _uuid
+
+        if self._config.existing_sim_id:
+            sim_uuid = _uuid.UUID(self._config.existing_sim_id)
+            sim = await self._sim_repo.get(sim_uuid)
+            if sim is None:
+                raise RuntimeError(f"existing_sim_id {sim_uuid} not found in simulations table")
+            await self._sim_repo.update_config(sim_uuid, config_snapshot)
+            await self._sim_repo.update_agents_participated(sim_uuid, self._config.agents)
+            await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
+            # Re-read so we have fresh config/agents/status fields
+            sim = await self._sim_repo.get(sim_uuid)
+            return sim
+
+        return await self._sim_repo.create(
+            SimulationCreate(
+                name=self._config.name,
+                description=self._config.description,
+                config=config_snapshot,
+                status=SimulationStatus.running,
+                agents_participated=self._config.agents,
+                model_versions=model_versions,
+            )
+        )
+
     async def run(self) -> None:
         """Execute the seeded simulation — create record, run phases, finalize."""
         self._start_time = time.monotonic()
@@ -423,17 +466,9 @@ class SimulationOrchestrator:
             ),
         }
         model_versions = self._build_model_versions()
-        sim = await self._sim_repo.create(
-            SimulationCreate(
-                name=self._config.name,
-                description=self._config.description,
-                config=config_snapshot,
-                status=SimulationStatus.running,
-                agents_participated=self._config.agents,
-                model_versions=model_versions,
-            )
-        )
+        sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
+        self._started_at = sim.started_at or datetime.now(UTC)
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
@@ -547,12 +582,29 @@ class SimulationOrchestrator:
 
                 # Evaluate phase assertions
                 if assertion_engine and not self._config.dry_run:
-                    assertion_results = await assertion_engine.evaluate_phase(
-                        phase,
-                        result,
-                        sim.id,
-                    )
-                    result.assertions = assertion_results
+                    try:
+                        # Phase-defined assertions from the seed file (may be empty)
+                        assertion_results = await assertion_engine.evaluate_phase(
+                            phase,
+                            result,
+                            sim.id,
+                        )
+                        # Always emit baseline conversation assertions so the
+                        # Assertions tab is populated even when the seed
+                        # scenario omits an `assertions:` block.
+                        baseline_results = await assertion_engine.evaluate_conversation_defaults(
+                            result,
+                            sim.id,
+                            config={},
+                            phase_name=phase.name,
+                        )
+                        result.assertions = assertion_results + baseline_results
+                    except Exception:
+                        logger.warning(
+                            "Assertion evaluation failed for phase %s",
+                            phase.name,
+                            exc_info=True,
+                        )
 
                 # Update DB stats
                 if not self._config.dry_run:
@@ -651,17 +703,9 @@ class SimulationOrchestrator:
             ),
         }
         model_versions = self._build_model_versions()
-        sim = await self._sim_repo.create(
-            SimulationCreate(
-                name=self._config.name,
-                description=self._config.description,
-                config=config_snapshot,
-                status=SimulationStatus.running,
-                agents_participated=self._config.agents,
-                model_versions=model_versions,
-            )
-        )
+        sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
+        self._started_at = sim.started_at or datetime.now(UTC)
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
@@ -980,7 +1024,13 @@ class SimulationOrchestrator:
             self._on_simulation_error,
         )
 
-        real_duration = timedelta(seconds=time.monotonic() - self._start_time)
+        completed_at = datetime.now(UTC)
+        # Wall-clock duration between start and completion. Falls back to
+        # monotonic delta only if started_at was never captured (defensive).
+        if self._started_at is not None:
+            real_duration = completed_at - self._started_at
+        else:
+            real_duration = timedelta(seconds=time.monotonic() - self._start_time)
         # Use clock elapsed time if speed_multiplier > 0, else fallback to phase count
         if self._config.speed_multiplier > 0 or self._config.mode == "autonomous":
             simulated_duration = self.clock.elapsed()
@@ -990,7 +1040,7 @@ class SimulationOrchestrator:
         await self._sim_repo.update_status(
             self._simulation_id,
             status.value,
-            completed_at=datetime.now(UTC),
+            completed_at=completed_at,
             error_log=combined_log,
         )
         await self._sim_repo.update_durations(

@@ -69,16 +69,29 @@ class ConfigVersionRepo:
         limit: int = 20,
         simulation_id: _uuid.UUID | None = None,
     ) -> list[AgentPromptVersion]:
-        """Get version history for an agent's prompts."""
-        rows = await self.db.fetch(
-            """SELECT * FROM agent_prompt_versions
-               WHERE agent_id = $1 AND simulation_id = $3
-               ORDER BY version DESC
-               LIMIT $2""",
-            agent_id,
-            limit,
-            simulation_id,
-        )
+        """Get version history for an agent's prompts.
+
+        When ``simulation_id`` is None, returns versions from every simulation.
+        """
+        if simulation_id is None:
+            rows = await self.db.fetch(
+                """SELECT * FROM agent_prompt_versions
+                   WHERE agent_id = $1
+                   ORDER BY version DESC
+                   LIMIT $2""",
+                agent_id,
+                limit,
+            )
+        else:
+            rows = await self.db.fetch(
+                """SELECT * FROM agent_prompt_versions
+                   WHERE agent_id = $1 AND simulation_id = $3
+                   ORDER BY version DESC
+                   LIMIT $2""",
+                agent_id,
+                limit,
+                simulation_id,
+            )
         return [AgentPromptVersion(**_parse_jsonb_row(dict(r))) for r in rows]
 
     async def insert_prompt_version(

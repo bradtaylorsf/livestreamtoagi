@@ -27,6 +27,7 @@ export interface ChatResponse {
 
 export interface WorldChunk {
   id: string;
+  name: string | null;
   x: number;
   y: number;
   width: number;
@@ -82,6 +83,7 @@ export interface LoreEvent {
 
 export interface ConversationSummary {
   id: string;
+  simulation_id: string | null;
   trigger_type: string;
   participating_agents: string[];
   topics_discussed: string[] | null;

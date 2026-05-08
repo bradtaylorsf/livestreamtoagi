@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import EvalCategoryCard from "@/components/EvalCategoryCard";
 import type { EvalCategoryCardProps } from "@/components/EvalCategoryCard";
 import ScoreHistoryChart from "@/components/ScoreHistoryChart";
 import ABComparisonView from "@/components/ABComparisonView";
+import SimulationPicker from "@/components/SimulationPicker";
 import {
   getEvalRuns,
   getEvalCategories,
@@ -15,6 +17,12 @@ import {
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
 import { exportAsJSON, exportAsCSV } from "@/lib/export";
+import {
+  getCurrentSimulationId,
+  setCurrentSimulationId,
+} from "@/lib/simulation-store";
+import { SkeletonGrid } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "How original and varied are agent outputs? Measures novelty in dialogue, artifacts, and problem-solving.",
@@ -43,6 +51,8 @@ function calculateTrend(history: EvalHistoryPoint[]): "up" | "down" | "flat" {
 }
 
 export default function EvalsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [categories, setCategories] = useState<EvalCategoryCardProps[]>([]);
   const [runs, setRuns] = useState<PublicEvalRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,11 +61,38 @@ export default function EvalsPage() {
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterModel, setFilterModel] = useState<string>("");
 
+  const simParam = searchParams.get("sim");
+  const [hydratedSim, setHydratedSim] = useState<string | null>(null);
+  useEffect(() => {
+    if (simParam == null) {
+      setHydratedSim(getCurrentSimulationId() ?? "");
+    } else {
+      setHydratedSim(simParam);
+    }
+  }, [simParam]);
+  const currentSimId = hydratedSim ?? "";
+
+  const setCurrentSimId = useCallback(
+    (id: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (id) sp.set("sim", id);
+      else sp.delete("sim");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+      setCurrentSimulationId(id || null);
+      setHydratedSim(id);
+    },
+    [router, searchParams],
+  );
+
+  const showSkeleton = useDelayedFlag(loading);
+
   useEffect(() => {
     const loadData = async () => {
       const [cats, evalRuns] = await Promise.all([
         getEvalCategories().catch(() => Object.keys(CATEGORY_DESCRIPTIONS)),
-        getEvalRuns().catch(() => []),
+        getEvalRuns({ simulation_id: currentSimId || undefined }).catch(
+          () => [],
+        ),
       ]);
 
       setRuns(evalRuns);
@@ -84,7 +121,7 @@ export default function EvalsPage() {
     };
 
     loadData();
-  }, []);
+  }, [currentSimId]);
 
   const latestRun = runs[0] ?? null;
   const runAData = compareA ? runs.find((r) => r.id === compareA) : null;
@@ -155,8 +192,16 @@ export default function EvalsPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-12">
-        <p className="text-sm text-foreground/50">Loading evaluation data...</p>
+      <div className="mx-auto max-w-6xl px-4 py-12 space-y-12">
+        {showSkeleton ? (
+          <>
+            <div className="space-y-3">
+              <div className="h-6 w-72 rounded bg-surface-light/60 animate-pulse [animation-duration:1.8s]" />
+              <div className="h-4 w-full max-w-2xl rounded bg-surface-light/60 animate-pulse [animation-duration:1.8s]" />
+            </div>
+            <SkeletonGrid count={12} />
+          </>
+        ) : null}
       </div>
     );
   }
@@ -172,6 +217,15 @@ export default function EvalsPage() {
           Transparent, read-only view of how the agent system performs across
           all 12 evaluation categories. Every score is public.
         </p>
+        <div className="pt-2">
+          <SimulationPicker
+            id="evals-sim-filter"
+            value={currentSimId}
+            onChange={setCurrentSimId}
+            label="Simulation"
+            allLabel="All simulations"
+          />
+        </div>
         <div
           className="rounded border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-400/80"
           data-testid="llm-judge-disclaimer"

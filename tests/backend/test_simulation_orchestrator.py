@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -41,7 +41,7 @@ def make_simulation_row(**overrides: Any) -> dict:
         "description": "Test simulation",
         "config": {"agents": ["vera", "rex"]},
         "status": "running",
-        "started_at": datetime(2026, 4, 3, 12, 0),
+        "started_at": datetime(2026, 4, 3, 12, 0, tzinfo=UTC),
         "completed_at": None,
         "simulated_duration": None,
         "real_duration": None,
@@ -54,7 +54,7 @@ def make_simulation_row(**overrides: Any) -> dict:
         "agents_participated": ["vera", "rex"],
         "error_log": None,
         "model_versions": {},
-        "created_at": datetime(2026, 4, 3, 12, 0),
+        "created_at": datetime(2026, 4, 3, 12, 0, tzinfo=UTC),
     }
     base.update(overrides)
     return base
@@ -366,6 +366,56 @@ class TestSimulationOrchestrator:
         assert sim_create.status == SimulationStatus.running
 
     @pytest.mark.asyncio
+    async def test_existing_sim_id_attaches_instead_of_creating(self):
+        """When the API pre-creates a sim row, the orchestrator must reuse it.
+
+        This is what lets the dashboard launcher redirect to /simulations/[id]
+        immediately on POST instead of waiting for the orchestrator to insert.
+        """
+        path = make_seed_file([{"name": "standup", "type": "scheduled"}])
+        services = make_mock_services()
+        existing_id = services["sim_id"]
+
+        config = SimulationConfig(
+            name="dashboard-test",
+            seed_file=path,
+            agents=["vera", "rex"],
+            dry_run=True,
+            existing_sim_id=str(existing_id),
+        )
+        config.load_seed_file()
+
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            management=services["management"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+        )
+        await orchestrator.run()
+
+        # Must NOT create a new row — must fetch the pre-created one and
+        # transition it to "running".
+        services["simulation_repo"].create.assert_not_called()
+        services["simulation_repo"].update_status.assert_any_await(
+            existing_id, SimulationStatus.running
+        )
+        services["simulation_repo"].update_config.assert_awaited()
+        services["simulation_repo"].update_agents_participated.assert_awaited()
+
+    @pytest.mark.asyncio
     async def test_dry_run_finalizes_as_completed(self):
         orchestrator, services = self._make_orchestrator(
             [{"name": "standup", "type": "scheduled"}],
@@ -440,6 +490,40 @@ class TestSimulationOrchestrator:
         dur_call = services["simulation_repo"].update_durations.call_args
         assert dur_call[1]["simulated_duration"] is not None
         assert dur_call[1]["real_duration"] is not None
+
+    @pytest.mark.asyncio
+    async def test_real_duration_uses_wall_clock_not_tick_loop(self):
+        """`real_duration` must reflect (completed_at - started_at), not tick-loop time.
+
+        Issue #398: in fast/instant mode the orchestrator's tick loop runs in
+        a few ms, but the simulation may have been scheduled hours earlier.
+        The persisted `real_duration` must come from wall-clock timestamps.
+        """
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "p1", "type": "scheduled"}],
+            dry_run=True,
+        )
+        # Pretend the simulation row was started 5 seconds ago.
+        sim_started_at = datetime.now(UTC) - timedelta(seconds=5)
+        sim_with_started = services["sim"].model_copy(update={"started_at": sim_started_at})
+        services["simulation_repo"].create = AsyncMock(return_value=sim_with_started)
+
+        await orchestrator.run()
+
+        dur_call = services["simulation_repo"].update_durations.call_args
+        assert dur_call[1]["real_duration"] >= timedelta(seconds=5)
+
+    @pytest.mark.asyncio
+    async def test_completed_at_passed_once_to_update_status(self):
+        """update_status should receive the same completed_at used for the duration calc."""
+        orchestrator, services = self._make_orchestrator(
+            [{"name": "p1", "type": "scheduled"}],
+            dry_run=True,
+        )
+        await orchestrator.run()
+        status_call = services["simulation_repo"].update_status.call_args
+        assert "completed_at" in status_call.kwargs
+        assert status_call.kwargs["completed_at"] is not None
 
 
 # ── CostLimitExceededError tests ─────────────────────────────────────

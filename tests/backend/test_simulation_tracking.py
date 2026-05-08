@@ -170,6 +170,65 @@ class TestSimulationRepo:
         sql = db.fetch.call_args[0][0]
         assert "WHERE status = $1" in sql
 
+    async def test_list_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetch.return_value = []
+        repo = SimulationRepo(db)
+
+        await repo.list()
+        sql = db.fetch.call_args[0][0]
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_list_with_status_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetch.return_value = []
+        repo = SimulationRepo(db)
+
+        await repo.list(status="running")
+        sql = db.fetch.call_args[0][0]
+        assert "WHERE status = $1" in sql
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_list_include_live_drops_filter(self) -> None:
+        db = make_mock_db()
+        db.fetch.return_value = []
+        repo = SimulationRepo(db)
+
+        await repo.list(include_live=True)
+        sql = db.fetch.call_args[0][0]
+        assert "is_live" not in sql
+
+    async def test_count_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetchval.return_value = 7
+        repo = SimulationRepo(db)
+
+        result = await repo.count()
+        assert result == 7
+        sql = db.fetchval.call_args[0][0]
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_count_with_status_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetchval.return_value = 3
+        repo = SimulationRepo(db)
+
+        result = await repo.count(status="completed")
+        assert result == 3
+        sql = db.fetchval.call_args[0][0]
+        assert "WHERE status = $1" in sql
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_count_include_live_drops_filter(self) -> None:
+        db = make_mock_db()
+        db.fetchval.return_value = 8
+        repo = SimulationRepo(db)
+
+        result = await repo.count(include_live=True)
+        assert result == 8
+        sql = db.fetchval.call_args[0][0]
+        assert "is_live" not in sql
+
     async def test_update_status(self) -> None:
         db = make_mock_db()
         completed_row = make_simulation_row(
@@ -278,6 +337,43 @@ class TestSimulationRepo:
 
         result = await repo.delete(uuid.uuid4())
         assert result is False
+
+    async def test_real_duration_fallback_when_null(self) -> None:
+        """If `real_duration` is NULL but the timestamps exist, fall back to delta."""
+        db = make_mock_db()
+        started = datetime(2026, 4, 3, 12, 0)
+        completed = datetime(2026, 4, 3, 19, 30)
+        row = make_simulation_row(
+            real_duration=None,
+            started_at=started,
+            completed_at=completed,
+            status="completed",
+        )
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.get(row["id"])
+        assert result is not None
+        assert result.real_duration == completed - started
+
+    async def test_real_duration_persisted_value_preferred_over_fallback(self) -> None:
+        """If `real_duration` is already set, do not overwrite with the timestamp delta."""
+        db = make_mock_db()
+        started = datetime(2026, 4, 3, 12, 0)
+        completed = datetime(2026, 4, 3, 19, 30)
+        persisted = timedelta(minutes=42)
+        row = make_simulation_row(
+            real_duration=persisted,
+            started_at=started,
+            completed_at=completed,
+            status="completed",
+        )
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.get(row["id"])
+        assert result is not None
+        assert result.real_duration == persisted
 
     async def test_create_sql_passes_serialized_jsonb(self) -> None:
         db = make_mock_db()

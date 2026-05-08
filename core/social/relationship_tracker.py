@@ -125,7 +125,16 @@ class RelationshipTracker:
         participants: list[str],
         timestamp: Any,
     ) -> None:
-        """Use LLM to extract sentiment scores from conversation text."""
+        """Use an LLM to extract sentiment + trust between every participant pair.
+
+        Sentiment formula: LLM returns a per-pair sentiment in [-1, 1] (hostile
+        → close ally) and trust in [0, 1] (no trust → full trust). Both scores
+        are clamped to their valid ranges. Pairs the LLM does not return get
+        conservative defaults (sentiment=0.0, trust=0.5) so that every directed
+        pair (a → b for a, b in participants, a != b) is persisted with a
+        non-null score after this method runs. Only LLM-derived updates are
+        written to the evolution_log; default fills are silent.
+        """
         conversation_text = "\n".join(
             f"[{msg.get('speaker', 'unknown')}]: {msg.get('content', '')}"
             for msg in conversation_history
@@ -141,22 +150,34 @@ class RelationshipTracker:
             participants=", ".join(participants),
         )
 
-        response = await self._llm.complete(
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": "Analyze the conversation now."},
-            ],
-            model=self._sentiment_model,
-            agent_id="system",
-            temperature=0.2,
-            max_tokens=500,
-            simulation_id=self._simulation_id,
-        )
-
-        analysis = _parse_json_response(response.content)
-        relationships = analysis.get("relationships", [])
+        llm_failed = False
+        relationships: list[dict[str, Any]] = []
+        try:
+            response = await self._llm.complete(
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": "Analyze the conversation now."},
+                ],
+                model=self._sentiment_model,
+                agent_id="system",
+                temperature=0.2,
+                max_tokens=500,
+                simulation_id=self._simulation_id,
+            )
+            analysis = _parse_json_response(response.content)
+            relationships = analysis.get("relationships", []) or []
+        except Exception:
+            logger.warning(
+                "Sentiment LLM call failed for %s; falling back to defaults.",
+                participants,
+                exc_info=True,
+            )
+            llm_failed = True
 
         ts_str = timestamp.isoformat() if timestamp else "unknown"
+
+        # Track which directed pairs the LLM explicitly scored.
+        scored_pairs: set[tuple[str, str]] = set()
 
         for rel in relationships:
             from_id = rel.get("from", "")
@@ -179,11 +200,13 @@ class RelationshipTracker:
                 )
                 old_sentiment = (
                     float(existing.sentiment_score)
-                    if existing and existing.sentiment_score
+                    if existing and existing.sentiment_score is not None
                     else None
                 )
                 old_trust = (
-                    float(existing.trust_score) if existing and existing.trust_score else None
+                    float(existing.trust_score)
+                    if existing and existing.trust_score is not None
+                    else None
                 )
 
                 await self._repo.upsert(
@@ -194,6 +217,7 @@ class RelationshipTracker:
                     trust_score=trust,
                     relationship_summary=summary,
                 )
+                scored_pairs.add((from_id, to_id))
 
                 # Append evolution event
                 event = {
@@ -217,6 +241,49 @@ class RelationshipTracker:
                     to_id,
                     exc_info=True,
                 )
+
+        # Fill remaining directed pairs with conservative defaults so that no
+        # row in the social graph is left with NULL sentiment/trust after a
+        # conversation involving its participants. Skip evolution_log writes
+        # here — these are not real signal, just default backfills.
+        for from_id in participants:
+            for to_id in participants:
+                if from_id == to_id:
+                    continue
+                if (from_id, to_id) in scored_pairs:
+                    continue
+                try:
+                    existing = await self._repo.get(
+                        self._simulation_id,
+                        from_id,
+                        to_id,
+                    )
+                    if (
+                        existing is not None
+                        and existing.sentiment_score is not None
+                        and existing.trust_score is not None
+                    ):
+                        # Already scored (from a prior conversation); leave it.
+                        continue
+                    await self._repo.upsert(
+                        self._simulation_id,
+                        from_id,
+                        to_id,
+                        sentiment_score=0.0,
+                        trust_score=0.5,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to default-fill relationship %s -> %s",
+                        from_id,
+                        to_id,
+                        exc_info=True,
+                    )
+
+        if llm_failed:
+            # Re-raise via no-op: caller's try/except already logged; we just
+            # made sure default fills ran first.
+            return
 
     async def update_from_reflection(
         self,

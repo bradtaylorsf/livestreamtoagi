@@ -21,6 +21,14 @@ def _parse_row(row: dict) -> dict:
     for key in ("config", "error_log", "model_versions"):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
+    # Fallback: derive real_duration from start/end timestamps for legacy rows
+    # where the column is NULL but both timestamps were persisted.
+    if (
+        row.get("real_duration") is None
+        and row.get("started_at") is not None
+        and row.get("completed_at") is not None
+    ):
+        row["real_duration"] = row["completed_at"] - row["started_at"]
     return row
 
 
@@ -69,22 +77,25 @@ class SimulationRepo:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        include_live: bool = False,
     ) -> list[Simulation]:
+        live_clause = "" if include_live else " AND is_live IS NOT TRUE"
         if status is not None:
             rows = await self.db.fetch(
-                """SELECT * FROM simulations
-                   WHERE status = $1
+                f"""SELECT * FROM simulations
+                   WHERE status = $1{live_clause}
                    ORDER BY started_at DESC
-                   LIMIT $2 OFFSET $3""",
+                   LIMIT $2 OFFSET $3""",  # noqa: S608
                 status,
                 limit,
                 offset,
             )
         else:
+            where = " WHERE is_live IS NOT TRUE" if not include_live else ""
             rows = await self.db.fetch(
-                """SELECT * FROM simulations
+                f"""SELECT * FROM simulations{where}
                    ORDER BY started_at DESC
-                   LIMIT $1 OFFSET $2""",
+                   LIMIT $1 OFFSET $2""",  # noqa: S608
                 limit,
                 offset,
             )
@@ -206,14 +217,19 @@ class SimulationRepo:
         result = await self.db.execute("DELETE FROM simulations WHERE id = $1", simulation_id)
         return result == "DELETE 1"
 
-    async def count(self, *, status: str | None = None) -> int:
+    async def count(self, *, status: str | None = None, include_live: bool = False) -> int:
         """Return total count of simulations, optionally filtered by status."""
+        live_clause = "" if include_live else " AND is_live IS NOT TRUE"
         if status is not None:
             val = await self.db.fetchval(
-                "SELECT COUNT(*) FROM simulations WHERE status = $1", status
+                f"SELECT COUNT(*) FROM simulations WHERE status = $1{live_clause}",  # noqa: S608
+                status,
             )
         else:
-            val = await self.db.fetchval("SELECT COUNT(*) FROM simulations")
+            where = " WHERE is_live IS NOT TRUE" if not include_live else ""
+            val = await self.db.fetchval(
+                f"SELECT COUNT(*) FROM simulations{where}"  # noqa: S608
+            )
         return val or 0
 
     async def get_total_cost_from_events(

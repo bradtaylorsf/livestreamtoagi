@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getSimulations } from "@/lib/api";
-import type { PublicSimulation } from "@/lib/api";
+import {
+  createSimulation,
+  getScenarios,
+  getSimulations,
+} from "@/lib/api";
+import type { PublicSimulation, ScenarioInfo } from "@/lib/api";
 import { formatDuration } from "@/components/simulation";
+import { SkeletonTable } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const STATUS_STYLES: Record<string, string> = {
   running: "bg-neon-green/20 text-neon-green border-neon-green/40",
@@ -16,10 +23,13 @@ const STATUS_STYLES: Record<string, string> = {
 const STATUS_FILTERS = ["all", "running", "completed", "failed", "cancelled"] as const;
 
 export default function SimulationsPage() {
+  const router = useRouter();
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [showLauncher, setShowLauncher] = useState(false);
+  const showSkeleton = useDelayedFlag(loading);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,11 +53,26 @@ export default function SimulationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
-      <h1 className="font-pixel text-xl text-neon-cyan mb-2">SIMULATIONS</h1>
+      <div className="flex items-start justify-between mb-2">
+        <h1 className="font-pixel text-xl text-neon-cyan">SIMULATIONS</h1>
+        <button
+          onClick={() => setShowLauncher(true)}
+          className="rounded border border-neon-cyan/40 bg-neon-cyan/10 px-3 py-1.5 text-xs font-medium text-neon-cyan hover:bg-neon-cyan/20 transition-colors"
+        >
+          Run new simulation
+        </button>
+      </div>
       <p className="text-foreground/60 mb-8">
         All simulation runs — explore agent conversations, eval scores,
         relationships, and reports.
       </p>
+
+      {showLauncher && (
+        <RunSimulationModal
+          onClose={() => setShowLauncher(false)}
+          onLaunched={(simId) => router.push(`/simulations/${simId}`)}
+        />
+      )}
 
       <div className="flex gap-2 mb-6">
         {STATUS_FILTERS.map((s) => (
@@ -72,7 +97,12 @@ export default function SimulationsPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-foreground/50">Loading simulations...</p>
+        showSkeleton ? (
+          <SkeletonTable
+            rows={5}
+            columnWidths={["w-32", "w-16", "w-20", "w-16", "w-10", "w-10", "w-14"]}
+          />
+        ) : null
       ) : simulations.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-foreground/40">
@@ -151,6 +181,161 @@ export default function SimulationsPage() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function RunSimulationModal({
+  onClose,
+  onLaunched,
+}: {
+  onClose: () => void;
+  onLaunched: (simId: string) => void;
+}) {
+  const [scenarios, setScenarios] = useState<ScenarioInfo[] | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string>("");
+  const [maxCost, setMaxCost] = useState<number>(2.0);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getScenarios()
+      .then((items) => {
+        if (cancelled) return;
+        setScenarios(items);
+        if (items.length > 0) setSelectedFile(items[0].filename);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load scenarios",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedFile) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await createSimulation({
+        seed_file: selectedFile,
+        max_cost: maxCost,
+      });
+      onLaunched(result.simulation_id);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to start simulation",
+      );
+      setSubmitting(false);
+    }
+  }
+
+  const selected = scenarios?.find((s) => s.filename === selectedFile);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      onClick={onClose}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+        className="w-full max-w-md rounded-lg border border-border bg-surface p-6 space-y-4"
+      >
+        <h2 className="font-pixel text-sm text-neon-cyan">RUN NEW SIMULATION</h2>
+
+        {scenarios === null ? (
+          <p className="text-sm text-foreground/50">Loading scenarios...</p>
+        ) : scenarios.length === 0 ? (
+          <p className="text-sm text-foreground/50">
+            No scenario YAML files found in scenarios/.
+          </p>
+        ) : (
+          <>
+            <div className="space-y-1">
+              <label
+                htmlFor="scenario"
+                className="block text-xs font-medium text-foreground/70"
+              >
+                Scenario
+              </label>
+              <select
+                id="scenario"
+                value={selectedFile}
+                onChange={(e) => setSelectedFile(e.target.value)}
+                className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground"
+              >
+                {scenarios.map((s) => (
+                  <option key={s.filename} value={s.filename}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              {selected?.description && (
+                <p className="text-xs text-foreground/50 mt-1">
+                  {selected.description.length > 200
+                    ? selected.description.slice(0, 200) + "…"
+                    : selected.description}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="max-cost"
+                className="block text-xs font-medium text-foreground/70"
+              >
+                Max cost ($)
+              </label>
+              <input
+                id="max-cost"
+                type="number"
+                step="0.1"
+                min={0}
+                max={10}
+                value={maxCost}
+                onChange={(e) => setMaxCost(parseFloat(e.target.value) || 0)}
+                className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground"
+              />
+            </div>
+          </>
+        )}
+
+        {error && (
+          <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="rounded border border-border px-3 py-1.5 text-xs text-foreground/60 hover:bg-surface-light transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={
+              submitting ||
+              !selectedFile ||
+              scenarios === null ||
+              scenarios.length === 0
+            }
+            className="rounded border border-neon-cyan/40 bg-neon-cyan/10 px-3 py-1.5 text-xs font-medium text-neon-cyan hover:bg-neon-cyan/20 transition-colors disabled:opacity-50"
+          >
+            {submitting ? "Starting..." : "Start"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

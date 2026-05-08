@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { getAgentJournal } from "@/lib/api";
 import type { JournalEntry } from "@/types";
+import { SkeletonCardList } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const TYPE_COLORS: Record<string, string> = {
   "6-hour": "bg-neon-cyan/10 text-neon-cyan",
@@ -18,6 +20,7 @@ export default function AgentJournal({ agentId }: Props) {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,11 +42,7 @@ export default function AgentJournal({ agentId }: Props) {
   }, [agentId]);
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-8">
-        <span className="text-sm text-foreground/40">Loading journal...</span>
-      </div>
-    );
+    return showSkeleton ? <SkeletonCardList count={3} /> : null;
   }
 
   if (error) {
