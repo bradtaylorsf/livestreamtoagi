@@ -1,3 +1,10 @@
+meta:
+  name: "State & Config Integration"
+  description: "End-to-end check that centralized config + agent internal state work together: tools/colors/roles load from config, boredom/energy/social_need evolve across conversations, and high state values fire triggers."
+  agents: [vera, rex, aurora, pixel]
+  expected_max_cost: 8.0
+  expected_runtime_minutes: 25
+
 # State & Config Integration Test
 # Validates that #228 (centralized config) and #267 (agent internal state) work end-to-end.
 #

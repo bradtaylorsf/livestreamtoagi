@@ -1,3 +1,10 @@
+meta:
+  name: "Faction Emergence"
+  description: "48-hour simulation with budgets and events enabled to create the conditions for organic alliance formation. Watches for at least one faction emerging, coordinated behavior between members, and inter-faction drama."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 15.0
+  expected_runtime_minutes: 60
+
 # Faction Emergence Test — validates #274 (factions)
 #
 # Tests whether alliances form organically over an extended simulation.

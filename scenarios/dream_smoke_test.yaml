@@ -1,3 +1,10 @@
+meta:
+  name: "Dream Smoke Test"
+  description: "Minimal end-to-end check that journals → dreams → dream-goals → mood shifts work without database errors. Use this to verify the dream pipeline before running heavier dream scenarios."
+  agents: [vera, rex, aurora]
+  expected_max_cost: 3.0
+  expected_runtime_minutes: 10
+
 # Dream Smoke Test — minimal scenario to verify dream system works end-to-end
 #
 # What this tests:

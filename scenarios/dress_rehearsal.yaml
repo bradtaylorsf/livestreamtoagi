@@ -1,3 +1,10 @@
+meta:
+  name: "Dress Rehearsal (24h)"
+  description: "Real-time 24-hour streaming readiness test with WorldSimulator and AudienceSimulator running. Ensures the stream never goes silent, audience interaction feels natural, and the Management filter holds up."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 30.0
+  expected_runtime_minutes: 60
+
 # Dress Rehearsal — real-time streaming readiness test
 #
 # 24-hour real-time simulation with WorldSimulator + AudienceSimulator.

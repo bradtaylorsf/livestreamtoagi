@@ -1,3 +1,10 @@
+meta:
+  name: "Local LLM Validation"
+  description: "Fast proof run for LM Studio / OpenAI-compatible local models. Verifies the fundamentals (turns, energy, tools, recall, reflections, dreams) without spending paid tokens — point it at any local model."
+  agents: [vera, rex, aurora, pixel]
+  expected_max_cost: 0.01
+  expected_runtime_minutes: 15
+
 # Local LLM Validation — fast proof run for LM Studio/OpenAI-compatible models
 #
 # Purpose:

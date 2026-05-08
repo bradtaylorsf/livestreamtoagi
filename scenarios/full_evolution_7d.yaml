@@ -1,3 +1,10 @@
+meta:
+  name: "Full Evolution (7 days)"
+  description: "Comprehensive 7-day simulation with every autonomy feature enabled — initiative, goals, budgets, memory, events, dreams, factions. The integration test for the full autonomy stack."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 50.0
+  expected_runtime_minutes: 120
+
 # Full Evolution 7-Day — tests all Layer 7.10 features together
 #
 # Comprehensive 7-day simulation with all features enabled: initiative,

@@ -1,3 +1,10 @@
+meta:
+  name: "Tool Coverage (missing 11)"
+  description: "Focused tool coverage that exercises only the 11 tools that failed in the full tool_coverage simulation. Faster iteration when fixing a specific tool."
+  agents: [vera, rex, aurora, pixel, fork, sentinel]
+  expected_max_cost: 5.0
+  expected_runtime_minutes: 20
+
 # Focused tool coverage — exercises only the 11 tools that failed in the
 # full tool_coverage simulation.
 #
