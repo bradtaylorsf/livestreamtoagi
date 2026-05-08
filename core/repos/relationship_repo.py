@@ -111,6 +111,19 @@ class RelationshipRepo:
         )
         return [Relationship(**_parse_row(dict(r))) for r in rows]
 
+    async def get_relationships_missing_sentiment(
+        self, simulation_id: uuid.UUID
+    ) -> list[Relationship]:
+        """Return relationship rows where sentiment or trust is NULL."""
+        rows = await self.db.fetch(
+            """SELECT * FROM agent_relationships
+               WHERE simulation_id = $1
+                 AND (sentiment_score IS NULL OR trust_score IS NULL)
+               ORDER BY agent_id, target_agent_id""",
+            simulation_id,
+        )
+        return [Relationship(**_parse_row(dict(r))) for r in rows]
+
     async def increment_interaction(
         self,
         simulation_id: uuid.UUID,
