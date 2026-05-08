@@ -762,7 +762,7 @@ async def get_conversation(conversation_id: str) -> ConversationDetailResponse:
             status_code=400,
             detail="Invalid conversation ID",
         ) from exc
-    conv = await repo.get(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
+    conv = await repo.get(conv_uuid)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -798,7 +798,7 @@ async def get_conversation_selections(
             status_code=400,
             detail="Invalid conversation ID",
         ) from exc
-    logs = await repo.get_selection_log(conv_uuid, simulation_id=LIVE_SIMULATION_ID)
+    logs = await repo.get_selection_log(conv_uuid)
     return [
         SelectionLogResponse(
             turn_number=log.turn_number,
