@@ -943,6 +943,62 @@ class TestLoreEndpoint:
         assert uuid.UUID(sim_id) in params
 
 
+# ── Snapshots ─────────────────────────────────────────────────
+
+
+class TestSnapshotEndpoints:
+    def test_snapshot_at_falls_back_to_file_mtime(self, mock_app, tmp_path, monkeypatch):
+        """When a snapshot JSON lacks `snapshot_at`, the API returns the file's
+        mtime as an ISO 8601 string so the UI can render a date instead of '—'."""
+        import json
+        import os
+        from datetime import UTC, datetime
+
+        client, *_ = mock_app
+        monkeypatch.chdir(tmp_path)
+        snapshots_dir = tmp_path / "snapshots"
+        snapshots_dir.mkdir()
+        snap_path = snapshots_dir / "snapshot-legacy.json"
+        # Older snapshots may not have snapshot_at persisted.
+        snap_path.write_text(json.dumps({"agents": {"vera": {}}}))
+        # Pin a known mtime to make the assertion deterministic.
+        target_dt = datetime(2026, 4, 15, 12, 30, 0, tzinfo=UTC)
+        ts = target_dt.timestamp()
+        os.utime(snap_path, (ts, ts))
+
+        sim_id = "00000000-0000-0000-0000-000000000123"
+        resp = client.get(f"/api/simulations/{sim_id}/snapshots")
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        snapshot_at = items[0]["snapshot_at"]
+        assert snapshot_at, "snapshot_at must not be empty when file exists"
+        parsed = datetime.fromisoformat(snapshot_at)
+        assert parsed == target_dt
+
+    def test_snapshot_at_uses_persisted_value_when_present(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        """When `snapshot_at` is persisted in the file, it is preferred over mtime."""
+        import json
+
+        client, *_ = mock_app
+        monkeypatch.chdir(tmp_path)
+        snapshots_dir = tmp_path / "snapshots"
+        snapshots_dir.mkdir()
+        persisted = "2026-03-01T08:00:00+00:00"
+        (snapshots_dir / "snapshot-new.json").write_text(
+            json.dumps({"snapshot_at": persisted, "agents": {}})
+        )
+
+        sim_id = "00000000-0000-0000-0000-000000000456"
+        resp = client.get(f"/api/simulations/{sim_id}/snapshots")
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        assert items[0]["snapshot_at"] == persisted
+
+
 # ── CORS Headers ──────────────────────────────────────────────
 
 
