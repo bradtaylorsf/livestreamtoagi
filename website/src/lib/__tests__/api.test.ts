@@ -182,6 +182,15 @@ describe("getLore", () => {
       expect.anything(),
     );
   });
+
+  it("forwards simulation_id when provided", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ items: [], total: 0, limit: 50, offset: 0 }));
+    await getLore({ simulation_id: "sim-abc" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/lore?simulation_id=sim-abc",
+      expect.anything(),
+    );
+  });
 });
 
 describe("getConversations", () => {
