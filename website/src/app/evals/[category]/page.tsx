@@ -121,7 +121,7 @@ export default function CategoryDetailPage() {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       const detail = await getEvalRunDetail(evalRunId);
       if (!detail) continue;
-      const status = (detail as unknown as { status?: string }).status;
+      const status = detail.status;
       if (status === "completed") {
         await refreshScores();
         const score = detail.category_scores?.[category];

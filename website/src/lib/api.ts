@@ -387,6 +387,7 @@ export interface PublicEvalRun {
   cost: number;
   model_versions: Record<string, string>;
   category_scores: Record<string, number | null>;
+  status?: string;
   results?: { category: string; score: number | null }[];
 }
 
