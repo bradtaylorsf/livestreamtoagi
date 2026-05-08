@@ -234,6 +234,29 @@ class ConversationRepo:
         )
         return [_row_to_conversation(r) for r in rows], count or 0
 
+    async def count_by_agent(
+        self,
+        agent_id: str,
+        *,
+        simulation_id: uuid.UUID | None = None,
+    ) -> int:
+        """Return the number of conversations the agent participated in."""
+        if simulation_id is None:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM conversations"
+                " WHERE participating_agents @> to_jsonb(ARRAY[$1])",
+                agent_id,
+            )
+        else:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM conversations"
+                " WHERE participating_agents @> to_jsonb(ARRAY[$1])"
+                " AND simulation_id = $2",
+                agent_id,
+                simulation_id,
+            )
+        return count or 0
+
     async def get_conversations_by_simulation(
         self,
         simulation_id: uuid.UUID,
