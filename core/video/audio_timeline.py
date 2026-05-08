@@ -70,8 +70,7 @@ def _build_concat_filter(
         inputs.extend(["-i", str(path)])
         delay_ms = max(0, int(round(start_s * 1000)))
         filter_parts.append(
-            f"[{idx}:a]aresample={sample_rate},"
-            f"adelay={delay_ms}|{delay_ms}[a{idx}]"
+            f"[{idx}:a]aresample={sample_rate},adelay={delay_ms}|{delay_ms}[a{idx}]"
         )
         mix_inputs.append(f"[a{idx}]")
     if not mix_inputs:

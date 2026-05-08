@@ -354,9 +354,7 @@ class MemorySnapshotImporter:
 
         return result
 
-    async def _clear_agent_state(
-        self, agent_id: str, simulation_id: Any | None = None
-    ) -> None:
+    async def _clear_agent_state(self, agent_id: str, simulation_id: Any | None = None) -> None:
         """Clear existing memory state for an agent.
 
         When ``simulation_id`` is provided, scope the delete to that
@@ -377,9 +375,7 @@ class MemorySnapshotImporter:
                 )
             else:
                 await self._db.execute("DELETE FROM recall_memory WHERE agent_id = $1", agent_id)
-                await self._db.execute(
-                    "DELETE FROM journal_entries WHERE agent_id = $1", agent_id
-                )
+                await self._db.execute("DELETE FROM journal_entries WHERE agent_id = $1", agent_id)
             # Don't delete core_memory — it will be overwritten
         except Exception:
             logger.warning("Failed to clear state for %s", agent_id, exc_info=True)

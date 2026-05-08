@@ -35,9 +35,7 @@ def save_video(
     if config.storage_backend == "s3":
         bucket = config.s3_bucket
         if not bucket:
-            raise ValueError(
-                "VIDEO_STORAGE=s3 requires VIDEO_S3_BUCKET to be set"
-            )
+            raise ValueError("VIDEO_STORAGE=s3 requires VIDEO_S3_BUCKET to be set")
         # Lazy import so the boto3 dependency is only required when actually
         # using the s3 backend.
         import boto3  # type: ignore[import-not-found]

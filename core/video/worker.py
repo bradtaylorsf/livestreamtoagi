@@ -51,9 +51,7 @@ async def enqueue_render(
         return "skipped"
     if state != "claimed":
         # Unknown state — be conservative and bail.
-        logger.warning(
-            "[video] unexpected claim state=%s for sim=%s", state, sim_id
-        )
+        logger.warning("[video] unexpected claim state=%s for sim=%s", state, sim_id)
         return "skipped"
 
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -78,9 +76,7 @@ async def enqueue_render(
     except Exception:
         # If the subprocess can't even be spawned, free the lock so a future
         # run can retry rather than leaving the sim stuck in 'rendering'.
-        logger.exception(
-            "[video] failed to spawn render subprocess for sim=%s", sim_id
-        )
+        logger.exception("[video] failed to spawn render subprocess for sim=%s", sim_id)
         await sim_repo.update_video_status(sim_id, status="failed")
         return "skipped"
 

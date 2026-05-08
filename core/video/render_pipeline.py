@@ -60,9 +60,7 @@ async def _capture_canvas(
     try:
         from playwright.async_api import async_playwright  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RenderError(
-            "playwright is not installed; cannot capture canvas"
-        ) from exc
+        raise RenderError("playwright is not installed; cannot capture canvas") from exc
 
     truncated = False
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,9 +82,7 @@ async def _capture_canvas(
         except Exception as exc:
             await context.close()
             await browser.close()
-            raise RenderError(
-                "replay page did not signal __replayReady"
-            ) from exc
+            raise RenderError("replay page did not signal __replayReady") from exc
 
         try:
             await page.wait_for_function(
@@ -95,9 +91,7 @@ async def _capture_canvas(
             )
         except Exception:
             truncated = True
-            logger.warning(
-                "[video] replay capture truncated at %ds", max_seconds
-            )
+            logger.warning("[video] replay capture truncated at %ds", max_seconds)
 
         await context.close()
         await browser.close()
@@ -165,9 +159,7 @@ async def render_simulation_video(
     if not cues:
         raise RenderError("no transcript cues — nothing to render")
 
-    work = work_dir or Path(
-        tempfile.mkdtemp(prefix=f"render_{sim_id_str}_")
-    )
+    work = work_dir or Path(tempfile.mkdtemp(prefix=f"render_{sim_id_str}_"))
     work.mkdir(parents=True, exist_ok=True)
     audio_path = work / "audio.wav"
     final_path = work / f"{sim_id_str}.mp4"
@@ -184,9 +176,7 @@ async def render_simulation_video(
             max_seconds=config.max_render_seconds,
         )
     )
-    stitch_task = asyncio.create_task(
-        stitch_audio_timeline(cues, tts=tts, output_path=audio_path)
-    )
+    stitch_task = asyncio.create_task(stitch_audio_timeline(cues, tts=tts, output_path=audio_path))
     (canvas_path, truncated), stitch_result = await asyncio.gather(
         capture_task,
         stitch_task,

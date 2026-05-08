@@ -101,9 +101,7 @@ class MemorySeedApplier:
                 result.core_memories_restored += 1
                 result.agents_restored.append(agent.id)
             except Exception as exc:
-                result.warnings.append(
-                    f"Failed to write blank core memory for {agent.id}: {exc}"
-                )
+                result.warnings.append(f"Failed to write blank core memory for {agent.id}: {exc}")
         return result
 
     async def _apply_inherit(
@@ -118,9 +116,7 @@ class MemorySeedApplier:
                 f"memory_seed inherit_from is not a valid UUID: {source_simulation_id!r}"
             ) from exc
 
-        row = await self._db.fetchrow(
-            "SELECT id FROM simulations WHERE id = $1", source_uuid
-        )
+        row = await self._db.fetchrow("SELECT id FROM simulations WHERE id = $1", source_uuid)
         if row is None:
             raise ValueError(
                 f"memory_seed inherit_from simulation not found: {source_simulation_id}"
@@ -155,9 +151,7 @@ class MemorySeedApplier:
         else:
             raw = json.loads(text)
         if not isinstance(raw, dict):
-            raise ValueError(
-                f"memory_seed custom_file must be a mapping, got {type(raw).__name__}"
-            )
+            raise ValueError(f"memory_seed custom_file must be a mapping, got {type(raw).__name__}")
 
         # Validate against the snapshot schema (extra fields ignored).
         snapshot = MemorySnapshot(**raw)

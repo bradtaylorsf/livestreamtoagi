@@ -64,7 +64,7 @@ def render_html(
             f'<p style="margin:16px 0 0;">'
             f'<a href="{safe_video}" '
             f'style="display:inline-block;padding:10px 18px;'
-            f'background:#0b5fff;color:#fff;text-decoration:none;'
+            f"background:#0b5fff;color:#fff;text-decoration:none;"
             f'border-radius:6px;font-weight:600;">Watch the video</a>'
             f"</p>"
             f'<p style="margin:8px 0 0;font-size:13px;color:#64748b;">'
@@ -77,8 +77,8 @@ def render_html(
         safe_err = escape(error_summary).replace("\n", "<br>")
         error_block = (
             f'<div style="margin-top:16px;padding:12px 14px;'
-            f'background:#fef2f2;border-left:3px solid #ef4444;'
-            f'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
+            f"background:#fef2f2;border-left:3px solid #ef4444;"
+            f"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
             f'font-size:13px;color:#7f1d1d;white-space:pre-wrap;">'
             f"{safe_err}</div>"
         )

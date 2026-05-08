@@ -18,11 +18,7 @@ class YoutubePublishConfig:
 
     @property
     def credentials_present(self) -> bool:
-        return bool(
-            self.oauth_client_id
-            and self.oauth_client_secret
-            and self.refresh_token
-        )
+        return bool(self.oauth_client_id and self.oauth_client_secret and self.refresh_token)
 
 
 def _parse_bool(raw: str | None, default: bool = False) -> bool:
@@ -38,10 +34,6 @@ def load_youtube_config() -> YoutubePublishConfig:
         oauth_client_secret=os.environ.get("YOUTUBE_OAUTH_CLIENT_SECRET") or None,
         refresh_token=os.environ.get("YOUTUBE_REFRESH_TOKEN") or None,
         max_retries=int(os.environ.get("YOUTUBE_MAX_RETRIES", "3")),
-        default_privacy=(
-            os.environ.get("YOUTUBE_DEFAULT_PRIVACY", "unlisted").lower()
-        ),
-        public_base_url=os.environ.get(
-            "PUBLIC_BASE_URL", "http://localhost:8000"
-        ).rstrip("/"),
+        default_privacy=(os.environ.get("YOUTUBE_DEFAULT_PRIVACY", "unlisted").lower()),
+        public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),
     )

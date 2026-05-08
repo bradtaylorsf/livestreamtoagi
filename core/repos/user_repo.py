@@ -34,9 +34,7 @@ class UserRepo:
         return _row_to_user(row) if row else None
 
     async def get_by_email(self, email: str) -> User | None:
-        row = await self.db.fetchrow(
-            "SELECT * FROM users WHERE lower(email) = lower($1)", email
-        )
+        row = await self.db.fetchrow("SELECT * FROM users WHERE lower(email) = lower($1)", email)
         return _row_to_user(row) if row else None
 
     async def upsert_on_login(self, email: str, *, login_at: datetime) -> User:

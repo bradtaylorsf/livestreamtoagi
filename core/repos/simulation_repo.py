@@ -337,8 +337,7 @@ class SimulationRepo:
         if status not in {"pending", "rendering", "done", "failed", "skipped"}:
             raise ValueError(f"Invalid video_render_status: {status}")
         rendered_at_clause = (
-            "video_rendered_at = CASE WHEN $1 = 'done' THEN now() "
-            "ELSE video_rendered_at END"
+            "video_rendered_at = CASE WHEN $1 = 'done' THEN now() ELSE video_rendered_at END"
         )
         row = await self.db.fetchrow(
             f"""UPDATE simulations

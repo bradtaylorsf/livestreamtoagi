@@ -161,9 +161,7 @@ class SimulationConfig:
             if valid_agent_ids is not None:
                 unknown = [m for m in faction.members if m not in valid_agent_ids]
                 if unknown:
-                    raise ValueError(
-                        f"faction '{faction.name}' has unknown members: {unknown}"
-                    )
+                    raise ValueError(f"faction '{faction.name}' has unknown members: {unknown}")
             self.factions.append(faction)
 
         raw_phases = data.get("phases", [])
@@ -484,8 +482,7 @@ class SimulationOrchestrator:
         )
         seed_result = await applier.apply(self._config.memory_seed, sim_id)
         logger.info(
-            "Applied memory_seed mode=%s: %d core, %d recall, %d journal "
-            "for agents %s",
+            "Applied memory_seed mode=%s: %d core, %d recall, %d journal for agents %s",
             self._config.memory_seed.mode,
             seed_result.core_memories_restored,
             seed_result.recall_memories_restored,
@@ -1283,9 +1280,7 @@ class SimulationOrchestrator:
             "failures": list(self._errors),
         }
 
-        await self._sim_repo.update_research_fields(
-            self._simulation_id, outcomes=outcomes
-        )
+        await self._sim_repo.update_research_fields(self._simulation_id, outcomes=outcomes)
 
         if self._config.auto_draft_learnings and not self._config.dry_run:
             try:

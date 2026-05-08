@@ -598,9 +598,7 @@ class ConversationEngine:
                     conversation_id=conv.id,
                     turn_number=conv.turn_number,
                     simulation_id=self._simulation_id,
-                    agent_energies={
-                        agent_id: conv.energy.energy for agent_id in conv.participants
-                    },
+                    agent_energies={agent_id: conv.energy.energy for agent_id in conv.participants},
                 )
             except Exception:
                 logger.warning("Failed to log agent energy timeline", exc_info=True)

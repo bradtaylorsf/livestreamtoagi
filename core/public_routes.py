@@ -292,9 +292,7 @@ def _shared_row_to_response(row: dict) -> ChallengeResponse:
         simulation_total_turns=row.get("simulation_total_turns") or 0,
         shared_at=row["shared_at"].isoformat() if row.get("shared_at") else None,
         created_at=row["created_at"].isoformat() if row.get("created_at") else None,
-        completed_at=(
-            row["completed_at"].isoformat() if row.get("completed_at") else None
-        ),
+        completed_at=(row["completed_at"].isoformat() if row.get("completed_at") else None),
     )
 
 

@@ -62,10 +62,7 @@ async def enqueue_youtube_publish(
     if not getattr(sim, "publish_to_youtube", False):
         return "opt_out"
 
-    if (
-        not getattr(sim, "video_url", None)
-        or getattr(sim, "video_render_status", None) != "done"
-    ):
+    if not getattr(sim, "video_url", None) or getattr(sim, "video_render_status", None) != "done":
         return "no_video"
 
     state = await sim_repo.claim_for_youtube_publish(sim_id)
@@ -76,9 +73,7 @@ async def enqueue_youtube_publish(
     if state != "claimed":
         # 'failed' here means a previous attempt exhausted retries;
         # don't auto-retry without an explicit reset.
-        logger.info(
-            "[youtube] not claiming sim=%s in state=%s", sim_id, state
-        )
+        logger.info("[youtube] not claiming sim=%s in state=%s", sim_id, state)
         return state or "no_video"
 
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -102,9 +97,7 @@ async def enqueue_youtube_publish(
         )
     except Exception:
         # Spawn failed — release the lock so a future run can retry.
-        logger.exception(
-            "[youtube] failed to spawn publish subprocess for sim=%s", sim_id
-        )
+        logger.exception("[youtube] failed to spawn publish subprocess for sim=%s", sim_id)
         await sim_repo.update_youtube_status(
             sim_id,
             status="failed",
