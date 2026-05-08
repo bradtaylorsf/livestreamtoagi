@@ -161,7 +161,7 @@ class TestSimulationRepo:
         results = await repo.list()
         assert len(results) == 2
         sql = db.fetch.call_args[0][0]
-        assert "ORDER BY started_at DESC" in sql
+        assert "ORDER BY s.started_at DESC" in sql
         assert "LIMIT $1 OFFSET $2" in sql
 
     async def test_list_with_status_filter(self) -> None:
@@ -172,7 +172,7 @@ class TestSimulationRepo:
         results = await repo.list(status="completed")
         assert len(results) == 1
         sql = db.fetch.call_args[0][0]
-        assert "WHERE status = $1" in sql
+        assert "s.status = $1" in sql
 
     async def test_list_excludes_live_by_default(self) -> None:
         db = make_mock_db()
@@ -190,7 +190,7 @@ class TestSimulationRepo:
 
         await repo.list(status="running")
         sql = db.fetch.call_args[0][0]
-        assert "WHERE status = $1" in sql
+        assert "s.status = $1" in sql
         assert "is_live IS NOT TRUE" in sql
 
     async def test_list_include_live_drops_filter(self) -> None:

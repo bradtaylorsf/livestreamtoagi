@@ -528,7 +528,9 @@ class Challenge(BaseModel):
     actual_cost: float | None = None
     votes: int = 0
     category: str | None = None
+    tags: list[str] = Field(default_factory=list)
     simulation_id: uuid.UUID | None = None
+    shared_at: datetime | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -538,6 +540,7 @@ class ChallengeCreate(BaseModel):
     submitted_by: str | None = None
     source: str | None = None
     category: str | None = None
+    tags: list[str] = Field(default_factory=list)
     assigned_agents: list[str] | None = None
     cost_estimate: float | None = None
     simulation_id: uuid.UUID | None = None
@@ -893,6 +896,7 @@ class Simulation(BaseModel):
     video_render_status: str | None = None
     video_rendered_at: datetime | None = None
     is_featured: bool = False
+    shared_as_challenge: bool = False
     # Populated only by joins in list queries (e.g. /api/simulations); the
     # local-part of the submitter's email if signed in. None means anonymous.
     submitter_display_name: str | None = None

@@ -26,6 +26,7 @@ function makeSim(
     agents_participated: [],
     is_featured: false,
     video_url: null,
+    submitter_display_name: null,
   };
 }
 

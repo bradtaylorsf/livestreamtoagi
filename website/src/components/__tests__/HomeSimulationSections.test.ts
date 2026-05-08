@@ -19,6 +19,7 @@ function makeSim(overrides: Partial<PublicSimulation> = {}): PublicSimulation {
     agents_participated: ["vera", "rex"],
     is_featured: false,
     video_url: null,
+    submitter_display_name: null,
     ...overrides,
   };
 }

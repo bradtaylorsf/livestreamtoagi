@@ -105,8 +105,19 @@ class ChallengeResponse(BaseModel):
     actual_cost: float | None = None
     votes: int = 0
     category: str | None = None
+    tags: list[str] = []
+    simulation_id: str | None = None
+    simulation_name: str | None = None
+    simulation_video_url: str | None = None
+    simulation_total_turns: int = 0
+    shared_at: str | None = None
     created_at: str | None = None
     completed_at: str | None = None
+
+
+class ShareSimulationAsChallengeRequest(BaseModel):
+    description: str
+    tags: list[str] = []
 
 
 class AgentPublicProfile(BaseModel):
@@ -252,8 +263,38 @@ def _challenge_to_response(c: Challenge) -> ChallengeResponse:
         actual_cost=c.actual_cost,
         votes=c.votes,
         category=c.category,
+        tags=c.tags,
+        simulation_id=str(c.simulation_id) if c.simulation_id else None,
+        shared_at=c.shared_at.isoformat() if c.shared_at else None,
         created_at=c.created_at.isoformat() if c.created_at else None,
         completed_at=c.completed_at.isoformat() if c.completed_at else None,
+    )
+
+
+def _shared_row_to_response(row: dict) -> ChallengeResponse:
+    """Convert a joined challenge+simulation row from ChallengeRepo.list_shared."""
+    sim_id = row.get("simulation_id")
+    return ChallengeResponse(
+        id=row["id"],
+        description=row["description"],
+        submitted_by=row.get("submitted_by"),
+        status=row.get("status", "pending"),
+        assigned_agents=row.get("assigned_agents"),
+        result=row.get("result"),
+        cost_estimate=row.get("cost_estimate"),
+        actual_cost=row.get("actual_cost"),
+        votes=row.get("votes", 0),
+        category=row.get("category"),
+        tags=list(row.get("tags") or []),
+        simulation_id=str(sim_id) if sim_id else None,
+        simulation_name=row.get("simulation_name"),
+        simulation_video_url=row.get("simulation_video_url"),
+        simulation_total_turns=row.get("simulation_total_turns") or 0,
+        shared_at=row["shared_at"].isoformat() if row.get("shared_at") else None,
+        created_at=row["created_at"].isoformat() if row.get("created_at") else None,
+        completed_at=(
+            row["completed_at"].isoformat() if row.get("completed_at") else None
+        ),
     )
 
 
@@ -1418,72 +1459,115 @@ async def get_world_chunks() -> list[dict[str, Any]]:
 
 @router.get("/challenges")
 async def get_challenges(
-    status: str | None = Query(None),
-    category: str | None = Query(None),
+    tag: str | None = Query(None),
     sort: str = Query("newest"),
+    include_legacy: bool = Query(False),
 ) -> list[ChallengeResponse]:
+    """List user-submitted simulations that have been shared as challenges.
+
+    Each row joins the underlying simulation so the response carries the
+    sim's id, name, video, and turn count for the card view. Legacy
+    chat-only challenges (created before issue #433) are hidden by default
+    because they target the live simulation, which is never marked
+    shared_as_challenge=TRUE; pass ``include_legacy=true`` to surface them.
+    """
+    from core.repos.challenge_repo import ChallengeRepo
+
     db = _get_db()
-    clauses: list[str] = ["simulation_id = $1"]
-    params: list[object] = [LIVE_SIMULATION_ID]
-    idx = 2
-
-    if status:
-        clauses.append(f"status = ${idx}")
-        params.append(status)
-        idx += 1
-    if category:
-        clauses.append(f"category = ${idx}")
-        params.append(category)
-        idx += 1
-
-    where = " WHERE " + " AND ".join(clauses)
-
-    order_map = {
-        "newest": "created_at DESC",
-        "most_upvoted": "votes DESC",
-        "status": "status ASC, created_at DESC",
-    }
-    order = order_map.get(sort, "created_at DESC")
-
-    rows = await db.fetch(
-        f"SELECT * FROM challenges{where} ORDER BY {order}",  # noqa: S608
-        *params,
+    repo = ChallengeRepo(db)
+    rows = await repo.list_shared(
+        tag=tag,
+        sort=sort,
+        include_legacy=include_legacy,
     )
-    challenges = []
-    for r in rows:
-        c = Challenge(**dict(r))
-        challenges.append(_challenge_to_response(c))
-    return challenges
+    return [_shared_row_to_response(r) for r in rows]
 
 
-@router.post("/challenges")
-async def submit_challenge(
-    req: ChallengeSubmitRequest,
-    request: Request,
+@router.get("/challenges/{challenge_id}")
+async def get_challenge(challenge_id: int) -> ChallengeResponse:
+    """Return a single shared challenge with its joined simulation context.
+
+    The Re-run flow uses this to discover the source simulation_id, agents,
+    and scenario so the creator form (issue #430) can pre-fill itself.
+    """
+    from core.repos.challenge_repo import ChallengeRepo
+
+    db = _get_db()
+    repo = ChallengeRepo(db)
+    row = await repo.get_shared(challenge_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    return _shared_row_to_response(row)
+
+
+@router.post("/simulations/{sim_id}/share-as-challenge")
+async def share_simulation_as_challenge(
+    sim_id: str,
+    body: ShareSimulationAsChallengeRequest,
+    user: User = Depends(get_current_user),
 ) -> ChallengeResponse:
-    svc = _get_services()
-    ip = _client_ip(request)
+    """Mark a user-submitted simulation as a community challenge.
+
+    Only the simulation's submitter may share it. Each share creates a
+    challenges row pointing at the simulation; re-sharing is rejected.
+    """
+    import uuid
+
+    from core.repos.challenge_repo import ChallengeRepo
+    from core.repos.simulation_repo import SimulationRepo
+
+    try:
+        sim_uuid = uuid.UUID(sim_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid simulation id") from exc
+
+    description = (body.description or "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+
+    services = _get_services()
+    db = services.db
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.get(sim_uuid)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    if sim.submitted_by_user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the simulation's submitter may share it as a challenge",
+        )
+    if sim.shared_as_challenge:
+        raise HTTPException(
+            status_code=409,
+            detail="Simulation is already shared as a challenge",
+        )
+
+    # Light per-user rate limit so a single account can't flood the feed.
     allowed = await _check_rate_limit(
-        svc.redis,
-        f"ratelimit:challenge:{ip}",
-        5,
+        services.redis,
+        f"ratelimit:share_challenge:{user.id}",
+        20,
         3600,
     )
     if not allowed:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded (5/hr)")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded (20/hr)")
 
-    db = _get_db()
-    row = await db.fetchrow(
-        """INSERT INTO challenges (description, submitted_by, source, category, votes, simulation_id)
-           VALUES ($1, $2, 'website', $3, 0, $4)
-           RETURNING *""",
-        req.description,
-        req.submitter_name,
-        req.category,
-        LIVE_SIMULATION_ID,
+    await db.execute(
+        "UPDATE simulations SET shared_as_challenge = TRUE WHERE id = $1",
+        sim_uuid,
     )
-    c = Challenge(**dict(row))
-    return _challenge_to_response(c)
+
+    repo = ChallengeRepo(db)
+    submitter = (user.email or "").split("@", 1)[0] or None
+    challenge = await repo.create_for_simulation(
+        simulation_id=sim_uuid,
+        description=description,
+        submitted_by=submitter,
+        tags=list(body.tags or []),
+    )
+    # Re-fetch joined row so the response includes simulation context.
+    row = await repo.get_shared(challenge.id)
+    return _shared_row_to_response(row) if row else _challenge_to_response(challenge)
 
 
 @router.post("/challenges/{challenge_id}/upvote")
@@ -1504,17 +1588,15 @@ async def upvote_challenge(
         # Mark as voted (no expiry — 1 vote per IP per challenge forever)
         await redis.set(vote_key, "1")
 
+    from core.repos.challenge_repo import ChallengeRepo
+
     db = _get_db()
-    row = await db.fetchrow(
-        """UPDATE challenges SET votes = votes + 1
-           WHERE id = $1 AND simulation_id = $2 RETURNING *""",
-        challenge_id,
-        LIVE_SIMULATION_ID,
-    )
-    if not row:
+    repo = ChallengeRepo(db)
+    challenge = await repo.upvote(challenge_id)
+    if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    c = Challenge(**dict(row))
-    return _challenge_to_response(c)
+    row = await repo.get_shared(challenge_id)
+    return _shared_row_to_response(row) if row else _challenge_to_response(challenge)
 
 
 # ── General Endpoints ────────────────────────────────────────────

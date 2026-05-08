@@ -1067,78 +1067,124 @@ class TestWorldEndpoints:
 # ── Challenge Endpoints ───────────────────────────────────────
 
 
+def _shared_challenge_row(**overrides):
+    base = {
+        "id": 1,
+        "description": "Try this scenario",
+        "submitted_by": "viewer1",
+        "source": "shared_simulation",
+        "status": "pending",
+        "assigned_agents": None,
+        "result": None,
+        "cost_estimate": None,
+        "actual_cost": None,
+        "votes": 1,
+        "category": None,
+        "tags": ["creative"],
+        "simulation_id": uuid.UUID("00000000-0000-0000-0000-000000000099"),
+        "shared_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+        "completed_at": None,
+        "simulation_name": "Garden build",
+        "simulation_video_url": "https://cdn/v.mp4",
+        "simulation_total_turns": 25,
+        "simulation_agents": ["vera", "rex"],
+    }
+    base.update(overrides)
+    return base
+
+
 class TestChallengeEndpoints:
-    def test_get_challenges(self, mock_app):
+    def test_get_challenges_filters_to_shared_only(self, mock_app):
+        """The default feed only joins simulations where shared_as_challenge=TRUE."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
         resp = client.get("/api/challenges")
         assert resp.status_code == 200
-        assert resp.json() == []
+        sql = mock_db.fetch.call_args[0][0]
+        assert "shared_as_challenge = TRUE" in sql
+        assert "JOIN simulations" in sql
 
-    def test_get_challenges_with_filters(self, mock_app):
+    def test_get_challenges_include_legacy_drops_filter(self, mock_app):
+        """Pass include_legacy=true to surface legacy challenge rows too."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
-        resp = client.get("/api/challenges?status=pending&sort=most_upvoted")
+        resp = client.get("/api/challenges?include_legacy=true")
         assert resp.status_code == 200
+        sql = mock_db.fetch.call_args[0][0]
+        assert "shared_as_challenge" not in sql
 
-    def test_submit_challenge(self, mock_app):
-        client, mock_db, _, mock_redis, _ = mock_app
-        mock_redis.incr = AsyncMock(return_value=1)
-        mock_db.fetchrow = AsyncMock(return_value={
-            "id": 1,
-            "description": "Build a garden",
-            "submitted_by": "viewer1",
-            "source": "website",
-            "status": "pending",
-            "assigned_agents": None,
-            "result": None,
-            "cost_estimate": None,
-            "actual_cost": None,
-            "votes": 0,
-            "category": "building",
-            "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-            "completed_at": None,
-        })
-        resp = client.post("/api/challenges", json={
-            "description": "Build a garden",
-            "category": "building",
-            "submitter_name": "viewer1",
-        })
+    def test_get_challenges_returns_simulation_context(self, mock_app):
+        """Each row carries the joined simulation fields for the card view."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[_shared_challenge_row()])
+        resp = client.get("/api/challenges")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["description"] == "Build a garden"
-        assert data["category"] == "building"
-        assert data["votes"] == 0
+        assert len(data) == 1
+        item = data[0]
+        assert item["simulation_id"] == "00000000-0000-0000-0000-000000000099"
+        assert item["simulation_name"] == "Garden build"
+        assert item["simulation_video_url"] == "https://cdn/v.mp4"
+        assert item["simulation_total_turns"] == 25
+        assert item["tags"] == ["creative"]
 
-    def test_submit_challenge_rate_limit(self, mock_app):
-        client, _, _, mock_redis, _ = mock_app
-        mock_redis.incr = AsyncMock(return_value=6)
-        resp = client.post("/api/challenges", json={
-            "description": "Too many requests",
-        })
-        assert resp.status_code == 429
+    def test_get_challenge_detail(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=_shared_challenge_row())
+        resp = client.get("/api/challenges/1")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == 1
+        assert body["simulation_id"] == "00000000-0000-0000-0000-000000000099"
+
+    def test_get_challenge_detail_not_found(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=None)
+        resp = client.get("/api/challenges/999")
+        assert resp.status_code == 404
+
+    def test_legacy_post_challenge_route_is_gone(self, mock_app):
+        """The raw-text POST /api/challenges flow is no longer accepted."""
+        client, *_ = mock_app
+        resp = client.post(
+            "/api/challenges",
+            json={"description": "x", "category": "building"},
+        )
+        # FastAPI returns 405 when the path exists for other verbs only
+        assert resp.status_code in (404, 405)
 
     def test_upvote_challenge(self, mock_app):
         client, mock_db, _, mock_redis, _ = mock_app
         mock_redis.get = AsyncMock(return_value=None)
-        mock_db.fetchrow = AsyncMock(return_value={
-            "id": 1,
-            "description": "Build a garden",
-            "submitted_by": "viewer1",
-            "source": "website",
-            "status": "pending",
-            "assigned_agents": None,
-            "result": None,
-            "cost_estimate": None,
-            "actual_cost": None,
-            "votes": 1,
-            "category": "building",
-            "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-            "completed_at": None,
-        })
+        mock_db.fetchrow = AsyncMock(
+            side_effect=[
+                {
+                    "id": 1,
+                    "description": "Try this scenario",
+                    "submitted_by": "viewer1",
+                    "source": "shared_simulation",
+                    "status": "pending",
+                    "assigned_agents": None,
+                    "result": None,
+                    "cost_estimate": None,
+                    "actual_cost": None,
+                    "votes": 2,
+                    "category": None,
+                    "tags": ["creative"],
+                    "simulation_id": uuid.UUID(
+                        "00000000-0000-0000-0000-000000000099"
+                    ),
+                    "shared_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    "completed_at": None,
+                },
+                _shared_challenge_row(votes=2),
+            ]
+        )
         resp = client.post("/api/challenges/1/upvote")
         assert resp.status_code == 200
-        assert resp.json()["votes"] == 1
+        assert resp.json()["votes"] == 2
 
     def test_upvote_challenge_duplicate(self, mock_app):
         client, _, _, mock_redis, _ = mock_app
