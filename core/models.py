@@ -888,6 +888,21 @@ class Simulation(BaseModel):
     factions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+# ── Public Users (magic-link auth) ──────────────────────────────
+
+
+class User(BaseModel):
+    """A public user authenticated via emailed magic links."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: str
+    created_at: datetime | None = None
+    last_login_at: datetime | None = None
+    simulations_submitted: int = 0
+    total_cost_spent: Decimal = Decimal("0")
+
+
 class ConversationConfig(BaseModel):
     """Top-level conversation engine configuration — loaded from YAML."""
 

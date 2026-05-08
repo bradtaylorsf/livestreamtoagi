@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from starlette.staticfiles import StaticFiles
 
 from core.admin import admin_router, auth_api, kill_switch_api
+from core.auth import user_auth_api
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
 from core.event_bus import event_bus
 from core.public_routes import router as public_router
@@ -133,6 +134,7 @@ app.include_router(admin_router)
 app.include_router(auth_api)
 app.include_router(kill_switch_api)
 app.include_router(public_router)
+app.include_router(user_auth_api)
 
 
 @app.websocket("/ws")
