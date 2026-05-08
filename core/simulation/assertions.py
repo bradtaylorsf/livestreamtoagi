@@ -82,8 +82,15 @@ class AssertionEngine:
         phase_result: PhaseResult,
         simulation_id: uuid.UUID,
         config: dict[str, Any],
+        *,
+        phase_name: str = "auto_conversation",
     ) -> list[AssertionResult]:
-        """Run default assertions for autonomous mode conversations."""
+        """Run default assertions for any conversation/phase.
+
+        These four baseline assertions (min_turns, max_cost, no_errors,
+        management_flags) populate the assertions tab even when a seeded
+        scenario omits an explicit `assertions:` block.
+        """
         results: list[AssertionResult] = []
 
         # Min turns
@@ -156,7 +163,6 @@ class AssertionEngine:
 
         # Persist
         if self._repo:
-            phase_name = "auto_conversation"
             await self._repo.save_results(
                 simulation_id,
                 phase_name,

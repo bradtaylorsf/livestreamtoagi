@@ -586,12 +586,31 @@ class SimulationOrchestrator:
 
                 # Evaluate phase assertions
                 if assertion_engine and not self._config.dry_run:
-                    assertion_results = await assertion_engine.evaluate_phase(
-                        phase,
-                        result,
-                        sim.id,
-                    )
-                    result.assertions = assertion_results
+                    try:
+                        # Phase-defined assertions from the seed file (may be empty)
+                        assertion_results = await assertion_engine.evaluate_phase(
+                            phase,
+                            result,
+                            sim.id,
+                        )
+                        # Always emit baseline conversation assertions so the
+                        # Assertions tab is populated even when the seed
+                        # scenario omits an `assertions:` block.
+                        baseline_results = (
+                            await assertion_engine.evaluate_conversation_defaults(
+                                result,
+                                sim.id,
+                                config={},
+                                phase_name=phase.name,
+                            )
+                        )
+                        result.assertions = assertion_results + baseline_results
+                    except Exception:
+                        logger.warning(
+                            "Assertion evaluation failed for phase %s",
+                            phase.name,
+                            exc_info=True,
+                        )
 
                 # Update DB stats
                 if not self._config.dry_run:
