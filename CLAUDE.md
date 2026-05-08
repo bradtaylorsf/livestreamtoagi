@@ -71,6 +71,13 @@ pytest tests/backend/ --cov=core --cov=tools
 # Lint
 ruff check core/ tools/
 ruff format core/ tools/
+
+# Video render (optional) — installs Playwright + Chromium for the
+# simulation → MP4 pipeline. Skip unless you're working on core/video/.
+# The Makefile targets pin `.venv/bin/python` and `.venv/bin/playwright`
+# so a stale `python` shim earlier on PATH cannot intercept the call.
+make render-install   # `uv pip install -e ".[render]" && playwright install chromium`
+make render-smoke     # imports playwright + runs `--help` against the entrypoint
 ```
 
 ### Frontend (Phaser.js)

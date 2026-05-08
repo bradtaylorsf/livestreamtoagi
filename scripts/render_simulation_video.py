@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import sys
 import uuid
@@ -26,6 +27,73 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
+
+
+# Exit codes used by the preflight checks. They are distinct from the
+# generic-failure code 1 so the orchestrator log makes the misconfiguration
+# obvious without having to grep stack traces.
+EXIT_PLAYWRIGHT_NOT_INSTALLED = 2
+EXIT_CHROMIUM_NOT_INSTALLED = 3
+
+
+def _chromium_browser_dir_exists() -> bool:
+    """Best-effort check that ``playwright install chromium`` has been run.
+
+    Playwright stores browser binaries outside the pip package — in
+    ``PLAYWRIGHT_BROWSERS_PATH`` if set, otherwise a per-OS cache directory.
+    We probe for any ``chromium-*`` subdirectory; the actual binary path
+    differs by build number.
+    """
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if override == "0":
+        try:
+            import playwright  # type: ignore[import-not-found]
+        except ImportError:
+            return False
+        candidates = [Path(playwright.__file__).parent / "driver" / "package" / ".local-browsers"]
+    elif override:
+        candidates = [Path(override)]
+    else:
+        home = Path.home()
+        candidates = [
+            home / "Library" / "Caches" / "ms-playwright",  # macOS
+            home / ".cache" / "ms-playwright",  # Linux
+            home / "AppData" / "Local" / "ms-playwright",  # Windows
+        ]
+
+    for d in candidates:
+        if not d.exists():
+            continue
+        try:
+            if any(p.name.startswith("chromium-") for p in d.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _preflight_render_dependencies(log: logging.Logger) -> int | None:
+    """Surface clear, actionable errors before the heavy bootstrap path runs.
+
+    Returns an exit code on misconfiguration, or ``None`` to continue.
+    """
+    try:
+        import playwright.async_api  # noqa: F401
+    except ImportError:
+        log.error(
+            'playwright is not installed — run `uv pip install -e ".[render]"` '
+            "(or `pip install playwright>=1.47.0`) and then `playwright install chromium`"
+        )
+        return EXIT_PLAYWRIGHT_NOT_INSTALLED
+
+    if not _chromium_browser_dir_exists():
+        log.error(
+            "playwright Chromium binaries not found — run `playwright install chromium`. "
+            "Set PLAYWRIGHT_BROWSERS_PATH if you keep browsers in a non-default location."
+        )
+        return EXIT_CHROMIUM_NOT_INSTALLED
+
+    return None
 
 
 # Speaker is encoded as a "[name]: ..." prefix on the transcript content;
@@ -84,6 +152,10 @@ async def _main(sim_id: uuid.UUID) -> int:
         datefmt="%H:%M:%S",
     )
     log = logging.getLogger("render_simulation_video")
+
+    preflight = _preflight_render_dependencies(log)
+    if preflight is not None:
+        return preflight
 
     from core.bootstrap import bootstrap_services
     from core.repos.simulation_repo import SimulationRepo
