@@ -10,7 +10,16 @@ auto_merge: true
 setup_command: "python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
 # Safety limits (0 = unlimited)
 batch: true
-batch_size: 5
+batch_size: 2
 max_issues: 25
 max_session_duration: 18000  # 5 hours in seconds
 agent_timeout: 3600  # 60 minutes in seconds
+
+# === Added by alpha-loop init (new settings) ===
+# These options were added in a newer alpha-loop release. They're commented out
+# so your current behavior is unchanged — uncomment to opt in.
+
+# harnesses:
+#   - claude-code
+#
+
