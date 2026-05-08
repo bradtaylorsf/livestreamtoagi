@@ -21,6 +21,9 @@ function makeSim(
     total_cost: "0",
     total_artifacts: 0,
     agents_participated: [],
+    is_featured: false,
+    video_url: null,
+    submitter_display_name: null,
   };
 }
 

@@ -1,3 +1,10 @@
+meta:
+  name: "First 48 Hours"
+  description: "Awakening + Dress Rehearsal combined: Day 1 blank-slate introductions feeding into Day 2 standups, work blocks, audience interaction, and evening dreams. Tests the full lifecycle including memory carry-over between days."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 40.0
+  expected_runtime_minutes: 90
+
 # First 48 Hours — Awakening + Dress Rehearsal combined
 #
 # Day 1: Blank-slate awakening — agents discover each other, get mission,

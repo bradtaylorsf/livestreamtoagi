@@ -8,7 +8,7 @@ from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ── Agents ──────────────────────────────────────────────────────
 
@@ -369,6 +369,27 @@ class EnergyLogCreate(BaseModel):
     simulation_id: uuid.UUID | None = None
 
 
+class AgentEnergyLogCreate(BaseModel):
+    """Per-agent, per-turn energy point — feeds the energy timeline chart."""
+
+    simulation_id: uuid.UUID
+    agent_id: str
+    conversation_id: uuid.UUID
+    turn_number: int
+    energy: float
+
+
+class AgentEnergyLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    simulation_id: uuid.UUID
+    agent_id: str
+    conversation_id: uuid.UUID
+    turn_number: int
+    energy: float
+    timestamp: datetime | None = None
+
+
 # ── World Chunks ────────────────────────────────────────────────
 
 
@@ -507,7 +528,9 @@ class Challenge(BaseModel):
     actual_cost: float | None = None
     votes: int = 0
     category: str | None = None
+    tags: list[str] = Field(default_factory=list)
     simulation_id: uuid.UUID | None = None
+    shared_at: datetime | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -517,6 +540,7 @@ class ChallengeCreate(BaseModel):
     submitted_by: str | None = None
     source: str | None = None
     category: str | None = None
+    tags: list[str] = Field(default_factory=list)
     assigned_agents: list[str] | None = None
     cost_estimate: float | None = None
     simulation_id: uuid.UUID | None = None
@@ -760,10 +784,61 @@ class ArtifactCreate(BaseModel):
 
 
 class SimulationStatus(enum.StrEnum):
+    queued = "queued"
     running = "running"
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+
+
+class FactionConfig(BaseModel):
+    """A named grouping of agents with a shared goal/stance.
+
+    Loaded from the optional ``factions:`` block of a scenario YAML and
+    persisted on the simulation row so it surfaces in reports.
+    """
+
+    name: str
+    members: list[str]
+    goal: str
+    stance: str | None = None
+
+    @field_validator("members")
+    @classmethod
+    def _members_non_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("faction members must be non-empty")
+        return v
+
+    @field_validator("goal")
+    @classmethod
+    def _goal_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("faction goal is required")
+        return v
+
+
+class MemorySeedConfig(BaseModel):
+    """Controls what each agent remembers at simulation start.
+
+    - ``none``: every agent gets blank core memory and no recall entries.
+    - ``inherit``: copy core + recall from the most recent state of an
+      existing simulation (referenced by ``inherit_from``).
+    - ``custom``: load a JSON/YAML snapshot file (referenced by
+      ``custom_file``) mapping agent_id → core_memory + recall entries.
+    """
+
+    mode: Literal["none", "inherit", "custom"]
+    inherit_from: str | None = None
+    custom_file: str | None = None
+
+    @model_validator(mode="after")
+    def _check_mode_requirements(self) -> MemorySeedConfig:
+        if self.mode == "inherit" and not self.inherit_from:
+            raise ValueError("memory_seed mode='inherit' requires inherit_from")
+        if self.mode == "custom" and not self.custom_file:
+            raise ValueError("memory_seed mode='custom' requires custom_file")
+        return self
 
 
 class SimulationCreate(BaseModel):
@@ -775,6 +850,20 @@ class SimulationCreate(BaseModel):
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)
+    factions: list[dict[str, Any]] = Field(default_factory=list)
+    submitted_by_user_id: uuid.UUID | None = None
+    publish_to_youtube: bool = False
+
+
+class SimulationUpdate(BaseModel):
+    """Partial update for the post-completion research fields."""
+
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] | None = None
+    learnings: list[dict[str, Any]] | None = None
 
 
 class Simulation(BaseModel):
@@ -799,6 +888,42 @@ class Simulation(BaseModel):
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     is_live: bool = False
     created_at: datetime | None = None
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)
+    factions: list[dict[str, Any]] = Field(default_factory=list)
+    submitted_by_user_id: uuid.UUID | None = None
+    video_url: str | None = None
+    video_render_status: str | None = None
+    video_rendered_at: datetime | None = None
+    is_featured: bool = False
+    shared_as_challenge: bool = False
+    publish_to_youtube: bool = False
+    youtube_url: str | None = None
+    youtube_publish_status: str | None = None
+    youtube_published_at: datetime | None = None
+    youtube_publish_attempts: int = 0
+    youtube_failure_reason: str | None = None
+    # Populated only by joins in list queries (e.g. /api/simulations); the
+    # local-part of the submitter's email if signed in. None means anonymous.
+    submitter_display_name: str | None = None
+
+
+# ── Public Users (magic-link auth) ──────────────────────────────
+
+
+class User(BaseModel):
+    """A public user authenticated via emailed magic links."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: str
+    created_at: datetime | None = None
+    last_login_at: datetime | None = None
+    simulations_submitted: int = 0
+    total_cost_spent: Decimal = Decimal("0")
+    notify_on_complete: bool = True
+    unsubscribe_token: str | None = None
 
 
 class ConversationConfig(BaseModel):

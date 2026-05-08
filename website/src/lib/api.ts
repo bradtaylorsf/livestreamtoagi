@@ -6,7 +6,6 @@ import type {
   AgentRelationshipResponse,
   ApiError,
   Challenge,
-  ChallengeSubmission,
   ChatResponse,
   Clip,
   ConversationDetail,
@@ -17,6 +16,7 @@ import type {
   PaginatedResponse,
   RecallMemoryPublic,
   SelectionLogEntry,
+  ShareSimulationAsChallengeRequest,
   Stats,
   WorldChunk,
 } from "@/types";
@@ -247,27 +247,35 @@ export async function getWorldChunks(): Promise<WorldChunk[]> {
   return request<WorldChunk[]>("/api/world/chunks");
 }
 
-// Challenges
+// Challenges (now: user-submitted simulations shared with the community)
 export async function getChallenges(params?: {
-  status?: string;
-  category?: string;
+  tag?: string;
   sort?: string;
+  include_legacy?: boolean;
 }): Promise<Challenge[]> {
   const searchParams = new URLSearchParams();
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.category) searchParams.set("category", params.category);
+  if (params?.tag) searchParams.set("tag", params.tag);
   if (params?.sort) searchParams.set("sort", params.sort);
+  if (params?.include_legacy) searchParams.set("include_legacy", "true");
   const qs = searchParams.toString();
   return request<Challenge[]>(`/api/challenges${qs ? `?${qs}` : ""}`);
 }
 
-export async function submitChallenge(
-  challenge: ChallengeSubmission,
+export async function getChallenge(id: number): Promise<Challenge> {
+  return request<Challenge>(`/api/challenges/${id}`);
+}
+
+export async function shareSimulationAsChallenge(
+  simulationId: string,
+  body: ShareSimulationAsChallengeRequest,
 ): Promise<Challenge> {
-  return request<Challenge>("/api/challenges", {
-    method: "POST",
-    body: JSON.stringify(challenge),
-  });
+  return request<Challenge>(
+    `/api/simulations/${simulationId}/share-as-challenge`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function upvoteChallenge(id: number): Promise<Challenge> {
@@ -496,6 +504,13 @@ export interface PublicSimulation {
   total_cost: string;
   total_artifacts: number;
   agents_participated: string[];
+  is_featured: boolean;
+  video_url: string | null;
+  youtube_url?: string | null;
+  youtube_publish_status?: string | null;
+  publish_to_youtube?: boolean;
+  // Local-part of the submitter's email if signed in; null = anonymous.
+  submitter_display_name: string | null;
 }
 
 export interface PublicSimulationDetail extends PublicSimulation {
@@ -506,10 +521,25 @@ export interface PublicSimulationDetail extends PublicSimulation {
 }
 
 export async function getSimulations(
-  params?: { status?: string; limit?: number; offset?: number },
+  params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+    is_featured?: boolean;
+    completed_within_hours?: number;
+  },
 ): Promise<PaginatedResponse<PublicSimulation>> {
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set("status", params.status);
+  if (params?.is_featured !== undefined) {
+    searchParams.set("is_featured", params.is_featured ? "true" : "false");
+  }
+  if (params?.completed_within_hours !== undefined) {
+    searchParams.set(
+      "completed_within_hours",
+      String(params.completed_within_hours),
+    );
+  }
   searchParams.set("limit", String(params?.limit ?? 20));
   searchParams.set("offset", String(params?.offset ?? 0));
   return request<PaginatedResponse<PublicSimulation>>(
@@ -534,10 +564,26 @@ export async function getScenarios(): Promise<ScenarioInfo[]> {
   return request<ScenarioInfo[]>("/api/admin/scenarios");
 }
 
+// Public scenario library (read-only, anonymous)
+export interface PublicScenarioMeta {
+  filename: string;
+  name: string;
+  description: string;
+  agents: string[];
+  phase_count: number;
+  expected_max_cost: number;
+  expected_runtime_minutes: number;
+}
+
+export async function getPublicScenarios(): Promise<PublicScenarioMeta[]> {
+  return request<PublicScenarioMeta[]>("/api/scenarios");
+}
+
 export interface CreateSimulationRequest {
   seed_file: string;
   max_cost?: number;
   name?: string;
+  publish_to_youtube?: boolean;
 }
 
 export interface CreateSimulationResponse {

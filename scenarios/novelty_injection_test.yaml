@@ -1,3 +1,10 @@
+meta:
+  name: "Novelty Injection"
+  description: "24-hour simulation with the random-event generator enabled. Validates that 2–4 events fire, each produces at least one conversation, and agents react in personality-consistent ways."
+  agents: [vera, rex, aurora, grok]
+  expected_max_cost: 8.0
+  expected_runtime_minutes: 25
+
 # Novelty Injection Test — validates #273 (random events)
 #
 # Tests whether the event generator fires events that produce conversations.

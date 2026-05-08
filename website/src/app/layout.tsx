@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Suspense } from "react";
 import { Press_Start_2P } from "next/font/google";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import JsonLd from "@/components/JsonLd";
+import { SimulationProvider } from "@/lib/SimulationContext";
 import "./globals.css";
 
 const pixelFont = Press_Start_2P({
@@ -60,8 +62,12 @@ export default function RootLayout({
               "A 24/7 livestreamed AI reality show exploring multi-agent AI dynamics in public.",
           }}
         />
-        <Navigation />
-        <main id="main-content" className="flex-1">{children}</main>
+        <Suspense fallback={null}>
+          <SimulationProvider>
+            <Navigation />
+            <main id="main-content" className="flex-1">{children}</main>
+          </SimulationProvider>
+        </Suspense>
         <Footer />
       </body>
     </html>

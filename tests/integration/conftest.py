@@ -67,6 +67,7 @@ async def services():
         await svc.db.execute("DELETE FROM agent_transactions")
         await svc.db.execute("DELETE FROM cost_events")
         await svc.db.execute("DELETE FROM energy_change_log")
+        await svc.db.execute("DELETE FROM agent_energy_log")
         await svc.db.execute("DELETE FROM conversation_selection_log")
         await svc.db.execute("DELETE FROM conversation_buffer")
         await svc.db.execute("DELETE FROM core_memory_history")

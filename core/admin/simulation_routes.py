@@ -48,6 +48,16 @@ class NewSimulationRequest(BaseModel):
     # fields are ignored in that branch.
     seed_file: str | None = None
     max_cost: float | None = Field(default=None, ge=0, le=10)
+    hypothesis: str | None = None
+    publish_to_youtube: bool = False
+
+
+class SimulationUpdateRequest(BaseModel):
+    """Body for PATCH /simulations/{id}; all fields optional."""
+
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] | None = None
+    learnings: list[dict[str, Any]] | None = None
 
 
 class NewSimulationResponse(BaseModel):
@@ -160,6 +170,8 @@ async def create_simulation(
                     "max_cost": max_cost,
                     "source": "dashboard",
                 },
+                hypothesis=body.hypothesis,
+                publish_to_youtube=body.publish_to_youtube,
             )
         )
 
@@ -210,6 +222,8 @@ async def create_simulation(
                 "source": "dashboard",
             },
             agents_participated=agents,
+            hypothesis=body.hypothesis,
+            publish_to_youtube=body.publish_to_youtube,
         )
     )
 
@@ -359,6 +373,79 @@ async def get_simulation(
     sim = await sim_repo.get(sim_id)
     if sim is None:
         raise HTTPException(status_code=404, detail="Simulation not found")
+    return sim
+
+
+@router.patch("/simulations/{sim_id}", response_model=Simulation)
+async def update_simulation_research_fields(
+    sim_id: uuid_mod.UUID,
+    body: SimulationUpdateRequest,
+    db: Database = Depends(get_db),
+) -> Simulation:
+    """Patch hypothesis, outcomes, or learnings on an existing simulation."""
+    from core.repos.simulation_repo import SimulationRepo
+
+    sim_repo = SimulationRepo(db)
+    updated = await sim_repo.update_research_fields(
+        sim_id,
+        hypothesis=body.hypothesis,
+        outcomes=body.outcomes,
+        learnings=body.learnings,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return updated
+
+
+class YoutubePromoteRequest(BaseModel):
+    """Body for POST /simulations/{id}/youtube/promote."""
+
+    privacy_status: str = Field(default="public")
+
+
+@router.post(
+    "/simulations/{sim_id}/youtube/promote",
+    response_model=Simulation,
+)
+async def promote_youtube_video(
+    sim_id: uuid_mod.UUID,
+    body: YoutubePromoteRequest,
+    db: Database = Depends(get_db),
+) -> Simulation:
+    """Promote (or demote) the privacy of a sim's published YouTube video.
+
+    Defaults to ``public`` so admins can flip an unlisted upload public after
+    review. Returns the updated simulation row.
+    """
+    from core.repos.simulation_repo import SimulationRepo
+    from core.youtube.client import YoutubeUploadError, update_privacy
+    from core.youtube.config import load_youtube_config
+
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.get(sim_id)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    if not sim.youtube_url:
+        raise HTTPException(
+            status_code=409,
+            detail="Simulation has no YouTube video to promote",
+        )
+
+    privacy = (body.privacy_status or "public").lower()
+    if privacy not in {"public", "private", "unlisted"}:
+        raise HTTPException(
+            status_code=400,
+            detail="privacy_status must be public/private/unlisted",
+        )
+
+    # Extract the video ID from the canonical watch URL we persist.
+    video_id = sim.youtube_url.rsplit("v=", 1)[-1]
+    config = load_youtube_config()
+    try:
+        update_privacy(video_id, privacy_status=privacy, config=config)
+    except YoutubeUploadError as exc:
+        raise HTTPException(status_code=502, detail=exc.reason) from exc
+
     return sim
 
 

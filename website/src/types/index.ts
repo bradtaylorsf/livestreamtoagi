@@ -55,14 +55,21 @@ export interface Challenge {
   actual_cost: number | null;
   votes: number;
   category: string | null;
+  tags: string[];
+  // Source simulation that this challenge was shared from. Null only on
+  // legacy rows that pre-date issue #433.
+  simulation_id: string | null;
+  simulation_name: string | null;
+  simulation_video_url: string | null;
+  simulation_total_turns: number;
+  shared_at: string | null;
   created_at: string | null;
   completed_at: string | null;
 }
 
-export interface ChallengeSubmission {
+export interface ShareSimulationAsChallengeRequest {
   description: string;
-  category?: string;
-  submitter_name?: string;
+  tags?: string[];
 }
 
 export interface Stats {

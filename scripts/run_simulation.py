@@ -70,7 +70,6 @@ async def run_simulation(args: argparse.Namespace) -> None:
     from core.memory.reflection import ReflectionManager
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
-    from tools.journal_image_tool import JournalImageGenerator
     from core.simulation.clock import SimulationClock
     from core.simulation.display import SimulationDisplay
     from core.simulation.orchestrator import (
@@ -78,6 +77,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         SimulationOrchestrator,
         parse_duration,
     )
+    from tools.journal_image_tool import JournalImageGenerator
 
     # ── Parse simulation config ───────────────────────────
     agents = [a.strip() for a in args.agents.split(",")]
@@ -85,6 +85,17 @@ async def run_simulation(args: argparse.Namespace) -> None:
     duration = None
     if args.duration:
         duration = parse_duration(args.duration)
+
+    # Build memory_seed config from CLI flags (overrides any YAML block).
+    memory_seed_cfg = None
+    if args.memory_seed_mode:
+        from core.models import MemorySeedConfig
+
+        memory_seed_cfg = MemorySeedConfig(
+            mode=args.memory_seed_mode,
+            inherit_from=args.memory_seed_inherit_from,
+            custom_file=args.memory_seed_file,
+        )
 
     sim_config = SimulationConfig(
         name=args.name,
@@ -99,9 +110,14 @@ async def run_simulation(args: argparse.Namespace) -> None:
         verbose=verbose,
         management_shadow=args.management_shadow,
         existing_sim_id=getattr(args, "sim_id", None),
+        hypothesis=getattr(args, "hypothesis", None),
+        auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
+        memory_seed=memory_seed_cfg,
     )
     sim_config.world_sim = args.world_sim
-    sim_config.load_seed_file()
+    # Validate faction membership against the participating-agents set so
+    # misconfigured scenarios fail loudly at load time.
+    sim_config.load_seed_file(valid_agent_ids=set(agents))
 
     # ── Connect services ──────────────────────────────────
     svc = await bootstrap_services(auto_migrate=True)
@@ -324,6 +340,54 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Enable WorldSimulator (simulates social media, email, and world reactions)",
+    )
+    parser.add_argument(
+        "--hypothesis",
+        type=str,
+        default=None,
+        help=(
+            "What you expect to happen this run. Stored on the simulation "
+            "row so the run can be evaluated as a research artifact."
+        ),
+    )
+    parser.add_argument(
+        "--auto-draft-learnings",
+        action="store_true",
+        default=False,
+        help=(
+            "After completion, ask an LLM to draft a 2-3 sentence learnings "
+            "entry summarizing the run. Off by default."
+        ),
+    )
+    parser.add_argument(
+        "--memory-seed-mode",
+        type=str,
+        choices=["none", "inherit", "custom"],
+        default=None,
+        help=(
+            "Override the scenario's memory_seed block. 'none' wipes all "
+            "agent memory; 'inherit' copies from --memory-seed-inherit-from; "
+            "'custom' loads --memory-seed-file."
+        ),
+    )
+    parser.add_argument(
+        "--memory-seed-file",
+        type=str,
+        default=None,
+        help=(
+            "Path to a JSON/YAML snapshot file mapping agent_id to "
+            "core_memory + recall entries. Required when "
+            "--memory-seed-mode=custom."
+        ),
+    )
+    parser.add_argument(
+        "--memory-seed-inherit-from",
+        type=str,
+        default=None,
+        help=(
+            "Source simulation UUID to copy core + recall memory from. "
+            "Required when --memory-seed-mode=inherit."
+        ),
     )
     parser.add_argument(
         "--dry-run",

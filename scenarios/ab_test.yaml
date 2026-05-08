@@ -1,3 +1,10 @@
+meta:
+  name: "A/B Test Baseline"
+  description: "Standardized scenario for comparing feature runs side by side. Fixed seed topics for the first 3 conversations, then 10 autonomous turns — designed to be repeatable so two runs can be diffed by their eval scores."
+  agents: [vera, rex, aurora, fork, sentinel]
+  expected_max_cost: 5.0
+  expected_runtime_minutes: 30
+
 # A/B Test Baseline — standardized scenario for comparing feature runs
 #
 # Designed for repeatability: fixed seed topics for the first 3 conversations,

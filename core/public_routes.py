@@ -12,13 +12,16 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
+from core.auth.dependencies import get_current_user
 from core.constants import LIVE_SIMULATION_ID
 from core.models import (
     Challenge,
     Conversation,
+    User,
     WorldChunk,
     WorldEvent,
 )
@@ -102,8 +105,19 @@ class ChallengeResponse(BaseModel):
     actual_cost: float | None = None
     votes: int = 0
     category: str | None = None
+    tags: list[str] = []
+    simulation_id: str | None = None
+    simulation_name: str | None = None
+    simulation_video_url: str | None = None
+    simulation_total_turns: int = 0
+    shared_at: str | None = None
     created_at: str | None = None
     completed_at: str | None = None
+
+
+class ShareSimulationAsChallengeRequest(BaseModel):
+    description: str
+    tags: list[str] = []
 
 
 class AgentPublicProfile(BaseModel):
@@ -222,6 +236,18 @@ class BlogPostDetail(BlogPostSummary):
     content: str
 
 
+class ScenarioMeta(BaseModel):
+    """Public-facing metadata for a scenario YAML in scenarios/."""
+
+    filename: str
+    name: str
+    description: str
+    agents: list[str] = []
+    phase_count: int = 0
+    expected_max_cost: float = 0.0
+    expected_runtime_minutes: int = 0
+
+
 # ── Serialization helpers ────────────────────────────────────────
 
 
@@ -237,8 +263,36 @@ def _challenge_to_response(c: Challenge) -> ChallengeResponse:
         actual_cost=c.actual_cost,
         votes=c.votes,
         category=c.category,
+        tags=c.tags,
+        simulation_id=str(c.simulation_id) if c.simulation_id else None,
+        shared_at=c.shared_at.isoformat() if c.shared_at else None,
         created_at=c.created_at.isoformat() if c.created_at else None,
         completed_at=c.completed_at.isoformat() if c.completed_at else None,
+    )
+
+
+def _shared_row_to_response(row: dict) -> ChallengeResponse:
+    """Convert a joined challenge+simulation row from ChallengeRepo.list_shared."""
+    sim_id = row.get("simulation_id")
+    return ChallengeResponse(
+        id=row["id"],
+        description=row["description"],
+        submitted_by=row.get("submitted_by"),
+        status=row.get("status", "pending"),
+        assigned_agents=row.get("assigned_agents"),
+        result=row.get("result"),
+        cost_estimate=row.get("cost_estimate"),
+        actual_cost=row.get("actual_cost"),
+        votes=row.get("votes", 0),
+        category=row.get("category"),
+        tags=list(row.get("tags") or []),
+        simulation_id=str(sim_id) if sim_id else None,
+        simulation_name=row.get("simulation_name"),
+        simulation_video_url=row.get("simulation_video_url"),
+        simulation_total_turns=row.get("simulation_total_turns") or 0,
+        shared_at=row["shared_at"].isoformat() if row.get("shared_at") else None,
+        created_at=row["created_at"].isoformat() if row.get("created_at") else None,
+        completed_at=(row["completed_at"].isoformat() if row.get("completed_at") else None),
     )
 
 
@@ -293,6 +347,138 @@ def _event_to_response(e: WorldEvent) -> LoreEventResponse:
         audience_participation=e.audience_participation,
         created_at=e.created_at.isoformat() if e.created_at else None,
     )
+
+
+# ── Scenario Library ─────────────────────────────────────────────
+
+
+def _scenarios_dir() -> Any:
+    """Return the project's scenarios/ directory (Path)."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "scenarios"
+
+
+def _extract_leading_comment_block(text: str) -> str:
+    """Best-effort description from the first contiguous block of ``# ...`` lines."""
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("#"):
+            cleaned = stripped.lstrip("#").strip()
+            if cleaned or lines:
+                lines.append(cleaned)
+        elif stripped == "":
+            if lines:
+                break
+        else:
+            break
+    while lines and not lines[-1]:
+        lines.pop()
+    return " ".join(lines).strip()
+
+
+def _agents_from_phases(phases: Any) -> list[str]:
+    """Union of agents referenced in scenario phases (best-effort)."""
+    agents: list[str] = []
+    if not isinstance(phases, list):
+        return agents
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        for key in ("required_agents", "agents"):
+            value = phase.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item not in agents:
+                        agents.append(item)
+        single = phase.get("agent")
+        if isinstance(single, str) and single not in agents:
+            agents.append(single)
+    return agents
+
+
+def _build_scenario_meta(path: Any) -> ScenarioMeta:
+    """Parse a scenarios/*.yaml file into a ScenarioMeta record.
+
+    Reads the new ``meta:`` block when present, falling back to the leading
+    ``# ...`` comment block for ``description`` and to phase scanning for
+    ``agents`` / ``phase_count``.
+    """
+    import yaml
+
+    text = path.read_text()
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+
+    meta_block = parsed.get("meta") if isinstance(parsed.get("meta"), dict) else {}
+    phases = parsed.get("phases")
+    phase_count = len(phases) if isinstance(phases, list) else 0
+
+    fallback_description = _extract_leading_comment_block(text)
+    description = (
+        meta_block.get("description")
+        if isinstance(meta_block.get("description"), str)
+        else fallback_description
+    )
+
+    name = (
+        meta_block.get("name")
+        if isinstance(meta_block.get("name"), str) and meta_block.get("name")
+        else path.stem
+    )
+
+    agents_value = meta_block.get("agents")
+    if isinstance(agents_value, list):
+        agents = [a for a in agents_value if isinstance(a, str)]
+    else:
+        agents = _agents_from_phases(phases)
+
+    cost_value = meta_block.get("expected_max_cost")
+    try:
+        expected_max_cost = float(cost_value) if cost_value is not None else 0.0
+    except (TypeError, ValueError):
+        expected_max_cost = 0.0
+
+    runtime_value = meta_block.get("expected_runtime_minutes")
+    try:
+        expected_runtime_minutes = int(runtime_value) if runtime_value is not None else 0
+    except (TypeError, ValueError):
+        expected_runtime_minutes = 0
+
+    return ScenarioMeta(
+        filename=path.name,
+        name=name,
+        description=description or "",
+        agents=agents,
+        phase_count=phase_count,
+        expected_max_cost=expected_max_cost,
+        expected_runtime_minutes=expected_runtime_minutes,
+    )
+
+
+@router.get("/scenarios", response_model=list[ScenarioMeta])
+async def list_public_scenarios() -> list[ScenarioMeta]:
+    """List every scenario YAML in ``scenarios/`` with extracted metadata.
+
+    Used by the public Scenario Library page to render runnable presets.
+    """
+    scenarios_dir = _scenarios_dir()
+    if not scenarios_dir.is_dir():
+        return []
+    out: list[ScenarioMeta] = []
+    for path in sorted(scenarios_dir.glob("*.yaml")):
+        if not path.is_file():
+            continue
+        try:
+            out.append(_build_scenario_meta(path))
+        except OSError as exc:
+            logger.warning("scenarios: failed to read %s: %s", path.name, exc)
+    return out
 
 
 # ── Agent Endpoints ──────────────────────────────────────────────
@@ -1271,72 +1457,115 @@ async def get_world_chunks() -> list[dict[str, Any]]:
 
 @router.get("/challenges")
 async def get_challenges(
-    status: str | None = Query(None),
-    category: str | None = Query(None),
+    tag: str | None = Query(None),
     sort: str = Query("newest"),
+    include_legacy: bool = Query(False),
 ) -> list[ChallengeResponse]:
+    """List user-submitted simulations that have been shared as challenges.
+
+    Each row joins the underlying simulation so the response carries the
+    sim's id, name, video, and turn count for the card view. Legacy
+    chat-only challenges (created before issue #433) are hidden by default
+    because they target the live simulation, which is never marked
+    shared_as_challenge=TRUE; pass ``include_legacy=true`` to surface them.
+    """
+    from core.repos.challenge_repo import ChallengeRepo
+
     db = _get_db()
-    clauses: list[str] = ["simulation_id = $1"]
-    params: list[object] = [LIVE_SIMULATION_ID]
-    idx = 2
-
-    if status:
-        clauses.append(f"status = ${idx}")
-        params.append(status)
-        idx += 1
-    if category:
-        clauses.append(f"category = ${idx}")
-        params.append(category)
-        idx += 1
-
-    where = " WHERE " + " AND ".join(clauses)
-
-    order_map = {
-        "newest": "created_at DESC",
-        "most_upvoted": "votes DESC",
-        "status": "status ASC, created_at DESC",
-    }
-    order = order_map.get(sort, "created_at DESC")
-
-    rows = await db.fetch(
-        f"SELECT * FROM challenges{where} ORDER BY {order}",  # noqa: S608
-        *params,
+    repo = ChallengeRepo(db)
+    rows = await repo.list_shared(
+        tag=tag,
+        sort=sort,
+        include_legacy=include_legacy,
     )
-    challenges = []
-    for r in rows:
-        c = Challenge(**dict(r))
-        challenges.append(_challenge_to_response(c))
-    return challenges
+    return [_shared_row_to_response(r) for r in rows]
 
 
-@router.post("/challenges")
-async def submit_challenge(
-    req: ChallengeSubmitRequest,
-    request: Request,
+@router.get("/challenges/{challenge_id}")
+async def get_challenge(challenge_id: int) -> ChallengeResponse:
+    """Return a single shared challenge with its joined simulation context.
+
+    The Re-run flow uses this to discover the source simulation_id, agents,
+    and scenario so the creator form (issue #430) can pre-fill itself.
+    """
+    from core.repos.challenge_repo import ChallengeRepo
+
+    db = _get_db()
+    repo = ChallengeRepo(db)
+    row = await repo.get_shared(challenge_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    return _shared_row_to_response(row)
+
+
+@router.post("/simulations/{sim_id}/share-as-challenge")
+async def share_simulation_as_challenge(
+    sim_id: str,
+    body: ShareSimulationAsChallengeRequest,
+    user: User = Depends(get_current_user),
 ) -> ChallengeResponse:
-    svc = _get_services()
-    ip = _client_ip(request)
+    """Mark a user-submitted simulation as a community challenge.
+
+    Only the simulation's submitter may share it. Each share creates a
+    challenges row pointing at the simulation; re-sharing is rejected.
+    """
+    import uuid
+
+    from core.repos.challenge_repo import ChallengeRepo
+    from core.repos.simulation_repo import SimulationRepo
+
+    try:
+        sim_uuid = uuid.UUID(sim_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid simulation id") from exc
+
+    description = (body.description or "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+
+    services = _get_services()
+    db = services.db
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.get(sim_uuid)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    if sim.submitted_by_user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the simulation's submitter may share it as a challenge",
+        )
+    if sim.shared_as_challenge:
+        raise HTTPException(
+            status_code=409,
+            detail="Simulation is already shared as a challenge",
+        )
+
+    # Light per-user rate limit so a single account can't flood the feed.
     allowed = await _check_rate_limit(
-        svc.redis,
-        f"ratelimit:challenge:{ip}",
-        5,
+        services.redis,
+        f"ratelimit:share_challenge:{user.id}",
+        20,
         3600,
     )
     if not allowed:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded (5/hr)")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded (20/hr)")
 
-    db = _get_db()
-    row = await db.fetchrow(
-        """INSERT INTO challenges (description, submitted_by, source, category, votes, simulation_id)
-           VALUES ($1, $2, 'website', $3, 0, $4)
-           RETURNING *""",
-        req.description,
-        req.submitter_name,
-        req.category,
-        LIVE_SIMULATION_ID,
+    await db.execute(
+        "UPDATE simulations SET shared_as_challenge = TRUE WHERE id = $1",
+        sim_uuid,
     )
-    c = Challenge(**dict(row))
-    return _challenge_to_response(c)
+
+    repo = ChallengeRepo(db)
+    submitter = (user.email or "").split("@", 1)[0] or None
+    challenge = await repo.create_for_simulation(
+        simulation_id=sim_uuid,
+        description=description,
+        submitted_by=submitter,
+        tags=list(body.tags or []),
+    )
+    # Re-fetch joined row so the response includes simulation context.
+    row = await repo.get_shared(challenge.id)
+    return _shared_row_to_response(row) if row else _challenge_to_response(challenge)
 
 
 @router.post("/challenges/{challenge_id}/upvote")
@@ -1357,17 +1586,15 @@ async def upvote_challenge(
         # Mark as voted (no expiry — 1 vote per IP per challenge forever)
         await redis.set(vote_key, "1")
 
+    from core.repos.challenge_repo import ChallengeRepo
+
     db = _get_db()
-    row = await db.fetchrow(
-        """UPDATE challenges SET votes = votes + 1
-           WHERE id = $1 AND simulation_id = $2 RETURNING *""",
-        challenge_id,
-        LIVE_SIMULATION_ID,
-    )
-    if not row:
+    repo = ChallengeRepo(db)
+    challenge = await repo.upvote(challenge_id)
+    if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    c = Challenge(**dict(row))
-    return _challenge_to_response(c)
+    row = await repo.get_shared(challenge_id)
+    return _shared_row_to_response(row) if row else _challenge_to_response(challenge)
 
 
 # ── General Endpoints ────────────────────────────────────────────
@@ -1458,11 +1685,16 @@ async def get_simulations(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     include_live: bool = Query(default=False),
+    is_featured: bool | None = Query(default=None),
+    completed_within_hours: int | None = Query(default=None, ge=1, le=720),
 ) -> dict[str, Any]:
     """List all simulations (public read-only). Optionally filter by status.
 
     The seeded live channel row is excluded by default; pass include_live=true
     to include it (it represents a permanent channel, not a discrete run).
+    Pass is_featured=true to retrieve only the curated set surfaced on the home
+    page. Pass completed_within_hours=N to restrict to runs that finished in
+    the last N hours (used by the 'Wall of Simulations' Recent tab).
     """
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
@@ -1474,8 +1706,15 @@ async def get_simulations(
         limit=limit,
         offset=offset,
         include_live=include_live,
+        is_featured=is_featured,
+        completed_within_hours=completed_within_hours,
     )
-    total = await sim_repo.count(status=status, include_live=include_live)
+    total = await sim_repo.count(
+        status=status,
+        include_live=include_live,
+        is_featured=is_featured,
+        completed_within_hours=completed_within_hours,
+    )
 
     return {
         "items": [
@@ -1492,6 +1731,12 @@ async def get_simulations(
                 "total_cost": s.total_cost,
                 "total_artifacts": s.total_artifacts,
                 "agents_participated": s.agents_participated,
+                "is_featured": s.is_featured,
+                "video_url": s.video_url,
+                "youtube_url": s.youtube_url,
+                "youtube_publish_status": s.youtube_publish_status,
+                "publish_to_youtube": s.publish_to_youtube,
+                "submitter_display_name": s.submitter_display_name,
             }
             for s in simulations
         ],
@@ -1573,6 +1818,14 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
         "total_artifacts": int(total_artifacts),
         "total_management_flags": int(total_management_flags),
         "agents_participated": sim.agents_participated,
+        "hypothesis": sim.hypothesis,
+        "outcomes": sim.outcomes,
+        "learnings": sim.learnings,
+        "factions": sim.factions,
+        "video_url": sim.video_url,
+        "youtube_url": sim.youtube_url,
+        "youtube_publish_status": sim.youtube_publish_status,
+        "publish_to_youtube": sim.publish_to_youtube,
     }
 
 
@@ -1629,6 +1882,25 @@ async def get_simulation_timeline(
         event_type=event_type,
     )
     return events
+
+
+@router.get("/simulations/{sim_id}/energy-timeline")
+async def get_simulation_energy_timeline(
+    sim_id: str,
+    agent_id: str | None = Query(default=None),
+) -> dict[str, list[dict[str, Any]]]:
+    """Time-series of conversation energy grouped by agent.
+
+    Returns a mapping of agent_id -> ordered list of
+    ``{t, energy, turn, conversation_id}`` points. Use the optional
+    ``agent_id`` query parameter to filter to a single agent.
+    """
+    db = _get_db()
+    from core.repos.conversation_repo import ConversationRepo
+
+    repo = ConversationRepo(db)
+    sim_uuid = uuid.UUID(sim_id)
+    return await repo.get_energy_timeline(sim_uuid, agent_id=agent_id)
 
 
 @router.get("/simulations/{sim_id}/report")
@@ -1871,3 +2143,245 @@ async def get_public_artifacts(
         "limit": limit,
         "offset": offset,
     }
+
+
+# ── Public Simulation Submission ─────────────────────────────────
+
+
+class PublicSubmitRequest(BaseModel):
+    scenario_id: str
+    name: str
+    params: dict[str, Any] | None = None
+    hypothesis: str | None = Field(default=None, max_length=2000)
+    publish_to_youtube: bool = False
+
+
+class PublicSubmitResponse(BaseModel):
+    simulation_id: str
+    status_url: str
+    estimated_completion_time: str
+
+
+_NAME_OK_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_")
+
+
+def _sanitize_submission_name(raw: str) -> str:
+    cleaned = "".join(c for c in (raw or "").strip() if c in _NAME_OK_CHARS)
+    return cleaned[:100]
+
+
+def _public_caps() -> tuple[float, float]:
+    """Return (per_submission_cap_usd, lifetime_cap_usd)."""
+    import os
+    from decimal import InvalidOperation
+
+    def _parse(name: str, default: float) -> float:
+        raw = os.environ.get(name, "")
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except (ValueError, InvalidOperation):
+            return default
+
+    return (
+        _parse("PUBLIC_SIM_MAX_COST_USD", 1.0),
+        _parse("PUBLIC_USER_LIFETIME_CAP_USD", 10.0),
+    )
+
+
+@router.post("/simulations/submit", response_model=PublicSubmitResponse)
+async def submit_public_simulation(
+    body: PublicSubmitRequest,
+    user: User = Depends(get_current_user),
+) -> PublicSubmitResponse:
+    """Public-user simulation submission with cost + rate guardrails.
+
+    Caps enforced before the orchestrator subprocess is spawned:
+
+      * ``max_cost`` per submission (env ``PUBLIC_SIM_MAX_COST_USD``, default $1)
+      * Per-user lifetime cost (``PUBLIC_USER_LIFETIME_CAP_USD``, default $10)
+      * 1 concurrent simulation per user (queued or running)
+      * 5 submissions / user / day via Redis counter
+    """
+    import os
+    import subprocess
+    import sys
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+    from pathlib import Path
+
+    from core.models import SimulationCreate
+    from core.repos.simulation_repo import SimulationRepo
+    from core.repos.user_repo import UserRepo
+
+    project_root = Path(__file__).resolve().parent.parent
+    scenarios_dir = (project_root / "scenarios").resolve()
+    candidate = (scenarios_dir / body.scenario_id).resolve()
+    try:
+        candidate.relative_to(scenarios_dir)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="scenario_id must resolve inside scenarios/",
+        ) from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=400, detail="scenario_id not found")
+
+    sim_name = _sanitize_submission_name(body.name)
+    if not sim_name:
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+
+    per_sub_cap, lifetime_cap = _public_caps()
+    requested_cost = float((body.params or {}).get("max_cost", per_sub_cap))
+    max_cost = max(0.0, min(requested_cost, per_sub_cap))
+
+    # Lifetime cost cap (worst-case: count requested max against the user's
+    # already-spent total, even though actual cost is usually lower).
+    projected_total = float(user.total_cost_spent) + max_cost
+    if projected_total > lifetime_cap:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "lifetime_cap",
+                "message": (
+                    f"Lifetime cost cap of ${lifetime_cap:.2f} would be exceeded "
+                    f"(spent ${float(user.total_cost_spent):.2f} + "
+                    f"requested ${max_cost:.2f})"
+                ),
+            },
+        )
+
+    services = _get_services()
+    db = services.db
+    sim_repo = SimulationRepo(db)
+    user_repo = UserRepo(db)
+
+    # Concurrent simulations cap (1)
+    active = await sim_repo.count_active_for_user(user.id)
+    if active >= 1:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "concurrent_limit",
+                "message": "You already have a simulation queued or running",
+            },
+        )
+
+    # Daily rate limit (5/day) — Redis counter, no-op if Redis is down.
+    redis = services.redis
+    daily_key = f"ratelimit:sim_submit:{user.id}"
+    allowed = await _check_rate_limit(redis, daily_key, 5, 86400)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "daily_limit",
+                "message": "Daily submission limit reached (5/day)",
+            },
+        )
+
+    sim = await sim_repo.create(
+        SimulationCreate(
+            name=sim_name,
+            description=body.hypothesis,
+            config={
+                "scenario_id": body.scenario_id,
+                "max_cost": max_cost,
+                "params": body.params or {},
+                "source": "public_submit",
+            },
+            status="queued",  # type: ignore[arg-type]
+            hypothesis=body.hypothesis,
+            submitted_by_user_id=user.id,
+            publish_to_youtube=body.publish_to_youtube,
+        )
+    )
+
+    # Worst-case accounting: charge the user for the requested cap up-front
+    # so concurrent submissions can't race past the lifetime cap. A future
+    # reconciliation worker should refund the unused portion based on
+    # cost_events, but that is out of scope here.
+    await user_repo.increment_sims_and_cost(
+        user.id,
+        cost_delta=Decimal(str(max_cost)),
+    )
+
+    cmd = [
+        sys.executable,
+        str(project_root / "scripts" / "run_simulation.py"),
+        "--name",
+        sim_name,
+        "--seed-file",
+        str(candidate),
+        "--max-cost",
+        str(max_cost),
+        "--sim-id",
+        str(sim.id),
+    ]
+    # Skip subprocess spawn during pytest — tests assert on row creation.
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        subprocess.Popen(  # noqa: S603
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            cwd=str(project_root),
+        )
+
+    eta = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    return PublicSubmitResponse(
+        simulation_id=str(sim.id),
+        status_url=f"/api/simulations/{sim.id}",
+        estimated_completion_time=eta,
+    )
+
+
+# ── Notifications: per-email opt-out via tokenised footer link ──
+
+
+_UNSUB_PAGE_OK = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Unsubscribed</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+              padding:48px 16px;background:#f8fafc;color:#0f172a;
+              text-align:center;">
+  <h1 style="margin:0 0 12px;">You're unsubscribed.</h1>
+  <p style="margin:0;color:#475569;">
+    We won't email you when your simulations finish.
+    You can opt back in from your account at any time.
+  </p>
+</body></html>"""
+
+_UNSUB_PAGE_INVALID = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Invalid link</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+              padding:48px 16px;background:#f8fafc;color:#0f172a;
+              text-align:center;">
+  <h1 style="margin:0 0 12px;">This unsubscribe link is no longer valid.</h1>
+  <p style="margin:0;color:#475569;">
+    The token was unrecognised. If you're still receiving emails, contact
+    support.
+  </p>
+</body></html>"""
+
+
+@router.get(
+    "/notifications/unsubscribe",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def unsubscribe_completion_emails(token: str = Query(...)) -> HTMLResponse:
+    """Tokenised one-click opt-out of completion emails (no auth required)."""
+    from core.repos.user_repo import UserRepo
+
+    if not token:
+        return HTMLResponse(_UNSUB_PAGE_INVALID, status_code=400)
+
+    repo = UserRepo(_get_db())
+    user = await repo.get_by_unsubscribe_token(token)
+    if user is None:
+        return HTMLResponse(_UNSUB_PAGE_INVALID, status_code=404)
+
+    await repo.set_notify_on_complete(user.id, enabled=False)
+    logger.info("[notify] user=%s opted out of completion emails", user.id)
+    return HTMLResponse(_UNSUB_PAGE_OK, status_code=200)

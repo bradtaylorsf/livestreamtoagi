@@ -129,6 +129,7 @@ class ContextAssembler:
         balance_context: str | None = None,
         recent_dream: str | None = None,
         alliances_context: str | None = None,
+        factions_context: str | None = None,
         simulation_id: _uuid.UUID | None = None,
     ) -> ContextResult:
         """Assemble the complete context window for an agent turn.
@@ -247,6 +248,9 @@ class ContextAssembler:
         # Alliances (#274)
         _track("alliances", alliances_context or "", bool(alliances_context))
 
+        # Factions (#419) — scenario-defined groupings with shared goals
+        _track("factions", factions_context or "", bool(factions_context))
+
         # Recent dream (#272)
         _track("recent_dream", recent_dream or "", bool(recent_dream))
 
@@ -315,6 +319,11 @@ class ContextAssembler:
         # Alliances (#274)
         if alliances_context:
             system_sections.append(alliances_context)
+
+        # Factions (#419) — emitted near alliances so agents reason about
+        # team membership and goals before the world state.
+        if factions_context:
+            system_sections.append(factions_context)
 
         # Recent dream (#272) — injected so agents can reference dreams
         if recent_dream:

@@ -619,6 +619,240 @@ class TestSimulationsEndpoint:
         assert "is_live" not in list_sql
         assert "is_live" not in count_sql
 
+    def test_list_simulations_is_featured_filter(self, mock_app):
+        """is_featured=true filters both the list and count queries."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations?is_featured=true")
+        assert resp.status_code == 200
+
+        list_call = mock_db.fetch.call_args
+        count_call = mock_db.fetchval.call_args
+        assert "is_featured" in list_call[0][0]
+        assert "is_featured" in count_call[0][0]
+        # the bound parameter for is_featured should be True
+        assert True in list_call[0][1:]
+        assert True in count_call[0][1:]
+
+    def test_list_simulations_is_featured_omitted_does_not_filter(self, mock_app):
+        """No is_featured query param means the column is NOT in the WHERE clause."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "is_featured" not in list_sql
+        assert "is_featured" not in count_sql
+
+    def test_list_simulations_response_includes_is_featured_and_video_url(
+        self, mock_app
+    ):
+        """Each item in the response has is_featured and video_url fields."""
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {
+                    "id": sim_id,
+                    "name": "Featured run",
+                    "description": "desc",
+                    "config": {},
+                    "status": "completed",
+                    "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    "completed_at": datetime(2026, 4, 1, 1, tzinfo=timezone.utc),
+                    "simulated_duration": None,
+                    "real_duration": None,
+                    "total_conversations": 0,
+                    "total_turns": 0,
+                    "total_tokens": 0,
+                    "total_cost": "0",
+                    "total_artifacts": 0,
+                    "total_management_flags": 0,
+                    "agents_participated": ["vera"],
+                    "error_log": None,
+                    "model_versions": {},
+                    "is_live": False,
+                    "created_at": None,
+                    "hypothesis": None,
+                    "outcomes": {},
+                    "learnings": [],
+                    "factions": [],
+                    "submitted_by_user_id": None,
+                    "video_url": "https://example.com/video.mp4",
+                    "video_render_status": "done",
+                    "video_rendered_at": None,
+                    "is_featured": True,
+                    "submitter_display_name": None,
+                }
+            ]
+        )
+        mock_db.fetchval = AsyncMock(return_value=1)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["is_featured"] is True
+        assert item["video_url"] == "https://example.com/video.mp4"
+
+    def test_list_simulations_completed_within_hours_filter(self, mock_app):
+        """Wall of Simulations 'Recent' tab maps completed_within_hours into SQL."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations?completed_within_hours=1")
+        assert resp.status_code == 200
+
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "completed_at" in list_sql
+        assert "completed_at" in count_sql
+        # The bound interval value should be present in both calls
+        assert 1 in mock_db.fetch.call_args[0][1:]
+        assert 1 in mock_db.fetchval.call_args[0][1:]
+
+    def test_list_simulations_completed_within_hours_omitted_does_not_filter(
+        self, mock_app
+    ):
+        """No completed_within_hours param means no completed_at predicate is added."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "completed_at" not in list_sql
+        assert "completed_at" not in count_sql
+
+    def test_list_simulations_joins_users_for_submitter_display_name(
+        self, mock_app
+    ):
+        """The list query LEFT JOINs users so the response carries display name."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        list_sql = mock_db.fetch.call_args[0][0]
+        assert "LEFT JOIN users" in list_sql
+        assert "submitter_display_name" in list_sql
+
+    def test_list_simulations_response_includes_submitter_display_name(
+        self, mock_app
+    ):
+        """Submitter display name flows through to the response (None == anonymous)."""
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        base_row = {
+            "id": sim_id,
+            "name": "User-submitted run",
+            "description": None,
+            "config": {},
+            "status": "running",
+            "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            "completed_at": None,
+            "simulated_duration": None,
+            "real_duration": None,
+            "total_conversations": 0,
+            "total_turns": 0,
+            "total_tokens": 0,
+            "total_cost": "0",
+            "total_artifacts": 0,
+            "total_management_flags": 0,
+            "agents_participated": ["vera"],
+            "error_log": None,
+            "model_versions": {},
+            "is_live": False,
+            "created_at": None,
+            "hypothesis": None,
+            "outcomes": {},
+            "learnings": [],
+            "factions": [],
+            "submitted_by_user_id": None,
+            "video_url": None,
+            "video_render_status": None,
+            "video_rendered_at": None,
+            "is_featured": False,
+        }
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {**base_row, "submitter_display_name": "brad"},
+                {
+                    **base_row,
+                    "id": uuid.uuid4(),
+                    "submitter_display_name": None,
+                },
+            ]
+        )
+        mock_db.fetchval = AsyncMock(return_value=2)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items[0]["submitter_display_name"] == "brad"
+        assert items[1]["submitter_display_name"] is None
+
+    def test_energy_timeline_returns_grouped_series(self, mock_app):
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        conv_id = uuid.uuid4()
+        ts1 = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
+        ts2 = datetime(2026, 5, 1, 10, 0, 5, tzinfo=timezone.utc)
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {
+                    "agent_id": "vera",
+                    "conversation_id": conv_id,
+                    "turn_number": 0,
+                    "energy": 50.0,
+                    "timestamp": ts1,
+                },
+                {
+                    "agent_id": "vera",
+                    "conversation_id": conv_id,
+                    "turn_number": 1,
+                    "energy": 47.5,
+                    "timestamp": ts2,
+                },
+                {
+                    "agent_id": "rex",
+                    "conversation_id": conv_id,
+                    "turn_number": 0,
+                    "energy": 50.0,
+                    "timestamp": ts1,
+                },
+            ]
+        )
+        resp = client.get(f"/api/simulations/{sim_id}/energy-timeline")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data.keys()) == {"vera", "rex"}
+        assert len(data["vera"]) == 2
+        assert data["vera"][0]["t"] == ts1.isoformat()
+        assert data["vera"][0]["energy"] == 50.0
+        assert data["vera"][0]["turn"] == 0
+
+    def test_energy_timeline_filters_by_agent(self, mock_app):
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get(f"/api/simulations/{sim_id}/energy-timeline?agent_id=vera")
+        assert resp.status_code == 200
+        # the per-agent path filters with $2
+        sql = mock_db.fetch.call_args[0][0]
+        assert "AND agent_id = $2" in sql
+
 
 # ── Blog Endpoints ────────────────────────────────────────────
 
@@ -833,78 +1067,124 @@ class TestWorldEndpoints:
 # ── Challenge Endpoints ───────────────────────────────────────
 
 
+def _shared_challenge_row(**overrides):
+    base = {
+        "id": 1,
+        "description": "Try this scenario",
+        "submitted_by": "viewer1",
+        "source": "shared_simulation",
+        "status": "pending",
+        "assigned_agents": None,
+        "result": None,
+        "cost_estimate": None,
+        "actual_cost": None,
+        "votes": 1,
+        "category": None,
+        "tags": ["creative"],
+        "simulation_id": uuid.UUID("00000000-0000-0000-0000-000000000099"),
+        "shared_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+        "completed_at": None,
+        "simulation_name": "Garden build",
+        "simulation_video_url": "https://cdn/v.mp4",
+        "simulation_total_turns": 25,
+        "simulation_agents": ["vera", "rex"],
+    }
+    base.update(overrides)
+    return base
+
+
 class TestChallengeEndpoints:
-    def test_get_challenges(self, mock_app):
+    def test_get_challenges_filters_to_shared_only(self, mock_app):
+        """The default feed only joins simulations where shared_as_challenge=TRUE."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
         resp = client.get("/api/challenges")
         assert resp.status_code == 200
-        assert resp.json() == []
+        sql = mock_db.fetch.call_args[0][0]
+        assert "shared_as_challenge = TRUE" in sql
+        assert "JOIN simulations" in sql
 
-    def test_get_challenges_with_filters(self, mock_app):
+    def test_get_challenges_include_legacy_drops_filter(self, mock_app):
+        """Pass include_legacy=true to surface legacy challenge rows too."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
-        resp = client.get("/api/challenges?status=pending&sort=most_upvoted")
+        resp = client.get("/api/challenges?include_legacy=true")
         assert resp.status_code == 200
+        sql = mock_db.fetch.call_args[0][0]
+        assert "shared_as_challenge" not in sql
 
-    def test_submit_challenge(self, mock_app):
-        client, mock_db, _, mock_redis, _ = mock_app
-        mock_redis.incr = AsyncMock(return_value=1)
-        mock_db.fetchrow = AsyncMock(return_value={
-            "id": 1,
-            "description": "Build a garden",
-            "submitted_by": "viewer1",
-            "source": "website",
-            "status": "pending",
-            "assigned_agents": None,
-            "result": None,
-            "cost_estimate": None,
-            "actual_cost": None,
-            "votes": 0,
-            "category": "building",
-            "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-            "completed_at": None,
-        })
-        resp = client.post("/api/challenges", json={
-            "description": "Build a garden",
-            "category": "building",
-            "submitter_name": "viewer1",
-        })
+    def test_get_challenges_returns_simulation_context(self, mock_app):
+        """Each row carries the joined simulation fields for the card view."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[_shared_challenge_row()])
+        resp = client.get("/api/challenges")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["description"] == "Build a garden"
-        assert data["category"] == "building"
-        assert data["votes"] == 0
+        assert len(data) == 1
+        item = data[0]
+        assert item["simulation_id"] == "00000000-0000-0000-0000-000000000099"
+        assert item["simulation_name"] == "Garden build"
+        assert item["simulation_video_url"] == "https://cdn/v.mp4"
+        assert item["simulation_total_turns"] == 25
+        assert item["tags"] == ["creative"]
 
-    def test_submit_challenge_rate_limit(self, mock_app):
-        client, _, _, mock_redis, _ = mock_app
-        mock_redis.incr = AsyncMock(return_value=6)
-        resp = client.post("/api/challenges", json={
-            "description": "Too many requests",
-        })
-        assert resp.status_code == 429
+    def test_get_challenge_detail(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=_shared_challenge_row())
+        resp = client.get("/api/challenges/1")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == 1
+        assert body["simulation_id"] == "00000000-0000-0000-0000-000000000099"
+
+    def test_get_challenge_detail_not_found(self, mock_app):
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=None)
+        resp = client.get("/api/challenges/999")
+        assert resp.status_code == 404
+
+    def test_legacy_post_challenge_route_is_gone(self, mock_app):
+        """The raw-text POST /api/challenges flow is no longer accepted."""
+        client, *_ = mock_app
+        resp = client.post(
+            "/api/challenges",
+            json={"description": "x", "category": "building"},
+        )
+        # FastAPI returns 405 when the path exists for other verbs only
+        assert resp.status_code in (404, 405)
 
     def test_upvote_challenge(self, mock_app):
         client, mock_db, _, mock_redis, _ = mock_app
         mock_redis.get = AsyncMock(return_value=None)
-        mock_db.fetchrow = AsyncMock(return_value={
-            "id": 1,
-            "description": "Build a garden",
-            "submitted_by": "viewer1",
-            "source": "website",
-            "status": "pending",
-            "assigned_agents": None,
-            "result": None,
-            "cost_estimate": None,
-            "actual_cost": None,
-            "votes": 1,
-            "category": "building",
-            "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-            "completed_at": None,
-        })
+        mock_db.fetchrow = AsyncMock(
+            side_effect=[
+                {
+                    "id": 1,
+                    "description": "Try this scenario",
+                    "submitted_by": "viewer1",
+                    "source": "shared_simulation",
+                    "status": "pending",
+                    "assigned_agents": None,
+                    "result": None,
+                    "cost_estimate": None,
+                    "actual_cost": None,
+                    "votes": 2,
+                    "category": None,
+                    "tags": ["creative"],
+                    "simulation_id": uuid.UUID(
+                        "00000000-0000-0000-0000-000000000099"
+                    ),
+                    "shared_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    "completed_at": None,
+                },
+                _shared_challenge_row(votes=2),
+            ]
+        )
         resp = client.post("/api/challenges/1/upvote")
         assert resp.status_code == 200
-        assert resp.json()["votes"] == 1
+        assert resp.json()["votes"] == 2
 
     def test_upvote_challenge_duplicate(self, mock_app):
         client, _, _, mock_redis, _ = mock_app

@@ -18,7 +18,14 @@ if TYPE_CHECKING:
 
 
 def _parse_row(row: dict) -> dict:
-    for key in ("config", "error_log", "model_versions"):
+    for key in (
+        "config",
+        "error_log",
+        "model_versions",
+        "outcomes",
+        "learnings",
+        "factions",
+    ):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
     # Fallback: derive real_duration from start/end timestamps for legacy rows
@@ -41,8 +48,10 @@ class SimulationRepo:
             """INSERT INTO simulations
                (name, description, config, status,
                 simulated_duration, agents_participated, error_log,
-                model_versions)
-               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb)
+                model_versions, hypothesis, outcomes, learnings,
+                factions, submitted_by_user_id, publish_to_youtube)
+               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb,
+                       $9, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14)
                RETURNING *""",
             sim.name,
             sim.description,
@@ -52,7 +61,106 @@ class SimulationRepo:
             sim.agents_participated,
             serialize_jsonb(sim.error_log),
             serialize_jsonb(sim.model_versions),
+            sim.hypothesis,
+            serialize_jsonb(sim.outcomes),
+            serialize_jsonb(sim.learnings),
+            serialize_jsonb(sim.factions),
+            sim.submitted_by_user_id,
+            sim.publish_to_youtube,
         )
+        return Simulation(**_parse_row(dict(row)))
+
+    async def count_active_for_user(self, user_id: uuid.UUID) -> int:
+        """Count this user's simulations that are still queued or running."""
+        val = await self.db.fetchval(
+            """SELECT COUNT(*) FROM simulations
+               WHERE submitted_by_user_id = $1
+                 AND status IN ('queued', 'running')""",
+            user_id,
+        )
+        return val or 0
+
+    async def count_today_for_user(self, user_id: uuid.UUID) -> int:
+        """Count submissions in the last 24 hours for the daily rate limit."""
+        val = await self.db.fetchval(
+            """SELECT COUNT(*) FROM simulations
+               WHERE submitted_by_user_id = $1
+                 AND started_at >= now() - interval '1 day'""",
+            user_id,
+        )
+        return val or 0
+
+    async def update_factions(
+        self,
+        simulation_id: uuid.UUID,
+        factions: list[dict[str, Any]],
+    ) -> Simulation | None:
+        """Overwrite the factions JSONB column for a simulation."""
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET factions = $1::jsonb
+               WHERE id = $2
+               RETURNING *""",
+            serialize_jsonb(factions),
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def update_research_fields(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        hypothesis: str | None = None,
+        outcomes: dict[str, Any] | None = None,
+        learnings: list[dict[str, Any]] | None = None,
+    ) -> Simulation | None:
+        """Partial update of the hypothesis/outcomes/learnings columns.
+
+        Any field passed as ``None`` is left untouched (COALESCE-style).
+        """
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET hypothesis = COALESCE($1, hypothesis),
+                   outcomes   = COALESCE($2::jsonb, outcomes),
+                   learnings  = COALESCE($3::jsonb, learnings)
+               WHERE id = $4
+               RETURNING *""",
+            hypothesis,
+            serialize_jsonb(outcomes) if outcomes is not None else None,
+            serialize_jsonb(learnings) if learnings is not None else None,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def append_learning(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        author: str,
+        text: str,
+    ) -> Simulation | None:
+        """Append a single ``{author, text, created_at}`` entry to learnings."""
+        from datetime import UTC, datetime
+
+        entry = {
+            "author": author,
+            "text": text,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET learnings = COALESCE(learnings, '[]'::jsonb) || $1::jsonb
+               WHERE id = $2
+               RETURNING *""",
+            serialize_jsonb([entry]),
+            simulation_id,
+        )
+        if row is None:
+            return None
         return Simulation(**_parse_row(dict(row)))
 
     async def get(self, simulation_id: uuid.UUID) -> Simulation | None:
@@ -78,27 +186,47 @@ class SimulationRepo:
         limit: int = 50,
         offset: int = 0,
         include_live: bool = False,
+        is_featured: bool | None = None,
+        completed_within_hours: int | None = None,
     ) -> list[Simulation]:
-        live_clause = "" if include_live else " AND is_live IS NOT TRUE"
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
         if status is not None:
-            rows = await self.db.fetch(
-                f"""SELECT * FROM simulations
-                   WHERE status = $1{live_clause}
-                   ORDER BY started_at DESC
-                   LIMIT $2 OFFSET $3""",  # noqa: S608
-                status,
-                limit,
-                offset,
+            clauses.append(f"s.status = ${idx}")
+            params.append(status)
+            idx += 1
+        if not include_live:
+            clauses.append("s.is_live IS NOT TRUE")
+        if is_featured is not None:
+            clauses.append(f"s.is_featured = ${idx}")
+            params.append(is_featured)
+            idx += 1
+        if completed_within_hours is not None:
+            clauses.append(
+                f"s.completed_at IS NOT NULL "
+                f"AND s.completed_at >= now() - make_interval(hours => ${idx})"
             )
-        else:
-            where = " WHERE is_live IS NOT TRUE" if not include_live else ""
-            rows = await self.db.fetch(
-                f"""SELECT * FROM simulations{where}
-                   ORDER BY started_at DESC
-                   LIMIT $1 OFFSET $2""",  # noqa: S608
-                limit,
-                offset,
-            )
+            params.append(completed_within_hours)
+            idx += 1
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        limit_idx = idx
+        idx += 1
+        params.append(offset)
+        offset_idx = idx
+        # LEFT JOIN users to expose the submitter's display name (email
+        # local-part) without a second round-trip. None == anonymous.
+        rows = await self.db.fetch(
+            f"""SELECT s.*,
+                       split_part(u.email, '@', 1) AS submitter_display_name
+                  FROM simulations s
+                  LEFT JOIN users u ON u.id = s.submitted_by_user_id
+                  {where}
+                 ORDER BY s.started_at DESC
+                 LIMIT ${limit_idx} OFFSET ${offset_idx}""",  # noqa: S608
+            *params,
+        )
         return [Simulation(**_parse_row(dict(r))) for r in rows]
 
     async def update_status(
@@ -195,6 +323,145 @@ class SimulationRepo:
             return None
         return Simulation(**_parse_row(dict(row)))
 
+    async def update_video_status(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        status: str,
+        url: str | None = None,
+    ) -> Simulation | None:
+        """Set video_render_status and (optionally) video_url + rendered_at.
+
+        ``video_rendered_at`` is stamped only when status == 'done'.
+        """
+        if status not in {"pending", "rendering", "done", "failed", "skipped"}:
+            raise ValueError(f"Invalid video_render_status: {status}")
+        rendered_at_clause = (
+            "video_rendered_at = CASE WHEN $1 = 'done' THEN now() ELSE video_rendered_at END"
+        )
+        row = await self.db.fetchrow(
+            f"""UPDATE simulations
+               SET video_render_status = $1,
+                   video_url = COALESCE($2, video_url),
+                   {rendered_at_clause}
+               WHERE id = $3
+               RETURNING *""",  # noqa: S608
+            status,
+            url,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def claim_for_render(
+        self,
+        simulation_id: uuid.UUID,
+    ) -> str | None:
+        """Atomically claim a simulation for rendering.
+
+        Returns 'claimed' if we transitioned NULL/failed/pending → rendering,
+        'done' if a video already exists, or None if another worker already
+        owns the render.
+        """
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET video_render_status = 'rendering'
+               WHERE id = $1
+                 AND (
+                     video_render_status IS NULL
+                     OR video_render_status IN ('pending', 'failed')
+                 )
+               RETURNING video_render_status""",
+            simulation_id,
+        )
+        if row is not None:
+            return "claimed"
+        # Find out why we couldn't claim — already rendering, done, or skipped.
+        existing = await self.db.fetchval(
+            "SELECT video_render_status FROM simulations WHERE id = $1",
+            simulation_id,
+        )
+        return existing
+
+    async def claim_for_youtube_publish(
+        self,
+        simulation_id: uuid.UUID,
+    ) -> str | None:
+        """Atomically claim a simulation for YouTube publishing.
+
+        Returns 'claimed' if we transitioned NULL/failed/pending → publishing,
+        or the existing youtube_publish_status (e.g. 'publishing', 'done') if
+        another worker already owns it.
+        """
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET youtube_publish_status = 'publishing'
+               WHERE id = $1
+                 AND (
+                     youtube_publish_status IS NULL
+                     OR youtube_publish_status IN ('pending', 'failed')
+                 )
+               RETURNING youtube_publish_status""",
+            simulation_id,
+        )
+        if row is not None:
+            return "claimed"
+        existing = await self.db.fetchval(
+            "SELECT youtube_publish_status FROM simulations WHERE id = $1",
+            simulation_id,
+        )
+        return existing
+
+    async def update_youtube_status(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        status: str | None,
+        url: str | None = None,
+        failure_reason: str | None = None,
+        increment_attempts: bool = False,
+    ) -> Simulation | None:
+        """Set youtube_publish_status and optionally url/failure/attempts.
+
+        ``youtube_published_at`` is stamped only when status == 'done'.
+        Pass status=None to leave the status untouched (useful when only
+        updating attempts after a retryable failure).
+        """
+        if status is not None and status not in {
+            "pending",
+            "publishing",
+            "done",
+            "failed",
+        }:
+            raise ValueError(f"Invalid youtube_publish_status: {status}")
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET youtube_publish_status = COALESCE($1, youtube_publish_status),
+                   youtube_url = COALESCE($2, youtube_url),
+                   youtube_failure_reason = CASE
+                       WHEN $3::text IS NOT NULL THEN $3
+                       WHEN $1 = 'done' THEN NULL
+                       ELSE youtube_failure_reason
+                   END,
+                   youtube_published_at = CASE
+                       WHEN $1 = 'done' THEN now()
+                       ELSE youtube_published_at
+                   END,
+                   youtube_publish_attempts = youtube_publish_attempts
+                       + CASE WHEN $4 THEN 1 ELSE 0 END
+               WHERE id = $5
+               RETURNING *""",
+            status,
+            url,
+            failure_reason,
+            increment_attempts,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
     async def update_config(
         self,
         simulation_id: uuid.UUID,
@@ -217,19 +484,40 @@ class SimulationRepo:
         result = await self.db.execute("DELETE FROM simulations WHERE id = $1", simulation_id)
         return result == "DELETE 1"
 
-    async def count(self, *, status: str | None = None, include_live: bool = False) -> int:
+    async def count(
+        self,
+        *,
+        status: str | None = None,
+        include_live: bool = False,
+        is_featured: bool | None = None,
+        completed_within_hours: int | None = None,
+    ) -> int:
         """Return total count of simulations, optionally filtered by status."""
-        live_clause = "" if include_live else " AND is_live IS NOT TRUE"
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
         if status is not None:
-            val = await self.db.fetchval(
-                f"SELECT COUNT(*) FROM simulations WHERE status = $1{live_clause}",  # noqa: S608
-                status,
+            clauses.append(f"status = ${idx}")
+            params.append(status)
+            idx += 1
+        if not include_live:
+            clauses.append("is_live IS NOT TRUE")
+        if is_featured is not None:
+            clauses.append(f"is_featured = ${idx}")
+            params.append(is_featured)
+            idx += 1
+        if completed_within_hours is not None:
+            clauses.append(
+                f"completed_at IS NOT NULL "
+                f"AND completed_at >= now() - make_interval(hours => ${idx})"
             )
-        else:
-            where = " WHERE is_live IS NOT TRUE" if not include_live else ""
-            val = await self.db.fetchval(
-                f"SELECT COUNT(*) FROM simulations{where}"  # noqa: S608
-            )
+            params.append(completed_within_hours)
+            idx += 1
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        val = await self.db.fetchval(
+            f"SELECT COUNT(*) FROM simulations{where}",  # noqa: S608
+            *params,
+        )
         return val or 0
 
     async def get_total_cost_from_events(

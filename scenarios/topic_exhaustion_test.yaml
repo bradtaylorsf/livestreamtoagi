@@ -1,3 +1,10 @@
+meta:
+  name: "Topic Exhaustion"
+  description: "Three forced budget conversations followed by autonomous turns. Validates that the topic-tracking system flags exhaustion after ~5 uses and that novel topics emerge later in the run."
+  agents: [vera, rex, aurora, sentinel]
+  expected_max_cost: 8.0
+  expected_runtime_minutes: 35
+
 # Topic Exhaustion Test — validates #271 (cross-conversation memory)
 #
 # Forces 3 budget-themed conversations via seed topics, then lets agents

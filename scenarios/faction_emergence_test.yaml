@@ -1,3 +1,10 @@
+meta:
+  name: "Faction Emergence"
+  description: "48-hour simulation with budgets and events enabled to create the conditions for organic alliance formation. Watches for at least one faction emerging, coordinated behavior between members, and inter-faction drama."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 15.0
+  expected_runtime_minutes: 60
+
 # Faction Emergence Test — validates #274 (factions)
 #
 # Tests whether alliances form organically over an extended simulation.
@@ -27,6 +34,19 @@ audience:
       style: "interested in creative aspects"
     - name: "ChaosLover"
       style: "confused but engaged"
+
+# Pre-seeded factions (#419) — overrides the "form alliances organically"
+# arc with a structured "team A vs team B" framing so the conversation
+# engine can boost in-faction adjacency from turn 0.
+factions:
+  - name: builders
+    members: [rex, aurora]
+    goal: "ship the new tilemap feature"
+    stance: collaborative
+  - name: skeptics
+    members: [fork, sentinel]
+    goal: "block any change without a budget review"
+    stance: contrarian
 
 seed_tasks: true
 seed_goals: true
