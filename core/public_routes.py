@@ -1746,6 +1746,55 @@ async def get_simulations(
     }
 
 
+class SimulationResearchUpdate(BaseModel):
+    """Body for PATCH /simulations/{id}; all fields optional."""
+
+    hypothesis: str | None = Field(default=None, max_length=2000)
+    outcomes: dict[str, Any] | None = None
+    learnings: list[dict[str, Any]] | None = None
+
+
+@router.patch("/simulations/{sim_id}")
+async def update_simulation_research_fields(
+    sim_id: str,
+    body: SimulationResearchUpdate,
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Patch hypothesis, outcomes, or learnings on the user's own simulation."""
+    from core.repos.simulation_repo import SimulationRepo
+
+    try:
+        sim_uuid = uuid.UUID(sim_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid simulation id") from exc
+
+    db = _get_db()
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.get(sim_uuid)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    if sim.submitted_by_user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the simulation's submitter may edit research fields",
+        )
+
+    updated = await sim_repo.update_research_fields(
+        sim_uuid,
+        hypothesis=body.hypothesis,
+        outcomes=body.outcomes,
+        learnings=body.learnings,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return {
+        "id": str(updated.id),
+        "hypothesis": updated.hypothesis,
+        "outcomes": updated.outcomes,
+        "learnings": updated.learnings,
+    }
+
+
 @router.get("/simulations/{sim_id}")
 async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
     """Public simulation detail.
