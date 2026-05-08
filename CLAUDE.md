@@ -74,8 +74,14 @@ ruff format core/ tools/
 
 # Video render (optional) — installs Playwright + Chromium for the
 # simulation → MP4 pipeline. Skip unless you're working on core/video/.
+# Use `uv run` (or `.venv/bin/…`) so the project venv is picked up
+# deterministically; bare `playwright` / `python` rely on PATH order and
+# can resolve to stale shims from other projects.
 uv pip install -e ".[render]"
-playwright install chromium
+uv run playwright install chromium
+# Smoke check (should print the preflight error and exit cleanly, never
+# a bare ModuleNotFoundError):
+uv run python scripts/render_simulation_video.py --sim-id 00000000-0000-0000-0000-000000000000
 ```
 
 ### Frontend (Phaser.js)
