@@ -244,6 +244,72 @@ class TestConversationEndpoints:
         assert data["items"] == []
         assert data["total"] == 0
 
+    def test_list_conversations_no_filter_returns_all_simulations(self, mock_app):
+        """Without simulation_id, the list endpoint must not scope to LIVE_SIMULATION_ID."""
+        client, mock_db, *_ = mock_app
+        sim_a = uuid.uuid4()
+        sim_b = uuid.uuid4()
+        rows = [
+            {
+                "id": uuid.uuid4(),
+                "trigger_type": "audience",
+                "trigger_details": {},
+                "initial_energy": 0.5,
+                "final_energy": None,
+                "participating_agents": ["vera"],
+                "topics_discussed": [],
+                "turn_count": 0,
+                "closed_by": None,
+                "location": None,
+                "config_hash": None,
+                "simulation_id": sim_a,
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "ended_at": None,
+            },
+            {
+                "id": uuid.uuid4(),
+                "trigger_type": "scheduled",
+                "trigger_details": {},
+                "initial_energy": 0.5,
+                "final_energy": None,
+                "participating_agents": ["rex"],
+                "topics_discussed": [],
+                "turn_count": 0,
+                "closed_by": None,
+                "location": None,
+                "config_hash": None,
+                "simulation_id": sim_b,
+                "started_at": datetime(2026, 4, 2, tzinfo=timezone.utc),
+                "ended_at": None,
+            },
+        ]
+        mock_db.fetchval = AsyncMock(return_value=2)
+        mock_db.fetch = AsyncMock(return_value=rows)
+        resp = client.get("/api/conversations")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        sim_ids = {item["simulation_id"] for item in data["items"]}
+        assert sim_ids == {str(sim_a), str(sim_b)}
+        # Neither query should filter by simulation_id
+        list_query = mock_db.fetch.call_args[0][0]
+        assert "simulation_id" not in list_query
+        count_query = mock_db.fetchval.call_args[0][0]
+        assert "simulation_id" not in count_query
+
+    def test_list_conversations_with_simulation_id_scopes(self, mock_app):
+        """When simulation_id IS provided, results are scoped to that simulation."""
+        client, mock_db, *_ = mock_app
+        sim_a = uuid.uuid4()
+        mock_db.fetchval = AsyncMock(return_value=0)
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get(f"/api/conversations?simulation_id={sim_a}")
+        assert resp.status_code == 200
+        list_query = mock_db.fetch.call_args[0][0]
+        assert "simulation_id" in list_query
+        count_query = mock_db.fetchval.call_args[0][0]
+        assert "simulation_id" in count_query
+
     def test_get_conversation_not_found(self, mock_app):
         client, mock_db, *_ = mock_app
         mock_db.fetchrow = AsyncMock(return_value=None)

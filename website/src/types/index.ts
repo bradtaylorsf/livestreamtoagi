@@ -82,6 +82,7 @@ export interface LoreEvent {
 
 export interface ConversationSummary {
   id: string;
+  simulation_id: string | null;
   trigger_type: string;
   participating_agents: string[];
   topics_discussed: string[] | null;

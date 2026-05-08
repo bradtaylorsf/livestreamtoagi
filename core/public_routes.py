@@ -145,6 +145,7 @@ class LoreEventResponse(BaseModel):
 
 class ConversationSummary(BaseModel):
     id: str
+    simulation_id: str | None = None
     trigger_type: str
     participating_agents: list[str]
     topics_discussed: list[str] | None = None
@@ -243,6 +244,7 @@ def _challenge_to_response(c: Challenge) -> ChallengeResponse:
 def _conversation_to_summary(c: Conversation) -> ConversationSummary:
     return ConversationSummary(
         id=str(c.id),
+        simulation_id=str(c.simulation_id) if c.simulation_id else None,
         trigger_type=c.trigger_type,
         participating_agents=c.participating_agents,
         topics_discussed=c.topics_discussed,
@@ -726,20 +728,30 @@ async def get_conversations(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     db = _get_db()
-    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
-    total = await db.fetchval(
-        "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
-        sim_id,
-    )
-    rows = await db.fetch(
-        """SELECT * FROM conversations
-           WHERE simulation_id = $3
-           ORDER BY started_at DESC
-           LIMIT $1 OFFSET $2""",
-        limit,
-        offset,
-        sim_id,
-    )
+    if simulation_id:
+        sim_id = uuid.UUID(simulation_id)
+        total = await db.fetchval(
+            "SELECT COUNT(*) FROM conversations WHERE simulation_id = $1",
+            sim_id,
+        )
+        rows = await db.fetch(
+            """SELECT * FROM conversations
+               WHERE simulation_id = $3
+               ORDER BY started_at DESC
+               LIMIT $1 OFFSET $2""",
+            limit,
+            offset,
+            sim_id,
+        )
+    else:
+        total = await db.fetchval("SELECT COUNT(*) FROM conversations")
+        rows = await db.fetch(
+            """SELECT * FROM conversations
+               ORDER BY started_at DESC
+               LIMIT $1 OFFSET $2""",
+            limit,
+            offset,
+        )
     items = []
     for r in rows:
         d = dict(r)
