@@ -18,6 +18,8 @@ import {
 } from "@/lib/api";
 import { scoreColor } from "@/lib/score-utils";
 import { useCurrentSimulationId } from "@/lib/simulation-store";
+import { SkeletonBlock, SkeletonGrid } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   creativity: "Measures originality, novelty, and variety in agent outputs — dialogue, artifacts, and problem-solving approaches.",
@@ -52,6 +54,7 @@ export default function CategoryDetailPage() {
   const [prompt, setPrompt] = useState<EvalPrompt | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedSchema, setExpandedSchema] = useState(false);
+  const showSkeleton = useDelayedFlag(loading);
 
   const [simulations, setSimulations] = useState<PublicSimulation[]>([]);
   const [selectedSimId, setSelectedSimId] = useState<string>("");
@@ -154,8 +157,14 @@ export default function CategoryDetailPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-12">
-        <p className="text-sm text-foreground/50">Loading...</p>
+      <div className="mx-auto max-w-4xl px-4 py-12 space-y-6">
+        {showSkeleton ? (
+          <>
+            <SkeletonBlock width="w-1/3" height="h-6" />
+            <SkeletonBlock width="w-2/3" height="h-4" />
+            <SkeletonGrid count={6} />
+          </>
+        ) : null}
       </div>
     );
   }

@@ -20,6 +20,8 @@ import {
   getCurrentSimulationId,
   setCurrentSimulationId,
 } from "@/lib/simulation-store";
+import { SkeletonCardList } from "@/components/Skeleton";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 import type {
   SystemPromptResponse,
   AgentCostBreakdown,
@@ -543,13 +545,8 @@ function ModelBadge({ label, value }: { label: string; value: string }) {
 // -- Loading Spinner ---------------------------------------------------------
 
 function TabSpinner() {
-  return (
-    <div className="flex justify-center py-12">
-      <span className="text-sm text-foreground/40 animate-pulse">
-        Loading...
-      </span>
-    </div>
-  );
+  const showSkeleton = useDelayedFlag(true);
+  return showSkeleton ? <SkeletonCardList count={4} /> : null;
 }
 
 // -- Overview Tab -------------------------------------------------------------
