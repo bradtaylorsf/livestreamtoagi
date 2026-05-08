@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getAgentData, getAllAgentIds } from "@/lib/agent-data";
 import AgentDetailClient from "./AgentDetailClient";
+import { SimulationProvider } from "@/lib/SimulationContext";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -40,7 +41,9 @@ export default async function AgentProfilePage({ params }: Props) {
         </div>
       }
     >
-      <AgentDetailClient agent={agent} />
+      <SimulationProvider>
+        <AgentDetailClient agent={agent} />
+      </SimulationProvider>
     </Suspense>
   );
 }

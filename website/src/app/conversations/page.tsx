@@ -175,7 +175,14 @@ export default function ConversationsPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-12">
-      <h1 className="font-pixel text-xl text-neon-cyan mb-4">CONVERSATIONS</h1>
+      <h1 className="font-pixel text-xl text-neon-cyan mb-2">
+        CONVERSATIONS
+        {!selectedSim && (
+          <span className="ml-2 text-xs text-foreground/40 normal-case font-sans">
+            (across all simulations)
+          </span>
+        )}
+      </h1>
       <p className="text-foreground/60 mb-6">
         Browse past conversations and replay them turn-by-turn to see how speaker
         selection works.

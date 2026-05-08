@@ -16,10 +16,7 @@ import {
   getAgentJournal,
   getAgentCosts,
 } from "@/lib/api";
-import {
-  getCurrentSimulationId,
-  setCurrentSimulationId,
-} from "@/lib/simulation-store";
+import { useSimulation } from "@/lib/SimulationContext";
 import SimulationPicker from "@/components/SimulationPicker";
 import { SkeletonCardList } from "@/components/Skeleton";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";
@@ -101,31 +98,21 @@ export default function AgentDetailClient({ agent }: Props) {
 
   const [journal, setJournal] = useState<JournalEntry[] | null>(null);
 
-  // Single shared simulation filter — persisted in URL (`?sim=…`) and mirrored
-  // into the simulation-store so other pages pick up the same selection.
-  const simParam = searchParams.get("sim");
-  const [hydratedSimFilter, setHydratedSimFilter] = useState<string | null>(null);
-  useEffect(() => {
-    if (simParam == null) {
-      setHydratedSimFilter(getCurrentSimulationId() ?? "");
-    } else {
-      setHydratedSimFilter(simParam);
-    }
-  }, [simParam]);
-  const simFilter = hydratedSimFilter ?? "";
+  // Single shared simulation filter — sourced from SimulationContext, which
+  // resolves URL path > URL query > session-store. When the page is a scoped
+  // route (/simulations/[sim]/agents/[id]), the context source is "url" and
+  // the picker is hidden because the simulation is fixed by the route.
+  const sim = useSimulation();
+  const simFilter = sim.simulationId ?? "";
+  const isSimRouteScoped = sim.isRouteScoped;
 
   const setSimFilter = useCallback(
     (v: string) => {
-      const sp = new URLSearchParams(searchParams.toString());
-      if (v) sp.set("sim", v);
-      else sp.delete("sim");
-      router.replace(`?${sp.toString()}`, { scroll: false });
-      setCurrentSimulationId(v || null);
-      setHydratedSimFilter(v);
+      sim.setSimulationId(v || null);
       setConvOffset(0);
       setArtOffset(0);
     },
-    [router, searchParams],
+    [sim],
   );
 
   const [costs, setCosts] = useState<AgentCostBreakdown | null>(null);
@@ -338,6 +325,16 @@ export default function AgentDetailClient({ agent }: Props) {
         </Link>
         {" / "}
         <span className="text-foreground/60">{agent.name}</span>
+        {!isSimRouteScoped && !sim.simulationId && (
+          <span className="ml-2 text-foreground/30">
+            (across all simulations)
+          </span>
+        )}
+        {isSimRouteScoped && sim.simulationId && (
+          <span className="ml-2 text-foreground/30">
+            (in simulation {sim.simulationId.slice(0, 8)})
+          </span>
+        )}
       </nav>
 
       {/* Header Section */}
@@ -419,6 +416,7 @@ export default function AgentDetailClient({ agent }: Props) {
             onSimFilterChange={setSimFilter}
             offset={convOffset}
             onOffsetChange={setConvOffset}
+            hidePicker={isSimRouteScoped}
           />
         )}
 
@@ -433,6 +431,7 @@ export default function AgentDetailClient({ agent }: Props) {
             onFilterChange={refreshArtifacts}
             offset={artOffset}
             onOffsetChange={setArtOffset}
+            hidePicker={isSimRouteScoped}
           />
         )}
 
@@ -442,6 +441,7 @@ export default function AgentDetailClient({ agent }: Props) {
             loading={tabLoading.has("journal")}
             simFilter={simFilter}
             onSimFilterChange={setSimFilter}
+            hidePicker={isSimRouteScoped}
           />
         )}
 
@@ -888,6 +888,7 @@ function ConversationsTab({
   onSimFilterChange,
   offset,
   onOffsetChange,
+  hidePicker = false,
 }: {
   data: PaginatedResponse<AgentConversation> | null;
   loading: boolean;
@@ -895,6 +896,7 @@ function ConversationsTab({
   onSimFilterChange: (v: string) => void;
   offset: number;
   onOffsetChange: (n: number) => void;
+  hidePicker?: boolean;
 }) {
   if (loading && !data) return <TabSpinner />;
   if (!data) return <TabSpinner />;
@@ -902,13 +904,15 @@ function ConversationsTab({
   return (
     <div className="space-y-4">
       {/* Filter */}
-      <div className="flex gap-2 items-end">
-        <SimulationPicker
-          value={simFilter}
-          onChange={onSimFilterChange}
-          label="Simulation"
-        />
-      </div>
+      {!hidePicker && (
+        <div className="flex gap-2 items-end">
+          <SimulationPicker
+            value={simFilter}
+            onChange={onSimFilterChange}
+            label="Simulation"
+          />
+        </div>
+      )}
 
       {/* Table */}
       {data.items.length === 0 ? (
@@ -982,6 +986,7 @@ function ArtifactsTab({
   onFilterChange,
   offset,
   onOffsetChange,
+  hidePicker = false,
 }: {
   data: PaginatedResponse<AgentArtifactResponse> | null;
   loading: boolean;
@@ -992,6 +997,7 @@ function ArtifactsTab({
   onFilterChange: () => void;
   offset: number;
   onOffsetChange: (n: number) => void;
+  hidePicker?: boolean;
 }) {
   if (loading && !data) return <TabSpinner />;
   if (!data) return <TabSpinner />;
@@ -1002,11 +1008,13 @@ function ArtifactsTab({
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex gap-2 flex-wrap items-end">
-        <SimulationPicker
-          value={simFilter}
-          onChange={onSimFilterChange}
-          label="Simulation"
-        />
+        {!hidePicker && (
+          <SimulationPicker
+            value={simFilter}
+            onChange={onSimFilterChange}
+            label="Simulation"
+          />
+        )}
         <select
           value={typeFilter}
           onChange={(e) => {
@@ -1085,11 +1093,13 @@ function JournalTab({
   loading,
   simFilter,
   onSimFilterChange,
+  hidePicker = false,
 }: {
   data: JournalEntry[] | null;
   loading: boolean;
   simFilter: string;
   onSimFilterChange: (v: string) => void;
+  hidePicker?: boolean;
 }) {
   if (loading && !data) return <TabSpinner />;
   if (!data) return <TabSpinner />;
@@ -1097,13 +1107,15 @@ function JournalTab({
   return (
     <div className="space-y-4">
       {/* Filter */}
-      <div className="flex gap-2 items-end">
-        <SimulationPicker
-          value={simFilter}
-          onChange={onSimFilterChange}
-          label="Simulation"
-        />
-      </div>
+      {!hidePicker && (
+        <div className="flex gap-2 items-end">
+          <SimulationPicker
+            value={simFilter}
+            onChange={onSimFilterChange}
+            label="Simulation"
+          />
+        </div>
+      )}
 
       {/* Entries */}
       {data.length === 0 ? (
