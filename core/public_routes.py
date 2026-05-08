@@ -1768,6 +1768,7 @@ async def get_simulation_social_graph(sim_id: str) -> list[dict[str, Any]]:
 async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
     """Public list of memory snapshots for a simulation."""
     import json as _json
+    from datetime import UTC, datetime
     from pathlib import Path
 
     snapshots_dir = Path("snapshots")
@@ -1781,11 +1782,14 @@ async def get_simulation_snapshots(sim_id: str) -> list[dict[str, Any]]:
             source_id = data.get("source_simulation_id", "")
             if source_id == sim_id or not source_id:
                 agents = data.get("agents", {})
+                snapshot_at = data.get("snapshot_at") or datetime.fromtimestamp(
+                    f.stat().st_mtime, tz=UTC
+                ).isoformat()
                 results.append(
                     {
                         "filename": f.name,
                         "simulation_id": source_id,
-                        "snapshot_at": data.get("snapshot_at", ""),
+                        "snapshot_at": snapshot_at,
                         "agent_count": len(agents),
                     }
                 )
