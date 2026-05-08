@@ -485,6 +485,38 @@ export async function getSimulation(
   return request<PublicSimulationDetail>(`/api/simulations/${id}`);
 }
 
+// Scenarios + simulation launcher (admin)
+export interface ScenarioInfo {
+  filename: string;
+  name: string;
+  description: string | null;
+}
+
+export async function getScenarios(): Promise<ScenarioInfo[]> {
+  return request<ScenarioInfo[]>("/api/admin/scenarios");
+}
+
+export interface CreateSimulationRequest {
+  seed_file: string;
+  max_cost?: number;
+  name?: string;
+}
+
+export interface CreateSimulationResponse {
+  simulation_id: string;
+  name: string;
+  status: string;
+}
+
+export async function createSimulation(
+  body: CreateSimulationRequest,
+): Promise<CreateSimulationResponse> {
+  return request<CreateSimulationResponse>("/api/admin/simulations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getSimulationReport(
   id: string,
 ): Promise<Record<string, unknown>> {

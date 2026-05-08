@@ -90,6 +90,7 @@ class SimulationConfig:
         verbose: bool = False,
         management_shadow: bool = True,
         debug_prompts: bool = False,
+        existing_sim_id: str | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -108,6 +109,11 @@ class SimulationConfig:
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
         self.seed_goals: bool = False
+        # When provided, the orchestrator attaches to a pre-created
+        # simulation row instead of inserting a new one. Used when the
+        # admin dashboard pre-creates the row so it can immediately return
+        # the simulation_id to the client for redirect.
+        self.existing_sim_id = existing_sim_id
 
     @property
     def mode(self) -> str:
@@ -411,6 +417,46 @@ class SimulationOrchestrator:
         random.seed(seed)
         logger.info("RNG seeded with %d (from simulation %s)", seed, simulation_id)
 
+    async def _create_or_attach_simulation(
+        self,
+        config_snapshot: dict[str, Any],
+        model_versions: dict[str, dict[str, str]],
+    ) -> Any:
+        """Create a new simulation row, or attach to one pre-created by the API.
+
+        When ``config.existing_sim_id`` is set the row was inserted by the
+        admin dashboard so the client could be redirected immediately;
+        we fetch it, refresh its config / agents / status, and reuse it.
+        """
+        import uuid as _uuid
+
+        if self._config.existing_sim_id:
+            sim_uuid = _uuid.UUID(self._config.existing_sim_id)
+            sim = await self._sim_repo.get(sim_uuid)
+            if sim is None:
+                raise RuntimeError(
+                    f"existing_sim_id {sim_uuid} not found in simulations table"
+                )
+            await self._sim_repo.update_config(sim_uuid, config_snapshot)
+            await self._sim_repo.update_agents_participated(
+                sim_uuid, self._config.agents
+            )
+            await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
+            # Re-read so we have fresh config/agents/status fields
+            sim = await self._sim_repo.get(sim_uuid)
+            return sim
+
+        return await self._sim_repo.create(
+            SimulationCreate(
+                name=self._config.name,
+                description=self._config.description,
+                config=config_snapshot,
+                status=SimulationStatus.running,
+                agents_participated=self._config.agents,
+                model_versions=model_versions,
+            )
+        )
+
     async def run(self) -> None:
         """Execute the seeded simulation — create record, run phases, finalize."""
         self._start_time = time.monotonic()
@@ -424,16 +470,7 @@ class SimulationOrchestrator:
             ),
         }
         model_versions = self._build_model_versions()
-        sim = await self._sim_repo.create(
-            SimulationCreate(
-                name=self._config.name,
-                description=self._config.description,
-                config=config_snapshot,
-                status=SimulationStatus.running,
-                agents_participated=self._config.agents,
-                model_versions=model_versions,
-            )
-        )
+        sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
         self._started_at = sim.started_at or datetime.now(UTC)
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
@@ -653,16 +690,7 @@ class SimulationOrchestrator:
             ),
         }
         model_versions = self._build_model_versions()
-        sim = await self._sim_repo.create(
-            SimulationCreate(
-                name=self._config.name,
-                description=self._config.description,
-                config=config_snapshot,
-                status=SimulationStatus.running,
-                agents_participated=self._config.agents,
-                model_versions=model_versions,
-            )
-        )
+        sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
         self._started_at = sim.started_at or datetime.now(UTC)
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation

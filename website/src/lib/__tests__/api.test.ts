@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiRequestError,
   chatWithAgent,
+  createSimulation,
   getAgents,
   getAgentArtifacts,
   getAgentConversations,
@@ -14,6 +15,7 @@ import {
   getConversations,
   getConversationSelections,
   getLore,
+  getScenarios,
   getStats,
   getWorldChunks,
   submitChallenge,
@@ -303,6 +305,47 @@ describe("getAgentEvolution", () => {
       expect.anything(),
     );
     expect(result).toEqual(events);
+  });
+});
+
+describe("getScenarios", () => {
+  it("sends GET to /api/admin/scenarios and returns the list", async () => {
+    const scenarios = [
+      { filename: "smoke.yaml", name: "smoke", description: "Smoke test" },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(scenarios));
+
+    const result = await getScenarios();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/scenarios",
+      expect.anything(),
+    );
+    expect(result).toEqual(scenarios);
+  });
+});
+
+describe("createSimulation", () => {
+  it("POSTs the seed_file + max_cost body to /api/admin/simulations", async () => {
+    const response = {
+      simulation_id: "sim-123",
+      name: "dashboard-smoke-x",
+      status: "running",
+    };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await createSimulation({
+      seed_file: "smoke.yaml",
+      max_cost: 1.5,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ seed_file: "smoke.yaml", max_cost: 1.5 }),
+      }),
+    );
+    expect(result).toEqual(response);
   });
 });
 

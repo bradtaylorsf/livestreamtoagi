@@ -98,6 +98,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         verbose=verbose,
         management_shadow=args.management_shadow,
+        existing_sim_id=getattr(args, "sim_id", None),
     )
     sim_config.world_sim = args.world_sim
     sim_config.load_seed_file()
@@ -307,6 +308,16 @@ def main() -> None:
         type=str,
         default=None,
         help="Path to a memory snapshot JSON file to pre-load before simulation",
+    )
+    parser.add_argument(
+        "--sim-id",
+        type=str,
+        default=None,
+        help=(
+            "Attach to a pre-created simulation row (UUID) instead of "
+            "inserting a new one. Used by the admin dashboard to redirect "
+            "the user to /simulations/<id> immediately on launch."
+        ),
     )
     parser.add_argument(
         "--world-sim",
