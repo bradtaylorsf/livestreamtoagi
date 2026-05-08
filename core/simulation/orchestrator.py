@@ -230,6 +230,7 @@ class SimulationOrchestrator:
             self._prompt_log_repo = PromptLogRepo(db)
         self._simulation_id: uuid.UUID | None = None
         self._start_time: float = 0.0
+        self._started_at: datetime | None = None
         self._total_cost = Decimal("0")
         self._cancelled = False
         self._errors: list[dict[str, Any]] = []
@@ -434,6 +435,7 @@ class SimulationOrchestrator:
             )
         )
         self._simulation_id = sim.id
+        self._started_at = sim.started_at or datetime.now(UTC)
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
@@ -662,6 +664,7 @@ class SimulationOrchestrator:
             )
         )
         self._simulation_id = sim.id
+        self._started_at = sim.started_at or datetime.now(UTC)
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
@@ -980,7 +983,13 @@ class SimulationOrchestrator:
             self._on_simulation_error,
         )
 
-        real_duration = timedelta(seconds=time.monotonic() - self._start_time)
+        completed_at = datetime.now(UTC)
+        # Wall-clock duration between start and completion. Falls back to
+        # monotonic delta only if started_at was never captured (defensive).
+        if self._started_at is not None:
+            real_duration = completed_at - self._started_at
+        else:
+            real_duration = timedelta(seconds=time.monotonic() - self._start_time)
         # Use clock elapsed time if speed_multiplier > 0, else fallback to phase count
         if self._config.speed_multiplier > 0 or self._config.mode == "autonomous":
             simulated_duration = self.clock.elapsed()
@@ -990,7 +999,7 @@ class SimulationOrchestrator:
         await self._sim_repo.update_status(
             self._simulation_id,
             status.value,
-            completed_at=datetime.now(UTC),
+            completed_at=completed_at,
             error_log=combined_log,
         )
         await self._sim_repo.update_durations(

@@ -21,6 +21,14 @@ def _parse_row(row: dict) -> dict:
     for key in ("config", "error_log", "model_versions"):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
+    # Fallback: derive real_duration from start/end timestamps for legacy rows
+    # where the column is NULL but both timestamps were persisted.
+    if (
+        row.get("real_duration") is None
+        and row.get("started_at") is not None
+        and row.get("completed_at") is not None
+    ):
+        row["real_duration"] = row["completed_at"] - row["started_at"]
     return row
 
 
