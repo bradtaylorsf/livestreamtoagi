@@ -619,6 +619,56 @@ class TestSimulationsEndpoint:
         assert "is_live" not in list_sql
         assert "is_live" not in count_sql
 
+    def test_energy_timeline_returns_grouped_series(self, mock_app):
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        conv_id = uuid.uuid4()
+        ts1 = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
+        ts2 = datetime(2026, 5, 1, 10, 0, 5, tzinfo=timezone.utc)
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {
+                    "agent_id": "vera",
+                    "conversation_id": conv_id,
+                    "turn_number": 0,
+                    "energy": 50.0,
+                    "timestamp": ts1,
+                },
+                {
+                    "agent_id": "vera",
+                    "conversation_id": conv_id,
+                    "turn_number": 1,
+                    "energy": 47.5,
+                    "timestamp": ts2,
+                },
+                {
+                    "agent_id": "rex",
+                    "conversation_id": conv_id,
+                    "turn_number": 0,
+                    "energy": 50.0,
+                    "timestamp": ts1,
+                },
+            ]
+        )
+        resp = client.get(f"/api/simulations/{sim_id}/energy-timeline")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data.keys()) == {"vera", "rex"}
+        assert len(data["vera"]) == 2
+        assert data["vera"][0]["t"] == ts1.isoformat()
+        assert data["vera"][0]["energy"] == 50.0
+        assert data["vera"][0]["turn"] == 0
+
+    def test_energy_timeline_filters_by_agent(self, mock_app):
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get(f"/api/simulations/{sim_id}/energy-timeline?agent_id=vera")
+        assert resp.status_code == 200
+        # the per-agent path filters with $2
+        sql = mock_db.fetch.call_args[0][0]
+        assert "AND agent_id = $2" in sql
+
 
 # ── Blog Endpoints ────────────────────────────────────────────
 

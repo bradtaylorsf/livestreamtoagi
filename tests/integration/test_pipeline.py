@@ -123,6 +123,20 @@ class TestConversationExecution:
             )
             assert len(rows) > 0, f"No energy change logs for conversation {conv_id}"
 
+    async def test_agent_energy_log_written(self, services, simulation_result):
+        """One agent_energy_log row per active participant per turn."""
+        for conv_id in simulation_result["conversation_ids"]:
+            rows = await services.db.fetch(
+                "SELECT * FROM agent_energy_log WHERE conversation_id = $1",
+                conv_id,
+            )
+            assert len(rows) > 0, (
+                f"No agent_energy_log rows for conversation {conv_id}"
+            )
+            # Every row should be tied to the same simulation
+            sim_ids = {r["simulation_id"] for r in rows}
+            assert len(sim_ids) == 1
+
     async def test_cost_events_written(self, services, simulation_result):
         """Cost events should be written with token counts during simulation."""
         st = simulation_result["start_time"]

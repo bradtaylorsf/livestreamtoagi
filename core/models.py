@@ -369,6 +369,27 @@ class EnergyLogCreate(BaseModel):
     simulation_id: uuid.UUID | None = None
 
 
+class AgentEnergyLogCreate(BaseModel):
+    """Per-agent, per-turn energy point — feeds the energy timeline chart."""
+
+    simulation_id: uuid.UUID
+    agent_id: str
+    conversation_id: uuid.UUID
+    turn_number: int
+    energy: float
+
+
+class AgentEnergyLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    simulation_id: uuid.UUID
+    agent_id: str
+    conversation_id: uuid.UUID
+    turn_number: int
+    energy: float
+    timestamp: datetime | None = None
+
+
 # ── World Chunks ────────────────────────────────────────────────
 
 

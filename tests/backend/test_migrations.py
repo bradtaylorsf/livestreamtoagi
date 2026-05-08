@@ -40,6 +40,7 @@ ALL_TABLES = [
     "conversation_selection_log",
     "interrupt_log",
     "energy_change_log",
+    "agent_energy_log",
     "management_shadow_log",
     "artifacts",
     "simulations",
@@ -89,7 +90,7 @@ async def conn():
     await c.execute("""
         DROP TABLE IF EXISTS
             eval_results, eval_runs, eval_analyses, agent_internal_state,
-            energy_change_log, self_modification_proposals, journal_entries,
+            energy_change_log, agent_energy_log, self_modification_proposals, journal_entries,
             interrupt_log, conversation_selection_log, expansion_proposals,
             conversation_buffer, recall_memory, core_memory_history, core_memory,
             cost_events, revenue_events, challenges, world_events, world_chunks,

@@ -11,6 +11,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from core.models import (
+    AgentEnergyLogCreate,
     EnergyLogCreate,
     InterruptLogCreate,
     SelectionLog,
@@ -124,6 +125,34 @@ class SelectionLogger:
             simulation_id=self.simulation_id,
         )
         await self.repo.log_energy(entry)
+
+    async def log_agent_energy(
+        self,
+        *,
+        conversation_id: uuid.UUID,
+        turn_number: int,
+        simulation_id: uuid.UUID,
+        agent_energies: dict[str, float],
+    ) -> None:
+        """Persist one ``agent_energy_log`` row per active participant.
+
+        Conversation energy is shared across active participants today, so we
+        write the same value for every agent in ``agent_energies``. The
+        timeline endpoint groups by agent_id at read time.
+        """
+        if not agent_energies:
+            return
+        entries = [
+            AgentEnergyLogCreate(
+                simulation_id=simulation_id,
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                turn_number=turn_number,
+                energy=float(energy),
+            )
+            for agent_id, energy in agent_energies.items()
+        ]
+        await self.repo.log_agent_energy_bulk(entries)
 
     async def cleanup(self, retention_days: int | None = None) -> None:
         """Delete logs older than retention_days."""
