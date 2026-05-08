@@ -122,7 +122,11 @@ export default function AgentDetailClient({ agent }: Props) {
       return next;
     });
 
-  // Load overview stats on mount
+  // Load overview stats on mount.
+  // Scope is intentionally lifetime (no simulation_id) so all three numbers
+  // reflect the same "across every simulation this agent has participated in"
+  // view. Once Epic 2 ships an active-simulation provider, swap in the
+  // selected sim id here so all three queries scope together.
   useEffect(() => {
     Promise.allSettled([
       getAgentConversations(id, { limit: 1, offset: 0 }),
