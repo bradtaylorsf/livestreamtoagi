@@ -8,7 +8,7 @@ from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ── Agents ──────────────────────────────────────────────────────
 
@@ -766,6 +766,33 @@ class SimulationStatus(enum.StrEnum):
     cancelled = "cancelled"
 
 
+class FactionConfig(BaseModel):
+    """A named grouping of agents with a shared goal/stance.
+
+    Loaded from the optional ``factions:`` block of a scenario YAML and
+    persisted on the simulation row so it surfaces in reports.
+    """
+
+    name: str
+    members: list[str]
+    goal: str
+    stance: str | None = None
+
+    @field_validator("members")
+    @classmethod
+    def _members_non_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("faction members must be non-empty")
+        return v
+
+    @field_validator("goal")
+    @classmethod
+    def _goal_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("faction goal is required")
+        return v
+
+
 class SimulationCreate(BaseModel):
     name: str
     description: str | None = None
@@ -775,6 +802,18 @@ class SimulationCreate(BaseModel):
     agents_participated: list[str] = Field(default_factory=list)
     error_log: dict[str, Any] | list[Any] | None = None
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)
+    factions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SimulationUpdate(BaseModel):
+    """Partial update for the post-completion research fields."""
+
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] | None = None
+    learnings: list[dict[str, Any]] | None = None
 
 
 class Simulation(BaseModel):
@@ -799,6 +838,10 @@ class Simulation(BaseModel):
     model_versions: dict[str, dict[str, str]] = Field(default_factory=dict)
     is_live: bool = False
     created_at: datetime | None = None
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
+    learnings: list[dict[str, Any]] = Field(default_factory=list)
+    factions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ConversationConfig(BaseModel):

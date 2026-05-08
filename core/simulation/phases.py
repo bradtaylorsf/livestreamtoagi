@@ -174,6 +174,7 @@ class PhaseRunner:
         relationship_tracker: RelationshipTracker | None = None,
         debug_prompts: bool = False,
         prompt_log_repo: object | None = None,
+        factions: list[Any] | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -197,6 +198,7 @@ class PhaseRunner:
         self._relationship_tracker = relationship_tracker
         self._debug_prompts = debug_prompts
         self._prompt_log_repo = prompt_log_repo
+        self._factions = list(factions or [])
 
         # Cross-phase conversation context to prevent repetition (#271)
         from core.models import ConversationRecord
@@ -636,6 +638,7 @@ class PhaseRunner:
                     debug_prompts=self._debug_prompts,
                     prompt_log_repo=self._prompt_log_repo,
                     topic_history=dict(self._topic_history),
+                    factions=list(self._factions) if self._factions else None,
                 ),
                 management=self._management,
                 context_assembler=self._context,

@@ -43,6 +43,10 @@ def make_simulation_row(**overrides: Any) -> dict:
         "agents_participated": ["vera", "rex", "aurora"],
         "error_log": None,
         "created_at": datetime(2026, 4, 3, 12, 0),
+        "hypothesis": None,
+        "outcomes": {},
+        "learnings": [],
+        "factions": [],
     }
     base.update(overrides)
     return base
@@ -392,6 +396,113 @@ class TestSimulationRepo:
         assert '"nested"' in args[3]
         # error_log should be JSON string
         assert '"oops"' in args[7]
+
+    async def test_create_persists_hypothesis_outcomes_learnings(self) -> None:
+        """SimulationCreate.hypothesis/outcomes/learnings flow into INSERT."""
+        db = make_mock_db()
+        row = make_simulation_row(
+            hypothesis="agents will form factions",
+            outcomes={"key_metrics": {"total_turns": 0}},
+            learnings=[{"author": "system", "text": "noted", "created_at": "2026-05-08T00:00:00Z"}],
+        )
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.create(
+            SimulationCreate(
+                name="sim-h",
+                config={"k": "v"},
+                hypothesis="agents will form factions",
+                outcomes={"key_metrics": {"total_turns": 0}},
+                learnings=[
+                    {
+                        "author": "system",
+                        "text": "noted",
+                        "created_at": "2026-05-08T00:00:00Z",
+                    }
+                ],
+            )
+        )
+        assert result.hypothesis == "agents will form factions"
+        assert result.outcomes == {"key_metrics": {"total_turns": 0}}
+        assert result.learnings[0]["text"] == "noted"
+
+        sql = db.fetchrow.call_args[0][0]
+        assert "hypothesis" in sql
+        assert "outcomes" in sql
+        assert "learnings" in sql
+        # Positional args: hypothesis = $9, outcomes = $10, learnings = $11
+        args = db.fetchrow.call_args[0]
+        assert args[9] == "agents will form factions"
+        assert '"key_metrics"' in args[10]
+        assert '"system"' in args[11]
+
+    async def test_update_research_fields_partial(self) -> None:
+        """Only the fields passed are updated; others use COALESCE."""
+        db = make_mock_db()
+        row = make_simulation_row(hypothesis="updated")
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.update_research_fields(row["id"], hypothesis="updated")
+        assert result is not None
+        assert result.hypothesis == "updated"
+
+        sql = db.fetchrow.call_args[0][0]
+        assert "UPDATE simulations" in sql
+        assert "COALESCE" in sql
+        args = db.fetchrow.call_args[0]
+        # hypothesis arg is non-None, outcomes and learnings are None
+        assert args[1] == "updated"
+        assert args[2] is None
+        assert args[3] is None
+
+    async def test_update_research_fields_outcomes_serialized(self) -> None:
+        db = make_mock_db()
+        row = make_simulation_row(outcomes={"key_metrics": {"x": 1}})
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        await repo.update_research_fields(
+            row["id"],
+            outcomes={"key_metrics": {"x": 1}, "surprises": []},
+        )
+        args = db.fetchrow.call_args[0]
+        assert args[1] is None
+        assert '"key_metrics"' in args[2]
+        assert args[3] is None
+
+    async def test_update_research_fields_not_found(self) -> None:
+        db = make_mock_db()
+        db.fetchrow.return_value = None
+        repo = SimulationRepo(db)
+
+        result = await repo.update_research_fields(uuid.uuid4(), hypothesis="x")
+        assert result is None
+
+    async def test_append_learning_appends_jsonb(self) -> None:
+        db = make_mock_db()
+        row = make_simulation_row(
+            learnings=[
+                {
+                    "author": "system",
+                    "text": "first",
+                    "created_at": "2026-05-08T00:00:00Z",
+                }
+            ]
+        )
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.append_learning(row["id"], author="system", text="first")
+        assert result is not None
+        sql = db.fetchrow.call_args[0][0]
+        assert "learnings = COALESCE(learnings, '[]'::jsonb) || $1::jsonb" in sql
+        # The serialized payload contains the entry
+        args = db.fetchrow.call_args[0]
+        assert '"first"' in args[1]
+        assert '"system"' in args[1]
+        assert '"created_at"' in args[1]
 
     async def test_update_status_with_error_log(self) -> None:
         db = make_mock_db()

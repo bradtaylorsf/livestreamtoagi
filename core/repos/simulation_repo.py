@@ -18,7 +18,14 @@ if TYPE_CHECKING:
 
 
 def _parse_row(row: dict) -> dict:
-    for key in ("config", "error_log", "model_versions"):
+    for key in (
+        "config",
+        "error_log",
+        "model_versions",
+        "outcomes",
+        "learnings",
+        "factions",
+    ):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
     # Fallback: derive real_duration from start/end timestamps for legacy rows
@@ -41,8 +48,10 @@ class SimulationRepo:
             """INSERT INTO simulations
                (name, description, config, status,
                 simulated_duration, agents_participated, error_log,
-                model_versions)
-               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb)
+                model_versions, hypothesis, outcomes, learnings,
+                factions)
+               VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8::jsonb,
+                       $9, $10::jsonb, $11::jsonb, $12::jsonb)
                RETURNING *""",
             sim.name,
             sim.description,
@@ -52,7 +61,84 @@ class SimulationRepo:
             sim.agents_participated,
             serialize_jsonb(sim.error_log),
             serialize_jsonb(sim.model_versions),
+            sim.hypothesis,
+            serialize_jsonb(sim.outcomes),
+            serialize_jsonb(sim.learnings),
+            serialize_jsonb(sim.factions),
         )
+        return Simulation(**_parse_row(dict(row)))
+
+    async def update_factions(
+        self,
+        simulation_id: uuid.UUID,
+        factions: list[dict[str, Any]],
+    ) -> Simulation | None:
+        """Overwrite the factions JSONB column for a simulation."""
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET factions = $1::jsonb
+               WHERE id = $2
+               RETURNING *""",
+            serialize_jsonb(factions),
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def update_research_fields(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        hypothesis: str | None = None,
+        outcomes: dict[str, Any] | None = None,
+        learnings: list[dict[str, Any]] | None = None,
+    ) -> Simulation | None:
+        """Partial update of the hypothesis/outcomes/learnings columns.
+
+        Any field passed as ``None`` is left untouched (COALESCE-style).
+        """
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET hypothesis = COALESCE($1, hypothesis),
+                   outcomes   = COALESCE($2::jsonb, outcomes),
+                   learnings  = COALESCE($3::jsonb, learnings)
+               WHERE id = $4
+               RETURNING *""",
+            hypothesis,
+            serialize_jsonb(outcomes) if outcomes is not None else None,
+            serialize_jsonb(learnings) if learnings is not None else None,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def append_learning(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        author: str,
+        text: str,
+    ) -> Simulation | None:
+        """Append a single ``{author, text, created_at}`` entry to learnings."""
+        from datetime import UTC, datetime
+
+        entry = {
+            "author": author,
+            "text": text,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET learnings = COALESCE(learnings, '[]'::jsonb) || $1::jsonb
+               WHERE id = $2
+               RETURNING *""",
+            serialize_jsonb([entry]),
+            simulation_id,
+        )
+        if row is None:
+            return None
         return Simulation(**_parse_row(dict(row)))
 
     async def get(self, simulation_id: uuid.UUID) -> Simulation | None:

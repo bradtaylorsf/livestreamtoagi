@@ -330,6 +330,38 @@ class TestBufferTruncation:
         assert "You are Rex" in messages[1]["content"]
 
 
+# ── Faction context tests (#419) ─────────────────────────────────
+
+
+class TestFactionContext:
+    @pytest.mark.asyncio
+    async def test_factions_context_appears_in_system_prompt(
+        self, assembler: ContextAssembler
+    ) -> None:
+        faction_block = (
+            "## Your Faction\nYou belong to the **builders** faction.\n"
+            "Faction goal: ship the new tilemap feature\n"
+            "Faction members alongside you: aurora.\n"
+            "Stance: collaborative"
+        )
+        messages = (
+            await assembler.assemble_context(
+                "rex", [], factions_context=faction_block
+            )
+        ).messages
+        system = messages[0]["content"]
+        assert "## Your Faction" in system
+        assert "builders" in system
+        assert "ship the new tilemap feature" in system
+
+    @pytest.mark.asyncio
+    async def test_no_factions_context_omits_section(
+        self, assembler: ContextAssembler
+    ) -> None:
+        messages = (await assembler.assemble_context("rex", [])).messages
+        assert "## Your Faction" not in messages[0]["content"]
+
+
 # ── Pixel chat highlights tests ──────────────────────────────────
 
 
@@ -709,7 +741,7 @@ class TestContextResultMetadata:
             "infrastructure", "character", "core_memory", "recall",
             "transcript", "world_state", "chat_highlights", "summaries",
             "relationships", "goals", "shared_state", "commitment_reminders",
-            "internal_state", "balance", "alliances", "recent_dream",
+            "internal_state", "balance", "alliances", "factions", "recent_dream",
         }
         assert set(result.sections_included.keys()) == expected_sections
 

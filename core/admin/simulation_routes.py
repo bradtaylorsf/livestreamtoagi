@@ -48,6 +48,15 @@ class NewSimulationRequest(BaseModel):
     # fields are ignored in that branch.
     seed_file: str | None = None
     max_cost: float | None = Field(default=None, ge=0, le=10)
+    hypothesis: str | None = None
+
+
+class SimulationUpdateRequest(BaseModel):
+    """Body for PATCH /simulations/{id}; all fields optional."""
+
+    hypothesis: str | None = None
+    outcomes: dict[str, Any] | None = None
+    learnings: list[dict[str, Any]] | None = None
 
 
 class NewSimulationResponse(BaseModel):
@@ -160,6 +169,7 @@ async def create_simulation(
                     "max_cost": max_cost,
                     "source": "dashboard",
                 },
+                hypothesis=body.hypothesis,
             )
         )
 
@@ -210,6 +220,7 @@ async def create_simulation(
                 "source": "dashboard",
             },
             agents_participated=agents,
+            hypothesis=body.hypothesis,
         )
     )
 
@@ -360,6 +371,27 @@ async def get_simulation(
     if sim is None:
         raise HTTPException(status_code=404, detail="Simulation not found")
     return sim
+
+
+@router.patch("/simulations/{sim_id}", response_model=Simulation)
+async def update_simulation_research_fields(
+    sim_id: uuid_mod.UUID,
+    body: SimulationUpdateRequest,
+    db: Database = Depends(get_db),
+) -> Simulation:
+    """Patch hypothesis, outcomes, or learnings on an existing simulation."""
+    from core.repos.simulation_repo import SimulationRepo
+
+    sim_repo = SimulationRepo(db)
+    updated = await sim_repo.update_research_fields(
+        sim_id,
+        hypothesis=body.hypothesis,
+        outcomes=body.outcomes,
+        learnings=body.learnings,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return updated
 
 
 @router.post("/simulations/{sim_id}/clone", response_model=CloneSimulationResponse)

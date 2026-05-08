@@ -152,3 +152,81 @@ def test_scenario_presets_point_to_existing_files():
             assert full_path.exists(), (
                 f"Preset '{name}' points to non-existent file: {filepath}"
             )
+
+
+# ── Faction parsing (#419) ──────────────────────────────────
+
+
+def test_faction_emergence_yaml_includes_factions_block():
+    """faction_emergence_test.yaml has the new factions: section."""
+    data = _load_scenario("faction_emergence_test")
+    assert "factions" in data
+    factions = data["factions"]
+    names = {f["name"] for f in factions}
+    assert {"builders", "skeptics"} <= names
+    builders = next(f for f in factions if f["name"] == "builders")
+    assert "rex" in builders["members"]
+    assert builders["goal"]
+
+
+def test_load_seed_file_parses_factions():
+    """SimulationConfig.load_seed_file populates `factions` from YAML."""
+    from core.simulation.orchestrator import SimulationConfig
+
+    cfg = SimulationConfig(
+        name="t",
+        seed_file=str(SCENARIOS_DIR / "faction_emergence_test.yaml"),
+        agents=["rex", "aurora", "fork", "sentinel", "vera"],
+        dry_run=True,
+    )
+    cfg.load_seed_file(valid_agent_ids={"rex", "aurora", "fork", "sentinel", "vera"})
+    assert len(cfg.factions) == 2
+    builders = next(f for f in cfg.factions if f.name == "builders")
+    assert builders.members == ["rex", "aurora"]
+    assert builders.goal
+
+
+def test_load_seed_file_rejects_unknown_member(tmp_path):
+    """Unknown member id in factions block raises a validation error."""
+    import pytest
+    import yaml as _y
+
+    from core.simulation.orchestrator import SimulationConfig
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        _y.safe_dump(
+            {
+                "factions": [
+                    {"name": "x", "members": ["nosuch"], "goal": "do stuff"},
+                ],
+                "phases": [],
+            }
+        )
+    )
+    cfg = SimulationConfig(name="t", seed_file=str(bad), agents=["vera"], dry_run=True)
+    with pytest.raises(ValueError, match="unknown members"):
+        cfg.load_seed_file(valid_agent_ids={"vera"})
+
+
+def test_load_seed_file_rejects_missing_goal(tmp_path):
+    """Missing/empty goal on a faction is a validation error."""
+    import pytest
+    import yaml as _y
+
+    from core.simulation.orchestrator import SimulationConfig
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        _y.safe_dump(
+            {
+                "factions": [
+                    {"name": "x", "members": ["vera"], "goal": ""},
+                ],
+                "phases": [],
+            }
+        )
+    )
+    cfg = SimulationConfig(name="t", seed_file=str(bad), agents=["vera"], dry_run=True)
+    with pytest.raises(ValueError, match="goal"):
+        cfg.load_seed_file(valid_agent_ids={"vera"})

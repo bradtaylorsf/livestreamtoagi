@@ -99,9 +99,13 @@ async def run_simulation(args: argparse.Namespace) -> None:
         verbose=verbose,
         management_shadow=args.management_shadow,
         existing_sim_id=getattr(args, "sim_id", None),
+        hypothesis=getattr(args, "hypothesis", None),
+        auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
     )
     sim_config.world_sim = args.world_sim
-    sim_config.load_seed_file()
+    # Validate faction membership against the participating-agents set so
+    # misconfigured scenarios fail loudly at load time.
+    sim_config.load_seed_file(valid_agent_ids=set(agents))
 
     # ── Connect services ──────────────────────────────────
     svc = await bootstrap_services(auto_migrate=True)
@@ -324,6 +328,24 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Enable WorldSimulator (simulates social media, email, and world reactions)",
+    )
+    parser.add_argument(
+        "--hypothesis",
+        type=str,
+        default=None,
+        help=(
+            "What you expect to happen this run. Stored on the simulation "
+            "row so the run can be evaluated as a research artifact."
+        ),
+    )
+    parser.add_argument(
+        "--auto-draft-learnings",
+        action="store_true",
+        default=False,
+        help=(
+            "After completion, ask an LLM to draft a 2-3 sentence learnings "
+            "entry summarizing the run. Off by default."
+        ),
     )
     parser.add_argument(
         "--dry-run",

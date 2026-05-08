@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE simulations
+    DROP COLUMN IF EXISTS factions;
+
+COMMIT;

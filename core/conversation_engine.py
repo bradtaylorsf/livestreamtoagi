@@ -167,6 +167,18 @@ class ConversationEngine:
             topic_history=options.topic_history,
         )
 
+        # Scenario factions (#419) — wire into selector adjacency boost and
+        # surface as a system-prompt section in _assemble_context_sections.
+        self._factions: list[Any] = list(options.factions or [])
+        if self._factions:
+            faction_pairs: set[frozenset[str]] = set()
+            for f in self._factions:
+                members = getattr(f, "members", None) or f.get("members", [])
+                for i, m1 in enumerate(members):
+                    for m2 in members[i + 1 :]:
+                        faction_pairs.add(frozenset({m1, m2}))
+            self._selector.set_faction_pairs(faction_pairs)
+
         self._active: _ActiveConversation | None = None
         self._running = False
         self._last_llm_meta: dict[str, Any] | None = None
@@ -1126,6 +1138,34 @@ class ConversationEngine:
 
     # ── Turn generation ────────────────────────────────────────
 
+    def _build_faction_context(self, agent_id: str) -> str | None:
+        """Return a formatted faction-membership block for ``agent_id``.
+
+        Returns None when the agent is not in any faction or when no
+        factions are configured for this run.
+        """
+        if not self._factions:
+            return None
+        for f in self._factions:
+            members = getattr(f, "members", None) or f.get("members", [])
+            if agent_id not in members:
+                continue
+            name = getattr(f, "name", None) or f.get("name", "")
+            goal = getattr(f, "goal", None) or f.get("goal", "")
+            stance = getattr(f, "stance", None) or f.get("stance")
+            others = [m for m in members if m != agent_id]
+            lines = [
+                "## Your Faction",
+                f"You belong to the **{name}** faction.",
+                f"Faction goal: {goal}",
+            ]
+            if others:
+                lines.append(f"Faction members alongside you: {', '.join(others)}.")
+            if stance:
+                lines.append(f"Stance: {stance}")
+            return "\n".join(lines)
+        return None
+
     async def _assemble_context_sections(
         self,
         agent: AgentConfig,
@@ -1142,6 +1182,7 @@ class ConversationEngine:
             "internal_state_context": None,
             "balance_context": None,
             "alliances_context": None,
+            "factions_context": self._build_faction_context(agent.id),
             "recent_dream": None,
             "shared_state_context": None,
         }
@@ -1497,6 +1538,7 @@ class ConversationEngine:
                     balance_context=ctx["balance_context"],
                     recent_dream=ctx["recent_dream"],
                     alliances_context=ctx["alliances_context"],
+                    factions_context=ctx["factions_context"],
                     simulation_id=self._simulation_id,
                 )
                 messages = context_result.messages
