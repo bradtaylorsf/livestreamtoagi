@@ -904,6 +904,8 @@ class User(BaseModel):
     last_login_at: datetime | None = None
     simulations_submitted: int = 0
     total_cost_spent: Decimal = Decimal("0")
+    notify_on_complete: bool = True
+    unsubscribe_token: str | None = None
 
 
 class ConversationConfig(BaseModel):

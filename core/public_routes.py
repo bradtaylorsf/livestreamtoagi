@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from core.auth.dependencies import get_current_user
@@ -2088,3 +2089,53 @@ async def submit_public_simulation(
         status_url=f"/api/simulations/{sim.id}",
         estimated_completion_time=eta,
     )
+
+
+# ── Notifications: per-email opt-out via tokenised footer link ──
+
+
+_UNSUB_PAGE_OK = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Unsubscribed</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+              padding:48px 16px;background:#f8fafc;color:#0f172a;
+              text-align:center;">
+  <h1 style="margin:0 0 12px;">You're unsubscribed.</h1>
+  <p style="margin:0;color:#475569;">
+    We won't email you when your simulations finish.
+    You can opt back in from your account at any time.
+  </p>
+</body></html>"""
+
+_UNSUB_PAGE_INVALID = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Invalid link</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+              padding:48px 16px;background:#f8fafc;color:#0f172a;
+              text-align:center;">
+  <h1 style="margin:0 0 12px;">This unsubscribe link is no longer valid.</h1>
+  <p style="margin:0;color:#475569;">
+    The token was unrecognised. If you're still receiving emails, contact
+    support.
+  </p>
+</body></html>"""
+
+
+@router.get(
+    "/notifications/unsubscribe",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def unsubscribe_completion_emails(token: str = Query(...)) -> HTMLResponse:
+    """Tokenised one-click opt-out of completion emails (no auth required)."""
+    from core.repos.user_repo import UserRepo
+
+    if not token:
+        return HTMLResponse(_UNSUB_PAGE_INVALID, status_code=400)
+
+    repo = UserRepo(_get_db())
+    user = await repo.get_by_unsubscribe_token(token)
+    if user is None:
+        return HTMLResponse(_UNSUB_PAGE_INVALID, status_code=404)
+
+    await repo.set_notify_on_complete(user.id, enabled=False)
+    logger.info("[notify] user=%s opted out of completion emails", user.id)
+    return HTMLResponse(_UNSUB_PAGE_OK, status_code=200)

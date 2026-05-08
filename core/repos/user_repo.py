@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,10 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from core.database import Database
+
+
+def _new_unsubscribe_token() -> str:
+    return secrets.token_urlsafe(24)
 
 
 def _row_to_user(row: dict) -> User:
@@ -35,17 +40,60 @@ class UserRepo:
         return _row_to_user(row) if row else None
 
     async def upsert_on_login(self, email: str, *, login_at: datetime) -> User:
-        """Insert a new user (or update last_login_at on an existing one)."""
+        """Insert a new user (or update last_login_at on an existing one).
+
+        Generates an unsubscribe token on first login and back-fills it for
+        legacy rows that pre-date migration 043.
+        """
         row = await self.db.fetchrow(
-            """INSERT INTO users (email, last_login_at)
-               VALUES ($1, $2)
+            """INSERT INTO users (email, last_login_at, unsubscribe_token)
+               VALUES ($1, $2, $3)
                ON CONFLICT (lower(email)) DO UPDATE
-                 SET last_login_at = EXCLUDED.last_login_at
+                 SET last_login_at = EXCLUDED.last_login_at,
+                     unsubscribe_token = COALESCE(
+                         users.unsubscribe_token,
+                         EXCLUDED.unsubscribe_token
+                     )
                RETURNING *""",
             email,
             login_at,
+            _new_unsubscribe_token(),
         )
         return _row_to_user(row)
+
+    async def get_by_unsubscribe_token(self, token: str) -> User | None:
+        row = await self.db.fetchrow(
+            "SELECT * FROM users WHERE unsubscribe_token = $1",
+            token,
+        )
+        return _row_to_user(row) if row else None
+
+    async def set_notify_on_complete(
+        self,
+        user_id: uuid.UUID,
+        *,
+        enabled: bool,
+    ) -> User | None:
+        row = await self.db.fetchrow(
+            """UPDATE users SET notify_on_complete = $1
+               WHERE id = $2
+               RETURNING *""",
+            enabled,
+            user_id,
+        )
+        return _row_to_user(row) if row else None
+
+    async def ensure_unsubscribe_token(self, user_id: uuid.UUID) -> str | None:
+        """Back-fill the unsubscribe token for users predating migration 043."""
+        row = await self.db.fetchrow(
+            """UPDATE users
+               SET unsubscribe_token = COALESCE(unsubscribe_token, $1)
+               WHERE id = $2
+               RETURNING unsubscribe_token""",
+            _new_unsubscribe_token(),
+            user_id,
+        )
+        return row["unsubscribe_token"] if row else None
 
     async def increment_sims_and_cost(
         self,
