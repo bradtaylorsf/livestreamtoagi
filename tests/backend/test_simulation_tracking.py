@@ -279,6 +279,43 @@ class TestSimulationRepo:
         result = await repo.delete(uuid.uuid4())
         assert result is False
 
+    async def test_real_duration_fallback_when_null(self) -> None:
+        """If `real_duration` is NULL but the timestamps exist, fall back to delta."""
+        db = make_mock_db()
+        started = datetime(2026, 4, 3, 12, 0)
+        completed = datetime(2026, 4, 3, 19, 30)
+        row = make_simulation_row(
+            real_duration=None,
+            started_at=started,
+            completed_at=completed,
+            status="completed",
+        )
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.get(row["id"])
+        assert result is not None
+        assert result.real_duration == completed - started
+
+    async def test_real_duration_persisted_value_preferred_over_fallback(self) -> None:
+        """If `real_duration` is already set, do not overwrite with the timestamp delta."""
+        db = make_mock_db()
+        started = datetime(2026, 4, 3, 12, 0)
+        completed = datetime(2026, 4, 3, 19, 30)
+        persisted = timedelta(minutes=42)
+        row = make_simulation_row(
+            real_duration=persisted,
+            started_at=started,
+            completed_at=completed,
+            status="completed",
+        )
+        db.fetchrow.return_value = row
+        repo = SimulationRepo(db)
+
+        result = await repo.get(row["id"])
+        assert result is not None
+        assert result.real_duration == persisted
+
     async def test_create_sql_passes_serialized_jsonb(self) -> None:
         db = make_mock_db()
         row = make_simulation_row()

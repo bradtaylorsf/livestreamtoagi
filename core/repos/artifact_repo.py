@@ -205,6 +205,26 @@ class ArtifactRepo:
             result.append(Artifact(**d))
         return result, count or 0
 
+    async def count_by_agent(
+        self,
+        agent_id: str,
+        *,
+        simulation_id: uuid.UUID | None = None,
+    ) -> int:
+        """Return the number of artifacts produced by an agent."""
+        if simulation_id is None:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM artifacts WHERE agent_id = $1",
+                agent_id,
+            )
+        else:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM artifacts WHERE agent_id = $1 AND simulation_id = $2",
+                agent_id,
+                simulation_id,
+            )
+        return count or 0
+
     async def get_artifacts_by_type(
         self,
         artifact_type: str,

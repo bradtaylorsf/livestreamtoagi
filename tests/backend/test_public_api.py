@@ -207,6 +207,148 @@ class TestAgentEndpoints:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    def test_list_agents_no_filter_does_not_scope_costs(self, mock_app):
+        """`GET /api/agents` (no sim_id) must not scope cost lookup to LIVE_SIMULATION_ID."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+        resp = client.get("/api/agents")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" not in call[0][0]
+
+    def test_list_agents_with_simulation_id_scopes_costs(self, mock_app):
+        """When `simulation_id` is provided, cost lookup is scoped to that simulation."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+        sim_id = uuid.uuid4()
+        resp = client.get(f"/api/agents?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        cost_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "cost_events" in c[0][0]
+        ]
+        assert cost_queries, "Expected at least one cost_events query"
+        for call in cost_queries:
+            assert "simulation_id" in call[0][0]
+
+    def test_list_agents_includes_conversation_and_artifact_counts(self, mock_app):
+        """Agent card returns conversation_count and artifact_count populated from DB."""
+        client, mock_db, _, _, mock_services = mock_app
+        mock_artifact_repo = MagicMock()
+        mock_artifact_repo.count_by_agent = AsyncMock(return_value=7)
+        mock_services.artifact_repo = mock_artifact_repo
+        mock_db.fetch = AsyncMock(return_value=[])
+
+        async def fetchval_side_effect(query: str, *args, **kwargs):
+            if "conversations" in query:
+                return 11
+            return 0
+
+        mock_db.fetchval = AsyncMock(side_effect=fetchval_side_effect)
+        resp = client.get("/api/agents")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(a["conversation_count"] == 11 for a in data)
+        assert all(a["artifact_count"] == 7 for a in data)
+
+    def test_get_agent_core_memory_unscoped(self, mock_app):
+        """Core memory endpoint must not default-scope to LIVE_SIMULATION_ID."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=None)
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/agents/vera/core-memory")
+        assert resp.status_code == 200
+        for call in mock_db.fetchrow.call_args_list:
+            assert "simulation_id" not in call[0][0]
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" not in call[0][0]
+
+    def test_get_agent_core_memory_scoped(self, mock_app):
+        """When simulation_id is provided, core-memory query filters by it."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchrow = AsyncMock(return_value=None)
+        mock_db.fetch = AsyncMock(return_value=[])
+        sim_id = uuid.uuid4()
+        resp = client.get(f"/api/agents/vera/core-memory?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        # The fetchrow query for current core memory must scope by simulation_id
+        assert any(
+            "simulation_id" in call[0][0] for call in mock_db.fetchrow.call_args_list
+        )
+
+    def test_get_agent_recall_memories_unscoped(self, mock_app):
+        """Recall-memories endpoint defaults to all simulations (no LIVE filter)."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchval = AsyncMock(return_value=0)
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/agents/vera/recall-memories")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" not in call[0][0]
+        for call in mock_db.fetchval.call_args_list:
+            assert "simulation_id" not in call[0][0]
+
+    def test_get_agent_recall_memories_scoped(self, mock_app):
+        """Recall-memories endpoint with explicit simulation_id scopes correctly."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchval = AsyncMock(return_value=0)
+        mock_db.fetch = AsyncMock(return_value=[])
+        sim_id = uuid.uuid4()
+        resp = client.get(f"/api/agents/vera/recall-memories?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" in call[0][0]
+
+    def test_get_agent_costs_unscoped(self, mock_app):
+        """Costs endpoint without simulation_id aggregates across all sims."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(return_value={
+            "total": 0, "input_tokens": 0, "output_tokens": 0,
+        })
+        resp = client.get("/api/agents/vera/costs")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" not in call[0][0]
+        for call in mock_db.fetchrow.call_args_list:
+            assert "simulation_id" not in call[0][0]
+
+    def test_get_agent_costs_scoped(self, mock_app):
+        """Costs endpoint with simulation_id filters by it."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(return_value={
+            "total": 0, "input_tokens": 0, "output_tokens": 0,
+        })
+        sim_id = uuid.uuid4()
+        resp = client.get(f"/api/agents/vera/costs?simulation_id={sim_id}")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" in call[0][0]
+
+    def test_get_agent_journal_unscoped(self, mock_app):
+        """Journal endpoint without simulation_id returns all-sim entries."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/agents/vera/journal")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" not in call[0][0]
+
+    def test_get_agent_conversations_unscoped(self, mock_app):
+        """Conversations-by-agent without simulation_id is unfiltered."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetchval = AsyncMock(return_value=0)
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get("/api/agents/vera/conversations")
+        assert resp.status_code == 200
+        for call in mock_db.fetch.call_args_list:
+            assert "simulation_id" not in call[0][0]
+        for call in mock_db.fetchval.call_args_list:
+            assert "simulation_id" not in call[0][0]
+
 
 # ── Chat Endpoint ─────────────────────────────────────────────
 

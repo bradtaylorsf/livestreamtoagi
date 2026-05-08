@@ -71,11 +71,18 @@ class MemoryRepo:
     async def get_core_memory(
         self, agent_id: str, simulation_id: _uuid.UUID | None = None
     ) -> CoreMemory | None:
-        row = await self.db.fetchrow(
-            f"SELECT * FROM core_memory WHERE agent_id = $1 AND {_sim_filter(2)}",
-            agent_id,
-            simulation_id,
-        )
+        if simulation_id is None:
+            row = await self.db.fetchrow(
+                """SELECT * FROM core_memory WHERE agent_id = $1
+                   ORDER BY last_updated DESC NULLS LAST LIMIT 1""",
+                agent_id,
+            )
+        else:
+            row = await self.db.fetchrow(
+                f"SELECT * FROM core_memory WHERE agent_id = $1 AND {_sim_filter(2)}",
+                agent_id,
+                simulation_id,
+            )
         return CoreMemory(**dict(row)) if row else None
 
     async def upsert_core_memory(
@@ -119,14 +126,23 @@ class MemoryRepo:
         self, agent_id: str, limit: int = 100, simulation_id: _uuid.UUID | None = None
     ) -> list[CoreMemoryHistory]:
         limit = min(limit, MAX_LIMIT)
-        rows = await self.db.fetch(
-            f"""SELECT * FROM core_memory_history
-                WHERE agent_id = $1 AND {_sim_filter(3)}
-                ORDER BY version LIMIT $2""",
-            agent_id,
-            limit,
-            simulation_id,
-        )
+        if simulation_id is None:
+            rows = await self.db.fetch(
+                """SELECT * FROM core_memory_history
+                    WHERE agent_id = $1
+                    ORDER BY version LIMIT $2""",
+                agent_id,
+                limit,
+            )
+        else:
+            rows = await self.db.fetch(
+                f"""SELECT * FROM core_memory_history
+                    WHERE agent_id = $1 AND {_sim_filter(3)}
+                    ORDER BY version LIMIT $2""",
+                agent_id,
+                limit,
+                simulation_id,
+            )
         return [CoreMemoryHistory(**dict(r)) for r in rows]
 
     # ── Recall Memory ───────────────────────────────────────
@@ -376,27 +392,48 @@ class MemoryRepo:
         offset: int = 0,
         simulation_id: _uuid.UUID | None = None,
     ) -> tuple[list[RecallMemory], int]:
-        """Text search recall memories using ILIKE (pg_trgm if available)."""
+        """Text search recall memories using ILIKE (pg_trgm if available).
+
+        When ``simulation_id`` is None, returns matches from every simulation.
+        """
         limit = min(limit, MAX_LIMIT)
         pattern = f"%{keyword}%"
-        count = await self.db.fetchval(
-            f"""SELECT COUNT(*) FROM recall_memory
-                WHERE agent_id = $1 AND summary ILIKE $2 AND {_sim_filter(3)}""",
-            agent_id,
-            pattern,
-            simulation_id,
-        )
-        rows = await self.db.fetch(
-            f"""SELECT * FROM recall_memory
-               WHERE agent_id = $1 AND summary ILIKE $2 AND {_sim_filter(5)}
-               ORDER BY timestamp DESC
-               LIMIT $3 OFFSET $4""",
-            agent_id,
-            pattern,
-            limit,
-            offset,
-            simulation_id,
-        )
+        if simulation_id is None:
+            count = await self.db.fetchval(
+                """SELECT COUNT(*) FROM recall_memory
+                    WHERE agent_id = $1 AND summary ILIKE $2""",
+                agent_id,
+                pattern,
+            )
+            rows = await self.db.fetch(
+                """SELECT * FROM recall_memory
+                   WHERE agent_id = $1 AND summary ILIKE $2
+                   ORDER BY timestamp DESC
+                   LIMIT $3 OFFSET $4""",
+                agent_id,
+                pattern,
+                limit,
+                offset,
+            )
+        else:
+            count = await self.db.fetchval(
+                f"""SELECT COUNT(*) FROM recall_memory
+                    WHERE agent_id = $1 AND summary ILIKE $2 AND {_sim_filter(3)}""",
+                agent_id,
+                pattern,
+                simulation_id,
+            )
+            rows = await self.db.fetch(
+                f"""SELECT * FROM recall_memory
+                   WHERE agent_id = $1 AND summary ILIKE $2 AND {_sim_filter(5)}
+                   ORDER BY timestamp DESC
+                   LIMIT $3 OFFSET $4""",
+                agent_id,
+                pattern,
+                limit,
+                offset,
+                simulation_id,
+            )
         return [_row_to_recall(r) for r in rows], count or 0
 
     async def get_recall_memories_paginated(
@@ -407,23 +444,41 @@ class MemoryRepo:
         offset: int = 0,
         simulation_id: _uuid.UUID | None = None,
     ) -> tuple[list[RecallMemory], int]:
-        """Return paginated recall memories for an agent."""
+        """Return paginated recall memories for an agent.
+
+        When ``simulation_id`` is None, returns memories from every simulation.
+        """
         limit = min(limit, MAX_LIMIT)
-        count = await self.db.fetchval(
-            f"SELECT COUNT(*) FROM recall_memory WHERE agent_id = $1 AND {_sim_filter(2)}",
-            agent_id,
-            simulation_id,
-        )
-        rows = await self.db.fetch(
-            f"""SELECT * FROM recall_memory
-               WHERE agent_id = $1 AND {_sim_filter(4)}
-               ORDER BY timestamp DESC
-               LIMIT $2 OFFSET $3""",
-            agent_id,
-            limit,
-            offset,
-            simulation_id,
-        )
+        if simulation_id is None:
+            count = await self.db.fetchval(
+                "SELECT COUNT(*) FROM recall_memory WHERE agent_id = $1",
+                agent_id,
+            )
+            rows = await self.db.fetch(
+                """SELECT * FROM recall_memory
+                   WHERE agent_id = $1
+                   ORDER BY timestamp DESC
+                   LIMIT $2 OFFSET $3""",
+                agent_id,
+                limit,
+                offset,
+            )
+        else:
+            count = await self.db.fetchval(
+                f"SELECT COUNT(*) FROM recall_memory WHERE agent_id = $1 AND {_sim_filter(2)}",
+                agent_id,
+                simulation_id,
+            )
+            rows = await self.db.fetch(
+                f"""SELECT * FROM recall_memory
+                   WHERE agent_id = $1 AND {_sim_filter(4)}
+                   ORDER BY timestamp DESC
+                   LIMIT $2 OFFSET $3""",
+                agent_id,
+                limit,
+                offset,
+                simulation_id,
+            )
         return [_row_to_recall(r) for r in rows], count or 0
 
     # ── Self-Modification Proposals ────────────────────────────

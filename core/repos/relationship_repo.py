@@ -83,15 +83,23 @@ class RelationshipRepo:
         return Relationship(**_parse_row(dict(row)))
 
     async def get_all_for_agent(
-        self, simulation_id: uuid.UUID, agent_id: str
+        self, simulation_id: uuid.UUID | None, agent_id: str
     ) -> list[Relationship]:
-        rows = await self.db.fetch(
-            """SELECT * FROM agent_relationships
-               WHERE simulation_id = $1 AND agent_id = $2
-               ORDER BY target_agent_id""",
-            simulation_id,
-            agent_id,
-        )
+        if simulation_id is None:
+            rows = await self.db.fetch(
+                """SELECT * FROM agent_relationships
+                   WHERE agent_id = $1
+                   ORDER BY target_agent_id""",
+                agent_id,
+            )
+        else:
+            rows = await self.db.fetch(
+                """SELECT * FROM agent_relationships
+                   WHERE simulation_id = $1 AND agent_id = $2
+                   ORDER BY target_agent_id""",
+                simulation_id,
+                agent_id,
+            )
         return [Relationship(**_parse_row(dict(r))) for r in rows]
 
     async def get_social_graph(self, simulation_id: uuid.UUID) -> list[Relationship]:

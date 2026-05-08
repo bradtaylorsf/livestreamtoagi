@@ -297,57 +297,30 @@ def _event_to_response(e: WorldEvent) -> LoreEventResponse:
 # ── Agent Endpoints ──────────────────────────────────────────────
 
 
-@router.get("/agents")
-async def get_agents() -> list[AgentPublicProfile]:
-    registry = _get_registry()
-    db = _get_db()
-    agents = registry.get_all_agents()
-
+async def _build_agent_profile(
+    a: Any,
+    *,
+    db: Any,
+    services: Any,
+    simulation_id: uuid.UUID | None,
+) -> AgentPublicProfile:
+    """Assemble an AgentPublicProfile with cost and activity totals."""
     from core.repos.cost_repo import CostRepo
 
     cost_repo = CostRepo(db)
-
-    result = []
-    for a in agents:
-        costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
-        total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
-        result.append(
-            AgentPublicProfile(
-                id=a.id,
-                display_name=a.display_name,
-                role=a.role,
-                color=a.color_hex,
-                status=a.status.value if hasattr(a.status, "value") else str(a.status),
-                conversation_model=a.model_conversation,
-                building_model=a.model_building,
-                chattiness=a.chattiness,
-                initiative=a.initiative,
-                voice=a.voice_id,
-                behaviors=list(a.behaviors.keys()) if a.behaviors else [],
-                interrupt_tendency=a.interrupt_tendency,
-                eavesdrop_tendency=a.eavesdrop_tendency,
-                closing_weight=a.closing_weight,
-                total_cost=f"{total_cost:.6f}",
-                message_count=len(costs) if costs else 0,
-            )
-        )
-    return result
-
-
-@router.get("/agents/{agent_id}")
-async def get_agent(agent_id: str) -> AgentPublicProfile:
-    registry = _get_registry()
-    db = _get_db()
-    agent = registry.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    a = agent
-
-    from core.repos.cost_repo import CostRepo
-
-    cost_repo = CostRepo(db)
-    costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=LIVE_SIMULATION_ID)
+    costs = await cost_repo.get_costs_by_agent(a.id, simulation_id=simulation_id)
     total_cost = sum(c.amount for c in costs if c.amount) if costs else 0
+
+    conversation_count = 0
+    artifact_count = 0
+    if db is not None:
+        conversation_count = await ConversationRepo(db).count_by_agent(
+            a.id, simulation_id=simulation_id
+        )
+    if services and getattr(services, "artifact_repo", None):
+        artifact_count = await services.artifact_repo.count_by_agent(
+            a.id, simulation_id=simulation_id
+        )
 
     return AgentPublicProfile(
         id=a.id,
@@ -366,11 +339,46 @@ async def get_agent(agent_id: str) -> AgentPublicProfile:
         closing_weight=a.closing_weight,
         total_cost=f"{total_cost:.6f}",
         message_count=len(costs) if costs else 0,
+        conversation_count=conversation_count,
+        artifact_count=artifact_count,
     )
 
 
+@router.get("/agents")
+async def get_agents(
+    simulation_id: str | None = Query(default=None),
+) -> list[AgentPublicProfile]:
+    registry = _get_registry()
+    db = _get_db()
+    services = _get_services()
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
+    agents = registry.get_all_agents()
+    return [
+        await _build_agent_profile(a, db=db, services=services, simulation_id=sim_id)
+        for a in agents
+    ]
+
+
+@router.get("/agents/{agent_id}")
+async def get_agent(
+    agent_id: str,
+    simulation_id: str | None = Query(default=None),
+) -> AgentPublicProfile:
+    registry = _get_registry()
+    db = _get_db()
+    services = _get_services()
+    agent = registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
+    return await _build_agent_profile(agent, db=db, services=services, simulation_id=sim_id)
+
+
 @router.get("/agents/{agent_id}/system-prompt")
-async def get_agent_system_prompt(agent_id: str) -> dict[str, Any]:
+async def get_agent_system_prompt(
+    agent_id: str,
+    simulation_id: str | None = Query(default=None),
+) -> dict[str, Any]:
     """Current assembled system prompt (all 3 layers) with token counts."""
     registry = _get_registry()
     db = _get_db()
@@ -382,7 +390,8 @@ async def get_agent_system_prompt(agent_id: str) -> dict[str, Any]:
     from core.system_prompt import INFRASTRUCTURE_PROMPT
 
     memory_repo = MemoryRepo(db)
-    core_mem = await memory_repo.get_core_memory(agent_id, simulation_id=LIVE_SIMULATION_ID)
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
+    core_mem = await memory_repo.get_core_memory(agent_id, simulation_id=sim_id)
 
     raw_layers = {
         "Infrastructure": INFRASTRUCTURE_PROMPT,
@@ -413,6 +422,7 @@ async def get_agent_costs(
     agent_id: str,
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
+    simulation_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """Cost breakdown: by day, by type, total."""
     from datetime import datetime as dt
@@ -424,11 +434,13 @@ async def get_agent_costs(
 
     parsed_from = dt.fromisoformat(from_date) if from_date else None
     parsed_to = dt.fromisoformat(to_date) if to_date else None
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
 
     data = await cost_repo.get_costs_by_agent_grouped(
         agent_id,
         from_date=parsed_from,
         to_date=parsed_to,
+        simulation_id=sim_id,
     )
 
     by_day = [
@@ -456,17 +468,28 @@ async def get_agent_journal(
     offset: int = Query(0, ge=0),
 ) -> list[dict[str, Any]]:
     db = _get_db()
-    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
-    rows = await db.fetch(
-        """SELECT * FROM journal_entries
-           WHERE agent_id = $1 AND simulation_id = $4
-           ORDER BY created_at DESC
-           LIMIT $2 OFFSET $3""",
-        agent_id,
-        limit,
-        offset,
-        sim_id,
-    )
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
+    if sim_id is None:
+        rows = await db.fetch(
+            """SELECT * FROM journal_entries
+               WHERE agent_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3""",
+            agent_id,
+            limit,
+            offset,
+        )
+    else:
+        rows = await db.fetch(
+            """SELECT * FROM journal_entries
+               WHERE agent_id = $1 AND simulation_id = $4
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3""",
+            agent_id,
+            limit,
+            offset,
+            sim_id,
+        )
     return [
         {
             "id": r["id"],
@@ -481,12 +504,16 @@ async def get_agent_journal(
 
 
 @router.get("/agents/{agent_id}/relationships")
-async def get_agent_relationships(agent_id: str) -> list[dict[str, Any]]:
+async def get_agent_relationships(
+    agent_id: str,
+    simulation_id: str | None = Query(default=None),
+) -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.relationship_repo:
         return []
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
     relationships = await svc.relationship_repo.get_all_for_agent(
-        LIVE_SIMULATION_ID,
+        sim_id,
         agent_id,
     )
     return [
@@ -511,7 +538,7 @@ async def get_agent_conversations(
 ) -> dict[str, Any]:
     db = _get_db()
     repo = ConversationRepo(db)
-    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
     convs, total = await repo.get_conversations_by_agent(
         agent_id,
         simulation_id=sim_id,
@@ -537,7 +564,7 @@ async def get_agent_artifacts(
     svc = _get_services()
     if not svc.artifact_repo:
         return {"items": [], "total": 0, "limit": limit, "offset": offset}
-    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
     artifacts, total = await svc.artifact_repo.get_all_artifacts(
         simulation_id=sim_id,
         agent_ids=[agent_id],
@@ -575,7 +602,7 @@ async def get_agent_core_memory(
 
     memory_repo = MemoryRepo(db)
 
-    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
     current = await memory_repo.get_core_memory(agent_id, simulation_id=sim_id)
     history = await memory_repo.get_core_memory_history(agent_id, simulation_id=sim_id)
 
@@ -614,7 +641,7 @@ async def get_agent_recall_memories(
 
     memory_repo = MemoryRepo(db)
 
-    sim_id = uuid.UUID(simulation_id) if simulation_id else LIVE_SIMULATION_ID
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
 
     if search:
         memories, total = await memory_repo.search_recall_memories_by_keyword(
@@ -650,13 +677,17 @@ async def get_agent_recall_memories(
 
 
 @router.get("/agents/{agent_id}/evolution")
-async def get_agent_evolution(agent_id: str) -> list[dict[str, Any]]:
+async def get_agent_evolution(
+    agent_id: str,
+    simulation_id: str | None = Query(default=None),
+) -> list[dict[str, Any]]:
     svc = _get_services()
     if not svc.config_version_repo:
         return []
+    sim_id = uuid.UUID(simulation_id) if simulation_id else None
     versions = await svc.config_version_repo.get_prompt_history(
         agent_id,
-        simulation_id=LIVE_SIMULATION_ID,
+        simulation_id=sim_id,
     )
     return [
         {
