@@ -688,6 +688,7 @@ class TestSimulationsEndpoint:
                     "video_render_status": "done",
                     "video_rendered_at": None,
                     "is_featured": True,
+                    "submitter_display_name": None,
                 }
             ]
         )
@@ -700,6 +701,107 @@ class TestSimulationsEndpoint:
         item = data["items"][0]
         assert item["is_featured"] is True
         assert item["video_url"] == "https://example.com/video.mp4"
+
+    def test_list_simulations_completed_within_hours_filter(self, mock_app):
+        """Wall of Simulations 'Recent' tab maps completed_within_hours into SQL."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations?completed_within_hours=1")
+        assert resp.status_code == 200
+
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "completed_at" in list_sql
+        assert "completed_at" in count_sql
+        # The bound interval value should be present in both calls
+        assert 1 in mock_db.fetch.call_args[0][1:]
+        assert 1 in mock_db.fetchval.call_args[0][1:]
+
+    def test_list_simulations_completed_within_hours_omitted_does_not_filter(
+        self, mock_app
+    ):
+        """No completed_within_hours param means no completed_at predicate is added."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "completed_at" not in list_sql
+        assert "completed_at" not in count_sql
+
+    def test_list_simulations_joins_users_for_submitter_display_name(
+        self, mock_app
+    ):
+        """The list query LEFT JOINs users so the response carries display name."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        list_sql = mock_db.fetch.call_args[0][0]
+        assert "LEFT JOIN users" in list_sql
+        assert "submitter_display_name" in list_sql
+
+    def test_list_simulations_response_includes_submitter_display_name(
+        self, mock_app
+    ):
+        """Submitter display name flows through to the response (None == anonymous)."""
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        base_row = {
+            "id": sim_id,
+            "name": "User-submitted run",
+            "description": None,
+            "config": {},
+            "status": "running",
+            "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            "completed_at": None,
+            "simulated_duration": None,
+            "real_duration": None,
+            "total_conversations": 0,
+            "total_turns": 0,
+            "total_tokens": 0,
+            "total_cost": "0",
+            "total_artifacts": 0,
+            "total_management_flags": 0,
+            "agents_participated": ["vera"],
+            "error_log": None,
+            "model_versions": {},
+            "is_live": False,
+            "created_at": None,
+            "hypothesis": None,
+            "outcomes": {},
+            "learnings": [],
+            "factions": [],
+            "submitted_by_user_id": None,
+            "video_url": None,
+            "video_render_status": None,
+            "video_rendered_at": None,
+            "is_featured": False,
+        }
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {**base_row, "submitter_display_name": "brad"},
+                {
+                    **base_row,
+                    "id": uuid.uuid4(),
+                    "submitter_display_name": None,
+                },
+            ]
+        )
+        mock_db.fetchval = AsyncMock(return_value=2)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items[0]["submitter_display_name"] == "brad"
+        assert items[1]["submitter_display_name"] is None
 
     def test_energy_timeline_returns_grouped_series(self, mock_app):
         client, mock_db, *_ = mock_app

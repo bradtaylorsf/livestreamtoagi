@@ -498,6 +498,8 @@ export interface PublicSimulation {
   agents_participated: string[];
   is_featured: boolean;
   video_url: string | null;
+  // Local-part of the submitter's email if signed in; null = anonymous.
+  submitter_display_name: string | null;
 }
 
 export interface PublicSimulationDetail extends PublicSimulation {
@@ -513,12 +515,19 @@ export async function getSimulations(
     limit?: number;
     offset?: number;
     is_featured?: boolean;
+    completed_within_hours?: number;
   },
 ): Promise<PaginatedResponse<PublicSimulation>> {
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set("status", params.status);
   if (params?.is_featured !== undefined) {
     searchParams.set("is_featured", params.is_featured ? "true" : "false");
+  }
+  if (params?.completed_within_hours !== undefined) {
+    searchParams.set(
+      "completed_within_hours",
+      String(params.completed_within_hours),
+    );
   }
   searchParams.set("limit", String(params?.limit ?? 20));
   searchParams.set("offset", String(params?.offset ?? 0));

@@ -893,6 +893,9 @@ class Simulation(BaseModel):
     video_render_status: str | None = None
     video_rendered_at: datetime | None = None
     is_featured: bool = False
+    # Populated only by joins in list queries (e.g. /api/simulations); the
+    # local-part of the submitter's email if signed in. None means anonymous.
+    submitter_display_name: str | None = None
 
 
 # ── Public Users (magic-link auth) ──────────────────────────────

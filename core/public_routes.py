@@ -1606,13 +1606,15 @@ async def get_simulations(
     offset: int = Query(0, ge=0),
     include_live: bool = Query(default=False),
     is_featured: bool | None = Query(default=None),
+    completed_within_hours: int | None = Query(default=None, ge=1, le=720),
 ) -> dict[str, Any]:
     """List all simulations (public read-only). Optionally filter by status.
 
     The seeded live channel row is excluded by default; pass include_live=true
     to include it (it represents a permanent channel, not a discrete run).
     Pass is_featured=true to retrieve only the curated set surfaced on the home
-    page.
+    page. Pass completed_within_hours=N to restrict to runs that finished in
+    the last N hours (used by the 'Wall of Simulations' Recent tab).
     """
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
@@ -1625,11 +1627,13 @@ async def get_simulations(
         offset=offset,
         include_live=include_live,
         is_featured=is_featured,
+        completed_within_hours=completed_within_hours,
     )
     total = await sim_repo.count(
         status=status,
         include_live=include_live,
         is_featured=is_featured,
+        completed_within_hours=completed_within_hours,
     )
 
     return {
@@ -1649,6 +1653,7 @@ async def get_simulations(
                 "agents_participated": s.agents_participated,
                 "is_featured": s.is_featured,
                 "video_url": s.video_url,
+                "submitter_display_name": s.submitter_display_name,
             }
             for s in simulations
         ],
