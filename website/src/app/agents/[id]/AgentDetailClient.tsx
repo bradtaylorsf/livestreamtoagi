@@ -184,13 +184,23 @@ export default function AgentDetailClient({ agent }: Props) {
           getAgentRecallMemories(id, { limit: PAGE_SIZE }).then((d) => { setRecallMemories(d); done(); }).catch(onErr);
           break;
         case "conversations":
-          getAgentConversations(id, { limit: PAGE_SIZE }).then((d) => { setConversations(d); done(); }).catch(onErr);
+          getAgentConversations(id, {
+            limit: PAGE_SIZE,
+            simulation_id: convSimFilter || undefined,
+          }).then((d) => { setConversations(d); done(); }).catch(onErr);
           break;
         case "artifacts":
-          getAgentArtifacts(id, { limit: PAGE_SIZE }).then((d) => { setArtifacts(d); done(); }).catch(onErr);
+          getAgentArtifacts(id, {
+            limit: PAGE_SIZE,
+            simulation_id: artSimFilter || undefined,
+            type: artTypeFilter || undefined,
+          }).then((d) => { setArtifacts(d); done(); }).catch(onErr);
           break;
         case "journal":
-          getAgentJournal(id, { limit: PAGE_SIZE }).then((d) => { setJournal(d); done(); }).catch(onErr);
+          getAgentJournal(id, {
+            limit: PAGE_SIZE,
+            simulation_id: journalSimFilter || undefined,
+          }).then((d) => { setJournal(d); done(); }).catch(onErr);
           break;
         case "costs":
           getAgentCosts(id).then((d) => { setCosts(d); done(); }).catch(onErr);
@@ -198,7 +208,7 @@ export default function AgentDetailClient({ agent }: Props) {
         // relationships + evolution are self-loading components
       }
     },
-    [id, loadedTabs],
+    [id, loadedTabs, convSimFilter, artSimFilter, artTypeFilter, journalSimFilter],
   );
 
   const handleTabChange = (tab: TabId) => {
