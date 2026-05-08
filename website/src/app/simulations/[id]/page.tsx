@@ -978,7 +978,7 @@ function SocialGraphTab({ simulationId }: { simulationId: string }) {
 
       {!anyQualifies && (
         <p className="text-xs text-foreground/50 italic">
-          Sentiment & trust hidden \u2014 fewer than {SENTIMENT_TRUST_MIN_INTERACTIONS} interactions per
+          Sentiment & trust hidden {"\u2014"} fewer than {SENTIMENT_TRUST_MIN_INTERACTIONS} interactions per
           pair.
         </p>
       )}
