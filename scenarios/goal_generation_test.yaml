@@ -1,3 +1,10 @@
+meta:
+  name: "Goal Generation"
+  description: "Organic conversations interleaved with two reflection phases. Validates that agents generate self-directed goals during reflection and reference those goals in subsequent conversations."
+  agents: [vera, rex, aurora]
+  expected_max_cost: 8.0
+  expected_runtime_minutes: 25
+
 # Goal Generation Test — validates #269 (autonomous goals)
 #
 # Tests whether agents generate self-directed goals during reflection cycles.

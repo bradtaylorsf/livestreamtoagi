@@ -225,6 +225,18 @@ class BlogPostDetail(BlogPostSummary):
     content: str
 
 
+class ScenarioMeta(BaseModel):
+    """Public-facing metadata for a scenario YAML in scenarios/."""
+
+    filename: str
+    name: str
+    description: str
+    agents: list[str] = []
+    phase_count: int = 0
+    expected_max_cost: float = 0.0
+    expected_runtime_minutes: int = 0
+
+
 # ── Serialization helpers ────────────────────────────────────────
 
 
@@ -296,6 +308,138 @@ def _event_to_response(e: WorldEvent) -> LoreEventResponse:
         audience_participation=e.audience_participation,
         created_at=e.created_at.isoformat() if e.created_at else None,
     )
+
+
+# ── Scenario Library ─────────────────────────────────────────────
+
+
+def _scenarios_dir() -> Any:
+    """Return the project's scenarios/ directory (Path)."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "scenarios"
+
+
+def _extract_leading_comment_block(text: str) -> str:
+    """Best-effort description from the first contiguous block of ``# ...`` lines."""
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("#"):
+            cleaned = stripped.lstrip("#").strip()
+            if cleaned or lines:
+                lines.append(cleaned)
+        elif stripped == "":
+            if lines:
+                break
+        else:
+            break
+    while lines and not lines[-1]:
+        lines.pop()
+    return " ".join(lines).strip()
+
+
+def _agents_from_phases(phases: Any) -> list[str]:
+    """Union of agents referenced in scenario phases (best-effort)."""
+    agents: list[str] = []
+    if not isinstance(phases, list):
+        return agents
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        for key in ("required_agents", "agents"):
+            value = phase.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item not in agents:
+                        agents.append(item)
+        single = phase.get("agent")
+        if isinstance(single, str) and single not in agents:
+            agents.append(single)
+    return agents
+
+
+def _build_scenario_meta(path: Any) -> ScenarioMeta:
+    """Parse a scenarios/*.yaml file into a ScenarioMeta record.
+
+    Reads the new ``meta:`` block when present, falling back to the leading
+    ``# ...`` comment block for ``description`` and to phase scanning for
+    ``agents`` / ``phase_count``.
+    """
+    import yaml
+
+    text = path.read_text()
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+
+    meta_block = parsed.get("meta") if isinstance(parsed.get("meta"), dict) else {}
+    phases = parsed.get("phases")
+    phase_count = len(phases) if isinstance(phases, list) else 0
+
+    fallback_description = _extract_leading_comment_block(text)
+    description = (
+        meta_block.get("description")
+        if isinstance(meta_block.get("description"), str)
+        else fallback_description
+    )
+
+    name = (
+        meta_block.get("name")
+        if isinstance(meta_block.get("name"), str) and meta_block.get("name")
+        else path.stem
+    )
+
+    agents_value = meta_block.get("agents")
+    if isinstance(agents_value, list):
+        agents = [a for a in agents_value if isinstance(a, str)]
+    else:
+        agents = _agents_from_phases(phases)
+
+    cost_value = meta_block.get("expected_max_cost")
+    try:
+        expected_max_cost = float(cost_value) if cost_value is not None else 0.0
+    except (TypeError, ValueError):
+        expected_max_cost = 0.0
+
+    runtime_value = meta_block.get("expected_runtime_minutes")
+    try:
+        expected_runtime_minutes = int(runtime_value) if runtime_value is not None else 0
+    except (TypeError, ValueError):
+        expected_runtime_minutes = 0
+
+    return ScenarioMeta(
+        filename=path.name,
+        name=name,
+        description=description or "",
+        agents=agents,
+        phase_count=phase_count,
+        expected_max_cost=expected_max_cost,
+        expected_runtime_minutes=expected_runtime_minutes,
+    )
+
+
+@router.get("/scenarios", response_model=list[ScenarioMeta])
+async def list_public_scenarios() -> list[ScenarioMeta]:
+    """List every scenario YAML in ``scenarios/`` with extracted metadata.
+
+    Used by the public Scenario Library page to render runnable presets.
+    """
+    scenarios_dir = _scenarios_dir()
+    if not scenarios_dir.is_dir():
+        return []
+    out: list[ScenarioMeta] = []
+    for path in sorted(scenarios_dir.glob("*.yaml")):
+        if not path.is_file():
+            continue
+        try:
+            out.append(_build_scenario_meta(path))
+        except OSError as exc:
+            logger.warning("scenarios: failed to read %s: %s", path.name, exc)
+    return out
 
 
 # ── Agent Endpoints ──────────────────────────────────────────────
@@ -1925,9 +2069,7 @@ class PublicSubmitResponse(BaseModel):
     estimated_completion_time: str
 
 
-_NAME_OK_CHARS = set(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_"
-)
+_NAME_OK_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_")
 
 
 def _sanitize_submission_name(raw: str) -> str:

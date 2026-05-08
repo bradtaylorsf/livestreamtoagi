@@ -1,3 +1,10 @@
+meta:
+  name: "Full Day (15 phases)"
+  description: "All 15 phases of a typical operational day: morning standup, post-standup chats, work blocks, audience Q&A, budget reviews, evening reflection. Use this as the canonical end-to-end smoke test for the conversation engine."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 10.0
+  expected_runtime_minutes: 30
+
 # Full-day simulation seed file — all 15 phases
 # Run with: python scripts/run_simulation.py --name "full-day" --seed-file scenarios/full_day.yaml
 

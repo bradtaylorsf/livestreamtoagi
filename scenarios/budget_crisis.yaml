@@ -1,3 +1,10 @@
+meta:
+  name: "Budget Crisis"
+  description: "Seeds agents with uneven balances (Rex broke at $0.50, Aurora rich at $8.00) to test economic behavior under stress. Looks for trading conversations, Sentinel flags, and personality-consistent reactions to scarcity."
+  agents: [vera, rex, aurora, sentinel]
+  expected_max_cost: 10.0
+  expected_runtime_minutes: 25
+
 # Budget Crisis — validates #270 (individual budgets)
 #
 # Seeds agents with varying balances to test economic behavior under stress.

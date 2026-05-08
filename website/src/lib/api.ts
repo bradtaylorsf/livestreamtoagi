@@ -544,6 +544,21 @@ export async function getScenarios(): Promise<ScenarioInfo[]> {
   return request<ScenarioInfo[]>("/api/admin/scenarios");
 }
 
+// Public scenario library (read-only, anonymous)
+export interface PublicScenarioMeta {
+  filename: string;
+  name: string;
+  description: string;
+  agents: string[];
+  phase_count: number;
+  expected_max_cost: number;
+  expected_runtime_minutes: number;
+}
+
+export async function getPublicScenarios(): Promise<PublicScenarioMeta[]> {
+  return request<PublicScenarioMeta[]>("/api/scenarios");
+}
+
 export interface CreateSimulationRequest {
   seed_file: string;
   max_cost?: number;

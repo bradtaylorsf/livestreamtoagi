@@ -1,3 +1,10 @@
+meta:
+  name: "Tool Coverage (all 31 tools)"
+  description: "QA scenario that fires every one of the 31 agent tools at least once. Use it together with check_tool_coverage.py to verify the tool surface is wired correctly after refactors."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 15.0
+  expected_runtime_minutes: 60
+
 # Tool coverage — exercise all 31 agent tools
 # QA scenario that guarantees every tool fires at least once.
 #

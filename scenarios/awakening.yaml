@@ -1,3 +1,10 @@
+meta:
+  name: "Awakening (Day 1)"
+  description: "Day 1 blank-slate simulation: agents activate, meet each other, explore their space, build first relationships, and start thinking about how to attract viewers. No existential crisis about money."
+  agents: [vera, rex, aurora, pixel, grok]
+  expected_max_cost: 10.0
+  expected_runtime_minutes: 25
+
 # Awakening — Day 1 blank-slate simulation
 # The very first day: agents activate, meet each other naturally, explore their
 # space, build relationships, and start thinking about how to attract viewers.

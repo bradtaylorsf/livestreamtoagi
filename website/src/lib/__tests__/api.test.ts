@@ -16,6 +16,7 @@ import {
   getConversations,
   getConversationSelections,
   getLore,
+  getPublicScenarios,
   getScenarios,
   getSimulationSnapshot,
   getStats,
@@ -330,6 +331,30 @@ describe("getScenarios", () => {
     const result = await getScenarios();
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/admin/scenarios",
+      expect.anything(),
+    );
+    expect(result).toEqual(scenarios);
+  });
+});
+
+describe("getPublicScenarios", () => {
+  it("sends GET to /api/scenarios and returns the structured meta list", async () => {
+    const scenarios = [
+      {
+        filename: "awakening.yaml",
+        name: "Awakening (Day 1)",
+        description: "Day 1 blank-slate.",
+        agents: ["vera", "rex"],
+        phase_count: 9,
+        expected_max_cost: 10,
+        expected_runtime_minutes: 25,
+      },
+    ];
+    mockFetch.mockReturnValue(jsonResponse(scenarios));
+
+    const result = await getPublicScenarios();
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/scenarios",
       expect.anything(),
     );
     expect(result).toEqual(scenarios);

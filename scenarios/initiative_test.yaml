@@ -1,3 +1,10 @@
+meta:
+  name: "Initiative Wiring"
+  description: "10 organic conversations to verify that high-initiative agents (Vera) start significantly more conversations than low-initiative ones (Rex). Quick check that the initiative score actually shapes behavior."
+  agents: [vera, rex, aurora]
+  expected_max_cost: 5.0
+  expected_runtime_minutes: 20
+
 # Initiative Test — validates #268 (initiative wiring)
 #
 # Tests whether agent initiative scores produce observable differences
