@@ -18,6 +18,7 @@ import {
   getScenarios,
   getStats,
   getWorldChunks,
+  runSimulationEval,
   submitChallenge,
   upvoteChallenge,
 } from "../api";
@@ -349,6 +350,38 @@ describe("createSimulation", () => {
   });
 });
 
+
+describe("runSimulationEval", () => {
+  it("POSTs categories body to /api/admin/simulations/:id/evals/run", async () => {
+    const response = { eval_run_id: "eval-123", status: "running" };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await runSimulationEval("sim-abc", {
+      categories: ["creativity"],
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-abc/evals/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ categories: ["creativity"] }),
+      }),
+    );
+    expect(result).toEqual(response);
+  });
+
+  it("POSTs an empty body when no options provided", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ eval_run_id: "x", status: "running" }));
+    await runSimulationEval("sim-abc");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/sim-abc/evals/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+  });
+});
 
 describe("error handling", () => {
   it("throws ApiRequestError on non-2xx response", async () => {

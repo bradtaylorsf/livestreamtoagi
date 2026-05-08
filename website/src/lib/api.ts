@@ -432,6 +432,30 @@ export async function getEvalRunDetail(
   }
 }
 
+// Admin: trigger an eval run for a simulation
+export interface RunSimulationEvalBody {
+  eval_suite?: string;
+  categories?: string[];
+}
+
+export interface RunSimulationEvalResponse {
+  eval_run_id: string;
+  status: string;
+}
+
+export async function runSimulationEval(
+  simId: string,
+  body: RunSimulationEvalBody = {},
+): Promise<RunSimulationEvalResponse> {
+  return request<RunSimulationEvalResponse>(
+    `/api/admin/simulations/${simId}/evals/run`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 // Clips
 export async function getClips(params?: {
   agent?: string;
