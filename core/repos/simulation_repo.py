@@ -185,27 +185,33 @@ class SimulationRepo:
         limit: int = 50,
         offset: int = 0,
         include_live: bool = False,
+        is_featured: bool | None = None,
     ) -> list[Simulation]:
-        live_clause = "" if include_live else " AND is_live IS NOT TRUE"
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
         if status is not None:
-            rows = await self.db.fetch(
-                f"""SELECT * FROM simulations
-                   WHERE status = $1{live_clause}
-                   ORDER BY started_at DESC
-                   LIMIT $2 OFFSET $3""",  # noqa: S608
-                status,
-                limit,
-                offset,
-            )
-        else:
-            where = " WHERE is_live IS NOT TRUE" if not include_live else ""
-            rows = await self.db.fetch(
-                f"""SELECT * FROM simulations{where}
-                   ORDER BY started_at DESC
-                   LIMIT $1 OFFSET $2""",  # noqa: S608
-                limit,
-                offset,
-            )
+            clauses.append(f"status = ${idx}")
+            params.append(status)
+            idx += 1
+        if not include_live:
+            clauses.append("is_live IS NOT TRUE")
+        if is_featured is not None:
+            clauses.append(f"is_featured = ${idx}")
+            params.append(is_featured)
+            idx += 1
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        limit_idx = idx
+        idx += 1
+        params.append(offset)
+        offset_idx = idx
+        rows = await self.db.fetch(
+            f"""SELECT * FROM simulations{where}
+               ORDER BY started_at DESC
+               LIMIT ${limit_idx} OFFSET ${offset_idx}""",  # noqa: S608
+            *params,
+        )
         return [Simulation(**_parse_row(dict(r))) for r in rows]
 
     async def update_status(
@@ -386,19 +392,32 @@ class SimulationRepo:
         result = await self.db.execute("DELETE FROM simulations WHERE id = $1", simulation_id)
         return result == "DELETE 1"
 
-    async def count(self, *, status: str | None = None, include_live: bool = False) -> int:
+    async def count(
+        self,
+        *,
+        status: str | None = None,
+        include_live: bool = False,
+        is_featured: bool | None = None,
+    ) -> int:
         """Return total count of simulations, optionally filtered by status."""
-        live_clause = "" if include_live else " AND is_live IS NOT TRUE"
+        clauses: list[str] = []
+        params: list[object] = []
+        idx = 1
         if status is not None:
-            val = await self.db.fetchval(
-                f"SELECT COUNT(*) FROM simulations WHERE status = $1{live_clause}",  # noqa: S608
-                status,
-            )
-        else:
-            where = " WHERE is_live IS NOT TRUE" if not include_live else ""
-            val = await self.db.fetchval(
-                f"SELECT COUNT(*) FROM simulations{where}"  # noqa: S608
-            )
+            clauses.append(f"status = ${idx}")
+            params.append(status)
+            idx += 1
+        if not include_live:
+            clauses.append("is_live IS NOT TRUE")
+        if is_featured is not None:
+            clauses.append(f"is_featured = ${idx}")
+            params.append(is_featured)
+            idx += 1
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        val = await self.db.fetchval(
+            f"SELECT COUNT(*) FROM simulations{where}",  # noqa: S608
+            *params,
+        )
         return val or 0
 
     async def get_total_cost_from_events(

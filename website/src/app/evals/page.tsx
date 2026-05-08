@@ -212,6 +212,11 @@ export default function EvalsPage() {
       <section className="space-y-3">
         <h1 className="font-pixel text-lg text-neon-cyan">
           EVALUATION DASHBOARD
+          {!currentSimId && (
+            <span className="ml-2 text-xs text-foreground/40 normal-case">
+              (across all simulations)
+            </span>
+          )}
         </h1>
         <p className="text-sm text-foreground/60 max-w-2xl">
           Transparent, read-only view of how the agent system performs across

@@ -1461,11 +1461,14 @@ async def get_simulations(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     include_live: bool = Query(default=False),
+    is_featured: bool | None = Query(default=None),
 ) -> dict[str, Any]:
     """List all simulations (public read-only). Optionally filter by status.
 
     The seeded live channel row is excluded by default; pass include_live=true
     to include it (it represents a permanent channel, not a discrete run).
+    Pass is_featured=true to retrieve only the curated set surfaced on the home
+    page.
     """
     db = _get_db()
     from core.repos.simulation_repo import SimulationRepo
@@ -1477,8 +1480,13 @@ async def get_simulations(
         limit=limit,
         offset=offset,
         include_live=include_live,
+        is_featured=is_featured,
     )
-    total = await sim_repo.count(status=status, include_live=include_live)
+    total = await sim_repo.count(
+        status=status,
+        include_live=include_live,
+        is_featured=is_featured,
+    )
 
     return {
         "items": [
@@ -1495,6 +1503,8 @@ async def get_simulations(
                 "total_cost": s.total_cost,
                 "total_artifacts": s.total_artifacts,
                 "agents_participated": s.agents_participated,
+                "is_featured": s.is_featured,
+                "video_url": s.video_url,
             }
             for s in simulations
         ],

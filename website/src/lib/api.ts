@@ -496,6 +496,8 @@ export interface PublicSimulation {
   total_cost: string;
   total_artifacts: number;
   agents_participated: string[];
+  is_featured: boolean;
+  video_url: string | null;
 }
 
 export interface PublicSimulationDetail extends PublicSimulation {
@@ -506,10 +508,18 @@ export interface PublicSimulationDetail extends PublicSimulation {
 }
 
 export async function getSimulations(
-  params?: { status?: string; limit?: number; offset?: number },
+  params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+    is_featured?: boolean;
+  },
 ): Promise<PaginatedResponse<PublicSimulation>> {
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set("status", params.status);
+  if (params?.is_featured !== undefined) {
+    searchParams.set("is_featured", params.is_featured ? "true" : "false");
+  }
   searchParams.set("limit", String(params?.limit ?? 20));
   searchParams.set("offset", String(params?.offset ?? 0));
   return request<PaginatedResponse<PublicSimulation>>(

@@ -892,6 +892,7 @@ class Simulation(BaseModel):
     video_url: str | None = None
     video_render_status: str | None = None
     video_rendered_at: datetime | None = None
+    is_featured: bool = False
 
 
 # ── Public Users (magic-link auth) ──────────────────────────────

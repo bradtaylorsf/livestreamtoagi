@@ -619,6 +619,88 @@ class TestSimulationsEndpoint:
         assert "is_live" not in list_sql
         assert "is_live" not in count_sql
 
+    def test_list_simulations_is_featured_filter(self, mock_app):
+        """is_featured=true filters both the list and count queries."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations?is_featured=true")
+        assert resp.status_code == 200
+
+        list_call = mock_db.fetch.call_args
+        count_call = mock_db.fetchval.call_args
+        assert "is_featured" in list_call[0][0]
+        assert "is_featured" in count_call[0][0]
+        # the bound parameter for is_featured should be True
+        assert True in list_call[0][1:]
+        assert True in count_call[0][1:]
+
+    def test_list_simulations_is_featured_omitted_does_not_filter(self, mock_app):
+        """No is_featured query param means the column is NOT in the WHERE clause."""
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+
+        list_sql = mock_db.fetch.call_args[0][0]
+        count_sql = mock_db.fetchval.call_args[0][0]
+        assert "is_featured" not in list_sql
+        assert "is_featured" not in count_sql
+
+    def test_list_simulations_response_includes_is_featured_and_video_url(
+        self, mock_app
+    ):
+        """Each item in the response has is_featured and video_url fields."""
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {
+                    "id": sim_id,
+                    "name": "Featured run",
+                    "description": "desc",
+                    "config": {},
+                    "status": "completed",
+                    "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                    "completed_at": datetime(2026, 4, 1, 1, tzinfo=timezone.utc),
+                    "simulated_duration": None,
+                    "real_duration": None,
+                    "total_conversations": 0,
+                    "total_turns": 0,
+                    "total_tokens": 0,
+                    "total_cost": "0",
+                    "total_artifacts": 0,
+                    "total_management_flags": 0,
+                    "agents_participated": ["vera"],
+                    "error_log": None,
+                    "model_versions": {},
+                    "is_live": False,
+                    "created_at": None,
+                    "hypothesis": None,
+                    "outcomes": {},
+                    "learnings": [],
+                    "factions": [],
+                    "submitted_by_user_id": None,
+                    "video_url": "https://example.com/video.mp4",
+                    "video_render_status": "done",
+                    "video_rendered_at": None,
+                    "is_featured": True,
+                }
+            ]
+        )
+        mock_db.fetchval = AsyncMock(return_value=1)
+
+        resp = client.get("/api/simulations")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["is_featured"] is True
+        assert item["video_url"] == "https://example.com/video.mp4"
+
     def test_energy_timeline_returns_grouped_series(self, mock_app):
         client, mock_db, *_ = mock_app
         sim_id = uuid.uuid4()
