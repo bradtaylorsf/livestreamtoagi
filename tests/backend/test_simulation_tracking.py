@@ -170,6 +170,65 @@ class TestSimulationRepo:
         sql = db.fetch.call_args[0][0]
         assert "WHERE status = $1" in sql
 
+    async def test_list_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetch.return_value = []
+        repo = SimulationRepo(db)
+
+        await repo.list()
+        sql = db.fetch.call_args[0][0]
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_list_with_status_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetch.return_value = []
+        repo = SimulationRepo(db)
+
+        await repo.list(status="running")
+        sql = db.fetch.call_args[0][0]
+        assert "WHERE status = $1" in sql
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_list_include_live_drops_filter(self) -> None:
+        db = make_mock_db()
+        db.fetch.return_value = []
+        repo = SimulationRepo(db)
+
+        await repo.list(include_live=True)
+        sql = db.fetch.call_args[0][0]
+        assert "is_live" not in sql
+
+    async def test_count_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetchval.return_value = 7
+        repo = SimulationRepo(db)
+
+        result = await repo.count()
+        assert result == 7
+        sql = db.fetchval.call_args[0][0]
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_count_with_status_excludes_live_by_default(self) -> None:
+        db = make_mock_db()
+        db.fetchval.return_value = 3
+        repo = SimulationRepo(db)
+
+        result = await repo.count(status="completed")
+        assert result == 3
+        sql = db.fetchval.call_args[0][0]
+        assert "WHERE status = $1" in sql
+        assert "is_live IS NOT TRUE" in sql
+
+    async def test_count_include_live_drops_filter(self) -> None:
+        db = make_mock_db()
+        db.fetchval.return_value = 8
+        repo = SimulationRepo(db)
+
+        result = await repo.count(include_live=True)
+        assert result == 8
+        sql = db.fetchval.call_args[0][0]
+        assert "is_live" not in sql
+
     async def test_update_status(self) -> None:
         db = make_mock_db()
         completed_row = make_simulation_row(
