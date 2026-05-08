@@ -147,10 +147,10 @@ cp .env.example .env  # Fill in API keys
 
 # 3a. Optional: video render pipeline (Playwright + Chromium).
 #     Skip unless you're working on core/video/ or running scripts/render_simulation_video.py.
-#     Use the venv's own binaries (or `uv run`) — invoking bare `playwright`
-#     or `python` relies on PATH order and can resolve to stale shims.
-pip install -e ".[render]"
-.venv/bin/playwright install chromium
+#     The Makefile targets pin `.venv/bin/...` so a stale `python`/`playwright`
+#     shim earlier on PATH cannot intercept the calls.
+make render-install      # uv pip install -e ".[render]" + playwright install chromium
+make render-smoke        # quick import + --help check on the entrypoint
 
 # 4. Frontend setup
 cd frontend && npm install && cd ..
