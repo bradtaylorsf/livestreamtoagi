@@ -889,6 +889,9 @@ class Simulation(BaseModel):
     learnings: list[dict[str, Any]] = Field(default_factory=list)
     factions: list[dict[str, Any]] = Field(default_factory=list)
     submitted_by_user_id: uuid.UUID | None = None
+    video_url: str | None = None
+    video_render_status: str | None = None
+    video_rendered_at: datetime | None = None
 
 
 # ── Public Users (magic-link auth) ──────────────────────────────
@@ -904,6 +907,8 @@ class User(BaseModel):
     last_login_at: datetime | None = None
     simulations_submitted: int = 0
     total_cost_spent: Decimal = Decimal("0")
+    notify_on_complete: bool = True
+    unsubscribe_token: str | None = None
 
 
 class ConversationConfig(BaseModel):

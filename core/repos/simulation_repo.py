@@ -302,6 +302,68 @@ class SimulationRepo:
             return None
         return Simulation(**_parse_row(dict(row)))
 
+    async def update_video_status(
+        self,
+        simulation_id: uuid.UUID,
+        *,
+        status: str,
+        url: str | None = None,
+    ) -> Simulation | None:
+        """Set video_render_status and (optionally) video_url + rendered_at.
+
+        ``video_rendered_at`` is stamped only when status == 'done'.
+        """
+        if status not in {"pending", "rendering", "done", "failed", "skipped"}:
+            raise ValueError(f"Invalid video_render_status: {status}")
+        rendered_at_clause = (
+            "video_rendered_at = CASE WHEN $1 = 'done' THEN now() "
+            "ELSE video_rendered_at END"
+        )
+        row = await self.db.fetchrow(
+            f"""UPDATE simulations
+               SET video_render_status = $1,
+                   video_url = COALESCE($2, video_url),
+                   {rendered_at_clause}
+               WHERE id = $3
+               RETURNING *""",  # noqa: S608
+            status,
+            url,
+            simulation_id,
+        )
+        if row is None:
+            return None
+        return Simulation(**_parse_row(dict(row)))
+
+    async def claim_for_render(
+        self,
+        simulation_id: uuid.UUID,
+    ) -> str | None:
+        """Atomically claim a simulation for rendering.
+
+        Returns 'claimed' if we transitioned NULL/failed/pending → rendering,
+        'done' if a video already exists, or None if another worker already
+        owns the render.
+        """
+        row = await self.db.fetchrow(
+            """UPDATE simulations
+               SET video_render_status = 'rendering'
+               WHERE id = $1
+                 AND (
+                     video_render_status IS NULL
+                     OR video_render_status IN ('pending', 'failed')
+                 )
+               RETURNING video_render_status""",
+            simulation_id,
+        )
+        if row is not None:
+            return "claimed"
+        # Find out why we couldn't claim — already rendering, done, or skipped.
+        existing = await self.db.fetchval(
+            "SELECT video_render_status FROM simulations WHERE id = $1",
+            simulation_id,
+        )
+        return existing
+
     async def update_config(
         self,
         simulation_id: uuid.UUID,
