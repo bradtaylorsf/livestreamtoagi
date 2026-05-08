@@ -206,6 +206,7 @@ class PublicEvalRun(BaseModel):
 
 
 class PublicEvalRunDetail(PublicEvalRun):
+    status: str = ""
     results: list[dict[str, Any]] = []
 
 
@@ -1210,6 +1211,7 @@ async def get_eval_run_detail(run_id: str) -> PublicEvalRunDetail:
         cost=float(run.cost),
         model_versions=flat_versions,
         category_scores=category_scores,
+        status=run.status,
         results=[
             {"category": r.category, "score": float(r.score) if r.score is not None else None}
             for r in results

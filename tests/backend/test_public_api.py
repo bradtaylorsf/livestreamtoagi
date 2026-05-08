@@ -657,6 +657,34 @@ class TestEvalEndpoints:
         resp = client.get(f"/api/evals/runs/{run_id}")
         assert resp.status_code == 404
 
+    def test_get_eval_run_detail_includes_status(self, mock_app):
+        """Frontend polls this endpoint and reads `status` to detect completion."""
+        client, mock_db, *_ = mock_app
+        run_id = uuid.uuid4()
+        sim_id = uuid.uuid4()
+        mock_db.fetchrow = AsyncMock(side_effect=[
+            # eval_repo.get_eval_run -> single eval run row
+            {
+                "id": run_id,
+                "simulation_id": sim_id,
+                "eval_suite": "full",
+                "status": "completed",
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "overall_score": 80.0,
+                "cost": 0.10,
+                "model_versions": "{}",
+                "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            },
+            # simulations name lookup
+            {"name": "Test Sim"},
+        ])
+        mock_db.fetch = AsyncMock(return_value=[])
+        resp = client.get(f"/api/evals/runs/{run_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "completed"
+
 
 # ── World Endpoints ───────────────────────────────────────────
 

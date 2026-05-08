@@ -17,6 +17,7 @@ import type {
   PublicSimulationDetail,
   SimulationEvalRun,
   SimulationCostResponse,
+  SnapshotSummary,
 } from "@/lib/api";
 import type { ConversationSummary, PaginatedResponse } from "@/types";
 import { conversationTopicLabel } from "@/lib/conversation-display";
@@ -1249,7 +1250,7 @@ function CostsTab({ simulationId }: { simulationId: string }) {
 }
 
 function SnapshotsTab({ simulationId }: { simulationId: string }) {
-  const [snapshots, setSnapshots] = useState<Record<string, unknown>[] | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -1290,15 +1291,20 @@ function SnapshotsTab({ simulationId }: { simulationId: string }) {
           <tbody>
             {snapshots.map((snap, idx) => (
               <tr
-                key={idx}
+                key={snap.filename ?? idx}
                 className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
               >
-                <td className="px-4 py-2 font-mono text-xs text-foreground/80">
-                  {String(snap.filename ?? snap.name ?? snap.id ?? `snapshot-${idx + 1}`)}
+                <td className="px-4 py-2 font-mono text-xs">
+                  <Link
+                    href={`/simulations/${simulationId}/snapshots/${encodeURIComponent(snap.filename)}`}
+                    className="text-neon-cyan hover:underline"
+                  >
+                    {snap.filename}
+                  </Link>
                 </td>
                 <td className="px-4 py-2 text-xs text-foreground/50">
-                  {snap.created_at || snap.date
-                    ? new Date(String(snap.created_at ?? snap.date)).toLocaleString()
+                  {snap.snapshot_at
+                    ? new Date(snap.snapshot_at).toLocaleString()
                     : "\u2014"}
                 </td>
                 <td className="px-4 py-2 font-mono text-right">
