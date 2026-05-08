@@ -12,13 +12,15 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
+from core.auth.dependencies import get_current_user
 from core.constants import LIVE_SIMULATION_ID
 from core.models import (
     Challenge,
     Conversation,
+    User,
     WorldChunk,
     WorldEvent,
 )
@@ -1894,3 +1896,195 @@ async def get_public_artifacts(
         "limit": limit,
         "offset": offset,
     }
+
+
+# ── Public Simulation Submission ─────────────────────────────────
+
+
+class PublicSubmitRequest(BaseModel):
+    scenario_id: str
+    name: str
+    params: dict[str, Any] | None = None
+    hypothesis: str | None = Field(default=None, max_length=2000)
+
+
+class PublicSubmitResponse(BaseModel):
+    simulation_id: str
+    status_url: str
+    estimated_completion_time: str
+
+
+_NAME_OK_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_"
+)
+
+
+def _sanitize_submission_name(raw: str) -> str:
+    cleaned = "".join(c for c in (raw or "").strip() if c in _NAME_OK_CHARS)
+    return cleaned[:100]
+
+
+def _public_caps() -> tuple[float, float]:
+    """Return (per_submission_cap_usd, lifetime_cap_usd)."""
+    import os
+    from decimal import InvalidOperation
+
+    def _parse(name: str, default: float) -> float:
+        raw = os.environ.get(name, "")
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except (ValueError, InvalidOperation):
+            return default
+
+    return (
+        _parse("PUBLIC_SIM_MAX_COST_USD", 1.0),
+        _parse("PUBLIC_USER_LIFETIME_CAP_USD", 10.0),
+    )
+
+
+@router.post("/simulations/submit", response_model=PublicSubmitResponse)
+async def submit_public_simulation(
+    body: PublicSubmitRequest,
+    user: User = Depends(get_current_user),
+) -> PublicSubmitResponse:
+    """Public-user simulation submission with cost + rate guardrails.
+
+    Caps enforced before the orchestrator subprocess is spawned:
+
+      * ``max_cost`` per submission (env ``PUBLIC_SIM_MAX_COST_USD``, default $1)
+      * Per-user lifetime cost (``PUBLIC_USER_LIFETIME_CAP_USD``, default $10)
+      * 1 concurrent simulation per user (queued or running)
+      * 5 submissions / user / day via Redis counter
+    """
+    import os
+    import subprocess
+    import sys
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+    from pathlib import Path
+
+    from core.models import SimulationCreate
+    from core.repos.simulation_repo import SimulationRepo
+    from core.repos.user_repo import UserRepo
+
+    project_root = Path(__file__).resolve().parent.parent
+    scenarios_dir = (project_root / "scenarios").resolve()
+    candidate = (scenarios_dir / body.scenario_id).resolve()
+    try:
+        candidate.relative_to(scenarios_dir)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="scenario_id must resolve inside scenarios/",
+        ) from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=400, detail="scenario_id not found")
+
+    sim_name = _sanitize_submission_name(body.name)
+    if not sim_name:
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+
+    per_sub_cap, lifetime_cap = _public_caps()
+    requested_cost = float((body.params or {}).get("max_cost", per_sub_cap))
+    max_cost = max(0.0, min(requested_cost, per_sub_cap))
+
+    # Lifetime cost cap (worst-case: count requested max against the user's
+    # already-spent total, even though actual cost is usually lower).
+    projected_total = float(user.total_cost_spent) + max_cost
+    if projected_total > lifetime_cap:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "lifetime_cap",
+                "message": (
+                    f"Lifetime cost cap of ${lifetime_cap:.2f} would be exceeded "
+                    f"(spent ${float(user.total_cost_spent):.2f} + "
+                    f"requested ${max_cost:.2f})"
+                ),
+            },
+        )
+
+    services = _get_services()
+    db = services.db
+    sim_repo = SimulationRepo(db)
+    user_repo = UserRepo(db)
+
+    # Concurrent simulations cap (1)
+    active = await sim_repo.count_active_for_user(user.id)
+    if active >= 1:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "concurrent_limit",
+                "message": "You already have a simulation queued or running",
+            },
+        )
+
+    # Daily rate limit (5/day) — Redis counter, no-op if Redis is down.
+    redis = services.redis
+    daily_key = f"ratelimit:sim_submit:{user.id}"
+    allowed = await _check_rate_limit(redis, daily_key, 5, 86400)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "daily_limit",
+                "message": "Daily submission limit reached (5/day)",
+            },
+        )
+
+    sim = await sim_repo.create(
+        SimulationCreate(
+            name=sim_name,
+            description=body.hypothesis,
+            config={
+                "scenario_id": body.scenario_id,
+                "max_cost": max_cost,
+                "params": body.params or {},
+                "source": "public_submit",
+            },
+            status="queued",  # type: ignore[arg-type]
+            hypothesis=body.hypothesis,
+            submitted_by_user_id=user.id,
+        )
+    )
+
+    # Worst-case accounting: charge the user for the requested cap up-front
+    # so concurrent submissions can't race past the lifetime cap. A future
+    # reconciliation worker should refund the unused portion based on
+    # cost_events, but that is out of scope here.
+    await user_repo.increment_sims_and_cost(
+        user.id,
+        cost_delta=Decimal(str(max_cost)),
+    )
+
+    cmd = [
+        sys.executable,
+        str(project_root / "scripts" / "run_simulation.py"),
+        "--name",
+        sim_name,
+        "--seed-file",
+        str(candidate),
+        "--max-cost",
+        str(max_cost),
+        "--sim-id",
+        str(sim.id),
+    ]
+    # Skip subprocess spawn during pytest — tests assert on row creation.
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        subprocess.Popen(  # noqa: S603
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            cwd=str(project_root),
+        )
+
+    eta = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    return PublicSubmitResponse(
+        simulation_id=str(sim.id),
+        status_url=f"/api/simulations/{sim.id}",
+        estimated_completion_time=eta,
+    )
