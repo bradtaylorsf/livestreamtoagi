@@ -23,7 +23,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from core.video.audio_timeline import TurnAudioCue, stitch_audio_timeline
 from core.video.config import VideoRenderConfig, load_video_render_config
@@ -32,6 +32,12 @@ if TYPE_CHECKING:
     from core.tts import TTSPipeline
 
 logger = logging.getLogger(__name__)
+
+LOCAL_REPLAY_HELP = (
+    "Expected the Next.js website replay route on http://localhost:4000 "
+    "with the backend API on http://localhost:8010. Start the normal `pnpm dev` "
+    "stack or set PUBLIC_BASE_URL / VIDEO_REPLAY_URL_TEMPLATE for this worker."
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,30 @@ class RenderResult:
 
 class RenderError(RuntimeError):
     """Raised when the render pipeline cannot produce an MP4."""
+
+
+class _ReplayResponse(Protocol):
+    status: int
+
+
+def _replay_page_error(message: str, replay_url: str) -> RenderError:
+    return RenderError(f"{message}: {replay_url}. {LOCAL_REPLAY_HELP}")
+
+
+def _raise_for_bad_replay_response(
+    response: _ReplayResponse | None,
+    replay_url: str,
+) -> None:
+    if response is None:
+        raise _replay_page_error(
+            "Replay page did not return an HTTP response",
+            replay_url,
+        )
+    if response.status < 200 or response.status >= 400:
+        raise _replay_page_error(
+            f"Replay page returned HTTP {response.status}",
+            replay_url,
+        )
 
 
 async def _capture_canvas(
@@ -67,34 +97,44 @@ async def _capture_canvas(
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            record_video_dir=str(output_path.parent),
-            record_video_size={"width": 1280, "height": 720},
-        )
-        page = await context.new_page()
-        await page.goto(replay_url, wait_until="domcontentloaded")
+        context = None
         try:
-            await page.wait_for_function(
-                "() => window.__replayReady === true",
-                timeout=30_000,
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                record_video_dir=str(output_path.parent),
+                record_video_size={"width": 1280, "height": 720},
             )
-        except Exception as exc:
-            await context.close()
+            page = await context.new_page()
+            try:
+                response = await page.goto(replay_url, wait_until="domcontentloaded")
+            except Exception as exc:
+                raise _replay_page_error("Could not open replay page", replay_url) from exc
+
+            _raise_for_bad_replay_response(response, replay_url)
+
+            try:
+                await page.wait_for_function(
+                    "() => window.__replayReady === true",
+                    timeout=30_000,
+                )
+            except Exception as exc:
+                raise _replay_page_error(
+                    "Replay page did not signal __replayReady within 30s",
+                    replay_url,
+                ) from exc
+
+            try:
+                await page.wait_for_function(
+                    "() => window.__replayDone === true",
+                    timeout=max_seconds * 1000,
+                )
+            except Exception:
+                truncated = True
+                logger.warning("[video] replay capture truncated at %ds", max_seconds)
+        finally:
+            if context is not None:
+                await context.close()
             await browser.close()
-            raise RenderError("replay page did not signal __replayReady") from exc
-
-        try:
-            await page.wait_for_function(
-                "() => window.__replayDone === true",
-                timeout=max_seconds * 1000,
-            )
-        except Exception:
-            truncated = True
-            logger.warning("[video] replay capture truncated at %ds", max_seconds)
-
-        await context.close()
-        await browser.close()
 
     # Playwright writes a webm into the record_video_dir; pick the newest.
     candidates = sorted(
@@ -164,10 +204,8 @@ async def render_simulation_video(
     audio_path = work / "audio.wav"
     final_path = work / f"{sim_id_str}.mp4"
 
-    replay_url = config.replay_url_template.format(
-        base_url=config.public_base_url,
-        sim_id=sim_id_str,
-    )
+    replay_url = config.replay_url_for(sim_id_str)
+    logger.info("[video] capture replay url=%s", replay_url)
 
     capture_task = asyncio.create_task(
         _capture_canvas(

@@ -62,7 +62,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Run
-uvicorn core.main:app --reload --port 8000
+uvicorn core.main:app --reload --port 8010
 
 # Test (after activating .venv). For automated runners that don't
 # activate the venv, use `make test-backend` — it pins `.venv/bin/pytest`
