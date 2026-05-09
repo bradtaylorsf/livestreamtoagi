@@ -213,6 +213,34 @@ class TestMagicLinkRequest:
         assert link.startswith("http")
         assert "/api/auth/verify?token=" in link
 
+    def test_console_log_empty_env_falls_back_to_default(
+        self, auth_app, tmp_path, monkeypatch
+    ) -> None:
+        """Blank EMAIL_CONSOLE_LOG (the .env.example default) must still capture.
+
+        Regression: `os.environ.get("EMAIL_CONSOLE_LOG", default)` returns "" —
+        not the default — when the var is set-but-empty. `Path("")` then
+        resolves to "." and the OSError is swallowed, killing capture.
+        """
+        client, *_ = auth_app
+        # Redirect the module-level default into tmp_path so we don't pollute
+        # /tmp/livestream-agi-emails.jsonl on the dev machine.
+        from core.auth import email as email_mod
+
+        fake_default = tmp_path / "fallback.jsonl"
+        monkeypatch.setattr(email_mod, "DEFAULT_CONSOLE_LOG_PATH", str(fake_default))
+        with patch.dict(os.environ, {"EMAIL_CONSOLE_LOG": ""}):
+            resp = client.post(
+                "/api/auth/magic-link", json={"email": "alice@example.com"}
+            )
+        assert resp.status_code == 200
+        assert fake_default.exists(), (
+            "blank EMAIL_CONSOLE_LOG should fall back to DEFAULT_CONSOLE_LOG_PATH"
+        )
+        assert fake_default.read_text(encoding="utf-8").strip(), (
+            "fallback log file is empty"
+        )
+
 
 # ── /api/auth/verify ──────────────────────────────────────────
 

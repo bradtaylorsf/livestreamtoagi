@@ -53,7 +53,10 @@ def _extract_links(body_text: str) -> list[str]:
 
 def _write_console_log(record: dict[str, object]) -> None:
     """Append a JSON line to the console-email log file. Never raises."""
-    path = Path(os.environ.get("EMAIL_CONSOLE_LOG", DEFAULT_CONSOLE_LOG_PATH))
+    # Treat empty-string the same as unset — `.env.example` ships with a blank
+    # `EMAIL_CONSOLE_LOG=` line, and `Path("")` resolves to "." which then
+    # fails open-for-append with IsADirectoryError, silently breaking capture.
+    path = Path(os.environ.get("EMAIL_CONSOLE_LOG", "") or DEFAULT_CONSOLE_LOG_PATH)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
