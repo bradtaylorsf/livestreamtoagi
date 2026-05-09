@@ -100,6 +100,22 @@ class TestRenderConfig:
             f"https://show.example/simulations/{sim_id}/replay?renderMode=1"
         )
 
+    def test_blank_replay_url_template_env_uses_default(self):
+        sim_id = uuid.uuid4()
+        with patch.dict(
+            os.environ,
+            {
+                "PUBLIC_BASE_URL": "http://localhost:4000",
+                "VIDEO_REPLAY_URL_TEMPLATE": "",
+            },
+            clear=False,
+        ):
+            cfg = load_video_render_config()
+
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"http://localhost:4000/simulations/{sim_id}/replay?renderMode=1"
+        )
+
     def test_replay_url_template_override_takes_precedence(self):
         sim_id = uuid.uuid4()
         with patch.dict(

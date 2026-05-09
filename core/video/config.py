@@ -49,12 +49,18 @@ def load_video_render_config() -> VideoRenderConfig:
         storage_backend=os.environ.get("VIDEO_STORAGE", "local").lower(),
         s3_bucket=os.environ.get("VIDEO_S3_BUCKET") or None,
         output_dir=os.environ.get("VIDEO_OUTPUT_DIR", "videos"),
-        public_base_url=os.environ.get(
-            "PUBLIC_BASE_URL",
-            DEFAULT_PUBLIC_BASE_URL,
-        ).rstrip("/"),
-        replay_url_template=os.environ.get(
+        public_base_url=_env_or_default("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL).rstrip(
+            "/"
+        ),
+        replay_url_template=_env_or_default(
             "VIDEO_REPLAY_URL_TEMPLATE",
             DEFAULT_REPLAY_URL_TEMPLATE,
         ),
     )
+
+
+def _env_or_default(name: str, default: str) -> str:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip()
