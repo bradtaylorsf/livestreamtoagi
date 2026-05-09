@@ -73,22 +73,29 @@ test.describe("replay scene", () => {
     expect(distinctBytes.size).toBeGreaterThan(64);
   });
 
-  test("hides chrome in renderMode — global nav, footer, skip link are not rendered", async ({ page }) => {
+  test("hides chrome in renderMode — global nav, footer, skip link are not visible", async ({ page }) => {
     await mockCues(page);
     await gotoReplay(page);
 
     // Acceptance criterion: ``renderMode=1`` hides all non-recording chrome.
-    // The render pipeline scrapes a page snapshot, so chrome must actually
-    // be display:none — not merely covered by a higher-z-index canvas.
-    await expect(page.locator("nav")).toHaveCount(0);
-    await expect(page.locator("footer")).toHaveCount(0);
+    // The root layout still mounts those elements, so assert both that they
+    // are display:none and that they are absent from the accessibility tree.
+    for (const selector of ["nav", "footer", 'a[href="#main-content"]']) {
+      const chrome = page.locator(selector);
+      const count = await chrome.count();
+      for (let i = 0; i < count; i += 1) {
+        await expect(chrome.nth(i)).toBeHidden();
+      }
+    }
+    await expect(page.getByRole("navigation")).toHaveCount(0);
+    await expect(page.getByRole("contentinfo")).toHaveCount(0);
     await expect(
-      page.locator('a[href="#main-content"]'),
+      page.getByRole("link", { name: /skip to main content/i }),
     ).toHaveCount(0);
 
     // The full-bleed wrap still has to cover the viewport so the canvas
     // is the only visible content during recording.
-    const wrap = page.locator('[data-render-mode="1"]');
+    const wrap = page.locator('div[data-render-mode="1"]');
     await expect(wrap).toBeVisible();
     const wrapBox = await wrap.boundingBox();
     expect(wrapBox).not.toBeNull();

@@ -74,6 +74,19 @@ function isValidTab(value: string | null): value is TabKey {
   return value !== null && TAB_KEYS.includes(value as TabKey);
 }
 
+function shouldPollSimulation(sim: PublicSimulationDetail | null): boolean {
+  if (!sim) return false;
+  if (sim.status === "queued" || sim.status === "running") return true;
+  if (sim.status === "cancelled") return false;
+  if (sim.video_render_status === null) {
+    return sim.status === "completed" || sim.status === "failed";
+  }
+  return (
+    sim.video_render_status === "pending" ||
+    sim.video_render_status === "rendering"
+  );
+}
+
 // API returns Decimal fields as strings; coerce to number for display.
 function toNumber(value: unknown): number | null {
   if (value == null) return null;
@@ -732,14 +745,51 @@ function SimulationDetailContent() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     getSimulation(id)
-      .then(setSim)
-      .catch((err) =>
+      .then((next) => {
+        if (!cancelled) setSim(next);
+      })
+      .catch((err) => {
+        if (cancelled) return;
         setError(
           err instanceof Error ? err.message : "Failed to load simulation",
-        ),
-      );
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  const shouldPoll = shouldPollSimulation(sim);
+
+  useEffect(() => {
+    if (!shouldPoll) return;
+
+    let cancelled = false;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      getSimulation(id)
+        .then((next) => {
+          if (!cancelled) {
+            setSim(next);
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(
+            err instanceof Error ? err.message : "Failed to refresh simulation",
+          );
+        });
+    };
+
+    const intervalId = window.setInterval(tick, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [id, shouldPoll]);
 
   const setActiveTab = useCallback(
     (tab: TabKey) => {
