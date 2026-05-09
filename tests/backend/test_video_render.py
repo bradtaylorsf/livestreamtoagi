@@ -11,12 +11,13 @@ import os
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from core.models import Simulation
-from core.video.audio_timeline import TurnAudioCue
+from core.video.audio_timeline import StitchResult, TurnAudioCue
 from core.video.config import VideoRenderConfig, load_video_render_config
 from core.video.worker import enqueue_render, mark_unrenderable
 
@@ -42,22 +43,31 @@ def _make_sim(**overrides) -> Simulation:
 
 # ── Config knobs ─────────────────────────────────────────────
 
+VIDEO_ENV_KEYS = (
+    "MAX_VIDEO_RENDER_MINUTES",
+    "VIDEO_STORAGE",
+    "VIDEO_S3_BUCKET",
+    "VIDEO_OUTPUT_DIR",
+    "PUBLIC_BASE_URL",
+    "VIDEO_REPLAY_URL_TEMPLATE",
+)
+
 
 class TestRenderConfig:
     def test_defaults(self):
         with patch.dict(os.environ, {}, clear=False):
-            for k in (
-                "MAX_VIDEO_RENDER_MINUTES",
-                "VIDEO_STORAGE",
-                "VIDEO_S3_BUCKET",
-                "VIDEO_OUTPUT_DIR",
-            ):
+            for k in VIDEO_ENV_KEYS:
                 os.environ.pop(k, None)
             cfg = load_video_render_config()
+        sim_id = uuid.uuid4()
         assert cfg.max_render_minutes == 30
         assert cfg.max_render_seconds == 30 * 60
         assert cfg.storage_backend == "local"
         assert cfg.s3_bucket is None
+        assert cfg.public_base_url == "http://localhost:4000"
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"http://localhost:4000/simulations/{sim_id}/replay?renderMode=1"
+        )
 
     def test_env_overrides(self):
         with patch.dict(
@@ -72,6 +82,105 @@ class TestRenderConfig:
         assert cfg.max_render_minutes == 5
         assert cfg.storage_backend == "s3"
         assert cfg.s3_bucket == "my-bucket"
+
+    def test_public_base_url_override_builds_default_replay_route(self):
+        sim_id = uuid.uuid4()
+        with patch.dict(
+            os.environ,
+            {
+                "PUBLIC_BASE_URL": "https://show.example/",
+            },
+            clear=False,
+        ):
+            os.environ.pop("VIDEO_REPLAY_URL_TEMPLATE", None)
+            cfg = load_video_render_config()
+
+        assert cfg.public_base_url == "https://show.example"
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"https://show.example/simulations/{sim_id}/replay?renderMode=1"
+        )
+
+    def test_replay_url_template_override_takes_precedence(self):
+        sim_id = uuid.uuid4()
+        with patch.dict(
+            os.environ,
+            {
+                "PUBLIC_BASE_URL": "https://show.example",
+                "VIDEO_REPLAY_URL_TEMPLATE": "http://renderer.local/replay/{sim_id}",
+            },
+            clear=False,
+        ):
+            cfg = load_video_render_config()
+
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"http://renderer.local/replay/{sim_id}"
+        )
+
+
+# ── Replay capture URL construction ──────────────────────────
+
+
+class TestRenderPipelineReplayUrls:
+    @pytest.mark.asyncio
+    async def test_capture_canvas_receives_website_replay_url(self, tmp_path):
+        from core.video.render_pipeline import render_simulation_video
+
+        sim_id = uuid.uuid4()
+        cfg = VideoRenderConfig(
+            max_render_minutes=5,
+            storage_backend="local",
+            s3_bucket=None,
+            output_dir="videos",
+            public_base_url="http://localhost:4000",
+            replay_url_template="{base_url}/simulations/{sim_id}/replay?renderMode=1",
+        )
+        capture = AsyncMock(return_value=(tmp_path / "canvas.webm", False))
+        stitch = AsyncMock(
+            return_value=StitchResult(
+                output_path=tmp_path / "audio.wav",
+                duration_seconds=1.0,
+                cues_rendered=1,
+            )
+        )
+
+        with (
+            patch("core.video.render_pipeline._capture_canvas", new=capture),
+            patch("core.video.render_pipeline.stitch_audio_timeline", new=stitch),
+            patch("core.video.render_pipeline._mux_final_mp4") as mux,
+        ):
+            result = await render_simulation_video(
+                sim_id,
+                cues=[TurnAudioCue("vera", "hello", 0.0)],
+                tts=MagicMock(),
+                config=cfg,
+                work_dir=tmp_path,
+            )
+
+        capture.assert_awaited_once()
+        assert capture.await_args.kwargs["replay_url"] == (
+            f"http://localhost:4000/simulations/{sim_id}/replay?renderMode=1"
+        )
+        assert capture.await_args.kwargs["max_seconds"] == 5 * 60
+        mux.assert_called_once()
+        assert result.output_path == tmp_path / f"{sim_id}.mp4"
+
+    def test_bad_replay_response_error_is_actionable(self):
+        from core.video.render_pipeline import (
+            RenderError,
+            _raise_for_bad_replay_response,
+        )
+
+        replay_url = "http://localhost:4000/simulations/sim-1/replay?renderMode=1"
+        with pytest.raises(RenderError) as exc:
+            _raise_for_bad_replay_response(SimpleNamespace(status=404), replay_url)
+
+        message = str(exc.value)
+        assert "HTTP 404" in message
+        assert replay_url in message
+        assert "localhost:4000" in message
+        assert "localhost:8010" in message
+        assert "PUBLIC_BASE_URL" in message
+        assert "VIDEO_REPLAY_URL_TEMPLATE" in message
 
 
 # ── Worker idempotency ───────────────────────────────────────

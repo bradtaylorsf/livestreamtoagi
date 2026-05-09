@@ -84,7 +84,10 @@ async def request_magic_link(
     expires_at = datetime.now(UTC) + timedelta(minutes=MAGIC_LINK_TTL_MINUTES)
     await repo.create(token_hash, email, expires_at=expires_at)
 
-    base_url = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+    base_url = os.environ.get(
+        "PUBLIC_BASE_URL",
+        "http://localhost:4000",
+    ).rstrip("/")
     link = f"{base_url}/api/auth/verify?token={raw_token}"
 
     subject = "Your sign-in link for Livestream to AGI"

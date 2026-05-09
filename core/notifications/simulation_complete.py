@@ -87,7 +87,10 @@ async def send_completion_email(
         )
         return NotificationSendResult(sent=False, skipped_reason="no_token")
 
-    base_url = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+    base_url = os.environ.get(
+        "PUBLIC_BASE_URL",
+        "http://localhost:4000",
+    ).rstrip("/")
     workspace_url = f"{base_url}/simulations/{sim.id}"
     unsubscribe_url = f"{base_url}/api/notifications/unsubscribe?token={token}"
     error_summary = _summarize_error(sim) if sim.status == "failed" else None
