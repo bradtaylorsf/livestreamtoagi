@@ -358,20 +358,27 @@ describe("state.buildSubmitPayload", () => {
 });
 
 describe("draftStorage", () => {
-  let storage: Record<string, string>;
+  let localStorageData: Record<string, string>;
+  let sessionStorageData: Record<string, string>;
+
+  function makeStorage(storage: Record<string, string>) {
+    return {
+      getItem: (key: string) => (key in storage ? storage[key] : null),
+      setItem: (key: string, value: string) => {
+        storage[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete storage[key];
+      },
+    };
+  }
 
   beforeEach(() => {
-    storage = {};
+    localStorageData = {};
+    sessionStorageData = {};
     vi.stubGlobal("window", {
-      sessionStorage: {
-        getItem: (key: string) => (key in storage ? storage[key] : null),
-        setItem: (key: string, value: string) => {
-          storage[key] = value;
-        },
-        removeItem: (key: string) => {
-          delete storage[key];
-        },
-      },
+      localStorage: makeStorage(localStorageData),
+      sessionStorage: makeStorage(sessionStorageData),
     });
   });
 
@@ -444,10 +451,40 @@ describe("draftStorage", () => {
     });
     expect(restored?.energy).toMatchObject({ vera: 62, rex: 44, pixel: 91 });
     expect(restored?.energy.fork).toBe(75);
+    expect(localStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeTruthy();
+    expect(sessionStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it("loads legacy session drafts when local storage is empty", () => {
+    sessionStorageData[CREATOR_DRAFT_STORAGE_KEY] = JSON.stringify({
+      version: 1,
+      saved_at: "2026-05-09T00:00:00Z",
+      state: {
+        scenario_id: "dream_smoke_test.yaml",
+        name: "Session draft run",
+        hypothesis: "",
+        excluded_agents: [],
+        factions: [],
+        memory_seed: { mode: "none" },
+        memory_seed_raw_json: "{}",
+        max_cost: 0.5,
+        publish_to_youtube: false,
+        conversation_cadence: 1,
+        energy: { vera: 70, rex: 60, aurora: 80 },
+      },
+    });
+
+    const restored = loadCreatorDraft({
+      scenarios: [makeScenario()],
+      remainingBudget: null,
+    });
+
+    expect(restored?.name).toBe("Session draft run");
+    expect(restored?.max_cost).toBe(0.5);
   });
 
   it("clears invalid or stale drafts instead of throwing", () => {
-    storage[CREATOR_DRAFT_STORAGE_KEY] = JSON.stringify({
+    localStorageData[CREATOR_DRAFT_STORAGE_KEY] = JSON.stringify({
       version: 1,
       state: { scenario_id: "missing.yaml" },
     });
@@ -458,13 +495,15 @@ describe("draftStorage", () => {
     });
 
     expect(restored).toBeNull();
-    expect(storage[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+    expect(localStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
   });
 
   it("clears the persisted draft on request", () => {
-    storage[CREATOR_DRAFT_STORAGE_KEY] = "draft";
+    localStorageData[CREATOR_DRAFT_STORAGE_KEY] = "draft";
+    sessionStorageData[CREATOR_DRAFT_STORAGE_KEY] = "legacy draft";
     clearCreatorDraft();
-    expect(storage[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+    expect(localStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+    expect(sessionStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
   });
 });
 

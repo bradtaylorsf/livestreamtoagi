@@ -43,6 +43,14 @@ async function mockCreatorApis(page: Page) {
     });
   });
 
+  await page.route("**/api/simulations?*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [], total: 0, limit: 10, offset: 0 }),
+    });
+  });
+
   await page.route("**/api/auth/me", async (route) => {
     await route.fulfill({
       status: signedIn ? 200 : 401,
@@ -86,7 +94,11 @@ async function setRangeValue(page: Page, testId: string, value: string) {
   await page.getByTestId(testId).evaluate(
     (element, nextValue) => {
       const input = element as HTMLInputElement;
-      input.value = nextValue;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(input, nextValue);
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     },

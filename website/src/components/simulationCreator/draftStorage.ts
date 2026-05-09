@@ -34,13 +34,20 @@ interface StoredCreatorDraft {
   };
 }
 
-function getStorage(): Storage | null {
+function getStorage(kind: "local" | "session"): Storage | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.sessionStorage;
+    return kind === "local" ? window.localStorage : window.sessionStorage;
   } catch {
     return null;
   }
+}
+
+function getDraftStores(): Storage[] {
+  const stores = [getStorage("local"), getStorage("session")].filter(
+    (store): store is Storage => store !== null,
+  );
+  return [...new Set(stores)];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -156,10 +163,14 @@ export function loadCreatorDraft(opts: {
   scenarios: PublicScenarioMeta[];
   remainingBudget: number | null;
 }): CreatorFormState | null {
-  const storage = getStorage();
-  if (!storage) return null;
+  const stores = getDraftStores();
+  if (stores.length === 0) return null;
 
-  const raw = storage.getItem(CREATOR_DRAFT_STORAGE_KEY);
+  let raw: string | null = null;
+  for (const storage of stores) {
+    raw = storage.getItem(CREATOR_DRAFT_STORAGE_KEY);
+    if (raw) break;
+  }
   if (!raw) return null;
 
   const draft = parseDraft(raw);
@@ -195,9 +206,6 @@ export function loadCreatorDraft(opts: {
 }
 
 export function saveCreatorDraft(state: CreatorFormState): void {
-  const storage = getStorage();
-  if (!storage) return;
-
   const draft: StoredCreatorDraft = {
     version: DRAFT_VERSION,
     saved_at: new Date().toISOString(),
@@ -216,19 +224,23 @@ export function saveCreatorDraft(state: CreatorFormState): void {
     },
   };
 
-  try {
-    storage.setItem(CREATOR_DRAFT_STORAGE_KEY, JSON.stringify(draft));
-  } catch {
-    // Private browsing or quota errors should not block form submission.
+  const serialized = JSON.stringify(draft);
+  for (const storage of getDraftStores()) {
+    try {
+      storage.setItem(CREATOR_DRAFT_STORAGE_KEY, serialized);
+      return;
+    } catch {
+      // Private browsing or quota errors should not block form submission.
+    }
   }
 }
 
 export function clearCreatorDraft(): void {
-  const storage = getStorage();
-  if (!storage) return;
-  try {
-    storage.removeItem(CREATOR_DRAFT_STORAGE_KEY);
-  } catch {
-    // Storage is best-effort only.
+  for (const storage of getDraftStores()) {
+    try {
+      storage.removeItem(CREATOR_DRAFT_STORAGE_KEY);
+    } catch {
+      // Storage is best-effort only.
+    }
   }
 }
