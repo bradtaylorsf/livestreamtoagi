@@ -194,6 +194,15 @@ curl -X POST http://localhost:8000/api/auth/magic-link \
 Set `EMAIL_CONSOLE_REDIS_STREAM=stream:email:console` to also XADD each
 record to Redis for future dev-tool UIs.
 
+If you don't have Postgres running and just want to verify the capture loop,
+boot the self-contained dev app instead of the full backend — it mounts only
+`/api/auth/*` + `/healthz` with stub services, so no database, Redis, or
+agent registry is required:
+
+```bash
+.venv/bin/uvicorn core.auth.dev_email_app:app --port 8765
+```
+
 ## Testing
 
 ```bash
