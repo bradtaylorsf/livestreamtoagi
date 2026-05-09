@@ -118,7 +118,7 @@ export default function VideoPlayer({
       <video
         controls
         preload="metadata"
-        src={src}
+        src={src ?? undefined}
         className="w-full rounded border border-border bg-black"
       >
         Your browser does not support the video tag.
