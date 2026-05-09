@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -22,7 +23,6 @@ from core.auth.dependencies import (
     is_valid_email,
 )
 from core.models import User
-
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -183,6 +183,63 @@ class TestMagicLinkRequest:
             "/api/auth/magic-link", json={"email": "alice@example.com"}
         )
         assert resp.status_code == 429
+
+    def test_console_provider_writes_jsonl(self, auth_app, tmp_path) -> None:
+        """EMAIL_PROVIDER=console should append a JSONL record with the magic link.
+
+        Repros the QA pain point from issue #466 where uvicorn's log config
+        swallowed the application logger and the plaintext token had no
+        capturable side-channel.
+        """
+        client, *_ = auth_app
+        log_path = tmp_path / "emails.jsonl"
+        # Don't set EMAIL_CONSOLE_REDIS_STREAM — we don't want this test
+        # to depend on a running Redis.
+        with patch.dict(os.environ, {"EMAIL_CONSOLE_LOG": str(log_path)}):
+            resp = client.post(
+                "/api/auth/magic-link", json={"email": "alice@example.com"}
+            )
+        assert resp.status_code == 200
+        assert log_path.exists(), "console log file was not created"
+        lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+        assert lines, "console log file is empty"
+        record = json.loads(lines[-1])
+        assert record["to"] == "alice@example.com"
+        assert "sign-in" in record["subject"].lower()
+        assert isinstance(record["links"], list) and record["links"], (
+            "expected at least one extracted magic link in 'links'"
+        )
+        link = record["links"][0]
+        assert link.startswith("http")
+        assert "/api/auth/verify?token=" in link
+
+    def test_console_log_empty_env_falls_back_to_default(
+        self, auth_app, tmp_path, monkeypatch
+    ) -> None:
+        """Blank EMAIL_CONSOLE_LOG (the .env.example default) must still capture.
+
+        Regression: `os.environ.get("EMAIL_CONSOLE_LOG", default)` returns "" —
+        not the default — when the var is set-but-empty. `Path("")` then
+        resolves to "." and the OSError is swallowed, killing capture.
+        """
+        client, *_ = auth_app
+        # Redirect the module-level default into tmp_path so we don't pollute
+        # /tmp/livestream-agi-emails.jsonl on the dev machine.
+        from core.auth import email as email_mod
+
+        fake_default = tmp_path / "fallback.jsonl"
+        monkeypatch.setattr(email_mod, "DEFAULT_CONSOLE_LOG_PATH", str(fake_default))
+        with patch.dict(os.environ, {"EMAIL_CONSOLE_LOG": ""}):
+            resp = client.post(
+                "/api/auth/magic-link", json={"email": "alice@example.com"}
+            )
+        assert resp.status_code == 200
+        assert fake_default.exists(), (
+            "blank EMAIL_CONSOLE_LOG should fall back to DEFAULT_CONSOLE_LOG_PATH"
+        )
+        assert fake_default.read_text(encoding="utf-8").strip(), (
+            "fallback log file is empty"
+        )
 
 
 # ── /api/auth/verify ──────────────────────────────────────────
