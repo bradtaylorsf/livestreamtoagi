@@ -77,3 +77,45 @@ describe("resolveSimulationId precedence", () => {
     expect(result.source).toBe("session");
   });
 });
+
+describe("parseSimIdFromPath", () => {
+  it("returns the id for /simulations/<id>", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath("/simulations/abc")).toBe("abc");
+  });
+
+  it("returns the id for nested simulation routes", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath("/simulations/abc/agents/rex")).toBe("abc");
+    expect(parseSimIdFromPath("/simulations/abc/replay")).toBe("abc");
+  });
+
+  it("returns null for the simulations index", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath("/simulations")).toBeNull();
+    expect(parseSimIdFromPath("/simulations/")).toBeNull();
+  });
+
+  it("returns null for the root path", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath("/")).toBeNull();
+  });
+
+  it("returns null for a null pathname", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath(null)).toBeNull();
+  });
+
+  it("returns null for unrelated paths", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath("/other/path")).toBeNull();
+    expect(parseSimIdFromPath("/agents/rex")).toBeNull();
+  });
+
+  it("returns null for known list-page sentinels", async () => {
+    const { parseSimIdFromPath } = await import("../SimulationContext");
+    expect(parseSimIdFromPath("/simulations/live")).toBeNull();
+    expect(parseSimIdFromPath("/simulations/new")).toBeNull();
+    expect(parseSimIdFromPath("/simulations/scenarios")).toBeNull();
+  });
+});
