@@ -171,6 +171,29 @@ cd frontend && npm run dev
 cd website && npm run dev
 ```
 
+### Capturing dev magic links
+
+The dev/test default is `EMAIL_PROVIDER=console`, which doesn't actually send
+email. To complete the magic-link sign-in flow locally, every "sent" message
+is also appended as a JSON line to the file at `EMAIL_CONSOLE_LOG`
+(default `/tmp/livestream-agi-emails.jsonl`):
+
+```bash
+# In one terminal, watch the file:
+tail -f /tmp/livestream-agi-emails.jsonl
+
+# In another, request a link:
+curl -X POST http://localhost:8000/api/auth/magic-link \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com"}'
+
+# The last line of the file contains {"links": ["http://.../api/auth/verify?token=..."]}
+# — open that URL in the browser to set the session cookie.
+```
+
+Set `EMAIL_CONSOLE_REDIS_STREAM=stream:email:console` to also XADD each
+record to Redis for future dev-tool UIs.
+
 ## Testing
 
 ```bash
