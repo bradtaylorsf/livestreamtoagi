@@ -724,9 +724,23 @@ function SimulationDetailContent() {
   const router = useRouter();
   const id = params.id as string;
 
-  const tabParam = searchParams.get("tab");
-  const activeTab: TabKey = isValidTab(tabParam) ? tabParam : "overview";
   const justQueued = searchParams.get("queued") === "1";
+
+  // Initialize from window.location.search so a cold load of
+  // /simulations/[id]?tab=<key> selects the requested tab on first render.
+  // useSearchParams() can return stale/empty values during the initial
+  // client render after Suspense, which would otherwise drop the user on
+  // Overview until a click triggers router.push().
+  const [activeTab, setActiveTabState] = useState<TabKey>(() => {
+    if (typeof window === "undefined") return "overview";
+    const initial = new URLSearchParams(window.location.search).get("tab");
+    return isValidTab(initial) ? initial : "overview";
+  });
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    setActiveTabState(isValidTab(tabParam) ? tabParam : "overview");
+  }, [searchParams]);
 
   const [sim, setSim] = useState<PublicSimulationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
