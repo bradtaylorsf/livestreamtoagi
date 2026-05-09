@@ -61,3 +61,14 @@ body {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+
+/* Replay renderMode: the page is captured headlessly to MP4 by the render
+   pipeline (core/video/render_pipeline.py) so the global chrome — skip
+   link, navigation, footer — must not show up in the recording or in the
+   accessibility snapshot the QA verifier scrapes. The replay page sets
+   `data-render-mode="1"` on <html> when ?renderMode=1 is in the URL. */
+html[data-render-mode="1"] body > a[href="#main-content"],
+html[data-render-mode="1"] body nav,
+html[data-render-mode="1"] body footer {
+  display: none !important;
+}

@@ -905,4 +905,25 @@ export async function getArtifacts(params?: {
   );
 }
 
+// Simulation replay cues — drives the headless Phaser replay capture and
+// the on-screen speech-bubble plan. Backend produces one cue per voiced
+// agent turn (see core/video/cue_parser.py).
+export interface ReplayCue {
+  agent_id: string;
+  text: string;
+  start_seconds: number;
+}
+
+export interface ReplayCuesResponse {
+  sim_id: string;
+  cues: ReplayCue[];
+  duration_seconds: number;
+}
+
+export async function getReplayCues(
+  simId: string,
+): Promise<ReplayCuesResponse> {
+  return request<ReplayCuesResponse>(`/api/simulations/${simId}/replay-cues`);
+}
+
 export { ApiRequestError };
