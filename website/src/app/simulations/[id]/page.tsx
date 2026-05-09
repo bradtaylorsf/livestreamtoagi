@@ -232,12 +232,18 @@ function ConversationsTab({ simulationId }: { simulationId: string }) {
 
 // ── Evals tab (with comparable-run lookup) ──────────────────────
 
+// Always render this tab, regardless of sim status. Evals only populate after a
+// run completes (the evaluator runs in the orchestrator's finalize hook), but
+// hiding the tab on running sims surprised QA and made it feel like a bug.
+// Pass simStatus so the empty state can explain *why* there are no rows yet.
 function EvalsTab({
   simulationId,
   scenarioId,
+  simStatus,
 }: {
   simulationId: string;
   scenarioId: string | null;
+  simStatus?: string | null;
 }) {
   const [evalRuns, setEvalRuns] = useState<SimulationEvalRun[] | null>(null);
   const [comparable, setComparable] = useState<PublicEvalRun[]>([]);
@@ -303,7 +309,11 @@ function EvalsTab({
   }
 
   if (!evalRuns || evalRuns.length === 0) {
-    return <p className="text-sm text-foreground/50">No eval runs found for this simulation.</p>;
+    const message =
+      simStatus === "running"
+        ? "Evaluations run after the simulation completes — nothing here yet."
+        : "No eval runs recorded for this simulation.";
+    return <p className="text-sm text-foreground/50" data-testid="evals-empty">{message}</p>;
   }
 
   return (
@@ -811,7 +821,7 @@ function SimulationDetailContent() {
           <MemoriesTab simulationId={id} agents={sim.agents_participated} />
         );
       case "evals":
-        return <EvalsTab simulationId={id} scenarioId={scenarioId} />;
+        return <EvalsTab simulationId={id} scenarioId={scenarioId} simStatus={sim.status} />;
       case "energy":
         return <EnergyTab simulationId={id} />;
       case "hypothesis-outcomes":
