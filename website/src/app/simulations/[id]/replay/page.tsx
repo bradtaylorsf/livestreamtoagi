@@ -20,6 +20,19 @@ export default function ReplayPage() {
   const [cues, setCues] = useState<ReplayCue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Mark <html> so globals.css can hide global chrome (skip link, nav,
+  // footer) from the DOM — not just visually occlude it. The render
+  // pipeline scrapes the page snapshot, so chrome must be display:none,
+  // not just behind a higher-z-index canvas.
+  useEffect(() => {
+    if (!renderMode) return;
+    const root = document.documentElement;
+    root.dataset.renderMode = "1";
+    return () => {
+      delete root.dataset.renderMode;
+    };
+  }, [renderMode]);
+
   useEffect(() => {
     let cancelled = false;
     if (!params?.id) return;
