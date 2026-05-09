@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HYPOTHESIS_MAX_LENGTH,
@@ -26,6 +26,12 @@ import {
   reseedForScenario,
   toggleAgent,
 } from "@/components/simulationCreator/state";
+import {
+  CREATOR_DRAFT_STORAGE_KEY,
+  clearCreatorDraft,
+  loadCreatorDraft,
+  saveCreatorDraft,
+} from "@/components/simulationCreator/draftStorage";
 import { filterScenarios } from "@/components/simulationCreator/ScenarioField";
 import type { PublicScenarioMeta } from "@/lib/api";
 
@@ -348,6 +354,117 @@ describe("state.buildSubmitPayload", () => {
       mode: "custom",
       data: { vera: [1, 2] },
     });
+  });
+});
+
+describe("draftStorage", () => {
+  let storage: Record<string, string>;
+
+  beforeEach(() => {
+    storage = {};
+    vi.stubGlobal("window", {
+      sessionStorage: {
+        getItem: (key: string) => (key in storage ? storage[key] : null),
+        setItem: (key: string, value: string) => {
+          storage[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete storage[key];
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves user-entered draft fields while refreshing scenario metadata", () => {
+    const scenario = makeScenario({
+      filename: "lab_rivals.yaml",
+      name: "Lab Rivals",
+      agents: ["vera", "rex", "pixel"],
+    });
+    const state = initialState({
+      scenarios: [scenario],
+      initialScenarioId: "lab_rivals.yaml",
+      remainingBudget: null,
+    });
+
+    saveCreatorDraft({
+      ...state,
+      name: "Neon pact run",
+      hypothesis: "Pixel will recruit Vera before Rex notices.",
+      excluded_agents: ["rex", "missing-agent"],
+      factions: [
+        {
+          name: "Pixel Pact",
+          members: ["vera", "pixel"],
+          goal: "Ship the prop board",
+        },
+      ],
+      memory_seed: { mode: "custom", data: null },
+      memory_seed_raw_json: '{"pixel":[{"content":"remember neon"}]}',
+      max_cost: 0.75,
+      publish_to_youtube: true,
+      conversation_cadence: 1.5,
+      energy: { vera: 62, rex: 44, pixel: 91 },
+    });
+
+    const restored = loadCreatorDraft({
+      scenarios: [
+        makeScenario({
+          filename: "lab_rivals.yaml",
+          name: "Lab Rivals",
+          agents: ["vera", "rex", "pixel", "fork"],
+        }),
+      ],
+      remainingBudget: 8,
+    });
+
+    expect(restored).toMatchObject({
+      scenario_id: "lab_rivals.yaml",
+      name: "Neon pact run",
+      hypothesis: "Pixel will recruit Vera before Rex notices.",
+      excluded_agents: ["rex"],
+      max_cost: 0.75,
+      remaining_budget: 8,
+      publish_to_youtube: true,
+      conversation_cadence: 1.5,
+      scenario_agents: ["vera", "rex", "pixel", "fork"],
+      factions: [
+        {
+          name: "Pixel Pact",
+          members: ["vera", "pixel"],
+          goal: "Ship the prop board",
+        },
+      ],
+      memory_seed: { mode: "custom", data: null },
+      memory_seed_raw_json: '{"pixel":[{"content":"remember neon"}]}',
+    });
+    expect(restored?.energy).toMatchObject({ vera: 62, rex: 44, pixel: 91 });
+    expect(restored?.energy.fork).toBe(75);
+  });
+
+  it("clears invalid or stale drafts instead of throwing", () => {
+    storage[CREATOR_DRAFT_STORAGE_KEY] = JSON.stringify({
+      version: 1,
+      state: { scenario_id: "missing.yaml" },
+    });
+
+    const restored = loadCreatorDraft({
+      scenarios: [makeScenario()],
+      remainingBudget: null,
+    });
+
+    expect(restored).toBeNull();
+    expect(storage[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it("clears the persisted draft on request", () => {
+    storage[CREATOR_DRAFT_STORAGE_KEY] = "draft";
+    clearCreatorDraft();
+    expect(storage[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
   });
 });
 

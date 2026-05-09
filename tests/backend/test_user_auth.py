@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from core.auth import user_auth_api
-from core.auth.auth_routes import _hash_token
+from core.auth.auth_routes import _hash_token, _safe_relative_redirect
 from core.auth.dependencies import (
     USER_SESSION_COOKIE,
     _check_email_rate_limit,
@@ -22,7 +22,6 @@ from core.auth.dependencies import (
     is_valid_email,
 )
 from core.models import User
-
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -184,6 +183,58 @@ class TestMagicLinkRequest:
         )
         assert resp.status_code == 429
 
+    def test_safe_next_path_is_included_in_email_link(self, auth_app) -> None:
+        client, *_ = auth_app
+        send_mock = AsyncMock()
+        with patch("core.auth.auth_routes.send_email", send_mock):
+            resp = client.post(
+                "/api/auth/magic-link",
+                json={
+                    "email": "alice@example.com",
+                    "next": "/simulations/new?scenario=lab_rivals.yaml",
+                },
+            )
+
+        assert resp.status_code == 200
+        body_text = send_mock.await_args.kwargs["body_text"]
+        assert "next=%2Fsimulations%2Fnew%3Fscenario%3Dlab_rivals.yaml" in body_text
+
+    def test_unsafe_next_path_is_not_included_in_email_link(self, auth_app) -> None:
+        client, *_ = auth_app
+        send_mock = AsyncMock()
+        with patch("core.auth.auth_routes.send_email", send_mock):
+            resp = client.post(
+                "/api/auth/magic-link",
+                json={
+                    "email": "alice@example.com",
+                    "next": "https://evil.test/phish",
+                },
+            )
+
+        assert resp.status_code == 200
+        body_text = send_mock.await_args.kwargs["body_text"]
+        assert "next=" not in body_text
+
+
+class TestSafeRelativeRedirect:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("/simulations/new?scenario=lab_rivals.yaml", "/simulations/new?scenario=lab_rivals.yaml"),
+            ("/simulations#draft", "/simulations#draft"),
+            ("https://evil.test/phish", None),
+            ("//evil.test/phish", None),
+            ("simulations/new", None),
+            ("/\\evil.test", None),
+        ],
+    )
+    def test_allows_only_same_site_relative_paths(
+        self,
+        raw: str,
+        expected: str | None,
+    ) -> None:
+        assert _safe_relative_redirect(raw) == expected
+
 
 # ── /api/auth/verify ──────────────────────────────────────────
 
@@ -214,6 +265,65 @@ class TestVerifyMagicLink:
             params={"token": "rawtoken"},
             follow_redirects=False,
         )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/simulations"
+        assert USER_SESSION_COOKIE in resp.cookies
+
+    def test_safe_next_redirect_is_honored(self, auth_app) -> None:
+        client, mock_db, _ = auth_app
+        new_user_id = uuid.uuid4()
+
+        mock_db.fetchrow = AsyncMock(
+            side_effect=[
+                {"email": "alice@example.com"},
+                {
+                    "id": new_user_id,
+                    "email": "alice@example.com",
+                    "created_at": datetime.now(UTC),
+                    "last_login_at": datetime.now(UTC),
+                    "simulations_submitted": 0,
+                    "total_cost_spent": Decimal("0"),
+                },
+            ]
+        )
+
+        resp = client.get(
+            "/api/auth/verify",
+            params={
+                "token": "rawtoken",
+                "next": "/simulations/new?scenario=lab_rivals.yaml",
+            },
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/simulations/new?scenario=lab_rivals.yaml"
+        assert USER_SESSION_COOKIE in resp.cookies
+
+    def test_unsafe_next_redirect_falls_back(self, auth_app) -> None:
+        client, mock_db, _ = auth_app
+        new_user_id = uuid.uuid4()
+
+        mock_db.fetchrow = AsyncMock(
+            side_effect=[
+                {"email": "alice@example.com"},
+                {
+                    "id": new_user_id,
+                    "email": "alice@example.com",
+                    "created_at": datetime.now(UTC),
+                    "last_login_at": datetime.now(UTC),
+                    "simulations_submitted": 0,
+                    "total_cost_spent": Decimal("0"),
+                },
+            ]
+        )
+
+        resp = client.get(
+            "/api/auth/verify",
+            params={"token": "rawtoken", "next": "//evil.test/phish"},
+            follow_redirects=False,
+        )
+
         assert resp.status_code == 303
         assert resp.headers["location"] == "/simulations"
         assert USER_SESSION_COOKIE in resp.cookies

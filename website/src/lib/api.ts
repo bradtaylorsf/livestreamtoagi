@@ -679,10 +679,31 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   }
 }
 
-export async function requestMagicLink(email: string): Promise<void> {
+function safeRelativeReturnPath(returnTo?: string): string | undefined {
+  const trimmed = returnTo?.trim();
+  if (!trimmed) return undefined;
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return undefined;
+  if (trimmed.includes("\\") || /[\u0000-\u001F\u007F]/.test(trimmed)) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(trimmed, "http://livestreamtoagi.local");
+    if (url.origin !== "http://livestreamtoagi.local") return undefined;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function requestMagicLink(
+  email: string,
+  returnTo?: string,
+): Promise<void> {
+  const nextPath = safeRelativeReturnPath(returnTo);
   await request<{ status: string }>("/api/auth/magic-link", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(nextPath ? { email, next: nextPath } : { email }),
   });
 }
 
