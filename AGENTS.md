@@ -6,7 +6,7 @@
 This repo is a monorepo for a 24/7 AI reality show set in a pixel-art world. The project canon centers on 9 agents: Vera, Rex, Aurora, Pixel, Fork, Sentinel, Grok, Management, and Alpha.
 
 The live codebase includes:
-- a FastAPI backend with a health route, WebSocket event bus, admin API (58 endpoints), and lifespan hooks that initialize database, Redis, agent registry, memory managers, LLM client, TTS pipeline, config watcher, and a reflection scheduler
+- a FastAPI backend with a health route, WebSocket event bus, admin API (63 endpoints across 9 route modules), and lifespan hooks that initialize database, Redis, agent registry, memory managers, LLM client, TTS pipeline, config watcher, and a reflection scheduler
 - async PostgreSQL and Redis clients with a typed repository layer (17 repo classes including artifact, simulation, eval, assertion, relationship, goal, config_version, evolution, prompt_log, agent_state, and alliance repos)
 - a multi-tier memory system: core memory (persistent identity), recall memory (pgvector semantic search), archival memory (long-term storage), and reflection (LLM-driven 6-hour + weekly cycles with journaling and self-modification proposals)
 - a conversation engine orchestrator with speaker selection, energy model, interrupts, topic detection, pacing, proximity groups, Management safety review, and TTS output
@@ -15,13 +15,13 @@ The live codebase includes:
 - raw SQL migrations (37 pairs, up to `037_config_version_simulation_isolation`) and typed repository classes
 - YAML-backed agent config loading from `agents/*`, including `config.yaml`, `behaviors.yaml`, `system_prompt.md`, and optional extra YAML files (e.g., management's `content_rules.yaml` and `intervention_levels.yaml`)
 - an OpenRouter LLM client with a 9-model registry, cost tracking, retry logic, and optional Langfuse hooks
-- an admin dashboard backend (`core/admin_routes.py`) with 58 endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, evolution tracking — protected by `ADMIN_PASSWORD` Bearer auth
+- a modular admin dashboard backend (`core/admin/`) with 9 route files and 63 endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, diagnostics, kill switch, auth — protected by `ADMIN_PASSWORD` Bearer auth
 - a simulation orchestrator (`core/simulation/`) with clock, phases, assertions, audience simulation, world simulation, snapshot, recurring personas, display, and CLI entry point (`scripts/run_simulation.py`)
 - an eval engine (`core/eval/`) with eval loader, prompt loader, engine, analyzer, evolution loop, change applier, and GitHub issue generator for eval findings
 - a character subsystem (`core/characters/`) with spawner, voting, and departure handling for dynamic agent creation
 - a social subsystem (`core/social/`) with relationship tracking and alliance management between agents
 - an events subsystem (`core/events/`) with event generator and event templates
-- a reporting subsystem (`core/reporting/`) with timeline reports, scorecards, cost projections, comparisons, and sectioned report generation (executive summary, cost analysis, daily breakdown, key moments, memory evolution, relationship evolution, tool usage)
+- a reporting subsystem (`core/reporting/`) with timeline reports, scorecards, cost projections, comparisons, and sectioned report generation under `core/reporting/sections/` (executive summary, cost analysis, daily breakdown, key moments, memory evolution, relationship evolution, tool usage)
 - a Phaser.js frontend (`frontend/`) with main scene, chunk-based world loading, agent sprite rendering and management, WebSocket client, and typed event handling
 - a Next.js website with static route pages, admin dashboard UI (agent inspector, conversation viewer, artifact browser, simulation timeline, eval dashboard), shared TS types, and an API client that targets future backend routes not yet implemented
 
@@ -41,7 +41,7 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 - TTS: Edge TTS pipeline in `core/tts.py` with per-agent voice support; `core/speech_parser.py` for structured dialogue/action parsing
 - Management: `core/management.py` reviews all agent output before broadcast (content filter with intervention levels)
 - Scheduling: APScheduler runs reflection cycles (6-hour at 2/8/14/20 UTC, weekly Sunday 20 UTC) via `core/scheduler.py`
-- Tools: `tools/` package with 15 functional tool modules, 32 tool classes, 2 simulation stubs, and a `ToolRegistry`; includes code execution via Docker sandbox with gVisor
+- Tools: `tools/` package with 15 functional tool modules, 32 tool classes, 2 simulation stubs, and a `ToolRegistry`; includes code execution via Docker sandbox with gVisor; `tools/journal_image_tool.py` provides a separate `JournalImageGenerator` utility
 - Characters: `core/characters/` — CharacterSpawner, VotingManager, departure handling for dynamic agent creation and voting
 - Social: `core/social/` — RelationshipTracker for agent-to-agent dynamics, AllianceManager for group formation
 - Events: `core/events/` — EventGenerator and EventTemplates for world event creation
@@ -63,14 +63,15 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 ```text
 agents/                 YAML agent configs, behaviors, system prompts, and optional extra YAML (9 agent directories + template)
 config/                 Shared configuration: conversation_config.yaml, event_config.yaml, office_layout.json, pixellab_assets.json, pixellab_style_guide.txt, recurring_personas.yaml
-core/                   FastAPI app, bootstrap, database/redis clients, event bus, LLM client, context assembly, admin routes, scheduler, models, config watcher, tool executor, agent goals, agent economy, system prompt, shared state
+core/                   FastAPI app, bootstrap, database/redis clients, event bus, LLM client, context assembly, scheduler, models, config watcher, tool executor, agent goals, agent economy, system prompt, shared state
+core/admin/             Admin route modules (9 files, 63 endpoints): agent_routes, artifact_routes, auth_routes, config_routes, conversation_routes, diagnostics_routes, eval_routes, kill_switch_routes, simulation_routes, plus shared dependencies
 core/characters/        Character subsystem: spawner, voting, departure (dynamic agent creation)
 core/conversation/      Conversation subsystems: energy, pacing, proximity, speaker_selector, topic_detector, triggers, selection_logger
 core/events/            Event subsystem: event_generator, event_templates
 core/eval/              Evaluation engine: loader, prompt_loader, engine, analyzer, evolution_loop, change_applier, issue_generator
 core/memory/            Memory subsystem: core, recall, archival, reflection, reflection_scheduler, compaction, dreams, embeddings, snapshot, token counting, validation
 core/repos/             Typed repository layer (17 repos): agents, agent_state, alliances, conversations, memory, costs, transcripts, world, artifacts, simulations, evals, assertions, relationships, goals, config_version, evolution, prompt_log
-core/reporting/         Reporting subsystem: timeline_reporter, scorecard, comparison, cost_projection, formatters, sectioned reports (executive_summary, cost_analysis, daily_breakdown, key_moments, memory_evolution, relationship_evolution, tool_usage)
+core/reporting/         Reporting subsystem: timeline_reporter, scorecard, comparison, cost_projection, formatters; sectioned reports under `sections/` (executive_summary, cost_analysis, daily_breakdown, key_moments, memory_evolution, relationship_evolution, tool_usage)
 core/simulation/        Simulation orchestrator: clock, phases, assertions, audience_sim, world_simulator, snapshot, recurring_personas, display, orchestrator
 core/social/            Social subsystem: relationship_tracker, alliances
 core/world/             World generation: office_generator, pixellab_client, sprite_generator
@@ -79,20 +80,20 @@ evals/                  Evaluation framework: 13 eval prompts (agency, creativit
 frontend/               Phaser.js world renderer: main scene, chunk-based world loading, agent sprite rendering/management, WebSocket client, typed events
 research/               Research papers and analysis documents for project positioning
 website/                Next.js app router site with public pages and admin dashboard (agent inspector, conversation viewer, artifact browser, simulation timeline, eval dashboard)
-scripts/                Utility scripts: chat.py, test_agent.py, watch_conversations.py, run_simulation.py, run_eval.py, run_evolution.py, run_reflection_test.py, report_simulation.py, snapshot_memory.py, restore_memory.py, seed_config.py, check_tool_coverage.py, test_sim_isolation.py, check-services.sh, generate_office_tilemap.py
+scripts/                Utility scripts: chat.py, test_agent.py, watch_conversations.py, run_simulation.py, run_eval.py, run_evolution.py, run_reflection_test.py, report_simulation.py, snapshot_memory.py, restore_memory.py, seed_config.py, check_tool_coverage.py, test_sim_isolation.py, verify_simulation.py, check_local_llm.py, check-services.sh, generate_office_tilemap.py, run_tool_coverage.sh
 skills/                 Skill definitions for code-review, git-workflow, implementation-planning, playwright-cli, security-analysis, test-robustness, testing-patterns
 specs/                  Product and architecture reference docs; useful context, not the runtime source of truth
-tools/                  Agent tool implementations: 15 functional modules + ToolRegistry (messaging, audience, memory, code execution, tilemap, revenue, web, Alpha dispatch, self-modification, task management, world state, evolution log, alliances, economy, character proposals)
-tests/                  ~94 Python test files: backend/ (unit + integration), frontend/ (vitest), website/ (vitest + playwright e2e)
+tools/                  Agent tool implementations: 15 functional modules + ToolRegistry (messaging, audience, memory, code execution, tilemap, revenue, web, Alpha dispatch, self-modification, task management, world state, evolution log, alliances, economy, character proposals); journal_image_tool utility
+tests/                  ~110 test files: backend/ (unit), integration/ (Python integration), frontend/ (vitest), website/ (vitest + playwright e2e)
 ```
 
 Important files:
 - `core/main.py` defines the FastAPI surface (`/api/health`, `/ws`, and `/api/admin/*`) and the lifespan that wires up all subsystems
 - `core/bootstrap.py` unified service initialization for all subsystems with dry-run mode support
-- `core/admin_routes.py` provides 58 admin endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, evolution tracking
+- `core/admin/` contains 9 route modules providing 63 admin endpoints: agent inspection, conversation viewer, artifact browser, simulation timeline, eval dashboard, transcript viewer, config management, diagnostics, kill switch, auth
 - `core/agent_registry.py` loads agent configs from disk, validates model names via aliases, and syncs status through Redis
 - `core/llm_client.py` defines 9 allowed models with aliases and per-token cost metadata
-- `core/models.py` is the source of backend Pydantic schemas (~102 model classes: agents, memory tiers, conversations, transcripts, journal entries, self-modification proposals, LLM responses, cost events, goals, relationships, prompt logs)
+- `core/models.py` is the source of backend Pydantic schemas (~101 BaseModel classes: agents, memory tiers, conversations, transcripts, journal entries, self-modification proposals, LLM responses, cost events, goals, relationships, prompt logs)
 - `core/conversation_engine.py` is the central runtime loop — ties together triggers, speaker selection, energy, interrupts, Management review, TTS, and event emission
 - `core/context_assembly.py` builds three-layer prompts: infrastructure → character → memory
 - `core/memory/reflection.py` drives 6-hour and weekly reflection cycles with journaling and self-modification proposals
@@ -113,6 +114,7 @@ Important files:
 - Keep backend schemas in Pydantic models in `core/models.py`; repository classes should return typed models, not loose dicts
 - Memory operations go through the managers in `core/memory/`; do not bypass them with direct repo calls from outside the memory subsystem
 - New tools must extend `tools/base.py:BaseTool` and be registered in `tools/__init__.py`; follow the existing pattern of injecting dependencies via constructor
+- New admin endpoints belong in the appropriate `core/admin/*_routes.py` module; share auth/database dependencies through `core/admin/dependencies.py`
 - Use raw SQL migrations in `db/migrations` for schema changes; keep migration filenames numbered and paired with `.up.sql` and `.down.sql`
 - Ruff is configured with `target-version = "py312"` and `line-length = 100`; keep imports grouped as stdlib, third-party, local
 - TypeScript is strict in both `frontend/` and `website/`; keep types explicit and avoid weakening configs with `any`
@@ -124,7 +126,7 @@ Important files:
 
 - Keep `<!-- managed by alpha-loop -->` as the first line of this file
 - Preserve the 9-agent roster and stable IDs unless the user explicitly changes canon across configs, migrations, and UI
-- The admin dashboard backend (`/api/admin/*`) is live with 58 endpoints; the public-facing API routes called from `website/src/lib/api.ts` are not yet served by the backend
+- The admin dashboard backend (`/api/admin/*`) is live with 63 endpoints across `core/admin/`; the public-facing API routes called from `website/src/lib/api.ts` are not yet served by the backend
 - The conversation engine, memory system, reflection scheduler, tools, and LLM client are initialized at startup, but there is no production entry point driving continuous agent dialogue yet; use `scripts/run_simulation.py` for full simulations, `scripts/run_eval.py` for post-simulation evaluations, and `scripts/run_evolution.py` for the self-improving evolution loop; CrewAI is installed but not wired
 - Preserve the special handling of `management` and `alpha`; they are not standard conversational agents
 - When touching model names, keep them in sync with `core/llm_client.py` MODEL_REGISTRY, the YAML configs under `agents/`, and the seed data in `db/migrations/002_seed_agents.up.sql`
