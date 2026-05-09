@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 import time as _time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from core.tts import TTSPipeline
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.responses import FileResponse
 from starlette.staticfiles import StaticFiles
 
 from core.admin import admin_router, auth_api, kill_switch_api
@@ -135,6 +137,45 @@ app.include_router(auth_api)
 app.include_router(kill_switch_api)
 app.include_router(public_router)
 app.include_router(user_auth_api)
+
+
+def _local_video_path(filename: str) -> Path | None:
+    """Resolve a local MP4 filename without allowing traversal."""
+    if not filename.endswith(".mp4"):
+        return None
+    stem = filename.removesuffix(".mp4")
+    try:
+        sim_id = _uuid_mod.UUID(stem)
+    except ValueError:
+        return None
+    if filename != f"{sim_id}.mp4":
+        return None
+
+    from core.video.config import load_video_render_config
+
+    config = load_video_render_config()
+    if config.storage_backend != "local":
+        return None
+
+    output_dir = Path(config.output_dir).resolve()
+    candidate = (output_dir / f"{sim_id}.mp4").resolve()
+    try:
+        candidate.relative_to(output_dir)
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+@app.get("/videos/{filename}", include_in_schema=False)
+@app.head("/videos/{filename}", include_in_schema=False)
+async def serve_local_video(filename: str) -> FileResponse:
+    """Serve locally rendered MP4s returned by ``VIDEO_STORAGE=local``."""
+    video_path = _local_video_path(filename)
+    if video_path is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(video_path, media_type="video/mp4")
 
 
 @app.websocket("/ws")
