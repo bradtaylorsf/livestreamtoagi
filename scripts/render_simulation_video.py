@@ -76,7 +76,11 @@ async def _main(sim_id: uuid.UUID) -> int:
     cues = await _build_cues(services.db, sim_id)
     if not cues:
         log.warning("Simulation %s has no transcripts; marking skipped", sim_id)
-        await repo.update_video_status(sim_id, status="skipped")
+        await repo.update_video_status(
+            sim_id,
+            status="skipped",
+            failure_reason="No transcript cues were available to render.",
+        )
         return 0
 
     tts = TTSPipeline(agent_registry=services.agent_registry)
@@ -84,20 +88,32 @@ async def _main(sim_id: uuid.UUID) -> int:
 
     try:
         result = await render_simulation_video(sim_id, cues=cues, tts=tts, config=config)
-    except RenderError:
+    except RenderError as exc:
         log.exception("Render failed for %s", sim_id)
-        await repo.update_video_status(sim_id, status="failed")
+        await repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason=str(exc) or "Video render failed.",
+        )
         return 1
-    except Exception:
+    except Exception as exc:
         log.exception("Unexpected render error for %s", sim_id)
-        await repo.update_video_status(sim_id, status="failed")
+        await repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason=f"Unexpected video render error: {exc}",
+        )
         return 1
 
     try:
         url = save_video(sim_id, result.output_path, config=config)
-    except Exception:
+    except Exception as exc:
         log.exception("Storage upload failed for %s", sim_id)
-        await repo.update_video_status(sim_id, status="failed")
+        await repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason=f"Video storage failed: {exc}",
+        )
         return 1
 
     await repo.update_video_status(sim_id, status="done", url=url)

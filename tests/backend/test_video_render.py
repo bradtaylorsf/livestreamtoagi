@@ -258,6 +258,7 @@ class TestEnqueueRender:
         repo.update_video_status.assert_awaited_once()
         kwargs = repo.update_video_status.await_args.kwargs
         assert kwargs["status"] == "skipped"
+        assert kwargs["failure_reason"] == "no transcripts"
 
 
 # ── Orchestrator finalize hook ───────────────────────────────
@@ -699,6 +700,7 @@ class TestClaimForRender:
         # The UPDATE only fires when the row was unclaimed.
         sql = db.fetchrow.await_args.args[0]
         assert "video_render_status = 'rendering'" in sql
+        assert "video_render_failure_reason = NULL" in sql
         assert "IS NULL" in sql
 
     @pytest.mark.asyncio
@@ -759,6 +761,7 @@ class TestClaimForRender:
             "video_url": "/videos/abc.mp4",
             "video_render_status": "done",
             "video_rendered_at": datetime.now(UTC),
+            "video_render_failure_reason": None,
         }
         db = MagicMock()
         db.fetchrow = AsyncMock(return_value=sim_row)
@@ -773,6 +776,58 @@ class TestClaimForRender:
         assert sim is not None
         assert sim.video_url == "/videos/abc.mp4"
         assert sim.video_render_status == "done"
+        assert sim.video_render_failure_reason is None
         # The query stamps video_rendered_at only on 'done'
         sql = db.fetchrow.await_args.args[0]
         assert "video_rendered_at = CASE WHEN $1 = 'done'" in sql
+        assert "video_render_failure_reason = CASE" in sql
+
+    @pytest.mark.asyncio
+    async def test_update_video_status_failed_stores_failure_reason(self):
+        from core.repos.simulation_repo import SimulationRepo
+
+        sim_row = {
+            "id": uuid.uuid4(),
+            "name": "x",
+            "description": None,
+            "config": {},
+            "status": "completed",
+            "started_at": datetime.now(UTC),
+            "completed_at": datetime.now(UTC),
+            "simulated_duration": None,
+            "real_duration": None,
+            "total_conversations": 1,
+            "total_turns": 1,
+            "total_tokens": 0,
+            "total_cost": Decimal("0"),
+            "total_artifacts": 0,
+            "total_management_flags": 0,
+            "agents_participated": [],
+            "error_log": None,
+            "model_versions": {},
+            "is_live": False,
+            "created_at": datetime.now(UTC),
+            "hypothesis": None,
+            "outcomes": {},
+            "learnings": [],
+            "factions": [],
+            "submitted_by_user_id": None,
+            "video_url": None,
+            "video_render_status": "failed",
+            "video_rendered_at": None,
+            "video_render_failure_reason": "Playwright timed out",
+        }
+        db = MagicMock()
+        db.fetchrow = AsyncMock(return_value=sim_row)
+        repo = SimulationRepo(db)
+
+        sim = await repo.update_video_status(
+            uuid.uuid4(),
+            status="failed",
+            failure_reason="Playwright timed out",
+        )
+
+        assert sim is not None
+        assert sim.video_render_status == "failed"
+        assert sim.video_render_failure_reason == "Playwright timed out"
+        assert db.fetchrow.await_args.args[3] == "Playwright timed out"

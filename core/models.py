@@ -896,6 +896,7 @@ class Simulation(BaseModel):
     video_url: str | None = None
     video_render_status: str | None = None
     video_rendered_at: datetime | None = None
+    video_render_failure_reason: str | None = None
     is_featured: bool = False
     shared_as_challenge: bool = False
     publish_to_youtube: bool = False

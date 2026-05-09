@@ -25,7 +25,14 @@ export default function OverviewTab({
         data-testid="overview-hero"
       >
         <div className="lg:col-span-2">
-          <VideoPlayer src={sim.video_url} youtubeUrl={sim.youtube_url} />
+          <VideoPlayer
+            src={sim.video_url}
+            youtubeUrl={sim.youtube_url}
+            renderStatus={sim.video_render_status}
+            simulationStatus={sim.status}
+            failureReason={sim.video_render_failure_reason}
+            cancellationReason={sim.video_render_cancellation_reason}
+          />
         </div>
         <div className="rounded border border-border bg-surface p-4 space-y-3">
           <div className="flex items-center justify-between">

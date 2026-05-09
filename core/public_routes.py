@@ -1754,6 +1754,25 @@ class SimulationResearchUpdate(BaseModel):
     learnings: list[dict[str, Any]] | None = None
 
 
+def _video_render_cancellation_reason(sim: Any) -> str | None:
+    """Return a user-facing reason when a simulation ended before render."""
+    if getattr(sim, "status", None) != "cancelled":
+        return None
+
+    error_log = getattr(sim, "error_log", None)
+    if isinstance(error_log, dict):
+        reason = error_log.get("reason")
+        if reason == "cost_limit_exceeded":
+            total_cost = error_log.get("total_cost")
+            if total_cost:
+                return f"Cost limit reached after ${total_cost}."
+            return "Cost limit reached before video rendering could start."
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+
+    return "Simulation was cancelled before video rendering could start."
+
+
 @router.patch("/simulations/{sim_id}")
 async def update_simulation_research_fields(
     sim_id: str,
@@ -1872,6 +1891,12 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
         "learnings": sim.learnings,
         "factions": sim.factions,
         "video_url": sim.video_url,
+        "video_render_status": sim.video_render_status,
+        "video_rendered_at": sim.video_rendered_at.isoformat()
+        if sim.video_rendered_at
+        else None,
+        "video_render_failure_reason": sim.video_render_failure_reason,
+        "video_render_cancellation_reason": _video_render_cancellation_reason(sim),
         "youtube_url": sim.youtube_url,
         "youtube_publish_status": sim.youtube_publish_status,
         "publish_to_youtube": sim.publish_to_youtube,

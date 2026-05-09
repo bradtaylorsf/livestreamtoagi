@@ -530,6 +530,16 @@ export interface PublicSimulationDetail extends PublicSimulation {
   outcomes: Record<string, unknown> | null;
   learnings: LearningEntry[] | null;
   factions: unknown | null;
+  video_render_status:
+    | "pending"
+    | "rendering"
+    | "done"
+    | "failed"
+    | "skipped"
+    | null;
+  video_rendered_at: string | null;
+  video_render_failure_reason: string | null;
+  video_render_cancellation_reason: string | null;
 }
 
 export async function getSimulations(
