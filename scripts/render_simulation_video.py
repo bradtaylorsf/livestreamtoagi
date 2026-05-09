@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import re
 import sys
 import uuid
 from pathlib import Path
@@ -27,38 +26,12 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+from core.video.cue_parser import build_cues_from_rows  # noqa: E402
 
-# Speaker is encoded as a "[name]: ..." prefix on the transcript content;
-# transcripts.participants is the unordered set of attendees, not the speaker.
-_SPEAKER_RE = re.compile(r"^\[([^\]]+)\]:\s*")
-
-
-def _build_cues_from_rows(rows: list) -> list:
-    """Convert transcript rows into TurnAudioCues. Pure (no DB), testable."""
-    from core.video.audio_timeline import TurnAudioCue
-
-    if not rows:
-        return []
-    base = rows[0]["created_at"]
-    cues: list[TurnAudioCue] = []
-    for r in rows:
-        content = r.get("content") or ""
-        match = _SPEAKER_RE.match(content)
-        if not match:
-            continue
-        agent_id = match.group(1).strip().lower()
-        text = _SPEAKER_RE.sub("", content, count=1).strip()
-        if not text:
-            continue
-        delta = (r["created_at"] - base).total_seconds()
-        cues.append(
-            TurnAudioCue(
-                agent_id=agent_id,
-                text=text,
-                start_seconds=max(0.0, delta),
-            )
-        )
-    return cues
+# Re-export under the historical underscore name so existing tests keep
+# importing from this script. The audio stitcher and the replay-cues
+# endpoint both call ``core.video.cue_parser.build_cues_from_rows``.
+_build_cues_from_rows = build_cues_from_rows
 
 
 async def _build_cues(db, sim_id: uuid.UUID) -> list:
@@ -74,7 +47,7 @@ async def _build_cues(db, sim_id: uuid.UUID) -> list:
             ORDER BY t.created_at""",
         sim_id,
     )
-    return _build_cues_from_rows(list(rows))
+    return build_cues_from_rows(list(rows))
 
 
 async def _main(sim_id: uuid.UUID) -> int:

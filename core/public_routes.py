@@ -1878,6 +1878,44 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/simulations/{sim_id}/replay-cues")
+async def get_simulation_replay_cues(sim_id: str) -> dict[str, Any]:
+    """Per-turn cue plan that drives the replay page and audio stitcher.
+
+    Returns one cue per voiced agent utterance, anchored at seconds-from-
+    sim-start. The audio stitcher uses the same parser
+    (``core.video.cue_parser.build_cues_from_rows``) so speech bubbles and
+    TTS cannot drift. ``duration_seconds`` reflects the end of the replay
+    (last cue start + estimated read-time of its text), not just the start
+    of the last cue.
+    """
+    db = _get_db()
+    from core.video.cue_parser import build_cues_from_rows, compute_replay_duration
+
+    sim_uuid = uuid.UUID(sim_id)
+    rows = await db.fetch(
+        """SELECT t.participants, t.content, t.created_at
+             FROM transcripts t
+             JOIN conversations c ON c.id = t.conversation_id
+            WHERE c.simulation_id = $1
+            ORDER BY t.created_at""",
+        sim_uuid,
+    )
+    cues = build_cues_from_rows([dict(r) for r in rows])
+    return {
+        "sim_id": sim_id,
+        "cues": [
+            {
+                "agent_id": cue.agent_id,
+                "text": cue.text,
+                "start_seconds": cue.start_seconds,
+            }
+            for cue in cues
+        ],
+        "duration_seconds": compute_replay_duration(cues),
+    }
+
+
 @router.get("/simulations/{sim_id}/conversations")
 async def get_simulation_conversations(
     sim_id: str,

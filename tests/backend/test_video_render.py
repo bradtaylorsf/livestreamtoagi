@@ -392,6 +392,169 @@ class TestBuildCuesFromRows:
         cues = build(rows)
         assert cues[0].agent_id == "vera"
 
+    def test_splits_intra_row_multi_speaker_turns(self):
+        """A single row with multiple [speaker]: markers becomes multiple cues."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["grok", "sentinel"],
+                "content": "[grok]: hi [sentinel]: yo [unknown]: ?",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows)
+        # Unknown speaker is skipped; grok + sentinel survive.
+        assert [c.agent_id for c in cues] == ["grok", "sentinel"]
+        assert cues[0].text == "hi"
+        assert cues[1].text == "yo"
+        # No cue text retains a [speaker] fragment.
+        for c in cues:
+            assert "[" not in c.text
+
+    def test_embedded_marker_stripped_from_each_cue(self):
+        """Multiple inline markers split cleanly with no leaked '[' fragments."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera", "rex"],
+                "content": "[vera]: hello [rex]: world",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows)
+        assert len(cues) == 2
+        assert [c.agent_id for c in cues] == ["vera", "rex"]
+        assert cues[0].text == "hello"
+        assert cues[1].text == "world"
+        for c in cues:
+            assert "[" not in c.text
+            assert "]" not in c.text
+
+    def test_skips_malformed_speaker_prefixes(self):
+        """Empty, whitespace-only, and unclosed brackets are not voiced."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": [],
+                "content": "[]: nothing here",
+                "created_at": base,
+            },
+            {
+                "participants": [],
+                "content": "[ ]: also nothing",
+                "created_at": base.replace(second=1),
+            },
+            {
+                "participants": [],
+                "content": "[grok unfinished bracket",
+                "created_at": base.replace(second=2),
+            },
+        ]
+        cues = build(rows)
+        assert cues == []
+
+    def test_intra_row_timestamp_ordering_preserved(self):
+        """Cues from one row share timestamp but are monotonically ordered."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera", "rex", "grok"],
+                "content": "[vera]: a [rex]: b [grok]: c",
+                "created_at": base,
+            },
+            {
+                "participants": ["sentinel"],
+                "content": "[sentinel]: d",
+                "created_at": base.replace(second=10),
+            },
+        ]
+        cues = build(rows)
+        # Three intra-row cues + one from the next row.
+        assert [c.agent_id for c in cues] == ["vera", "rex", "grok", "sentinel"]
+        # Strictly increasing within the first row.
+        assert cues[0].start_seconds < cues[1].start_seconds < cues[2].start_seconds
+        # Intra-row cues stay clustered before the next row at t=10.
+        assert cues[2].start_seconds < cues[3].start_seconds
+        assert cues[3].start_seconds == 10.0
+
+    def test_drops_narration_before_first_marker(self):
+        """Text preceding the first [speaker] marker is not attached to it."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera"],
+                "content": "the room is quiet. [vera]: morning",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows)
+        assert len(cues) == 1
+        assert cues[0].agent_id == "vera"
+        assert cues[0].text == "morning"
+
+    def test_known_agents_filter_applied(self):
+        """Speakers absent from known_agents are skipped."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera", "ghost"],
+                "content": "[vera]: hi [ghost]: boo",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows, known_agents={"vera"})
+        assert [c.agent_id for c in cues] == ["vera"]
+
+
+# ── Replay duration helper ────────────────────────────────────
+
+
+class TestReplayDuration:
+    def test_duration_is_last_cue_start_plus_read_time(self):
+        from core.video.audio_timeline import TurnAudioCue
+        from core.video.cue_parser import compute_replay_duration, estimate_read_seconds
+
+        cues = [
+            TurnAudioCue("vera", "hello", 0.0),
+            TurnAudioCue("rex", "this is a longer sentence to read out loud", 30.0),
+        ]
+        expected = 30.0 + estimate_read_seconds(cues[-1].text)
+        assert compute_replay_duration(cues) == expected
+        # Sanity: end-of-replay strictly exceeds last cue start.
+        assert compute_replay_duration(cues) > 30.0
+
+    def test_empty_cues_duration_zero(self):
+        from core.video.cue_parser import compute_replay_duration
+
+        assert compute_replay_duration([]) == 0.0
+
+    def test_read_time_has_floor(self):
+        from core.video.cue_parser import (
+            DEFAULT_READ_FLOOR_SECONDS,
+            estimate_read_seconds,
+        )
+
+        assert estimate_read_seconds("hi") == DEFAULT_READ_FLOOR_SECONDS
+        assert estimate_read_seconds("") == DEFAULT_READ_FLOOR_SECONDS
+
 
 # ── SimulationRepo claim semantics ───────────────────────────
 
