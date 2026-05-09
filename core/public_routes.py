@@ -1901,6 +1901,43 @@ async def get_simulation_conversations(
     }
 
 
+@router.get("/simulations/{sim_id}/replay-cues")
+async def get_simulation_replay_cues(sim_id: str) -> dict[str, Any]:
+    """Transcript turns formatted for the headless replay page.
+
+    Mirrors the SQL in ``scripts.render_simulation_video._build_cues`` so
+    the page renders bubbles in lock-step with the audio stitcher. The
+    payload is intentionally minimal: ``{cues: [...], duration_seconds}``
+    where each cue is ``{agent_id, text, start_seconds}``.
+    """
+    db = _get_db()
+    sim_uuid = uuid.UUID(sim_id)
+    rows = await db.fetch(
+        """SELECT t.participants, t.content, t.created_at
+             FROM transcripts t
+             JOIN conversations c ON c.id = t.conversation_id
+            WHERE c.simulation_id = $1
+            ORDER BY t.created_at""",
+        sim_uuid,
+    )
+
+    from core.video.cue_parser import build_cues_from_rows
+
+    cues = build_cues_from_rows(list(rows))
+    duration = max((c.start_seconds for c in cues), default=0.0)
+    return {
+        "cues": [
+            {
+                "agent_id": c.agent_id,
+                "text": c.text,
+                "start_seconds": c.start_seconds,
+            }
+            for c in cues
+        ],
+        "duration_seconds": duration,
+    }
+
+
 @router.get("/simulations/{sim_id}/costs")
 async def get_simulation_costs(sim_id: str) -> dict[str, Any]:
     """Cost breakdown by agent for a simulation."""

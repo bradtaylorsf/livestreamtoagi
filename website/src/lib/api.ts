@@ -820,6 +820,26 @@ export async function getSimulationCosts(
   return request<SimulationCostResponse>(`/api/simulations/${id}/costs`);
 }
 
+// Simulation replay cues — feeds the headless replay page
+export interface ReplayCue {
+  agent_id: string;
+  text: string;
+  start_seconds: number;
+}
+
+export interface ReplayCuesResponse {
+  cues: ReplayCue[];
+  duration_seconds: number;
+}
+
+export async function getReplayCues(
+  simId: string,
+): Promise<ReplayCuesResponse> {
+  return request<ReplayCuesResponse>(
+    `/api/simulations/${simId}/replay-cues`,
+  );
+}
+
 // Simulation energy timeline
 export interface EnergyTimelinePoint {
   t: string;
