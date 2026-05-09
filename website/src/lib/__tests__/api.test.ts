@@ -21,6 +21,7 @@ import {
   getSimulationSnapshot,
   getStats,
   getWorldChunks,
+  requestMagicLink,
   runSimulationEval,
   shareSimulationAsChallenge,
   upvoteChallenge,
@@ -358,6 +359,42 @@ describe("getPublicScenarios", () => {
       expect.anything(),
     );
     expect(result).toEqual(scenarios);
+  });
+});
+
+describe("requestMagicLink", () => {
+  it("sends a safe same-site return path with the magic-link request", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ status: "ok" }));
+
+    await requestMagicLink(
+      "alice@example.com",
+      "/simulations/new?scenario=lab_rivals.yaml",
+    );
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/auth/magic-link",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          email: "alice@example.com",
+          next: "/simulations/new?scenario=lab_rivals.yaml",
+        }),
+      }),
+    );
+  });
+
+  it("omits unsafe return paths from the magic-link request", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ status: "ok" }));
+
+    await requestMagicLink("alice@example.com", "https://evil.test/phish");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/auth/magic-link",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "alice@example.com" }),
+      }),
+    );
   });
 });
 
