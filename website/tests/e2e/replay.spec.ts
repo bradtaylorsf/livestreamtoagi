@@ -73,19 +73,28 @@ test.describe("replay scene", () => {
     expect(distinctBytes.size).toBeGreaterThan(64);
   });
 
-  test("hides chrome in renderMode (no global navigation)", async ({ page }) => {
+  test("hides chrome in renderMode — full-bleed wrap covers any global nav", async ({ page }) => {
     await mockCues(page);
     await gotoReplay(page);
-    // Replay layout strips top-level chrome; the only visible nav element
-    // would be from the global Navigation component, which is suppressed
-    // by the route's full-bleed black backdrop in renderMode.
-    const navs = page.locator("nav");
-    const count = await navs.count();
-    if (count > 0) {
-      // If a nav exists, it must be visually covered by the renderMode wrap.
-      const wrap = page.locator('[data-render-mode="1"]');
-      await expect(wrap).toBeVisible();
-    }
+
+    // Acceptance criterion: ``renderMode=1`` hides all non-recording chrome
+    // but keeps the full world canvas visible. The replay route's wrap is
+    // position:fixed, inset:0, zIndex:9999 — meaning even if the global
+    // Navigation rendered, it would be visually occluded by the canvas.
+    const wrap = page.locator('[data-render-mode="1"]');
+    await expect(wrap).toBeVisible();
+    const wrapBox = await wrap.boundingBox();
+    expect(wrapBox).not.toBeNull();
+    // Wrap must fill the viewport so the canvas is the only visible thing.
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    expect(wrapBox!.width).toBeGreaterThanOrEqual(viewport!.width);
+    expect(wrapBox!.height).toBeGreaterThanOrEqual(viewport!.height);
+
+    const wrapZ = await wrap.evaluate(
+      (el) => parseInt(window.getComputedStyle(el).zIndex || "0", 10),
+    );
+    expect(wrapZ).toBeGreaterThanOrEqual(9999);
   });
 
   test("flips __replayDone after the plan completes", async ({ page }) => {
