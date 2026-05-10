@@ -1907,6 +1907,52 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
     }
 
 
+def _unique_replay_agent_ids(values: Any) -> list[str]:
+    """Return stable, trimmed agent IDs for replay roster fields."""
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _resolve_replay_agent_roster(
+    *,
+    config: Any,
+    agents_participated: Any,
+    cue_agent_ids: list[str],
+) -> list[str]:
+    """Choose the visible replay roster from newest to oldest data shape."""
+    config_dict = config if isinstance(config, dict) else {}
+
+    effective_agents = _unique_replay_agent_ids(config_dict.get("effective_agents"))
+    if effective_agents:
+        return effective_agents
+
+    scenario_agents = _unique_replay_agent_ids(config_dict.get("scenario_agents"))
+    if scenario_agents:
+        excluded = set(_unique_replay_agent_ids(config_dict.get("excluded_agents")))
+        scenario_roster = [
+            agent_id for agent_id in scenario_agents if agent_id not in excluded
+        ]
+        if scenario_roster:
+            return scenario_roster
+
+    participated = _unique_replay_agent_ids(agents_participated)
+    if participated:
+        return participated
+
+    return _unique_replay_agent_ids(cue_agent_ids)
+
+
 @router.get("/simulations/{sim_id}/replay-cues")
 async def get_simulation_replay_cues(sim_id: str) -> dict[str, Any]:
     """Per-turn cue plan that drives the replay page and audio stitcher.
@@ -1919,9 +1965,15 @@ async def get_simulation_replay_cues(sim_id: str) -> dict[str, Any]:
     of the last cue.
     """
     db = _get_db()
+    from core.repos.simulation_repo import SimulationRepo
     from core.video.cue_parser import build_cues_from_rows, compute_replay_duration
 
     sim_uuid = uuid.UUID(sim_id)
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.get(sim_uuid)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
     rows = await db.fetch(
         """SELECT t.participants, t.content, t.created_at
              FROM transcripts t
@@ -1931,8 +1983,14 @@ async def get_simulation_replay_cues(sim_id: str) -> dict[str, Any]:
         sim_uuid,
     )
     cues = build_cues_from_rows([dict(r) for r in rows])
+    agent_roster = _resolve_replay_agent_roster(
+        config=sim.config,
+        agents_participated=sim.agents_participated,
+        cue_agent_ids=[cue.agent_id for cue in cues],
+    )
     return {
         "sim_id": sim_id,
+        "agent_roster": agent_roster,
         "cues": [
             {
                 "agent_id": cue.agent_id,

@@ -18,6 +18,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _sim_row(
+    *,
+    config: dict | None = None,
+    agents_participated: list[str] | None = None,
+) -> dict:
+    return {
+        "id": uuid.uuid4(),
+        "name": "replay-test",
+        "config": config or {},
+        "agents_participated": agents_participated or [],
+    }
+
+
 @pytest.fixture
 def replay_client():
     """A TestClient with public-routes deps mocked, like ``test_public_api``."""
@@ -26,7 +39,7 @@ def replay_client():
     mock_db.disconnect = AsyncMock()
     mock_db.fetch = AsyncMock(return_value=[])
     mock_db.fetchval = AsyncMock(return_value=0)
-    mock_db.fetchrow = AsyncMock(return_value=None)
+    mock_db.fetchrow = AsyncMock(return_value=_sim_row())
 
     mock_redis = MagicMock()
     mock_redis.connect = AsyncMock()
@@ -171,3 +184,63 @@ class TestReplayCuesEndpoint:
         body = resp.json()
         assert body["cues"] == []
         assert body["duration_seconds"] == 0.0
+        assert body["agent_roster"] == []
+
+    def test_agent_roster_prefers_effective_agents(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(
+            return_value=_sim_row(
+                config={
+                    "effective_agents": ["vera", "rex"],
+                    "scenario_agents": ["vera", "rex", "grok"],
+                    "excluded_agents": ["rex"],
+                },
+                agents_participated=["grok"],
+            )
+        )
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        assert resp.status_code == 200
+        assert resp.json()["agent_roster"] == ["vera", "rex"]
+
+    def test_agent_roster_uses_scenario_agents_minus_exclusions(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(
+            return_value=_sim_row(
+                config={
+                    "scenario_agents": ["vera", "rex", "grok", "rex"],
+                    "excluded_agents": ["grok"],
+                },
+                agents_participated=["pixel"],
+            )
+        )
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        assert resp.status_code == 200
+        assert resp.json()["agent_roster"] == ["vera", "rex"]
+
+    def test_agent_roster_falls_back_to_agents_participated(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(
+            return_value=_sim_row(agents_participated=["pixel", "aurora", "pixel"])
+        )
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        assert resp.status_code == 200
+        assert resp.json()["agent_roster"] == ["pixel", "aurora"]
+
+    def test_agent_roster_falls_back_to_unique_cue_agents(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                _row("[vera]: hello [rex]: hi [vera]: back again", 0),
+            ]
+        )
+        mock_db.fetchrow = AsyncMock(return_value=_sim_row())
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        assert resp.status_code == 200
+        assert resp.json()["agent_roster"] == ["vera", "rex"]

@@ -64,6 +64,48 @@ export function getDeskPosition(agentId: string): DeskPosition {
   return DESK_POSITIONS[agentId] ?? FALLBACK;
 }
 
+function addVisibleAgent(order: string[], seen: Set<string>, agentId: string) {
+  const id = agentId.trim();
+  if (!id || seen.has(id)) return;
+  if (id === "management") return; // overlaps alpha; skip to avoid stacking
+  seen.add(id);
+  order.push(id);
+}
+
+/** Pick the agents to spawn in the replay scene. */
+export function pickVisibleAgents(
+  cueAgentIds: string[],
+  simulationRoster?: string[] | null,
+): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  const roster = Array.isArray(simulationRoster) ? simulationRoster : [];
+
+  if (roster.length > 0) {
+    for (const agentId of roster) {
+      addVisibleAgent(order, seen, agentId);
+    }
+    for (const agentId of cueAgentIds) {
+      if (!seen.has(agentId) && !hasAgentLayout(agentId)) {
+        addVisibleAgent(order, seen, agentId);
+      }
+    }
+    return order;
+  }
+
+  // Legacy simulations did not expose a roster. Keep the full resident
+  // fallback so older exports still look like the live office.
+  for (const known of getKnownAgents()) {
+    addVisibleAgent(order, seen, known);
+  }
+  for (const agentId of cueAgentIds) {
+    if (!seen.has(agentId) && !hasAgentLayout(agentId)) {
+      addVisibleAgent(order, seen, agentId);
+    }
+  }
+  return order;
+}
+
 /**
  * Slight per-cue offset so multiple speakers in the same room don't sit on
  * top of each other. Deterministic given (agentId, cueIndex) — this matters

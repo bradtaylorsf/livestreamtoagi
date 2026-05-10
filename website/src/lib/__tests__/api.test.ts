@@ -17,6 +17,7 @@ import {
   getConversationSelections,
   getLore,
   getPublicScenarios,
+  getReplayCues,
   getScenarios,
   getSimulationSnapshot,
   getStats,
@@ -529,6 +530,27 @@ describe("submitPublicSimulation", () => {
       }),
     );
     expect(result).toEqual(response);
+  });
+});
+
+describe("getReplayCues", () => {
+  it("returns replay cues with the simulation render roster", async () => {
+    const response = {
+      sim_id: "sim-123",
+      agent_roster: ["vera", "rex"],
+      cues: [{ agent_id: "vera", text: "hello", start_seconds: 0 }],
+      duration_seconds: 1.5,
+    };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await getReplayCues("sim-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/sim-123/replay-cues",
+      expect.anything(),
+    );
+    expect(result).toEqual(response);
+    expect(result.agent_roster).toEqual(["vera", "rex"]);
   });
 });
 

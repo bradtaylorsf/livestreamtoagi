@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installReplayHarness, REPLAY_HARNESS_ORIGIN } from "./replayHarness";
 
 /**
  * Visual smoke test for the office replay page (issue #476).
@@ -10,8 +11,10 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 const SIM_ID = "00000000-0000-4000-8000-000000000476";
+const SKIP_BROWSER_IN_CODEX_SANDBOX = process.env.CODEX_SANDBOX === "seatbelt";
 const FIXTURE_CUES = {
   sim_id: SIM_ID,
+  agent_roster: ["vera", "rex", "aurora"],
   duration_seconds: 6,
   cues: [
     { agent_id: "vera", text: "Welcome to the office.", start_seconds: 0.5 },
@@ -21,17 +24,19 @@ const FIXTURE_CUES = {
 };
 
 async function mockCues(page: Page) {
-  await page.route(`**/api/simulations/${SIM_ID}/replay-cues`, async (route) => {
-    await route.fulfill({
+  await installReplayHarness(page, {
+    simId: SIM_ID,
+    replayCues: {
       status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(FIXTURE_CUES),
-    });
+      body: FIXTURE_CUES,
+    },
   });
 }
 
 async function gotoReplay(page: Page) {
-  await page.goto(`/simulations/${SIM_ID}/replay?renderMode=1`);
+  await page.goto(
+    `${REPLAY_HARNESS_ORIGIN}/simulations/${SIM_ID}/replay?renderMode=1`,
+  );
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__replayReady === true,
     null,
@@ -40,6 +45,38 @@ async function gotoReplay(page: Page) {
 }
 
 test.describe("replay scene", () => {
+  test.skip(
+    SKIP_BROWSER_IN_CODEX_SANDBOX,
+    "Chromium cannot launch inside the Codex macOS seatbelt sandbox.",
+  );
+
+  test("renderMode exposes cue-load failure and does not mount the stage", async ({ page }) => {
+    await installReplayHarness(page, {
+      simId: SIM_ID,
+      replayCues: {
+        status: 500,
+        body: { detail: "cue load exploded" },
+      },
+    });
+
+    await page.goto(
+      `${REPLAY_HARNESS_ORIGIN}/simulations/${SIM_ID}/replay?renderMode=1`,
+    );
+    await page.waitForFunction(
+      () => Boolean((window as unknown as Record<string, unknown>).__replayError),
+      null,
+      { timeout: 10_000 },
+    );
+
+    const replayError = await page.evaluate(
+      () => (window as unknown as Record<string, unknown>).__replayError,
+    );
+    expect(String(replayError)).toContain("Replay cue load failed");
+    await expect(page.getByTestId("replay-error")).toBeVisible();
+    await expect(page.getByTestId("replay-stage")).toHaveCount(0);
+    await expect(page.locator("canvas")).toHaveCount(0);
+  });
+
   test("renders 1280x720 canvas with non-uniform pixels (not solid black)", async ({ page }) => {
     await mockCues(page);
     await gotoReplay(page);
