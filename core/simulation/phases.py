@@ -339,14 +339,28 @@ class PhaseRunner:
             except (OSError, KeyError, ValueError):
                 logger.warning("Task pruning failed", exc_info=True)
 
+    def _active_required_agents(self, phase: Phase) -> list[str]:
+        """Return phase required agents constrained to this run's roster."""
+        active = set(self._agent_ids)
+        return [a for a in phase.required_agents if a in active]
+
+    def _fallback_starter(self) -> str | None:
+        return self._agent_ids[0] if self._agent_ids else None
+
+    def _starter_or_fallback(self, agent_id: str | None) -> str | None:
+        if agent_id in self._agent_ids:
+            return agent_id
+        return self._fallback_starter()
+
     # ── Phase runners ─────────────────────────────────────
 
     async def _run_scheduled(self, phase: Phase) -> None:
         """Run a scheduled trigger conversation (e.g. standup)."""
         trigger_name = phase.config.get("trigger", phase.name)
-        starter = "vera"
-        if phase.required_agents:
-            starter = phase.required_agents[0]
+        required = self._active_required_agents(phase)
+        starter = required[0] if required else self._starter_or_fallback("vera")
+        if starter is None:
+            return
 
         trigger = {
             "type": "scheduled",
@@ -363,6 +377,8 @@ class PhaseRunner:
 
     async def _run_organic(self, phase: Phase) -> None:
         """Run 1-3 idle-triggered organic conversations."""
+        if not self._agent_ids:
+            return
         count = phase.config.get("count", 1)
         topics = phase.config.get("topics", [])
 
@@ -378,9 +394,12 @@ class PhaseRunner:
 
             # Use required_agents[0] as starter when specified, else rotate
             if phase.required_agents:
-                starter = phase.required_agents[i % len(phase.required_agents)]
+                required = self._active_required_agents(phase)
+                starter = required[i % len(required)] if required else self._fallback_starter()
             else:
                 starter = self._agent_ids[i % len(self._agent_ids)]
+            if starter is None:
+                continue
             trigger["starter_agent_id"] = starter
 
             await self._run_conversation(trigger, phase)
@@ -388,7 +407,9 @@ class PhaseRunner:
     async def _run_challenge(self, phase: Phase) -> None:
         """Run a coding challenge phase."""
         challenge = phase.config.get("challenge", {})
-        assigned = challenge.get("assigned_to", "rex")
+        assigned = self._starter_or_fallback(challenge.get("assigned_to", "rex"))
+        if assigned is None:
+            return
         title = challenge.get("title", "Coding Challenge")
         description = challenge.get("description", "Write some code")
         language = challenge.get("language", "python")
@@ -413,7 +434,9 @@ class PhaseRunner:
         Tool exercises are capped at 4 turns by default (not 15) since the
         goal is just to verify the tool fires, not to have a long conversation.
         """
-        agent_id = phase.config.get("agent", "pixel")
+        agent_id = self._starter_or_fallback(phase.config.get("agent", "pixel"))
+        if agent_id is None:
+            return
         tool_name = phase.config.get("tool", "web_search")
         context = phase.config.get("context", f"Use the {tool_name} tool")
 
@@ -511,9 +534,12 @@ class PhaseRunner:
             self._triggers.queue_event("chat_highlight", msg)
 
         # Run a conversation triggered by the audience event
+        starter = self._starter_or_fallback("pixel")
+        if starter is None:
+            return
         trigger = {
             "type": "audience",
-            "starter_agent_id": "pixel",
+            "starter_agent_id": starter,
             "prompt_hint": f"Respond to audience: {messages[0].get('text', '')}",
             "event_type": "chat_highlight",
             "event_data": messages[0] if messages else {},
@@ -530,8 +556,20 @@ class PhaseRunner:
         if self._dry_run:
             logger.info("[DRY RUN] Would run conversation: %s", trigger)
             return
+        if not self._agent_ids:
+            logger.warning("No active agents configured; skipping conversation")
+            return
+
+        trigger = dict(trigger)
+        trigger["starter_agent_id"] = self._starter_or_fallback(
+            trigger.get("starter_agent_id")
+        )
+        if trigger["starter_agent_id"] is None:
+            logger.warning("No active starter agent configured; skipping conversation")
+            return
 
         max_turns = phase.config.get("max_turns", 15)
+        required_agents = set(self._active_required_agents(phase))
 
         # Ensure agents are placed at the conversation location
         location = trigger.get("location", "town_square")
@@ -633,7 +671,7 @@ class PhaseRunner:
                     simulation_id=self._simulation_id,
                     recent_conversation_summaries=list(self._conversation_summaries),
                     recent_outputs=list(self._recent_outputs),
-                    required_agents=set(phase.required_agents) if phase.required_agents else None,
+                    required_agents=required_agents if required_agents else None,
                     max_turns=max_turns,
                     debug_prompts=self._debug_prompts,
                     prompt_log_repo=self._prompt_log_repo,

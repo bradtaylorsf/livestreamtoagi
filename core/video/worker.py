@@ -77,7 +77,11 @@ async def enqueue_render(
         # If the subprocess can't even be spawned, free the lock so a future
         # run can retry rather than leaving the sim stuck in 'rendering'.
         logger.exception("[video] failed to spawn render subprocess for sim=%s", sim_id)
-        await sim_repo.update_video_status(sim_id, status="failed")
+        await sim_repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason="Render worker failed to start.",
+        )
         return "skipped"
 
     logger.info("[video] enqueued render subprocess for sim=%s", sim_id)
@@ -93,4 +97,4 @@ async def mark_unrenderable(
     """Stamp the sim as ``skipped`` when there's nothing to render."""
     sim_id = uuid.UUID(str(simulation_id))
     logger.info("[video] marking sim=%s as skipped: %s", sim_id, reason)
-    await sim_repo.update_video_status(sim_id, status="skipped")
+    await sim_repo.update_video_status(sim_id, status="skipped", failure_reason=reason)

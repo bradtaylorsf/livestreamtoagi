@@ -131,6 +131,64 @@ def mock_app():
             app.dependency_overrides.clear()
 
 
+# ── Local Video Serving ─────────────────────────────────────────
+
+
+class TestLocalVideoServing:
+    def test_serves_uuid_mp4_from_configured_output_dir(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        client, *_ = mock_app
+        sim_id = uuid.uuid4()
+        video_path = tmp_path / f"{sim_id}.mp4"
+        video_path.write_bytes(b"fake mp4 bytes")
+        monkeypatch.setenv("VIDEO_STORAGE", "local")
+        monkeypatch.setenv("VIDEO_OUTPUT_DIR", str(tmp_path))
+
+        resp = client.get(f"/videos/{sim_id}.mp4")
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("video/mp4")
+        assert resp.content == b"fake mp4 bytes"
+
+    def test_video_head_returns_mp4_content_type(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        client, *_ = mock_app
+        sim_id = uuid.uuid4()
+        (tmp_path / f"{sim_id}.mp4").write_bytes(b"fake mp4 bytes")
+        monkeypatch.setenv("VIDEO_STORAGE", "local")
+        monkeypatch.setenv("VIDEO_OUTPUT_DIR", str(tmp_path))
+
+        resp = client.head(f"/videos/{sim_id}.mp4")
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("video/mp4")
+
+    def test_rejects_non_uuid_and_traversal_video_paths(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        client, *_ = mock_app
+        monkeypatch.setenv("VIDEO_STORAGE", "local")
+        monkeypatch.setenv("VIDEO_OUTPUT_DIR", str(tmp_path))
+
+        assert client.get("/videos/not-a-uuid.mp4").status_code == 404
+        assert client.get("/videos/%2E%2E%2Fsecret.mp4").status_code == 404
+
+    def test_local_video_route_disabled_for_s3_storage(
+        self, mock_app, tmp_path, monkeypatch
+    ):
+        client, *_ = mock_app
+        sim_id = uuid.uuid4()
+        (tmp_path / f"{sim_id}.mp4").write_bytes(b"fake mp4 bytes")
+        monkeypatch.setenv("VIDEO_STORAGE", "s3")
+        monkeypatch.setenv("VIDEO_OUTPUT_DIR", str(tmp_path))
+
+        resp = client.get(f"/videos/{sim_id}.mp4")
+
+        assert resp.status_code == 404
+
+
 # ── Agent Endpoints ───────────────────────────────────────────
 
 
@@ -168,6 +226,8 @@ class TestAgentEndpoints:
                 "agent_id": "vera",
                 "reflection_type": "daily",
                 "content": "A good day.",
+                "token_count": 12,
+                "image_url": "https://example.com/journals/vera.png",
                 "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
             },
         ])
@@ -177,6 +237,7 @@ class TestAgentEndpoints:
         assert len(data) == 1
         assert data[0]["agent_id"] == "vera"
         assert data[0]["content"] == "A good day."
+        assert data[0]["image_url"] == "https://example.com/journals/vera.png"
 
     def test_get_agent_relationships_empty(self, mock_app):
         client, *_ = mock_app
@@ -802,6 +863,119 @@ class TestSimulationsEndpoint:
         items = resp.json()["items"]
         assert items[0]["submitter_display_name"] == "brad"
         assert items[1]["submitter_display_name"] is None
+
+    def test_simulation_detail_includes_video_render_status_and_failure(
+        self, mock_app
+    ):
+        """Detail response exposes enough video render state for the workspace."""
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        rendered_at = datetime(2026, 4, 1, 2, tzinfo=timezone.utc)
+        mock_db.fetchrow = AsyncMock(
+            return_value={
+                "id": sim_id,
+                "name": "Render failed run",
+                "description": "desc",
+                "config": {},
+                "status": "completed",
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 4, 1, 1, tzinfo=timezone.utc),
+                "simulated_duration": None,
+                "real_duration": None,
+                "total_conversations": 0,
+                "total_turns": 0,
+                "total_tokens": 0,
+                "total_cost": "0",
+                "total_artifacts": 0,
+                "total_management_flags": 0,
+                "agents_participated": ["vera"],
+                "error_log": None,
+                "model_versions": {},
+                "is_live": False,
+                "created_at": None,
+                "hypothesis": None,
+                "outcomes": {},
+                "learnings": [],
+                "factions": [],
+                "submitted_by_user_id": None,
+                "video_url": None,
+                "video_render_status": "failed",
+                "video_rendered_at": rendered_at,
+                "video_render_failure_reason": "Playwright timed out",
+                "is_featured": False,
+                "publish_to_youtube": False,
+                "youtube_url": None,
+                "youtube_publish_status": None,
+                "youtube_published_at": None,
+                "youtube_publish_attempts": 0,
+                "youtube_failure_reason": None,
+            }
+        )
+        mock_db.fetchval = AsyncMock(side_effect=[2, 12, "0.25", 1, 0])
+
+        resp = client.get(f"/api/simulations/{sim_id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["video_render_status"] == "failed"
+        assert data["video_rendered_at"] == rendered_at.isoformat()
+        assert data["video_render_failure_reason"] == "Playwright timed out"
+        assert data["video_render_cancellation_reason"] is None
+
+    def test_simulation_detail_includes_cost_limited_cancellation_reason(
+        self, mock_app
+    ):
+        """Cancelled cost-limited runs tell the UI why no render is coming."""
+        client, mock_db, *_ = mock_app
+        sim_id = uuid.uuid4()
+        mock_db.fetchrow = AsyncMock(
+            return_value={
+                "id": sim_id,
+                "name": "Cost limited run",
+                "description": None,
+                "config": {},
+                "status": "cancelled",
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 4, 1, 1, tzinfo=timezone.utc),
+                "simulated_duration": None,
+                "real_duration": None,
+                "total_conversations": 0,
+                "total_turns": 0,
+                "total_tokens": 0,
+                "total_cost": "0",
+                "total_artifacts": 0,
+                "total_management_flags": 0,
+                "agents_participated": ["vera"],
+                "error_log": {"reason": "cost_limit_exceeded", "total_cost": "1.23"},
+                "model_versions": {},
+                "is_live": False,
+                "created_at": None,
+                "hypothesis": None,
+                "outcomes": {},
+                "learnings": [],
+                "factions": [],
+                "submitted_by_user_id": None,
+                "video_url": None,
+                "video_render_status": None,
+                "video_rendered_at": None,
+                "video_render_failure_reason": None,
+                "is_featured": False,
+                "publish_to_youtube": False,
+                "youtube_url": None,
+                "youtube_publish_status": None,
+                "youtube_published_at": None,
+                "youtube_publish_attempts": 0,
+                "youtube_failure_reason": None,
+            }
+        )
+        mock_db.fetchval = AsyncMock(side_effect=[0, 0, "1.23", 0, 0])
+
+        resp = client.get(f"/api/simulations/{sim_id}")
+
+        assert resp.status_code == 200
+        assert resp.json()["video_render_cancellation_reason"] == (
+            "Cost limit reached after $1.23."
+        )
 
     def test_energy_timeline_returns_grouped_series(self, mock_app):
         client, mock_db, *_ = mock_app

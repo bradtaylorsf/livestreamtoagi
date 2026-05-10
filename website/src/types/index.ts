@@ -10,13 +10,13 @@ export interface Agent {
 }
 
 export interface JournalEntry {
-  id: string;
+  id: number;
   agent_id: string;
-  timestamp: string;
   content: string;
-  mood: string;
+  token_count?: number;
   image_url: string | null;
   reflection_type: string;
+  created_at: string | null;
 }
 
 export interface ChatResponse {

@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HYPOTHESIS_MAX_LENGTH,
@@ -26,6 +26,12 @@ import {
   reseedForScenario,
   toggleAgent,
 } from "@/components/simulationCreator/state";
+import {
+  CREATOR_DRAFT_STORAGE_KEY,
+  clearCreatorDraft,
+  loadCreatorDraft,
+  saveCreatorDraft,
+} from "@/components/simulationCreator/draftStorage";
 import { filterScenarios } from "@/components/simulationCreator/ScenarioField";
 import type { PublicScenarioMeta } from "@/lib/api";
 
@@ -299,6 +305,8 @@ describe("state.buildSubmitPayload", () => {
     expect(payload.hypothesis).toBe("Rex and Aurora ally");
     expect(payload.params?.max_cost).toBe(0.5);
     expect(payload.params?.conversation_cadence).toBe(1.5);
+    expect(payload.params?.agents).toEqual(["vera", "rex", "aurora"]);
+    expect(payload.params?.excluded_agents).toEqual([]);
     expect(payload.params?.energy).toBeTruthy();
   });
   it("omits hypothesis when blank", () => {
@@ -333,6 +341,38 @@ describe("state.buildSubmitPayload", () => {
     expect(payload.params?.excluded_agents).toEqual(["rex"]);
     expect(payload.params?.agents).toEqual(["vera", "aurora"]);
   });
+  it("filters energy and faction members to the active roster", () => {
+    const s = initialState({
+      scenarios: [makeScenario()],
+      initialScenarioId: null,
+      remainingBudget: null,
+    });
+    const payload = buildSubmitPayload({
+      ...toggleAgent(s, "rex"),
+      factions: [
+        {
+          name: "Show team",
+          members: ["vera", "rex", "aurora"],
+          goal: "make the run entertaining",
+        },
+      ],
+      energy: {
+        vera: 80,
+        rex: 10,
+        aurora: 90,
+      },
+    });
+
+    expect(payload.params?.agents).toEqual(["vera", "aurora"]);
+    expect(payload.params?.energy).toEqual({ vera: 80, aurora: 90 });
+    expect(payload.params?.factions).toEqual([
+      {
+        name: "Show team",
+        members: ["vera", "aurora"],
+        goal: "make the run entertaining",
+      },
+    ]);
+  });
   it("parses custom-mode memory seed JSON when valid", () => {
     const s = initialState({
       scenarios: [makeScenario()],
@@ -348,6 +388,156 @@ describe("state.buildSubmitPayload", () => {
       mode: "custom",
       data: { vera: [1, 2] },
     });
+  });
+});
+
+describe("draftStorage", () => {
+  let localStorageData: Record<string, string>;
+  let sessionStorageData: Record<string, string>;
+
+  function makeStorage(storage: Record<string, string>) {
+    return {
+      getItem: (key: string) => (key in storage ? storage[key] : null),
+      setItem: (key: string, value: string) => {
+        storage[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete storage[key];
+      },
+    };
+  }
+
+  beforeEach(() => {
+    localStorageData = {};
+    sessionStorageData = {};
+    vi.stubGlobal("window", {
+      localStorage: makeStorage(localStorageData),
+      sessionStorage: makeStorage(sessionStorageData),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves user-entered draft fields while refreshing scenario metadata", () => {
+    const scenario = makeScenario({
+      filename: "lab_rivals.yaml",
+      name: "Lab Rivals",
+      agents: ["vera", "rex", "pixel"],
+    });
+    const state = initialState({
+      scenarios: [scenario],
+      initialScenarioId: "lab_rivals.yaml",
+      remainingBudget: null,
+    });
+
+    saveCreatorDraft({
+      ...state,
+      name: "Neon pact run",
+      hypothesis: "Pixel will recruit Vera before Rex notices.",
+      excluded_agents: ["rex", "missing-agent"],
+      factions: [
+        {
+          name: "Pixel Pact",
+          members: ["vera", "pixel"],
+          goal: "Ship the prop board",
+        },
+      ],
+      memory_seed: { mode: "custom", data: null },
+      memory_seed_raw_json: '{"pixel":[{"content":"remember neon"}]}',
+      max_cost: 0.75,
+      publish_to_youtube: true,
+      conversation_cadence: 1.5,
+      energy: { vera: 62, rex: 44, pixel: 91 },
+    });
+
+    const restored = loadCreatorDraft({
+      scenarios: [
+        makeScenario({
+          filename: "lab_rivals.yaml",
+          name: "Lab Rivals",
+          agents: ["vera", "rex", "pixel", "fork"],
+        }),
+      ],
+      remainingBudget: 8,
+    });
+
+    expect(restored).toMatchObject({
+      scenario_id: "lab_rivals.yaml",
+      name: "Neon pact run",
+      hypothesis: "Pixel will recruit Vera before Rex notices.",
+      excluded_agents: ["rex"],
+      max_cost: 0.75,
+      remaining_budget: 8,
+      publish_to_youtube: true,
+      conversation_cadence: 1.5,
+      scenario_agents: ["vera", "rex", "pixel", "fork"],
+      factions: [
+        {
+          name: "Pixel Pact",
+          members: ["vera", "pixel"],
+          goal: "Ship the prop board",
+        },
+      ],
+      memory_seed: { mode: "custom", data: null },
+      memory_seed_raw_json: '{"pixel":[{"content":"remember neon"}]}',
+    });
+    expect(restored?.energy).toMatchObject({ vera: 62, rex: 44, pixel: 91 });
+    expect(restored?.energy.fork).toBe(75);
+    expect(localStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeTruthy();
+    expect(sessionStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it("loads legacy session drafts when local storage is empty", () => {
+    sessionStorageData[CREATOR_DRAFT_STORAGE_KEY] = JSON.stringify({
+      version: 1,
+      saved_at: "2026-05-09T00:00:00Z",
+      state: {
+        scenario_id: "dream_smoke_test.yaml",
+        name: "Session draft run",
+        hypothesis: "",
+        excluded_agents: [],
+        factions: [],
+        memory_seed: { mode: "none" },
+        memory_seed_raw_json: "{}",
+        max_cost: 0.5,
+        publish_to_youtube: false,
+        conversation_cadence: 1,
+        energy: { vera: 70, rex: 60, aurora: 80 },
+      },
+    });
+
+    const restored = loadCreatorDraft({
+      scenarios: [makeScenario()],
+      remainingBudget: null,
+    });
+
+    expect(restored?.name).toBe("Session draft run");
+    expect(restored?.max_cost).toBe(0.5);
+  });
+
+  it("clears invalid or stale drafts instead of throwing", () => {
+    localStorageData[CREATOR_DRAFT_STORAGE_KEY] = JSON.stringify({
+      version: 1,
+      state: { scenario_id: "missing.yaml" },
+    });
+
+    const restored = loadCreatorDraft({
+      scenarios: [makeScenario()],
+      remainingBudget: null,
+    });
+
+    expect(restored).toBeNull();
+    expect(localStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it("clears the persisted draft on request", () => {
+    localStorageData[CREATOR_DRAFT_STORAGE_KEY] = "draft";
+    sessionStorageData[CREATOR_DRAFT_STORAGE_KEY] = "legacy draft";
+    clearCreatorDraft();
+    expect(localStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
+    expect(sessionStorageData[CREATOR_DRAFT_STORAGE_KEY]).toBeUndefined();
   });
 });
 

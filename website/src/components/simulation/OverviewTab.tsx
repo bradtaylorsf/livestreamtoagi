@@ -10,12 +10,24 @@ interface OverviewTabProps {
   onJumpToHypothesis?: () => void;
 }
 
+function configStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 export default function OverviewTab({
   sim,
   simulationId,
   onJumpToHypothesis,
 }: OverviewTabProps) {
   const hypothesis = (sim.hypothesis ?? "").trim();
+  const configuredRoster =
+    configStringList(sim.config?.effective_agents).length > 0
+      ? configStringList(sim.config.effective_agents)
+      : configStringList(sim.config?.agents);
+  const displayedAgents =
+    configuredRoster.length > 0 ? configuredRoster : sim.agents_participated;
 
   return (
     <div className="space-y-8" data-testid="overview-tab">
@@ -25,7 +37,14 @@ export default function OverviewTab({
         data-testid="overview-hero"
       >
         <div className="lg:col-span-2">
-          <VideoPlayer src={sim.video_url} youtubeUrl={sim.youtube_url} />
+          <VideoPlayer
+            src={sim.video_url}
+            youtubeUrl={sim.youtube_url}
+            renderStatus={sim.video_render_status}
+            simulationStatus={sim.status}
+            failureReason={sim.video_render_failure_reason}
+            cancellationReason={sim.video_render_cancellation_reason}
+          />
         </div>
         <div className="rounded border border-border bg-surface p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -67,8 +86,9 @@ export default function OverviewTab({
       />
 
       <AgentList
-        agents={sim.agents_participated}
+        agents={displayedAgents}
         linkPrefix={`/simulations/${simulationId}/agents`}
+        title="Effective Agent Roster"
       />
 
       <div className="text-xs text-foreground/40">
