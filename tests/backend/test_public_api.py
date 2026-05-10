@@ -226,6 +226,8 @@ class TestAgentEndpoints:
                 "agent_id": "vera",
                 "reflection_type": "daily",
                 "content": "A good day.",
+                "token_count": 12,
+                "image_url": "https://example.com/journals/vera.png",
                 "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
             },
         ])
@@ -235,6 +237,7 @@ class TestAgentEndpoints:
         assert len(data) == 1
         assert data[0]["agent_id"] == "vera"
         assert data[0]["content"] == "A good day."
+        assert data[0]["image_url"] == "https://example.com/journals/vera.png"
 
     def test_get_agent_relationships_empty(self, mock_app):
         client, *_ = mock_app

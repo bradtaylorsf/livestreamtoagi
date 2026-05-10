@@ -161,7 +161,7 @@ class CostRepo:
         self,
         simulation_id: uuid.UUID,
     ) -> dict[str, object]:
-        """Return cost breakdown by agent for a simulation using direct FK."""
+        """Return cost breakdown by agent and cost type for a simulation using direct FK."""
         by_agent_rows = await self.db.fetch(
             """SELECT COALESCE(agent_id, 'system') as agent_id,
                       SUM(amount) as total,
@@ -172,13 +172,32 @@ class CostRepo:
                GROUP BY COALESCE(agent_id, 'system') ORDER BY total DESC""",
             simulation_id,
         )
-        total = sum(r["total"] for r in by_agent_rows) if by_agent_rows else Decimal("0")
-        total_input = sum(r["input_tokens"] for r in by_agent_rows) if by_agent_rows else 0
-        total_output = sum(r["output_tokens"] for r in by_agent_rows) if by_agent_rows else 0
+        by_type_rows = await self.db.fetch(
+            """SELECT cost_type,
+                      SUM(amount) as total,
+                      SUM(COALESCE((details->>'input_tokens')::int, 0)
+                        + COALESCE((details->>'output_tokens')::int, 0)) as tokens
+               FROM cost_events
+               WHERE simulation_id = $1
+               GROUP BY cost_type ORDER BY total DESC""",
+            simulation_id,
+        )
+
+        total = (
+            sum(r["total"] or Decimal("0") for r in by_agent_rows)
+            if by_agent_rows
+            else Decimal("0")
+        )
+        total_input = sum(r["input_tokens"] or 0 for r in by_agent_rows) if by_agent_rows else 0
+        total_output = sum(r["output_tokens"] or 0 for r in by_agent_rows) if by_agent_rows else 0
 
         return {
             "by_agent": [
                 {"agent_id": r["agent_id"], "total": str(r["total"])} for r in by_agent_rows
+            ],
+            "by_type": [
+                {"type": r["cost_type"], "cost": str(r["total"]), "tokens": int(r["tokens"] or 0)}
+                for r in by_type_rows
             ],
             "total": str(total),
             "total_input_tokens": total_input,

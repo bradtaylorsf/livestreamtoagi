@@ -144,3 +144,46 @@ class TestSimulationRepoTotalCost:
 
         result = await repo.get_total_cost_from_events(uuid.uuid4())
         assert result == Decimal("0")
+
+
+class TestCostRepoSimulationBreakdown:
+    """Verify simulation cost breakdowns include image generation cost types."""
+
+    @pytest.mark.asyncio
+    async def test_get_costs_by_simulation_includes_by_type(self) -> None:
+        from core.repos.cost_repo import CostRepo
+
+        db = AsyncMock()
+        db.fetch = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "agent_id": "vera",
+                        "total": Decimal("0.03"),
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                    },
+                    {
+                        "agent_id": "system",
+                        "total": Decimal("0.02"),
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                    },
+                ],
+                [
+                    {"cost_type": "llm_call", "total": Decimal("0.03"), "tokens": 120},
+                    {"cost_type": "imagen_generation", "total": Decimal("0.02"), "tokens": 0},
+                ],
+            ]
+        )
+        repo = CostRepo(db)
+
+        result = await repo.get_costs_by_simulation(uuid.uuid4())
+
+        assert result["total"] == "0.05"
+        assert result["total_input_tokens"] == 100
+        assert result["total_output_tokens"] == 20
+        assert result["by_type"] == [
+            {"type": "llm_call", "cost": "0.03", "tokens": 120},
+            {"type": "imagen_generation", "cost": "0.02", "tokens": 0},
+        ]

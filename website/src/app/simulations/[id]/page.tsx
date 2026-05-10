@@ -586,6 +586,9 @@ function CostsTab({ simulationId }: { simulationId: string }) {
   const agentCosts = [...data.by_agent].sort(
     (a, b) => Number(b.total) - Number(a.total),
   );
+  const typeCosts = [...(data.by_type ?? [])].sort(
+    (a, b) => Number(b.cost) - Number(a.cost),
+  );
 
   return (
     <div className="space-y-4">
@@ -649,6 +652,43 @@ function CostsTab({ simulationId }: { simulationId: string }) {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {typeCosts.length > 0 && (
+        <div>
+          <h3 className="text-xs text-foreground/50 font-medium uppercase tracking-wide mb-2">
+            Cost by Type
+          </h3>
+          <div className="rounded-lg border border-border bg-surface overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-foreground/50">
+                  <th scope="col" className="px-4 py-2 font-medium">Type</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Tokens</th>
+                  <th scope="col" className="px-4 py-2 font-medium text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {typeCosts.map((entry) => (
+                  <tr
+                    key={entry.type}
+                    className="border-b border-border last:border-0 hover:bg-surface-light transition-colors"
+                  >
+                    <td className="px-4 py-2 font-mono text-foreground/80">
+                      {entry.type}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-right">
+                      {entry.tokens.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-right">
+                      ${parseFloat(entry.cost || "0").toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

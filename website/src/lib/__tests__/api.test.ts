@@ -66,7 +66,16 @@ describe("getAgents", () => {
 
 describe("getAgentJournal", () => {
   it("sends GET request to /api/agents/:id/journal", async () => {
-    const entries = [{ id: "1", content: "Day 1" }];
+    const entries = [
+      {
+        id: 1,
+        agent_id: "vera",
+        reflection_type: "daily",
+        content: "Day 1",
+        image_url: "https://example.com/journals/vera.png",
+        created_at: "2026-04-01T00:00:00Z",
+      },
+    ];
     mockFetch.mockReturnValue(jsonResponse(entries));
 
     const result = await getAgentJournal("vera");
@@ -76,6 +85,7 @@ describe("getAgentJournal", () => {
       expect.anything(),
     );
     expect(result).toEqual(entries);
+    expect(result[0].image_url).toBe("https://example.com/journals/vera.png");
   });
 });
 
