@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { installReplayHarness, REPLAY_HARNESS_ORIGIN } from "./replayHarness";
 
@@ -12,6 +14,29 @@ import { installReplayHarness, REPLAY_HARNESS_ORIGIN } from "./replayHarness";
 
 const SIM_ID = "00000000-0000-4000-8000-000000000476";
 const SKIP_BROWSER_IN_CODEX_SANDBOX = process.env.CODEX_SANDBOX === "seatbelt";
+const WEBSITE_ROOT = resolve(__dirname, "../..");
+const FRONTEND_ASSET_ROOT = resolve(WEBSITE_ROOT, "../frontend/assets");
+const REPLAY_SOURCE_ROOT = resolve(WEBSITE_ROOT, "src/components/replay");
+const TILESET_NAMES = [
+  "office_tiles",
+  "office_tiles_hardwood",
+  "office_tiles_whitetile",
+  "office_tiles_teal",
+  "office_tiles_purple",
+  "office_tiles_bluegrey",
+  "office_tiles_concrete",
+  "office_tiles_olive",
+];
+const TILESET_IMAGE_KEYS = [
+  "tileset",
+  "tileset_hardwood",
+  "tileset_whitetile",
+  "tileset_teal",
+  "tileset_purple",
+  "tileset_bluegrey",
+  "tileset_concrete",
+  "tileset_olive",
+];
 const FIXTURE_CUES = {
   sim_id: SIM_ID,
   agent_roster: ["vera", "rex", "aurora"],
@@ -55,6 +80,48 @@ interface ReplayDebugState {
   } | null;
 }
 
+interface TilemapJson {
+  layers: Array<{
+    name: string;
+    type: string;
+    width?: number;
+    height?: number;
+    data?: number[];
+  }>;
+  tilesets: Array<{
+    name: string;
+    image: string;
+    tilecount: number;
+  }>;
+}
+
+function replayAssetPath(relativePath: string): string {
+  return resolve(FRONTEND_ASSET_ROOT, relativePath);
+}
+
+function readReplayAsset(relativePath: string): Buffer {
+  const path = replayAssetPath(relativePath);
+  expect(existsSync(path), `${relativePath} should exist`).toBe(true);
+  return readFileSync(path);
+}
+
+function expectVisualPngAsset(
+  relativePath: string,
+  expectedSize?: { width: number; height: number },
+): void {
+  const buffer = readReplayAsset(relativePath);
+  expect(buffer.subarray(1, 4).toString("ascii")).toBe("PNG");
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  expect(width).toBeGreaterThan(0);
+  expect(height).toBeGreaterThan(0);
+  if (expectedSize) {
+    expect({ width, height }).toEqual(expectedSize);
+  }
+  expect(buffer.length).toBeGreaterThan(256);
+  expect(new Set(buffer).size).toBeGreaterThan(32);
+}
+
 async function mockCues(page: Page) {
   await installReplayHarness(page, {
     simId: SIM_ID,
@@ -96,6 +163,71 @@ async function waitForReplayDebug(page: Page): Promise<ReplayDebugState> {
       (window as unknown as { __replayDebug: ReplayDebugState }).__replayDebug,
   );
 }
+
+test.describe("replay scene sandbox fallback", () => {
+  test.skip(
+    !SKIP_BROWSER_IN_CODEX_SANDBOX,
+    "Node-only fallback is only needed when Chromium is blocked by the Codex sandbox.",
+  );
+
+  test("verifies deterministic replay visual evidence without launching Chromium", () => {
+    const tilemap = JSON.parse(
+      readReplayAsset("tilesets/office/tilemap_office.json").toString("utf8"),
+    ) as TilemapJson;
+
+    const ground = tilemap.layers.find(
+      (layer) => layer.name === "Ground" && layer.type === "tilelayer",
+    );
+    expect(ground).toBeDefined();
+    expect(ground?.width).toBe(40);
+    expect(ground?.height).toBe(22);
+    expect(ground?.data?.filter((gid) => gid > 0).length).toBeGreaterThan(500);
+    expect(new Set(ground?.data ?? []).size).toBeGreaterThan(8);
+
+    expect(tilemap.tilesets.map((tileset) => tileset.name)).toEqual(TILESET_NAMES);
+    expect(tilemap.tilesets.map((tileset) => tileset.image)).toEqual(
+      TILESET_IMAGE_KEYS,
+    );
+    for (const imageKey of TILESET_IMAGE_KEYS) {
+      expectVisualPngAsset(`tilesets/office/${imageKey}.png`, {
+        width: 128,
+        height: 128,
+      });
+    }
+
+    for (const agentId of ["vera", "rex"]) {
+      expectVisualPngAsset(`sprites/${agentId}/rotations/south.png`, {
+        width: 48,
+        height: 48,
+      });
+      expectVisualPngAsset(
+        `sprites/${agentId}/animations/breathing-idle/south/frame_000.png`,
+        { width: 48, height: 48 },
+      );
+      expectVisualPngAsset(
+        `sprites/${agentId}/animations/walking/south/frame_000.png`,
+        { width: 48, height: 48 },
+      );
+    }
+
+    const sceneSource = readFileSync(
+      resolve(REPLAY_SOURCE_ROOT, "OfficeReplayScene.ts"),
+      "utf8",
+    );
+    expect(sceneSource).toContain("__replayDebug");
+    expect(sceneSource).toContain("fallbackFloorUsed");
+    expect(sceneSource).toContain("usedFallbackRectangle");
+    expect(sceneSource).toContain("latestBubble");
+
+    const bubbleSource = readFileSync(
+      resolve(REPLAY_SOURCE_ROOT, "ReplaySpeechBubble.ts"),
+      "utf8",
+    );
+    expect(bubbleSource).toContain("fillRoundedRect");
+    expect(bubbleSource).toContain("fillTriangle");
+    expect(bubbleSource).toContain("setVisible");
+  });
+});
 
 test.describe("replay scene", () => {
   test.skip(
