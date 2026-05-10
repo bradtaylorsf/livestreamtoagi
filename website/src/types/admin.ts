@@ -33,6 +33,7 @@ export interface TimelineEvent {
 
 export interface SimulationCostResponse {
   by_agent: { agent_id: string; total: string }[];
+  by_type: CostByType[];
   total: string;
   total_input_tokens: number;
   total_output_tokens: number;
@@ -245,7 +246,7 @@ export interface AgentArtifact {
 }
 
 export interface JournalEntry {
-  id: string;
+  id: number;
   simulation_id: string | null;
   content: string;
   reflection_type: string;

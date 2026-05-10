@@ -677,17 +677,21 @@ async def get_agent_journal(
             offset,
             sim_id,
         )
-    return [
-        {
-            "id": r["id"],
-            "agent_id": r["agent_id"],
-            "reflection_type": r["reflection_type"],
-            "content": r["content"],
-            "image_url": r.get("image_url"),
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-        }
-        for r in rows
-    ]
+    entries = []
+    for row in rows:
+        r = dict(row)
+        entries.append(
+            {
+                "id": r["id"],
+                "agent_id": r["agent_id"],
+                "reflection_type": r["reflection_type"],
+                "content": r["content"],
+                "token_count": r.get("token_count", 0),
+                "image_url": r.get("image_url"),
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+        )
+    return entries
 
 
 @router.get("/agents/{agent_id}/relationships")

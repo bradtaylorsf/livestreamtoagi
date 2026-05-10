@@ -809,6 +809,7 @@ export async function getSimulationConversations(
 // Simulation costs
 export interface SimulationCostResponse {
   by_agent: { agent_id: string; total: string }[];
+  by_type: { type: string; cost: string; tokens: number }[];
   total: string;
   total_input_tokens: number;
   total_output_tokens: number;
