@@ -3,8 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 const specArgs = process.argv.filter((arg) =>
   /(?:^|[/\\])[^/\\]+\.spec\.ts$/.test(arg),
 );
-const runningReplaySpecOnly =
-  specArgs.length === 1 && /(?:^|[/\\])replay\.spec\.ts$/.test(specArgs[0]);
+const runningReplayHarnessSpecOnly =
+  specArgs.length === 1 &&
+  /(?:^|[/\\])replay-harness\.spec\.ts$/.test(specArgs[0]);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -23,7 +24,7 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  ...(runningReplaySpecOnly
+  ...(runningReplayHarnessSpecOnly
     ? {}
     : {
         webServer: {

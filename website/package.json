@@ -12,7 +12,9 @@
     "sync-replay-assets": "node scripts/sync-replay-assets.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:replay:harness": "playwright test tests/e2e/replay-harness.spec.ts",
+    "test:e2e:replay:production": "playwright test tests/e2e/replay-production.spec.ts"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",
