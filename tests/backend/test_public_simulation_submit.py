@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.auth.dependencies import get_current_user
-from core.models import Simulation, SimulationCreate, User
+from core.models import User
 from core.public_routes import router as public_router
 
 
@@ -161,6 +162,99 @@ class TestSubmitHappyPath:
         passed_args = create_call.args[1:]
         assert "queued" in passed_args
         assert user.id in passed_args
+
+    def test_persists_effective_roster_and_user_visible_config(
+        self,
+        submit_app,
+        tmp_path,
+    ) -> None:
+        client, mock_db, _, user, _ = submit_app
+        sim_id = uuid.uuid4()
+        mock_db.fetchrow = AsyncMock(
+            side_effect=[
+                _make_sim_row(
+                    id=sim_id,
+                    status="queued",
+                    submitted_by_user_id=user.id,
+                ),
+                {
+                    "id": user.id,
+                    "email": user.email,
+                    "created_at": user.created_at,
+                    "last_login_at": user.last_login_at,
+                    "simulations_submitted": 1,
+                    "total_cost_spent": Decimal("0.5"),
+                },
+            ]
+        )
+        mock_db.fetchval = AsyncMock(return_value=0)
+
+        env = {
+            "PUBLIC_SIM_RUN_CONFIG_DIR": str(tmp_path),
+            "PYTEST_CURRENT_TEST": "",
+        }
+        with patch.dict(os.environ, env), patch("subprocess.Popen") as popen:
+            popen.return_value = MagicMock(pid=123)
+            resp = client.post(
+                "/api/simulations/submit",
+                json={
+                    "scenario_id": "awakening.yaml",
+                    "name": "small cast",
+                    "params": {
+                        "max_cost": 0.5,
+                        "agents": ["vera", "rex", "aurora", "pixel"],
+                        "excluded_agents": ["grok"],
+                        "factions": [
+                            {
+                                "name": "artists",
+                                "members": ["aurora", "pixel"],
+                                "goal": "make the show vivid",
+                            }
+                        ],
+                        "memory_seed": {"mode": "none"},
+                        "energy": {
+                            "vera": 85,
+                            "rex": 60,
+                            "aurora": 90,
+                            "pixel": 70,
+                            "grok": 10,
+                        },
+                        "conversation_cadence": 1.25,
+                    },
+                },
+            )
+
+        assert resp.status_code == 200, resp.text
+        create_call = mock_db.fetchrow.call_args_list[0]
+        config = json.loads(create_call.args[3])
+        assert config["scenario_agents"] == ["vera", "rex", "aurora", "pixel", "grok"]
+        assert config["excluded_agents"] == ["grok"]
+        assert config["effective_agents"] == ["vera", "rex", "aurora", "pixel"]
+        assert config["agents"] == ["vera", "rex", "aurora", "pixel"]
+        assert config["factions"] == [
+            {
+                "name": "artists",
+                "members": ["aurora", "pixel"],
+                "goal": "make the show vivid",
+            }
+        ]
+        assert config["memory_seed"] == {"mode": "none"}
+        assert config["energy"] == {
+            "vera": 85.0,
+            "rex": 60.0,
+            "aurora": 90.0,
+            "pixel": 70.0,
+        }
+        assert config["conversation_cadence"] == 1.25
+        assert create_call.args[6] == ["vera", "rex", "aurora", "pixel"]
+
+        run_config = json.loads((tmp_path / str(sim_id) / "run_config.json").read_text())
+        assert run_config["agents"] == ["vera", "rex", "aurora", "pixel"]
+        assert run_config["excluded_agents"] == ["grok"]
+        cmd = popen.call_args.args[0]
+        assert "--agents" in cmd
+        assert cmd[cmd.index("--agents") + 1] == "vera,rex,aurora,pixel"
+        assert "--run-config-file" in cmd
 
     def test_clamps_max_cost_to_per_submission_cap(self, submit_app) -> None:
         client, mock_db, *_, user, _ = submit_app

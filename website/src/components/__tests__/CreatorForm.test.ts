@@ -305,6 +305,8 @@ describe("state.buildSubmitPayload", () => {
     expect(payload.hypothesis).toBe("Rex and Aurora ally");
     expect(payload.params?.max_cost).toBe(0.5);
     expect(payload.params?.conversation_cadence).toBe(1.5);
+    expect(payload.params?.agents).toEqual(["vera", "rex", "aurora"]);
+    expect(payload.params?.excluded_agents).toEqual([]);
     expect(payload.params?.energy).toBeTruthy();
   });
   it("omits hypothesis when blank", () => {
@@ -338,6 +340,38 @@ describe("state.buildSubmitPayload", () => {
     const payload = buildSubmitPayload(off);
     expect(payload.params?.excluded_agents).toEqual(["rex"]);
     expect(payload.params?.agents).toEqual(["vera", "aurora"]);
+  });
+  it("filters energy and faction members to the active roster", () => {
+    const s = initialState({
+      scenarios: [makeScenario()],
+      initialScenarioId: null,
+      remainingBudget: null,
+    });
+    const payload = buildSubmitPayload({
+      ...toggleAgent(s, "rex"),
+      factions: [
+        {
+          name: "Show team",
+          members: ["vera", "rex", "aurora"],
+          goal: "make the run entertaining",
+        },
+      ],
+      energy: {
+        vera: 80,
+        rex: 10,
+        aurora: 90,
+      },
+    });
+
+    expect(payload.params?.agents).toEqual(["vera", "aurora"]);
+    expect(payload.params?.energy).toEqual({ vera: 80, aurora: 90 });
+    expect(payload.params?.factions).toEqual([
+      {
+        name: "Show team",
+        members: ["vera", "aurora"],
+        goal: "make the run entertaining",
+      },
+    ]);
   });
   it("parses custom-mode memory seed JSON when valid", () => {
     const s = initialState({

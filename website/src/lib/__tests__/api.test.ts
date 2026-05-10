@@ -24,6 +24,7 @@ import {
   requestMagicLink,
   runSimulationEval,
   shareSimulationAsChallenge,
+  submitPublicSimulation,
   upvoteChallenge,
 } from "../api";
 
@@ -477,6 +478,47 @@ describe("getSimulationSnapshot", () => {
       "/api/admin/simulations/sim-123/snapshots/snap%20with%20spaces.json",
       expect.anything(),
     );
+  });
+});
+
+describe("submitPublicSimulation", () => {
+  it("sends the selected scenario payload to /api/simulations/submit", async () => {
+    const response = {
+      simulation_id: "sim-123",
+      status_url: "/api/simulations/sim-123",
+      estimated_completion_time: "2026-05-10T00:00:00Z",
+    };
+    const body = {
+      scenario_id: "awakening.yaml",
+      name: "small cast",
+      params: {
+        agents: ["vera", "rex", "aurora", "pixel"],
+        excluded_agents: ["grok"],
+        factions: [
+          {
+            name: "artists",
+            members: ["aurora", "pixel"],
+            goal: "make the show vivid",
+          },
+        ],
+        memory_seed: { mode: "none" as const },
+        energy: { vera: 80, rex: 60, aurora: 90, pixel: 75 },
+        conversation_cadence: 1.25,
+        max_cost: 0.5,
+      },
+    };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await submitPublicSimulation(body);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/submit",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(result).toEqual(response);
   });
 });
 
