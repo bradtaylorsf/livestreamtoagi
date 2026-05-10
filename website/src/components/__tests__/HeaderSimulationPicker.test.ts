@@ -47,6 +47,14 @@ describe("HeaderSimulationPicker.buildPickerLabel", () => {
   it("falls back to the bare id when active id has no detail loaded yet", () => {
     expect(buildPickerLabel("abc", null)).toBe("abc");
   });
+
+  it("falls back to bare id when active detail is for a different simulation", () => {
+    // Guards against the brief flash on direct URL navigation between sims:
+    // the activeId switches before the new sim's metadata fetch resolves, so
+    // any stale detail must not be rendered as if it were the active one.
+    const stale = makeSim("A", "completed", "local-state-config");
+    expect(buildPickerLabel("B", stale)).toBe("B");
+  });
 });
 
 describe("HeaderSimulationPicker.filterSimulations", () => {

@@ -6,8 +6,13 @@ the orchestrator finalize path stays fast. Loads the simulation's transcript,
 drives the headless replay capture, stitches TTS audio, and writes the final
 file to local disk or S3 via the storage backend.
 
-Usage:
-    python scripts/render_simulation_video.py --sim-id <uuid>
+Usage (canonical — bypasses stale ``python`` shims, sources ``.env``):
+    make render-verify SIM=<uuid>            # or, with auto-pick:
+    make render-verify
+    bash scripts/verify-render.sh <uuid>
+
+Usage (low-level, requires DATABASE_URL exported and ``.venv/bin/python`` on PATH):
+    .venv/bin/python scripts/render_simulation_video.py --sim-id <uuid>
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import re
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -28,37 +33,75 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-# Speaker is encoded as a "[name]: ..." prefix on the transcript content;
-# transcripts.participants is the unordered set of attendees, not the speaker.
-_SPEAKER_RE = re.compile(r"^\[([^\]]+)\]:\s*")
+# Exit codes used by the preflight checks. They are distinct from the
+# generic-failure code 1 so the orchestrator log makes the misconfiguration
+# obvious without having to grep stack traces.
+EXIT_PLAYWRIGHT_NOT_INSTALLED = 2
+EXIT_CHROMIUM_NOT_INSTALLED = 3
 
 
-def _build_cues_from_rows(rows: list) -> list:
-    """Convert transcript rows into TurnAudioCues. Pure (no DB), testable."""
-    from core.video.audio_timeline import TurnAudioCue
+def _chromium_browser_dir_exists() -> bool:
+    """Best-effort check that ``playwright install chromium`` has been run.
 
-    if not rows:
-        return []
-    base = rows[0]["created_at"]
-    cues: list[TurnAudioCue] = []
-    for r in rows:
-        content = r.get("content") or ""
-        match = _SPEAKER_RE.match(content)
-        if not match:
+    Playwright stores browser binaries outside the pip package — in
+    ``PLAYWRIGHT_BROWSERS_PATH`` if set, otherwise a per-OS cache directory.
+    We probe for any ``chromium-*`` subdirectory; the actual binary path
+    differs by build number.
+    """
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if override == "0":
+        try:
+            import playwright  # type: ignore[import-not-found]
+        except ImportError:
+            return False
+        candidates = [Path(playwright.__file__).parent / "driver" / "package" / ".local-browsers"]
+    elif override:
+        candidates = [Path(override)]
+    else:
+        home = Path.home()
+        candidates = [
+            home / "Library" / "Caches" / "ms-playwright",  # macOS
+            home / ".cache" / "ms-playwright",  # Linux
+            home / "AppData" / "Local" / "ms-playwright",  # Windows
+        ]
+
+    for d in candidates:
+        if not d.exists():
             continue
-        agent_id = match.group(1).strip().lower()
-        text = _SPEAKER_RE.sub("", content, count=1).strip()
-        if not text:
+        try:
+            if any(p.name.startswith("chromium-") for p in d.iterdir()):
+                return True
+        except OSError:
             continue
-        delta = (r["created_at"] - base).total_seconds()
-        cues.append(
-            TurnAudioCue(
-                agent_id=agent_id,
-                text=text,
-                start_seconds=max(0.0, delta),
-            )
+    return False
+
+
+def _preflight_render_dependencies(log: logging.Logger) -> int | None:
+    """Surface clear, actionable errors before the heavy bootstrap path runs.
+
+    Returns an exit code on misconfiguration, or ``None`` to continue.
+    """
+    try:
+        import playwright.async_api  # noqa: F401
+    except ImportError:
+        log.error(
+            'playwright is not installed — run `uv pip install -e ".[render]"` '
+            "(or `pip install playwright>=1.47.0`) and then `playwright install chromium`"
         )
-    return cues
+        return EXIT_PLAYWRIGHT_NOT_INSTALLED
+
+    if not _chromium_browser_dir_exists():
+        log.error(
+            "playwright Chromium binaries not found — run `playwright install chromium`. "
+            "Set PLAYWRIGHT_BROWSERS_PATH if you keep browsers in a non-default location."
+        )
+        return EXIT_CHROMIUM_NOT_INSTALLED
+
+    return None
+
+
+from core.video.cue_parser import SPEAKER_RE as _SPEAKER_RE  # noqa: F401, E402
+from core.video.cue_parser import build_cues_from_rows as _build_cues_from_rows  # noqa: E402
 
 
 async def _build_cues(db, sim_id: uuid.UUID) -> list:
@@ -84,6 +127,10 @@ async def _main(sim_id: uuid.UUID) -> int:
         datefmt="%H:%M:%S",
     )
     log = logging.getLogger("render_simulation_video")
+
+    preflight = _preflight_render_dependencies(log)
+    if preflight is not None:
+        return preflight
 
     from core.bootstrap import bootstrap_services
     from core.repos.simulation_repo import SimulationRepo

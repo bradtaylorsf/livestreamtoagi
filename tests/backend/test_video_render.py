@@ -7,7 +7,9 @@ acceptance criteria for issue #425.
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -488,3 +490,200 @@ class TestClaimForRender:
         # The query stamps video_rendered_at only on 'done'
         sql = db.fetchrow.await_args.args[0]
         assert "video_rendered_at = CASE WHEN $1 = 'done'" in sql
+
+
+# ── Render-pipeline error surfacing ─────────────────────────
+
+
+class TestRenderPipelineErrors:
+    """Issue #462: a fresh checkout with playwright missing, or the package
+    installed but Chromium binaries un-fetched, used to crash with terse
+    errors that didn't tell the operator how to fix it."""
+
+    @pytest.mark.asyncio
+    async def test_missing_playwright_module_points_at_render_extra(self, tmp_path):
+        from core.video.render_pipeline import RenderError, _capture_canvas
+
+        # Force the lazy import to fail by hiding the module.
+        with patch.dict(sys.modules, {"playwright.async_api": None}):
+            with pytest.raises(RenderError) as ei:
+                await _capture_canvas(
+                    replay_url="http://example.com/replay",
+                    output_path=tmp_path / "canvas.webm",
+                    max_seconds=1,
+                )
+        assert ".[render]" in str(ei.value)
+        assert "playwright is not installed" in str(ei.value)
+
+    @pytest.mark.asyncio
+    async def test_missing_chromium_binary_points_at_install_command(self, tmp_path):
+        from core.video.render_pipeline import RenderError, _capture_canvas
+
+        # Stub `async_playwright()` so the launch raises a Playwright-style
+        # "Executable doesn't exist" error. We don't need the real package.
+        class _FakeChromium:
+            async def launch(self, **_kw):
+                raise RuntimeError(
+                    "Executable doesn't exist at /tmp/.../headless_shell\n"
+                    "Looks like Playwright was just installed or updated. "
+                    "Please run the following command to download new browsers:\n"
+                    "    playwright install"
+                )
+
+        class _FakePW:
+            chromium = _FakeChromium()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        def fake_async_playwright():
+            return _FakePW()
+
+        fake_module = MagicMock()
+        fake_module.async_playwright = fake_async_playwright
+        # Stub both the parent ``playwright`` package and the submodule so the
+        # ``from playwright.async_api import async_playwright`` lazy import
+        # resolves even when the real package isn't installed in the venv.
+        fake_parent = MagicMock()
+        fake_parent.async_api = fake_module
+        with patch.dict(
+            sys.modules,
+            {"playwright": fake_parent, "playwright.async_api": fake_module},
+        ):
+            with pytest.raises(RenderError) as ei:
+                await _capture_canvas(
+                    replay_url="http://example.com/replay",
+                    output_path=tmp_path / "canvas.webm",
+                    max_seconds=1,
+                )
+        assert "Chromium binaries not installed" in str(ei.value)
+        assert "playwright install chromium" in str(ei.value)
+
+    @pytest.mark.asyncio
+    async def test_unrelated_launch_error_is_re_raised(self, tmp_path):
+        """Non-binary launch failures shouldn't be re-labelled as missing
+        binaries — that would mask real bugs (port conflicts, etc.)."""
+        from core.video.render_pipeline import _capture_canvas
+
+        class _FakeChromium:
+            async def launch(self, **_kw):
+                raise RuntimeError("some unrelated launch failure")
+
+        class _FakePW:
+            chromium = _FakeChromium()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        fake_module = MagicMock()
+        fake_module.async_playwright = lambda: _FakePW()
+        fake_parent = MagicMock()
+        fake_parent.async_api = fake_module
+        with patch.dict(
+            sys.modules,
+            {"playwright": fake_parent, "playwright.async_api": fake_module},
+        ):
+            with pytest.raises(RuntimeError, match="some unrelated launch failure"):
+                await _capture_canvas(
+                    replay_url="http://example.com/replay",
+                    output_path=tmp_path / "canvas.webm",
+                    max_seconds=1,
+                )
+
+
+# ── Render-script preflight checks ──────────────────────────
+
+
+class TestRenderScriptPreflight:
+    """The standalone subprocess (scripts/render_simulation_video.py) must
+    fail loudly with an actionable message *before* bootstrapping DB/Redis,
+    so the orchestrator log makes the misconfiguration obvious."""
+
+    def test_chromium_dir_check_finds_chromium_subdir(self, tmp_path, monkeypatch):
+        from scripts.render_simulation_video import _chromium_browser_dir_exists
+
+        (tmp_path / "chromium-1234").mkdir()
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+        assert _chromium_browser_dir_exists() is True
+
+    def test_chromium_dir_check_returns_false_when_empty(self, tmp_path, monkeypatch):
+        from scripts.render_simulation_video import _chromium_browser_dir_exists
+
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+        assert _chromium_browser_dir_exists() is False
+
+    def test_chromium_dir_check_returns_false_for_missing_path(self, tmp_path, monkeypatch):
+        from scripts.render_simulation_video import _chromium_browser_dir_exists
+
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "does-not-exist"))
+        assert _chromium_browser_dir_exists() is False
+
+    def test_preflight_returns_2_when_playwright_missing(self, caplog):
+        from scripts.render_simulation_video import (
+            EXIT_PLAYWRIGHT_NOT_INSTALLED,
+            _preflight_render_dependencies,
+        )
+
+        log = logging.getLogger("test_preflight_missing_pw")
+        with patch.dict(sys.modules, {"playwright.async_api": None}):
+            with caplog.at_level(logging.ERROR, logger=log.name):
+                code = _preflight_render_dependencies(log)
+
+        assert code == EXIT_PLAYWRIGHT_NOT_INSTALLED
+        assert any(".[render]" in r.message for r in caplog.records)
+
+    def test_preflight_returns_3_when_chromium_missing(self, caplog, monkeypatch):
+        from scripts.render_simulation_video import (
+            EXIT_CHROMIUM_NOT_INSTALLED,
+            _preflight_render_dependencies,
+        )
+
+        # Pretend playwright is importable, but no chromium dir exists.
+        # Stub both the parent package and the submodule because
+        # ``import playwright.async_api`` resolves the parent first.
+        fake_pw_async = MagicMock()
+        fake_pw_parent = MagicMock()
+        fake_pw_parent.async_api = fake_pw_async
+        log = logging.getLogger("test_preflight_missing_chromium")
+
+        with (
+            patch.dict(
+                sys.modules,
+                {"playwright": fake_pw_parent, "playwright.async_api": fake_pw_async},
+            ),
+            patch(
+                "scripts.render_simulation_video._chromium_browser_dir_exists",
+                return_value=False,
+            ),
+        ):
+            with caplog.at_level(logging.ERROR, logger=log.name):
+                code = _preflight_render_dependencies(log)
+
+        assert code == EXIT_CHROMIUM_NOT_INSTALLED
+        assert any("playwright install chromium" in r.message for r in caplog.records)
+
+    def test_preflight_returns_none_when_dependencies_present(self):
+        from scripts.render_simulation_video import _preflight_render_dependencies
+
+        fake_pw_async = MagicMock()
+        fake_pw_parent = MagicMock()
+        fake_pw_parent.async_api = fake_pw_async
+        log = logging.getLogger("test_preflight_ok")
+
+        with (
+            patch.dict(
+                sys.modules,
+                {"playwright": fake_pw_parent, "playwright.async_api": fake_pw_async},
+            ),
+            patch(
+                "scripts.render_simulation_video._chromium_browser_dir_exists",
+                return_value=True,
+            ),
+        ):
+            assert _preflight_render_dependencies(log) is None
