@@ -15,11 +15,11 @@ const SKIP_BROWSER_IN_CODEX_SANDBOX = process.env.CODEX_SANDBOX === "seatbelt";
 const FIXTURE_CUES = {
   sim_id: SIM_ID,
   agent_roster: ["vera", "rex", "aurora"],
-  duration_seconds: 6,
+  duration_seconds: 7,
   cues: [
-    { agent_id: "vera", text: "Welcome to the office.", start_seconds: 0.5 },
-    { agent_id: "rex", text: "Booting the workshop.", start_seconds: 2 },
-    { agent_id: "aurora", text: "Studio is online.", start_seconds: 4 },
+    { agent_id: "vera", text: "Welcome to the office.", start_seconds: 1.5 },
+    { agent_id: "rex", text: "Booting the workshop.", start_seconds: 3 },
+    { agent_id: "aurora", text: "Studio is online.", start_seconds: 5 },
   ],
 };
 
@@ -27,6 +27,8 @@ interface ReplayDebugState {
   tilemap: {
     layerCount: number;
     layerNames: string[];
+    renderedLayerCount: number;
+    renderedLayerNames: string[];
     tilesetCount: number;
     tilesetNames: string[];
     fallbackFloorUsed: boolean;
@@ -82,6 +84,7 @@ async function waitForReplayDebug(page: Page): Promise<ReplayDebugState> {
       return (
         debug != null &&
         debug.tilemap.layerCount > 0 &&
+        debug.tilemap.renderedLayerCount > 0 &&
         debug.agents.length >= 2
       );
     },
@@ -143,6 +146,8 @@ test.describe("replay scene", () => {
     expect(debug.tilemap.fallbackFloorUsed).toBe(false);
     expect(debug.tilemap.layerCount).toBeGreaterThanOrEqual(1);
     expect(debug.tilemap.layerNames).toContain("Ground");
+    expect(debug.tilemap.renderedLayerCount).toBeGreaterThanOrEqual(1);
+    expect(debug.tilemap.renderedLayerNames).toContain("Ground");
     expect(debug.tilemap.tilesetCount).toBe(8);
     expect(debug.tilemap.tilesetNames).toEqual(
       expect.arrayContaining([
@@ -250,7 +255,7 @@ test.describe("replay scene", () => {
     const canvas = page.locator("canvas");
 
     // Snapshot the canvas before the first cue starts (during the
-    // initial 500ms gap from the fixture). All agents should be at desks
+    // initial 1.5s gap from the fixture). All agents should be at desks
     // with no bubbles yet.
     const beforeShot = await canvas.screenshot();
 

@@ -97,6 +97,8 @@ describe("OfficeReplayScene assets", () => {
     expect(SCENE_SOURCE).toMatch(/OfficeReplayDebugState/);
     expect(SCENE_SOURCE).toMatch(/__replayDebug/);
     expect(SCENE_SOURCE).toMatch(/fallbackFloorUsed/);
+    expect(SCENE_SOURCE).toMatch(/renderedLayerCount/);
+    expect(SCENE_SOURCE).toMatch(/renderedLayerNames/);
     expect(SCENE_SOURCE).toMatch(/tilesetCount/);
     expect(SCENE_SOURCE).toMatch(/usedFallbackRectangle/);
     expect(SCENE_SOURCE).toMatch(/textureKey/);

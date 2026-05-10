@@ -57,6 +57,8 @@ export interface OfficeReplayDebugState {
   tilemap: {
     layerCount: number;
     layerNames: string[];
+    renderedLayerCount: number;
+    renderedLayerNames: string[];
     tilesetCount: number;
     tilesetNames: string[];
     fallbackFloorUsed: boolean;
@@ -103,6 +105,8 @@ export class OfficeReplayScene extends Phaser.Scene {
   private tilemapDebug: OfficeReplayDebugState["tilemap"] = {
     layerCount: 0,
     layerNames: [],
+    renderedLayerCount: 0,
+    renderedLayerNames: [],
     tilesetCount: 0,
     tilesetNames: [],
     fallbackFloorUsed: false,
@@ -205,6 +209,8 @@ export class OfficeReplayScene extends Phaser.Scene {
     this.tilemapDebug = {
       layerCount: map.layers.length,
       layerNames: map.layers.map((layer) => layer.name),
+      renderedLayerCount: 0,
+      renderedLayerNames: [],
       tilesetCount: tilesets.length,
       tilesetNames: tilesets.map((tileset) => tileset.name),
       fallbackFloorUsed: tilesets.length === 0,
@@ -220,11 +226,25 @@ export class OfficeReplayScene extends Phaser.Scene {
     }
     // Paint every tile layer from the Tiled JSON. The map's "Collision"
     // and object layers don't render visually so this is safe.
+    const renderedLayerNames: string[] = [];
     for (const layer of map.layers) {
       const created = map.createLayer(layer.name, tilesets, 0, 0);
       if (created) {
         created.setDepth(0);
+        renderedLayerNames.push(layer.name);
       }
+    }
+    this.tilemapDebug = {
+      ...this.tilemapDebug,
+      renderedLayerCount: renderedLayerNames.length,
+      renderedLayerNames,
+      fallbackFloorUsed: renderedLayerNames.length === 0,
+    };
+    if (renderedLayerNames.length === 0) {
+      console.error("[replay] tilemap loaded but no visible layers were created");
+      const g = this.add.graphics();
+      g.fillStyle(0x2c3e50, 1);
+      g.fillRect(0, 0, STAGE_W, 704);
     }
   }
 
