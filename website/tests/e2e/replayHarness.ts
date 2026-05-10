@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "fs";
-import { extname, resolve } from "path";
+import { extname, isAbsolute, relative, resolve } from "path";
 import type { Page, Route } from "@playwright/test";
 import ts from "typescript";
 
@@ -16,6 +16,7 @@ interface ReplayHarnessOptions {
 }
 
 const WEBSITE_ROOT = resolve(__dirname, "../..");
+const FRONTEND_ASSET_ROOT = resolve(WEBSITE_ROOT, "../frontend/assets");
 const moduleCache = new Map<string, string>();
 
 const REPLAY_MODULES: Record<string, string> = {
@@ -142,6 +143,7 @@ async function loadReplay() {
   window.__replayReady = false;
   window.__replayDone = false;
   window.__replayHadBubble = false;
+  delete window.__replayDebug;
   window.__replayMountedAt = Date.now();
 
   try {
@@ -221,16 +223,25 @@ export default Phaser;
 }
 
 async function fulfillAsset(route: Route, pathname: string): Promise<void> {
-  const assetRoot = resolve(WEBSITE_ROOT, "public/replay-assets");
-  const filePath = resolve(WEBSITE_ROOT, "public", pathname.slice(1));
-  if (!filePath.startsWith(assetRoot) || !existsSync(filePath)) {
-    await route.abort();
-    return;
+  const relativeAssetPath = pathname.slice("/replay-assets/".length);
+  for (const assetRoot of [
+    resolve(WEBSITE_ROOT, "public/replay-assets"),
+    FRONTEND_ASSET_ROOT,
+  ]) {
+    const filePath = resolve(assetRoot, relativeAssetPath);
+    const rootRelativePath = relative(assetRoot, filePath);
+    const isInsideRoot =
+      rootRelativePath === "" ||
+      (!rootRelativePath.startsWith("..") && !isAbsolute(rootRelativePath));
+    if (isInsideRoot && existsSync(filePath)) {
+      await route.fulfill({
+        path: filePath,
+        contentType: contentTypeFor(pathname),
+      });
+      return;
+    }
   }
-  await route.fulfill({
-    path: filePath,
-    contentType: contentTypeFor(pathname),
-  });
+  await route.abort();
 }
 
 export async function installReplayHarness(

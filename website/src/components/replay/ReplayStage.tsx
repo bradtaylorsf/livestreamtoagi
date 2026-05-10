@@ -40,6 +40,7 @@ export default function ReplayStage({
       w.__replayReady = false;
       w.__replayDone = false;
       w.__replayHadBubble = false;
+      delete w.__replayDebug;
       w.__replayMountedAt = Date.now();
     }
 
