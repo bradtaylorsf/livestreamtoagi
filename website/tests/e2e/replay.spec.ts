@@ -23,6 +23,36 @@ const FIXTURE_CUES = {
   ],
 };
 
+interface ReplayDebugState {
+  tilemap: {
+    layerCount: number;
+    layerNames: string[];
+    tilesetCount: number;
+    tilesetNames: string[];
+    fallbackFloorUsed: boolean;
+  };
+  agents: Array<{
+    id: string;
+    visible: boolean;
+    x: number;
+    y: number;
+    textureKey: string | null;
+    usedFallbackRectangle: boolean;
+  }>;
+  hadBubble: boolean;
+  latestBubble: {
+    agentId: string;
+    text: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    visible: boolean;
+    startMs: number;
+    endMs: number;
+  } | null;
+}
+
 async function mockCues(page: Page) {
   await installReplayHarness(page, {
     simId: SIM_ID,
@@ -41,6 +71,26 @@ async function gotoReplay(page: Page) {
     () => (window as unknown as Record<string, unknown>).__replayReady === true,
     null,
     { timeout: 30_000 },
+  );
+}
+
+async function waitForReplayDebug(page: Page): Promise<ReplayDebugState> {
+  await page.waitForFunction(
+    () => {
+      const debug = (window as unknown as { __replayDebug?: ReplayDebugState })
+        .__replayDebug;
+      return (
+        debug != null &&
+        debug.tilemap.layerCount > 0 &&
+        debug.agents.length >= 2
+      );
+    },
+    null,
+    { timeout: 10_000 },
+  );
+  return page.evaluate(
+    () =>
+      (window as unknown as { __replayDebug: ReplayDebugState }).__replayDebug,
   );
 }
 
@@ -77,16 +127,51 @@ test.describe("replay scene", () => {
     await expect(page.locator("canvas")).toHaveCount(0);
   });
 
-  test("renders 1280x720 canvas with non-uniform pixels (not solid black)", async ({ page }) => {
+  test("renders office tilemap and multiple real sprites on a nonblank canvas", async ({ page }) => {
     await mockCues(page);
     await gotoReplay(page);
 
     const canvas = page.locator("canvas");
     await expect(canvas).toBeVisible();
+    await expect(page.getByTestId("replay-stage").locator("canvas")).toHaveCount(1);
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBe(1280);
     expect(box!.height).toBe(720);
+
+    const debug = await waitForReplayDebug(page);
+    expect(debug.tilemap.fallbackFloorUsed).toBe(false);
+    expect(debug.tilemap.layerCount).toBeGreaterThanOrEqual(1);
+    expect(debug.tilemap.layerNames).toContain("Ground");
+    expect(debug.tilemap.tilesetCount).toBe(8);
+    expect(debug.tilemap.tilesetNames).toEqual(
+      expect.arrayContaining([
+        "office_tiles",
+        "office_tiles_hardwood",
+        "office_tiles_whitetile",
+        "office_tiles_teal",
+        "office_tiles_purple",
+        "office_tiles_bluegrey",
+        "office_tiles_concrete",
+        "office_tiles_olive",
+      ]),
+    );
+
+    const realSprites = debug.agents.filter(
+      (agent) =>
+        agent.visible &&
+        !agent.usedFallbackRectangle &&
+        agent.textureKey != null &&
+        agent.textureKey.includes(agent.id),
+    );
+    expect(realSprites.length).toBeGreaterThanOrEqual(2);
+    expect(realSprites.map((agent) => agent.id)).toEqual(
+      expect.arrayContaining(["vera", "rex"]),
+    );
+    for (const agent of realSprites) {
+      expect(agent.x).toBeGreaterThan(0);
+      expect(agent.y).toBeGreaterThan(0);
+    }
 
     // Phaser renders via WebGL without preserveDrawingBuffer, so
     // canvas.getContext("2d") returns null and getImageData on a
@@ -173,10 +258,39 @@ test.describe("replay scene", () => {
     // ``__replayHadBubble`` flag the first time the speech-bubble
     // container becomes visible.
     await page.waitForFunction(
-      () => (window as unknown as Record<string, unknown>).__replayHadBubble === true,
+      () => {
+        const debug = (window as unknown as { __replayDebug?: ReplayDebugState })
+          .__replayDebug;
+        return (
+          (window as unknown as Record<string, unknown>).__replayHadBubble ===
+            true &&
+          debug?.hadBubble === true &&
+          debug.latestBubble?.visible === true &&
+          debug.latestBubble.w > 0 &&
+          debug.latestBubble.h > 0
+        );
+      },
       null,
       { timeout: 15_000 },
     );
+    const bubbleDebug = await waitForReplayDebug(page);
+    expect(bubbleDebug.hadBubble).toBe(true);
+    expect(bubbleDebug.latestBubble).toMatchObject({
+      agentId: "vera",
+      text: "Welcome to the office.",
+      visible: true,
+    });
+    expect(bubbleDebug.latestBubble!.w).toBeGreaterThan(80);
+    expect(bubbleDebug.latestBubble!.h).toBeGreaterThan(40);
+    expect(
+      bubbleDebug.agents.some(
+        (agent) =>
+          agent.id === bubbleDebug.latestBubble!.agentId &&
+          agent.visible &&
+          !agent.usedFallbackRectangle,
+      ),
+    ).toBe(true);
+
     const duringShot = await canvas.screenshot();
 
     // The during-cue screenshot must differ meaningfully from the before

@@ -30,6 +30,10 @@ describe("ReplayStage wiring", () => {
     expect(STAGE_SOURCE).toMatch(/__replayDone/);
   });
 
+  it("clears stale replay debug state before mounting a new scene", () => {
+    expect(STAGE_SOURCE).toMatch(/delete w\.__replayDebug/);
+  });
+
   it("uses 1280x720 stage dimensions", () => {
     expect(STAGE_SOURCE).toMatch(/STAGE_W\s*=\s*1280/);
     expect(STAGE_SOURCE).toMatch(/STAGE_H\s*=\s*720/);
@@ -87,6 +91,23 @@ describe("OfficeReplayScene assets", () => {
   it("creates idle/walk animations and tweens between desk and speaking position", () => {
     expect(SCENE_SOURCE).toMatch(/this\.tweens\.add/);
     expect(SCENE_SOURCE).toMatch(/getSpeakingPosition/);
+  });
+
+  it("exposes tilemap and sprite evidence through the replay debug hook", () => {
+    expect(SCENE_SOURCE).toMatch(/OfficeReplayDebugState/);
+    expect(SCENE_SOURCE).toMatch(/__replayDebug/);
+    expect(SCENE_SOURCE).toMatch(/fallbackFloorUsed/);
+    expect(SCENE_SOURCE).toMatch(/tilesetCount/);
+    expect(SCENE_SOURCE).toMatch(/usedFallbackRectangle/);
+    expect(SCENE_SOURCE).toMatch(/textureKey/);
+  });
+
+  it("updates replay debug metadata when a speech bubble renders", () => {
+    expect(SCENE_SOURCE).toMatch(/latestBubble/);
+    expect(SCENE_SOURCE).toMatch(/hadBubble/);
+    expect(SCENE_SOURCE).toMatch(/agentId/);
+    expect(SCENE_SOURCE).toMatch(/startMs/);
+    expect(SCENE_SOURCE).toMatch(/endMs/);
   });
 });
 
