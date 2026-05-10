@@ -11,6 +11,7 @@ import { installReplayHarness, REPLAY_HARNESS_ORIGIN } from "./replayHarness";
  */
 
 const SIM_ID = "00000000-0000-4000-8000-000000000476";
+const SKIP_BROWSER_IN_CODEX_SANDBOX = process.env.CODEX_SANDBOX === "seatbelt";
 const FIXTURE_CUES = {
   sim_id: SIM_ID,
   agent_roster: ["vera", "rex", "aurora"],
@@ -44,6 +45,11 @@ async function gotoReplay(page: Page) {
 }
 
 test.describe("replay scene", () => {
+  test.skip(
+    SKIP_BROWSER_IN_CODEX_SANDBOX,
+    "Chromium cannot launch inside the Codex macOS seatbelt sandbox.",
+  );
+
   test("renderMode exposes cue-load failure and does not mount the stage", async ({ page }) => {
     await installReplayHarness(page, {
       simId: SIM_ID,
