@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installReplayHarness, REPLAY_HARNESS_ORIGIN } from "./replayHarness";
 
 /**
  * Visual smoke test for the office replay page (issue #476).
@@ -22,17 +23,19 @@ const FIXTURE_CUES = {
 };
 
 async function mockCues(page: Page) {
-  await page.route(`**/api/simulations/${SIM_ID}/replay-cues`, async (route) => {
-    await route.fulfill({
+  await installReplayHarness(page, {
+    simId: SIM_ID,
+    replayCues: {
       status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(FIXTURE_CUES),
-    });
+      body: FIXTURE_CUES,
+    },
   });
 }
 
 async function gotoReplay(page: Page) {
-  await page.goto(`/simulations/${SIM_ID}/replay?renderMode=1`);
+  await page.goto(
+    `${REPLAY_HARNESS_ORIGIN}/simulations/${SIM_ID}/replay?renderMode=1`,
+  );
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>).__replayReady === true,
     null,
@@ -42,15 +45,17 @@ async function gotoReplay(page: Page) {
 
 test.describe("replay scene", () => {
   test("renderMode exposes cue-load failure and does not mount the stage", async ({ page }) => {
-    await page.route(`**/api/simulations/${SIM_ID}/replay-cues`, async (route) => {
-      await route.fulfill({
+    await installReplayHarness(page, {
+      simId: SIM_ID,
+      replayCues: {
         status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ detail: "cue load exploded" }),
-      });
+        body: { detail: "cue load exploded" },
+      },
     });
 
-    await page.goto(`/simulations/${SIM_ID}/replay?renderMode=1`);
+    await page.goto(
+      `${REPLAY_HARNESS_ORIGIN}/simulations/${SIM_ID}/replay?renderMode=1`,
+    );
     await page.waitForFunction(
       () => Boolean((window as unknown as Record<string, unknown>).__replayError),
       null,
