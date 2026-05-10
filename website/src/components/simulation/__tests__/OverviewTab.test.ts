@@ -117,4 +117,16 @@ describe("OverviewTab", () => {
     expect(agentList).toBeTruthy();
     expect(agentList?.props.linkPrefix).toBe(`/simulations/${sim.id}/agents`);
   });
+
+  it("passes the configured effective roster before participation data exists", () => {
+    const sim = makeSim({
+      agents_participated: [],
+      config: { effective_agents: ["vera", "rex", "aurora", "pixel"] },
+    });
+    const tree = OverviewTab({ sim, simulationId: sim.id });
+    const agentList = flatten(tree).find((el) => el.type === AgentList);
+
+    expect(agentList?.props.agents).toEqual(["vera", "rex", "aurora", "pixel"]);
+    expect(agentList?.props.title).toBe("Effective Agent Roster");
+  });
 });

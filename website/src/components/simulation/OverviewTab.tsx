@@ -10,12 +10,24 @@ interface OverviewTabProps {
   onJumpToHypothesis?: () => void;
 }
 
+function configStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 export default function OverviewTab({
   sim,
   simulationId,
   onJumpToHypothesis,
 }: OverviewTabProps) {
   const hypothesis = (sim.hypothesis ?? "").trim();
+  const configuredRoster =
+    configStringList(sim.config?.effective_agents).length > 0
+      ? configStringList(sim.config.effective_agents)
+      : configStringList(sim.config?.agents);
+  const displayedAgents =
+    configuredRoster.length > 0 ? configuredRoster : sim.agents_participated;
 
   return (
     <div className="space-y-8" data-testid="overview-tab">
@@ -67,8 +79,9 @@ export default function OverviewTab({
       />
 
       <AgentList
-        agents={sim.agents_participated}
+        agents={displayedAgents}
         linkPrefix={`/simulations/${simulationId}/agents`}
+        title="Effective Agent Roster"
       />
 
       <div className="text-xs text-foreground/40">

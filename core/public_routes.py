@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -2235,10 +2235,33 @@ async def get_public_artifacts(
 # ── Public Simulation Submission ─────────────────────────────────
 
 
+class PublicSubmitFaction(BaseModel):
+    name: str
+    members: list[str]
+    goal: str
+    stance: str | None = None
+
+
+class PublicSubmitMemorySeed(BaseModel):
+    mode: Literal["none", "inherit", "custom"]
+    simulation_id: str | None = None
+    data: Any | None = None
+
+
+class PublicSubmitParams(BaseModel):
+    max_cost: float | None = None
+    agents: list[str] | None = None
+    excluded_agents: list[str] = Field(default_factory=list)
+    factions: list[PublicSubmitFaction] | None = None
+    memory_seed: PublicSubmitMemorySeed | None = None
+    energy: dict[str, float] | None = None
+    conversation_cadence: float | None = Field(default=None, ge=0.1, le=10.0)
+
+
 class PublicSubmitRequest(BaseModel):
     scenario_id: str
     name: str
-    params: dict[str, Any] | None = None
+    params: PublicSubmitParams | None = None
     hypothesis: str | None = Field(default=None, max_length=2000)
     publish_to_youtube: bool = False
 
@@ -2277,6 +2300,319 @@ def _public_caps() -> tuple[float, float]:
     )
 
 
+def _unique_strings(values: Any) -> list[str]:
+    """Return trimmed string values in first-seen order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(values, list):
+        return out
+    for raw in values:
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _load_agent_configs(services: Any) -> list[Any]:
+    """Load agent configs from the live registry, falling back to YAML."""
+    registry = getattr(services, "agent_registry", None)
+    if registry is not None and hasattr(registry, "get_all_agents"):
+        try:
+            configs = list(registry.get_all_agents())
+            if configs:
+                return configs
+        except (AttributeError, TypeError):
+            pass
+
+    from core.agent_registry import AgentRegistry
+
+    return list(AgentRegistry(redis_client=None)._load_all_from_yaml().values())
+
+
+def _speaking_agent_ids(agent_configs: list[Any]) -> list[str]:
+    """Agents available for public speaking rosters, excluding special system agents."""
+    system_only = {"management", "alpha"}
+    return [
+        a.id
+        for a in agent_configs
+        if a.id not in system_only and (getattr(a, "chattiness", 0) > 0 or getattr(a, "initiative", 0) > 0)
+    ]
+
+
+def _scenario_data(path: Any) -> dict[str, Any]:
+    import yaml
+
+    raw = yaml.safe_load(path.read_text()) or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _scenario_agent_roster(path: Any, data: dict[str, Any]) -> list[str]:
+    """Return the scenario-declared roster from meta, falling back to phases."""
+    meta = _build_scenario_meta(path)
+    if meta.agents:
+        return _unique_strings(meta.agents)
+    return _unique_strings(_agents_from_phases(data.get("phases")))
+
+
+def _normalize_public_factions(
+    *,
+    requested_factions: list[PublicSubmitFaction] | None,
+    scenario_factions: Any,
+    effective_agents: list[str],
+) -> list[dict[str, Any]]:
+    """Validate requested factions or filter scenario defaults to active agents."""
+    active = set(effective_agents)
+
+    if requested_factions is not None:
+        normalized: list[dict[str, Any]] = []
+        for faction in requested_factions:
+            name = faction.name.strip()
+            goal = faction.goal.strip()
+            members = _unique_strings(faction.members)
+            if not name or not goal or not members:
+                raise HTTPException(
+                    status_code=400,
+                    detail="factions require a name, goal, and at least one member",
+                )
+            unknown = [m for m in members if m not in active]
+            if unknown:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"faction '{name}' includes inactive agents: {unknown}",
+                )
+            normalized.append(
+                {
+                    "name": name,
+                    "members": members,
+                    "goal": goal,
+                    **({"stance": faction.stance.strip()} if faction.stance else {}),
+                }
+            )
+        return normalized
+
+    normalized = []
+    if not isinstance(scenario_factions, list):
+        return normalized
+    for raw in scenario_factions:
+        if not isinstance(raw, dict):
+            continue
+        members = [m for m in _unique_strings(raw.get("members")) if m in active]
+        if not members:
+            continue
+        name = raw.get("name")
+        goal = raw.get("goal")
+        if not isinstance(name, str) or not isinstance(goal, str):
+            continue
+        item: dict[str, Any] = {
+            "name": name,
+            "members": members,
+            "goal": goal,
+        }
+        stance = raw.get("stance")
+        if isinstance(stance, str):
+            item["stance"] = stance
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_public_memory_seed(
+    requested: PublicSubmitMemorySeed | None,
+    scenario_seed: Any,
+) -> dict[str, Any] | None:
+    """Normalize public memory seed params into DB/run-config shape."""
+    if requested is None:
+        return scenario_seed if isinstance(scenario_seed, dict) else None
+    if requested.mode == "none":
+        return {"mode": "none"}
+    if requested.mode == "inherit":
+        if not requested.simulation_id:
+            raise HTTPException(
+                status_code=400,
+                detail="memory_seed mode='inherit' requires simulation_id",
+            )
+        try:
+            uuid.UUID(requested.simulation_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="memory_seed simulation_id must be a UUID",
+            ) from exc
+        return {"mode": "inherit", "inherit_from": requested.simulation_id}
+    if requested.data is None:
+        raise HTTPException(
+            status_code=400,
+            detail="memory_seed mode='custom' requires data",
+        )
+    return {"mode": "custom", "data": requested.data}
+
+
+def _normalize_public_energy(
+    raw_energy: dict[str, float] | None,
+    effective_agents: list[str],
+) -> dict[str, float]:
+    """Keep initial energy values for active agents only, clamped to 0-100."""
+    raw_energy = raw_energy or {}
+    normalized: dict[str, float] = {}
+    for agent_id in effective_agents:
+        value = raw_energy.get(agent_id, 75)
+        normalized[agent_id] = max(0.0, min(100.0, float(value)))
+    return normalized
+
+
+def _build_public_run_config(
+    *,
+    scenario_id: str,
+    scenario_path: Any,
+    scenario_data: dict[str, Any],
+    scenario_meta: ScenarioMeta,
+    params: PublicSubmitParams,
+    services: Any,
+    max_cost: float,
+) -> dict[str, Any]:
+    """Normalize public-facing params into the authoritative run config."""
+    agent_configs = _load_agent_configs(services)
+    all_agent_ids = {a.id for a in agent_configs}
+    speaking_agents = _speaking_agent_ids(agent_configs)
+    speaking_set = set(speaking_agents)
+
+    scenario_agents = _scenario_agent_roster(scenario_path, scenario_data)
+    if scenario_agents:
+        unknown = [a for a in scenario_agents if a not in all_agent_ids]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"scenario references unknown agents: {unknown}",
+            )
+        roster_base = scenario_agents
+    else:
+        roster_base = speaking_agents
+
+    requested_agents = _unique_strings(params.agents)
+    excluded_agents = _unique_strings(params.excluded_agents)
+
+    if requested_agents:
+        invalid_requested = [a for a in requested_agents if a not in roster_base]
+        if invalid_requested:
+            raise HTTPException(
+                status_code=400,
+                detail=f"requested agents are outside the scenario roster: {invalid_requested}",
+            )
+        selected_agents = requested_agents
+    else:
+        selected_agents = [a for a in roster_base if a not in excluded_agents]
+
+    invalid_exclusions = [a for a in excluded_agents if a not in roster_base]
+    if invalid_exclusions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"excluded agents are outside the scenario roster: {invalid_exclusions}",
+        )
+
+    non_speaking = [a for a in selected_agents if a not in speaking_set]
+    if non_speaking:
+        raise HTTPException(
+            status_code=400,
+            detail=f"agents are not available as public speaking agents: {non_speaking}",
+        )
+
+    effective_agents = [a for a in selected_agents if a not in excluded_agents]
+    if not effective_agents:
+        raise HTTPException(
+            status_code=400,
+            detail="at least one speaking agent must remain after exclusions",
+        )
+
+    factions = _normalize_public_factions(
+        requested_factions=params.factions,
+        scenario_factions=scenario_data.get("factions"),
+        effective_agents=effective_agents,
+    )
+    memory_seed = _normalize_public_memory_seed(
+        params.memory_seed,
+        scenario_data.get("memory_seed"),
+    )
+    energy = _normalize_public_energy(params.energy, effective_agents)
+    conversation_cadence = params.conversation_cadence or 1.0
+
+    submitted_params = params.model_dump(exclude_none=True)
+    return {
+        "scenario_id": scenario_id,
+        "scenario_meta": scenario_meta.model_dump(),
+        "scenario_agents": roster_base,
+        "excluded_agents": excluded_agents,
+        "effective_agents": effective_agents,
+        "agents": effective_agents,
+        "factions": factions,
+        "memory_seed": memory_seed,
+        "energy": energy,
+        "conversation_cadence": conversation_cadence,
+        "max_cost": max_cost,
+        "params": submitted_params,
+        "source": "public_submit",
+    }
+
+
+def _public_run_dir(project_root: Any, sim_id: uuid.UUID) -> Any:
+    import os
+    import tempfile
+    from pathlib import Path
+
+    base = os.environ.get("PUBLIC_SIM_RUN_CONFIG_DIR")
+    root = Path(base) if base else Path(tempfile.gettempdir()) / "livestreamtoagi-public-sim-runs"
+    return root / str(sim_id)
+
+
+def _write_public_run_files(project_root: Any, sim_id: uuid.UUID, config: dict[str, Any]) -> Any:
+    run_dir = _public_run_dir(project_root, sim_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_config = dict(config)
+    memory_seed = run_config.get("memory_seed")
+    if isinstance(memory_seed, dict) and memory_seed.get("mode") == "custom":
+        seed_path = run_dir / "memory_seed.json"
+        seed_path.write_text(json.dumps(memory_seed.get("data"), indent=2, sort_keys=True))
+        run_config["memory_seed"] = {
+            "mode": "custom",
+            "custom_file": str(seed_path),
+        }
+    run_config_path = run_dir / "run_config.json"
+    run_config_path.write_text(json.dumps(run_config, indent=2, sort_keys=True))
+    return run_config_path
+
+
+def _build_public_simulation_command(
+    *,
+    project_root: Any,
+    sim_name: str,
+    scenario_path: Any,
+    max_cost: float,
+    sim_id: uuid.UUID,
+    agents: list[str],
+    run_config_file: Any,
+) -> list[str]:
+    import sys
+
+    return [
+        sys.executable,
+        str(project_root / "scripts" / "run_simulation.py"),
+        "--name",
+        sim_name,
+        "--seed-file",
+        str(scenario_path),
+        "--agents",
+        ",".join(agents),
+        "--max-cost",
+        str(max_cost),
+        "--sim-id",
+        str(sim_id),
+        "--run-config-file",
+        str(run_config_file),
+    ]
+
+
 @router.post("/simulations/submit", response_model=PublicSubmitResponse)
 async def submit_public_simulation(
     body: PublicSubmitRequest,
@@ -2293,7 +2629,6 @@ async def submit_public_simulation(
     """
     import os
     import subprocess
-    import sys
     from datetime import UTC, datetime, timedelta
     from decimal import Decimal
     from pathlib import Path
@@ -2320,7 +2655,8 @@ async def submit_public_simulation(
         raise HTTPException(status_code=400, detail="name cannot be empty")
 
     per_sub_cap, lifetime_cap = _public_caps()
-    requested_cost = float((body.params or {}).get("max_cost", per_sub_cap))
+    params = body.params or PublicSubmitParams()
+    requested_cost = float(params.max_cost if params.max_cost is not None else per_sub_cap)
     max_cost = max(0.0, min(requested_cost, per_sub_cap))
 
     # Lifetime cost cap (worst-case: count requested max against the user's
@@ -2343,6 +2679,18 @@ async def submit_public_simulation(
     db = services.db
     sim_repo = SimulationRepo(db)
     user_repo = UserRepo(db)
+
+    scenario_data = _scenario_data(candidate)
+    scenario_meta = _build_scenario_meta(candidate)
+    public_run_config = _build_public_run_config(
+        scenario_id=body.scenario_id,
+        scenario_path=candidate,
+        scenario_data=scenario_data,
+        scenario_meta=scenario_meta,
+        params=params,
+        services=services,
+        max_cost=max_cost,
+    )
 
     # Concurrent simulations cap (1)
     active = await sim_repo.count_active_for_user(user.id)
@@ -2372,13 +2720,10 @@ async def submit_public_simulation(
         SimulationCreate(
             name=sim_name,
             description=body.hypothesis,
-            config={
-                "scenario_id": body.scenario_id,
-                "max_cost": max_cost,
-                "params": body.params or {},
-                "source": "public_submit",
-            },
+            config=public_run_config,
             status="queued",  # type: ignore[arg-type]
+            agents_participated=public_run_config["effective_agents"],
+            factions=public_run_config["factions"],
             hypothesis=body.hypothesis,
             submitted_by_user_id=user.id,
             publish_to_youtube=body.publish_to_youtube,
@@ -2394,18 +2739,16 @@ async def submit_public_simulation(
         cost_delta=Decimal(str(max_cost)),
     )
 
-    cmd = [
-        sys.executable,
-        str(project_root / "scripts" / "run_simulation.py"),
-        "--name",
-        sim_name,
-        "--seed-file",
-        str(candidate),
-        "--max-cost",
-        str(max_cost),
-        "--sim-id",
-        str(sim.id),
-    ]
+    run_config_file = _write_public_run_files(project_root, sim.id, public_run_config)
+    cmd = _build_public_simulation_command(
+        project_root=project_root,
+        sim_name=sim_name,
+        scenario_path=candidate,
+        max_cost=max_cost,
+        sim_id=sim.id,
+        agents=public_run_config["effective_agents"],
+        run_config_file=run_config_file,
+    )
     # Skip subprocess spawn during pytest — tests assert on row creation.
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         subprocess.Popen(  # noqa: S603
