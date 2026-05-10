@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WebSocketClient } from "./WebSocketClient";
+import { DEFAULT_WS_URL, resolveWebSocketUrl, WebSocketClient } from "./WebSocketClient";
 import type { ServerEvent } from "../types/events";
 import { EventType } from "../types/events";
 
@@ -60,6 +60,21 @@ afterEach(() => {
 });
 
 describe("WebSocketClient", () => {
+  it("defaults to the backend websocket on port 8010", () => {
+    const client = new WebSocketClient();
+    client.connect();
+
+    expect(DEFAULT_WS_URL).toBe("ws://localhost:8010/ws");
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toBe("ws://localhost:8010/ws");
+    client.disconnect();
+  });
+
+  it("resolves a missing env URL to the backend websocket default", () => {
+    expect(resolveWebSocketUrl(undefined)).toBe("ws://localhost:8010/ws");
+    expect(resolveWebSocketUrl("ws://test:8000/ws")).toBe("ws://test:8000/ws");
+  });
+
   it("connects to the given URL", () => {
     const client = new WebSocketClient("ws://test:8000/ws");
     client.connect();

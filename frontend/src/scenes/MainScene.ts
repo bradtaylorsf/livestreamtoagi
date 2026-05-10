@@ -10,7 +10,7 @@ import { DevPanel } from "../ui/DevPanel";
 import { AudioManager } from "../audio/AudioManager";
 import { BehaviorScheduler } from "../agents/BehaviorScheduler";
 import { ManagementEffects } from "../effects/ManagementEffects";
-import { WebSocketClient } from "../network/WebSocketClient";
+import { resolveWebSocketUrl, WebSocketClient } from "../network/WebSocketClient";
 import { AGENTS } from "../agents";
 import furnitureManifestsData from "../world/furniture/furniture-manifests.json";
 
@@ -346,7 +346,7 @@ export class MainScene extends Phaser.Scene {
     this.placeFurniture();
 
     // ── WebSocket connection to backend ─────────────────────────
-    const wsUrl = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws";
+    const wsUrl = resolveWebSocketUrl(import.meta.env.VITE_WS_URL);
     this.wsClient = new WebSocketClient(wsUrl);
 
     // ── Connection status overlay ───────────────────────────────
