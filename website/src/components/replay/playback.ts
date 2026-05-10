@@ -29,9 +29,10 @@ function estimateDurationMs(text: string): number {
  *
  * Each cue becomes a bubble that appears at ``cue.start_seconds`` and stays
  * visible for either an estimated TTS duration (~60ms/char + 0.5s) or until
- * the next cue starts, whichever is shorter. The plan also computes the
- * point at which the page should set ``window.__replayDone = true`` —
- * that's the last bubble's end + 1s, with a hard floor of 1s.
+ * the same agent's next cue starts, whichever is shorter. Multiple agents
+ * can have overlapping bubbles. The plan also computes the point at which
+ * the page should set ``window.__replayDone = true`` — that's the last
+ * bubble's end + 1s, with a hard floor of 1s.
  */
 export function planReplay(cues: ReplayCue[]): ReplayPlan {
   if (cues.length === 0) {
@@ -41,12 +42,18 @@ export function planReplay(cues: ReplayCue[]): ReplayPlan {
   const sorted = [...cues].sort((a, b) => a.start_seconds - b.start_seconds);
   const bubbles: BubblePlan[] = sorted.map((cue, idx) => {
     const start_ms = Math.max(0, Math.round(cue.start_seconds * 1000));
-    const next_start_ms =
-      idx + 1 < sorted.length
-        ? Math.round(sorted[idx + 1].start_seconds * 1000)
-        : Number.POSITIVE_INFINITY;
+    // Truncate against the same agent's next utterance so two consecutive
+    // bubbles for one speaker don't overlap. Different speakers are allowed
+    // to overlap so the office reads as a real conversation, not turn-taking.
+    let next_same_agent_ms = Number.POSITIVE_INFINITY;
+    for (let j = idx + 1; j < sorted.length; j++) {
+      if (sorted[j].agent_id === cue.agent_id) {
+        next_same_agent_ms = Math.round(sorted[j].start_seconds * 1000);
+        break;
+      }
+    }
     const estimated_end_ms = start_ms + estimateDurationMs(cue.text);
-    const end_ms = Math.min(estimated_end_ms, next_start_ms);
+    const end_ms = Math.min(estimated_end_ms, next_same_agent_ms);
     return {
       agent_id: cue.agent_id,
       text: cue.text,
@@ -55,7 +62,7 @@ export function planReplay(cues: ReplayCue[]): ReplayPlan {
     };
   });
 
-  const last_end = bubbles[bubbles.length - 1].end_ms;
+  const last_end = bubbles.reduce((m, b) => Math.max(m, b.end_ms), 0);
   const done_at_ms = Math.max(MIN_PLAYBACK_MS, last_end + TRAILING_BUFFER_MS);
   return { bubbles, done_at_ms };
 }

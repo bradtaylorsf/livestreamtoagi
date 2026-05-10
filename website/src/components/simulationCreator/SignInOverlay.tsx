@@ -4,10 +4,11 @@ import { useState } from "react";
 import { requestMagicLink } from "@/lib/api";
 
 interface SignInOverlayProps {
+  returnTo: string;
   onClose: () => void;
 }
 
-export default function SignInOverlay({ onClose }: SignInOverlayProps) {
+export default function SignInOverlay({ returnTo, onClose }: SignInOverlayProps) {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
@@ -15,11 +16,12 @@ export default function SignInOverlay({ onClose }: SignInOverlayProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    e.stopPropagation();
     if (!email.trim()) return;
     setSubmitting(true);
     setError(null);
     try {
-      await requestMagicLink(email.trim());
+      await requestMagicLink(email.trim(), returnTo);
       setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send magic link");

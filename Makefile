@@ -1,35 +1,35 @@
 # Makefile — convenience targets that pin invocations to the project's venv
-# so they are immune to stale `python` / `playwright` shims on PATH.
-#
-# These are documentation-quality helpers; the canonical install path is
-# still `uv pip install -e ".[render]"` followed by `playwright install
-# chromium`. The targets exist so CI, verifiers, and humans can run
-# render-pipeline checks without depending on PATH order.
+# so they are immune to stale `python`, `pytest`, or `playwright` shims on PATH.
 
 PY := .venv/bin/python
+PYTEST := .venv/bin/pytest
 PW := .venv/bin/playwright
 
-.PHONY: render-install render-smoke render-verify
+.PHONY: test test-backend test-replay-cues render-install render-smoke render-verify
 
-# Install the render extra and download the Chromium binaries playwright
-# needs to actually launch a browser. Idempotent.
+# Run the full backend unit-test suite with coverage. Mirrors the CI
+# step in .github/workflows/ci.yml so local runs match CI exactly.
+test test-backend:
+	$(PYTEST) tests/backend/ -v -m "not integration" --cov=core --cov=tools
+
+# Issue #477 — replay-cue parser + endpoint. The verification harness
+# auto-runs these on every change to core/video/cue_parser.py or
+# core/public_routes.py's replay-cues route.
+test-replay-cues:
+	$(PYTEST) tests/backend/test_video_render.py tests/backend/test_replay_cues_endpoint.py -v
+
+# Install the render extra and download the Chromium binaries Playwright
+# needs to launch a browser. Idempotent.
 render-install:
 	uv pip install -e ".[render]"
 	$(PW) install chromium
 
 # Smoke-check the render entrypoint without touching a real simulation.
-# Exits 0 if playwright is importable AND `--help` parses cleanly. Hits
-# the venv's own python directly to bypass any stale `python` shim that
-# might be earlier on PATH.
 render-smoke:
 	$(PY) -c "import playwright.async_api; print('playwright import: ok')"
 	$(PY) scripts/render_simulation_video.py --help
 
 # End-to-end verification: pick a real sim with transcripts (or use SIM=<uuid>),
 # render to MP4, and ffprobe-confirm both video + audio streams are present.
-# The shell wrapper sources `.env` (so DATABASE_URL is set even when the caller
-# didn't export it) and pins to `.venv/bin/python`, so a stale `python` shim
-# earlier on PATH cannot intercept the call. This is the canonical entrypoint
-# for issue #463's verification step.
 render-verify:
 	bash scripts/verify-render.sh $(SIM)

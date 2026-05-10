@@ -13,12 +13,13 @@ import sys
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from core.models import Simulation
-from core.video.audio_timeline import TurnAudioCue
+from core.video.audio_timeline import StitchResult, TurnAudioCue
 from core.video.config import VideoRenderConfig, load_video_render_config
 from core.video.worker import enqueue_render, mark_unrenderable
 
@@ -44,22 +45,31 @@ def _make_sim(**overrides) -> Simulation:
 
 # ── Config knobs ─────────────────────────────────────────────
 
+VIDEO_ENV_KEYS = (
+    "MAX_VIDEO_RENDER_MINUTES",
+    "VIDEO_STORAGE",
+    "VIDEO_S3_BUCKET",
+    "VIDEO_OUTPUT_DIR",
+    "PUBLIC_BASE_URL",
+    "VIDEO_REPLAY_URL_TEMPLATE",
+)
+
 
 class TestRenderConfig:
     def test_defaults(self):
         with patch.dict(os.environ, {}, clear=False):
-            for k in (
-                "MAX_VIDEO_RENDER_MINUTES",
-                "VIDEO_STORAGE",
-                "VIDEO_S3_BUCKET",
-                "VIDEO_OUTPUT_DIR",
-            ):
+            for k in VIDEO_ENV_KEYS:
                 os.environ.pop(k, None)
             cfg = load_video_render_config()
+        sim_id = uuid.uuid4()
         assert cfg.max_render_minutes == 30
         assert cfg.max_render_seconds == 30 * 60
         assert cfg.storage_backend == "local"
         assert cfg.s3_bucket is None
+        assert cfg.public_base_url == "http://localhost:4000"
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"http://localhost:4000/simulations/{sim_id}/replay?renderMode=1"
+        )
 
     def test_env_overrides(self):
         with patch.dict(
@@ -74,6 +84,157 @@ class TestRenderConfig:
         assert cfg.max_render_minutes == 5
         assert cfg.storage_backend == "s3"
         assert cfg.s3_bucket == "my-bucket"
+
+    def test_public_base_url_override_builds_default_replay_route(self):
+        sim_id = uuid.uuid4()
+        with patch.dict(
+            os.environ,
+            {
+                "PUBLIC_BASE_URL": "https://show.example/",
+            },
+            clear=False,
+        ):
+            os.environ.pop("VIDEO_REPLAY_URL_TEMPLATE", None)
+            cfg = load_video_render_config()
+
+        assert cfg.public_base_url == "https://show.example"
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"https://show.example/simulations/{sim_id}/replay?renderMode=1"
+        )
+
+    def test_blank_replay_url_template_env_uses_default(self):
+        sim_id = uuid.uuid4()
+        with patch.dict(
+            os.environ,
+            {
+                "PUBLIC_BASE_URL": "http://localhost:4000",
+                "VIDEO_REPLAY_URL_TEMPLATE": "",
+            },
+            clear=False,
+        ):
+            cfg = load_video_render_config()
+
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"http://localhost:4000/simulations/{sim_id}/replay?renderMode=1"
+        )
+
+    def test_replay_url_template_override_takes_precedence(self):
+        sim_id = uuid.uuid4()
+        with patch.dict(
+            os.environ,
+            {
+                "PUBLIC_BASE_URL": "https://show.example",
+                "VIDEO_REPLAY_URL_TEMPLATE": "http://renderer.local/replay/{sim_id}",
+            },
+            clear=False,
+        ):
+            cfg = load_video_render_config()
+
+        assert cfg.replay_url_for(str(sim_id)) == (
+            f"http://renderer.local/replay/{sim_id}"
+        )
+
+
+# ── Replay capture URL construction ──────────────────────────
+
+
+class TestRenderPipelineReplayUrls:
+    @pytest.mark.asyncio
+    async def test_capture_canvas_receives_website_replay_url(self, tmp_path):
+        from core.video.render_pipeline import render_simulation_video
+
+        sim_id = uuid.uuid4()
+        cfg = VideoRenderConfig(
+            max_render_minutes=5,
+            storage_backend="local",
+            s3_bucket=None,
+            output_dir="videos",
+            public_base_url="http://localhost:4000",
+            replay_url_template="{base_url}/simulations/{sim_id}/replay?renderMode=1",
+        )
+        capture = AsyncMock(return_value=(tmp_path / "canvas.webm", False))
+        stitch = AsyncMock(
+            return_value=StitchResult(
+                output_path=tmp_path / "audio.wav",
+                duration_seconds=1.0,
+                cues_rendered=1,
+            )
+        )
+
+        with (
+            patch("core.video.render_pipeline._capture_canvas", new=capture),
+            patch("core.video.render_pipeline.stitch_audio_timeline", new=stitch),
+            patch("core.video.render_pipeline._mux_final_mp4") as mux,
+        ):
+            result = await render_simulation_video(
+                sim_id,
+                cues=[TurnAudioCue("vera", "hello", 0.0)],
+                tts=MagicMock(),
+                config=cfg,
+                work_dir=tmp_path,
+            )
+
+        capture.assert_awaited_once()
+        assert capture.await_args.kwargs["replay_url"] == (
+            f"http://localhost:4000/simulations/{sim_id}/replay?renderMode=1"
+        )
+        assert capture.await_args.kwargs["max_seconds"] == 5 * 60
+        mux.assert_called_once()
+        assert result.output_path == tmp_path / f"{sim_id}.mp4"
+
+    def test_bad_replay_response_error_is_actionable(self):
+        from core.video.render_pipeline import (
+            RenderError,
+            _raise_for_bad_replay_response,
+        )
+
+        replay_url = "http://localhost:4000/simulations/sim-1/replay?renderMode=1"
+        with pytest.raises(RenderError) as exc:
+            _raise_for_bad_replay_response(SimpleNamespace(status=404), replay_url)
+
+        message = str(exc.value)
+        assert "HTTP 404" in message
+        assert replay_url in message
+        assert "localhost:4000" in message
+        assert "localhost:8010" in message
+        assert "PUBLIC_BASE_URL" in message
+        assert "VIDEO_REPLAY_URL_TEMPLATE" in message
+
+    @pytest.mark.asyncio
+    async def test_replay_error_global_fails_before_ready_timeout(self):
+        from core.video.render_pipeline import (
+            RenderError,
+            _wait_for_replay_ready_or_error,
+        )
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, int]] = []
+
+            async def wait_for_function(
+                self,
+                expression: str,
+                *,
+                timeout: int,
+            ) -> None:
+                self.calls.append((expression, timeout))
+
+            async def evaluate(self, expression: str) -> str:
+                assert "__replayError" in expression
+                return "Replay cue load failed: HTTP 500"
+
+        replay_url = "http://localhost:4000/simulations/sim-1/replay?renderMode=1"
+        page = FakePage()
+
+        with pytest.raises(RenderError) as exc:
+            await _wait_for_replay_ready_or_error(page, replay_url)
+
+        message = str(exc.value)
+        assert "__replayError" in message
+        assert "Replay cue load failed: HTTP 500" in message
+        assert replay_url in message
+        assert "__replayReady" in page.calls[0][0]
+        assert "__replayError" in page.calls[0][0]
 
 
 # ── Worker idempotency ───────────────────────────────────────
@@ -135,6 +296,7 @@ class TestEnqueueRender:
         repo.update_video_status.assert_awaited_once()
         kwargs = repo.update_video_status.await_args.kwargs
         assert kwargs["status"] == "skipped"
+        assert kwargs["failure_reason"] == "no transcripts"
 
 
 # ── Orchestrator finalize hook ───────────────────────────────
@@ -394,6 +556,169 @@ class TestBuildCuesFromRows:
         cues = build(rows)
         assert cues[0].agent_id == "vera"
 
+    def test_splits_intra_row_multi_speaker_turns(self):
+        """A single row with multiple [speaker]: markers becomes multiple cues."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["grok", "sentinel"],
+                "content": "[grok]: hi [sentinel]: yo [unknown]: ?",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows)
+        # Unknown speaker is skipped; grok + sentinel survive.
+        assert [c.agent_id for c in cues] == ["grok", "sentinel"]
+        assert cues[0].text == "hi"
+        assert cues[1].text == "yo"
+        # No cue text retains a [speaker] fragment.
+        for c in cues:
+            assert "[" not in c.text
+
+    def test_embedded_marker_stripped_from_each_cue(self):
+        """Multiple inline markers split cleanly with no leaked '[' fragments."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera", "rex"],
+                "content": "[vera]: hello [rex]: world",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows)
+        assert len(cues) == 2
+        assert [c.agent_id for c in cues] == ["vera", "rex"]
+        assert cues[0].text == "hello"
+        assert cues[1].text == "world"
+        for c in cues:
+            assert "[" not in c.text
+            assert "]" not in c.text
+
+    def test_skips_malformed_speaker_prefixes(self):
+        """Empty, whitespace-only, and unclosed brackets are not voiced."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": [],
+                "content": "[]: nothing here",
+                "created_at": base,
+            },
+            {
+                "participants": [],
+                "content": "[ ]: also nothing",
+                "created_at": base.replace(second=1),
+            },
+            {
+                "participants": [],
+                "content": "[grok unfinished bracket",
+                "created_at": base.replace(second=2),
+            },
+        ]
+        cues = build(rows)
+        assert cues == []
+
+    def test_intra_row_timestamp_ordering_preserved(self):
+        """Cues from one row share timestamp but are monotonically ordered."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera", "rex", "grok"],
+                "content": "[vera]: a [rex]: b [grok]: c",
+                "created_at": base,
+            },
+            {
+                "participants": ["sentinel"],
+                "content": "[sentinel]: d",
+                "created_at": base.replace(second=10),
+            },
+        ]
+        cues = build(rows)
+        # Three intra-row cues + one from the next row.
+        assert [c.agent_id for c in cues] == ["vera", "rex", "grok", "sentinel"]
+        # Strictly increasing within the first row.
+        assert cues[0].start_seconds < cues[1].start_seconds < cues[2].start_seconds
+        # Intra-row cues stay clustered before the next row at t=10.
+        assert cues[2].start_seconds < cues[3].start_seconds
+        assert cues[3].start_seconds == 10.0
+
+    def test_drops_narration_before_first_marker(self):
+        """Text preceding the first [speaker] marker is not attached to it."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera"],
+                "content": "the room is quiet. [vera]: morning",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows)
+        assert len(cues) == 1
+        assert cues[0].agent_id == "vera"
+        assert cues[0].text == "morning"
+
+    def test_known_agents_filter_applied(self):
+        """Speakers absent from known_agents are skipped."""
+        from datetime import UTC, datetime
+
+        build = self._import()
+        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        rows = [
+            {
+                "participants": ["vera", "ghost"],
+                "content": "[vera]: hi [ghost]: boo",
+                "created_at": base,
+            },
+        ]
+        cues = build(rows, known_agents={"vera"})
+        assert [c.agent_id for c in cues] == ["vera"]
+
+
+# ── Replay duration helper ────────────────────────────────────
+
+
+class TestReplayDuration:
+    def test_duration_is_last_cue_start_plus_read_time(self):
+        from core.video.audio_timeline import TurnAudioCue
+        from core.video.cue_parser import compute_replay_duration, estimate_read_seconds
+
+        cues = [
+            TurnAudioCue("vera", "hello", 0.0),
+            TurnAudioCue("rex", "this is a longer sentence to read out loud", 30.0),
+        ]
+        expected = 30.0 + estimate_read_seconds(cues[-1].text)
+        assert compute_replay_duration(cues) == expected
+        # Sanity: end-of-replay strictly exceeds last cue start.
+        assert compute_replay_duration(cues) > 30.0
+
+    def test_empty_cues_duration_zero(self):
+        from core.video.cue_parser import compute_replay_duration
+
+        assert compute_replay_duration([]) == 0.0
+
+    def test_read_time_has_floor(self):
+        from core.video.cue_parser import (
+            DEFAULT_READ_FLOOR_SECONDS,
+            estimate_read_seconds,
+        )
+
+        assert estimate_read_seconds("hi") == DEFAULT_READ_FLOOR_SECONDS
+        assert estimate_read_seconds("") == DEFAULT_READ_FLOOR_SECONDS
+
 
 # ── SimulationRepo claim semantics ───────────────────────────
 
@@ -413,6 +738,7 @@ class TestClaimForRender:
         # The UPDATE only fires when the row was unclaimed.
         sql = db.fetchrow.await_args.args[0]
         assert "video_render_status = 'rendering'" in sql
+        assert "video_render_failure_reason = NULL" in sql
         assert "IS NULL" in sql
 
     @pytest.mark.asyncio
@@ -473,6 +799,7 @@ class TestClaimForRender:
             "video_url": "/videos/abc.mp4",
             "video_render_status": "done",
             "video_rendered_at": datetime.now(UTC),
+            "video_render_failure_reason": None,
         }
         db = MagicMock()
         db.fetchrow = AsyncMock(return_value=sim_row)
@@ -487,18 +814,68 @@ class TestClaimForRender:
         assert sim is not None
         assert sim.video_url == "/videos/abc.mp4"
         assert sim.video_render_status == "done"
+        assert sim.video_render_failure_reason is None
         # The query stamps video_rendered_at only on 'done'
         sql = db.fetchrow.await_args.args[0]
         assert "video_rendered_at = CASE WHEN $1 = 'done'" in sql
+        assert "video_render_failure_reason = CASE" in sql
+
+    @pytest.mark.asyncio
+    async def test_update_video_status_failed_stores_failure_reason(self):
+        from core.repos.simulation_repo import SimulationRepo
+
+        sim_row = {
+            "id": uuid.uuid4(),
+            "name": "x",
+            "description": None,
+            "config": {},
+            "status": "completed",
+            "started_at": datetime.now(UTC),
+            "completed_at": datetime.now(UTC),
+            "simulated_duration": None,
+            "real_duration": None,
+            "total_conversations": 1,
+            "total_turns": 1,
+            "total_tokens": 0,
+            "total_cost": Decimal("0"),
+            "total_artifacts": 0,
+            "total_management_flags": 0,
+            "agents_participated": [],
+            "error_log": None,
+            "model_versions": {},
+            "is_live": False,
+            "created_at": datetime.now(UTC),
+            "hypothesis": None,
+            "outcomes": {},
+            "learnings": [],
+            "factions": [],
+            "submitted_by_user_id": None,
+            "video_url": None,
+            "video_render_status": "failed",
+            "video_rendered_at": None,
+            "video_render_failure_reason": "Playwright timed out",
+        }
+        db = MagicMock()
+        db.fetchrow = AsyncMock(return_value=sim_row)
+        repo = SimulationRepo(db)
+
+        sim = await repo.update_video_status(
+            uuid.uuid4(),
+            status="failed",
+            failure_reason="Playwright timed out",
+        )
+
+        assert sim is not None
+        assert sim.video_render_status == "failed"
+        assert sim.video_render_failure_reason == "Playwright timed out"
+        assert db.fetchrow.await_args.args[3] == "Playwright timed out"
 
 
 # ── Render-pipeline error surfacing ─────────────────────────
 
 
 class TestRenderPipelineErrors:
-    """Issue #462: a fresh checkout with playwright missing, or the package
-    installed but Chromium binaries un-fetched, used to crash with terse
-    errors that didn't tell the operator how to fix it."""
+    """Issue #462: missing render dependencies should explain the fix."""
 
     @pytest.mark.asyncio
     async def test_missing_playwright_module_points_at_render_extra(self, tmp_path):
@@ -519,8 +896,6 @@ class TestRenderPipelineErrors:
     async def test_missing_chromium_binary_points_at_install_command(self, tmp_path):
         from core.video.render_pipeline import RenderError, _capture_canvas
 
-        # Stub `async_playwright()` so the launch raises a Playwright-style
-        # "Executable doesn't exist" error. We don't need the real package.
         class _FakeChromium:
             async def launch(self, **_kw):
                 raise RuntimeError(
@@ -544,9 +919,6 @@ class TestRenderPipelineErrors:
 
         fake_module = MagicMock()
         fake_module.async_playwright = fake_async_playwright
-        # Stub both the parent ``playwright`` package and the submodule so the
-        # ``from playwright.async_api import async_playwright`` lazy import
-        # resolves even when the real package isn't installed in the venv.
         fake_parent = MagicMock()
         fake_parent.async_api = fake_module
         with patch.dict(
@@ -564,8 +936,6 @@ class TestRenderPipelineErrors:
 
     @pytest.mark.asyncio
     async def test_unrelated_launch_error_is_re_raised(self, tmp_path):
-        """Non-binary launch failures shouldn't be re-labelled as missing
-        binaries — that would mask real bugs (port conflicts, etc.)."""
         from core.video.render_pipeline import _capture_canvas
 
         class _FakeChromium:
@@ -601,9 +971,7 @@ class TestRenderPipelineErrors:
 
 
 class TestRenderScriptPreflight:
-    """The standalone subprocess (scripts/render_simulation_video.py) must
-    fail loudly with an actionable message *before* bootstrapping DB/Redis,
-    so the orchestrator log makes the misconfiguration obvious."""
+    """The standalone subprocess should fail before bootstrapping services."""
 
     def test_chromium_dir_check_finds_chromium_subdir(self, tmp_path, monkeypatch):
         from scripts.render_simulation_video import _chromium_browser_dir_exists
@@ -618,7 +986,9 @@ class TestRenderScriptPreflight:
         monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
         assert _chromium_browser_dir_exists() is False
 
-    def test_chromium_dir_check_returns_false_for_missing_path(self, tmp_path, monkeypatch):
+    def test_chromium_dir_check_returns_false_for_missing_path(
+        self, tmp_path, monkeypatch
+    ):
         from scripts.render_simulation_video import _chromium_browser_dir_exists
 
         monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "does-not-exist"))
@@ -638,15 +1008,12 @@ class TestRenderScriptPreflight:
         assert code == EXIT_PLAYWRIGHT_NOT_INSTALLED
         assert any(".[render]" in r.message for r in caplog.records)
 
-    def test_preflight_returns_3_when_chromium_missing(self, caplog, monkeypatch):
+    def test_preflight_returns_3_when_chromium_missing(self, caplog):
         from scripts.render_simulation_video import (
             EXIT_CHROMIUM_NOT_INSTALLED,
             _preflight_render_dependencies,
         )
 
-        # Pretend playwright is importable, but no chromium dir exists.
-        # Stub both the parent package and the submodule because
-        # ``import playwright.async_api`` resolves the parent first.
         fake_pw_async = MagicMock()
         fake_pw_parent = MagicMock()
         fake_pw_parent.async_api = fake_pw_async

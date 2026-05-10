@@ -7,9 +7,10 @@ import logging
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlencode, urlparse
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -33,6 +34,7 @@ MAGIC_LINK_TTL_MINUTES = 15
 
 class MagicLinkRequest(BaseModel):
     email: str
+    next: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -57,6 +59,21 @@ def _user_to_response(u: User) -> UserResponse:
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _safe_relative_redirect(raw_path: str | None) -> str | None:
+    if not raw_path:
+        return None
+    path = raw_path.strip()
+    if not path or not path.startswith("/") or path.startswith("//"):
+        return None
+    if "\\" in path or any(ord(ch) < 32 or ord(ch) == 127 for ch in path):
+        return None
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        return None
+    return parsed.geturl()
 
 
 @router.post("/magic-link")
@@ -84,8 +101,15 @@ async def request_magic_link(
     expires_at = datetime.now(UTC) + timedelta(minutes=MAGIC_LINK_TTL_MINUTES)
     await repo.create(token_hash, email, expires_at=expires_at)
 
-    base_url = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
-    link = f"{base_url}/api/auth/verify?token={raw_token}"
+    base_url = os.environ.get(
+        "PUBLIC_BASE_URL",
+        "http://localhost:4000",
+    ).rstrip("/")
+    link_params = {"token": raw_token}
+    next_path = _safe_relative_redirect(body.next)
+    if next_path:
+        link_params["next"] = next_path
+    link = f"{base_url}/api/auth/verify?{urlencode(link_params)}"
 
     subject = "Your sign-in link for Livestream to AGI"
     body_text = (
@@ -110,6 +134,7 @@ async def verify_magic_link(
     token: str,
     request: Request,
     response: Response,
+    next_path: str | None = Query(default=None, alias="next"),
 ) -> RedirectResponse:
     """Consume a magic-link token, set the session cookie, redirect."""
     if not token:
@@ -143,7 +168,10 @@ async def verify_magic_link(
         algorithm="HS256",
     )
 
-    redirect = RedirectResponse(url="/simulations", status_code=303)
+    redirect = RedirectResponse(
+        url=_safe_relative_redirect(next_path) or "/simulations",
+        status_code=303,
+    )
     redirect.set_cookie(
         key=USER_SESSION_COOKIE,
         value=jwt_token,

@@ -62,11 +62,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Run
-uvicorn core.main:app --reload --port 8000
+uvicorn core.main:app --reload --port 8010
 
-# Test
+# Test (after activating .venv). For automated runners that don't
+# activate the venv, use `make test-backend` — it pins `.venv/bin/pytest`
+# so it works under `/bin/sh` without `.venv/bin` on PATH.
 pytest tests/backend/ -v
 pytest tests/backend/ --cov=core --cov=tools
+make test-backend          # PATH-safe equivalent
 
 # Lint
 ruff check core/ tools/

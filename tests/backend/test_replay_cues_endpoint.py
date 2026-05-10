@@ -1,9 +1,10 @@
-"""Tests for the public ``/api/simulations/{sim_id}/replay-cues`` endpoint.
+"""Tests for ``GET /api/simulations/{sim_id}/replay-cues``.
 
-The endpoint feeds the headless replay page (``website/src/app/.../replay``)
-that the render pipeline captures into MP4. It must agree byte-for-byte
-with the render-script's audio cue parser, otherwise bubbles drift out of
-sync with the TTS audio.
+The endpoint must split intra-row multi-speaker turns into per-cue
+entries (so the replay page renders short bubbles instead of giant
+transcript dumps), strip any ``[speaker]`` prefix fragments from cue
+text, and return a ``duration_seconds`` that reflects the end of the
+replay (last cue start + estimated read-time of its text).
 """
 
 from __future__ import annotations
@@ -17,23 +18,37 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _sim_row(
+    *,
+    config: dict | None = None,
+    agents_participated: list[str] | None = None,
+) -> dict:
+    return {
+        "id": uuid.uuid4(),
+        "name": "replay-test",
+        "config": config or {},
+        "agents_participated": agents_participated or [],
+    }
+
+
 @pytest.fixture
-def mock_app():
+def replay_client():
+    """A TestClient with public-routes deps mocked, like ``test_public_api``."""
     mock_db = MagicMock()
     mock_db.connect = AsyncMock()
     mock_db.disconnect = AsyncMock()
     mock_db.fetch = AsyncMock(return_value=[])
     mock_db.fetchval = AsyncMock(return_value=0)
-    mock_db.fetchrow = AsyncMock(return_value=None)
+    mock_db.fetchrow = AsyncMock(return_value=_sim_row())
 
     mock_redis = MagicMock()
     mock_redis.connect = AsyncMock()
     mock_redis.disconnect = AsyncMock()
     mock_redis.ping = AsyncMock(return_value=True)
+    mock_redis.incr = AsyncMock(return_value=1)
+    mock_redis.expire = AsyncMock()
 
     mock_registry = MagicMock()
-    mock_registry.get_all_agents.return_value = []
-    mock_registry.get_agent.side_effect = lambda aid: None
 
     mock_services = MagicMock()
     mock_services.db = mock_db
@@ -59,9 +74,10 @@ def mock_app():
     mock_lifespan_services.event_bus = MagicMock()
 
     env_overrides = {
-        "OPENROUTER_API_KEY": "sk-test-fake-key",
-        "DATABASE_URL": "postgresql://agi:devpassword@localhost:5434/livestream_agi",
-        "ADMIN_PASSWORD": "test-admin",
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key",
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "")
+        or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
+        "ADMIN_PASSWORD": "test-admin-password",
     }
 
     with (
@@ -78,109 +94,153 @@ def mock_app():
     ):
         from core.main import app
 
-        with TestClient(app) as client:
-            yield client, mock_db
+        try:
+            with TestClient(app) as client:
+                yield client, mock_db
+        finally:
+            app.dependency_overrides.clear()
+
+
+def _row(content: str, second: int) -> dict:
+    return {
+        "participants": ["vera", "rex", "grok", "sentinel"],
+        "content": content,
+        "created_at": datetime(2026, 5, 8, 12, 0, second, tzinfo=UTC),
+    }
 
 
 class TestReplayCuesEndpoint:
-    def test_returns_ordered_cues_with_start_seconds(self, mock_app):
-        client, mock_db = mock_app
-        sim_id = uuid.uuid4()
-        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+    def test_multi_speaker_row_yields_one_cue_per_speaker(self, replay_client):
+        client, mock_db = replay_client
+        # One transcript row containing three bracketed speakers.
         mock_db.fetch = AsyncMock(
             return_value=[
-                {
-                    "participants": ["vera", "rex"],
-                    "content": "[vera]: morning team",
-                    "created_at": base,
-                },
-                {
-                    "participants": ["vera", "rex"],
-                    "content": "[rex]: hi vera",
-                    "created_at": base.replace(second=12),
-                },
-                {
-                    "participants": ["vera", "rex"],
-                    "content": "[vera]: let's go over the plan",
-                    "created_at": base.replace(second=20),
-                },
+                _row("[vera]: morning team [rex]: budget update [grok]: I object", 0),
             ]
         )
 
+        sim_id = uuid.uuid4()
         resp = client.get(f"/api/simulations/{sim_id}/replay-cues")
         assert resp.status_code == 200
         body = resp.json()
-        cues = body["cues"]
-        assert [c["agent_id"] for c in cues] == ["vera", "rex", "vera"]
-        assert [c["text"] for c in cues] == [
-            "morning team",
-            "hi vera",
-            "let's go over the plan",
-        ]
-        assert [c["start_seconds"] for c in cues] == [0.0, 12.0, 20.0]
-        assert body["duration_seconds"] == 20.0
 
-    def test_skips_rows_without_speaker_prefix(self, mock_app):
-        client, mock_db = mock_app
-        base = datetime(2026, 5, 8, 12, 0, 0, tzinfo=UTC)
+        assert body["sim_id"] == str(sim_id)
+        cues = body["cues"]
+        assert len(cues) == 3
+        assert [c["agent_id"] for c in cues] == ["vera", "rex", "grok"]
+        assert cues[0]["text"] == "morning team"
+        assert cues[1]["text"] == "budget update"
+        assert cues[2]["text"] == "I object"
+
+    def test_no_cue_text_contains_speaker_fragments(self, replay_client):
+        client, mock_db = replay_client
         mock_db.fetch = AsyncMock(
             return_value=[
-                {
-                    "participants": ["vera"],
-                    "content": "system: budget warning",
-                    "created_at": base,
-                },
-                {
-                    "participants": ["vera"],
-                    "content": "[vera]: noted",
-                    "created_at": base.replace(second=3),
-                },
+                _row("[vera]: hello [rex]: world", 0),
+                _row("[grok]: chaos [sentinel]: stop", 5),
             ]
         )
+
         resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
         assert resp.status_code == 200
         cues = resp.json()["cues"]
-        assert len(cues) == 1
-        assert cues[0]["agent_id"] == "vera"
+        for cue in cues:
+            assert "[" not in cue["text"]
+            assert "]" not in cue["text"]
 
-    def test_empty_simulation_returns_empty_cues(self, mock_app):
-        client, mock_db = mock_app
+    def test_unknown_speaker_skipped(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                _row("[vera]: hi [unknown]: ??? [rex]: ok", 0),
+            ]
+        )
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        cues = resp.json()["cues"]
+        assert [c["agent_id"] for c in cues] == ["vera", "rex"]
+
+    def test_duration_exceeds_last_cue_start(self, replay_client):
+        """duration_seconds must reflect the end of replay, not last start."""
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                _row("[vera]: opening line", 0),
+                _row("[rex]: a few sentences worth of closing remarks", 30),
+            ]
+        )
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        body = resp.json()
+        last_start = body["cues"][-1]["start_seconds"]
+        assert body["duration_seconds"] > last_start
+
+    def test_empty_transcripts_returns_empty_cues_zero_duration(self, replay_client):
+        client, mock_db = replay_client
         mock_db.fetch = AsyncMock(return_value=[])
+
         resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
         assert resp.status_code == 200
         body = resp.json()
         assert body["cues"] == []
         assert body["duration_seconds"] == 0.0
+        assert body["agent_roster"] == []
 
-    def test_speaker_normalized_to_lowercase(self, mock_app):
-        client, mock_db = mock_app
-        mock_db.fetch = AsyncMock(
-            return_value=[
-                {
-                    "participants": ["vera"],
-                    "content": "[VERA]: hello",
-                    "created_at": datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
-                }
-            ]
+    def test_agent_roster_prefers_effective_agents(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(
+            return_value=_sim_row(
+                config={
+                    "effective_agents": ["vera", "rex"],
+                    "scenario_agents": ["vera", "rex", "grok"],
+                    "excluded_agents": ["rex"],
+                },
+                agents_participated=["grok"],
+            )
         )
+
         resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
         assert resp.status_code == 200
-        cues = resp.json()["cues"]
-        assert cues[0]["agent_id"] == "vera"
+        assert resp.json()["agent_roster"] == ["vera", "rex"]
 
-    def test_payload_shape_matches_typescript_interface(self, mock_app):
-        """Cue objects expose only the three fields ReplayCue declares."""
-        client, mock_db = mock_app
-        mock_db.fetch = AsyncMock(
-            return_value=[
-                {
-                    "participants": ["vera"],
-                    "content": "[vera]: hi",
-                    "created_at": datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
-                }
-            ]
+    def test_agent_roster_uses_scenario_agents_minus_exclusions(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(
+            return_value=_sim_row(
+                config={
+                    "scenario_agents": ["vera", "rex", "grok", "rex"],
+                    "excluded_agents": ["grok"],
+                },
+                agents_participated=["pixel"],
+            )
         )
+
         resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
         assert resp.status_code == 200
-        cue = resp.json()["cues"][0]
-        assert set(cue.keys()) == {"agent_id", "text", "start_seconds"}
+        assert resp.json()["agent_roster"] == ["vera", "rex"]
+
+    def test_agent_roster_falls_back_to_agents_participated(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(return_value=[])
+        mock_db.fetchrow = AsyncMock(
+            return_value=_sim_row(agents_participated=["pixel", "aurora", "pixel"])
+        )
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        assert resp.status_code == 200
+        assert resp.json()["agent_roster"] == ["pixel", "aurora"]
+
+    def test_agent_roster_falls_back_to_unique_cue_agents(self, replay_client):
+        client, mock_db = replay_client
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                _row("[vera]: hello [rex]: hi [vera]: back again", 0),
+            ]
+        )
+        mock_db.fetchrow = AsyncMock(return_value=_sim_row())
+
+        resp = client.get(f"/api/simulations/{uuid.uuid4()}/replay-cues")
+        assert resp.status_code == 200
+        assert resp.json()["agent_roster"] == ["vera", "rex"]

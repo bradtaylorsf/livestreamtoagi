@@ -3,15 +3,20 @@ import Link from "next/link";
 interface AgentListProps {
   agents: string[];
   linkPrefix?: string;
+  title?: string;
 }
 
-export default function AgentList({ agents, linkPrefix }: AgentListProps) {
+export default function AgentList({
+  agents,
+  linkPrefix,
+  title = "Agents Participated",
+}: AgentListProps) {
   if (agents.length === 0) return null;
 
   return (
     <div>
       <h2 className="text-sm font-medium text-foreground/70 mb-2">
-        Agents Participated
+        {title}
       </h2>
       <div className="flex flex-wrap gap-2">
         {agents.map((agent) =>

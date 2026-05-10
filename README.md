@@ -162,7 +162,7 @@ cd frontend && npm install && cd ..
 cd website && npm install && cd ..
 
 # 6. Run backend
-uvicorn core.main:app --reload --port 8000
+uvicorn core.main:app --reload --port 8010
 
 # 7. Run frontend (separate terminal)
 cd frontend && npm run dev
