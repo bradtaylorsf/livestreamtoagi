@@ -14,6 +14,8 @@ import {
 
 const SKIP_BROWSER_IN_CODEX_SANDBOX = process.env.CODEX_SANDBOX === "seatbelt";
 const REPLAY_CUES_PATH = `/api/simulations/${SIM_ID}/replay-cues`;
+const SIMULATIONS_LIST_PATH = "/api/simulations";
+const ALLOWED_API_PATHS = new Set([REPLAY_CUES_PATH, SIMULATIONS_LIST_PATH]);
 
 interface ReplayCuesMock {
   status: number;
@@ -33,6 +35,16 @@ async function mockReplayCues(
   });
 }
 
+async function mockPageShellApis(page: Page): Promise<void> {
+  await page.route("**/api/simulations?*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [], total: 0, limit: 10, offset: 0 }),
+    });
+  });
+}
+
 function collectApiRequests(page: Page): string[] {
   const requests: string[] = [];
   page.on("request", (request) => {
@@ -42,6 +54,11 @@ function collectApiRequests(page: Page): string[] {
     }
   });
   return requests;
+}
+
+function expectOnlyMockedApiRequests(apiRequests: string[]): void {
+  expect(apiRequests).toContain(REPLAY_CUES_PATH);
+  expect(apiRequests.filter((path) => !ALLOWED_API_PATHS.has(path))).toEqual([]);
 }
 
 function collectReplayAssetResponses(page: Page): Map<string, number> {
@@ -113,6 +130,7 @@ test.describe("production replay route", () => {
   }) => {
     const apiRequests = collectApiRequests(page);
     const assetResponses = collectReplayAssetResponses(page);
+    await mockPageShellApis(page);
     await mockReplayCues(page);
 
     await gotoReplay(page, replayPath());
@@ -124,8 +142,7 @@ test.describe("production replay route", () => {
     const debug = await waitForReplayDebug(page);
     expectOfficeReplayDebug(debug);
     expectReplayAssetsLoaded(assetResponses);
-    expect(apiRequests.length).toBeGreaterThanOrEqual(1);
-    expect(apiRequests.every((path) => path === REPLAY_CUES_PATH)).toBe(true);
+    expectOnlyMockedApiRequests(apiRequests);
 
     await waitForReplayDone(page);
     await expectReplayGlobals(page, true);
@@ -134,6 +151,7 @@ test.describe("production replay route", () => {
   test("renderMode cue-load failures expose the render-pipeline error contract without mounting a stage", async ({
     page,
   }) => {
+    await mockPageShellApis(page);
     await mockReplayCues(page, {
       status: 400,
       body: { message: "cue load exploded" },
