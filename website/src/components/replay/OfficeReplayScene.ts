@@ -11,9 +11,7 @@
 import Phaser from "phaser";
 import {
   getDeskPosition,
-  getKnownAgents,
   getSpeakingPosition,
-  hasAgentLayout,
   clampBubblePosition,
 } from "./agentLayout";
 import { ReplaySpeechBubble } from "./ReplaySpeechBubble";
@@ -51,11 +49,45 @@ interface AgentVisual {
   bubble: ReplaySpeechBubble;
   desk: { x: number; y: number };
   facing: Direction;
+  textureKey: string | null;
+  usedFallbackRectangle: boolean;
+}
+
+export interface OfficeReplayDebugState {
+  tilemap: {
+    layerCount: number;
+    layerNames: string[];
+    renderedLayerCount: number;
+    renderedLayerNames: string[];
+    tilesetCount: number;
+    tilesetNames: string[];
+    fallbackFloorUsed: boolean;
+  };
+  agents: Array<{
+    id: string;
+    visible: boolean;
+    x: number;
+    y: number;
+    textureKey: string | null;
+    usedFallbackRectangle: boolean;
+  }>;
+  hadBubble: boolean;
+  latestBubble: {
+    agentId: string;
+    text: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    visible: boolean;
+    startMs: number;
+    endMs: number;
+  } | null;
 }
 
 export interface OfficeReplaySceneOptions {
   plan: ReplayPlan;
-  /** Agents that show up in the cue list, plus the always-on residents. */
+  /** Agents selected by the simulation roster or legacy replay fallback. */
   visibleAgents: string[];
   /** Sets ``window.__replayReady`` once textures + first frame are drawn. */
   onReady?: () => void;
@@ -70,6 +102,17 @@ export class OfficeReplayScene extends Phaser.Scene {
   private doneFired = false;
   /** Active bubble per agent (one bubble at a time per speaker). */
   private activeBubbleStart: Map<string, number> = new Map();
+  private tilemapDebug: OfficeReplayDebugState["tilemap"] = {
+    layerCount: 0,
+    layerNames: [],
+    renderedLayerCount: 0,
+    renderedLayerNames: [],
+    tilesetCount: 0,
+    tilesetNames: [],
+    fallbackFloorUsed: false,
+  };
+  private hadBubble = false;
+  private latestBubble: OfficeReplayDebugState["latestBubble"] = null;
 
   constructor(opts: OfficeReplaySceneOptions) {
     super({ key: "OfficeReplayScene" });
@@ -137,6 +180,7 @@ export class OfficeReplayScene extends Phaser.Scene {
     // Defer the ready signal until the first POST_UPDATE so tests + the
     // render pipeline can trust that the canvas has actually drawn.
     this.events.once(Phaser.Scenes.Events.POST_UPDATE, () => {
+      this.publishDebugState();
       this.opts.onReady?.();
     });
   }
@@ -162,6 +206,15 @@ export class OfficeReplayScene extends Phaser.Scene {
       const ts = map.addTilesetImage(tilesetName, imageKey);
       if (ts) tilesets.push(ts);
     }
+    this.tilemapDebug = {
+      layerCount: map.layers.length,
+      layerNames: map.layers.map((layer) => layer.name),
+      renderedLayerCount: 0,
+      renderedLayerNames: [],
+      tilesetCount: tilesets.length,
+      tilesetNames: tilesets.map((tileset) => tileset.name),
+      fallbackFloorUsed: tilesets.length === 0,
+    };
     if (tilesets.length === 0) {
       // No tilesets loaded — still draw a placeholder floor so the test can
       // see something other than solid black, but log loud.
@@ -173,11 +226,25 @@ export class OfficeReplayScene extends Phaser.Scene {
     }
     // Paint every tile layer from the Tiled JSON. The map's "Collision"
     // and object layers don't render visually so this is safe.
+    const renderedLayerNames: string[] = [];
     for (const layer of map.layers) {
       const created = map.createLayer(layer.name, tilesets, 0, 0);
       if (created) {
         created.setDepth(0);
+        renderedLayerNames.push(layer.name);
       }
+    }
+    this.tilemapDebug = {
+      ...this.tilemapDebug,
+      renderedLayerCount: renderedLayerNames.length,
+      renderedLayerNames,
+      fallbackFloorUsed: renderedLayerNames.length === 0,
+    };
+    if (renderedLayerNames.length === 0) {
+      console.error("[replay] tilemap loaded but no visible layers were created");
+      const g = this.add.graphics();
+      g.fillStyle(0x2c3e50, 1);
+      g.fillRect(0, 0, STAGE_W, 704);
     }
   }
 
@@ -232,6 +299,7 @@ export class OfficeReplayScene extends Phaser.Scene {
           ? fallbackTexture
           : null;
       let sprite: Phaser.GameObjects.Sprite;
+      let usedFallbackRectangle = false;
       if (textureKey) {
         sprite = this.add.sprite(desk.x, desk.y, textureKey);
       } else {
@@ -239,6 +307,7 @@ export class OfficeReplayScene extends Phaser.Scene {
         // still has a visible avatar even if the asset sync misfired.
         const rect = this.add.rectangle(desk.x, desk.y, 32, 48, 0x60a5fa);
         sprite = rect as unknown as Phaser.GameObjects.Sprite;
+        usedFallbackRectangle = true;
       }
       sprite.setDepth(10);
       sprite.setOrigin(0.5, 0.5);
@@ -266,6 +335,8 @@ export class OfficeReplayScene extends Phaser.Scene {
         bubble,
         desk: { x: desk.x, y: desk.y },
         facing: desk.facing,
+        textureKey,
+        usedFallbackRectangle,
       });
     }
   }
@@ -336,9 +407,24 @@ export class OfficeReplayScene extends Phaser.Scene {
         );
         visual.bubble.setBubblePosition(pos.x, pos.y);
         visual.bubble.setVisible(true);
+        this.hadBubble = true;
+        this.latestBubble = {
+          agentId,
+          text: active.text,
+          x: pos.x,
+          y: pos.y,
+          w: Math.max(w, 80),
+          h: Math.max(h, 40),
+          visible: true,
+          startMs: active.start_ms,
+          endMs: active.end_ms,
+        };
       } else if (visual.bubble.isVisible()) {
         visual.bubble.setVisible(false);
         this.activeBubbleStart.delete(agentId);
+        if (this.latestBubble?.agentId === agentId) {
+          this.latestBubble = { ...this.latestBubble, visible: false };
+        }
         // Walk back to desk if we drifted away.
         if (visual.sprite.x !== visual.desk.x || visual.sprite.y !== visual.desk.y) {
           this.tweens.killTweensOf(visual.sprite);
@@ -358,6 +444,7 @@ export class OfficeReplayScene extends Phaser.Scene {
         }
       }
     }
+    this.publishDebugState();
   }
 
   private allBubblesHidden(): boolean {
@@ -366,27 +453,30 @@ export class OfficeReplayScene extends Phaser.Scene {
     }
     return true;
   }
-}
 
-/** Pick the agents to spawn in the scene given a cue list. */
-export function pickVisibleAgents(cueAgentIds: string[]): string[] {
-  const seen = new Set<string>();
-  const order: string[] = [];
-  // Always show the office residents that have desk positions, even when
-  // they don't speak — empty desks make the office feel like a liminal
-  // space. Order them deterministically so screenshots are stable.
-  for (const known of getKnownAgents()) {
-    if (known === "management") continue; // overlaps alpha; skip to avoid stacking
-    seen.add(known);
-    order.push(known);
+  private publishDebugState(): void {
+    if (typeof window === "undefined") return;
+
+    const agents = Array.from(this.agents.entries()).map(([id, visual]) => {
+      const sprite = visual.sprite as Phaser.GameObjects.Sprite & {
+        texture?: { key?: string };
+      };
+      return {
+        id,
+        visible: visual.sprite.visible,
+        x: Math.round(visual.sprite.x),
+        y: Math.round(visual.sprite.y),
+        textureKey: sprite.texture?.key ?? visual.textureKey,
+        usedFallbackRectangle: visual.usedFallbackRectangle,
+      };
+    });
+
+    const debugState: OfficeReplayDebugState = {
+      tilemap: this.tilemapDebug,
+      agents,
+      hadBubble: this.hadBubble,
+      latestBubble: this.latestBubble,
+    };
+    (window as unknown as Record<string, unknown>).__replayDebug = debugState;
   }
-  // Append any unknown speaker ids so they still render with a fallback
-  // position rather than silently disappearing.
-  for (const id of cueAgentIds) {
-    if (!seen.has(id) && !hasAgentLayout(id)) {
-      seen.add(id);
-      order.push(id);
-    }
-  }
-  return order;
 }

@@ -3,12 +3,14 @@
 import { useEffect, useRef } from "react";
 import type { ReplayCue } from "@/lib/api";
 import { planReplay } from "./playback";
+import { pickVisibleAgents } from "./agentLayout";
 
 const STAGE_W = 1280;
 const STAGE_H = 720;
 
 interface ReplayStageProps {
   cues: ReplayCue[];
+  agentRoster?: string[];
   renderMode: boolean;
 }
 
@@ -17,7 +19,11 @@ interface ReplayStageProps {
  * ``__replayReady`` / ``__replayDone`` flags the render pipeline
  * (``core/video/render_pipeline.py``) polls for via Playwright.
  */
-export default function ReplayStage({ cues, renderMode }: ReplayStageProps) {
+export default function ReplayStage({
+  cues,
+  agentRoster,
+  renderMode,
+}: ReplayStageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Game ref typed loosely because Phaser is dynamically imported.
   const gameRef = useRef<{ destroy: (removeCanvas: boolean) => void } | null>(
@@ -34,17 +40,19 @@ export default function ReplayStage({ cues, renderMode }: ReplayStageProps) {
       w.__replayReady = false;
       w.__replayDone = false;
       w.__replayHadBubble = false;
+      delete w.__replayDebug;
       w.__replayMountedAt = Date.now();
     }
 
     (async () => {
       const Phaser = (await import("phaser")).default;
-      const { OfficeReplayScene, pickVisibleAgents } = await import(
-        "./OfficeReplayScene"
-      );
+      const { OfficeReplayScene } = await import("./OfficeReplayScene");
       if (cancelled) return;
 
-      const visibleAgents = pickVisibleAgents(cues.map((c) => c.agent_id));
+      const visibleAgents = pickVisibleAgents(
+        cues.map((c) => c.agent_id),
+        agentRoster,
+      );
 
       const setReady = () => {
         if (typeof window !== "undefined") {
@@ -91,7 +99,7 @@ export default function ReplayStage({ cues, renderMode }: ReplayStageProps) {
         gameRef.current = null;
       }
     };
-  }, [cues]);
+  }, [agentRoster, cues]);
 
   const wrapStyle: React.CSSProperties = renderMode
     ? {

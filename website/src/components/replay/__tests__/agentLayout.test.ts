@@ -5,6 +5,7 @@ import {
   getKnownAgents,
   getSpeakingPosition,
   hasAgentLayout,
+  pickVisibleAgents,
   __LAYOUT_INTERNALS,
 } from "../agentLayout";
 
@@ -81,5 +82,25 @@ describe("agentLayout", () => {
     const pos = clampBubblePosition(640, 360, 200, 80);
     // 640 - 200/2 = 540
     expect(pos.x).toBe(540);
+  });
+
+  it("uses the simulation roster when provided", () => {
+    expect(pickVisibleAgents(["vera", "grok"], ["vera", "rex"])).toEqual([
+      "vera",
+      "rex",
+    ]);
+  });
+
+  it("keeps the full resident fallback when no simulation roster is provided", () => {
+    const visible = pickVisibleAgents(["vera"], []);
+    expect(visible).toContain("vera");
+    expect(visible).toContain("rex");
+    expect(visible).toContain("grok");
+    expect(visible).not.toContain("management");
+  });
+
+  it("appends unknown cue speakers without re-adding omitted residents", () => {
+    const visible = pickVisibleAgents(["grok", "guest-agent"], ["vera", "rex"]);
+    expect(visible).toEqual(["vera", "rex", "guest-agent"]);
   });
 });

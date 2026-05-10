@@ -198,6 +198,42 @@ class TestRenderPipelineReplayUrls:
         assert "PUBLIC_BASE_URL" in message
         assert "VIDEO_REPLAY_URL_TEMPLATE" in message
 
+    @pytest.mark.asyncio
+    async def test_replay_error_global_fails_before_ready_timeout(self):
+        from core.video.render_pipeline import (
+            RenderError,
+            _wait_for_replay_ready_or_error,
+        )
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, int]] = []
+
+            async def wait_for_function(
+                self,
+                expression: str,
+                *,
+                timeout: int,
+            ) -> None:
+                self.calls.append((expression, timeout))
+
+            async def evaluate(self, expression: str) -> str:
+                assert "__replayError" in expression
+                return "Replay cue load failed: HTTP 500"
+
+        replay_url = "http://localhost:4000/simulations/sim-1/replay?renderMode=1"
+        page = FakePage()
+
+        with pytest.raises(RenderError) as exc:
+            await _wait_for_replay_ready_or_error(page, replay_url)
+
+        message = str(exc.value)
+        assert "__replayError" in message
+        assert "Replay cue load failed: HTTP 500" in message
+        assert replay_url in message
+        assert "__replayReady" in page.calls[0][0]
+        assert "__replayError" in page.calls[0][0]
+
 
 # ── Worker idempotency ───────────────────────────────────────
 

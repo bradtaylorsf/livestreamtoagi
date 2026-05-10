@@ -23,7 +23,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from core.video.audio_timeline import TurnAudioCue, stitch_audio_timeline
 from core.video.config import VideoRenderConfig, load_video_render_config
@@ -76,6 +76,58 @@ def _raise_for_bad_replay_response(
         )
 
 
+async def _read_replay_error(page: Any) -> str | None:
+    raw = await page.evaluate("() => window.__replayError || null")
+    if raw is None:
+        return None
+    message = str(raw).strip()
+    return message or None
+
+
+async def _raise_for_page_replay_error(page: Any, replay_url: str) -> None:
+    message = await _read_replay_error(page)
+    if message:
+        raise _replay_page_error(
+            f"Replay page reported __replayError: {message}",
+            replay_url,
+        )
+
+
+async def _wait_for_replay_ready_or_error(page: Any, replay_url: str) -> None:
+    try:
+        await page.wait_for_function(
+            "() => window.__replayReady === true || Boolean(window.__replayError)",
+            timeout=30_000,
+        )
+    except Exception as exc:
+        await _raise_for_page_replay_error(page, replay_url)
+        raise _replay_page_error(
+            "Replay page did not signal __replayReady within 30s",
+            replay_url,
+        ) from exc
+
+    await _raise_for_page_replay_error(page, replay_url)
+
+
+async def _wait_for_replay_done_or_error(
+    page: Any,
+    replay_url: str,
+    max_seconds: int,
+) -> bool:
+    """Return True when capture should be marked truncated."""
+    try:
+        await page.wait_for_function(
+            "() => window.__replayDone === true || Boolean(window.__replayError)",
+            timeout=max_seconds * 1000,
+        )
+    except Exception:
+        await _raise_for_page_replay_error(page, replay_url)
+        return True
+
+    await _raise_for_page_replay_error(page, replay_url)
+    return False
+
+
 async def _capture_canvas(
     *,
     replay_url: str,
@@ -112,23 +164,9 @@ async def _capture_canvas(
 
             _raise_for_bad_replay_response(response, replay_url)
 
-            try:
-                await page.wait_for_function(
-                    "() => window.__replayReady === true",
-                    timeout=30_000,
-                )
-            except Exception as exc:
-                raise _replay_page_error(
-                    "Replay page did not signal __replayReady within 30s",
-                    replay_url,
-                ) from exc
+            await _wait_for_replay_ready_or_error(page, replay_url)
 
-            try:
-                await page.wait_for_function(
-                    "() => window.__replayDone === true",
-                    timeout=max_seconds * 1000,
-                )
-            except Exception:
+            if await _wait_for_replay_done_or_error(page, replay_url, max_seconds):
                 truncated = True
                 logger.warning("[video] replay capture truncated at %ds", max_seconds)
         finally:

@@ -948,6 +948,7 @@ export interface ReplayCue {
 
 export interface ReplayCuesResponse {
   sim_id: string;
+  agent_roster: string[];
   cues: ReplayCue[];
   duration_seconds: number;
 }

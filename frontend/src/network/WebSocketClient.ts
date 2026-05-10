@@ -2,10 +2,14 @@ import type { ServerEvent } from "../types/events";
 
 export type EventCallback = (event: ServerEvent) => void;
 
-const DEFAULT_URL = "ws://localhost:8000/ws";
+export const DEFAULT_WS_URL = "ws://localhost:8010/ws";
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30000;
 const BACKOFF_FACTOR = 2;
+
+export function resolveWebSocketUrl(url?: string): string {
+  return url ?? DEFAULT_WS_URL;
+}
 
 export class WebSocketClient {
   private ws: WebSocket | null = null;
@@ -22,7 +26,7 @@ export class WebSocketClient {
   /** Called when the WebSocket connection closes (before reconnect scheduling). */
   onDisconnect: (() => void) | null = null;
 
-  constructor(url: string = DEFAULT_URL) {
+  constructor(url: string = DEFAULT_WS_URL) {
     this.url = url;
   }
 

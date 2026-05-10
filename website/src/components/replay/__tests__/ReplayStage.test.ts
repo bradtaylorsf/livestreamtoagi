@@ -30,6 +30,10 @@ describe("ReplayStage wiring", () => {
     expect(STAGE_SOURCE).toMatch(/__replayDone/);
   });
 
+  it("clears stale replay debug state before mounting a new scene", () => {
+    expect(STAGE_SOURCE).toMatch(/delete w\.__replayDebug/);
+  });
+
   it("uses 1280x720 stage dimensions", () => {
     expect(STAGE_SOURCE).toMatch(/STAGE_W\s*=\s*1280/);
     expect(STAGE_SOURCE).toMatch(/STAGE_H\s*=\s*720/);
@@ -88,6 +92,25 @@ describe("OfficeReplayScene assets", () => {
     expect(SCENE_SOURCE).toMatch(/this\.tweens\.add/);
     expect(SCENE_SOURCE).toMatch(/getSpeakingPosition/);
   });
+
+  it("exposes tilemap and sprite evidence through the replay debug hook", () => {
+    expect(SCENE_SOURCE).toMatch(/OfficeReplayDebugState/);
+    expect(SCENE_SOURCE).toMatch(/__replayDebug/);
+    expect(SCENE_SOURCE).toMatch(/fallbackFloorUsed/);
+    expect(SCENE_SOURCE).toMatch(/renderedLayerCount/);
+    expect(SCENE_SOURCE).toMatch(/renderedLayerNames/);
+    expect(SCENE_SOURCE).toMatch(/tilesetCount/);
+    expect(SCENE_SOURCE).toMatch(/usedFallbackRectangle/);
+    expect(SCENE_SOURCE).toMatch(/textureKey/);
+  });
+
+  it("updates replay debug metadata when a speech bubble renders", () => {
+    expect(SCENE_SOURCE).toMatch(/latestBubble/);
+    expect(SCENE_SOURCE).toMatch(/hadBubble/);
+    expect(SCENE_SOURCE).toMatch(/agentId/);
+    expect(SCENE_SOURCE).toMatch(/startMs/);
+    expect(SCENE_SOURCE).toMatch(/endMs/);
+  });
 });
 
 describe("replay route wiring", () => {
@@ -99,6 +122,18 @@ describe("replay route wiring", () => {
   it("page reads renderMode=1 from search params", () => {
     expect(PAGE_SOURCE).toMatch(/renderMode/);
     expect(PAGE_SOURCE).toMatch(/getReplayCues/);
+  });
+
+  it("page passes the backend replay roster into ReplayStage", () => {
+    expect(PAGE_SOURCE).toMatch(/agent_roster/);
+    expect(PAGE_SOURCE).toMatch(/agentRoster/);
+    expect(STAGE_SOURCE).toMatch(/agentRoster/);
+  });
+
+  it("renderMode cue-load failures expose __replayError without empty-stage fallback", () => {
+    expect(PAGE_SOURCE).toMatch(/__replayError/);
+    expect(PAGE_SOURCE).toMatch(/data-testid="replay-error"/);
+    expect(PAGE_SOURCE).not.toMatch(/setCues\(\[\]\)/);
   });
 
   it("layout marks the page non-indexable", () => {
