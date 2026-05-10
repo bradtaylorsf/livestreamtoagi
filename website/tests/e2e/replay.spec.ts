@@ -12,6 +12,7 @@ import { expect, test, type Page } from "@playwright/test";
 const SIM_ID = "00000000-0000-4000-8000-000000000476";
 const FIXTURE_CUES = {
   sim_id: SIM_ID,
+  agent_roster: ["vera", "rex", "aurora"],
   duration_seconds: 6,
   cues: [
     { agent_id: "vera", text: "Welcome to the office.", start_seconds: 0.5 },
@@ -40,6 +41,31 @@ async function gotoReplay(page: Page) {
 }
 
 test.describe("replay scene", () => {
+  test("renderMode exposes cue-load failure and does not mount the stage", async ({ page }) => {
+    await page.route(`**/api/simulations/${SIM_ID}/replay-cues`, async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "cue load exploded" }),
+      });
+    });
+
+    await page.goto(`/simulations/${SIM_ID}/replay?renderMode=1`);
+    await page.waitForFunction(
+      () => Boolean((window as unknown as Record<string, unknown>).__replayError),
+      null,
+      { timeout: 10_000 },
+    );
+
+    const replayError = await page.evaluate(
+      () => (window as unknown as Record<string, unknown>).__replayError,
+    );
+    expect(String(replayError)).toContain("Replay cue load failed");
+    await expect(page.getByTestId("replay-error")).toBeVisible();
+    await expect(page.getByTestId("replay-stage")).toHaveCount(0);
+    await expect(page.locator("canvas")).toHaveCount(0);
+  });
+
   test("renders 1280x720 canvas with non-uniform pixels (not solid black)", async ({ page }) => {
     await mockCues(page);
     await gotoReplay(page);

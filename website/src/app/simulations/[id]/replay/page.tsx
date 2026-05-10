@@ -12,12 +12,29 @@ const ReplayStage = dynamic(
   { ssr: false, loading: () => null },
 );
 
+interface LoadedReplay {
+  cues: ReplayCue[];
+  agentRoster: string[];
+}
+
+function cueLoadErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "failed to load cues";
+}
+
+function exposeReplayError(message: string) {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as Record<string, unknown>;
+  w.__replayReady = false;
+  w.__replayDone = false;
+  w.__replayError = `Replay cue load failed: ${message}`;
+}
+
 export default function ReplayPage() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
   const renderMode = search?.get("renderMode") === "1";
 
-  const [cues, setCues] = useState<ReplayCue[] | null>(null);
+  const [replay, setReplay] = useState<LoadedReplay | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Mark <html> so globals.css can hide global chrome (skip link, nav,
@@ -36,44 +53,59 @@ export default function ReplayPage() {
   useEffect(() => {
     let cancelled = false;
     if (!params?.id) return;
+    setReplay(null);
+    setError(null);
+    if (typeof window !== "undefined") {
+      const w = window as unknown as Record<string, unknown>;
+      delete w.__replayError;
+    }
     getReplayCues(params.id)
       .then((res) => {
         if (cancelled) return;
-        setCues(res.cues);
+        setReplay({
+          cues: res.cues,
+          agentRoster: res.agent_roster ?? [],
+        });
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "failed to load cues");
-        // Empty cue list is still a valid render — the pipeline times out
-        // on __replayReady, not on having no bubbles.
-        setCues([]);
+        const message = cueLoadErrorMessage(err);
+        setError(message);
+        exposeReplayError(message);
       });
     return () => {
       cancelled = true;
     };
   }, [params?.id]);
 
-  if (cues === null) {
+  if (error) {
+    return (
+      <div
+        data-testid="replay-error"
+        style={{
+          minHeight: renderMode ? "100vh" : undefined,
+          padding: renderMode ? 24 : 12,
+          background: renderMode ? "#020617" : "#7f1d1d",
+          color: "#fee2e2",
+          fontSize: 14,
+        }}
+      >
+        Replay failed to load: {error}
+      </div>
+    );
+  }
+
+  if (replay === null) {
     return renderMode ? null : (
       <div style={{ padding: 24, color: "#94a3b8" }}>Loading replay…</div>
     );
   }
 
   return (
-    <>
-      {error && !renderMode && (
-        <div
-          style={{
-            padding: 12,
-            background: "#7f1d1d",
-            color: "#fee2e2",
-            fontSize: 14,
-          }}
-        >
-          Replay loaded with errors: {error}
-        </div>
-      )}
-      <ReplayStage cues={cues} renderMode={renderMode} />
-    </>
+    <ReplayStage
+      cues={replay.cues}
+      agentRoster={replay.agentRoster}
+      renderMode={renderMode}
+    />
   );
 }

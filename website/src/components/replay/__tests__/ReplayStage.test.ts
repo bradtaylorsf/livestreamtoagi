@@ -101,6 +101,18 @@ describe("replay route wiring", () => {
     expect(PAGE_SOURCE).toMatch(/getReplayCues/);
   });
 
+  it("page passes the backend replay roster into ReplayStage", () => {
+    expect(PAGE_SOURCE).toMatch(/agent_roster/);
+    expect(PAGE_SOURCE).toMatch(/agentRoster/);
+    expect(STAGE_SOURCE).toMatch(/agentRoster/);
+  });
+
+  it("renderMode cue-load failures expose __replayError without empty-stage fallback", () => {
+    expect(PAGE_SOURCE).toMatch(/__replayError/);
+    expect(PAGE_SOURCE).toMatch(/data-testid="replay-error"/);
+    expect(PAGE_SOURCE).not.toMatch(/setCues\(\[\]\)/);
+  });
+
   it("layout marks the page non-indexable", () => {
     expect(LAYOUT_SOURCE).toMatch(/robots/);
     expect(LAYOUT_SOURCE).toMatch(/index:\s*false/);

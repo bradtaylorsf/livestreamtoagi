@@ -11,9 +11,7 @@
 import Phaser from "phaser";
 import {
   getDeskPosition,
-  getKnownAgents,
   getSpeakingPosition,
-  hasAgentLayout,
   clampBubblePosition,
 } from "./agentLayout";
 import { ReplaySpeechBubble } from "./ReplaySpeechBubble";
@@ -55,7 +53,7 @@ interface AgentVisual {
 
 export interface OfficeReplaySceneOptions {
   plan: ReplayPlan;
-  /** Agents that show up in the cue list, plus the always-on residents. */
+  /** Agents selected by the simulation roster or legacy replay fallback. */
   visibleAgents: string[];
   /** Sets ``window.__replayReady`` once textures + first frame are drawn. */
   onReady?: () => void;
@@ -366,27 +364,4 @@ export class OfficeReplayScene extends Phaser.Scene {
     }
     return true;
   }
-}
-
-/** Pick the agents to spawn in the scene given a cue list. */
-export function pickVisibleAgents(cueAgentIds: string[]): string[] {
-  const seen = new Set<string>();
-  const order: string[] = [];
-  // Always show the office residents that have desk positions, even when
-  // they don't speak — empty desks make the office feel like a liminal
-  // space. Order them deterministically so screenshots are stable.
-  for (const known of getKnownAgents()) {
-    if (known === "management") continue; // overlaps alpha; skip to avoid stacking
-    seen.add(known);
-    order.push(known);
-  }
-  // Append any unknown speaker ids so they still render with a fallback
-  // position rather than silently disappearing.
-  for (const id of cueAgentIds) {
-    if (!seen.has(id) && !hasAgentLayout(id)) {
-      seen.add(id);
-      order.push(id);
-    }
-  }
-  return order;
 }
