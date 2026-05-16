@@ -1896,9 +1896,7 @@ async def get_simulation_detail(sim_id: str) -> dict[str, Any]:
         "factions": sim.factions,
         "video_url": sim.video_url,
         "video_render_status": sim.video_render_status,
-        "video_rendered_at": sim.video_rendered_at.isoformat()
-        if sim.video_rendered_at
-        else None,
+        "video_rendered_at": sim.video_rendered_at.isoformat() if sim.video_rendered_at else None,
         "video_render_failure_reason": sim.video_render_failure_reason,
         "video_render_cancellation_reason": _video_render_cancellation_reason(sim),
         "youtube_url": sim.youtube_url,
@@ -1940,9 +1938,7 @@ def _resolve_replay_agent_roster(
     scenario_agents = _unique_replay_agent_ids(config_dict.get("scenario_agents"))
     if scenario_agents:
         excluded = set(_unique_replay_agent_ids(config_dict.get("excluded_agents")))
-        scenario_roster = [
-            agent_id for agent_id in scenario_agents if agent_id not in excluded
-        ]
+        scenario_roster = [agent_id for agent_id in scenario_agents if agent_id not in excluded]
         if scenario_roster:
             return scenario_roster
 
@@ -2426,7 +2422,8 @@ def _speaking_agent_ids(agent_configs: list[Any]) -> list[str]:
     return [
         a.id
         for a in agent_configs
-        if a.id not in system_only and (getattr(a, "chattiness", 0) > 0 or getattr(a, "initiative", 0) > 0)
+        if a.id not in system_only
+        and (getattr(a, "chattiness", 0) > 0 or getattr(a, "initiative", 0) > 0)
     ]
 
 

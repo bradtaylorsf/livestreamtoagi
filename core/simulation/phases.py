@@ -561,9 +561,7 @@ class PhaseRunner:
             return
 
         trigger = dict(trigger)
-        trigger["starter_agent_id"] = self._starter_or_fallback(
-            trigger.get("starter_agent_id")
-        )
+        trigger["starter_agent_id"] = self._starter_or_fallback(trigger.get("starter_agent_id"))
         if trigger["starter_agent_id"] is None:
             logger.warning("No active starter agent configured; skipping conversation")
             return

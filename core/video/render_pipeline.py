@@ -157,8 +157,7 @@ async def _capture_canvas(
             msg = str(exc)
             if "Executable doesn't exist" in msg or "playwright install" in msg:
                 raise RenderError(
-                    "playwright Chromium binaries not installed — "
-                    "run `playwright install chromium`"
+                    "playwright Chromium binaries not installed — run `playwright install chromium`"
                 ) from exc
             raise
         context = None

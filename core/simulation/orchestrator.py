@@ -122,8 +122,7 @@ class SimulationConfig:
         self.seed_tasks: bool = False
         self.seed_goals: bool = False
         self.factions: list[FactionConfig] = [
-            f if isinstance(f, FactionConfig) else FactionConfig(**f)
-            for f in (factions or [])
+            f if isinstance(f, FactionConfig) else FactionConfig(**f) for f in (factions or [])
         ]
         self._factions_override = factions is not None
         # When provided, the orchestrator attaches to a pre-created
