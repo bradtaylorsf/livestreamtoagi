@@ -17,12 +17,15 @@ import {
   getConversationSelections,
   getLore,
   getPublicScenarios,
+  getReplayCues,
   getScenarios,
   getSimulationSnapshot,
   getStats,
   getWorldChunks,
+  requestMagicLink,
   runSimulationEval,
   shareSimulationAsChallenge,
+  submitPublicSimulation,
   upvoteChallenge,
 } from "../api";
 
@@ -64,7 +67,16 @@ describe("getAgents", () => {
 
 describe("getAgentJournal", () => {
   it("sends GET request to /api/agents/:id/journal", async () => {
-    const entries = [{ id: "1", content: "Day 1" }];
+    const entries = [
+      {
+        id: 1,
+        agent_id: "vera",
+        reflection_type: "daily",
+        content: "Day 1",
+        image_url: "https://example.com/journals/vera.png",
+        created_at: "2026-04-01T00:00:00Z",
+      },
+    ];
     mockFetch.mockReturnValue(jsonResponse(entries));
 
     const result = await getAgentJournal("vera");
@@ -74,6 +86,7 @@ describe("getAgentJournal", () => {
       expect.anything(),
     );
     expect(result).toEqual(entries);
+    expect(result[0].image_url).toBe("https://example.com/journals/vera.png");
   });
 });
 
@@ -361,6 +374,42 @@ describe("getPublicScenarios", () => {
   });
 });
 
+describe("requestMagicLink", () => {
+  it("sends a safe same-site return path with the magic-link request", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ status: "ok" }));
+
+    await requestMagicLink(
+      "alice@example.com",
+      "/simulations/new?scenario=lab_rivals.yaml",
+    );
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/auth/magic-link",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          email: "alice@example.com",
+          next: "/simulations/new?scenario=lab_rivals.yaml",
+        }),
+      }),
+    );
+  });
+
+  it("omits unsafe return paths from the magic-link request", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ status: "ok" }));
+
+    await requestMagicLink("alice@example.com", "https://evil.test/phish");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/auth/magic-link",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "alice@example.com" }),
+      }),
+    );
+  });
+});
+
 describe("createSimulation", () => {
   it("POSTs the seed_file + max_cost body to /api/admin/simulations", async () => {
     const response = {
@@ -440,6 +489,68 @@ describe("getSimulationSnapshot", () => {
       "/api/admin/simulations/sim-123/snapshots/snap%20with%20spaces.json",
       expect.anything(),
     );
+  });
+});
+
+describe("submitPublicSimulation", () => {
+  it("sends the selected scenario payload to /api/simulations/submit", async () => {
+    const response = {
+      simulation_id: "sim-123",
+      status_url: "/api/simulations/sim-123",
+      estimated_completion_time: "2026-05-10T00:00:00Z",
+    };
+    const body = {
+      scenario_id: "awakening.yaml",
+      name: "small cast",
+      params: {
+        agents: ["vera", "rex", "aurora", "pixel"],
+        excluded_agents: ["grok"],
+        factions: [
+          {
+            name: "artists",
+            members: ["aurora", "pixel"],
+            goal: "make the show vivid",
+          },
+        ],
+        memory_seed: { mode: "none" as const },
+        energy: { vera: 80, rex: 60, aurora: 90, pixel: 75 },
+        conversation_cadence: 1.25,
+        max_cost: 0.5,
+      },
+    };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await submitPublicSimulation(body);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/submit",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(result).toEqual(response);
+  });
+});
+
+describe("getReplayCues", () => {
+  it("returns replay cues with the simulation render roster", async () => {
+    const response = {
+      sim_id: "sim-123",
+      agent_roster: ["vera", "rex"],
+      cues: [{ agent_id: "vera", text: "hello", start_seconds: 0 }],
+      duration_seconds: 1.5,
+    };
+    mockFetch.mockReturnValue(jsonResponse(response));
+
+    const result = await getReplayCues("sim-123");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/sim-123/replay-cues",
+      expect.anything(),
+    );
+    expect(result).toEqual(response);
+    expect(result.agent_roster).toEqual(["vera", "rex"]);
   });
 });
 

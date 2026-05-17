@@ -530,6 +530,16 @@ export interface PublicSimulationDetail extends PublicSimulation {
   outcomes: Record<string, unknown> | null;
   learnings: LearningEntry[] | null;
   factions: unknown | null;
+  video_render_status:
+    | "pending"
+    | "rendering"
+    | "done"
+    | "failed"
+    | "skipped"
+    | null;
+  video_rendered_at: string | null;
+  video_render_failure_reason: string | null;
+  video_render_cancellation_reason: string | null;
 }
 
 export async function getSimulations(
@@ -679,10 +689,31 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   }
 }
 
-export async function requestMagicLink(email: string): Promise<void> {
+function safeRelativeReturnPath(returnTo?: string): string | undefined {
+  const trimmed = returnTo?.trim();
+  if (!trimmed) return undefined;
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return undefined;
+  if (trimmed.includes("\\") || /[\u0000-\u001F\u007F]/.test(trimmed)) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(trimmed, "http://livestreamtoagi.local");
+    if (url.origin !== "http://livestreamtoagi.local") return undefined;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function requestMagicLink(
+  email: string,
+  returnTo?: string,
+): Promise<void> {
+  const nextPath = safeRelativeReturnPath(returnTo);
   await request<{ status: string }>("/api/auth/magic-link", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(nextPath ? { email, next: nextPath } : { email }),
   });
 }
 
@@ -809,6 +840,7 @@ export async function getSimulationConversations(
 // Simulation costs
 export interface SimulationCostResponse {
   by_agent: { agent_id: string; total: string }[];
+  by_type: { type: string; cost: string; tokens: number }[];
   total: string;
   total_input_tokens: number;
   total_output_tokens: number;
@@ -903,6 +935,28 @@ export async function getArtifacts(params?: {
   return request<PaginatedResponse<AgentArtifactResponse>>(
     `/api/artifacts${qs ? `?${qs}` : ""}`,
   );
+}
+
+// Simulation replay cues — drives the headless Phaser replay capture and
+// the on-screen speech-bubble plan. Backend produces one cue per voiced
+// agent turn (see core/video/cue_parser.py).
+export interface ReplayCue {
+  agent_id: string;
+  text: string;
+  start_seconds: number;
+}
+
+export interface ReplayCuesResponse {
+  sim_id: string;
+  agent_roster: string[];
+  cues: ReplayCue[];
+  duration_seconds: number;
+}
+
+export async function getReplayCues(
+  simId: string,
+): Promise<ReplayCuesResponse> {
+  return request<ReplayCuesResponse>(`/api/simulations/${simId}/replay-cues`);
 }
 
 export { ApiRequestError };

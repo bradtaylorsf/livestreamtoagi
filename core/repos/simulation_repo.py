@@ -329,25 +329,35 @@ class SimulationRepo:
         *,
         status: str,
         url: str | None = None,
+        failure_reason: str | None = None,
     ) -> Simulation | None:
-        """Set video_render_status and (optionally) video_url + rendered_at.
+        """Set video_render_status and optional URL/failure detail.
 
-        ``video_rendered_at`` is stamped only when status == 'done'.
+        ``video_rendered_at`` is stamped only when status == 'done'. Terminal
+        failures/skips keep a reason; successful or retry states clear stale
+        failure detail.
         """
         if status not in {"pending", "rendering", "done", "failed", "skipped"}:
             raise ValueError(f"Invalid video_render_status: {status}")
         rendered_at_clause = (
             "video_rendered_at = CASE WHEN $1 = 'done' THEN now() ELSE video_rendered_at END"
         )
+        failure_reason_clause = (
+            "video_render_failure_reason = CASE "
+            "WHEN $1 IN ('failed', 'skipped') THEN COALESCE($3, video_render_failure_reason) "
+            "ELSE NULL END"
+        )
         row = await self.db.fetchrow(
             f"""UPDATE simulations
                SET video_render_status = $1,
                    video_url = COALESCE($2, video_url),
-                   {rendered_at_clause}
-               WHERE id = $3
+                   {rendered_at_clause},
+                   {failure_reason_clause}
+               WHERE id = $4
                RETURNING *""",  # noqa: S608
             status,
             url,
+            failure_reason,
             simulation_id,
         )
         if row is None:
@@ -366,7 +376,8 @@ class SimulationRepo:
         """
         row = await self.db.fetchrow(
             """UPDATE simulations
-               SET video_render_status = 'rendering'
+               SET video_render_status = 'rendering',
+                   video_render_failure_reason = NULL
                WHERE id = $1
                  AND (
                      video_render_status IS NULL

@@ -334,6 +334,7 @@ class TestAgentEndpoints:
             JournalEntry(
                 id=1, agent_id="vera", reflection_type="daily",
                 content="Today was productive.", token_count=10,
+                image_url="https://example.com/journals/vera.png",
             ),
         ]
 
@@ -348,6 +349,7 @@ class TestAgentEndpoints:
         data = resp.json()
         assert len(data["items"]) == 1
         assert data["items"][0]["content"] == "Today was productive."
+        assert data["items"][0]["image_url"] == "https://example.com/journals/vera.png"
 
 
 # ── Simulation Endpoint Tests ──────────────────────────────────
@@ -556,13 +558,22 @@ class TestSimulationEndpoints:
         with patch(
             "core.repos.cost_repo.CostRepo.get_costs_by_simulation",
             new_callable=AsyncMock,
-            return_value={"by_agent": [], "total": "0"},
+            return_value={
+                "by_agent": [],
+                "by_type": [{"type": "imagen_generation", "cost": "0.02", "tokens": 0}],
+                "total": "0.02",
+            },
         ):
             resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/costs")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == "0"
+        assert data["total"] == "0.02"
+        assert data["by_type"][0] == {
+            "type": "imagen_generation",
+            "cost": "0.02",
+            "tokens": 0,
+        }
 
 
 # ── Scenario / Simulation Launcher Tests ───────────────────────

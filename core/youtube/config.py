@@ -35,5 +35,8 @@ def load_youtube_config() -> YoutubePublishConfig:
         refresh_token=os.environ.get("YOUTUBE_REFRESH_TOKEN") or None,
         max_retries=int(os.environ.get("YOUTUBE_MAX_RETRIES", "3")),
         default_privacy=(os.environ.get("YOUTUBE_DEFAULT_PRIVACY", "unlisted").lower()),
-        public_base_url=os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),
+        public_base_url=os.environ.get(
+            "PUBLIC_BASE_URL",
+            "http://localhost:4000",
+        ).rstrip("/"),
     )

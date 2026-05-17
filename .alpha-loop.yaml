@@ -1,7 +1,7 @@
 # Alpha Loop configuration
 repo: bradtaylorsf/livestreamtoagi
 project: 5
-agent: claude
+agent: codex
 label: ready
 base_branch: main
 test_command: pnpm test

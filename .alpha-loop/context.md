@@ -1,24 +1,20 @@
 ## Architecture
-- FastAPI app in `core/main.py` (lifespan-bootstrapped via `core.bootstrap.bootstrap_services`); mounts `core/admin`, `core/auth`, `core/public_routes.py`, plus a `/ws` WebSocket. Frontend (Phaser, `frontend/`) connects to `ws://…/ws`; Next.js website (`website/src/app/*`) calls REST via `BACKEND_URL`.
-- DB: PostgreSQL 16 + pgvector on port 5434. Schema lives in `db/migrations/NNN_*.{up,down}.sql` (94 files through `015_phase_assertions`). Run via `pnpm db:migrate` (`python -m db up`); auto-applied at startup when `auto_migrate=True`. Repos in `core/repos/`.
-- Domain modules under `core/`: `conversation/`, `memory/`, `simulation/`, `world/`, `eval/`, `social/`, `youtube/`, `video/`, `events/`. Agent personalities in `agents/*.yaml`; tool implementations in `tools/`; sandboxed code execution in `sandbox/` (Docker + gVisor).
-- Redis 7 on 6381 (`core/redis_client.py`, keys in `core/redis_keys.py`) for shared state and kill switches. Langfuse on 3100 for LLM telemetry.
-- Dev orchestration via `pnpm dev` → concurrently runs docker, backend (uvicorn 8010), frontend (Vite), website (Next 4000).
+- Root `package.json` orchestrates Docker, FastAPI, Phaser, and Next: `pnpm dev` starts services, `core.main:app` on `8010`, Vite frontend on `5173`, and website on `4000`.
+- FastAPI entrypoint is `core/main.py`: lifespan calls `bootstrap_services()`, mounts `/ws`, `/api/health`, `/api/dev/*`, `/api/admin/*`, `/api/*` public routes, `/videos/*`, and `/audio/*`.
+- Database is PostgreSQL 16 + pgvector via `asyncpg` in `core/database.py`; schema lives in paired raw SQL migrations under `db/migrations/`, applied with `python -m db up` or `pnpm db:migrate`.
+- Key directories: `core/` backend subsystems and repos, `tools/` agent tools, `agents/` YAML identities, `frontend/` Phaser world renderer, `website/` Next app router site, `tests/` pytest/vitest/e2e coverage.
 
 ## Conventions
-- Python 3.12–3.13 only (3.14+ unsupported). Type hints + async/await everywhere; Pydantic for schemas; `ruff` (config in `ruff.toml`) lints/formats `core/ tools/`. mypy is intentionally lenient — see `pyproject.toml` `disable_error_code` list.
-- TypeScript strict mode, ESM, named exports. `const` by default.
-- Tests: pytest with `asyncio_mode = "auto"`; testpaths `tests/backend` and `tests/integration` (integration tests require Docker — mark with `@pytest.mark.integration`). Frontend/website use Vitest; website E2E uses Playwright.
-- New backend route → add a router module under `core/` and include it in `core/main.py` (alongside `admin_router`, `public_router`). New migration → next sequential number with both `.up.sql` and `.down.sql`.
-- Conventional commits (`feat:`, `fix:`, etc.); branch `feat/…` or `fix/…`; one feature per PR.
+- Python is async-first FastAPI/Pydantic v2 with typed repository classes in `core/repos/`; avoid direct DB access outside repos/managers unless matching existing patterns.
+- TypeScript is strict ESM: `frontend/` uses Vite + Phaser, `website/` uses Next app router with `@/*` alias and API helpers in `website/src/lib/api.ts`.
+- Tests run from root with `pnpm test`; focused commands are `.venv/bin/pytest`, `npm --prefix frontend test`, `npm --prefix website test`, and `npm --prefix website run test:e2e`.
+- New backend routes wire into `core/public_routes.py` for public API or a domain module in `core/admin/` plus `core/admin/__init__.py`; frontend realtime changes must match `core/event_bus.py` event types and `frontend/src/types/events.ts`.
 
 ## Critical Rules
-- Never edit `specs/` — read-only design reference. `research/PAPER-INDEX.md` is the entry point for prior art.
-- Migrations are append-only and paired: editing an applied `.up.sql` (or shipping without a `.down.sql`) breaks `db:rollback` and prod state.
-- Every agent output must pass through `core/management.py` content filter before `core/tts.py` — bypassing it skips the 3-second intervention window.
-- `core/bootstrap.py` wires the dependency graph (registry → memory → LLM client → TTS); adding a service means updating both `Services` and `shutdown_services`.
-- Don't commit `.env`. External comms (social/email) require human approval — see `core/social/` and `specs/HUMAN-CHECKLIST.md`.
-- Pre-flight: `docker compose up -d && bash scripts/check-services.sh` (5 checks must pass) before any integration work.
+- Do not casually alter the 9-agent canon in `agents/`, `specs/CHARACTER-SHEETS.md`, DB seed migrations, or UI constants; `management` and `alpha` have special nonstandard behavior.
+- Model names must stay synchronized across `core/llm_client.py` `MODEL_REGISTRY`, `agents/*/config.yaml`, and `db/migrations/002_seed_agents.up.sql`.
+- Port/env changes must be updated together in `.env.example`, `website/.env.example`, `package.json`, `docker-compose.yaml`, `frontend/vite.config.ts`, and `website/next.config.ts`.
+- Schema changes need numbered `.up.sql` and `.down.sql` migrations; preserve existing migrations and query through typed repos/managers rather than ad hoc SQL.
 
 ## Active State
 - Test status: (will be filled in by the loop)

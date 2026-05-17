@@ -145,6 +145,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # Fill in API keys
 
+# 3a. Optional: video render pipeline (Playwright + Chromium).
+#     Skip unless you're working on core/video/ or running scripts/render_simulation_video.py.
+#     The Makefile targets pin `.venv/bin/...` so a stale `python`/`playwright`
+#     shim earlier on PATH cannot intercept the calls.
+make render-install      # uv pip install -e ".[render]" + playwright install chromium
+make render-smoke        # quick import + --help check on the entrypoint
+make render-verify       # render a real sim end-to-end, ffprobe-confirm streams
+                         #   (auto-picks a completed sim with transcripts;
+                         #    pass SIM=<uuid> to target a specific simulation)
+
 # 4. Frontend setup
 cd frontend && npm install && cd ..
 
@@ -152,13 +162,45 @@ cd frontend && npm install && cd ..
 cd website && npm install && cd ..
 
 # 6. Run backend
-uvicorn core.main:app --reload --port 8000
+uvicorn core.main:app --reload --port 8010
 
 # 7. Run frontend (separate terminal)
 cd frontend && npm run dev
 
 # 8. Run website (separate terminal)
 cd website && npm run dev
+```
+
+### Capturing dev magic links
+
+The dev/test default is `EMAIL_PROVIDER=console`, which doesn't actually send
+email. To complete the magic-link sign-in flow locally, every "sent" message
+is also appended as a JSON line to the file at `EMAIL_CONSOLE_LOG`
+(default `/tmp/livestream-agi-emails.jsonl`):
+
+```bash
+# In one terminal, watch the file:
+tail -f /tmp/livestream-agi-emails.jsonl
+
+# In another, request a link:
+curl -X POST http://localhost:8000/api/auth/magic-link \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com"}'
+
+# The last line of the file contains {"links": ["http://.../api/auth/verify?token=..."]}
+# — open that URL in the browser to set the session cookie.
+```
+
+Set `EMAIL_CONSOLE_REDIS_STREAM=stream:email:console` to also XADD each
+record to Redis for future dev-tool UIs.
+
+If you don't have Postgres running and just want to verify the capture loop,
+boot the self-contained dev app instead of the full backend — it mounts only
+`/api/auth/*` + `/healthz` with stub services, so no database, Redis, or
+agent registry is required:
+
+```bash
+.venv/bin/uvicorn core.auth.dev_email_app:app --port 8765
 ```
 
 ## Testing

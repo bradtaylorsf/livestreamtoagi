@@ -6,6 +6,7 @@ import Link from "next/link";
 import PersonalityRadar from "@/components/PersonalityRadar";
 import RelationshipGraph from "@/components/RelationshipGraph";
 import EvolutionTimeline from "@/components/EvolutionTimeline";
+import JournalIllustration from "@/components/JournalIllustration";
 import type { AgentData } from "@/lib/agent-data";
 import {
   getAgentSystemPrompt,
@@ -1095,6 +1096,14 @@ function ArtifactCard({ artifact }: { artifact: AgentArtifactResponse }) {
 
 // -- Journal Tab -------------------------------------------------------------
 
+function formatJournalDate(createdAt: string | null): string {
+  return createdAt ? new Date(createdAt).toLocaleString() : "Undated";
+}
+
+function formatReflectionType(type: string): string {
+  return type === "6hour" ? "6-hour" : type;
+}
+
 function JournalTab({
   data,
   loading,
@@ -1136,12 +1145,16 @@ function JournalTab({
             >
               <div className="flex items-center gap-2 mb-2">
                 <span className="inline-block rounded border border-border bg-surface-light px-2 py-0.5 text-xs font-medium text-foreground/60">
-                  {entry.mood}
+                  {formatReflectionType(entry.reflection_type)}
                 </span>
                 <span className="text-xs text-foreground/30">
-                  {new Date(entry.timestamp).toLocaleString()}
+                  {formatJournalDate(entry.created_at)}
                 </span>
               </div>
+              <JournalIllustration
+                imageUrl={entry.image_url}
+                label={`${formatReflectionType(entry.reflection_type)} journal illustration`}
+              />
               <p className="text-sm text-foreground/70 whitespace-pre-wrap">
                 {entry.content}
               </p>

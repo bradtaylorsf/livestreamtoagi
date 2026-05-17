@@ -896,6 +896,7 @@ class Simulation(BaseModel):
     video_url: str | None = None
     video_render_status: str | None = None
     video_rendered_at: datetime | None = None
+    video_render_failure_reason: str | None = None
     is_featured: bool = False
     shared_as_challenge: bool = False
     publish_to_youtube: bool = False
@@ -1148,6 +1149,7 @@ class EvalExportResponse(BaseModel):
 
 class SimulationCostResponse(BaseModel):
     by_agent: list[dict[str, str]] = []
+    by_type: list[CostByType] = []
     total: str = "0"
     total_input_tokens: int = 0
     total_output_tokens: int = 0

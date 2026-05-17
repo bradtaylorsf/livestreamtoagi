@@ -94,6 +94,15 @@ class SimulationConfig:
         hypothesis: str | None = None,
         auto_draft_learnings: bool = False,
         memory_seed: MemorySeedConfig | None = None,
+        scenario_id: str | None = None,
+        scenario_meta: dict[str, Any] | None = None,
+        scenario_agents: list[str] | None = None,
+        excluded_agents: list[str] | None = None,
+        factions: list[dict[str, Any] | FactionConfig] | None = None,
+        initial_agent_energy: dict[str, float] | None = None,
+        conversation_cadence: float = 1.0,
+        submitted_params: dict[str, Any] | None = None,
+        source: str | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -112,7 +121,10 @@ class SimulationConfig:
         self.audience_config: dict[str, Any] | None = None
         self.seed_tasks: bool = False
         self.seed_goals: bool = False
-        self.factions: list[FactionConfig] = []
+        self.factions: list[FactionConfig] = [
+            f if isinstance(f, FactionConfig) else FactionConfig(**f) for f in (factions or [])
+        ]
+        self._factions_override = factions is not None
         # When provided, the orchestrator attaches to a pre-created
         # simulation row instead of inserting a new one. Used when the
         # admin dashboard pre-creates the row so it can immediately return
@@ -121,6 +133,14 @@ class SimulationConfig:
         self.hypothesis = hypothesis
         self.auto_draft_learnings = auto_draft_learnings
         self.memory_seed: MemorySeedConfig | None = memory_seed
+        self.scenario_id = scenario_id
+        self.scenario_meta = scenario_meta or None
+        self.scenario_agents = list(scenario_agents or [])
+        self.excluded_agents = list(excluded_agents or [])
+        self.initial_agent_energy = dict(initial_agent_energy or {})
+        self.conversation_cadence = max(0.1, float(conversation_cadence or 1.0))
+        self.submitted_params = dict(submitted_params or {})
+        self.source = source
 
     @property
     def mode(self) -> str:
@@ -149,8 +169,13 @@ class SimulationConfig:
         if raw_seed and self.memory_seed is None:
             self.memory_seed = MemorySeedConfig(**raw_seed)
 
-        # Parse factions if present
-        raw_factions = data.get("factions") or []
+        # Parse factions if present. Public submissions pass an explicit
+        # normalized list, which intentionally overrides the scenario YAML.
+        raw_factions = (
+            [f.model_dump() for f in self.factions]
+            if self._factions_override
+            else data.get("factions") or []
+        )
         seen_names: set[str] = set()
         self.factions = []
         for entry in raw_factions:
@@ -206,8 +231,28 @@ class SimulationConfig:
         if self.phases:
             d["phase_count"] = len(self.phases)
             d["phase_names"] = [p.name for p in self.phases]
-        if self.factions:
+        if self.factions or self._factions_override or self.source == "public_submit":
             d["factions"] = [f.model_dump() for f in self.factions]
+        if self.scenario_id:
+            d["scenario_id"] = self.scenario_id
+        if self.scenario_meta:
+            d["scenario_meta"] = self.scenario_meta
+        if self.scenario_agents:
+            d["scenario_agents"] = self.scenario_agents
+        if self.excluded_agents or self.source == "public_submit":
+            d["excluded_agents"] = self.excluded_agents
+        if self.agents:
+            d["effective_agents"] = self.agents
+        if self.initial_agent_energy:
+            d["energy"] = self.initial_agent_energy
+        if self.conversation_cadence != 1.0 or self.source == "public_submit":
+            d["conversation_cadence"] = self.conversation_cadence
+        if self.submitted_params:
+            d["params"] = self.submitted_params
+        if self.source:
+            d["source"] = self.source
+        if self.memory_seed is not None:
+            d["memory_seed"] = self.memory_seed.model_dump(exclude_none=True)
         return d
 
 
@@ -409,6 +454,7 @@ class SimulationOrchestrator:
             mean = 90
         jitter = 0.3
         gap = random.uniform(mean * (1 - jitter), mean * (1 + jitter))
+        gap = gap / self._config.conversation_cadence
         return timedelta(seconds=gap)
 
     def _build_model_versions(self) -> dict[str, dict[str, str]]:
@@ -491,6 +537,27 @@ class SimulationOrchestrator:
         )
         for w in seed_result.warnings:
             logger.warning("memory_seed: %s", w)
+
+    async def _apply_initial_agent_energy(self) -> None:
+        """Apply public-submission initial energy to active agent states."""
+        if (
+            not self._config.initial_agent_energy
+            or self._config.dry_run
+            or self._services is None
+            or self._services.agent_state_manager is None
+        ):
+            return
+
+        manager = self._services.agent_state_manager
+        active = set(self._config.agents)
+        for agent_id, raw_value in self._config.initial_agent_energy.items():
+            if agent_id not in active:
+                continue
+            value = float(raw_value)
+            normalized = value / 100.0 if value > 1.0 else value
+            state = await manager.get_state(agent_id)
+            state.energy = max(0.0, min(1.0, normalized))
+            await manager.save_state(state)
 
     async def _create_or_attach_simulation(
         self,
@@ -599,6 +666,7 @@ class SimulationOrchestrator:
 
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
+        await self._apply_initial_agent_energy()
 
         # Initialize economy accounts for this simulation scope
         # (bootstrap creates live-scoped accounts; we need sim-scoped ones)
@@ -838,6 +906,7 @@ class SimulationOrchestrator:
 
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
+        await self._apply_initial_agent_energy()
 
         # Start world simulator if enabled
         world_sim = None
@@ -885,6 +954,11 @@ class SimulationOrchestrator:
                     self.clock.advance(gap)
                     self._triggers.notify_speech()  # Reset idle timer
                     continue
+
+                if not self._config.agents:
+                    raise RuntimeError("autonomous simulation has no active agents")
+                if trigger.get("starter_agent_id") not in self._config.agents:
+                    trigger["starter_agent_id"] = self._config.agents[0]
 
                 conversation_num += 1
                 trigger_type = trigger.get("type", "idle")

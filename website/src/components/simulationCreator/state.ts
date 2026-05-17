@@ -92,16 +92,25 @@ export function activeAgents(state: CreatorFormState): string[] {
 }
 
 export function buildSubmitPayload(state: CreatorFormState): PublicSubmitRequest {
+  const agents = activeAgents(state);
+  const active = new Set(agents);
+  const energy = Object.fromEntries(
+    agents.map((agent) => [agent, state.energy[agent] ?? DEFAULT_AGENT_ENERGY]),
+  );
+  const factions = state.factions
+    .map((faction) => ({
+      ...faction,
+      members: faction.members.filter((member) => active.has(member)),
+    }))
+    .filter((faction) => faction.members.length > 0);
   const params: PublicSubmitParams = {
+    agents,
+    excluded_agents: state.excluded_agents,
     max_cost: state.max_cost,
     conversation_cadence: state.conversation_cadence,
   };
-  if (state.excluded_agents.length > 0) {
-    params.excluded_agents = state.excluded_agents;
-    params.agents = activeAgents(state);
-  }
-  if (state.factions.length > 0) {
-    params.factions = state.factions;
+  if (factions.length > 0) {
+    params.factions = factions;
   }
   if (state.memory_seed.mode === "inherit") {
     params.memory_seed = state.memory_seed;
@@ -116,8 +125,8 @@ export function buildSubmitPayload(state: CreatorFormState): PublicSubmitRequest
   } else {
     params.memory_seed = { mode: "none" };
   }
-  if (state.scenario_agents.length > 0) {
-    params.energy = { ...state.energy };
+  if (agents.length > 0) {
+    params.energy = energy;
   }
   return {
     scenario_id: state.scenario_id,

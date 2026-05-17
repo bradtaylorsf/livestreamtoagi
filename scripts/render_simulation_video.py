@@ -6,8 +6,13 @@ the orchestrator finalize path stays fast. Loads the simulation's transcript,
 drives the headless replay capture, stitches TTS audio, and writes the final
 file to local disk or S3 via the storage backend.
 
-Usage:
-    python scripts/render_simulation_video.py --sim-id <uuid>
+Usage (canonical — bypasses stale ``python`` shims, sources ``.env``):
+    make render-verify SIM=<uuid>            # or, with auto-pick:
+    make render-verify
+    bash scripts/verify-render.sh <uuid>
+
+Usage (low-level, requires DATABASE_URL exported and ``.venv/bin/python`` on PATH):
+    .venv/bin/python scripts/render_simulation_video.py --sim-id <uuid>
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import re
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -27,38 +32,72 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+from core.video.cue_parser import build_cues_from_rows  # noqa: E402
 
-# Speaker is encoded as a "[name]: ..." prefix on the transcript content;
-# transcripts.participants is the unordered set of attendees, not the speaker.
-_SPEAKER_RE = re.compile(r"^\[([^\]]+)\]:\s*")
+# Exit codes used by the preflight checks. They are distinct from the
+# generic-failure code 1 so the orchestrator log makes the misconfiguration
+# obvious without having to grep stack traces.
+EXIT_PLAYWRIGHT_NOT_INSTALLED = 2
+EXIT_CHROMIUM_NOT_INSTALLED = 3
 
 
-def _build_cues_from_rows(rows: list) -> list:
-    """Convert transcript rows into TurnAudioCues. Pure (no DB), testable."""
-    from core.video.audio_timeline import TurnAudioCue
+def _chromium_browser_dir_exists() -> bool:
+    """Best-effort check that ``playwright install chromium`` has been run."""
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if override == "0":
+        try:
+            import playwright  # type: ignore[import-not-found]
+        except ImportError:
+            return False
+        candidates = [
+            Path(playwright.__file__).parent / "driver" / "package" / ".local-browsers"
+        ]
+    elif override:
+        candidates = [Path(override)]
+    else:
+        home = Path.home()
+        candidates = [
+            home / "Library" / "Caches" / "ms-playwright",
+            home / ".cache" / "ms-playwright",
+            home / "AppData" / "Local" / "ms-playwright",
+        ]
 
-    if not rows:
-        return []
-    base = rows[0]["created_at"]
-    cues: list[TurnAudioCue] = []
-    for r in rows:
-        content = r.get("content") or ""
-        match = _SPEAKER_RE.match(content)
-        if not match:
+    for directory in candidates:
+        if not directory.exists():
             continue
-        agent_id = match.group(1).strip().lower()
-        text = _SPEAKER_RE.sub("", content, count=1).strip()
-        if not text:
+        try:
+            if any(path.name.startswith("chromium-") for path in directory.iterdir()):
+                return True
+        except OSError:
             continue
-        delta = (r["created_at"] - base).total_seconds()
-        cues.append(
-            TurnAudioCue(
-                agent_id=agent_id,
-                text=text,
-                start_seconds=max(0.0, delta),
-            )
+    return False
+
+
+def _preflight_render_dependencies(log: logging.Logger) -> int | None:
+    """Surface clear, actionable errors before the heavy bootstrap path runs."""
+    try:
+        import playwright.async_api  # noqa: F401
+    except ImportError:
+        log.error(
+            'playwright is not installed — run `uv pip install -e ".[render]"` '
+            "(or `pip install playwright>=1.47.0`) and then `playwright install chromium`"
         )
-    return cues
+        return EXIT_PLAYWRIGHT_NOT_INSTALLED
+
+    if not _chromium_browser_dir_exists():
+        log.error(
+            "playwright Chromium binaries not found — run `playwright install chromium`. "
+            "Set PLAYWRIGHT_BROWSERS_PATH if you keep browsers in a non-default location."
+        )
+        return EXIT_CHROMIUM_NOT_INSTALLED
+
+    return None
+
+
+# Re-export under the historical underscore name so existing tests keep
+# importing from this script. The audio stitcher and the replay-cues
+# endpoint both call ``core.video.cue_parser.build_cues_from_rows``.
+_build_cues_from_rows = build_cues_from_rows
 
 
 async def _build_cues(db, sim_id: uuid.UUID) -> list:
@@ -74,7 +113,7 @@ async def _build_cues(db, sim_id: uuid.UUID) -> list:
             ORDER BY t.created_at""",
         sim_id,
     )
-    return _build_cues_from_rows(list(rows))
+    return build_cues_from_rows(list(rows))
 
 
 async def _main(sim_id: uuid.UUID) -> int:
@@ -84,6 +123,10 @@ async def _main(sim_id: uuid.UUID) -> int:
         datefmt="%H:%M:%S",
     )
     log = logging.getLogger("render_simulation_video")
+
+    preflight = _preflight_render_dependencies(log)
+    if preflight is not None:
+        return preflight
 
     from core.bootstrap import bootstrap_services
     from core.repos.simulation_repo import SimulationRepo
@@ -103,7 +146,11 @@ async def _main(sim_id: uuid.UUID) -> int:
     cues = await _build_cues(services.db, sim_id)
     if not cues:
         log.warning("Simulation %s has no transcripts; marking skipped", sim_id)
-        await repo.update_video_status(sim_id, status="skipped")
+        await repo.update_video_status(
+            sim_id,
+            status="skipped",
+            failure_reason="No transcript cues were available to render.",
+        )
         return 0
 
     tts = TTSPipeline(agent_registry=services.agent_registry)
@@ -111,20 +158,32 @@ async def _main(sim_id: uuid.UUID) -> int:
 
     try:
         result = await render_simulation_video(sim_id, cues=cues, tts=tts, config=config)
-    except RenderError:
+    except RenderError as exc:
         log.exception("Render failed for %s", sim_id)
-        await repo.update_video_status(sim_id, status="failed")
+        await repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason=str(exc) or "Video render failed.",
+        )
         return 1
-    except Exception:
+    except Exception as exc:
         log.exception("Unexpected render error for %s", sim_id)
-        await repo.update_video_status(sim_id, status="failed")
+        await repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason=f"Unexpected video render error: {exc}",
+        )
         return 1
 
     try:
         url = save_video(sim_id, result.output_path, config=config)
-    except Exception:
+    except Exception as exc:
         log.exception("Storage upload failed for %s", sim_id)
-        await repo.update_video_status(sim_id, status="failed")
+        await repo.update_video_status(
+            sim_id,
+            status="failed",
+            failure_reason=f"Video storage failed: {exc}",
+        )
         return 1
 
     await repo.update_video_status(sim_id, status="done", url=url)

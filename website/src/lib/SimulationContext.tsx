@@ -8,7 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   getCurrentSimulationId,
   setCurrentSimulationId,
@@ -28,6 +28,26 @@ export interface SimulationContextValue {
 
 const SimulationContext = createContext<SimulationContextValue | null>(null);
 
+// Sub-paths under /simulations that are list/index pages, not simulation ids.
+const SIMULATION_LIST_SENTINELS = new Set(["live", "new", "scenarios"]);
+
+/**
+ * Extract a simulation id from a pathname. Returns the segment after
+ * `/simulations/` when it looks like an id (non-empty, not a known list-page
+ * sentinel like `live`, `new`, `scenarios`); null otherwise.
+ *
+ * Synchronous: a route-aware caller can use this on the very first render to
+ * seed the active simulation id from the URL without waiting for hydration.
+ */
+export function parseSimIdFromPath(pathname: string | null): string | null {
+  if (!pathname) return null;
+  const match = pathname.match(/^\/simulations\/([^/]+)/);
+  if (!match) return null;
+  const id = match[1];
+  if (!id || SIMULATION_LIST_SENTINELS.has(id)) return null;
+  return id;
+}
+
 interface ProviderProps {
   /**
    * The route-scoped simulation id, e.g. from `/simulations/[id]/...`. When
@@ -41,9 +61,10 @@ interface ProviderProps {
 
 /**
  * SimulationProvider resolves the active simulation id with precedence:
- *   1. routeSimulationId prop (from the URL path segment)
- *   2. ?sim= URL search param
- *   3. session-store value (cross-page memory)
+ *   1. routeSimulationId prop (from the URL path segment, scoped layout)
+ *   2. pathname-derived sim id (root provider on /simulations/[id]/... pages)
+ *   3. ?sim= URL search param
+ *   4. session-store value (cross-page memory)
  *
  * setSimulationId() updates the session store unconditionally and writes
  * back to the `?sim=` query param when no route-level sim is in play.
@@ -53,6 +74,7 @@ export function SimulationProvider({
   children,
 }: ProviderProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const simParam = searchParams.get("sim");
   const [sessionSim] = useCurrentSimulationId();
@@ -64,12 +86,26 @@ export function SimulationProvider({
     setHydrated(true);
   }, []);
 
+  const pathSimId = parseSimIdFromPath(pathname);
+  const routeOwned = Boolean(routeSimulationId) || Boolean(pathSimId);
+
+  // Keep the cross-page session store in sync with the URL so non-scoped
+  // pages reflect the most recently visited simulation.
+  useEffect(() => {
+    if (pathSimId) {
+      setCurrentSimulationId(pathSimId);
+    }
+  }, [pathSimId]);
+
   const { simulationId, source } = useMemo<{
     simulationId: string | null;
     source: SimulationContextSource;
   }>(() => {
     if (routeSimulationId) {
       return { simulationId: routeSimulationId, source: "route" };
+    }
+    if (pathSimId) {
+      return { simulationId: pathSimId, source: "route" };
     }
     if (simParam) {
       return { simulationId: simParam, source: "url" };
@@ -78,7 +114,7 @@ export function SimulationProvider({
       return { simulationId: sessionSim, source: "session" };
     }
     return { simulationId: null, source: "none" };
-  }, [routeSimulationId, simParam, sessionSim, hydrated]);
+  }, [routeSimulationId, pathSimId, simParam, sessionSim, hydrated]);
 
   const setSimulationId = useCallback(
     (id: string | null) => {
@@ -87,7 +123,7 @@ export function SimulationProvider({
 
       // If we're on a route that has its own sim segment, the route owns the
       // value and we leave the URL alone.
-      if (routeSimulationId) return;
+      if (routeOwned) return;
 
       const sp = new URLSearchParams(searchParams.toString());
       if (id) sp.set("sim", id);
@@ -95,7 +131,7 @@ export function SimulationProvider({
       const qs = sp.toString();
       router.replace(qs ? `?${qs}` : "?", { scroll: false });
     },
-    [router, searchParams, routeSimulationId],
+    [router, searchParams, routeOwned],
   );
 
   const value: SimulationContextValue = useMemo(
@@ -103,9 +139,9 @@ export function SimulationProvider({
       simulationId,
       setSimulationId,
       source,
-      isRouteScoped: Boolean(routeSimulationId),
+      isRouteScoped: routeOwned,
     }),
-    [simulationId, setSimulationId, source, routeSimulationId],
+    [simulationId, setSimulationId, source, routeOwned],
   );
 
   return (
@@ -131,6 +167,7 @@ export function useSimulation(): SimulationContextValue {
 
 function useStandaloneSimulation(): SimulationContextValue {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const simParam = searchParams.get("sim");
   const [sessionSim] = useCurrentSimulationId();
@@ -140,30 +177,41 @@ function useStandaloneSimulation(): SimulationContextValue {
     setHydrated(true);
   }, []);
 
+  const pathSimId = parseSimIdFromPath(pathname);
+  const routeOwned = Boolean(pathSimId);
+
+  useEffect(() => {
+    if (pathSimId) {
+      setCurrentSimulationId(pathSimId);
+    }
+  }, [pathSimId]);
+
   const { simulationId, source } = useMemo<{
     simulationId: string | null;
     source: SimulationContextSource;
   }>(() => {
+    if (pathSimId) return { simulationId: pathSimId, source: "route" };
     if (simParam) return { simulationId: simParam, source: "url" };
     if (hydrated && sessionSim) {
       return { simulationId: sessionSim, source: "session" };
     }
     return { simulationId: null, source: "none" };
-  }, [simParam, sessionSim, hydrated]);
+  }, [pathSimId, simParam, sessionSim, hydrated]);
 
   const setSimulationId = useCallback(
     (id: string | null) => {
       setCurrentSimulationId(id);
+      if (routeOwned) return;
       const sp = new URLSearchParams(searchParams.toString());
       if (id) sp.set("sim", id);
       else sp.delete("sim");
       const qs = sp.toString();
       router.replace(qs ? `?${qs}` : "?", { scroll: false });
     },
-    [router, searchParams],
+    [router, searchParams, routeOwned],
   );
 
-  return { simulationId, setSimulationId, source, isRouteScoped: false };
+  return { simulationId, setSimulationId, source, isRouteScoped: routeOwned };
 }
 
 /**

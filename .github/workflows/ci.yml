@@ -79,6 +79,37 @@ jobs:
       - name: Build verification
         run: cd website && npm run build
 
+  render-test:
+    name: Render Pipeline Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-render-${{ hashFiles('pyproject.toml') }}
+          restore-keys: ${{ runner.os }}-uv-render-
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev,render]"
+      - name: Resolve playwright version
+        id: pw
+        run: echo "version=$(python -c 'import importlib.metadata; print(importlib.metadata.version(\"playwright\"))')" >> "$GITHUB_OUTPUT"
+      - name: Cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: Install chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Run render tests
+        run: pytest tests/backend/test_video_render.py -v
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest

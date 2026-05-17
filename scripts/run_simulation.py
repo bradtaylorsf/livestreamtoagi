@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import signal
 import sys
@@ -43,6 +44,53 @@ def _default_agents() -> str:
 
 
 DEFAULT_AGENTS = _default_agents()
+
+
+def _load_run_config_file(path: str | None) -> dict:
+    """Load a JSON run config produced by public simulation submission."""
+    if not path:
+        return {}
+    with open(path) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("--run-config-file must contain a JSON object")
+    return data
+
+
+def _agents_from_run_config(args: argparse.Namespace, run_config: dict) -> list[str]:
+    raw_agents = run_config.get("agents") or args.agents.split(",")
+    if isinstance(raw_agents, str):
+        raw_agents = raw_agents.split(",")
+    if not isinstance(raw_agents, list):
+        raise ValueError("run config agents must be a list or comma-separated string")
+    return [a.strip() for a in raw_agents if isinstance(a, str) and a.strip()]
+
+
+def _memory_seed_from_run_config(args: argparse.Namespace, run_config: dict):
+    """Build MemorySeedConfig from CLI flags first, then run config."""
+    from core.models import MemorySeedConfig
+
+    if args.memory_seed_mode:
+        return MemorySeedConfig(
+            mode=args.memory_seed_mode,
+            inherit_from=args.memory_seed_inherit_from,
+            custom_file=args.memory_seed_file,
+        )
+
+    raw = run_config.get("memory_seed")
+    if not isinstance(raw, dict) or not raw.get("mode"):
+        return None
+
+    if raw.get("mode") == "inherit" and not raw.get("inherit_from"):
+        raw = {**raw, "inherit_from": raw.get("simulation_id")}
+    if raw.get("mode") == "custom" and not raw.get("custom_file"):
+        raise ValueError("run config memory_seed mode='custom' requires custom_file")
+
+    return MemorySeedConfig(
+        mode=raw.get("mode"),
+        inherit_from=raw.get("inherit_from"),
+        custom_file=raw.get("custom_file"),
+    )
 
 
 async def run_simulation(args: argparse.Namespace) -> None:
@@ -80,22 +128,15 @@ async def run_simulation(args: argparse.Namespace) -> None:
     from tools.journal_image_tool import JournalImageGenerator
 
     # ── Parse simulation config ───────────────────────────
-    agents = [a.strip() for a in args.agents.split(",")]
+    run_config = _load_run_config_file(getattr(args, "run_config_file", None))
+    agents = _agents_from_run_config(args, run_config)
 
     duration = None
     if args.duration:
         duration = parse_duration(args.duration)
 
-    # Build memory_seed config from CLI flags (overrides any YAML block).
-    memory_seed_cfg = None
-    if args.memory_seed_mode:
-        from core.models import MemorySeedConfig
-
-        memory_seed_cfg = MemorySeedConfig(
-            mode=args.memory_seed_mode,
-            inherit_from=args.memory_seed_inherit_from,
-            custom_file=args.memory_seed_file,
-        )
+    # Build memory_seed config from CLI flags or public run config.
+    memory_seed_cfg = _memory_seed_from_run_config(args, run_config)
 
     sim_config = SimulationConfig(
         name=args.name,
@@ -113,6 +154,15 @@ async def run_simulation(args: argparse.Namespace) -> None:
         hypothesis=getattr(args, "hypothesis", None),
         auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
         memory_seed=memory_seed_cfg,
+        scenario_id=run_config.get("scenario_id"),
+        scenario_meta=run_config.get("scenario_meta"),
+        scenario_agents=run_config.get("scenario_agents"),
+        excluded_agents=run_config.get("excluded_agents"),
+        factions=run_config.get("factions"),
+        initial_agent_energy=run_config.get("energy"),
+        conversation_cadence=run_config.get("conversation_cadence", 1.0),
+        submitted_params=run_config.get("params"),
+        source=run_config.get("source"),
     )
     sim_config.world_sim = args.world_sim
     # Validate faction membership against the participating-agents set so
@@ -333,6 +383,15 @@ def main() -> None:
             "Attach to a pre-created simulation row (UUID) instead of "
             "inserting a new one. Used by the admin dashboard to redirect "
             "the user to /simulations/<id> immediately on launch."
+        ),
+    )
+    parser.add_argument(
+        "--run-config-file",
+        type=str,
+        default=None,
+        help=(
+            "Path to a JSON config file with public submission overrides "
+            "(agents, exclusions, factions, memory seed, energy, cadence)."
         ),
     )
     parser.add_argument(

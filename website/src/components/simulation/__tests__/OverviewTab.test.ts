@@ -52,6 +52,10 @@ function makeSim(
     agents_participated: ["vera", "rex"],
     is_featured: false,
     video_url: null,
+    video_render_status: null,
+    video_rendered_at: null,
+    video_render_failure_reason: null,
+    video_render_cancellation_reason: null,
     submitter_display_name: null,
     config: {},
     simulated_duration: null,
@@ -90,6 +94,17 @@ describe("OverviewTab", () => {
     expect(player?.props.src).toBe("https://example.com/run.mp4");
   });
 
+  it("passes render status detail to the embedded VideoPlayer", () => {
+    const sim = makeSim({
+      video_render_status: "failed",
+      video_render_failure_reason: "Playwright timed out",
+    });
+    const tree = OverviewTab({ sim, simulationId: sim.id });
+    const player = flatten(tree).find((el) => el.type === VideoPlayer);
+    expect(player?.props.renderStatus).toBe("failed");
+    expect(player?.props.failureReason).toBe("Playwright timed out");
+  });
+
   it("still renders VideoPlayer when video_url is null (component handles empty state)", () => {
     const sim = makeSim({ video_url: null });
     const tree = OverviewTab({ sim, simulationId: sim.id });
@@ -102,12 +117,65 @@ describe("OverviewTab", () => {
     const tree = VideoPlayer({ src: null });
     expect(findByTestId(tree as ReactElement, "video-player-empty")).not.toBeNull();
     expect(findByTestId(tree as ReactElement, "video-player")).toBeNull();
+    expect(findByTestId(tree as ReactElement, "video-player-empty")?.props[
+      "data-state"
+    ]).toBe("none");
   });
 
   it("VideoPlayer renders the video element when src is provided", () => {
-    const tree = VideoPlayer({ src: "https://example.com/run.mp4" });
+    const tree = VideoPlayer({
+      src: "https://example.com/run.mp4",
+      renderStatus: "done",
+    });
     expect(findByTestId(tree as ReactElement, "video-player")).not.toBeNull();
     expect(findByTestId(tree as ReactElement, "video-player-empty")).toBeNull();
+  });
+
+  it("VideoPlayer shows the rendering state", () => {
+    const tree = VideoPlayer({ src: null, renderStatus: "rendering" });
+    expect(findByTestId(tree as ReactElement, "video-player-empty")?.props[
+      "data-state"
+    ]).toBe("rendering");
+  });
+
+  it("VideoPlayer shows failure detail when render fails", () => {
+    const tree = VideoPlayer({
+      src: null,
+      renderStatus: "failed",
+      failureReason: "ffmpeg exited",
+    });
+    const empty = findByTestId(tree as ReactElement, "video-player-empty");
+    expect(empty?.props["data-state"]).toBe("failed");
+    expect(JSON.stringify(empty?.props.children)).toContain("ffmpeg exited");
+  });
+
+  it("VideoPlayer shows skipped renders separately from failures", () => {
+    const tree = VideoPlayer({
+      src: null,
+      renderStatus: "skipped",
+      failureReason: "No transcript cues were available to render.",
+    });
+    expect(findByTestId(tree as ReactElement, "video-player-empty")?.props[
+      "data-state"
+    ]).toBe("skipped");
+  });
+
+  it("VideoPlayer shows cancelled and cost-limited runs", () => {
+    const tree = VideoPlayer({
+      src: null,
+      simulationStatus: "cancelled",
+      cancellationReason: "Cost limit reached after $1.23.",
+    });
+    const empty = findByTestId(tree as ReactElement, "video-player-empty");
+    expect(empty?.props["data-state"]).toBe("cancelled");
+    expect(JSON.stringify(empty?.props.children)).toContain("Cost limit");
+  });
+
+  it("VideoPlayer distinguishes done-without-url from no render yet", () => {
+    const tree = VideoPlayer({ src: null, renderStatus: "done" });
+    expect(findByTestId(tree as ReactElement, "video-player-empty")?.props[
+      "data-state"
+    ]).toBe("done-missing");
   });
 
   it("links the AgentList into simulation-scoped agent routes", () => {
@@ -116,5 +184,17 @@ describe("OverviewTab", () => {
     const agentList = flatten(tree).find((el) => el.type === AgentList);
     expect(agentList).toBeTruthy();
     expect(agentList?.props.linkPrefix).toBe(`/simulations/${sim.id}/agents`);
+  });
+
+  it("passes the configured effective roster before participation data exists", () => {
+    const sim = makeSim({
+      agents_participated: [],
+      config: { effective_agents: ["vera", "rex", "aurora", "pixel"] },
+    });
+    const tree = OverviewTab({ sim, simulationId: sim.id });
+    const agentList = flatten(tree).find((el) => el.type === AgentList);
+
+    expect(agentList?.props.agents).toEqual(["vera", "rex", "aurora", "pixel"]);
+    expect(agentList?.props.title).toBe("Effective Agent Roster");
   });
 });

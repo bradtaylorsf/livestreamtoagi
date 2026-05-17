@@ -34,7 +34,12 @@ export function buildPickerLabel(
   active: PublicSimulation | null,
 ): string {
   if (!activeId) return AGGREGATE_LABEL;
-  if (active) return `${active.name} · ${active.status}`;
+  // Only render rich `name · status` when the loaded detail matches the
+  // active id — otherwise we'd flash the prior simulation's name during the
+  // moment between an id change and the metadata fetch resolving.
+  if (active && active.id === activeId) {
+    return `${active.name} · ${active.status}`;
+  }
   return activeId;
 }
 
@@ -82,6 +87,9 @@ export default function HeaderSimulationPicker() {
       setActiveDetail(inList);
       return;
     }
+    // Clear stale detail before awaiting the fetch so the trigger falls back
+    // to the bare id rather than rendering the prior sim's name · status.
+    setActiveDetail(null);
     let cancelled = false;
     getSimulation(simulationId)
       .then((sim) => {
