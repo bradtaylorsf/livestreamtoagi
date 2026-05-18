@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "payload": {
+    "results": [
+      {
+        "content": "Rex built a bridge",
+        "memory_id": "m-1",
+        "score": 0.91
+      }
+    ]
+  },
+  "request_id": "req-memory-recall-0001",
+  "retryable": false
+}
