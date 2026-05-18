@@ -1,0 +1,66 @@
+# minecraft.service — systemd unit for the 24/7 private Paper server.
+#
+# This is the committed supervisor unit referenced by
+# docs/minecraft/supervision.md (issue #529, epic E2-4). It keeps the private
+# Minecraft server running unattended: systemd restarts it on a crash and
+# retains its logs in the journal.
+#
+# It supervises scripts/minecraft/start-server.sh (issue #526, epic E2-1) on
+# the recommended 24/7 Linux host (Ubuntu Server 24.04 LTS — see
+# docs/minecraft/hosting.md, E2-3). start-server.sh `exec`s the JVM in the
+# foreground, so systemd tracks the Paper process directly: a crash is seen
+# immediately, and a clean `systemctl stop` delivers SIGTERM straight to
+# Paper so the world is saved before shutdown.
+#
+# Pins (Paper 1.21.6 / Java 21 / online-mode=false — E1-R1/E1-R2) live in
+# start-server.sh and the docs/decisions/000{1,2}-*.md decision docs. This
+# unit adds no pins of its own; it only restarts what E2-1 launches.
+#
+# Install (beginner steps are in docs/minecraft/supervision.md):
+#   1. Edit User= and the three EDIT paths below to match this host.
+#   2. sudo cp scripts/minecraft/minecraft.service \
+#        /etc/systemd/system/minecraft.service
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now minecraft
+#   5. journalctl -u minecraft -f          # follow the logs
+
+[Unit]
+Description=Livestream-to-AGI private Paper Minecraft server (E2-4 supervision)
+Documentation=https://github.com/bradtaylorsf/livestreamtoagi/blob/main/docs/minecraft/supervision.md
+After=network-online.target
+Wants=network-online.target
+# Crash-loop guard: if the server fails StartLimitBurst times within
+# StartLimitIntervalSec seconds, systemd stops retrying instead of spinning
+# forever on a broken config. Mirrors supervise.sh's CRASH_LOOP_* guard.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# EDIT: the unprivileged user that owns the repo checkout and world files.
+# Do NOT run the server as root.
+User=minecraft
+# EDIT: absolute path to the repo checkout on this host.
+WorkingDirectory=/opt/livestreamtoagi
+# EDIT: where the world + Paper jar live (passed through to start-server.sh).
+Environment=SERVER_DIR=/opt/livestreamtoagi/minecraft-server
+# Recommended 24/7 JVM heap (matches docs/minecraft/hosting.md / E1-R1).
+# Edit for the host's RAM.
+Environment=MEM=4G
+ExecStart=/opt/livestreamtoagi/scripts/minecraft/start-server.sh
+# Restart ONLY on failure/crash. A clean operator `systemctl stop` exits 0
+# and must NOT loop. RestartSec is the documented restart window: systemd
+# waits this long after a crash before relaunching.
+Restart=on-failure
+RestartSec=10
+# Give Paper time to flush and save the world on shutdown before SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=90
+# Retain logs in the systemd journal — inspect with `journalctl -u minecraft`.
+# Paper additionally writes its own rotated logs under SERVER_DIR/logs/.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minecraft
+
+[Install]
+WantedBy=multi-user.target

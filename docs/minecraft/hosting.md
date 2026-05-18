@@ -104,7 +104,9 @@ is a local machine you already keep running anyway.
   provisioning is explicitly **out of scope** and deferred to later ops work.
   The E2-1 start script still works by hand on whichever host you pick.
 - **Auto-restart / crash recovery** — that's
-  [E2-4](https://github.com/bradtaylorsf/livestreamtoagi/issues/529).
+  [E2-4](https://github.com/bradtaylorsf/livestreamtoagi/issues/529), now
+  documented in [supervision.md](./supervision.md) (the systemd unit you
+  install on the host chosen here).
 - **Backups & restore** (which is part of the disk budget above) — that's
   [E2-5](https://github.com/bradtaylorsf/livestreamtoagi/issues/530).
 - **Health checks / status endpoint** — that's
