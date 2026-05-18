@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "payload": {
+    "reason": "no policy violations",
+    "sanitized_text": null,
+    "verdict": "allow"
+  },
+  "request_id": "req-management-review-0001",
+  "retryable": false
+}

@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "payload": {
+    "allowed": true,
+    "reason": "ok"
+  },
+  "request_id": "req-cost-gate-0001",
+  "retryable": false
+}

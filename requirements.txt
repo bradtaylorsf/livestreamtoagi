@@ -47,6 +47,8 @@ pytest>=8.0.0
 pytest-asyncio>=0.24.0
 pytest-cov>=5.0.0
 ruff>=0.8.0
+# Node-side direction of the E4-2 bridge contract test (test-only, pure-Python)
+jsonschema>=4.0.0
 
 # Video render (optional) — also installable via `pip install -e ".[render]"`
 # After install, fetch browser binaries: `playwright install chromium`
