@@ -1,16 +1,16 @@
 # Session Summary: session/epic-505-epic-e3-mindcraft-fork-evaluation
 
 ## Overview
-A single-issue session (#535, E3-3) that verified per-agent multi-model OpenRouter/LM Studio routing in the mindcraft fork rather than speculatively patching it, confirming prior decision 0003's conclusion that native routing requires no fork changes. The issue succeeded on the first attempt with zero retries, and the review step caught a genuine acceptance-criterion gap before merge. Total duration was 21 minutes.
+Three E3 Mindcraft fork-evaluation issues (536, 537, 539) were completed successfully in 53 minutes with zero test-fix retries and a clean test suite throughout. The work consistently honored the epic's core constraint — minimal/reversible fork divergence — using config flags and contract guards rather than fork-core edits. All three substantive defects were caught in review rather than by tests, all of them "correct artifact, incomplete workflow/doc wiring" problems.
 
 ## Recurring Patterns
-- **"Verify, don't patch"**: When a prior decision (E1-R3/#520, decision 0003) already concludes native support exists, the issue's job is concrete two-instance proof (RoutingBotA/RoutingBotB) plus lock-step regression tests — not new fork code. This kept the change minimal and de-risked.
+- **Reuse existing contract/drift guards tied to the single source of truth.** Issue 536 reused E3-3's `MODEL_NAME_ALIASES`→`MODEL_REGISTRY` resolution as a runtime drift guard; issue 539 added a fork-source routing-contract guard in the same spirit. Generators/tests are bound to `core/llm_client.py` and `agents/<id>/config.yaml` so config cannot silently diverge.
 
 ## Recurring Anti-Patterns
-- **Validating templates instead of resolved runtime values**: The distinctness guard asserted on always-distinct substitution *templates* rather than post-substitution runtime env ids (`LLM_A_CHAT`, etc.), so the degenerate all-four-identical-models case passed silently and the troubleshooting doc described a warning that didn't exist. (Single occurrence, but a high-value lesson — guards must assert on the layer that can actually be wrong.)
+- **New artifacts shipped without wiring them into their surrounding docs/workflows** (the dominant cross-issue theme, caught only in review):
 
 ## Recommendations
-- **Add a verification-vs-implementation triage step to the plan prompt**: When an issue references a prior decision that concludes "native support / no patch needed" (e.g., decision docs, E1-R3/#520), the plan should default to a verification-only approach (concrete N-instance proof + lock-step tests) and explicitly justify any new production code. This pattern worked well here and should be made repeatable.
+- **Update the implement/review prompts with a "new artifact wiring" pre-merge check:** every new script, `skipif`-gated test, or config flag must be traced to (a) the doc/runbook that documents it and (b) the workflow step that actually invokes it — checked in the same change, not deferred to review.
 
 ## Metrics
 | Metric | Value |
