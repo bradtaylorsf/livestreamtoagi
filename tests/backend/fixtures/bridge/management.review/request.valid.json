@@ -1,0 +1,20 @@
+{
+  "agent_id": "vera",
+  "cost_context": {
+    "agent_tier": "conversation",
+    "budget_bucket": "daily-global",
+    "estimated_cost_usd": 0.001
+  },
+  "deadline_ms": 5000,
+  "method": "review",
+  "payload": {
+    "agent_id": "grok",
+    "context": {},
+    "text": "I think we should ship it"
+  },
+  "request_id": "req-management-review-0001",
+  "run_id": "run-0001",
+  "service": "management",
+  "simulation_id": "11111111-1111-1111-1111-111111111111",
+  "version": "1.0"
+}

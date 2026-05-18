@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "payload": {
+    "reason": "unsure",
+    "verdict": "maybe"
+  },
+  "request_id": "req-management-review-0001",
+  "retryable": false
+}

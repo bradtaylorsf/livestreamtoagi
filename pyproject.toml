@@ -40,6 +40,9 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.0.0",
     "pre-commit>=4.0.0",
+    # Node-side direction of the E4-2 bridge contract test
+    # (tests/backend/test_bridge_contract.py). Pure-Python, test-only.
+    "jsonschema>=4.0.0",
 ]
 # Headless Phaser canvas → MP4 render pipeline (core/video, scripts/render_simulation_video.py).
 # Browser binaries are downloaded separately: `playwright install chromium`.
