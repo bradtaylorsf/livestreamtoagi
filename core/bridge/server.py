@@ -41,6 +41,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from core.bridge import inbound
 from core.bridge.contract import (
     ERR_INVALID_PAYLOAD,
     ERR_UNSUPPORTED_SERVICE,
@@ -222,6 +223,21 @@ async def bridge_ws(websocket: WebSocket) -> None:
                 )
             else:
                 response = build_bridge_response(raw)
+                # E4-6 (#545): perception.report / action.result are
+                # Node->Python *reports*. The wire response is still the same
+                # contract-valid stub build_bridge_response already produced
+                # ({"accepted": true}); the additional work here is emitting
+                # the schema-validated event onto the bus so it is observable
+                # on the Python side *before* the ack goes out. Only routed for
+                # an ok response to an in-registry inbound verb — the envelope
+                # and payload are then guaranteed already validated.
+                if (
+                    response.ok
+                    and isinstance(raw, dict)
+                    and service_key(raw.get("service", ""), raw.get("method", ""))
+                    in inbound.INBOUND_VERBS
+                ):
+                    await inbound.dispatch_inbound(BridgeRequest.model_validate(raw))
             await websocket.send_json(response.model_dump())
     except WebSocketDisconnect:
         pass
