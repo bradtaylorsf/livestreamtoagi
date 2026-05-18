@@ -113,6 +113,7 @@ def test_dry_run_prints_resolved_e2_target(tmp_path):
     assert "auth:        offline" in out
     assert f"minecraft:   {MC_VERSION}" in out
     assert STOCK_BOT_NAME in out
+    assert "runtime-version shim" in out
     # No model set in CI → must say it is required and how to list ids.
     assert "LOCAL_LLM_MODEL unset" in out
     assert "pnpm llm:local --list-only" in out
@@ -174,6 +175,24 @@ def test_script_refuses_unpinned_or_missing_clone_and_missing_model():
     assert "WHITELIST=false" in src
 
 
+def test_script_stages_runtime_version_shim_and_restores_clone_source():
+    """The real launch must make Mindcraft use the pinned 1.21.6 protocol.
+
+    At the pinned fork commit, ``src/utils/mcdata.js`` captures
+    ``settings.minecraft_version`` before the child process receives settings
+    from MindServer. Without this shim, Mineflayer auto-selects its newest
+    supported protocol and fails to join the E2 1.21.6 server.
+    """
+    src = SCRIPT.read_text()
+    assert "src/utils/mcdata.js" in src
+    assert "LTAG E3-2 runtime version refresh" in src
+    assert "mc_version = settings.minecraft_version;" in src
+    assert "settings arrive after module import" in src
+    assert "trap restore_mcdata_patch EXIT" in src
+    assert "node main.js --profiles" in src
+    assert "exec node main.js" not in src
+
+
 def test_connect_doc_records_command_and_offline_posture():
     text = CONNECT_DOC.read_text()
     assert "scripts/minecraft/connect-stock-bot.sh" in text
@@ -182,6 +201,7 @@ def test_connect_doc_records_command_and_offline_posture():
     assert "offline" in text, "offline auth posture must be documented (E1-R2)"
     assert f"whitelist add {STOCK_BOT_NAME}" in text
     assert "pnpm llm:local --list-only" in text
+    assert "runtime-version shim" in text
 
 
 def test_fork_doc_links_to_the_connect_walkthrough():

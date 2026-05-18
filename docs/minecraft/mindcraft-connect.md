@@ -16,6 +16,11 @@ Mindcraft experience is assumed. Every command is copy-paste.
 - A committed, reviewed `settings.js` template and stock profile that the launch
   script **stages** into the git-ignored `./mindcraft` clone — the same
   committed-artifact pattern E3-1 uses for the vendored lockfile.
+- A tiny **runtime-version shim** staged only for the launch: the pinned fork
+  reads `minecraft_version` before the child agent receives settings, so the
+  script temporarily refreshes that value from runtime settings and restores the
+  disposable clone when the bot exits. Without it, Mineflayer auto-selects its
+  newest supported protocol instead of the E2-pinned `1.21.6`.
 - A bot driven by a **local LM Studio** model only — **zero external model
   spend**. No `openrouter/...` anywhere in this issue.
 
@@ -27,8 +32,9 @@ Mindcraft experience is assumed. Every command is copy-paste.
   ([#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535))**.
 - **Profile generation from `agents/<id>/config.yaml`** — that's **E3-4
   ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))**.
-- **Any fork customization** — the pinned clone stays clean; only `settings.js`
-  and the staged profile are written into it at launch.
+- **Agent customization** — the pinned clone stays clean of persistent changes;
+  only the staged config/profile and temporary runtime-version shim are applied
+  for this launch.
 
 ## The settings this bot uses (authoritative values)
 
@@ -100,7 +106,10 @@ That single command:
    (host/port/profile substituted from env; everything else verbatim).
 4. Stages `scripts/minecraft/profiles/stock-bot.json` →
    `./mindcraft/profiles/stock-bot.json` with the LM Studio model ids filled in.
-5. Prints the exact **whitelist** command (see §5), then launches:
+5. Temporarily patches `./mindcraft/src/utils/mcdata.js` so the child bot reads
+   the configured `minecraft_version` after settings arrive from MindServer, then
+   restores that source file when the launch exits.
+6. Prints the exact **whitelist** command (see §5), then launches:
    `cd ./mindcraft && node main.js --profiles ./profiles/stock-bot.json`.
 
 ### Preview without launching (optional)
@@ -239,6 +248,7 @@ scripts/minecraft/connect-stock-bot.sh --verify
 | `✗ No Mindcraft clone at ./mindcraft` | Fork not installed yet. | Run `scripts/minecraft/setup-mindcraft.sh` (see `docs/minecraft/mindcraft-fork.md`). |
 | `✗ Clone is not at the pinned commit` | `./mindcraft` drifted off the pin. | Re-pin: `scripts/minecraft/setup-mindcraft.sh` (don't hand-edit the clone). |
 | `✗ LOCAL_LLM_MODEL is not set` | No local model selected. | `pnpm llm:local --list-only`, then `export LOCAL_LLM_MODEL=<id>`. |
+| `✗ Mindcraft source shape changed; cannot apply runtime-version shim` | The pinned fork changed `src/utils/mcdata.js`, so the launch-time compatibility patch no longer matches. | Re-run `scripts/minecraft/setup-mindcraft.sh`; if it still fails, re-review the pinned fork before launching. |
 | Bot connects but never responds in chat | LM Studio not serving on `http://localhost:1234/v1` (the only endpoint string-form `lmstudio/` profiles use at the pinned commit), or the model is not loaded. | Run LM Studio on `http://localhost:1234/v1`; `pnpm llm:local --list-only` to confirm a model is loaded. Overriding `LOCAL_LLM_BASE_URL` does **not** move the bot — it must be at the default endpoint. |
 | Bot joins as the wrong name | `MINDCRAFT_PROFILE` overridden / profile edited. | Use the default `./profiles/stock-bot.json`; whitelist the `name` it actually uses. |
 

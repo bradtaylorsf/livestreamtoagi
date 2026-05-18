@@ -5,9 +5,10 @@
 # (issue #534, epic E3-2). It proves the pinned fork (E3-1 / #533) talks to the
 # E2 Paper server (#526) before any agent customization (that is E8).
 #
-# `./mindcraft` is git-ignored, so the only committed artifacts are the settings
-# template + stock profile next to this script; this script STAGES them into the
-# clone — exactly the pattern setup-mindcraft.sh uses for the vendored lockfile.
+# `./mindcraft` is git-ignored, so the committed artifacts are the settings
+# template, stock profile, and launch-time compatibility shim next to this
+# script; this script STAGES them into the clone — exactly the pattern
+# setup-mindcraft.sh uses for the vendored lockfile.
 #
 # Pinned defaults come from the E1 decisions:
 #   - Fork commit: 35be480b4cc0bca990278e6103a1426392559d96  (E1-R1 → docs/decisions/0001)
@@ -15,6 +16,8 @@
 #   - Minecraft:   1.21.6                                     (E1-R1 → docs/decisions/0001)
 #   - host/port:   127.0.0.1 : 25565  (E2 start-server.sh default; localhost only)
 #   - auth:        offline   (E1-R2 → docs/decisions/0002 — matches online-mode=false)
+#   - launch shim: refresh minecraft_version after child-agent settings arrive
+#                  (the pinned fork reads it too early at module import time)
 # Models are LOCAL ONLY (LM Studio, decision 0003): zero external spend. No
 # openrouter/... here.
 #
@@ -60,6 +63,11 @@ MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/stock-bot.json}"
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 MINDCRAFT_LLM_URL="http://localhost:1234/v1"   # where the bot actually connects (Mindcraft default)
 STOCK_BOT_NAME="StockBot"                 # MUST match "name" in profiles/stock-bot.json
+MCDATA_REL="src/utils/mcdata.js"
+MCDATA_VERSION_PATCH_MARKER="LTAG E3-2 runtime version refresh"
+MINDCRAFT_DIR_ABS=""
+MCDATA_BACKUP=""
+MCDATA_PATH=""
 
 # Resolve the committed template + profile relative to THIS script (not the
 # caller's cwd) so the reviewed copies are used no matter where it is invoked.
@@ -88,6 +96,13 @@ esac
 ok()   { echo "✓ $*"; }
 info() { echo "  $*"; }
 fail() { echo "✗ $*" >&2; }
+
+restore_mcdata_patch() {
+    if [ -n "${MCDATA_BACKUP:-}" ] && [ -f "$MCDATA_BACKUP" ] && [ -n "${MCDATA_PATH:-}" ]; then
+        cp "$MCDATA_BACKUP" "$MCDATA_PATH" 2> /dev/null || true
+        rm -f "$MCDATA_BACKUP"
+    fi
+}
 
 # ── Node / npm check (identical posture to setup-mindcraft.sh) ──
 # A real run needs Node $REQUIRED_NODE_MAJOR LTS. In --dry-run/--verify we only
@@ -204,6 +219,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would assert: $MINDCRAFT_DIR HEAD == $MINDCRAFT_COMMIT"
     info "Would stage:  $SETTINGS_TEMPLATE → $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $PROFILE_TEMPLATE  → $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./} (models substituted)"
+    info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL (restored on exit)"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
     exit 0
 fi
@@ -230,6 +246,7 @@ if [ "$HEAD_SHA" != "$MINDCRAFT_COMMIT" ]; then
     exit 1
 fi
 ok "Clone is at the pinned commit $MINDCRAFT_COMMIT"
+MINDCRAFT_DIR_ABS="$(cd -- "$MINDCRAFT_DIR" && pwd)"
 
 # (b) The conversation model is mandatory for a real run (local LM Studio only).
 if [ -z "$LLM_MODEL" ]; then
@@ -245,7 +262,7 @@ fi
 # (c) Stage settings.js (host/port/profile substituted; everything else is the
 #     reviewed template verbatim). Line-anchored so the comment header is never
 #     touched — only the actual setting lines match.
-DEST_SETTINGS="$MINDCRAFT_DIR/settings.js"
+DEST_SETTINGS="$MINDCRAFT_DIR_ABS/settings.js"
 if ! sed -E \
     -e "s|^([[:space:]]*\"host\":[[:space:]]*\")[^\"]*(\".*)$|\1${MC_HOST}\2|" \
     -e "s|^([[:space:]]*\"port\":[[:space:]]*)[0-9]+(,.*)$|\1${MC_PORT}\2|" \
@@ -258,7 +275,7 @@ ok "Staged settings.js → $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profi
 
 # (d) Stage the profile with the LM Studio model ids substituted in.
 #     Strip a leading "./" so the on-disk path stays clean (no "..././/...").
-DEST_PROFILE="$MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
+DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
 if ! sed \
     -e "s|__LOCAL_LLM_MODEL__|${LLM_MODEL}|g" \
@@ -271,7 +288,62 @@ ok "Staged profile → $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}        (conversation tier — decision 0003)"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 0003)"
 
-# (e) Whitelist reminder. start-server.sh defaults white-list=true, so the E2
+# (e) Apply a tiny launch-time compatibility shim to the disposable clone.
+#     At the pinned commit, mcdata.js captures settings.minecraft_version at
+#     module import time, before the child process receives settings from the
+#     MindServer. That makes Mineflayer auto-select its newest supported
+#     protocol (currently 1.21.11) instead of the E2-pinned 1.21.6. We patch
+#     only the local clone during this launch and restore it on exit.
+MCDATA_PATH="$MINDCRAFT_DIR_ABS/$MCDATA_REL"
+if [ ! -f "$MCDATA_PATH" ]; then
+    fail "Mindcraft source file missing: $MCDATA_PATH"
+    exit 1
+fi
+if grep -q "$MCDATA_VERSION_PATCH_MARKER" "$MCDATA_PATH"; then
+    info "Found a previous runtime-version shim in $MCDATA_REL; restoring the pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$MCDATA_REL" > "$MCDATA_PATH"; then
+        fail "Could not restore pinned $MCDATA_REL before applying runtime-version shim."
+        exit 1
+    fi
+fi
+if ! grep -q 'let mc_version = settings.minecraft_version;' "$MCDATA_PATH"; then
+    fail "Mindcraft source shape changed; cannot apply runtime-version shim."
+    info "  Expected to find: let mc_version = settings.minecraft_version;"
+    info "  Re-check the pinned fork before launching."
+    exit 1
+fi
+MCDATA_BACKUP="$(mktemp -t mindcraft-mcdata.XXXXXX)"
+cp "$MCDATA_PATH" "$MCDATA_BACKUP"
+trap restore_mcdata_patch EXIT
+trap 'restore_mcdata_patch; exit 130' INT
+trap 'restore_mcdata_patch; exit 143' TERM
+MCDATA_PATH="$MCDATA_PATH" MCDATA_VERSION_PATCH_MARKER="$MCDATA_VERSION_PATCH_MARKER" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.MCDATA_PATH;
+const marker = process.env.MCDATA_VERSION_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+
+source = source.replace(
+    'let mc_version = settings.minecraft_version;',
+    `let mc_version = null; // ${marker}: settings arrive after module import`
+);
+
+const initNeedle = 'export function initBot(username) {\n';
+const initPatch = `export function initBot(username) {\n    mc_version = settings.minecraft_version; // ${marker}\n`;
+if (!source.includes(initPatch)) {
+    if (!source.includes(initNeedle)) {
+        throw new Error('initBot signature not found while applying runtime-version shim');
+    }
+    source = source.replace(initNeedle, initPatch);
+}
+
+writeFileSync(path, source);
+NODE
+ok "Staged Mindcraft runtime-version shim → $MCDATA_PATH"
+info "  Restores $MCDATA_REL automatically when this launch exits."
+
+# (f) Whitelist reminder. start-server.sh defaults white-list=true, so the E2
 #     server will REJECT the bot until "$STOCK_BOT_NAME" is whitelisted.
 echo
 info "── Whitelist (E2 server defaults to white-list=true) ───────────────────"
@@ -282,10 +354,10 @@ info "    WHITELIST=false scripts/minecraft/start-server.sh"
 info "Skipping this → the bot connects then is kicked with 'not whitelisted'."
 echo
 
-# (f) Launch. Mindcraft reads ./settings.js; --profiles is passed explicitly so
+# (g) Launch. Mindcraft reads ./settings.js; --profiles is passed explicitly so
 #     the launch command itself documents which bot is starting (per the plan).
 ok "Launching ${STOCK_BOT_NAME} → ${MC_HOST}:${MC_PORT} … (Ctrl+C to stop)"
 info "Success looks like: '${STOCK_BOT_NAME} joined the game' in the E2 server"
 info "console, ${STOCK_BOT_NAME} in its 'list' output, and the bot moving in-world."
-cd "$MINDCRAFT_DIR"
-exec node main.js --profiles "$MINDCRAFT_PROFILE"
+cd "$MINDCRAFT_DIR_ABS"
+node main.js --profiles "$MINDCRAFT_PROFILE"

@@ -64,7 +64,7 @@ Concretely:
 |-------|----------------|-----------------------|
 | Upstream Mindcraft source | `bradtaylorsf/mindcraft` @ `35be480b4cc0bca990278e6103a1426392559d96` (tag `e1-r1-pin`) — **clean**, no local commits | No — it is a frozen, reviewed point |
 | Deterministic dependency tree | `scripts/minecraft/mindcraft-package-lock.json` (committed **here**) | Re-vendored deliberately on a re-pin |
-| Bot config / profiles | `scripts/minecraft/mindcraft-settings.js`, `scripts/minecraft/profiles/*.json` (committed **here**, staged by `connect-stock-bot.sh`) | No — they are ours, version-controlled here |
+| Bot config / profiles / launch shims | `scripts/minecraft/mindcraft-settings.js`, `scripts/minecraft/profiles/*.json`, and the `connect-stock-bot.sh` runtime-version shim (committed **here**, staged by the launch script) | No — they are ours, version-controlled here |
 | Future patches (profile generator, feature flags, Python bridge) | `patch-package` patches + generators committed **here** in later E3/E4 issues | No — re-applied against each new pin |
 | The working tree | `./mindcraft` — **git-ignored**, disposable, rebuilt by `setup-mindcraft.sh` | N/A — throwaway |
 
