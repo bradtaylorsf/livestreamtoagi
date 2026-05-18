@@ -451,9 +451,26 @@ def test_decision_0003_back_references_e3_7():
     assert "test_mc_routing_fork_contract.py" in text
 
 
-def test_fork_maintenance_doc_exists_so_the_hint_is_actionable():
-    """Every fork-source failure tells the reader to re-review the E3-6
-    re-base runbook — that doc must actually exist."""
+def test_fork_maintenance_doc_wires_the_routing_contract_into_the_rebase_flow():
+    """Every fork-source failure tells the reader to re-review the E3-6 re-base
+    runbook — that doc must exist *and* actually instruct running this contract
+    at the moment a re-based clone is present.
+
+    This is the linchpin of E3-7: the fork-source assertions ``skipif`` when no
+    clone exists (CI), so the *only* moment they execute is during an E3-6
+    re-base. If the runbook never tells the re-baser to run
+    ``verify:mindcraft-routing-contract``, a routing-breaking upstream re-base
+    ships silently — exactly the regression vector E3-7 names — even though
+    this module is correct. Asserting the wiring here makes it un-silenceable
+    (symmetric with ``test_model_routing_doc_records_e3_7_premise_not_met``)."""
     assert FORK_MAINT_DOC.is_file(), (
         f"missing {FORK_MAINT_DOC} — the REBASE_HINT points here"
+    )
+    text = FORK_MAINT_DOC.read_text()
+    assert "verify:mindcraft-routing-contract" in text, (
+        "docs/minecraft/fork-maintenance.md ('How to re-base on upstream') "
+        "must instruct running `pnpm verify:mindcraft-routing-contract` "
+        "against the freshly re-based clone — that is the only moment this "
+        "fork-source contract executes (it skips in CI). Without it an E3-6 "
+        "re-base can silently break per-tier routing, defeating E3-7."
     )
