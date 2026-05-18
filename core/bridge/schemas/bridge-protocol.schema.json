@@ -159,6 +159,19 @@
           "title": "Simulation Id",
           "type": "string"
         },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "End-to-end correlation id for cross-language tracing (E4-7, #546). Optional and additive (ADR \u00a73 minor bump, protocol 1.1): a 1.0 peer omits it. The server mints one when absent so a request is always traceable in both Node and Python logs by a single id.",
+          "title": "Trace Id"
+        },
         "version": {
           "description": "Protocol semver (ADR \u00a73). Required on every message.",
           "title": "Version",
@@ -225,6 +238,19 @@
           "description": "Whether the caller may safely retry (ADR \u00a75).",
           "title": "Retryable",
           "type": "boolean"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Echoes the request's correlation id (or the one the server minted when the request omitted it) so the same trace id appears on both halves of the round-trip (E4-7, #546). Optional/additive (ADR \u00a73).",
+          "title": "Trace Id"
         }
       },
       "required": [
@@ -575,7 +601,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.0",
+  "protocolVersion": "1.1",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",

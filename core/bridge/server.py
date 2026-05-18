@@ -7,6 +7,13 @@ validation, and a dispatch table whose handlers return contract-valid **stub**
 payloads. Real memory/management/cost wiring is explicitly out of scope (E5/E8);
 the perception/action inbound channel is E4-5/E4-6.
 
+E4-7 (#546) layers observability on the receive loop without changing the wire
+contract: every settled frame resolves a single ``trace_id`` (echoed from the
+request or minted here when the additive field is absent), is echoed back on
+the :class:`BridgeResponse`, and emits one structured log record + one metrics
+sample via :mod:`core.bridge.observability` — so one request is traceable end
+to end by a single id across the Node and Python logs.
+
 Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
 (#540, E4-1) and validated against the versioned contract from
 :mod:`core.bridge.contract` (#541, E4-2):
@@ -35,13 +42,15 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from core.bridge import inbound
+from core.bridge import inbound, observability
 from core.bridge.contract import (
     ERR_INVALID_PAYLOAD,
     ERR_UNSUPPORTED_SERVICE,
@@ -127,6 +136,43 @@ def _request_id_from_raw(raw: Any) -> str:
         if isinstance(rid, str) and rid:
             return rid
     return UNKNOWN_REQUEST_ID
+
+
+def _resolve_trace_id(raw: Any) -> str:
+    """The correlation id for this frame (E4-7, #546).
+
+    Echo the caller's ``trace_id`` when the inbound frame carried a non-empty
+    string one; otherwise **mint** a server-side ``trace-<uuid>`` so a request
+    is *always* traceable end-to-end by a single id — a 1.0 peer that omits the
+    field (additive, ADR §3) still gets correlated logs on both halves.
+    """
+    if isinstance(raw, dict):
+        tid = raw.get("trace_id")
+        if isinstance(tid, str) and tid:
+            return tid
+    return f"trace-{uuid4()}"
+
+
+def _str_field_from_raw(raw: Any, key: str, default: str) -> str:
+    """Best-effort string field off an un-trusted/maybe-unparsed frame (logs only)."""
+    if isinstance(raw, dict):
+        val = raw.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return default
+
+
+def _verb_from_raw(raw: Any) -> str:
+    """Canonical ``service.method`` for metrics, or ``unparseable`` when absent.
+
+    Used only to key the in-process counters/log line; the real dispatch still
+    goes through the validated envelope, so a bogus value here never routes.
+    """
+    if isinstance(raw, dict):
+        service, method = raw.get("service"), raw.get("method")
+        if isinstance(service, str) and service and isinstance(method, str) and method:
+            return service_key(service, method)
+    return "unparseable"
 
 
 def build_bridge_response(raw: Any) -> BridgeResponse:
@@ -216,28 +262,62 @@ async def bridge_ws(websocket: WebSocket) -> None:
             except ValueError as exc:
                 # Frame was not JSON at all — still answer with a typed,
                 # contract-valid error rather than dropping the connection.
+                started = time.perf_counter()
+                raw = None  # never parsed; observed under the 'unparseable' verb
                 response = make_error_response(
                     UNKNOWN_REQUEST_ID,
                     ERR_INVALID_PAYLOAD,
                     f"frame was not valid JSON: {exc}",
                 )
             else:
+                started = time.perf_counter()
                 response = build_bridge_response(raw)
-                # E4-6 (#545): perception.report / action.result are
-                # Node->Python *reports*. The wire response is still the same
-                # contract-valid stub build_bridge_response already produced
-                # ({"accepted": true}); the additional work here is emitting
-                # the schema-validated event onto the bus so it is observable
-                # on the Python side *before* the ack goes out. Only routed for
-                # an ok response to an in-registry inbound verb — the envelope
-                # and payload are then guaranteed already validated.
-                if (
-                    response.ok
-                    and isinstance(raw, dict)
-                    and service_key(raw.get("service", ""), raw.get("method", ""))
-                    in inbound.INBOUND_VERBS
-                ):
-                    await inbound.dispatch_inbound(BridgeRequest.model_validate(raw))
+
+            # E4-7 (#546): one correlation id per frame. Echo the caller's
+            # trace_id, or mint one when the (additive) field is absent, so the
+            # request is traceable end-to-end by a single id in BOTH logs.
+            trace_id = _resolve_trace_id(raw)
+
+            # E4-6 (#545): perception.report / action.result are Node->Python
+            # *reports*. The wire response is still the same contract-valid stub
+            # build_bridge_response already produced ({"accepted": true}); the
+            # additional work here is emitting the schema-validated event onto
+            # the bus so it is observable on the Python side *before* the ack
+            # goes out. Only routed for an ok response to an in-registry inbound
+            # verb — the envelope and payload are then guaranteed already
+            # validated. The resolved trace_id rides along so the emitted bus
+            # event joins the same correlation id (E4-7).
+            if (
+                response.ok
+                and isinstance(raw, dict)
+                and service_key(raw.get("service", ""), raw.get("method", ""))
+                in inbound.INBOUND_VERBS
+            ):
+                await inbound.dispatch_inbound(BridgeRequest.model_validate(raw), trace_id=trace_id)
+
+            # E4-7 (#546): observe + correlate EVERY settled frame — success,
+            # ok=false, and the unparseable path alike — so the counters'
+            # denominator is honest and a single id greps across both languages.
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            response.trace_id = trace_id
+            observability.log_bridge_event(
+                logger,
+                trace_id=trace_id,
+                request_id=response.request_id,
+                agent_id=_str_field_from_raw(raw, "agent_id", "unknown"),
+                service=_str_field_from_raw(raw, "service", "-"),
+                method=_str_field_from_raw(raw, "method", "-"),
+                ok=response.ok,
+                latency_ms=latency_ms,
+                error_code=response.error.code if response.error else None,
+                direction="inbound",
+            )
+            observability.record_call(
+                verb=_verb_from_raw(raw),
+                ok=response.ok,
+                latency_ms=latency_ms,
+                error_code=response.error.code if response.error else None,
+            )
             await websocket.send_json(response.model_dump())
     except WebSocketDisconnect:
         pass

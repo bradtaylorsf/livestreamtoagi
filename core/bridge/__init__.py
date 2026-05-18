@@ -25,6 +25,12 @@ from core.bridge.contract import (
     validate_response,
 )
 from core.bridge.inbound import INBOUND_VERBS, dispatch_inbound
+from core.bridge.observability import (
+    bridge_metrics_snapshot,
+    log_bridge_event,
+    record_call,
+    reset_metrics,
+)
 from core.bridge.server import bridge_router
 
 __all__ = [
@@ -36,8 +42,12 @@ __all__ = [
     "BridgeResponse",
     "CostContext",
     "UnsupportedServiceError",
+    "bridge_metrics_snapshot",
     "bridge_router",
     "dispatch_inbound",
+    "log_bridge_event",
+    "record_call",
+    "reset_metrics",
     "export_json_schema",
     "is_supported_version",
     "parse_version",

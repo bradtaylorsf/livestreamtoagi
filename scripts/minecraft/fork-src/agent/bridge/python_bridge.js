@@ -1,4 +1,5 @@
-// Node→Python bridge client (issue #543 E4-4 + issue #544 E4-5 — epic E4 #506).
+// Node→Python bridge client (issue #543 E4-4 + #544 E4-5 + #546 E4-7 — epic
+// E4 #506).
 //
 // `./mindcraft` is git-ignored, so this file is the committed source of truth.
 // `scripts/minecraft/connect-bridge-bot.sh` copies it verbatim into the pinned
@@ -30,6 +31,12 @@
 //     A disconnected/saturated bridge is therefore a CLOSED gate, never an
 //     unsafe action: callers (the action layer) degrade to safe-idle. This is
 //     exactly the fail-closed rule ADR 0010 §5 says E4-5 must preserve.
+//   * (E4-7 #546) Observability with no wire-contract change: each call carries
+//     an additive `trace_id` (protocol 1.1) the Python server echoes/mints, so
+//     one request greps end-to-end across BOTH logs by a single id; every call
+//     start and settle path emits a fixed `key=value` line to STDERR (matching
+//     core/bridge/observability.py) and feeds in-process counters exposed via
+//     `bridgeMetrics()`. Logging is best-effort and never crashes the bot.
 //   * IS NOT: a persistent pooled connection or the inbound Python→Node push
 //     channel — that is E4-6 (#545). Each successful call is still its own
 //     one-shot socket; the probe is the only added socket and only one is ever
@@ -59,7 +66,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-export const PROTOCOL_VERSION = '1.0'; // contract.PROTOCOL_VERSION (ADR §3)
+// contract.PROTOCOL_VERSION (ADR §3). 1.1 is the E4-7 (#546) minor bump: the
+// optional `trace_id` correlation field is purely additive — the server only
+// gates on the major, so this stays wire-compatible with a 1.0 peer.
+export const PROTOCOL_VERSION = '1.1';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';
@@ -102,6 +112,100 @@ function _config() {
         reconnectMaxMs: _posIntEnv(BRIDGE_RECONNECT_MAX_MS_ENV, DEFAULT_RECONNECT_MAX_MS),
         circuitThreshold: _posIntEnv(BRIDGE_CIRCUIT_THRESHOLD_ENV, DEFAULT_CIRCUIT_THRESHOLD),
     };
+}
+
+// ── E4-7 (#546): structured logs + in-process metrics ───────────────────────
+//
+// Correlation is the point: every call logs the same `trace_id` the envelope
+// carries, and the Python server logs that identical id, so one request greps
+// end-to-end across both languages. Logs go to STDERR only — stdout is the
+// data channel some callers/harnesses parse — in the same fixed `key=value`
+// shape the Python side emits (core/bridge/observability.py) so a single id
+// lines up across the two logs. No new dependency (frozen lockfile): the
+// logger is a stderr write and the metrics are a plain module object.
+
+function _fmtLogVal(v) {
+    if (v === undefined || v === null) return '-';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3);
+    return String(v);
+}
+
+// Fixed key order so the line is stable/diffable and matches the Python side.
+const _LOG_KEY_ORDER = [
+    'trace_id',
+    'request_id',
+    'direction',
+    'service',
+    'method',
+    'phase',
+    'ok',
+    'outcome',
+    'latency_ms',
+    'echoed_trace_id',
+];
+
+function _logBridge(fields) {
+    try {
+        const parts = [];
+        for (const k of _LOG_KEY_ORDER) {
+            if (k in fields) parts.push(`${k}=${_fmtLogVal(fields[k])}`);
+        }
+        // STDERR, never stdout — logging must never corrupt a caller's data
+        // channel and (issue #543 contract) must never crash the bot.
+        process.stderr.write(`bridge_event ${parts.join(' ')}\n`);
+    } catch {
+        /* best-effort: a logging failure must never mask/crash the call */
+    }
+}
+
+function _newMetrics() {
+    return {
+        calls: {}, // "<service>.<method>" -> count
+        callsTotal: 0,
+        errors: {}, // error code -> count
+        errorsTotal: 0,
+        latencyMs: { count: 0, sum: 0, max: 0 },
+    };
+}
+
+let _metrics = _newMetrics();
+
+function _recordCall({ verb, ok, code, latencyMs }) {
+    _metrics.calls[verb] = (_metrics.calls[verb] || 0) + 1;
+    _metrics.callsTotal += 1;
+    if (!ok) {
+        const c = code || 'unknown';
+        _metrics.errors[c] = (_metrics.errors[c] || 0) + 1;
+        _metrics.errorsTotal += 1;
+    }
+    const l = _metrics.latencyMs;
+    l.count += 1;
+    l.sum += latencyMs;
+    if (latencyMs > l.max) l.max = latencyMs;
+}
+
+/**
+ * A deep copy of the in-process bridge counters (calls by verb, errors by
+ * code, latency aggregate). Every settled `callBridge` is counted exactly once
+ * so `errorsTotal / callsTotal` is the true error rate. A real exporter can
+ * read this later without changing the contract.
+ * @returns {{calls: object, callsTotal: number, errors: object,
+ *            errorsTotal: number, latencyMs: {count:number,sum:number,max:number}}}
+ */
+export function bridgeMetrics() {
+    return {
+        calls: { ..._metrics.calls },
+        callsTotal: _metrics.callsTotal,
+        errors: { ..._metrics.errors },
+        errorsTotal: _metrics.errorsTotal,
+        latencyMs: { ..._metrics.latencyMs },
+    };
+}
+
+/** Reset the in-process counters (test isolation; not used in production). */
+export function resetBridgeMetrics() {
+    _metrics = _newMetrics();
 }
 
 // ── Typed structured error (carries a stable machine-readable code) ─────────
@@ -195,7 +299,7 @@ function attachHandlers(sock, { onOpen, onMessage, onClose, onError }) {
 
 // ── Envelope construction (ADR §2 — exact field set) ───────────────────────
 
-function buildEnvelope({ service, method, payload, deadlineMs, agentId }) {
+function buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId }) {
     return {
         version: PROTOCOL_VERSION,
         request_id: `bridge-${randomUUID()}`, // unique correlation + idempotency key (ADR §5)
@@ -211,6 +315,11 @@ function buildEnvelope({ service, method, payload, deadlineMs, agentId }) {
             budget_bucket: 'bridge',
             estimated_cost_usd: 0.0,
         },
+        // E4-7 (#546): end-to-end correlation id. Accept a caller-supplied id
+        // (so a chain of related calls shares one trace) and otherwise mint a
+        // unique one per call. Additive/optional (protocol 1.1) — the server
+        // echoes it back, or mints its own when this is somehow absent.
+        trace_id: traceId || `trace-${randomUUID()}`,
     };
 }
 
@@ -272,6 +381,7 @@ async function _callBridgeOnce({
     payload = {},
     deadlineMs = DEFAULT_DEADLINE_MS,
     agentId,
+    traceId,
 } = {}) {
     const token = process.env[BRIDGE_TOKEN_ENV];
     if (!token) {
@@ -285,7 +395,7 @@ async function _callBridgeOnce({
     await resolveWebSocket();
 
     const url = process.env[BRIDGE_URL_ENV] || DEFAULT_BRIDGE_URL;
-    const envelope = buildEnvelope({ service, method, payload, deadlineMs, agentId });
+    const envelope = buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId });
 
     return await new Promise((resolve, reject) => {
         let settled = false;
@@ -553,26 +663,59 @@ export function bridgeIsReachable() {
  * @param {object}  [opts.payload]   service-specific body
  * @param {number}  [opts.deadlineMs] hard local deadline (ADR §5), default 5000
  * @param {string}  [opts.agentId]   stable agent identity (a claim, not proof)
+ * @param {string}  [opts.traceId]   E4-7 correlation id; reuse one to tie a
+ *                                   chain of related calls together. Defaults
+ *                                   to a unique `trace-<uuid>` per call.
  * @returns {Promise<object>} the parsed response envelope
  */
 export async function callBridge(opts = {}) {
+    // E4-7 (#546): one correlation id for this whole call, logged at start and
+    // on every settle path and carried in the envelope so the Python server
+    // logs the SAME id — one request greps end-to-end across both languages.
+    const { service, method } = opts;
+    const verb = `${service}.${method}`;
+    const traceId = opts.traceId || `trace-${randomUUID()}`;
+    const startedAt = Date.now();
+    _logBridge({ trace_id: traceId, direction: 'outbound', service, method, phase: 'start' });
+
+    // Settle a FAILURE path: record one metrics sample + one structured log,
+    // then hand the original typed error back to the caller unchanged.
+    const settleError = (err) => {
+        const code = err instanceof BridgeClientError ? err.code : 'bridge_unknown';
+        const latencyMs = Date.now() - startedAt;
+        _recordCall({ verb, ok: false, code, latencyMs });
+        _logBridge({
+            trace_id: traceId,
+            direction: 'outbound',
+            service,
+            method,
+            phase: 'settle',
+            ok: false,
+            outcome: code,
+            latency_ms: latencyMs,
+        });
+        return err;
+    };
+
     // 1. Fail fast while the circuit is open — do NOT pay the deadline or open
     //    a doomed socket. A disconnected bridge is a closed gate (ADR §5): the
     //    caller degrades to safe-idle, never an unsafe action.
     if (_circuit.state === 'open') {
         _scheduleProbe(); // defensive: ensure a probe is pending to recover
-        throw _makeUnreachableError();
+        throw settleError(_makeUnreachableError());
     }
 
     // 2. Bounded in-flight: fail-closed backpressure. Never an unbounded queue,
     //    never more concurrent sockets than MAX_INFLIGHT.
     const { maxInflight } = _config();
     if (_inflight >= maxInflight) {
-        throw new BridgeClientError(
-            'bridge_overloaded',
-            `bridge in-flight cap reached (${_inflight}/${maxInflight}); ` +
-                'rejecting to apply backpressure — safe-idle and retry later',
-            { retryable: true },
+        throw settleError(
+            new BridgeClientError(
+                'bridge_overloaded',
+                `bridge in-flight cap reached (${_inflight}/${maxInflight}); ` +
+                    'rejecting to apply backpressure — safe-idle and retry later',
+                { retryable: true },
+            ),
         );
     }
 
@@ -580,15 +723,32 @@ export async function callBridge(opts = {}) {
     //    settle path (decrement no matter how it ends).
     _inflight += 1;
     try {
-        const response = await _callBridgeOnce(opts);
+        const response = await _callBridgeOnce({ ...opts, traceId });
         _recordSuccess();
+        const latencyMs = Date.now() - startedAt;
+        _recordCall({ verb, ok: true, latencyMs });
+        // Tolerate a missing `trace_id` in the response (additive — a 1.0 peer
+        // omits it); log the echoed value when present so the round-trip is
+        // verifiably one trace.
+        _logBridge({
+            trace_id: traceId,
+            request_id: response && response.request_id,
+            direction: 'outbound',
+            service,
+            method,
+            phase: 'settle',
+            ok: true,
+            outcome: 'ok',
+            latency_ms: latencyMs,
+            echoed_trace_id: response && response.trace_id,
+        });
         return response;
     } catch (err) {
         const code = err instanceof BridgeClientError ? err.code : undefined;
         if (code && CONNECT_CLASS_CODES.has(code)) {
             _recordConnectFailure();
         }
-        throw err; // pass the original typed error through unchanged
+        throw settleError(err); // pass the original typed error through unchanged
     } finally {
         _inflight -= 1;
     }
@@ -598,6 +758,8 @@ export default {
     callBridge,
     bridgeStatus,
     bridgeIsReachable,
+    bridgeMetrics,
+    resetBridgeMetrics,
     BridgeClientError,
     PROTOCOL_VERSION,
     DEFAULT_BRIDGE_URL,
