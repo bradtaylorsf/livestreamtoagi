@@ -1,7 +1,7 @@
 # Alpha Loop configuration
 repo: bradtaylorsf/livestreamtoagi
 project: 5
-agent: codex
+agent: claude
 label: ready
 base_branch: main
 test_command: pnpm test
@@ -19,7 +19,7 @@ agent_timeout: 7200  # 120 minutes in seconds
 # These options were added in a newer alpha-loop release. They're commented out
 # so your current behavior is unchanged — uncomment to opt in.
 
-# harnesses:
-#   - claude-code
+harnesses:
+  - claude-code
 #
 
