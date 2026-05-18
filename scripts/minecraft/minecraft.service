@@ -31,7 +31,9 @@ After=network-online.target
 Wants=network-online.target
 # Crash-loop guard: if the server fails StartLimitBurst times within
 # StartLimitIntervalSec seconds, systemd stops retrying instead of spinning
-# forever on a broken config. Mirrors supervise.sh's CRASH_LOOP_* guard.
+# forever on a broken config. Analogous to supervise.sh's CRASH_LOOP_*
+# guard (same burst of 5; systemd uses a 300s window vs the script's 60s —
+# see docs/minecraft/supervision.md).
 StartLimitIntervalSec=300
 StartLimitBurst=5
 

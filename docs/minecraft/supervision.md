@@ -52,11 +52,20 @@ boot time:
 the window if you want (`RestartSec=` / `RESTART_DELAY=`), but a few seconds
 of backoff avoids hammering a host that's mid-problem.
 
-Crash-loop guard (both paths): **5 restarts within 60s → stop trying**
-(systemd `StartLimitBurst=5` / `StartLimitIntervalSec=300`; supervise.sh
-`CRASH_LOOP_LIMIT=5` / `CRASH_LOOP_WINDOW=60`). When that trips, fix the
-underlying problem (check the logs below), then re-enable/restart the
-supervisor.
+Crash-loop guard (both paths): **after 5 rapid restarts the supervisor
+stops trying** instead of spinning forever on a broken config. The two
+paths use the same burst count (5) but a different window:
+
+- **systemd:** `StartLimitBurst=5` within `StartLimitIntervalSec=300` —
+  5 failed starts inside **5 minutes** → systemd gives up.
+- **supervise.sh:** `CRASH_LOOP_LIMIT=5` within `CRASH_LOOP_WINDOW=60` —
+  5 crashes inside **60 seconds** → the watchdog aborts.
+
+(systemd's longer window is fine: a server that fails fast will trip
+either guard in well under a minute; the difference only matters for a
+server that limps for ~minutes between crashes.) When the guard trips,
+fix the underlying problem (check the logs below), then re-enable/restart
+the supervisor.
 
 ## Path A — systemd (the Linux 24/7 host)
 
