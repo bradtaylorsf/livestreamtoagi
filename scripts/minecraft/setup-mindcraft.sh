@@ -14,7 +14,7 @@
 # sync with it and can be overridden via env vars.
 #
 # Upstream Mindcraft commits NO lockfile at the pinned commit, so determinism
-# comes from the committed, audited copy next to this script
+# comes from the committed, reviewed copy next to this script
 # (scripts/minecraft/mindcraft-package-lock.json). The script stages that copy
 # into the clone and runs `npm ci`, which itself aborts if the lockfile and the
 # pinned package.json ever drift apart.
@@ -42,9 +42,16 @@ MINDCRAFT_DIR="${MINDCRAFT_DIR:-./mindcraft}"
 REQUIRED_NODE_MAJOR="20"
 
 # Resolve the committed lockfile relative to THIS script (not the caller's cwd)
-# so the audited copy is used no matter where the script is invoked from.
+# so the reviewed copy is used no matter where the script is invoked from.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMMITTED_LOCK="$SCRIPT_DIR/mindcraft-package-lock.json"
+NPM_CI_LOG=""
+cleanup() {
+    if [ -n "${NPM_CI_LOG:-}" ]; then
+        rm -f "$NPM_CI_LOG"
+    fi
+}
+trap cleanup EXIT
 
 MODE="run"
 case "${1:-}" in
@@ -115,7 +122,7 @@ info "lock:    $COMMITTED_LOCK"
 info "node:    ${REQUIRED_NODE_MAJOR} LTS  (install: npm ci)"
 
 # ── --verify: static, CI/network-safe checks only ──────
-# Used by the headless verifier. Asserts the audited lockfile is present and
+# Used by the headless verifier. Asserts the vendored lockfile is present and
 # well-formed without touching the network, Node, or git. The strict JSON
 # parse lives in tests/backend/test_minecraft_setup_mindcraft.py.
 if [ "$MODE" = "verify" ]; then
@@ -160,7 +167,10 @@ if [ -d "$MINDCRAFT_DIR/.git" ]; then
     # instead of our fork). Realign it before fetching so we pin from the
     # intended repo, not whatever this tree happened to be cloned from.
     EXISTING_ORIGIN="$(git -C "$MINDCRAFT_DIR" remote get-url origin 2>/dev/null || true)"
-    if [ "$EXISTING_ORIGIN" != "$MINDCRAFT_REPO" ]; then
+    if [ -z "$EXISTING_ORIGIN" ]; then
+        info "origin remote is missing; adding $MINDCRAFT_REPO"
+        git -C "$MINDCRAFT_DIR" remote add origin "$MINDCRAFT_REPO"
+    elif [ "$EXISTING_ORIGIN" != "$MINDCRAFT_REPO" ]; then
         info "origin is '$EXISTING_ORIGIN'; repointing it at $MINDCRAFT_REPO"
         git -C "$MINDCRAFT_DIR" remote set-url origin "$MINDCRAFT_REPO"
     fi
@@ -183,11 +193,11 @@ if [ "$HEAD_SHA" != "$MINDCRAFT_COMMIT" ]; then
 fi
 ok "Checked out the pinned commit $MINDCRAFT_COMMIT"
 
-# ── (e) Stage the audited lockfile (drift guard) ───────
+# ── (e) Stage the vendored lockfile (drift guard) ───────
 CLONE_LOCK="$MINDCRAFT_DIR/package-lock.json"
 if [ -f "$CLONE_LOCK" ]; then
     # The pinned upstream ships no lockfile today. If a future re-pin adds
-    # one, it MUST byte-match our audited copy or the install is not the one
+    # one, it MUST byte-match our reviewed copy or the install is not the one
     # we vetted — fail loudly rather than silently install something else.
     if ! diff -q "$COMMITTED_LOCK" "$CLONE_LOCK" > /dev/null 2>&1; then
         fail "Lockfile drift detected."
@@ -207,7 +217,20 @@ fi
 # and package.json are out of sync — that IS the drift check for the pinned
 # package.json (the SHA assertion above fixes package.json content).
 info "Installing dependencies: npm ci (deterministic, lockfile-pinned)…"
-( cd "$MINDCRAFT_DIR" && npm ci )
+NPM_CI_LOG="$(mktemp -t mindcraft-npm-ci.XXXXXX)"
+if ! ( cd "$MINDCRAFT_DIR" && npm ci 2>&1 | tee "$NPM_CI_LOG" ); then
+    fail "npm ci failed. See the output above."
+    exit 1
+fi
+if grep -q \
+    -e '^\*\*ERROR\*\* Failed to apply patch' \
+    -e 'Warning: patch-package detected a patch file version mismatch' \
+    "$NPM_CI_LOG"; then
+    fail "patch-package reported a failed patch or version mismatch during npm ci."
+    info "  The vendored lockfile must resolve package versions that match upstream patches."
+    info "  Refresh scripts/minecraft/mindcraft-package-lock.json and re-run."
+    exit 1
+fi
 
 ok "Mindcraft installed deterministically at the pinned commit."
 info "Next: E3-2 (#534) points one stock bot at the E2 server. This issue stops"

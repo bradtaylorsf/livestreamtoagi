@@ -29,6 +29,14 @@ FORK_DOC = REPO_ROOT / "docs" / "minecraft" / "mindcraft-fork.md"
 
 PINNED_SHA = "35be480b4cc0bca990278e6103a1426392559d96"
 FORK_URL = "https://github.com/bradtaylorsf/mindcraft"
+PATCHED_PACKAGE_VERSIONS = {
+    "minecraft-data": "3.97.0",
+    "mineflayer": "4.33.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "mineflayer-pvp": "1.3.2",
+    "prismarine-viewer": "1.33.0",
+    "protodef": "1.19.0",
+}
 
 
 def _run(args, cwd: Path, extra_env: dict | None = None):
@@ -124,6 +132,30 @@ def test_committed_lockfile_exists_and_is_deterministic():
     assert data.get("name") == "mindcraft"
     # A real resolved tree, not an empty stub — guards an accidental truncation.
     assert len(data.get("packages", {})) > 1
+
+
+def test_committed_lockfile_pins_upstream_patch_targets():
+    """The lockfile must resolve package versions matching upstream patches."""
+    data = json.loads(LOCKFILE.read_text())
+    packages = data.get("packages", {})
+    for package_name, expected_version in PATCHED_PACKAGE_VERSIONS.items():
+        package = packages.get(f"node_modules/{package_name}")
+        assert package is not None, f"{package_name} missing from lockfile"
+        assert package.get("version") == expected_version, (
+            f"{package_name} must stay pinned to the upstream patch target"
+        )
+
+
+def test_script_fails_on_patch_package_errors_or_version_mismatches():
+    src = SCRIPT.read_text()
+    assert "Failed to apply patch" in src
+    assert "patch-package detected a patch file version mismatch" in src
+
+
+def test_existing_clone_origin_is_added_or_repointed_before_fetch():
+    src = SCRIPT.read_text()
+    assert "remote add origin" in src
+    assert "remote set-url origin" in src
 
 
 def test_summary_decision_doc_records_pin_and_fork():

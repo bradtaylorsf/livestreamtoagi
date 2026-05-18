@@ -9,9 +9,9 @@ command is copy-paste, and every setting is explained in plain language.
 ## What this gets you
 
 - A local clone of **our org fork** of Mindcraft, checked out at one **exact,
-  audited commit** — not a moving upstream branch.
+  reviewed commit** — not a moving upstream branch.
 - A **deterministic `npm ci` install** driven by a committed, vendored
-  lockfile, so two clean checkouts install byte-identical dependency trees.
+  lockfile, so two clean checkouts resolve the same dependency tree.
 - A repeatable setup script that refuses to install anything that isn't the
   pinned commit.
 
@@ -101,7 +101,8 @@ fork). Every install, every later patch, and every sibling issue (#534, #535,
 Upstream Mindcraft does **not** commit a lockfile, so a plain `npm install`
 would resolve different transitive versions over time. To make installs
 deterministic we generated a lockfile from the pinned `package.json` once,
-audited it, and committed it as **`scripts/minecraft/mindcraft-package-lock.json`**.
+checked it against the upstream patch targets, and committed it as
+**`scripts/minecraft/mindcraft-package-lock.json`**.
 The setup script stages that file into the clone and runs `npm ci`, which
 installs *strictly* from the lockfile and aborts if it ever drifts from the
 pinned `package.json`.
@@ -155,9 +156,17 @@ The first run clones the fork and builds native dependencies (this takes a few
 minutes — `canvas`, `gl`, and friends compile). You're done when you see:
 
 ```
+mineflayer@4.33.0 ✔
+...
 ✓ Checked out the pinned commit 35be480b4cc0bca990278e6103a1426392559d96
 ✓ Mindcraft installed deterministically at the pinned commit.
 ```
+
+You may see `npm warn EBADENGINE` lines for `mineflayer` or
+`minecraft-protocol` declaring `node: >=22`. Those warnings come from the npm
+package metadata in the pinned dependency tree; E1 still pins local validation
+to Node 20, and the setup is successful only if `patch-package` applies every
+upstream patch and the final success line appears.
 
 Re-running the script is safe: it fetches, re-pins to the same commit, and
 re-installs from the same lockfile — the result is identical.
@@ -197,7 +206,9 @@ real `setup-mindcraft.sh` run for a host with Node 20 and network.
 | `✗ Node.js not found on PATH` | No Node installed. | Do §2, open a **new** terminal. |
 | `✗ Node 22 found, but the pinned Mindcraft needs Node 20 LTS` | Wrong Node major. | Install Node 20 (`nvm install 20 && nvm use 20`); ensure `node -v` says `v20`. |
 | `✗ npm not found on PATH` | Node installed without npm (rare). | Reinstall Node 20 LTS (npm ships with it). |
+| `npm warn EBADENGINE ... node: >=22` | Some pinned Mindcraft npm packages declare a newer engine even though E1 local validation uses Node 20. | Continue only if every `patch-package` line is green and the final success line appears. |
 | `✗ Pinned-commit assertion FAILED` | The clone's `HEAD` isn't the pinned SHA. | Don't hand-edit the clone; delete `./mindcraft` and re-run. |
+| `✗ patch-package reported a failed patch or version mismatch` | The vendored lockfile resolved package versions that no longer match upstream's patch files. | Refresh `scripts/minecraft/mindcraft-package-lock.json` so patched packages match the patch filenames, then re-run. |
 | `✗ Lockfile drift detected` | A future re-pin added an upstream lockfile that differs from ours. | Re-vet and refresh `scripts/minecraft/mindcraft-package-lock.json` against the new pin, then re-run. |
 | `npm ci` fails building `canvas`/`gl` | Missing native build toolchain. | Install build tools (macOS: Xcode CLT; Debian: `build-essential` + `libcairo2-dev` etc.) and re-run. |
 | `git ... not found` | git missing. | Install git, then re-run. |
