@@ -1,0 +1,484 @@
+#!/usr/bin/env bash
+# Launch ONE Mindcraft bot wired to the Python bridge (E4-4 / #543 spike).
+#
+# This is the committed launch script referenced by
+# docs/minecraft/mindcraft-bridge-client.md. It proves decision 0005's bridge
+# extension point end-to-end: a Node bot opens an authenticated WebSocket to the
+# E4-3 FastAPI bridge endpoint and the in-game `!bridgePing("hi")` action
+# round-trips a contract envelope and logs the Python `pong`.
+#
+# `./mindcraft` is git-ignored, so the committed artifacts are the settings
+# template, the local-only bridge profile, and the bridge client + action under
+# scripts/minecraft/fork-src/. This script STAGES them into the clone — exactly
+# the copy-in pattern connect-stock-bot.sh uses for settings.js / the mcdata
+# shim. The pinned tree is restored on exit (the bridge files removed, the
+# patched actions.js + mcdata.js reverted) so the clone stays clean.
+#
+# Pinned defaults come from the E1 decisions:
+#   - Fork commit: 35be480b4cc0bca990278e6103a1426392559d96  (E1-R1 → docs/decisions/0001)
+#   - Node:        20 LTS                                     (E1-R1 → docs/decisions/0001)
+#   - Minecraft:   1.21.6                                     (E1-R1 → docs/decisions/0001)
+#   - host/port:   127.0.0.1 : 25565  (E2 start-server.sh default; localhost only)
+#   - auth:        offline   (E1-R2 → docs/decisions/0002 — matches online-mode=false)
+#   - bridge:      ws://127.0.0.1:8010/api/minecraft/bridge/ws  (decision 0010 §1)
+# Models are LOCAL ONLY (LM Studio, decision 0003): zero external spend. No
+# openrouter/... here. The bridge bearer token is NEVER committed.
+#
+# Usage:
+#   scripts/minecraft/connect-bridge-bot.sh            # stage + launch the bridge bot
+#   scripts/minecraft/connect-bridge-bot.sh --dry-run  # print resolved plan; no clone/network/launch
+#   scripts/minecraft/connect-bridge-bot.sh --verify   # static asset checks only (CI/network-safe)
+#   scripts/minecraft/connect-bridge-bot.sh --help
+#
+# Configuration (environment variables):
+#   MINECRAFT_BRIDGE_TOKEN  Shared bearer secret (REQUIRED for a real run; must
+#                           match the server's MINECRAFT_BRIDGE_TOKEN). Never
+#                           printed, never committed.
+#   MINECRAFT_BRIDGE_URL    Bridge WebSocket URL
+#                           (default: ws://127.0.0.1:8010/api/minecraft/bridge/ws)
+#   MINDCRAFT_DIR           Where the pinned clone lives  (default: ./mindcraft)
+#   MC_HOST                 E2 server host                (default: 127.0.0.1)
+#   MC_PORT                 E2 server port                (default: 25565)
+#   MINDCRAFT_PROFILE       Profile path inside the clone (default: ./profiles/bridge-bot.json)
+#   LOCAL_LLM_BASE_URL      LM Studio URL for the PRE-FLIGHT reachability check
+#                           only (pnpm llm:local --list-only).
+#                           (default: http://localhost:1234/v1)
+#   LOCAL_LLM_MODEL         LM Studio model id for the conversation tier (REQUIRED for a real run)
+#   LOCAL_LLM_MODEL_BUILDING  LM Studio model id for the building/code tier (default: = LOCAL_LLM_MODEL)
+#
+# A real run requires the E2 server running, the pinned fork installed, LM
+# Studio reachable, and the FastAPI bridge endpoint (E4-3) up with a matching
+# MINECRAFT_BRIDGE_TOKEN. The bot username is fixed as "BridgeBot"; with the E2
+# default white-list=true you must whitelist it (this script prints the command).
+set -euo pipefail
+
+# ── Pinned E1 defaults (kept in sync with docs/decisions/0001 & 0002) ──
+MINDCRAFT_COMMIT="${MINDCRAFT_COMMIT:-35be480b4cc0bca990278e6103a1426392559d96}"
+MINDCRAFT_DIR="${MINDCRAFT_DIR:-./mindcraft}"
+REQUIRED_NODE_MAJOR="20"
+MC_VERSION="1.21.6"                       # E1-R1 / decisions 0001
+MC_HOST="${MC_HOST:-127.0.0.1}"           # E1-R2 / decisions 0002 — localhost only
+MC_PORT="${MC_PORT:-25565}"               # E2 start-server.sh default
+MC_AUTH="offline"                         # E1-R2 / decisions 0002
+MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/bridge-bot.json}"
+LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
+MINDCRAFT_LLM_URL="http://localhost:1234/v1"   # where the bot actually connects
+BRIDGE_BOT_NAME="BridgeBot"               # MUST match "name" in profiles/bridge-bot.json
+
+# ── Bridge defaults (decision 0010 §1/§4) ──
+MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
+# MINECRAFT_BRIDGE_TOKEN is intentionally NOT defaulted: fail closed if unset
+# for a real run. Never echo its value.
+
+MCDATA_REL="src/utils/mcdata.js"
+MCDATA_VERSION_PATCH_MARKER="LTAG E3-2 runtime version refresh"
+ACTIONS_REL="src/agent/commands/actions.js"
+ACTIONS_PATCH_MARKER="LTAG E4-4 bridge ping action"
+BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
+BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
+
+MINDCRAFT_DIR_ABS=""
+MCDATA_BACKUP=""
+MCDATA_PATH=""
+ACTIONS_BACKUP=""
+ACTIONS_PATH=""
+BRIDGE_CLIENT_DEST=""
+BRIDGE_ACTION_DEST=""
+
+# Resolve the committed templates relative to THIS script (not the caller's
+# cwd) so the reviewed copies are used no matter where it is invoked.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SETTINGS_TEMPLATE="$SCRIPT_DIR/mindcraft-settings.js"
+PROFILE_TEMPLATE="$SCRIPT_DIR/profiles/bridge-bot.json"
+FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
+BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
+BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
+
+MODE="run"
+case "${1:-}" in
+    --dry-run) MODE="dry-run" ;;
+    --verify)  MODE="verify" ;;
+    --help|-h)
+        awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"
+        exit 0
+        ;;
+    "") ;;
+    *)
+        echo "✗ Unknown argument: $1 (try --help)" >&2
+        exit 2
+        ;;
+esac
+
+ok()   { echo "✓ $*"; }
+info() { echo "  $*"; }
+fail() { echo "✗ $*" >&2; }
+
+# Restore the disposable clone: revert the patched/copied files so a re-run (or
+# any other launch script) sees the pinned tree, same trap pattern as the
+# mcdata shim in connect-stock-bot.sh.
+restore_clone_patches() {
+    if [ -n "${MCDATA_BACKUP:-}" ] && [ -f "$MCDATA_BACKUP" ] && [ -n "${MCDATA_PATH:-}" ]; then
+        cp "$MCDATA_BACKUP" "$MCDATA_PATH" 2> /dev/null || true
+        rm -f "$MCDATA_BACKUP"
+    fi
+    if [ -n "${ACTIONS_BACKUP:-}" ] && [ -f "$ACTIONS_BACKUP" ] && [ -n "${ACTIONS_PATH:-}" ]; then
+        cp "$ACTIONS_BACKUP" "$ACTIONS_PATH" 2> /dev/null || true
+        rm -f "$ACTIONS_BACKUP"
+    fi
+    [ -n "${BRIDGE_CLIENT_DEST:-}" ] && rm -f "$BRIDGE_CLIENT_DEST" 2> /dev/null || true
+    [ -n "${BRIDGE_ACTION_DEST:-}" ] && rm -f "$BRIDGE_ACTION_DEST" 2> /dev/null || true
+}
+
+# ── Node / npm check (identical posture to connect-stock-bot.sh) ──
+node_major() {
+    command -v node > /dev/null 2>&1 || return 1
+    local out major
+    out="$(node -v 2>&1)" || return 1
+    major="$(printf '%s\n' "$out" | sed -nE 's/^v?([0-9]+).*/\1/p')"
+    [ -n "$major" ] || return 1
+    printf '%s\n' "$major"
+}
+
+check_node() {
+    local node_m
+    node_m="$(node_major || true)"
+    if [ -z "${node_m:-}" ]; then
+        fail "Node.js not found on PATH. Install Node ${REQUIRED_NODE_MAJOR} LTS:"
+        info "  nvm:   nvm install ${REQUIRED_NODE_MAJOR} && nvm use ${REQUIRED_NODE_MAJOR}"
+        info "  See docs/minecraft/mindcraft-bridge-client.md for details."
+        return 1
+    fi
+    if [ "$node_m" != "$REQUIRED_NODE_MAJOR" ]; then
+        fail "Node ${node_m} found, but the pinned Mindcraft needs Node ${REQUIRED_NODE_MAJOR} LTS."
+        info "  Mindcraft warns Node 24+ breaks native deps; we pin ${REQUIRED_NODE_MAJOR} (E1-R1)."
+        info "  Install Node ${REQUIRED_NODE_MAJOR} and retry."
+        return 1
+    fi
+    if ! command -v npm > /dev/null 2>&1; then
+        fail "npm not found on PATH (it ships with Node ${REQUIRED_NODE_MAJOR})."
+        return 1
+    fi
+    ok "Node ${node_m} + npm $(npm -v) detected (need Node ${REQUIRED_NODE_MAJOR})"
+}
+
+# ── Static assertions on the committed assets (no Node/net/git) ──
+# Defense-in-depth; the strict checks live in
+# tests/backend/test_bridge_node_client.py.
+verify_committed_assets() {
+    local problems=0
+
+    if [ ! -s "$SETTINGS_TEMPLATE" ]; then
+        fail "Settings template missing or empty: $SETTINGS_TEMPLATE"; problems=1
+    else
+        grep -q '"host": "127.0.0.1"'   "$SETTINGS_TEMPLATE" || { fail "template host is not 127.0.0.1"; problems=1; }
+        grep -q '"port": 25565'         "$SETTINGS_TEMPLATE" || { fail "template port is not 25565"; problems=1; }
+        grep -q '"auth": "offline"'     "$SETTINGS_TEMPLATE" || { fail "template auth is not offline"; problems=1; }
+        grep -q '"minecraft_version": "1.21.6"' "$SETTINGS_TEMPLATE" || { fail "template minecraft_version is not 1.21.6"; problems=1; }
+    fi
+
+    if [ ! -s "$PROFILE_TEMPLATE" ]; then
+        fail "Bridge profile missing or empty: $PROFILE_TEMPLATE"; problems=1
+    else
+        grep -q "\"name\": \"${BRIDGE_BOT_NAME}\"" "$PROFILE_TEMPLATE" || { fail "profile name is not ${BRIDGE_BOT_NAME}"; problems=1; }
+        grep -q '"model": "lmstudio/'      "$PROFILE_TEMPLATE" || { fail "profile model is not an lmstudio/ id"; problems=1; }
+        grep -q '"code_model": "lmstudio/' "$PROFILE_TEMPLATE" || { fail "profile code_model is not an lmstudio/ id"; problems=1; }
+        if grep -q 'openrouter/' "$PROFILE_TEMPLATE"; then
+            fail "profile must NOT reference openrouter/ — local validation only"; problems=1
+        fi
+    fi
+
+    if [ ! -s "$BRIDGE_CLIENT_SRC" ]; then
+        fail "Bridge client missing or empty: $BRIDGE_CLIENT_SRC"; problems=1
+    else
+        grep -q '/api/minecraft/bridge/ws' "$BRIDGE_CLIENT_SRC" || { fail "client missing the bridge endpoint path"; problems=1; }
+        grep -q 'Bearer'                   "$BRIDGE_CLIENT_SRC" || { fail "client missing bearer-token auth"; problems=1; }
+        grep -q 'MINECRAFT_BRIDGE_TOKEN'   "$BRIDGE_CLIENT_SRC" || { fail "client does not read MINECRAFT_BRIDGE_TOKEN"; problems=1; }
+        grep -q 'request_id'               "$BRIDGE_CLIENT_SRC" || { fail "client missing request_id envelope field"; problems=1; }
+        grep -q 'deadline_ms'              "$BRIDGE_CLIENT_SRC" || { fail "client missing deadline_ms envelope field"; problems=1; }
+        grep -q 'cost_context'             "$BRIDGE_CLIENT_SRC" || { fail "client missing cost_context envelope field"; problems=1; }
+        grep -q 'setTimeout'               "$BRIDGE_CLIENT_SRC" || { fail "client missing a local deadline timeout"; problems=1; }
+        grep -q 'BridgeClientError'        "$BRIDGE_CLIENT_SRC" || { fail "client missing the structured error type"; problems=1; }
+        if grep -q 'openrouter' "$BRIDGE_CLIENT_SRC"; then
+            fail "bridge client must NOT reference openrouter"; problems=1
+        fi
+    fi
+
+    if [ ! -s "$BRIDGE_ACTION_SRC" ]; then
+        fail "Bridge action missing or empty: $BRIDGE_ACTION_SRC"; problems=1
+    else
+        grep -q "'!bridgePing'" "$BRIDGE_ACTION_SRC" || { fail "action name is not !bridgePing"; problems=1; }
+        grep -q 'callBridge'    "$BRIDGE_ACTION_SRC" || { fail "action does not call callBridge"; problems=1; }
+        grep -q 'try {'         "$BRIDGE_ACTION_SRC" || { fail "action is not wrapped to never crash the bot"; problems=1; }
+    fi
+
+    return $problems
+}
+
+# ── (b) Resolve + print config (shared by every mode) ──
+ok "Bridge Mindcraft bot → E2 server + Python bridge"
+info "bot name:  $BRIDGE_BOT_NAME  (fixed; whitelist this exact name)"
+info "server:    ${MC_HOST}:${MC_PORT}  auth=${MC_AUTH}  minecraft=${MC_VERSION}"
+info "bridge:    ${MINECRAFT_BRIDGE_URL}  (bearer token via MINECRAFT_BRIDGE_TOKEN)"
+info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
+info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
+info "client:    staged → $BRIDGE_CLIENT_REL  (from fork-src/)"
+info "action:    !bridgePing injected into $ACTIONS_REL"
+info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (local only, decision 0003)"
+
+# ── --verify: static, CI/network-safe checks only ──
+if [ "$MODE" = "verify" ]; then
+    if verify_committed_assets; then
+        ok "Static verify passed: settings → E2 server, bridge profile is"
+        info "local-only (lmstudio/), python_bridge.js carries the envelope fields,"
+        info "bearer auth, bridge endpoint, a deadline timeout and a structured"
+        info "error type, and !bridgePing is wrapped so a failure never crashes."
+        info "(No clone, no network, no Node, no launch — drop --verify to connect.)"
+        exit 0
+    fi
+    fail "Static verify FAILED — see messages above."
+    exit 1
+fi
+
+LLM_MODEL="${LOCAL_LLM_MODEL:-}"
+LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LLM_MODEL}"
+
+# ── --dry-run: print the resolved plan, do NOT clone/network/launch ──
+if [ "$MODE" = "dry-run" ]; then
+    check_node || true
+    verify_committed_assets || true
+    echo
+    ok "Dry run complete — no clone, no network, nothing launched."
+    info "host:        $MC_HOST"
+    info "port:        $MC_PORT"
+    info "auth:        $MC_AUTH"
+    info "minecraft:   $MC_VERSION"
+    info "bridge url:  $MINECRAFT_BRIDGE_URL"
+    if [ -n "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
+        info "bridge token: set (value hidden)"
+    else
+        info "bridge token: (MINECRAFT_BRIDGE_TOKEN unset — REQUIRED for a real run)"
+    fi
+    info "profile:     $MINDCRAFT_PROFILE  (bot name $BRIDGE_BOT_NAME)"
+    if [ -n "$LLM_MODEL" ]; then
+        info "model:       lmstudio/$LLM_MODEL  (conversation tier)"
+        info "code_model:  lmstudio/$LLM_MODEL_BUILDING  (building tier)"
+    else
+        info "model:       (LOCAL_LLM_MODEL unset — REQUIRED for a real run;"
+        info "             list ids with: pnpm llm:local --list-only)"
+    fi
+    info "Would assert: $MINDCRAFT_DIR HEAD == $MINDCRAFT_COMMIT"
+    info "Would stage:  $SETTINGS_TEMPLATE → $MINDCRAFT_DIR/settings.js"
+    info "Would stage:  $PROFILE_TEMPLATE  → $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
+    info "Would copy:   fork-src/ → $MINDCRAFT_DIR/$BRIDGE_CLIENT_REL + $BRIDGE_ACTION_REL"
+    info "Would patch:  inject bridgePingAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
+    info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL (restored on exit)"
+    info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
+    exit 0
+fi
+
+# ── Real run ──
+verify_committed_assets || { fail "Refusing to launch with bad committed assets."; exit 1; }
+check_node || exit 1
+command -v git > /dev/null 2>&1 || { fail "git not found on PATH."; exit 1; }
+
+# (a) The pinned fork must already be installed (E3-1 / #533).
+if [ ! -d "$MINDCRAFT_DIR/.git" ]; then
+    fail "No Mindcraft clone at $MINDCRAFT_DIR."
+    info "  Install the pinned fork first:  scripts/minecraft/setup-mindcraft.sh"
+    exit 1
+fi
+HEAD_SHA="$(git -C "$MINDCRAFT_DIR" rev-parse HEAD 2>/dev/null || true)"
+if [ "$HEAD_SHA" != "$MINDCRAFT_COMMIT" ]; then
+    fail "Clone is not at the pinned commit — refusing to launch an unpinned tree."
+    info "  HEAD is     ${HEAD_SHA:-<unknown>}"
+    info "  expected    $MINDCRAFT_COMMIT"
+    info "  Re-pin with: scripts/minecraft/setup-mindcraft.sh"
+    exit 1
+fi
+ok "Clone is at the pinned commit $MINDCRAFT_COMMIT"
+MINDCRAFT_DIR_ABS="$(cd -- "$MINDCRAFT_DIR" && pwd)"
+
+# (b) Fail closed on a missing bridge token (decision 0010 §4 — no anonymous
+#     path). Checked BEFORE the LLM model so the security boundary is first.
+if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
+    fail "MINECRAFT_BRIDGE_TOKEN is not set — the bridge has NO unauthenticated path."
+    info "  Export the SAME shared secret the FastAPI bridge server uses:"
+    info "    export MINECRAFT_BRIDGE_TOKEN=<the-server-secret>"
+    info "  (decision 0010 §4: bearer token is the auth boundary, not agent_id)"
+    exit 1
+fi
+
+# (c) The conversation model is mandatory for a real run (local LM Studio only).
+if [ -z "$LLM_MODEL" ]; then
+    fail "LOCAL_LLM_MODEL is not set — a real run needs a local LM Studio model id."
+    info "  List the models LM Studio is serving, then export one:"
+    info "    pnpm llm:local --list-only"
+    info "    export LOCAL_LLM_MODEL=<model-id-from-the-list>"
+    info "  This keeps validation 100% local — zero external model spend (decision 0003)."
+    exit 1
+fi
+
+# (d) Stage settings.js (host/port/profile substituted; everything else the
+#     reviewed template verbatim). Line-anchored so the header is untouched.
+DEST_SETTINGS="$MINDCRAFT_DIR_ABS/settings.js"
+if ! sed -E \
+    -e "s|^([[:space:]]*\"host\":[[:space:]]*\")[^\"]*(\".*)$|\1${MC_HOST}\2|" \
+    -e "s|^([[:space:]]*\"port\":[[:space:]]*)[0-9]+(,.*)$|\1${MC_PORT}\2|" \
+    -e "s|^([[:space:]]*\")\\./profiles/stock-bot\\.json(\".*)$|\1${MINDCRAFT_PROFILE}\2|" \
+    "$SETTINGS_TEMPLATE" > "$DEST_SETTINGS"; then
+    fail "Failed to stage settings.js → $DEST_SETTINGS"
+    exit 1
+fi
+ok "Staged settings.js → $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profile=${MINDCRAFT_PROFILE})"
+
+# (e) Stage the profile with the LM Studio model ids substituted in.
+DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
+mkdir -p "$(dirname -- "$DEST_PROFILE")"
+if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const templatePath = process.env.TEMPLATE_PATH;
+const destPath = process.env.DEST_PATH;
+const chatModel = process.env.CHAT_MODEL;
+const codeModel = process.env.CODE_MODEL;
+const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
+
+if (
+    profile.model !== 'lmstudio/__LOCAL_LLM_MODEL__' ||
+    profile.code_model !== 'lmstudio/__LOCAL_LLM_MODEL_BUILDING__'
+) {
+    throw new Error('bridge-bot profile template lost its local model placeholders');
+}
+
+profile.model = `lmstudio/${chatModel}`;
+profile.code_model = `lmstudio/${codeModel}`;
+writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
+NODE
+then
+    fail "Failed to stage profile → $DEST_PROFILE"
+    exit 1
+fi
+ok "Staged profile → $DEST_PROFILE"
+info "  model:      lmstudio/${LLM_MODEL}        (conversation tier — decision 0003)"
+info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 0003)"
+
+# (f) Copy the committed bridge client + action verbatim into the clone (the
+#     decision 0005 extension points). Removed again on exit.
+BRIDGE_CLIENT_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_CLIENT_REL"
+BRIDGE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_ACTION_REL"
+mkdir -p "$(dirname -- "$BRIDGE_CLIENT_DEST")" "$(dirname -- "$BRIDGE_ACTION_DEST")"
+cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
+cp "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_DEST"
+ok "Copied bridge client → $BRIDGE_CLIENT_REL"
+ok "Copied bridge action → $BRIDGE_ACTION_REL"
+
+# (g) Inject bridgePingAction into the actionsList array via an anchored
+#     node-driven patch. Backed up + restored on exit (the mcdata shim pattern).
+ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
+if [ ! -f "$ACTIONS_PATH" ]; then
+    fail "Mindcraft source file missing: $ACTIONS_PATH"
+    exit 1
+fi
+if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH"; then
+    info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
+        fail "Could not restore pinned $ACTIONS_REL before patching."
+        exit 1
+    fi
+fi
+ACTIONS_BACKUP="$(mktemp -t mindcraft-actions.XXXXXX)"
+cp "$ACTIONS_PATH" "$ACTIONS_BACKUP"
+trap restore_clone_patches EXIT
+trap 'restore_clone_patches; exit 130' INT
+trap 'restore_clone_patches; exit 143' TERM
+if ! ACTIONS_PATH="$ACTIONS_PATH" ACTIONS_PATCH_MARKER="$ACTIONS_PATCH_MARKER" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.ACTIONS_PATH;
+const marker = process.env.ACTIONS_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+
+// Anchor on the exact array opener at the pinned commit
+// (mindcraft-bots/mindcraft@35be480 src/agent/commands/actions.js L28).
+const anchor = 'export const actionsList = [';
+if (!source.includes(anchor)) {
+    throw new Error('actionsList anchor not found — pinned fork shape changed');
+}
+if (!source.includes(marker)) {
+    const importLine =
+        `import { bridgePingAction } from './bridge_ping_action.js'; // ${marker}\n`;
+    source = importLine + source;
+    source = source.replace(anchor, `${anchor}\n    bridgePingAction, // ${marker}`);
+    writeFileSync(path, source);
+}
+NODE
+then
+    fail "Failed to inject bridgePingAction into $ACTIONS_REL"
+    exit 1
+fi
+ok "Injected !bridgePing into $ACTIONS_REL"
+info "  Restores $ACTIONS_REL automatically when this launch exits."
+
+# (h) Runtime-version shim (identical to connect-stock-bot.sh — same marker /
+#     restore). The pinned fork reads minecraft_version at module import,
+#     before the child agent receives settings.
+MCDATA_PATH="$MINDCRAFT_DIR_ABS/$MCDATA_REL"
+if [ ! -f "$MCDATA_PATH" ]; then
+    fail "Mindcraft source file missing: $MCDATA_PATH"
+    exit 1
+fi
+if grep -q "$MCDATA_VERSION_PATCH_MARKER" "$MCDATA_PATH"; then
+    info "Found a previous runtime-version shim in $MCDATA_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$MCDATA_REL" > "$MCDATA_PATH"; then
+        fail "Could not restore pinned $MCDATA_REL before applying runtime-version shim."
+        exit 1
+    fi
+fi
+if ! grep -q 'let mc_version = settings.minecraft_version;' "$MCDATA_PATH"; then
+    fail "Mindcraft source shape changed; cannot apply runtime-version shim."
+    info "  Expected to find: let mc_version = settings.minecraft_version;"
+    exit 1
+fi
+MCDATA_BACKUP="$(mktemp -t mindcraft-mcdata.XXXXXX)"
+cp "$MCDATA_PATH" "$MCDATA_BACKUP"
+MCDATA_PATH="$MCDATA_PATH" MCDATA_VERSION_PATCH_MARKER="$MCDATA_VERSION_PATCH_MARKER" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.MCDATA_PATH;
+const marker = process.env.MCDATA_VERSION_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+
+source = source.replace(
+    'let mc_version = settings.minecraft_version;',
+    `let mc_version = null; // ${marker}: settings arrive after module import`
+);
+
+const initNeedle = 'export function initBot(username) {\n';
+const initPatch = `export function initBot(username) {\n    mc_version = settings.minecraft_version; // ${marker}\n`;
+if (!source.includes(initPatch)) {
+    if (!source.includes(initNeedle)) {
+        throw new Error('initBot signature not found while applying runtime-version shim');
+    }
+    source = source.replace(initNeedle, initPatch);
+}
+
+writeFileSync(path, source);
+NODE
+ok "Staged Mindcraft runtime-version shim → $MCDATA_PATH"
+info "  Restores $MCDATA_REL automatically when this launch exits."
+
+# (i) Whitelist reminder (E2 server defaults white-list=true).
+echo
+info "── Whitelist (E2 server defaults to white-list=true) ──"
+info "In the E2 server console, run exactly:"
+info "    whitelist add ${BRIDGE_BOT_NAME}"
+info "Skipping this → the bot connects then is kicked with 'not whitelisted'."
+echo
+
+# (j) Launch.
+ok "Launching ${BRIDGE_BOT_NAME} → ${MC_HOST}:${MC_PORT} … (Ctrl+C to stop)"
+info "Then in Minecraft chat:  ${BRIDGE_BOT_NAME} !bridgePing(\"hello\")"
+info "Success: the bot logs 'bridge pong: hello'; the Python bridge logs the"
+info "agent_id + request_id. A bridge failure is logged [error.code] — not a crash."
+cd "$MINDCRAFT_DIR_ABS"
+node main.js --profiles "$MINDCRAFT_PROFILE"
