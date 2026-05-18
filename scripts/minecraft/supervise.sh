@@ -102,7 +102,7 @@ STOP_REQUESTED=0
 CHILD_PID=""
 
 # Invoked via the trap below (not called directly).
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 on_signal() {
     STOP_REQUESTED=1
     log "supervisor: stop requested (signal) — stopping the server, NOT restarting"

@@ -135,9 +135,11 @@ if [ "$MODE" = "self-test" ]; then
     fi
 
     PORT_FILE="$(mktemp)"
-    # shellcheck disable=SC2329  # invoked indirectly via the trap below
+    # shellcheck disable=SC2317,SC2329  # invoked indirectly via the trap below
     cleanup_selftest() {
-        [ -n "${LISTENER_PID:-}" ] && kill "$LISTENER_PID" 2> /dev/null || true
+        if [ -n "${LISTENER_PID:-}" ]; then
+            kill "$LISTENER_PID" 2> /dev/null || true
+        fi
         rm -f "$PORT_FILE"
     }
     trap cleanup_selftest EXIT

@@ -144,21 +144,14 @@ def test_existing_server_properties_is_not_clobbered(tmp_path):
 
 
 def test_run_mode_without_java_fails_loudly(tmp_path):
-    """A real run must hard-fail with an install hint when Java is absent.
-
-    Skipped on hosts that actually have Java 21, where the script would
-    correctly proceed past the Java gate instead.
-    """
-    probe = subprocess.run(
-        ["bash", "-c", 'java -version 2>&1 | head -1'],
-        capture_output=True,
-        text=True,
-    )
-    if 'version "21' in probe.stdout:
-        pytest.skip("Java 21 present on host; Java-gate path not exercised")
-
+    """A real run must hard-fail with an install hint when Java is absent."""
     server_dir = tmp_path / "mc"
-    proc = _run([], server_dir)
+    fake_path = tmp_path / "bin"
+    fake_path.mkdir()
+    (fake_path / "bash").symlink_to(shutil.which("bash") or "/bin/bash")
+    (fake_path / "dirname").symlink_to(shutil.which("dirname") or "/usr/bin/dirname")
+
+    proc = _run([], server_dir, {"PATH": str(fake_path)})
 
     assert proc.returncode == 1
     assert "Java not found" in proc.stderr  # the failure line → stderr

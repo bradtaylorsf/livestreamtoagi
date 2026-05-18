@@ -221,8 +221,11 @@ if [ "$MODE" = "smoke" ]; then
     # Hold the FIFO open so the JVM's stdin does not get EOF before we send stop.
     sleep 100000 > "$PIPE" &
     HOLDER=$!
-    # shellcheck disable=SC2329  # invoked indirectly via the trap below
-    cleanup() { kill "$HOLDER" 2> /dev/null || true; rm -f "$PIPE"; }
+    # shellcheck disable=SC2317,SC2329  # invoked indirectly via the trap below
+    cleanup() {
+        kill "$HOLDER" 2> /dev/null || true
+        rm -f "$PIPE"
+    }
     trap cleanup EXIT
 
     info "Smoke boot (timeout ${SMOKE_TIMEOUT}s)…"
