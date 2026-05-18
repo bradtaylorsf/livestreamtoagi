@@ -42,8 +42,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors.
-PROTOCOL_VERSION = "1.0"
+# additive-compatible within a major and fail-closed across majors. 1.1 is a
+# minor bump: E4-7 (#546) adds the optional `trace_id` correlation field to
+# both envelopes. It is purely additive — `is_supported_version` only gates on
+# the major, so a 1.0 peer that omits `trace_id` stays wire-compatible.
+PROTOCOL_VERSION = "1.1"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -171,6 +174,15 @@ class BridgeRequest(BaseModel):
     )
     deadline_ms: int = Field(gt=0, description="Caller's hard deadline in milliseconds (ADR §5).")
     cost_context: CostContext = Field(description="Cost-attribution hints (ADR §2).")
+    trace_id: str | None = Field(
+        default=None,
+        description=(
+            "End-to-end correlation id for cross-language tracing (E4-7, #546). "
+            "Optional and additive (ADR §3 minor bump, protocol 1.1): a 1.0 peer "
+            "omits it. The server mints one when absent so a request is always "
+            "traceable in both Node and Python logs by a single id."
+        ),
+    )
 
 
 class BridgeResponse(BaseModel):
@@ -191,6 +203,14 @@ class BridgeResponse(BaseModel):
     error: BridgeError | None = Field(default=None, description="Typed error when ok is False.")
     retryable: bool = Field(
         default=False, description="Whether the caller may safely retry (ADR §5)."
+    )
+    trace_id: str | None = Field(
+        default=None,
+        description=(
+            "Echoes the request's correlation id (or the one the server minted "
+            "when the request omitted it) so the same trace id appears on both "
+            "halves of the round-trip (E4-7, #546). Optional/additive (ADR §3)."
+        ),
     )
 
 

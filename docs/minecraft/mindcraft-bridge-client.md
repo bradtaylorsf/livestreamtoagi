@@ -35,9 +35,12 @@ point, proven end to end. E4-5 (#544) adds the resilience policy that keeps a
   Each *successful* call is still its own one-shot `connect → send → await →
   close`; E4-5 adds only one extra socket — the single background reconnect
   probe — and never more than one at a time.
-- **The perception/action result channel and observability/trace IDs** — E4-6 /
-  E4-7. Real `memory.*` / `management.*` / `cost.*` wiring is E5/E8; the server
-  side is still the E4-3 stub.
+- **The perception/action result channel** — E4-6
+  ([#545](https://github.com/bradtaylorsf/livestreamtoagi/issues/545)). Real
+  `memory.*` / `management.*` / `cost.*` wiring is E5/E8; the server side is
+  still the E4-3 stub. (Observability/trace IDs — E4-7
+  ([#546](https://github.com/bradtaylorsf/livestreamtoagi/issues/546)) — *is*
+  now part of this client: see [Observability](#observability-e4-7).)
 
 ## How the client is staged
 
@@ -61,10 +64,11 @@ mcdata shim) so the pinned tree stays clean and re-runnable.
 
 Fixed by ADR [`0010-bridge-protocol.md`](../decisions/0010-bridge-protocol.md)
 and the versioned contract (`core/bridge/contract.py`, E4-2). The client builds
-a contract-valid `BridgeRequest`: `version:"1.0"`, a unique `request_id`,
+a contract-valid `BridgeRequest`: `version:"1.1"`, a unique `request_id`,
 `agent_id`, `run_id`/`simulation_id`, `service`, `method`, `payload`,
-`deadline_ms`, and `cost_context:{agent_tier:"conversation",
-budget_bucket:"bridge", estimated_cost_usd:0.0}`. It correlates the response by
+`deadline_ms`, `cost_context:{agent_tier:"conversation",
+budget_bucket:"bridge", estimated_cost_usd:0.0}`, and an additive `trace_id`
+(E4-7 — see [Observability](#observability-e4-7)). It correlates the response by
 `request_id`, enforces a **local timeout == `deadline_ms`**, and on any
 auth/handshake/protocol/`ok:false` failure rejects with a typed
 `BridgeClientError` carrying a stable `code` — it **fails closed** and never
@@ -124,6 +128,37 @@ Mindcraft lockfile is frozen).
 | --- | --- | --- |
 | `bridge_unreachable` | Circuit open — Python is down; failing fast (no socket, no deadline). Retryable; the background probe is auto-recovering. | **Safe-idle**, no in-world action. |
 | `bridge_overloaded` | In-flight cap (`MINECRAFT_BRIDGE_MAX_INFLIGHT`) reached — fail-closed backpressure. Retryable once load drops. | **Safe-idle**, no in-world action. |
+
+## Observability (E4-7)
+
+Debugging a cross-language 24/7 system needs **correlation**: one request must
+be followable through both the Node logs and the Python logs by a single id.
+E4-7 ([#546](https://github.com/bradtaylorsf/livestreamtoagi/issues/546)) adds
+that with **no wire-contract change** — only the additive `trace_id`
+(protocol 1.1) and instrumentation. No new npm dependency (the lockfile is
+frozen): the logger is a stderr write and the metrics are a plain module
+object.
+
+- **One trace id, end to end.** `!bridgePing` mints `trace-<uuid>` and passes
+  it to `callBridge`, which puts it in the envelope; the Python server echoes
+  it back (or mints one if a caller ever omits it). The action's
+  `[bridgePing trace=<id>]` log lines, the client's structured logs, and the
+  Python server logs therefore all carry the **same** id. Reuse one
+  `traceId` across related `callBridge` calls to tie a whole chain together.
+- **Structured logs (stderr).** Every `callBridge` emits one fixed
+  `key=value` line at *start* and on *every* settle path — prefix
+  `bridge_event`, `trace_id` first — to **stderr only** (stdout is the data
+  channel some callers parse). It mirrors the Python side
+  (`core/bridge/observability.py`) so one `grep <trace-id>` lines both logs up.
+  Logging is best-effort and **never** crashes the bot (the #543 contract).
+- **In-process metrics.** `bridgeMetrics()` returns a snapshot — calls by
+  verb, errors by code, and a latency aggregate (count/sum/max) — every
+  settled call counted exactly once so `errorsTotal / callsTotal` is the true
+  error rate. `resetBridgeMetrics()` exists for test isolation. A real
+  exporter can read the snapshot later without changing this contract.
+
+There is **no new environment variable** for observability: structured logs
+are always on (stderr) and the counters are in-process.
 
 ## Environment variables
 
@@ -216,7 +251,10 @@ the LM Studio model id(s) and the commands run in the issue/PR.
 - Client + action: `scripts/minecraft/fork-src/agent/bridge/python_bridge.js`,
   `scripts/minecraft/fork-src/agent/commands/bridge_ping_action.js`.
 - Profile: `scripts/minecraft/profiles/bridge-bot.json` (local-only).
-- Test: `tests/backend/test_bridge_node_client.py` (`pnpm verify:bridge-node-client`).
+- Tests: `tests/backend/test_bridge_node_client.py`
+  (`pnpm verify:bridge-node-client`); E4-7 correlation/metrics:
+  `tests/backend/test_bridge_observability.py`
+  (`pnpm verify:bridge-observability`).
 
 ### Related
 

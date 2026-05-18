@@ -29,17 +29,25 @@ Every message is one of two envelopes, with the exact field set ADR §2 fixes
 
 - **`BridgeRequest`** — `version`, `request_id`, `agent_id`, `run_id`,
   `simulation_id`, `service`, `method`, `payload`, `deadline_ms`,
-  `cost_context`. Node->Python, or Python->Node for control messages.
-- **`BridgeResponse`** — `request_id`, `ok`, `payload`, `error`, `retryable`.
-  `retryable` defaults to `false` (ADR §5: absence/ambiguity is *not*
-  retryable).
+  `cost_context`, `trace_id`. Node->Python, or Python->Node for control
+  messages.
+- **`BridgeResponse`** — `request_id`, `ok`, `payload`, `error`, `retryable`,
+  `trace_id`. `retryable` defaults to `false` (ADR §5: absence/ambiguity is
+  *not* retryable).
+
+`trace_id` is the **E4-7 (#546)** end-to-end correlation id: optional,
+defaults to `null`, an *additive* protocol-1.1 minor bump (ADR §3) — a 1.0
+peer that omits it stays wire-compatible. The server echoes the caller's
+`trace_id` or mints one when absent, so a single request is traceable across
+both the Node and Python logs by one id.
 
 `payload` is opaque at the envelope level and validated per-verb via
 `SERVICE_REGISTRY`.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.0"`. Same-major versions are wire-compatible in either
+`PROTOCOL_VERSION = "1.1"` (E4-7 added the optional `trace_id`; 1.0→1.1 is an
+additive minor bump). Same-major versions are wire-compatible in either
 direction (new fields/verbs are additive). An unknown *major* — or any
 unparseable version — is **not supported**; the server replies with the exact
 ADR §3 shape (`unsupported_version_response`): `ok=false`,
@@ -99,6 +107,30 @@ alongside `/ws`):
   is E4-5/E4-6. Each stub response is re-validated through
   `validate_response` before it goes on the wire.
 
+## Observability (E4-7)
+
+`core/bridge/observability.py` is the Python half of the cross-language
+correlation story (issue #546). It changes **no wire contract** — only adds the
+additive `trace_id` and instrumentation:
+
+- **One trace id per request.** The server resolves a single `trace_id` for
+  every settled frame — echoing the caller's, or **minting** `trace-<uuid>`
+  when the (additive) field is absent — echoes it back on the
+  `BridgeResponse`, and threads it into the E4-6 inbound emit. The Node client
+  (`python_bridge.js`) mints/propagates the same id and the
+  `!bridgePing` action tags its log lines with it, so **one request greps
+  end-to-end across both languages by a single id**.
+- **Structured logs.** Both sides emit one fixed `key=value` line per settled
+  call — prefix `bridge_event`, `trace_id` first — Python via stdlib `logging`
+  (also attached as `extra={"bridge": {...}}`), Node to **stderr** (never
+  stdout — that is a data channel). Success logs at INFO, a handled failure /
+  unparseable frame at WARNING.
+- **In-process counters.** Calls by verb, errors by code, and a latency
+  accumulator (count/sum/max, plus fixed buckets on the Python side). No
+  `prometheus`/`statsd` dependency — `bridge_metrics_snapshot()` (Python) /
+  `bridgeMetrics()` (Node) expose a JSON-safe snapshot a real exporter can read
+  later without a contract change.
+
 ## Verifying
 
 The contract test validates **both directions** (request + response) on **both
@@ -107,11 +139,14 @@ committed static fixtures in `tests/backend/fixtures/bridge/`, and guards
 against schema drift, fail-closed versioning, and an out-of-contract verb. The
 server test drives the **real endpoint** over an in-process WebSocket: every
 verb round-trips a contract-valid stub, and unauthenticated/malformed-token
-handshakes are rejected before dispatch:
+handshakes are rejected before dispatch. The observability test drives the
+**real endpoint** with the committed Node client and asserts one `trace_id`
+correlates the Node stderr logs with the Python server logs, plus the counters:
 
 ```bash
-pnpm verify:bridge-contract     # .venv/bin/pytest tests/backend/test_bridge_contract.py -v
-pnpm verify:bridge-server       # .venv/bin/pytest tests/backend/test_bridge_server.py -v
+pnpm verify:bridge-contract        # .venv/bin/pytest tests/backend/test_bridge_contract.py -v
+pnpm verify:bridge-server          # .venv/bin/pytest tests/backend/test_bridge_server.py -v
+pnpm verify:bridge-observability   # .venv/bin/pytest tests/backend/test_bridge_observability.py -v
 ```
 
 This epic step has **no LLM runtime path** (auth + schema plumbing dispatching

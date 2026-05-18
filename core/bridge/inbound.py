@@ -14,6 +14,10 @@ attributed event — and deliberately nothing downstream of it:
 * **Out of scope:** memory writes (E5) and eval consumption (E10). Those attach
   later as ordinary ``event_bus.on(...)`` subscribers — no change here.
 
+E4-7 (#546) adds the end-to-end ``trace_id`` to the emitted event's attribution
+and logs the emit with it, so a report is followable from the Node send
+through the Python bus by the same correlation id the server logged.
+
 The wire format is fixed by the E4-2 contract (:mod:`core.bridge.contract`),
 itself fixed by ADR ``docs/decisions/0010-bridge-protocol.md`` §6. The
 request/response *stub* for these verbs stays in :mod:`core.bridge.server`
@@ -29,8 +33,10 @@ Docker/network/LLM).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import uuid4
 
 from core.bridge.contract import (
     SERVICE_REGISTRY,
@@ -39,7 +45,10 @@ from core.bridge.contract import (
     PerceptionReportRequest,
     service_key,
 )
+from core.bridge.observability import log_bridge_inbound_event
 from core.event_bus import EventType, event_bus
+
+logger = logging.getLogger(__name__)
 
 # The closed set of Node->Python verbs that produce an observable event on the
 # Python side. Everything else on the bridge is a normal request/response stub
@@ -48,13 +57,27 @@ from core.event_bus import EventType, event_bus
 INBOUND_VERBS: frozenset[str] = frozenset({"perception.report", "action.result"})
 
 
-def _attribution(env: BridgeRequest) -> dict[str, str]:
+def _resolve_trace_id(env: BridgeRequest, trace_id: str | None) -> str:
+    """The correlation id for this inbound emit (E4-7, #546).
+
+    Prefer the trace id the server already resolved for the frame (passed in by
+    :mod:`core.bridge.server` so the bus event, the server log, and the wire
+    response all share one id). Fall back to the envelope's own ``trace_id``
+    (e.g. a direct handler unit-call), and finally mint one so the attribution
+    dict is always a complete ``dict[str, str]`` and never carries a ``None``.
+    """
+    return trace_id or env.trace_id or f"trace-{uuid4()}"
+
+
+def _attribution(env: BridgeRequest, trace_id: str) -> dict[str, str]:
     """Envelope-carried attribution every inbound event must carry.
 
-    request_id is the correlation/idempotency key (ADR §5); the rest tie the
-    event to the right run/simulation so E5/E10 can charge and journal it.
+    request_id is the correlation/idempotency key (ADR §5); trace_id is the
+    E4-7 end-to-end correlation id (#546); the rest tie the event to the right
+    run/simulation so E5/E10 can charge and journal it.
     """
     return {
+        "trace_id": trace_id,
         "request_id": env.request_id,
         "agent_id": env.agent_id,
         "run_id": env.run_id,
@@ -62,52 +85,76 @@ def _attribution(env: BridgeRequest) -> dict[str, str]:
     }
 
 
-async def handle_perception_report(env: BridgeRequest) -> dict[str, Any]:
+async def handle_perception_report(
+    env: BridgeRequest, trace_id: str | None = None
+) -> dict[str, Any]:
     """Emit a schema-validated ``BRIDGE_PERCEPTION`` event; ack the report.
 
     The payload was already validated by the server's ``validate_request``;
     re-parsing it into :class:`PerceptionReportRequest` here guarantees the
     emitted event body is itself contract-valid (not a raw dict that could
     drift). The return value is identical to the E4-3 stub so the contract
-    response schema stays satisfied.
+    response schema stays satisfied. ``trace_id`` (E4-7, #546) is carried on
+    the event and logged so this emit joins the frame's correlation id.
     """
     payload = PerceptionReportRequest.model_validate(env.payload)
+    tid = _resolve_trace_id(env, trace_id)
     await event_bus.emit(
         EventType.BRIDGE_PERCEPTION,
-        {**_attribution(env), "observations": payload.observations},
+        {**_attribution(env, tid), "observations": payload.observations},
+    )
+    log_bridge_inbound_event(
+        logger,
+        trace_id=tid,
+        request_id=env.request_id,
+        agent_id=env.agent_id,
+        event_type=EventType.BRIDGE_PERCEPTION.value,
     )
     return {"accepted": True}
 
 
-async def handle_action_result(env: BridgeRequest) -> dict[str, Any]:
+async def handle_action_result(env: BridgeRequest, trace_id: str | None = None) -> dict[str, Any]:
     """Emit a schema-validated ``BRIDGE_ACTION_RESULT`` event; ack the result.
 
     ``model_dump()`` spreads the validated ``action_id``/``status``/``detail``
     into the event so subscribers get typed fields, not a raw payload dict.
+    ``trace_id`` (E4-7, #546) is carried on the event and logged so this emit
+    joins the frame's correlation id.
     """
     payload = ActionResultRequest.model_validate(env.payload)
+    tid = _resolve_trace_id(env, trace_id)
     await event_bus.emit(
         EventType.BRIDGE_ACTION_RESULT,
-        {**_attribution(env), **payload.model_dump()},
+        {**_attribution(env, tid), **payload.model_dump()},
+    )
+    log_bridge_inbound_event(
+        logger,
+        trace_id=tid,
+        request_id=env.request_id,
+        agent_id=env.agent_id,
+        event_type=EventType.BRIDGE_ACTION_RESULT.value,
     )
     return {"accepted": True}
 
 
 # Keyed by the canonical "<service>.<method>" registry key (ADR §6).
-INBOUND_HANDLERS: dict[str, Callable[[BridgeRequest], Awaitable[dict[str, Any]]]] = {
+InboundHandler = Callable[[BridgeRequest, str | None], Awaitable[dict[str, Any]]]
+INBOUND_HANDLERS: dict[str, InboundHandler] = {
     "perception.report": handle_perception_report,
     "action.result": handle_action_result,
 }
 
 
-async def dispatch_inbound(env: BridgeRequest) -> dict[str, Any]:
+async def dispatch_inbound(env: BridgeRequest, trace_id: str | None = None) -> dict[str, Any]:
     """Route an inbound report envelope to its handler and return the ack.
 
     The caller (the server receive loop) only invokes this for an ``ok``
     response whose verb is in :data:`INBOUND_VERBS`, so the key is always
-    present; a missing key is a wiring bug and should fail loudly.
+    present; a missing key is a wiring bug and should fail loudly. ``trace_id``
+    is the frame's resolved correlation id (E4-7, #546) — threaded through so
+    the emitted bus event shares the id the server logged and echoed.
     """
-    return await INBOUND_HANDLERS[service_key(env.service, env.method)](env)
+    return await INBOUND_HANDLERS[service_key(env.service, env.method)](env, trace_id)
 
 
 # Defensive parity: the inbound handler set, the public verb set, and the

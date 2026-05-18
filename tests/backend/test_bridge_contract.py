@@ -44,6 +44,9 @@ COMMITTED_SCHEMA = REPO_ROOT / "core" / "bridge" / "schemas" / "bridge-protocol.
 # ADR docs/decisions/0010-bridge-protocol.md §2 fixes these exact envelope
 # fields. The Pydantic models must match this set verbatim or Node and Python
 # disagree on the wire shape.
+# `trace_id` is the E4-7 (#546) additive correlation field: optional, default
+# None, a protocol 1.1 minor bump (ADR §3 additive-compatible) — not an ADR §2
+# rename, so the rest of the set stays verbatim.
 ADR_REQUEST_FIELDS = {
     "version",
     "request_id",
@@ -55,8 +58,9 @@ ADR_REQUEST_FIELDS = {
     "payload",
     "deadline_ms",
     "cost_context",
+    "trace_id",
 }
-ADR_RESPONSE_FIELDS = {"request_id", "ok", "payload", "error", "retryable"}
+ADR_RESPONSE_FIELDS = {"request_id", "ok", "payload", "error", "retryable", "trace_id"}
 
 # ADR §6 closed set of typed service names. The registry must be a subset of
 # this (plus bridge.ping, which the ADR's "First proof: !bridgePing" names but
@@ -244,18 +248,55 @@ def test_schema_is_draft_2020_12_with_a_complete_service_map(
 
 
 def test_envelope_models_match_adr_field_set() -> None:
-    """Drift guard tying the Pydantic envelopes to ADR §2 verbatim."""
+    """Drift guard tying the Pydantic envelopes to ADR §2 (+ the E4-7
+    additive `trace_id`) verbatim."""
     assert set(c.BridgeRequest.model_fields) == ADR_REQUEST_FIELDS
     assert set(c.BridgeResponse.model_fields) == ADR_RESPONSE_FIELDS
+
+
+def test_trace_id_is_optional_and_additive_on_both_envelopes(
+    committed_schema: dict[str, Any],
+) -> None:
+    """E4-7 (#546): `trace_id` is an OPTIONAL string on both envelopes — a
+    purely additive 1.1 change. It must (a) default to None on the Pydantic
+    models, (b) appear in the committed Node-side schema, and (c) NOT be in
+    either envelope's `required` list, so a 1.0 peer that omits it still
+    validates on both sides (ADR §3 additive-compatible)."""
+    # (a) Pydantic: present, optional, defaults to None.
+    for model in (c.BridgeRequest, c.BridgeResponse):
+        assert "trace_id" in model.model_fields
+        assert model.model_fields["trace_id"].default is None
+
+    # A request/response with no trace_id still parses (additive, not required).
+    req = c.BridgeRequest.model_validate(_load(FIXTURES / "bridge.ping" / "request.valid.json"))
+    assert req.trace_id is None
+    assert c.BridgeResponse(request_id="r", ok=True, payload={"pong": "x"}).trace_id is None
+
+    # An explicit trace_id round-trips through the envelope (extra='forbid' so
+    # it only passes because it is a *declared* field, not silently ignored).
+    assert (
+        c.BridgeRequest.model_validate(
+            _load(FIXTURES / "bridge.ping" / "request.valid.json") | {"trace_id": "trace-abc"}
+        ).trace_id
+        == "trace-abc"
+    )
+
+    # (b)/(c) Committed Node-side schema: present on both, required on neither.
+    defs = committed_schema["$defs"]
+    for env_name in ("BridgeRequest", "BridgeResponse"):
+        assert "trace_id" in defs[env_name]["properties"], env_name
+        assert "trace_id" not in defs[env_name].get("required", []), env_name
 
 
 # ── Versioning (ADR §3, fail-closed) ────────────────────────────────────────
 
 
 def test_protocol_version_is_self_consistent() -> None:
-    assert c.PROTOCOL_VERSION == "1.0"
+    # 1.1: E4-7 (#546) added the optional `trace_id` correlation field to both
+    # envelopes — an additive minor bump (ADR §3), same major as 1.0.
+    assert c.PROTOCOL_VERSION == "1.1"
     assert c.is_supported_version(c.PROTOCOL_VERSION)
-    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 0, 0)
+    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 1, 0)
 
 
 @pytest.mark.parametrize("version", ["1.0", "1.4", "1.0.9", "1.99.99"])

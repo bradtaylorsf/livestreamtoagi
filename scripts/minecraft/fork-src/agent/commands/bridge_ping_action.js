@@ -1,5 +1,5 @@
-// The `!bridgePing` custom Mindcraft action (issue #543 E4-4 + #544 E4-5 —
-// epic E4 #506).
+// The `!bridgePing` custom Mindcraft action (issue #543 E4-4 + #544 E4-5 +
+// #546 E4-7 — epic E4 #506).
 //
 // Committed source of truth (`./mindcraft` is git-ignored).
 // `scripts/minecraft/connect-bridge-bot.sh` copies this verbatim into the
@@ -24,6 +24,8 @@
 // explicit SAFE-IDLE (logged, no in-world action) — a closed gate, never an
 // unsafe action (ADR 0010 §5). The client's background probe auto-recovers.
 
+import { randomUUID } from 'node:crypto';
+
 import { callBridge, BridgeClientError } from '../bridge/python_bridge.js';
 
 export const bridgePingAction = {
@@ -42,17 +44,26 @@ export const bridgePingAction = {
         // so a bare `!bridgePing` still proves the channel.
         const text = message === undefined || message === null ? 'hello' : String(message);
 
+        // E4-7 (#546): mint the correlation id HERE and pass it through, so the
+        // action's log lines, the bridge client's structured logs, and the
+        // Python server logs all carry the SAME trace id — one request greps
+        // end-to-end across every layer.
+        const traceId = `trace-${randomUUID()}`;
+
         // `agent.openChat` puts a line in Minecraft chat when available; both it
         // and console logging are best-effort so logging can never itself crash
-        // the bot. `agent` may be absent when the action is unit-driven.
+        // the bot. `agent` may be absent when the action is unit-driven. The
+        // trace id is in the log prefix (not the chat line — that stays
+        // human-facing) so console logs join the same correlation id.
         const announce = (line, isError) => {
             try {
                 if (agent && typeof agent.openChat === 'function') agent.openChat(line);
             } catch {
                 /* chat is cosmetic; never let it mask the bridge result */
             }
-            if (isError) console.error(`[bridgePing] ${line}`);
-            else console.log(`[bridgePing] ${line}`);
+            const tagged = `[bridgePing trace=${traceId}] ${line}`;
+            if (isError) console.error(tagged);
+            else console.log(tagged);
         };
 
         try {
@@ -62,6 +73,7 @@ export const bridgePingAction = {
                 payload: { message: text },
                 deadlineMs: 5000,
                 agentId: agent && agent.name,
+                traceId,
             });
             const pong =
                 response && response.payload ? response.payload.pong : undefined;

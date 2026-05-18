@@ -99,7 +99,9 @@ def test_client_carries_the_full_request_envelope() -> None:
     assert "agent_tier" in src and "conversation" in src
     assert "budget_bucket" in src and "'bridge'" in src
     assert "estimated_cost_usd" in src
-    assert "PROTOCOL_VERSION = '1.0'" in src, "protocol version must be 1.0"
+    # 1.1: E4-7 (#546) added the additive `trace_id` correlation field — a
+    # minor bump (ADR §3), still wire-compatible with a 1.0 peer.
+    assert "PROTOCOL_VERSION = '1.1'" in src, "protocol version must be 1.1"
 
 
 def test_client_uses_bearer_auth_and_the_bridge_endpoint() -> None:
