@@ -108,6 +108,15 @@ def test_bash_syntax_is_valid():
     assert proc.returncode == 0, proc.stderr
 
 
+def test_profile_staging_uses_json_escaping_not_sed_substitution():
+    """Operator-provided model ids must be written as JSON values literally."""
+    src = SCRIPT.read_text()
+    assert "JSON.parse(readFileSync(templatePath" in src
+    assert "JSON.stringify(profile" in src
+    assert 's|${chat_tok}|${chat}|g' not in src
+    assert 's|${code_tok}|${code}|g' not in src
+
+
 @pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck not installed")
 def test_shellcheck_clean():
     proc = subprocess.run(["shellcheck", str(SCRIPT)], capture_output=True, text=True)

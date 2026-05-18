@@ -393,10 +393,27 @@ stage_profile() {
     local template="$1" rel="$2" chat="$3" code="$4" chat_tok="$5" code_tok="$6"
     local dest="$MINDCRAFT_DIR_ABS/${rel#./}"
     mkdir -p "$(dirname -- "$dest")"
-    if ! sed \
-        -e "s|${chat_tok}|${chat}|g" \
-        -e "s|${code_tok}|${code}|g" \
-        "$template" > "$dest"; then
+    if ! TEMPLATE_PATH="$template" DEST_PATH="$dest" CHAT_MODEL="$chat" CODE_MODEL="$code" \
+        CHAT_TOKEN="$chat_tok" CODE_TOKEN="$code_tok" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const templatePath = process.env.TEMPLATE_PATH;
+const destPath = process.env.DEST_PATH;
+const chatModel = process.env.CHAT_MODEL;
+const codeModel = process.env.CODE_MODEL;
+const chatToken = process.env.CHAT_TOKEN;
+const codeToken = process.env.CODE_TOKEN;
+
+const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
+if (profile.model !== `lmstudio/${chatToken}` || profile.code_model !== `lmstudio/${codeToken}`) {
+    throw new Error(`Unexpected routing placeholders in ${templatePath}`);
+}
+
+profile.model = `lmstudio/${chatModel}`;
+profile.code_model = `lmstudio/${codeModel}`;
+writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
+NODE
+    then
         fail "Failed to stage profile → $dest"
         exit 1
     fi
