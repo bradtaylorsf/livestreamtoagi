@@ -40,6 +40,18 @@ check "pg_trgm extension" bash -c 'docker compose exec -T postgres \
 LANGFUSE_PORT="${LANGFUSE_PORT:-3100}"
 check "Langfuse UI (port $LANGFUSE_PORT)" curl -sf "http://localhost:$LANGFUSE_PORT"
 
+# Minecraft server liveness — OPT-IN (E2-6, issue #531). Off by default so
+# the 5-service dev gate and CI (which run with no Minecraft server present)
+# keep passing unchanged. Set CHECK_MINECRAFT=1 to include it. The probe
+# (scripts/minecraft/health.sh --quiet) resolves the port from SERVER_PORT
+# or server.properties; see docs/minecraft/health.md.
+if [ "${CHECK_MINECRAFT:-0}" = "1" ]; then
+    MC_HOST="${SERVER_HOST:-127.0.0.1}"
+    MC_PORT="${SERVER_PORT:-auto}"
+    check "Minecraft server ($MC_HOST:$MC_PORT)" \
+        bash "$(dirname "$0")/minecraft/health.sh" --quiet
+fi
+
 echo
 echo "Results: $PASS passed, $FAIL failed"
 

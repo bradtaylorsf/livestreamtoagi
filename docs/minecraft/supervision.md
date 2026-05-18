@@ -203,8 +203,11 @@ clean stop does **not** restart.
   protect the world data. That's E2-5 —
   [backup-restore.md](./backup-restore.md)
   ([issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
-- **Health checks / status endpoint.** Knowing the world is *healthy* (not
-  just *running*) is [E2-6](https://github.com/bradtaylorsf/livestreamtoagi/issues/531).
+- **Health checks / status endpoint.** Knowing the world is *up* (and
+  exposing that to the brain) is E2-6 — now documented in
+  **[health.md](./health.md)** (a one-command probe + `--json` status, and
+  the opt-in `check-services.sh` integration). Supervision *acts*; health
+  *reports*.
 - **Provisioning the host / IaC.** No Terraform/Ansible/cloud-init. Picking
   the host is E2-3 ([hosting.md](./hosting.md)); you install this unit by hand.
 
@@ -219,6 +222,7 @@ clean stop does **not** restart.
 - **E2-5 — Backups & restore:** [backup-restore.md](./backup-restore.md)
   (issue [#530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)) —
   scheduled `backup.sh`, the documented restore, and the clean-reset path.
-- **E2-6 — Health check + status:**
-  [issue #531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531).
+- **E2-6 — Health check + status:** [health.md](./health.md)
+  (issue [#531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531)) —
+  `scripts/minecraft/health.sh`, the up/down probe for the server this keeps alive.
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-4**.

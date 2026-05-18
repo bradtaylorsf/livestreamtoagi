@@ -240,6 +240,7 @@ this issue only provides the reset command itself.
   (issue [#529](https://github.com/bradtaylorsf/livestreamtoagi/issues/529)) —
   the systemd/`supervise.sh` host this schedules against; stop it before
   restore/reset.
-- **E2-6 — Health check + status:**
-  [issue #531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531).
+- **E2-6 — Health check + status:** [health.md](./health.md)
+  (issue [#531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531)) —
+  the up/down probe; run it after a restore to confirm the world is back.
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-5**.
