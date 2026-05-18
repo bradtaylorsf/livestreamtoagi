@@ -1,0 +1,75 @@
+{
+  "name": "session/epic-505-epic-e3-mindcraft-fork-evaluation",
+  "branch": "session/epic-505-epic-e3-mindcraft-fork-evaluation",
+  "completed": "2026-05-18T15:30:08.467Z",
+  "results": [
+    {
+      "issueNum": 533,
+      "title": "E3-1 — Fork Mindcraft, pin the commit, reproducible install",
+      "status": "success",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/640",
+      "testsPassing": true,
+      "verifyPassing": true,
+      "duration": 957,
+      "filesChanged": 3
+    }
+  ],
+  "stages": [
+    {
+      "stage": "plan",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 20,
+      "tokens_out": 10727,
+      "cost_usd": 0.661269,
+      "wall_time_s": 150.899,
+      "tool_calls": 13,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-18T15:11:21.686Z",
+      "issue_num": 533
+    },
+    {
+      "stage": "implement",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 64,
+      "tokens_out": 34174,
+      "cost_usd": 2.674734,
+      "wall_time_s": 462.776,
+      "tool_calls": 36,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T15:13:53.120Z",
+      "issue_num": 533
+    },
+    {
+      "stage": "review",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 24,
+      "tokens_out": 13864,
+      "cost_usd": 0.861949,
+      "wall_time_s": 193.614,
+      "tool_calls": 12,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T15:22:53.321Z",
+      "issue_num": 533
+    },
+    {
+      "stage": "assumptions",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 6,
+      "tokens_out": 3028,
+      "cost_usd": 0.273897,
+      "wall_time_s": 46.847,
+      "tool_calls": 4,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T15:26:12.835Z",
+      "issue_num": 533
+    }
+  ]
+}
