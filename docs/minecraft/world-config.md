@@ -110,9 +110,12 @@ So to actually see a new world, start **fresh** in one of these ways:
   (`<SERVER_DIR>/<LEVEL_NAME>/`) **and** the generated
   `<SERVER_DIR>/server.properties`, then start again.
 
-> The clean, documented **reset / "fresh world"** path is owned by
-> **E2-5 — World backup & restore** ([issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
-> Prefer that once it lands; the manual deletes above are the interim path.
+> The clean, documented **reset / "fresh world"** path is now owned by
+> **E2-5 — World backup & restore**: run `scripts/minecraft/restore.sh
+> --reset` instead of the manual deletes above — it snapshots the old world
+> first and removes the world folders **and** `server.properties` for you.
+> See [backup-restore.md](./backup-restore.md)
+> ([issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
 
 To preview the world the current config *would* generate without touching
 anything or downloading the jar:
@@ -131,7 +134,8 @@ freshly generated `server.properties` (only if one doesn't already exist).
   (`E12-5 — World as an input wired to E2`). This issue makes the world a
   *file-based input*; connecting it to run specs is later work.
 - **Backups, restore, and the clean reset workflow** — that's
-  **E2-5** ([issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
+  **E2-5** ([backup-restore.md](./backup-restore.md),
+  [issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
 - **In-game spawn placement** (`/setworldspawn`) — done live in the game,
   not via this file.
 
