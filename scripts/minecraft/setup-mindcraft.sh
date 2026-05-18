@@ -156,6 +156,14 @@ command -v git > /dev/null 2>&1 || { fail "git not found on PATH."; exit 1; }
 # ── (c) Idempotent clone-or-fetch ──────────────────────
 if [ -d "$MINDCRAFT_DIR/.git" ]; then
     ok "Reusing existing clone at $MINDCRAFT_DIR"
+    # A stale clone may point `origin` at a different remote (e.g. upstream
+    # instead of our fork). Realign it before fetching so we pin from the
+    # intended repo, not whatever this tree happened to be cloned from.
+    EXISTING_ORIGIN="$(git -C "$MINDCRAFT_DIR" remote get-url origin 2>/dev/null || true)"
+    if [ "$EXISTING_ORIGIN" != "$MINDCRAFT_REPO" ]; then
+        info "origin is '$EXISTING_ORIGIN'; repointing it at $MINDCRAFT_REPO"
+        git -C "$MINDCRAFT_DIR" remote set-url origin "$MINDCRAFT_REPO"
+    fi
     info "Fetching latest refs so the pinned commit is available locally…"
     git -C "$MINDCRAFT_DIR" fetch --quiet --tags origin
 else
