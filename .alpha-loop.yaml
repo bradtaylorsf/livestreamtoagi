@@ -4,10 +4,10 @@ project: 5
 agent: claude
 label: ready
 base_branch: main
-test_command: pnpm test
+test_command: pnpm test:python && pnpm test:frontend && pnpm test:website
 dev_command: pnpm dev
 auto_merge: true
-setup_command: "python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+setup_command: "/opt/homebrew/bin/uv venv --python 3.13 .venv && /opt/homebrew/bin/uv pip install --python .venv/bin/python -r requirements.txt && npm ci --silent --prefix frontend && npm ci --silent --prefix website"
 # Safety limits (0 = unlimited)
 # batch: true
 # batch_size: 2
@@ -22,4 +22,3 @@ agent_timeout: 7200  # 120 minutes in seconds
 harnesses:
   - claude-code
 #
-
