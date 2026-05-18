@@ -32,6 +32,7 @@ Node round-trip with the Python server logs — no Docker/network/LLM.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Any
 
@@ -46,13 +47,32 @@ BRIDGE_INBOUND_EVENT_PREFIX = "bridge_inbound_event"
 # the last bound so the buckets always sum to the call count.
 _LATENCY_BUCKETS_MS: tuple[float, ...] = (5.0, 25.0, 100.0, 500.0, 1000.0, 5000.0)
 
+# Any whitespace (incl. newline/CR/tab) or control char in a rendered string
+# value would break the single-line, space-delimited ``key=value`` shape — the
+# exact property the trace id greps on — and let an authenticated peer forge
+# extra ``bridge_event`` lines through a caller-controlled field (``trace_id``,
+# ``request_id``, ``agent_id``; ``service``/``method`` on the unparseable
+# path). Collapse each to ``_`` and cap the length so a hostile/oversized id
+# can neither corrupt the line nor flood the log. Mirrored verbatim by
+# ``_fmtLogVal``/``_safeStr`` in ``python_bridge.js`` so both sides render the
+# same token for the same id.
+_UNSAFE_LOG_CHARS = re.compile(r"[\s\x00-\x1f\x7f]")
+_MAX_LOG_VALUE_LEN = 256
+
+
+def _safe_str(value: str) -> str:
+    cleaned = _UNSAFE_LOG_CHARS.sub("_", value)
+    return cleaned if len(cleaned) <= _MAX_LOG_VALUE_LEN else cleaned[:_MAX_LOG_VALUE_LEN] + "~"
+
 
 def _fmt(value: Any) -> str:
     """Render one field value for the deterministic ``key=value`` log line.
 
     ``None`` → ``-`` (a missing value is explicit, never an empty token that a
     splitter would lose); bools lowercase so they grep the same on both sides;
-    floats fixed to 3 decimals so latency lines are stable/diffable.
+    floats fixed to 3 decimals so latency lines are stable/diffable. String
+    values are sanitised (:func:`_safe_str`) so a caller-controlled field can
+    never break the single-line shape or inject a forged record.
     """
     if value is None:
         return "-"
@@ -60,7 +80,7 @@ def _fmt(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, float):
         return f"{value:.3f}"
-    return str(value)
+    return _safe_str(str(value))
 
 
 def _kv_line(prefix: str, fields: dict[str, Any]) -> str:

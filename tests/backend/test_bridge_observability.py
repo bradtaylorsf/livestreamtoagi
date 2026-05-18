@@ -189,6 +189,58 @@ def test_log_bridge_inbound_event_carries_trace_id() -> None:
     assert rec.levelno == logging.INFO
 
 
+def test_caller_controlled_field_cannot_break_the_line_or_forge_a_record() -> None:
+    """The acceptance bar is *one trace id greps cleanly across both logs*.
+    A caller-controlled field (``trace_id``/``request_id``/``agent_id``) is an
+    authenticated peer's input; an embedded newline/space would split the
+    single-line ``key=value`` shape and let it forge a second ``bridge_event``
+    record. Such characters must be neutralised and an oversized id capped."""
+    log = logging.getLogger("test.bridge.obs.inject")
+    forged = "real\nbridge_event trace_id=forged ok=true latency_ms=0"
+    with capture_logs("test.bridge.obs.inject") as h:
+        observability.log_bridge_event(
+            log,
+            trace_id=forged,
+            request_id="req with space",
+            agent_id="x" * 5000,  # hostile/oversized → must be capped
+            service="bridge",
+            method="ping",
+            ok=True,
+            latency_ms=1.0,
+        )
+    rec = h.records[0]
+    msg = rec.getMessage()
+    tokens = msg.split(" ")
+    # One physical line; the prefix appears once as a *standalone* token (a
+    # forged record would need a fresh `bridge_event ` at a token boundary —
+    # an inert substring inside a sanitised value does not parse as one).
+    assert "\n" not in msg
+    assert tokens.count(observability.BRIDGE_EVENT_PREFIX) == 1
+    # The whole forged payload collapsed into the single trace_id token: no
+    # whitespace survived to fake `ok=`/`latency_ms=` fields or a new record.
+    trace_tok = next(t for t in tokens if t.startswith("trace_id="))
+    assert trace_tok == "trace_id=real_bridge_event_trace_id=forged_ok=true_latency_ms=0"
+    # The space in another value cannot be confused for the field delimiter.
+    assert "request_id=req_with_space" in tokens
+    # Oversized value is bounded (cap + truncation marker), not unbounded.
+    agent_tok = next(t for t in tokens if t.startswith("agent_id="))
+    assert len(agent_tok) <= len("agent_id=") + observability._MAX_LOG_VALUE_LEN + 1
+    assert agent_tok.endswith("~")
+    # A normal hyphenated id is untouched (the range op is not a literal '-').
+    with capture_logs("test.bridge.obs.inject") as h2:
+        observability.log_bridge_event(
+            log,
+            trace_id="trace-e2e-acceptance-001",
+            request_id="r",
+            agent_id="vera",
+            service="bridge",
+            method="ping",
+            ok=True,
+            latency_ms=1.0,
+        )
+    assert "trace_id=trace-e2e-acceptance-001 " in h2.records[0].getMessage()
+
+
 # ── Units: the in-process metrics registry ──────────────────────────────────
 
 

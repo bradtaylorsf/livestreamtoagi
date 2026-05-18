@@ -124,11 +124,31 @@ function _config() {
 // lines up across the two logs. No new dependency (frozen lockfile): the
 // logger is a stderr write and the metrics are a plain module object.
 
+// Any whitespace (incl. newline/CR/tab) or control char in a string value
+// would break the single-line, space-delimited `key=value` shape the trace id
+// greps on, and let a caller-controlled field (`trace_id`/`request_id`/…)
+// forge an extra `bridge_event` line. Collapse each to `_` and cap the length
+// so a hostile/oversized id can neither corrupt the line nor flood stderr.
+// Mirrors `_safe_str` in core/bridge/observability.py verbatim so both sides
+// render the same token for the same id.
+const _MAX_LOG_VALUE_LEN = 256;
+
+function _safeStr(s) {
+    // `\s` covers space/tab/newline/CR; \u0000-\u001f and \u007f add the
+    // remaining C0 controls + DEL. A literal hyphen is NOT in the class
+    // (it is the range operator), so `trace-<uuid>` ids survive.
+    // eslint-disable-next-line no-control-regex
+    const cleaned = s.replace(/[\s\u0000-\u001f\u007f]/g, '_');
+    return cleaned.length <= _MAX_LOG_VALUE_LEN
+        ? cleaned
+        : cleaned.slice(0, _MAX_LOG_VALUE_LEN) + '~';
+}
+
 function _fmtLogVal(v) {
     if (v === undefined || v === null) return '-';
     if (typeof v === 'boolean') return v ? 'true' : 'false';
     if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3);
-    return String(v);
+    return _safeStr(String(v));
 }
 
 // Fixed key order so the line is stable/diffable and matches the Python side.
