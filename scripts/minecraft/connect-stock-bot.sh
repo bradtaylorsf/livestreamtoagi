@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# Launch ONE stock Mindcraft bot against the local E2 server (beginner walkthrough).
+#
+# This is the committed launch script referenced by docs/minecraft/mindcraft-connect.md
+# (issue #534, epic E3-2). It proves the pinned fork (E3-1 / #533) talks to the
+# E2 Paper server (#526) before any agent customization (that is E8).
+#
+# `./mindcraft` is git-ignored, so the only committed artifacts are the settings
+# template + stock profile next to this script; this script STAGES them into the
+# clone — exactly the pattern setup-mindcraft.sh uses for the vendored lockfile.
+#
+# Pinned defaults come from the E1 decisions:
+#   - Fork commit: 35be480b4cc0bca990278e6103a1426392559d96  (E1-R1 → docs/decisions/0001)
+#   - Node:        20 LTS                                     (E1-R1 → docs/decisions/0001)
+#   - Minecraft:   1.21.6                                     (E1-R1 → docs/decisions/0001)
+#   - host/port:   127.0.0.1 : 25565  (E2 start-server.sh default; localhost only)
+#   - auth:        offline   (E1-R2 → docs/decisions/0002 — matches online-mode=false)
+# Models are LOCAL ONLY (LM Studio, decision 0003): zero external spend. No
+# openrouter/... here.
+#
+# Usage:
+#   scripts/minecraft/connect-stock-bot.sh            # stage config + launch the bot
+#   scripts/minecraft/connect-stock-bot.sh --dry-run  # print resolved host/port/auth/profile/model; no clone/network/launch
+#   scripts/minecraft/connect-stock-bot.sh --verify   # static checks only (CI/network-safe)
+#   scripts/minecraft/connect-stock-bot.sh --help
+#
+# Configuration (environment variables, all optional):
+#   MINDCRAFT_DIR           Where the pinned clone lives  (default: ./mindcraft)
+#   MC_HOST                 E2 server host                (default: 127.0.0.1)
+#   MC_PORT                 E2 server port                (default: 25565)
+#   MINDCRAFT_PROFILE       Profile path inside the clone (default: ./profiles/stock-bot.json)
+#   LOCAL_LLM_BASE_URL      LM Studio URL for the PRE-FLIGHT reachability check
+#                           only (pnpm llm:local --list-only). Mindcraft's
+#                           string-form "lmstudio/<id>" profiles (decision 0003)
+#                           always talk to its built-in http://localhost:1234/v1
+#                           at the pinned commit, so run LM Studio there.
+#                           (default: http://localhost:1234/v1)
+#   LOCAL_LLM_MODEL         LM Studio model id for the conversation tier (REQUIRED for a real run)
+#   LOCAL_LLM_MODEL_BUILDING  LM Studio model id for the building/code tier (default: = LOCAL_LLM_MODEL)
+#
+# A real run requires the E2 server already running (docs/minecraft/server-setup.md)
+# and the pinned fork already installed (docs/minecraft/mindcraft-fork.md). The
+# bot username is fixed as "StockBot"; with the E2 default white-list=true you
+# must whitelist it (this script prints the exact command).
+set -euo pipefail
+
+# ── Pinned E1 defaults (kept in sync with docs/decisions/0001 & 0002) ──
+MINDCRAFT_COMMIT="${MINDCRAFT_COMMIT:-35be480b4cc0bca990278e6103a1426392559d96}"
+MINDCRAFT_DIR="${MINDCRAFT_DIR:-./mindcraft}"
+REQUIRED_NODE_MAJOR="20"
+MC_VERSION="1.21.6"                       # E1-R1 / decisions 0001 (matches start-server.sh + the settings template)
+MC_HOST="${MC_HOST:-127.0.0.1}"           # E1-R2 / decisions 0002 — localhost only in offline mode
+MC_PORT="${MC_PORT:-25565}"               # E2 start-server.sh default (server-port left unset)
+MC_AUTH="offline"                         # E1-R2 / decisions 0002 — matches Paper online-mode=false
+MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/stock-bot.json}"
+# Pre-flight reachability-check URL only (consumed by `pnpm llm:local`, which
+# reads LOCAL_LLM_BASE_URL itself). Mindcraft's string-form "lmstudio/<id>"
+# profiles carry no url, so at the pinned commit the bot ALWAYS uses Mindcraft's
+# built-in http://localhost:1234/v1 regardless of this value — run LM Studio there.
+LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
+MINDCRAFT_LLM_URL="http://localhost:1234/v1"   # where the bot actually connects (Mindcraft default)
+STOCK_BOT_NAME="StockBot"                 # MUST match "name" in profiles/stock-bot.json
+
+# Resolve the committed template + profile relative to THIS script (not the
+# caller's cwd) so the reviewed copies are used no matter where it is invoked.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SETTINGS_TEMPLATE="$SCRIPT_DIR/mindcraft-settings.js"
+PROFILE_TEMPLATE="$SCRIPT_DIR/profiles/stock-bot.json"
+
+MODE="run"
+case "${1:-}" in
+    --dry-run) MODE="dry-run" ;;
+    --verify)  MODE="verify" ;;
+    --help|-h)
+        # Print the contiguous comment header (skip the shebang, stop at the
+        # first non-comment line) so help never leaks script code, and stays
+        # correct if the header length changes.
+        awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"
+        exit 0
+        ;;
+    "") ;;
+    *)
+        echo "✗ Unknown argument: $1 (try --help)" >&2
+        exit 2
+        ;;
+esac
+
+ok()   { echo "✓ $*"; }
+info() { echo "  $*"; }
+fail() { echo "✗ $*" >&2; }
+
+# ── Node / npm check (identical posture to setup-mindcraft.sh) ──
+# A real run needs Node $REQUIRED_NODE_MAJOR LTS. In --dry-run/--verify we only
+# warn so config/static checks stay verifiable on a machine without (or with a
+# different) Node — same posture as the Java check in start-server.sh.
+node_major() {
+    command -v node > /dev/null 2>&1 || return 1
+    local out major
+    out="$(node -v 2>&1)" || return 1   # e.g. "v20.11.1"
+    major="$(printf '%s\n' "$out" | sed -nE 's/^v?([0-9]+).*/\1/p')"
+    [ -n "$major" ] || return 1
+    printf '%s\n' "$major"
+}
+
+check_node() {
+    local node_m
+    node_m="$(node_major || true)"
+    if [ -z "${node_m:-}" ]; then
+        fail "Node.js not found on PATH. Install Node ${REQUIRED_NODE_MAJOR} LTS:"
+        info "  nvm:           nvm install ${REQUIRED_NODE_MAJOR} && nvm use ${REQUIRED_NODE_MAJOR}"
+        info "  macOS:         brew install node@${REQUIRED_NODE_MAJOR}"
+        info "  See docs/minecraft/mindcraft-connect.md for details."
+        return 1
+    fi
+    if [ "$node_m" != "$REQUIRED_NODE_MAJOR" ]; then
+        fail "Node ${node_m} found, but the pinned Mindcraft needs Node ${REQUIRED_NODE_MAJOR} LTS."
+        info "  Mindcraft warns Node 24+ breaks native deps; we pin ${REQUIRED_NODE_MAJOR} (E1-R1)."
+        info "  Install Node ${REQUIRED_NODE_MAJOR} (see docs/minecraft/mindcraft-connect.md) and retry."
+        return 1
+    fi
+    if ! command -v npm > /dev/null 2>&1; then
+        fail "npm not found on PATH (it ships with Node ${REQUIRED_NODE_MAJOR})."
+        return 1
+    fi
+    ok "Node ${node_m} + npm $(npm -v) detected (need Node ${REQUIRED_NODE_MAJOR})"
+}
+
+# ── Static assertions on the committed template + profile (no Node/net/git) ──
+# Defense-in-depth: the staged settings.js must point at the E2 server and the
+# profile must be local-only. The strict JSON parse lives in
+# tests/backend/test_minecraft_connect_stock_bot.py.
+verify_committed_assets() {
+    local problems=0
+    if [ ! -s "$SETTINGS_TEMPLATE" ]; then
+        fail "Settings template missing or empty: $SETTINGS_TEMPLATE"; problems=1
+    else
+        grep -q '"host": "127.0.0.1"'   "$SETTINGS_TEMPLATE" || { fail "template host is not 127.0.0.1"; problems=1; }
+        grep -q '"port": 25565'         "$SETTINGS_TEMPLATE" || { fail "template port is not 25565"; problems=1; }
+        grep -q '"auth": "offline"'     "$SETTINGS_TEMPLATE" || { fail "template auth is not offline"; problems=1; }
+        grep -q '"minecraft_version": "1.21.6"' "$SETTINGS_TEMPLATE" || { fail "template minecraft_version is not 1.21.6"; problems=1; }
+        grep -q '"auto_open_ui": false' "$SETTINGS_TEMPLATE" || { fail "template auto_open_ui is not false"; problems=1; }
+    fi
+    if [ ! -s "$PROFILE_TEMPLATE" ]; then
+        fail "Stock profile missing or empty: $PROFILE_TEMPLATE"; problems=1
+    else
+        grep -q "\"name\": \"${STOCK_BOT_NAME}\"" "$PROFILE_TEMPLATE" || { fail "profile name is not ${STOCK_BOT_NAME}"; problems=1; }
+        grep -q '"model": "lmstudio/'        "$PROFILE_TEMPLATE" || { fail "profile model is not an lmstudio/ id (no external spend)"; problems=1; }
+        grep -q '"code_model": "lmstudio/'   "$PROFILE_TEMPLATE" || { fail "profile code_model is not an lmstudio/ id"; problems=1; }
+        if grep -q 'openrouter/' "$PROFILE_TEMPLATE"; then
+            fail "profile must NOT reference openrouter/ — local validation only"; problems=1
+        fi
+    fi
+    return $problems
+}
+
+# ── (b) Resolve + print config (shared by every mode) ──
+ok "Stock Mindcraft bot → E2 server"
+info "bot name:  $STOCK_BOT_NAME  (fixed; whitelist this exact name)"
+info "server:    ${MC_HOST}:${MC_PORT}  auth=${MC_AUTH}  minecraft=${MC_VERSION}"
+info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
+info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
+info "settings:  staged from $SETTINGS_TEMPLATE"
+info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (Mindcraft built-in for"
+info "           string-form lmstudio/ profiles — run LM Studio there; local"
+info "           only, zero external spend, decision 0003)"
+info "           pre-flight check (pnpm llm:local) uses ${LOCAL_LLM_BASE_URL}"
+
+# ── --verify: static, CI/network-safe checks only ──────
+if [ "$MODE" = "verify" ]; then
+    if verify_committed_assets; then
+        ok "Static verify passed: settings template points at the E2 server,"
+        info "stock profile is local-only (lmstudio/), bot name is ${STOCK_BOT_NAME}."
+        info "(No clone, no network, no Node, no launch — run without --verify to connect.)"
+        exit 0
+    fi
+    fail "Static verify FAILED — see messages above."
+    exit 1
+fi
+
+# Resolve the LM Studio model ids. A real run requires the conversation model;
+# the building model defaults to it (single-model local validation is fine for
+# a stock bot — decision 0003 says set LOCAL_LLM_MODEL_BUILDING when available).
+LLM_MODEL="${LOCAL_LLM_MODEL:-}"
+LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LLM_MODEL}"
+
+# ── --dry-run: print the resolved plan, do NOT clone/network/launch ──
+if [ "$MODE" = "dry-run" ]; then
+    check_node || true   # advisory only in dry-run
+    verify_committed_assets || true
+    echo
+    ok "Dry run complete — no clone, no network, nothing launched."
+    info "host:        $MC_HOST"
+    info "port:        $MC_PORT"
+    info "auth:        $MC_AUTH"
+    info "minecraft:   $MC_VERSION"
+    info "profile:     $MINDCRAFT_PROFILE  (bot name $STOCK_BOT_NAME)"
+    if [ -n "$LLM_MODEL" ]; then
+        info "model:       lmstudio/$LLM_MODEL  (conversation tier)"
+        info "code_model:  lmstudio/$LLM_MODEL_BUILDING  (building tier)"
+    else
+        info "model:       (LOCAL_LLM_MODEL unset — REQUIRED for a real run;"
+        info "             list ids with: pnpm llm:local --list-only)"
+    fi
+    info "Would assert: $MINDCRAFT_DIR HEAD == $MINDCRAFT_COMMIT"
+    info "Would stage:  $SETTINGS_TEMPLATE → $MINDCRAFT_DIR/settings.js"
+    info "Would stage:  $PROFILE_TEMPLATE  → $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./} (models substituted)"
+    info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
+    exit 0
+fi
+
+# ── Real run ───────────────────────────────────────────
+verify_committed_assets || { fail "Refusing to launch with bad committed assets."; exit 1; }
+check_node || exit 1
+command -v git > /dev/null 2>&1 || { fail "git not found on PATH."; exit 1; }
+
+# (a) The pinned fork must already be installed (E3-1 / #533).
+if [ ! -d "$MINDCRAFT_DIR/.git" ]; then
+    fail "No Mindcraft clone at $MINDCRAFT_DIR."
+    info "  Install the pinned fork first:"
+    info "    scripts/minecraft/setup-mindcraft.sh"
+    info "  (see docs/minecraft/mindcraft-fork.md)"
+    exit 1
+fi
+HEAD_SHA="$(git -C "$MINDCRAFT_DIR" rev-parse HEAD 2>/dev/null || true)"
+if [ "$HEAD_SHA" != "$MINDCRAFT_COMMIT" ]; then
+    fail "Clone is not at the pinned commit — refusing to launch an unpinned tree."
+    info "  HEAD is     ${HEAD_SHA:-<unknown>}"
+    info "  expected    $MINDCRAFT_COMMIT"
+    info "  Re-pin with: scripts/minecraft/setup-mindcraft.sh"
+    exit 1
+fi
+ok "Clone is at the pinned commit $MINDCRAFT_COMMIT"
+
+# (b) The conversation model is mandatory for a real run (local LM Studio only).
+if [ -z "$LLM_MODEL" ]; then
+    fail "LOCAL_LLM_MODEL is not set — a real run needs a local LM Studio model id."
+    info "  List the models LM Studio is serving, then export one:"
+    info "    pnpm llm:local --list-only      # or: .venv/bin/python scripts/check_local_llm.py --list-only"
+    info "    export LOCAL_LLM_MODEL=<model-id-from-the-list>"
+    info "  Optionally also: export LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id>"
+    info "  This keeps validation 100% local — zero external model spend (decision 0003)."
+    exit 1
+fi
+
+# (c) Stage settings.js (host/port/profile substituted; everything else is the
+#     reviewed template verbatim). Line-anchored so the comment header is never
+#     touched — only the actual setting lines match.
+DEST_SETTINGS="$MINDCRAFT_DIR/settings.js"
+if ! sed -E \
+    -e "s|^([[:space:]]*\"host\":[[:space:]]*\")[^\"]*(\".*)$|\1${MC_HOST}\2|" \
+    -e "s|^([[:space:]]*\"port\":[[:space:]]*)[0-9]+(,.*)$|\1${MC_PORT}\2|" \
+    -e "s|^([[:space:]]*\")\\./profiles/stock-bot\\.json(\".*)$|\1${MINDCRAFT_PROFILE}\2|" \
+    "$SETTINGS_TEMPLATE" > "$DEST_SETTINGS"; then
+    fail "Failed to stage settings.js → $DEST_SETTINGS"
+    exit 1
+fi
+ok "Staged settings.js → $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profile=${MINDCRAFT_PROFILE})"
+
+# (d) Stage the profile with the LM Studio model ids substituted in.
+#     Strip a leading "./" so the on-disk path stays clean (no "..././/...").
+DEST_PROFILE="$MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
+mkdir -p "$(dirname -- "$DEST_PROFILE")"
+if ! sed \
+    -e "s|__LOCAL_LLM_MODEL__|${LLM_MODEL}|g" \
+    -e "s|__LOCAL_LLM_MODEL_BUILDING__|${LLM_MODEL_BUILDING}|g" \
+    "$PROFILE_TEMPLATE" > "$DEST_PROFILE"; then
+    fail "Failed to stage profile → $DEST_PROFILE"
+    exit 1
+fi
+ok "Staged profile → $DEST_PROFILE"
+info "  model:      lmstudio/${LLM_MODEL}        (conversation tier — decision 0003)"
+info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 0003)"
+
+# (e) Whitelist reminder. start-server.sh defaults white-list=true, so the E2
+#     server will REJECT the bot until "$STOCK_BOT_NAME" is whitelisted.
+echo
+info "── Whitelist (E2 server defaults to white-list=true) ───────────────────"
+info "In the E2 server console, run exactly:"
+info "    whitelist add ${STOCK_BOT_NAME}"
+info "Or restart the E2 server with the whitelist off (dev only, localhost):"
+info "    WHITELIST=false scripts/minecraft/start-server.sh"
+info "Skipping this → the bot connects then is kicked with 'not whitelisted'."
+echo
+
+# (f) Launch. Mindcraft reads ./settings.js; --profiles is passed explicitly so
+#     the launch command itself documents which bot is starting (per the plan).
+ok "Launching ${STOCK_BOT_NAME} → ${MC_HOST}:${MC_PORT} … (Ctrl+C to stop)"
+info "Success looks like: '${STOCK_BOT_NAME} joined the game' in the E2 server"
+info "console, ${STOCK_BOT_NAME} in its 'list' output, and the bot moving in-world."
+cd "$MINDCRAFT_DIR"
+exec node main.js --profiles "$MINDCRAFT_PROFILE"

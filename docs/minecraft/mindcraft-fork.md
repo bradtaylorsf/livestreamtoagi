@@ -36,8 +36,10 @@ command is copy-paste, and every setting is explained in plain language.
 ## What this does NOT cover (on purpose)
 
 - **Connecting a bot to the server** — that's **E3-2 ([#534](https://github.com/bradtaylorsf/livestreamtoagi/issues/534))**:
-  point `settings.js`/a profile at the E2 server and launch one stock bot.
-  This doc stops at a reproducible *install*.
+  point `settings.js`/a profile at the E2 server and launch one stock bot. See
+  the beginner walkthrough **[`docs/minecraft/mindcraft-connect.md`](./mindcraft-connect.md)**
+  (script: `scripts/minecraft/connect-stock-bot.sh`). This doc stops at a
+  reproducible *install*.
 - **Per-agent model routing** — that's **E3-3 ([#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535))**
   and **E3-4 ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))**.
 - **Any customization of the fork** — explicitly out of scope here. The fork is
