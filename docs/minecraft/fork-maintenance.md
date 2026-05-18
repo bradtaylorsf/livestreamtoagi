@@ -148,11 +148,23 @@ edits the live `./mindcraft` clone by hand. Run every step from the repo root.
    Update the patch (or pin the package version) until every `patch-package`
    line is green, then re-vendor the lockfile again.
 
-5. **Prove the fork still builds and the contract holds.**
+5. **Prove the fork still builds and routing still holds.**
+
+   The freshly re-based clone is now on disk — this is the **only** moment
+   the E3-7 ([#539](https://github.com/bradtaylorsf/livestreamtoagi/issues/539))
+   fork-**source** routing contract actually executes (it `skipif`s when no
+   clone is present, e.g. in CI). Run both:
 
    ```bash
-   pnpm verify:mindcraft-fork
+   pnpm verify:mindcraft-fork              # pin contract (SHA, Node 20, lockfile)
+   pnpm verify:mindcraft-routing-contract  # E3-7: model/code_model tier routing survived the re-base
    ```
+
+   If `verify:mindcraft-routing-contract` fails, the upstream change silently
+   altered Mindcraft's native per-agent/per-tier routing — re-review the
+   *"Evidence"* lines in `docs/decisions/0003-mindcraft-model-routing.md` and
+   `docs/minecraft/model-routing.md` before accepting the new pin. **Do not
+   proceed** until it is green against the re-based clone.
 
 6. **Update every place the old pin is recorded** so docs and code cannot drift
    apart. Search-and-replace the old SHA/tag with the new ones in:
@@ -169,10 +181,13 @@ edits the live `./mindcraft` clone by hand. Run every step from the repo root.
 
    ```bash
    pnpm verify:mindcraft-fork && pnpm verify:mindcraft-fork-maintenance
+   pnpm verify:mindcraft-routing-contract   # re-confirm against the re-based clone
    ```
 
-A re-pin is **not done** until both verify commands are green and every bullet
-in step 6 has been updated in the same change.
+A re-pin is **not done** until all three verify commands are green (with the
+re-based clone present, so `verify:mindcraft-routing-contract` actually runs
+rather than skips) and every bullet in step 6 has been updated in the same
+change.
 
 ---
 

@@ -43,6 +43,18 @@ back to word-overlap during skill doc selection. That is acceptable for the
 first vertical slice, but profile generation should set an explicit embedding
 provider later if we keep Mindcraft examples enabled.
 
+> **Verified by E3-5 ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)).**
+> The "disable/de-emphasize Mindcraft examples until E5" decision (and the
+> memory/voice/vision-are-Python-side conclusion) is realised through the
+> reversible `settings.js` flags `num_examples` (2→0),
+> `relevant_docs_count` (5→0), `narrate_behavior` (true→false), with
+> `load_memory`/`speak`/`allow_vision` kept off — no fork-core edit. A bot
+> still connects and acts with them off — see
+> `docs/minecraft/mindcraft-stripped-features.md`,
+> `scripts/minecraft/mindcraft-settings-stripped.js`,
+> `scripts/minecraft/connect-stripped-bot.sh`, and
+> `tests/backend/test_mc_stripped_features.py`.
+
 Mindcraft's model providers do not track cost in our database. OpenRouter also
 does not currently pass arbitrary `params` through in the constructor. Cost
 controls remain Python-side work in E4/E11, and local LM Studio validation should
@@ -86,6 +98,20 @@ Studio or OpenRouter.
 > Two bots (`RoutingBotA`/`RoutingBotB`) each route a conversation `model` to a
 > distinct building `code_model` with **no fork patch** — see
 > `docs/minecraft/model-routing.md` and `tests/backend/test_mc_model_routing.py`.
+
+> **Resolved by E3-7 ([#539](https://github.com/bradtaylorsf/livestreamtoagi/issues/539)) — no patch required.**
+> E3-7's conditional trigger ("a patch is required and E3-3 was non-trivial")
+> is **not met**: native routing, no patch to harden. The acceptance criterion
+> ("tests fail if per-agent/per-tier routing breaks") is instead satisfied by a
+> fork-**source** routing-contract guard,
+> `tests/backend/test_mc_routing_fork_contract.py`
+> (`pnpm verify:mindcraft-routing-contract`), which asserts the *Evidence*
+> lines below against the pinned fork itself so an E3-6
+> ([#538](https://github.com/bradtaylorsf/livestreamtoagi/issues/538))
+> upstream re-base cannot silently break `model`/`code_model` tier routing —
+> the gap the repo-only E3-3 tests did not cover. See
+> `docs/minecraft/model-routing.md` and
+> `docs/minecraft/fork-maintenance.md`.
 
 Patches still expected later:
 

@@ -26,6 +26,55 @@ add a fork patch**. Any later patches (cost-gating, Management review, profile
 `params`) are tracked separately — see decision 0003 *"Patch Scope"* and E3-7
 ([#539](https://github.com/bradtaylorsf/livestreamtoagi/issues/539)).
 
+## E3-7 ([#539](https://github.com/bradtaylorsf/livestreamtoagi/issues/539)) — conditional premise not met (no patch to harden)
+
+E3-7 is conditional: *"Only if E1-R3 concluded a patch is required and E3-3 was
+non-trivial."* Neither holds — decision 0003 *"Patch Scope"* concluded **no
+fork patch is required**, and E3-3 verified native routing **with no patch**.
+So there is **no routing patch to harden**.
+
+The acceptance criterion (*"tests fail if per-agent/per-tier routing breaks"*)
+still binds, and a real uncovered regression vector exists: every E3-3 check in
+`tests/backend/test_mc_model_routing.py` only inspects **repo-side** committed
+assets (the profile/settings templates, the launch script, this doc,
+`core/llm_client.py`) — **none inspects the pinned Mindcraft fork source**. So
+the E3-6 ([#538](https://github.com/bradtaylorsf/livestreamtoagi/issues/538))
+upstream-re-base flow could silently change Mindcraft's `Prompter` to ignore
+`code_model` or collapse the chat/code tiers and **every E3-3 test stays
+green** — exactly the *"an upstream rebase can't silently break the thesis"*
+risk E3-7 names.
+
+E3-7 closes that gap with **`tests/backend/test_mc_routing_fork_contract.py`**
+(`pnpm verify:mindcraft-routing-contract`): a fork-**source** routing contract
+asserting, against the pinned clone itself, that
+
+- `src/models/prompter.js` still builds **separate** chat (`profile.model` →
+  conversation tier) and code (`profile.code_model` → building tier) models,
+  with the documented `code_model := chat_model` fallback intact;
+- `src/models/_model_map.js` still dispatches the `lmstudio/` / `openrouter/`
+  string prefixes to **distinct** provider classes;
+- `src/models/openrouter.js` / `src/models/lmstudio.js` keep their
+  `prefix`/`sendRequest` surface and the OpenRouter-has-no-embeddings caveat
+  the word-overlap example fallback depends on (decision 0003);
+- the zero-external-spend boundary holds as a *negative* contract (committed
+  runtime profiles never carry `openrouter/`; providers never touch our DB),
+  and per-agent `chat != code` still resolves through `core.llm_client`.
+
+It mirrors the E3-3/E3-5 offline posture: the fork-source assertions
+`skipif` when the disposable `./mindcraft` clone is absent (CI has no clone —
+the suite stays green via the existing `backend-test` job, **no new CI
+infra**), and run on any developer / E3-6 re-base host that has the clone —
+regardless of which commit it sits at, since catching a re-based clone that
+broke routing is the whole point. Every failure message points back at the
+**E3-6 re-base runbook** (`docs/minecraft/fork-maintenance.md`, *"How to
+re-base on upstream"*) and decision 0003's *"Evidence"* lines to re-review.
+
+> **No LLM runtime path for #539.** This is a static fork-source contract — it
+> never calls a model, so there is no LM Studio / OpenRouter step to validate
+> for E3-7. The nearest local smoke is `pnpm verify:mindcraft-routing-contract`
+> (clone present) or its skip-clean run (clone absent). Per-agent routing
+> through LM Studio was validated in E3-3 ([#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535)).
+
 ## The two verification bots
 
 Two committed profile templates under `scripts/minecraft/profiles/`, each
@@ -165,6 +214,49 @@ acceptance — decision 0003):
 > If no LLM runtime is available, state that explicitly and attach the
 > static-verify output instead.
 
+## Generating per-agent profiles (E3-4 / [#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))
+
+The two verification bots above are hand-written templates. The **production**
+profiles are generated from the single source of truth
+(`agents/<id>/config.yaml`) by `scripts/minecraft/gen_profiles.py`, so the
+`openrouter/<provider>/<model>` strings can never be hand-copied out of sync
+with `core/llm_client.py`:
+
+```bash
+# Production reference form (default) — openrouter/<config value> per tier,
+# validated through core.llm_client.MODEL_NAME_ALIASES/MODEL_REGISTRY:
+pnpm mc:gen-profiles vera
+# shorthand for: .venv/bin/python scripts/minecraft/gen_profiles.py vera
+# → {"name":"Vera","model":"openrouter/anthropic/claude-haiku-4.5",
+#    "code_model":"openrouter/anthropic/claude-sonnet-4.6"}
+
+# Local-dev / LM Studio form (zero external spend, decision 0003):
+pnpm mc:gen-profiles vera --provider lmstudio --local-chat <id> --local-code <id>
+# (env fallback: LOCAL_LLM_MODEL / LOCAL_LLM_MODEL_BUILDING)
+
+# Write to a profile file instead of stdout:
+pnpm mc:gen-profiles vera --out ./mindcraft/profiles/vera.json
+```
+
+The emitted schema is exactly `{name, model, code_model}` — the same minimal
+shape as the committed sibling templates (`stock-bot.json`,
+`routing-bot-a.json`). **Management is refused** (a content filter, never a
+world bot — E7-5); **Alpha generates** (its non-verbal/no-chat behavior is an
+E7-1 runtime concern, not a profile field). Mapping *all nine* agents at launch
+is **E8**; this generator emits one profile per call.
+
+The headless, dependency-free pytest equivalent (what CI runs):
+
+```bash
+pnpm verify:mindcraft-profiles
+# shorthand for: .venv/bin/pytest tests/backend/test_mc_profile_gen.py -v
+```
+
+> This generator has **no LLM runtime path** — it only emits JSON. The nearest
+> local smoke is `pnpm verify:mindcraft-profiles` plus the
+> `--provider lmstudio` form above (no OpenRouter spend required for
+> acceptance).
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -190,3 +282,26 @@ acceptance — decision 0003):
 - **`tests/backend/test_mc_model_routing.py`** — the headless contract test
   that keeps the profiles, the doc, the agent configs, and `core/llm_client.py`
   in lock-step.
+- **`tests/backend/test_mc_routing_fork_contract.py`** — the E3-7
+  ([#539](https://github.com/bradtaylorsf/livestreamtoagi/issues/539))
+  fork-**source** routing contract (`pnpm verify:mindcraft-routing-contract`):
+  asserts the pinned Mindcraft fork still routes `model`/`code_model` to
+  separate, distinct providers so an E3-6 upstream re-base cannot silently
+  break the thesis. Skips clean when no clone is present.
+- **`docs/minecraft/fork-maintenance.md`** — the E3-6
+  ([#538](https://github.com/bradtaylorsf/livestreamtoagi/issues/538))
+  upstream-re-base runbook the E3-7 contract protects (every fork-source
+  failure points back at its *"How to re-base on upstream"* section).
+- **`scripts/minecraft/gen_profiles.py`** / **`tests/backend/test_mc_profile_gen.py`**
+  — the E3-4 ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))
+  generator that emits per-agent profiles from `agents/<id>/config.yaml`
+  (`pnpm mc:gen-profiles` / `pnpm verify:mindcraft-profiles`).
+
+### Related
+
+- **`docs/minecraft/mindcraft-stripped-features.md`** — the E3-5
+  ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)) sibling:
+  disables the Python-superseded Mindcraft features (memory/examples/voice/
+  vision per decision 0003) behind reversible `settings.js` flags, while
+  **keeping** the decentralized conversation (decision 0004). Same
+  committed-artifact + staged-into-clone pattern as this runbook.
