@@ -785,3 +785,122 @@ def test_server_kill_safe_idles_then_auto_recovers(tmp_path: Path) -> None:
             proc.kill()
             proc.wait(timeout=5)
         os.environ.pop(BRIDGE_TOKEN_ENV, None)
+
+
+# ── (c) Live ACCEPTANCE: bounded in-flight → fail-closed backpressure ───────
+
+_BACKPRESSURE_HARNESS = r"""
+import { pathToFileURL } from 'node:url';
+
+// Any uncaught error/rejection is a CRASH — backpressure must never crash.
+process.on('uncaughtException', (e) => {
+    process.stdout.write(JSON.stringify({ ev: 'crash', message: String((e && e.message) || e) }) + '\n');
+    process.exit(3);
+});
+process.on('unhandledRejection', (e) => {
+    process.stdout.write(JSON.stringify({ ev: 'crash', message: String((e && e.message) || e) }) + '\n');
+    process.exit(3);
+});
+
+const mod = await import(pathToFileURL(process.env.BRIDGE_MODULE).href);
+const { callBridge, BridgeClientError } = mod;
+
+const fanout = Number(process.env.BR_FANOUT || '6');
+
+// Fire the whole burst synchronously: every callBridge runs to its first
+// `await` (past the semaphore check + increment) before any yields, so the
+// in-flight cap is exercised deterministically with no sleep/race.
+const settled = await Promise.allSettled(
+    Array.from({ length: fanout }, (_, k) =>
+        callBridge({
+            service: 'bridge',
+            method: 'ping',
+            payload: { message: `burst-${k}` },
+            deadlineMs: 5000,
+            agentId: 'burst-bot',
+        }),
+    ),
+);
+
+const results = settled.map((s) =>
+    s.status === 'fulfilled'
+        ? { status: 'ok' }
+        : {
+              status: 'error',
+              isBridgeClientError: s.reason instanceof BridgeClientError,
+              code: s.reason && s.reason.code,
+              retryable: !!(s.reason && s.reason.retryable),
+          },
+);
+process.stdout.write(JSON.stringify({ ev: 'done', results }) + '\n');
+process.exit(0);
+"""
+
+
+@requires_node
+def test_bounded_in_flight_sheds_excess_as_retryable_backpressure(tmp_path: Path) -> None:
+    """ACCEPTANCE (#544, scope: bounded in-flight): with a small
+    ``MINECRAFT_BRIDGE_MAX_INFLIGHT`` and a synchronous burst of more
+    concurrent ``callBridge`` calls than the cap, the excess reject
+    *immediately* with a structured, retryable ``bridge_overloaded`` (never an
+    unbounded queue, never more concurrent sockets than the cap), at most
+    ``MAX_INFLIGHT`` succeed, and the process never crashes."""
+    from core.bridge.server import BRIDGE_TOKEN_ENV
+
+    port = _free_port()
+    url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
+    harness = tmp_path / "backpressure_harness.mjs"
+    harness.write_text(_BACKPRESSURE_HARNESS)
+
+    max_inflight = 2
+    fanout = 6
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "BRIDGE_MODULE": str(BRIDGE_CLIENT),
+        "MINECRAFT_BRIDGE_URL": url,
+        "MINECRAFT_BRIDGE_TOKEN": TOKEN,
+        "MINECRAFT_BRIDGE_MAX_INFLIGHT": str(max_inflight),
+        "BR_FANOUT": str(fanout),
+    }
+
+    os.environ[BRIDGE_TOKEN_ENV] = TOKEN
+    try:
+        with _ThreadedUvicorn(port):
+            proc = subprocess.run(
+                [NODE, str(harness)],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp_path,  # empty dir → global WebSocket + ?token= (CI path)
+                timeout=30,
+            )
+    finally:
+        os.environ.pop(BRIDGE_TOKEN_ENV, None)
+
+    assert proc.returncode == 0, (
+        f"node exited {proc.returncode} (backpressure must never crash)\n"
+        f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    )
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["ev"] == "done", payload
+    results = payload["results"]
+    assert len(results) == fanout, results
+
+    oks = [r for r in results if r["status"] == "ok"]
+    overloaded = [r for r in results if r.get("code") == "bridge_overloaded"]
+
+    # The semaphore must bound concurrency: never more than the cap proceed.
+    assert len(oks) <= max_inflight, (
+        f"more calls proceeded than MAX_INFLIGHT={max_inflight}: {results}"
+    )
+    # The excess must shed as fail-closed backpressure, and every shed call
+    # must be a structured, retryable bridge_overloaded (so callers safe-idle).
+    assert len(overloaded) >= fanout - max_inflight, results
+    for r in overloaded:
+        assert r["isBridgeClientError"] is True, r
+        assert r["retryable"] is True, r
+    # No other error class, and definitely no crash.
+    assert not any(e.get("ev") == "crash" for e in [payload]), payload
+    assert all(r["status"] == "ok" or r.get("code") == "bridge_overloaded" for r in results), (
+        f"unexpected non-overloaded failure during a healthy burst: {results}"
+    )
