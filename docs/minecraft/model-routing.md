@@ -165,6 +165,49 @@ acceptance — decision 0003):
 > If no LLM runtime is available, state that explicitly and attach the
 > static-verify output instead.
 
+## Generating per-agent profiles (E3-4 / [#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))
+
+The two verification bots above are hand-written templates. The **production**
+profiles are generated from the single source of truth
+(`agents/<id>/config.yaml`) by `scripts/minecraft/gen_profiles.py`, so the
+`openrouter/<provider>/<model>` strings can never be hand-copied out of sync
+with `core/llm_client.py`:
+
+```bash
+# Production reference form (default) — openrouter/<config value> per tier,
+# validated through core.llm_client.MODEL_NAME_ALIASES/MODEL_REGISTRY:
+pnpm mc:gen-profiles vera
+# shorthand for: .venv/bin/python scripts/minecraft/gen_profiles.py vera
+# → {"name":"Vera","model":"openrouter/anthropic/claude-haiku-4.5",
+#    "code_model":"openrouter/anthropic/claude-sonnet-4.6"}
+
+# Local-dev / LM Studio form (zero external spend, decision 0003):
+pnpm mc:gen-profiles vera --provider lmstudio --local-chat <id> --local-code <id>
+# (env fallback: LOCAL_LLM_MODEL / LOCAL_LLM_MODEL_BUILDING)
+
+# Write to a profile file instead of stdout:
+pnpm mc:gen-profiles vera --out ./mindcraft/profiles/vera.json
+```
+
+The emitted schema is exactly `{name, model, code_model}` — the same minimal
+shape as the committed sibling templates (`stock-bot.json`,
+`routing-bot-a.json`). **Management is refused** (a content filter, never a
+world bot — E7-5); **Alpha generates** (its non-verbal/no-chat behavior is an
+E7-1 runtime concern, not a profile field). Mapping *all nine* agents at launch
+is **E8**; this generator emits one profile per call.
+
+The headless, dependency-free pytest equivalent (what CI runs):
+
+```bash
+pnpm verify:mindcraft-profiles
+# shorthand for: .venv/bin/pytest tests/backend/test_mc_profile_gen.py -v
+```
+
+> This generator has **no LLM runtime path** — it only emits JSON. The nearest
+> local smoke is `pnpm verify:mindcraft-profiles` plus the
+> `--provider lmstudio` form above (no OpenRouter spend required for
+> acceptance).
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -190,3 +233,7 @@ acceptance — decision 0003):
 - **`tests/backend/test_mc_model_routing.py`** — the headless contract test
   that keeps the profiles, the doc, the agent configs, and `core/llm_client.py`
   in lock-step.
+- **`scripts/minecraft/gen_profiles.py`** / **`tests/backend/test_mc_profile_gen.py`**
+  — the E3-4 ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))
+  generator that emits per-agent profiles from `agents/<id>/config.yaml`
+  (`pnpm mc:gen-profiles` / `pnpm verify:mindcraft-profiles`).
