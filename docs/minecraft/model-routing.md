@@ -237,3 +237,12 @@ pnpm verify:mindcraft-profiles
   — the E3-4 ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))
   generator that emits per-agent profiles from `agents/<id>/config.yaml`
   (`pnpm mc:gen-profiles` / `pnpm verify:mindcraft-profiles`).
+
+### Related
+
+- **`docs/minecraft/mindcraft-stripped-features.md`** — the E3-5
+  ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)) sibling:
+  disables the Python-superseded Mindcraft features (memory/examples/voice/
+  vision per decision 0003) behind reversible `settings.js` flags, while
+  **keeping** the decentralized conversation (decision 0004). Same
+  committed-artifact + staged-into-clone pattern as this runbook.

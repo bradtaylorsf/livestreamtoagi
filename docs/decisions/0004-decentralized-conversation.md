@@ -30,6 +30,16 @@ and personality-calibrated initiation.
 - Treat eavesdropping and group chat as explicit new work, not native Mindcraft
   behavior.
 
+> **Verified by E3-5 ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)).**
+> When E3-5 stripped the Python-superseded Mindcraft features, the
+> decentralized bot-to-bot conversation was **deliberately KEPT**:
+> `chat_bot_messages` stays `true` and the conversation system is not disabled.
+> The contract test asserts it is not stripped — see
+> `docs/minecraft/mindcraft-stripped-features.md`,
+> `scripts/minecraft/mindcraft-settings-stripped.js`, and
+> `tests/backend/test_mc_stripped_features.py`. The personality/proximity/
+> eavesdrop layer remains E8 new work (not removal).
+
 ## What Mindcraft Actually Does
 
 Mindcraft exposes `!startConversation(player_name, message)` and
