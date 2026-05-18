@@ -43,7 +43,10 @@ case "${1:-}" in
     --dry-run) MODE="dry-run" ;;
     --smoke)   MODE="smoke" ;;
     --help|-h)
-        sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+        # Print the contiguous comment header (skip the shebang, stop at the
+        # first non-comment line) so help never leaks script code, and stays
+        # correct if the header length changes.
+        awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"
         exit 0
         ;;
     "") ;;

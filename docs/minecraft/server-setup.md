@@ -184,6 +184,9 @@ regenerated once it exists.
 - **`max-players=20`** — Connection cap.
 - **`view-distance=10`** — How many chunks the server sends each player. Lower
   it (e.g. `6`) if the host is RAM-constrained.
+- **`spawn-protection=0`** — Radius (in blocks) around spawn where only
+  operators may build. We set `0` (no protected zone) so agents can build
+  anywhere; raise it if you want a protected spawn area.
 - **`level-seed` / `level-type`** — Left at defaults here. **Configurable world
   generation is delivered separately in E2-2** — don't hand-edit these yet if
   you want to stay compatible with that work.

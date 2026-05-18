@@ -61,6 +61,10 @@ def test_help_exits_zero_and_describes_usage():
     assert proc.returncode == 0
     assert "--dry-run" in proc.stdout
     assert "--smoke" in proc.stdout
+    # Help must print only the comment header — never leak script source
+    # (regression guard for the hardcoded sed line-range bug).
+    assert "set -euo pipefail" not in proc.stdout
+    assert 'MC_VERSION="${MC_VERSION' not in proc.stdout
 
 
 def test_unknown_argument_is_rejected():
