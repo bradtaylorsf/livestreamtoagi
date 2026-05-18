@@ -29,7 +29,12 @@
 #   MC_HOST                 E2 server host                (default: 127.0.0.1)
 #   MC_PORT                 E2 server port                (default: 25565)
 #   MINDCRAFT_PROFILE       Profile path inside the clone (default: ./profiles/stock-bot.json)
-#   LOCAL_LLM_BASE_URL      LM Studio OpenAI-compatible URL (default: http://localhost:1234/v1)
+#   LOCAL_LLM_BASE_URL      LM Studio URL for the PRE-FLIGHT reachability check
+#                           only (pnpm llm:local --list-only). Mindcraft's
+#                           string-form "lmstudio/<id>" profiles (decision 0003)
+#                           always talk to its built-in http://localhost:1234/v1
+#                           at the pinned commit, so run LM Studio there.
+#                           (default: http://localhost:1234/v1)
 #   LOCAL_LLM_MODEL         LM Studio model id for the conversation tier (REQUIRED for a real run)
 #   LOCAL_LLM_MODEL_BUILDING  LM Studio model id for the building/code tier (default: = LOCAL_LLM_MODEL)
 #
@@ -48,7 +53,12 @@ MC_HOST="${MC_HOST:-127.0.0.1}"           # E1-R2 / decisions 0002 — localhost
 MC_PORT="${MC_PORT:-25565}"               # E2 start-server.sh default (server-port left unset)
 MC_AUTH="offline"                         # E1-R2 / decisions 0002 — matches Paper online-mode=false
 MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/stock-bot.json}"
+# Pre-flight reachability-check URL only (consumed by `pnpm llm:local`, which
+# reads LOCAL_LLM_BASE_URL itself). Mindcraft's string-form "lmstudio/<id>"
+# profiles carry no url, so at the pinned commit the bot ALWAYS uses Mindcraft's
+# built-in http://localhost:1234/v1 regardless of this value — run LM Studio there.
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
+MINDCRAFT_LLM_URL="http://localhost:1234/v1"   # where the bot actually connects (Mindcraft default)
 STOCK_BOT_NAME="StockBot"                 # MUST match "name" in profiles/stock-bot.json
 
 # Resolve the committed template + profile relative to THIS script (not the
@@ -150,7 +160,10 @@ info "server:    ${MC_HOST}:${MC_PORT}  auth=${MC_AUTH}  minecraft=${MC_VERSION}
 info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
 info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
 info "settings:  staged from $SETTINGS_TEMPLATE"
-info "LM Studio: $LOCAL_LLM_BASE_URL  (local only — zero external spend, decision 0003)"
+info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (Mindcraft built-in for"
+info "           string-form lmstudio/ profiles — run LM Studio there; local"
+info "           only, zero external spend, decision 0003)"
+info "           pre-flight check (pnpm llm:local) uses ${LOCAL_LLM_BASE_URL}"
 
 # ── --verify: static, CI/network-safe checks only ──────
 if [ "$MODE" = "verify" ]; then

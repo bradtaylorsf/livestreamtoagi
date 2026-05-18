@@ -122,9 +122,16 @@ Every value has a sensible, E1-pinned default.
 | `MC_HOST` | `127.0.0.1` | E2 server host (keep localhost in offline mode — E1-R2). |
 | `MC_PORT` | `25565` | E2 server port. |
 | `MINDCRAFT_PROFILE` | `./profiles/stock-bot.json` | Profile path inside the clone. |
-| `LOCAL_LLM_BASE_URL` | `http://localhost:1234/v1` | LM Studio OpenAI-compatible URL. |
+| `LOCAL_LLM_BASE_URL` | `http://localhost:1234/v1` | LM Studio URL for the **pre-flight reachability check only** (`pnpm llm:local --list-only`). It does **not** retarget the bot — see note below. |
 | `LOCAL_LLM_MODEL` | *(required)* | LM Studio model id — conversation tier. |
 | `LOCAL_LLM_MODEL_BUILDING` | `= LOCAL_LLM_MODEL` | LM Studio model id — building/code tier. |
+
+> **Where the bot actually connects:** the stock profile uses Mindcraft's
+> string-form `lmstudio/<id>` syntax (decision 0003). At the pinned commit those
+> profiles carry no URL, so Mindcraft always talks to its **built-in
+> `http://localhost:1234/v1`** — `LOCAL_LLM_BASE_URL` cannot move the bot off
+> that endpoint (it only changes the URL the separate `pnpm llm:local` check
+> hits). **Run LM Studio on `http://localhost:1234/v1`** (its default).
 
 ## 4. What success looks like
 
@@ -232,7 +239,7 @@ scripts/minecraft/connect-stock-bot.sh --verify
 | `✗ No Mindcraft clone at ./mindcraft` | Fork not installed yet. | Run `scripts/minecraft/setup-mindcraft.sh` (see `docs/minecraft/mindcraft-fork.md`). |
 | `✗ Clone is not at the pinned commit` | `./mindcraft` drifted off the pin. | Re-pin: `scripts/minecraft/setup-mindcraft.sh` (don't hand-edit the clone). |
 | `✗ LOCAL_LLM_MODEL is not set` | No local model selected. | `pnpm llm:local --list-only`, then `export LOCAL_LLM_MODEL=<id>`. |
-| Bot connects but never responds in chat | LM Studio unreachable or model not loaded. | Check `pnpm llm:local --list-only`; confirm `LOCAL_LLM_BASE_URL` (default `http://localhost:1234/v1`) and that a model is loaded. |
+| Bot connects but never responds in chat | LM Studio not serving on `http://localhost:1234/v1` (the only endpoint string-form `lmstudio/` profiles use at the pinned commit), or the model is not loaded. | Run LM Studio on `http://localhost:1234/v1`; `pnpm llm:local --list-only` to confirm a model is loaded. Overriding `LOCAL_LLM_BASE_URL` does **not** move the bot — it must be at the default endpoint. |
 | Bot joins as the wrong name | `MINDCRAFT_PROFILE` overridden / profile edited. | Use the default `./profiles/stock-bot.json`; whitelist the `name` it actually uses. |
 
 ## 9. Where this is recorded
