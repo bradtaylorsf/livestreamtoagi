@@ -1,17 +1,27 @@
 {
   "name": "session/epic-505-epic-e3-mindcraft-fork-evaluation",
   "branch": "session/epic-505-epic-e3-mindcraft-fork-evaluation",
-  "completed": "2026-05-18T15:30:08.467Z",
+  "completed": "2026-05-18T16:49:40.580Z",
   "results": [
     {
-      "issueNum": 533,
-      "title": "E3-1 — Fork Mindcraft, pin the commit, reproducible install",
+      "issueNum": 534,
+      "title": "E3-2 — One stock bot connects to the E2 server",
       "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/640",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/642",
       "testsPassing": true,
       "verifyPassing": true,
-      "duration": 957,
-      "filesChanged": 3
+      "duration": 1403,
+      "filesChanged": 1
+    },
+    {
+      "issueNum": 538,
+      "title": "E3-6 — Fork maintenance & upstream-merge policy",
+      "status": "success",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/643",
+      "testsPassing": true,
+      "verifyPassing": true,
+      "duration": 765,
+      "filesChanged": 1
     }
   ],
   "stages": [
@@ -70,6 +80,118 @@
       "stage_success": true,
       "started_at": "2026-05-18T15:26:12.835Z",
       "issue_num": 533
+    },
+    {
+      "stage": "plan",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 28,
+      "tokens_out": 11253,
+      "cost_usd": 0.967981,
+      "wall_time_s": 161.765,
+      "tool_calls": 20,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:09:07.652Z",
+      "issue_num": 534
+    },
+    {
+      "stage": "implement",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 208,
+      "tokens_out": 49114,
+      "cost_usd": 4.380197,
+      "wall_time_s": 661.75,
+      "tool_calls": 69,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:11:49.899Z",
+      "issue_num": 534
+    },
+    {
+      "stage": "review",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 84,
+      "tokens_out": 26402,
+      "cost_usd": 2.974061,
+      "wall_time_s": 389.791,
+      "tool_calls": 41,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:24:27.551Z",
+      "issue_num": 534
+    },
+    {
+      "stage": "assumptions",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 12,
+      "tokens_out": 4379,
+      "cost_usd": 0.43677,
+      "wall_time_s": 68.631,
+      "tool_calls": 8,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:31:03.538Z",
+      "issue_num": 534
+    },
+    {
+      "stage": "plan",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 20,
+      "tokens_out": 7982,
+      "cost_usd": 0.598615,
+      "wall_time_s": 113.483,
+      "tool_calls": 12,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:33:09.793Z",
+      "issue_num": 538
+    },
+    {
+      "stage": "implement",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 52,
+      "tokens_out": 22720,
+      "cost_usd": 2.000837,
+      "wall_time_s": 313.618,
+      "tool_calls": 33,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:35:03.747Z",
+      "issue_num": 538
+    },
+    {
+      "stage": "review",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 32,
+      "tokens_out": 10617,
+      "cost_usd": 0.80746,
+      "wall_time_s": 162.58,
+      "tool_calls": 19,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:42:01.167Z",
+      "issue_num": 538
+    },
+    {
+      "stage": "assumptions",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 6,
+      "tokens_out": 3293,
+      "cost_usd": 0.26812,
+      "wall_time_s": 49.479,
+      "tool_calls": 4,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T16:44:47.738Z",
+      "issue_num": 538
     }
   ]
 }
