@@ -19,6 +19,7 @@
     "verify:mindcraft-routing": ".venv/bin/pytest tests/backend/test_mc_model_routing.py -v",
     "verify:mindcraft-profiles": ".venv/bin/pytest tests/backend/test_mc_profile_gen.py -v",
     "verify:mindcraft-stripped": ".venv/bin/pytest tests/backend/test_mc_stripped_features.py -v",
+    "verify:mindcraft-routing-contract": ".venv/bin/pytest tests/backend/test_mc_routing_fork_contract.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",

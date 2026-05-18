@@ -99,6 +99,20 @@ Studio or OpenRouter.
 > distinct building `code_model` with **no fork patch** — see
 > `docs/minecraft/model-routing.md` and `tests/backend/test_mc_model_routing.py`.
 
+> **Resolved by E3-7 ([#539](https://github.com/bradtaylorsf/livestreamtoagi/issues/539)) — no patch required.**
+> E3-7's conditional trigger ("a patch is required and E3-3 was non-trivial")
+> is **not met**: native routing, no patch to harden. The acceptance criterion
+> ("tests fail if per-agent/per-tier routing breaks") is instead satisfied by a
+> fork-**source** routing-contract guard,
+> `tests/backend/test_mc_routing_fork_contract.py`
+> (`pnpm verify:mindcraft-routing-contract`), which asserts the *Evidence*
+> lines below against the pinned fork itself so an E3-6
+> ([#538](https://github.com/bradtaylorsf/livestreamtoagi/issues/538))
+> upstream re-base cannot silently break `model`/`code_model` tier routing —
+> the gap the repo-only E3-3 tests did not cover. See
+> `docs/minecraft/model-routing.md` and
+> `docs/minecraft/fork-maintenance.md`.
+
 Patches still expected later:
 
 - Cost-gated wrapper before model calls or bridge-level cost accounting.
