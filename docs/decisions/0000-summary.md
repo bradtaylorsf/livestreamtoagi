@@ -88,3 +88,4 @@ and the final broadcast hardening pass.
 - [0005: Skill And Bridge Extension Point](0005-skill-extension-point.md)
 - [0006: Minecraft Video Capture](0006-video-capture.md)
 - [0007: Minecraft Licensing And Commercial Posture](0007-licensing.md)
+- [0010: Bridge Protocol And Transport](0010-bridge-protocol.md)
