@@ -16,7 +16,7 @@ explained in plain language.
 
 ## What this does NOT cover (on purpose)
 
-- **Running it 24/7 in the cloud** — that's [E2-3](https://github.com/bradtaylorsf/livestreamtoagi/issues/528) (decide/document hosting).
+- **Running it 24/7 (where the durable host lives)** — that's [E2-3](https://github.com/bradtaylorsf/livestreamtoagi/issues/528), now documented in **[hosting.md](./hosting.md)** (recommended host, spec, cost, and the capture-host tradeoff). This doc runs the server locally; see that doc to choose where it lives 24/7.
 - **Auto-restart / crash recovery** — that's [E2-4](https://github.com/bradtaylorsf/livestreamtoagi/issues/529) (supervision).
 - **Choosing the world seed/type/spawn** — that's [E2-2](https://github.com/bradtaylorsf/livestreamtoagi/issues/527), now documented in **[world-config.md](./world-config.md)**. This doc boots the default world; see that doc to change it.
 - **Backups, health checks, teardown** — later E2 issues.
