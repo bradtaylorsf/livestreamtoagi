@@ -13,6 +13,7 @@
     "test:frontend": "npm --prefix frontend test",
     "test:website": "npm --prefix website test",
     "verify:minecraft-server": ".venv/bin/pytest tests/backend/test_minecraft_start_server.py tests/backend/test_minecraft_world_config.py tests/backend/test_minecraft_supervision.py tests/backend/test_minecraft_backup_restore.py tests/backend/test_minecraft_health.py tests/backend/test_minecraft_runbook.py -v",
+    "verify:mindcraft-fork": ".venv/bin/pytest tests/backend/test_minecraft_setup_mindcraft.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",

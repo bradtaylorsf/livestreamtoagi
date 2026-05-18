@@ -21,7 +21,7 @@ and the final broadcast hardening pass.
 | --- | --- | --- |
 | Minecraft version | Pin `1.21.6` for E2 through E8. | #518 |
 | Server software | Use Paper, artifact `paper-1.21.6-48.jar`. | #518 |
-| Mindcraft pin | Fork `mindcraft-bots/mindcraft@35be480b4cc0bca990278e6103a1426392559d96`. | #518 |
+| Mindcraft pin | Fork `mindcraft-bots/mindcraft` to the org fork <https://github.com/bradtaylorsf/mindcraft> (tag `e1-r1-pin`), pinned at commit `35be480b4cc0bca990278e6103a1426392559d96`. Reproducible install: [docs/minecraft/mindcraft-fork.md](../minecraft/mindcraft-fork.md). | #518, #533 |
 | Node runtime | Use Node 20 LTS for Mindcraft. | #518 |
 | Java runtime | Use Java 21 for Paper 1.21.6. | #518 |
 | Local auth | Use private offline mode: Paper `online-mode=false`, Mindcraft `auth: "offline"`. | #519 |
@@ -40,7 +40,12 @@ and the final broadcast hardening pass.
 
 1. E2-1: provision Paper 1.21.6 locally with a beginner runbook.
 2. E3-1: fork Mindcraft at the pinned commit and make install reproducible with
-   Node 20.
+   Node 20. **Done (#533):** org fork
+   <https://github.com/bradtaylorsf/mindcraft> (tag `e1-r1-pin`), commit
+   `35be480b4cc0bca990278e6103a1426392559d96`. Reproducible install is
+   `scripts/minecraft/setup-mindcraft.sh` driven by the committed lockfile
+   `scripts/minecraft/mindcraft-package-lock.json`; beginner runbook is
+   [docs/minecraft/mindcraft-fork.md](../minecraft/mindcraft-fork.md).
 3. E3-4: generate Mindcraft profiles from `agents/<id>/config.yaml`.
 4. E4-1/E4-2: define the bridge envelope and implement `!bridgePing`.
 5. E11 can run in parallel: add hard per-agent hourly spend caps and connect the
