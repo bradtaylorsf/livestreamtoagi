@@ -230,6 +230,28 @@ stops it automatically, exiting non-zero if it never becomes ready:
 scripts/minecraft/start-server.sh --smoke
 ```
 
+### Headless verification (no Java, no network, no Node)
+
+The canonical, dependency-free way to verify this issue — used by CI and the
+automated verifier — is the project's standard test runner. It exercises the
+provisioning logic via `--dry-run` (EULA + `server.properties` generation,
+pinned E1 defaults, env overrides, the no-clobber guarantee) plus bash-syntax
+and shellcheck linting of the start script. It needs **no Java, no network, and
+no Node.js**:
+
+```bash
+pnpm verify:minecraft-server
+```
+
+That is shorthand for the equivalent direct command (run either one):
+
+```bash
+.venv/bin/pytest tests/backend/test_minecraft_start_server.py -v
+```
+
+Run `pnpm verify:minecraft-server` to validate this issue headlessly; reserve
+`--smoke` (above) for hosts that have Java 21 and a real end-to-end boot.
+
 ## 10. Troubleshooting
 
 | Symptom | Cause | Fix |
