@@ -19,7 +19,9 @@ explained in plain language.
 - **Running it 24/7 (where the durable host lives)** — that's [E2-3](https://github.com/bradtaylorsf/livestreamtoagi/issues/528), now documented in **[hosting.md](./hosting.md)** (recommended host, spec, cost, and the capture-host tradeoff). This doc runs the server locally; see that doc to choose where it lives 24/7.
 - **Auto-restart / crash recovery (24/7 supervision)** — that's [E2-4](https://github.com/bradtaylorsf/livestreamtoagi/issues/529), now documented in **[supervision.md](./supervision.md)** (a systemd unit for the Linux 24/7 host plus a portable supervisor script, with the restart window and log retention). This doc just runs the server; see that doc to keep it up unattended.
 - **Choosing the world seed/type/spawn** — that's [E2-2](https://github.com/bradtaylorsf/livestreamtoagi/issues/527), now documented in **[world-config.md](./world-config.md)**. This doc boots the default world; see that doc to change it.
-- **Backups, health checks, teardown** — later E2 issues.
+- **Backups & restore** — that's [E2-5](https://github.com/bradtaylorsf/livestreamtoagi/issues/530), now documented in **[backup-restore.md](./backup-restore.md)** (scheduled snapshots, restore, and a clean reset).
+- **Knowing the server is up (health check / status)** — that's [E2-6](https://github.com/bradtaylorsf/livestreamtoagi/issues/531), now documented in **[health.md](./health.md)** (a one-command up/down probe + `--json` status for the brain). This doc just starts the server; see that doc to check it's alive.
+- **Teardown** — that's a later E2 issue ([E2-7](https://github.com/bradtaylorsf/livestreamtoagi/issues/532), the consolidated ops runbook).
 
 Here you just get a server running locally and learn what each knob means.
 
