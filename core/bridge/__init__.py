@@ -24,9 +24,11 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
+from core.bridge.inbound import INBOUND_VERBS, dispatch_inbound
 from core.bridge.server import bridge_router
 
 __all__ = [
+    "INBOUND_VERBS",
     "PROTOCOL_VERSION",
     "SERVICE_REGISTRY",
     "BridgeError",
@@ -35,6 +37,7 @@ __all__ = [
     "CostContext",
     "UnsupportedServiceError",
     "bridge_router",
+    "dispatch_inbound",
     "export_json_schema",
     "is_supported_version",
     "parse_version",
