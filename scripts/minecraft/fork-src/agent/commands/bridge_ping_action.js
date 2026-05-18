@@ -1,4 +1,5 @@
-// The `!bridgePing` custom Mindcraft action (issue #543, E4-4 — epic E4 #506).
+// The `!bridgePing` custom Mindcraft action (issue #543 E4-4 + #544 E4-5 —
+// epic E4 #506).
 //
 // Committed source of truth (`./mindcraft` is git-ignored).
 // `scripts/minecraft/connect-bridge-bot.sh` copies this verbatim into the
@@ -18,6 +19,10 @@
 // logs the Python response; the failure path is logged with the structured
 // `error.code`/message and the action returns a status string — it is wrapped
 // so a bridge failure is never an uncaught throw and never crashes the bot.
+// E4-5 (#544) extends that contract: a down/saturated bridge surfaces as
+// `bridge_unreachable`/`bridge_overloaded`, which this action treats as an
+// explicit SAFE-IDLE (logged, no in-world action) — a closed gate, never an
+// unsafe action (ADR 0010 §5). The client's background probe auto-recovers.
 
 import { callBridge, BridgeClientError } from '../bridge/python_bridge.js';
 
@@ -68,6 +73,16 @@ export const bridgePingAction = {
             // first, then the human message (ADR §2/§5).
             const code = err instanceof BridgeClientError ? err.code : 'bridge_unknown';
             const detail = err && err.message ? err.message : String(err);
+            // E4-5 (#544): a down (circuit open) or saturated (in-flight cap)
+            // bridge is a CLOSED gate, never an unsafe action (ADR 0010 §5).
+            // Degrade to an explicit SAFE-IDLE: log it, take no in-world
+            // action, return a status string — same never-crash contract. The
+            // background reconnect probe auto-recovers; a later call succeeds.
+            if (code === 'bridge_unreachable' || code === 'bridge_overloaded') {
+                const idle = `bridge unavailable, safe-idling [${code}]: ${detail}`;
+                announce(idle, true);
+                return idle; // safe-idle, not crashed — no in-world action
+            }
             const line = `bridge ping failed [${code}]: ${detail}`;
             announce(line, true);
             return line; // logged, not crashed — the bot keeps running
