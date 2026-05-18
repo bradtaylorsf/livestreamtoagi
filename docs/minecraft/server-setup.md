@@ -21,7 +21,10 @@ explained in plain language.
 - **Choosing the world seed/type/spawn** — that's [E2-2](https://github.com/bradtaylorsf/livestreamtoagi/issues/527), now documented in **[world-config.md](./world-config.md)**. This doc boots the default world; see that doc to change it.
 - **Backups & restore** — that's [E2-5](https://github.com/bradtaylorsf/livestreamtoagi/issues/530), now documented in **[backup-restore.md](./backup-restore.md)** (scheduled snapshots, restore, and a clean reset).
 - **Knowing the server is up (health check / status)** — that's [E2-6](https://github.com/bradtaylorsf/livestreamtoagi/issues/531), now documented in **[health.md](./health.md)** (a one-command up/down probe + `--json` status for the brain). This doc just starts the server; see that doc to check it's alive.
-- **Teardown** — that's a later E2 issue ([E2-7](https://github.com/bradtaylorsf/livestreamtoagi/issues/532), the consolidated ops runbook).
+- **Teardown** and the consolidated day-to-day operations (start/stop/backup/
+  restore/restart/health on one page) — that's [E2-7](https://github.com/bradtaylorsf/livestreamtoagi/issues/532),
+  now documented in **[runbook.md](./runbook.md)** (the single beginner ops
+  page, including a clean, irreversible-flagged teardown procedure).
 
 Here you just get a server running locally and learn what each knob means.
 
