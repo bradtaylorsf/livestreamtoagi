@@ -22,6 +22,7 @@
     "verify:mindcraft-routing-contract": ".venv/bin/pytest tests/backend/test_mc_routing_fork_contract.py -v",
     "verify:bridge-protocol": ".venv/bin/pytest tests/backend/test_bridge_protocol_decision.py -v",
     "verify:bridge-contract": ".venv/bin/pytest tests/backend/test_bridge_contract.py -v",
+    "verify:bridge-server": ".venv/bin/pytest tests/backend/test_bridge_server.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",
