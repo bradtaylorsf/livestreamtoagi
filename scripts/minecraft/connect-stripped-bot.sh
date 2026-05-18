@@ -337,10 +337,29 @@ info "  E3-5 features OFF; chat_bot_messages KEPT (decision 0004)"
 #     Strip a leading "./" so the on-disk path stays clean (no "..././/...").
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! sed \
-    -e "s|__LOCAL_LLM_MODEL__|${LLM_MODEL}|g" \
-    -e "s|__LOCAL_LLM_MODEL_BUILDING__|${LLM_MODEL_BUILDING}|g" \
-    "$PROFILE_TEMPLATE" > "$DEST_PROFILE"; then
+if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const templatePath = process.env.TEMPLATE_PATH;
+const destPath = process.env.DEST_PATH;
+const chatModel = process.env.CHAT_MODEL;
+const codeModel = process.env.CODE_MODEL;
+const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
+
+if (
+    profile.model !== 'lmstudio/__LOCAL_LLM_MODEL__' ||
+    profile.code_model !== 'lmstudio/__LOCAL_LLM_MODEL_BUILDING__'
+) {
+    throw new Error(
+        'stock-bot profile template no longer has the expected local model placeholders'
+    );
+}
+
+profile.model = `lmstudio/${chatModel}`;
+profile.code_model = `lmstudio/${codeModel}`;
+writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
+NODE
+then
     fail "Failed to stage profile → $DEST_PROFILE"
     exit 1
 fi

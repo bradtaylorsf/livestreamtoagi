@@ -213,6 +213,16 @@ def test_dry_run_with_model_env_substitutes_lmstudio_ids(tmp_path):
     assert "openrouter/" not in proc.stdout
 
 
+def test_profile_staging_uses_json_escaping_not_sed_substitution():
+    """Real launches must preserve model ids containing sed metacharacters."""
+    src = SCRIPT.read_text()
+    assert "JSON.parse(readFileSync" in src
+    assert "JSON.stringify(profile" in src
+    assert "profile.model = `lmstudio/${chatModel}`" in src
+    assert "s|__LOCAL_LLM_MODEL__|${LLM_MODEL}|g" not in src
+    assert "s|__LOCAL_LLM_MODEL_BUILDING__|${LLM_MODEL_BUILDING}|g" not in src
+
+
 # ── The core contract: exactly these flags flip, and only these ─────────────
 
 

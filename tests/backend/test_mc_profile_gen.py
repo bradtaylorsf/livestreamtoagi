@@ -230,6 +230,18 @@ def test_cli_unknown_agent_exits_nonzero():
 # ── (f) E8 readiness + E1 policy bindings ───────────────────────────────────
 
 
+@pytest.mark.parametrize(
+    ("agent_id", "expected"),
+    [
+        ("vera", "Vera"),
+        ("routing-bot-a", "RoutingBotA"),
+        ("fork_agent", "ForkAgent"),
+    ],
+)
+def test_bot_name_normalizes_agent_ids_to_pascal_case(agent_id, expected):
+    assert gen._bot_name(agent_id) == expected
+
+
 @pytest.mark.parametrize("agent_id", _real_agent_ids())
 def test_every_real_agent_generates_valid_json(agent_id):
     """Every real agent emits a valid 3-key profile from its own config."""
@@ -237,7 +249,7 @@ def test_every_real_agent_generates_valid_json(agent_id):
     cfg = yaml.safe_load((AGENTS_DIR / agent_id / "config.yaml").read_text())
 
     assert set(profile) == PROFILE_KEYS
-    assert profile["name"] == agent_id.capitalize()
+    assert profile["name"] == gen._bot_name(agent_id)
     assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
     assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
     # Round-trips as JSON with all-string values.
