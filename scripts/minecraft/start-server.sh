@@ -26,6 +26,12 @@
 #   ONLINE_MODE   Verify accounts with Mojang?      (default: false   — E1-R2)
 #   WHITELIST     Reject players not on the list?   (default: true)
 #   SMOKE_TIMEOUT Seconds to wait for boot in smoke (default: 180)
+#   WORLD_CONFIG  World-gen config file             (default: <script dir>/world.config)
+#
+# World generation (seed/type/name/structures/spawn-protection) is a
+# configurable INPUT, not hardcoded (issue #527, epic E2-2). It is read from
+# WORLD_CONFIG (a committed KEY=VALUE file) and only affects the FIRST world
+# generation — see docs/minecraft/world-config.md for the beginner explainer.
 set -euo pipefail
 
 # ── Pinned E1 defaults (kept in sync with docs/decisions/0001 & 0002) ──
@@ -37,6 +43,12 @@ MEM="${MEM:-2G}"
 ONLINE_MODE="${ONLINE_MODE:-false}"
 WHITELIST="${WHITELIST:-true}"
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-180}"
+
+# ── World-generation config (issue #527 / E2-2) ──
+# Resolve world.config relative to THIS script (not the caller's cwd) so the
+# committed defaults are used no matter where the script is invoked from.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+WORLD_CONFIG="${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
 
 MODE="run"
 case "${1:-}" in
@@ -59,6 +71,17 @@ esac
 ok()   { echo "✓ $*"; }
 info() { echo "  $*"; }
 fail() { echo "✗ $*" >&2; }
+
+# read_world_key KEY → value of the last "KEY=value" line in WORLD_CONFIG
+# (or empty). This is a fixed allow-list reader: the file is parsed with sed,
+# never sourced/executed, so a malformed or hostile world.config cannot run
+# code or set anything other than the keys we explicitly ask for here.
+# `tr -d '\r'` tolerates a Windows-edited (CRLF) config. Comment lines start
+# with '#', so the '^KEY=' anchor already excludes the examples in the file.
+read_world_key() {
+    [ -f "$WORLD_CONFIG" ] || return 0
+    tr -d '\r' < "$WORLD_CONFIG" | sed -nE "s/^${1}=(.*)$/\1/p" | tail -n1
+}
 
 # ── (a) Java check ─────────────────────────────────────
 # A real run requires Java $REQUIRED_JAVA_MAJOR. In --dry-run we only warn so the
@@ -97,6 +120,26 @@ info "Paper jar:    $JAR (Minecraft ${MC_VERSION}, build ${PAPER_BUILD})"
 info "Memory:       $MEM"
 info "online-mode:  $ONLINE_MODE   white-list: $WHITELIST"
 
+# ── Resolve world generation from WORLD_CONFIG (issue #527 / E2-2) ──
+# Missing file or missing key → fall back to the same safe defaults the
+# committed world.config ships, so the server still boots a sane world even
+# without the config present. An empty LEVEL_SEED is intentional (= random).
+LEVEL_SEED="$(read_world_key LEVEL_SEED)"
+LEVEL_TYPE="$(read_world_key LEVEL_TYPE)";                 LEVEL_TYPE="${LEVEL_TYPE:-minecraft:normal}"
+LEVEL_NAME="$(read_world_key LEVEL_NAME)";                 LEVEL_NAME="${LEVEL_NAME:-world}"
+GENERATE_STRUCTURES="$(read_world_key GENERATE_STRUCTURES)"; GENERATE_STRUCTURES="${GENERATE_STRUCTURES:-true}"
+SPAWN_PROTECTION="$(read_world_key SPAWN_PROTECTION)";     SPAWN_PROTECTION="${SPAWN_PROTECTION:-0}"
+
+if [ -f "$WORLD_CONFIG" ]; then
+    info "world config: $WORLD_CONFIG"
+else
+    info "world config: $WORLD_CONFIG (absent — using built-in safe defaults)"
+fi
+SEED_DISPLAY="${LEVEL_SEED:-(empty → random)}"
+info "world:        seed=${SEED_DISPLAY}  type=${LEVEL_TYPE}  name=${LEVEL_NAME}"
+info "              generate-structures=${GENERATE_STRUCTURES}  spawn-protection=${SPAWN_PROTECTION}"
+info "              (only applied on FIRST world gen — see docs/minecraft/world-config.md)"
+
 # ── (e) Accept the Minecraft EULA ─────────────────────
 # Running a server REQUIRES agreeing to Mojang's EULA (https://aka.ms/MinecraftEULA).
 # This script writes eula=true on your behalf — by running it you accept that EULA.
@@ -122,9 +165,16 @@ white-list=${WHITELIST}
 difficulty=normal
 max-players=20
 view-distance=10
-spawn-protection=0
-# level-seed / level-type are intentionally left at defaults here;
-# configurable world generation is delivered separately in E2-2.
+spawn-protection=${SPAWN_PROTECTION}
+# ── World generation (issue #527 / E2-2) ──
+# These come from $WORLD_CONFIG and ONLY take effect on the FIRST world
+# generation — Minecraft bakes the seed/type into the saved world. To apply
+# a change you must start fresh. See docs/minecraft/world-config.md.
+# level-seed= (empty) means "pick a new random world".
+level-name=${LEVEL_NAME}
+level-seed=${LEVEL_SEED}
+level-type=${LEVEL_TYPE}
+generate-structures=${GENERATE_STRUCTURES}
 EOF
     ok "Wrote a minimal $PROPS"
 fi
@@ -137,6 +187,7 @@ if [ "$MODE" = "dry-run" ]; then
     ok "Dry run complete — no jar downloaded, server not launched."
     info "Would download (if missing): https://api.papermc.io/v2/projects/paper/versions/${MC_VERSION}/builds/${PAPER_BUILD}/downloads/${JAR}"
     info "Would run from $SERVER_DIR: ${JAVA_CMD[*]}"
+    info "Would generate world: seed=${SEED_DISPLAY} type=${LEVEL_TYPE} name=${LEVEL_NAME} (from $WORLD_CONFIG)"
     exit 0
 fi
 

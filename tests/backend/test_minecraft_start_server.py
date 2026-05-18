@@ -92,9 +92,14 @@ def test_dry_run_generates_eula_and_pinned_defaults(tmp_path):
     assert "difficulty=" in props
     assert "max-players=" in props
     assert "motd=" in props
-    # World gen is deferred to E2-2 — must not be pinned here.
-    assert "level-seed=" not in props
-    assert "level-type=" not in props
+    # E2-2 (#527): world-gen inputs now come from scripts/minecraft/world.config
+    # and are written into a freshly generated server.properties. The committed
+    # defaults: normal world, empty seed (= random), folder "world".
+    assert "level-type=minecraft:normal" in props
+    assert "level-name=world" in props
+    assert "generate-structures=true" in props
+    # Seed line is present but empty → Minecraft picks a random world.
+    assert "level-seed=\n" in props or props.rstrip().endswith("level-seed=")
 
     # Pinned E1-R1 jar appears in the "would download/run" preview.
     assert "paper-1.21.6-48.jar" in proc.stdout
