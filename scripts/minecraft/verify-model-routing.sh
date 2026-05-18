@@ -110,7 +110,32 @@ esac
 
 ok()   { echo "✓ $*"; }
 info() { echo "  $*"; }
+warn() { echo "⚠ $*" >&2; }
 fail() { echo "✗ $*" >&2; }
+
+# Advisory on the RESOLVED runtime model ids (verify_committed_assets only
+# checks the committed template tokens, which are always distinct). The whole
+# point of E3-3 is each bot routes a conversation `model` to a DIFFERENT
+# building `code_model`; warn loudly (non-fatal — a local connectivity smoke may
+# legitimately reuse one loaded model) when the operator's ids collapse that.
+warn_runtime_model_ids() {
+    [ -n "$LLM_A_CHAT" ] && [ -n "$LLM_A_CODE" ] \
+        && [ -n "$LLM_B_CHAT" ] && [ -n "$LLM_B_CODE" ] || return 0
+    if [ "$LLM_A_CHAT" = "$LLM_A_CODE" ] && [ "$LLM_A_CHAT" = "$LLM_B_CHAT" ] \
+        && [ "$LLM_A_CHAT" = "$LLM_B_CODE" ]; then
+        warn "All four model ids are '$LLM_A_CHAT' — the routing demo is vacuous."
+        info "  Export at least two distinct LM Studio ids so chat vs code routing"
+        info "  is observable (pnpm llm:local --list-only to list served ids)."
+        return 0
+    fi
+    if [ "$LLM_A_CHAT" = "$LLM_A_CODE" ]; then
+        warn "$BOT_A_NAME chat == code id ('$LLM_A_CHAT') — that tier split is unobservable."
+    fi
+    if [ "$LLM_B_CHAT" = "$LLM_B_CODE" ]; then
+        warn "$BOT_B_NAME chat == code id ('$LLM_B_CHAT') — that tier split is unobservable."
+    fi
+    return 0
+}
 
 restore_mcdata_patch() {
     if [ -n "${MCDATA_BACKUP:-}" ] && [ -f "$MCDATA_BACKUP" ] && [ -n "${MCDATA_PATH:-}" ]; then
@@ -274,6 +299,7 @@ if [ "$MODE" = "dry-run" ]; then
     if [ -n "$LLM_A_CHAT" ] && [ -n "$LLM_A_CODE" ] && [ -n "$LLM_B_CHAT" ] && [ -n "$LLM_B_CODE" ]; then
         info "$BOT_A_NAME  model: lmstudio/$LLM_A_CHAT   code_model: lmstudio/$LLM_A_CODE"
         info "$BOT_B_NAME  model: lmstudio/$LLM_B_CHAT   code_model: lmstudio/$LLM_B_CODE"
+        warn_runtime_model_ids
     else
         info "models:     (LLM_A_CHAT/LLM_A_CODE/LLM_B_CHAT/LLM_B_CODE unset — all"
         info "             four REQUIRED for a real run; list ids with:"
@@ -331,6 +357,10 @@ if [ -n "$missing" ]; then
     info "  This keeps validation 100% local — zero external model spend (decision 0003)."
     exit 1
 fi
+# Non-fatal: warn if the operator's ids collapse the chat-vs-code tier split
+# the issue is meant to demonstrate (the committed-template check above cannot
+# see runtime env values — these are the resolved ids the bots will actually use).
+warn_runtime_model_ids
 
 # (c) LM Studio pre-flight reachability check (lists the served model ids).
 ok "LM Studio pre-flight (pnpm llm:local --list-only @ ${LOCAL_LLM_BASE_URL})"

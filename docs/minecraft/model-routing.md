@@ -170,7 +170,7 @@ acceptance — decision 0003):
 | Symptom | Cause | Fix |
 |---|---|---|
 | `✗ Missing required model id(s): …` | One or more of the four `LLM_*` env vars unset. | Export all four (`pnpm llm:local --list-only` to list ids). |
-| Both bots answer with the same model id | Same id exported for several `LLM_*` vars. | Use at least two distinct LM Studio ids; the script warns only when *all four* are identical. |
+| Both bots answer with the same model id | Same id exported for several `LLM_*` vars. | Use at least two distinct LM Studio ids. The script prints a non-fatal `⚠` when a bot's `chat == code` id (that tier split is unobservable) and a louder one when *all four* ids are identical (vacuous demo). |
 | `✗ LM Studio not reachable` | LM Studio not serving on `http://localhost:1234/v1`. | Start LM Studio there (its default); `pnpm llm:local --list-only` to confirm. Overriding `LOCAL_LLM_BASE_URL` only moves the *pre-flight* check, not the bots (string-form `lmstudio/` profiles always use the built-in endpoint at the pinned commit — same as E3-2). |
 | `✗ No Mindcraft clone at ./mindcraft` / `not at the pinned commit` | Fork not installed / drifted. | `scripts/minecraft/setup-mindcraft.sh` (see `docs/minecraft/mindcraft-fork.md`). |
 | `✗ Node 22 found, but the pinned Mindcraft needs Node 20 LTS` | Wrong Node major. | `nvm install 20 && nvm use 20`. |

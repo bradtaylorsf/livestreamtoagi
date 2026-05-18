@@ -178,6 +178,43 @@ def test_dry_run_with_env_substitutes_four_lmstudio_ids(tmp_path):
     assert f"{BOT_A_NAME}  model: lmstudio/qwen3-8b   code_model: lmstudio/qwen3-30b" in out
     assert f"{BOT_B_NAME}  model: lmstudio/llama3-8b   code_model: lmstudio/deepseek-coder" in out
     assert "openrouter/" not in out
+    # Distinct ids → no degenerate-routing advisory.
+    assert "⚠" not in (proc.stdout + proc.stderr)
+
+
+def test_dry_run_warns_when_a_bot_chat_equals_code(tmp_path):
+    """E3-3's point is each bot routes chat `model` != building `code_model`.
+
+    verify_committed_assets only inspects the always-distinct template tokens,
+    so the resolved-env advisory is the only thing that catches an operator
+    collapsing a bot's tier split.
+    """
+    proc = _run(
+        ["--dry-run"],
+        tmp_path,
+        {
+            "LLM_A_CHAT": "samemodel",
+            "LLM_A_CODE": "samemodel",
+            "LLM_B_CHAT": "llama3-8b",
+            "LLM_B_CODE": "deepseek-coder",
+        },
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    combined = proc.stdout + proc.stderr
+    assert "⚠" in combined
+    assert BOT_A_NAME in combined and "chat == code" in combined
+
+
+def test_dry_run_warns_loudly_when_all_four_ids_identical(tmp_path):
+    proc = _run(
+        ["--dry-run"],
+        tmp_path,
+        {k: "onlymodel" for k in ("LLM_A_CHAT", "LLM_A_CODE", "LLM_B_CHAT", "LLM_B_CODE")},
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    combined = proc.stdout + proc.stderr
+    assert "⚠" in combined
+    assert "vacuous" in combined
 
 
 # ── Committed routing settings template ─────────────────────────────────────
