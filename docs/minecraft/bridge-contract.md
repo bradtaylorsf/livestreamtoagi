@@ -68,18 +68,53 @@ arbitrary Python" verb. The six initial verbs from issue #541 plus
 `cost.reserve`, `journal.event`, and `kill.status` are named in ADR §6 but
 their schemas land with their owning issues — out of E4-2 scope.
 
+## Server endpoint (E4-3)
+
+`core/bridge/server.py` mounts the Python side of the bridge as one
+authenticated FastAPI WebSocket (`bridge_router`, wired into `core/main.py`
+alongside `/ws`):
+
+```
+/api/minecraft/bridge/ws
+```
+
+- **Fail-closed auth (ADR §4).** A shared-secret bearer token is read from the
+  `MINECRAFT_BRIDGE_TOKEN` env var and compared with `hmac.compare_digest`
+  (constant-time, mirroring `core/admin/kill_switch_routes.py`). The presented
+  token comes from the handshake `Authorization: Bearer <token>` header, with a
+  `?token=` query-param fallback for clients that cannot set WS headers. An
+  unset/empty server token, or a missing/malformed/wrong presented token,
+  **closes the socket with code 1008 before `accept()`** — no `service` is ever
+  dispatched on an unauthenticated connection. There is no anonymous or
+  "auth optional in dev" path.
+- **Validation order (ADR §2→§3→§6).** After `accept()`, each frame is parsed
+  as a `BridgeRequest`, version-negotiated fail-closed on an unknown major, and
+  validated against the closed per-verb registry. Every post-handshake failure
+  comes back as a contract-valid `BridgeResponse` (`ok=false` + typed `error`)
+  on a still-open socket — only the handshake closes the socket.
+- **Stub dispatch only.** Each of the 7 registry verbs maps to a handler that
+  returns a contract-valid placeholder payload with **no business logic**
+  (e.g. `bridge.ping` → `{pong}`, `memory.recall` → `{results: []}`). Real
+  memory/management/cost wiring is E5/E8; the perception/action inbound channel
+  is E4-5/E4-6. Each stub response is re-validated through
+  `validate_response` before it goes on the wire.
+
 ## Verifying
 
 The contract test validates **both directions** (request + response) on **both
 sides** (Pydantic *and* the committed JSON Schema via `jsonschema`) against
 committed static fixtures in `tests/backend/fixtures/bridge/`, and guards
-against schema drift, fail-closed versioning, and an out-of-contract verb:
+against schema drift, fail-closed versioning, and an out-of-contract verb. The
+server test drives the **real endpoint** over an in-process WebSocket: every
+verb round-trips a contract-valid stub, and unauthenticated/malformed-token
+handshakes are rejected before dispatch:
 
 ```bash
 pnpm verify:bridge-contract     # .venv/bin/pytest tests/backend/test_bridge_contract.py -v
+pnpm verify:bridge-server       # .venv/bin/pytest tests/backend/test_bridge_server.py -v
 ```
 
-This issue has **no LLM runtime path** (pure schema/data plumbing, no model
-calls), so no LM Studio simulation is required; `pnpm verify:bridge-contract`
-is the nearest local smoke path and runs headless in the existing
-`backend-test` CI job.
+This epic step has **no LLM runtime path** (auth + schema plumbing dispatching
+to pure stubs, no model calls), so no LM Studio simulation is required. Both
+tests are the nearest local smoke path and run headless — dependency-free, no
+Docker/network — in the existing `backend-test` CI job.
