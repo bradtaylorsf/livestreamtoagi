@@ -128,4 +128,8 @@ is a local machine you already keep running anyway.
   the runbook and `scripts/minecraft/start-server.sh` you run *on* the host
   chosen here; `MEM=4G` is the override that applies the recommended heap.
 - **E2-2 — World as input:** [world-config.md](./world-config.md).
+- **E2-7 — Ops runbook (+ teardown):** [runbook.md](./runbook.md)
+  (issue [#532](https://github.com/bradtaylorsf/livestreamtoagi/issues/532)) —
+  the one-page consolidation of start/stop/backup/restore/restart/health, with
+  a clean teardown for when this host is decommissioned.
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-3**.

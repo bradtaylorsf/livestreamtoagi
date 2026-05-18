@@ -243,4 +243,8 @@ this issue only provides the reset command itself.
 - **E2-6 — Health check + status:** [health.md](./health.md)
   (issue [#531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531)) —
   the up/down probe; run it after a restore to confirm the world is back.
+- **E2-7 — Ops runbook (+ teardown):** [runbook.md](./runbook.md)
+  (issue [#532](https://github.com/bradtaylorsf/livestreamtoagi/issues/532)) —
+  the one-page consolidation; the quick-reference backup/restore/reset
+  commands and the keepsake-backup-then-teardown procedure live there.
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-5**.

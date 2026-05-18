@@ -143,4 +143,8 @@ scripts/minecraft/health.sh --json       # → {"up":true,...}
   what *acts* on a down server; health only *reports* it.
 - **E2-5 — Backups & restore:** [backup-restore.md](./backup-restore.md)
   (issue [#530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
+- **E2-7 — Ops runbook (+ teardown):** [runbook.md](./runbook.md)
+  (issue [#532](https://github.com/bradtaylorsf/livestreamtoagi/issues/532)) —
+  the one-page consolidation; the quick-reference health commands (CLI,
+  `--json`, and the opt-in `check-services.sh` line) live there.
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-6**.

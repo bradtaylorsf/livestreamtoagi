@@ -6,6 +6,8 @@ generates, in plain language. No prior Minecraft-server experience assumed.
 > **Issue:** E2-2 (epic E2). **Config file:** `scripts/minecraft/world.config`.
 > **Consumed by:** `scripts/minecraft/start-server.sh` (the E2-1 start script —
 > see [server-setup.md](./server-setup.md) to get a server running first).
+> **Day-to-day operation** (start/stop/backup/restore/reset/health on one
+> page) is in the consolidated **[runbook.md](./runbook.md)** (E2-7).
 
 ## TL;DR
 

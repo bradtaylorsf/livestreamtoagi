@@ -225,4 +225,8 @@ clean stop does **not** restart.
 - **E2-6 — Health check + status:** [health.md](./health.md)
   (issue [#531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531)) —
   `scripts/minecraft/health.sh`, the up/down probe for the server this keeps alive.
+- **E2-7 — Ops runbook (+ teardown):** [runbook.md](./runbook.md)
+  (issue [#532](https://github.com/bradtaylorsf/livestreamtoagi/issues/532)) —
+  the one-page consolidation; the quick-reference restart/supervision commands
+  and the clean-teardown steps for removing these units live there.
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-4**.
