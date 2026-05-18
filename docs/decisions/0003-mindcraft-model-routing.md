@@ -82,6 +82,11 @@ takes over memory/example retrieval.
 No fork patch is required for basic per-agent/per-tier routing through LM
 Studio or OpenRouter.
 
+> **Verified by E3-3 ([#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535)).**
+> Two bots (`RoutingBotA`/`RoutingBotB`) each route a conversation `model` to a
+> distinct building `code_model` with **no fork patch** — see
+> `docs/minecraft/model-routing.md` and `tests/backend/test_mc_model_routing.py`.
+
 Patches still expected later:
 
 - Cost-gated wrapper before model calls or bridge-level cost accounting.
