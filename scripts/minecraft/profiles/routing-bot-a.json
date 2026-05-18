@@ -1,0 +1,5 @@
+{
+    "name": "RoutingBotA",
+    "model": "lmstudio/__LLM_A_CHAT__",
+    "code_model": "lmstudio/__LLM_A_CODE__"
+}
