@@ -271,3 +271,9 @@ scripts/minecraft/connect-stock-bot.sh --verify
   [#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535)): verify
   per-agent multi-model routing with two bots, each routing a conversation
   `model` to a distinct building `code_model`. No fork patch (decision 0003).
+- **`docs/minecraft/mindcraft-stripped-features.md`** — the E3-5
+  ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)) sibling:
+  the same E2 connect contract with the Python-superseded Mindcraft features
+  (memory/examples/auto-narration/voice/vision) disabled behind reversible
+  `settings.js` flags; decentralized conversation deliberately kept
+  (decision 0004).

@@ -43,6 +43,18 @@ back to word-overlap during skill doc selection. That is acceptable for the
 first vertical slice, but profile generation should set an explicit embedding
 provider later if we keep Mindcraft examples enabled.
 
+> **Verified by E3-5 ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)).**
+> The "disable/de-emphasize Mindcraft examples until E5" decision (and the
+> memory/voice/vision-are-Python-side conclusion) is realised through the
+> reversible `settings.js` flags `num_examples` (2→0),
+> `relevant_docs_count` (5→0), `narrate_behavior` (true→false), with
+> `load_memory`/`speak`/`allow_vision` kept off — no fork-core edit. A bot
+> still connects and acts with them off — see
+> `docs/minecraft/mindcraft-stripped-features.md`,
+> `scripts/minecraft/mindcraft-settings-stripped.js`,
+> `scripts/minecraft/connect-stripped-bot.sh`, and
+> `tests/backend/test_mc_stripped_features.py`.
+
 Mindcraft's model providers do not track cost in our database. OpenRouter also
 does not currently pass arbitrary `params` through in the constructor. Cost
 controls remain Python-side work in E4/E11, and local LM Studio validation should
