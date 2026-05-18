@@ -1,16 +1,16 @@
 # Session Summary: session/epic-505-epic-e3-mindcraft-fork-evaluation
 
 ## Overview
-Two E3 mindcraft-fork-evaluation issues (534, 538) were completed successfully in 36 minutes with zero failures, retries, or test-fix loops. Both leaned on the established E3-1 "committed-artifact staged into git-ignored clone" pattern and CI-friendly static verification, letting work requiring Node 20 + a live server + LM Studio be validated entirely within the existing `backend-test` CI job.
+A single-issue session (#535, E3-3) that verified per-agent multi-model OpenRouter/LM Studio routing in the mindcraft fork rather than speculatively patching it, confirming prior decision 0003's conclusion that native routing requires no fork changes. The issue succeeded on the first attempt with zero retries, and the review step caught a genuine acceptance-criterion gap before merge. Total duration was 21 minutes.
 
 ## Recurring Patterns
-- **Static/contract verification in lieu of live runtimes**: both issues replaced runtime-dependent checks with CI-enforceable static assertions — `--dry-run`/`--verify` modes asserting resolved config (534), and a dependency-free contract test anchoring doc-vs-code drift (SHA, fork URL, pin tag, lockfile path, verify command) onto the existing CI job (538). This converts "needs a live environment" and "documentation-only" acceptance criteria into green build checks with no new infrastructure.
+- **"Verify, don't patch"**: When a prior decision (E1-R3/#520, decision 0003) already concludes native support exists, the issue's job is concrete two-instance proof (RoutingBotA/RoutingBotB) plus lock-step regression tests — not new fork code. This kept the change minimal and de-risked.
 
 ## Recurring Anti-Patterns
-- **Deferrals captured as prose, not tracked work**: issue 538 documented a deferred Node-20 live `npm ci` build as an in-document TODO instead of filing the GitHub follow-up its own scope required. Single occurrence, but it directly contradicts explicit issue scope and silently drops deferred work.
+- **Validating templates instead of resolved runtime values**: The distinctness guard asserted on always-distinct substitution *templates* rather than post-substitution runtime env ids (`LLM_A_CHAT`, etc.), so the degenerate all-four-identical-models case passed silently and the troubleshooting doc described a warning that didn't exist. (Single occurrence, but a high-value lesson — guards must assert on the layer that can actually be wrong.)
 
 ## Recommendations
-- **File the missing follow-up now**: create the deferred Node-20 live `npm ci` build GitHub issue (`gh issue create`) and link it from `docs/minecraft/fork-maintenance.md`, replacing the in-doc TODO. This closes the open gap from issue 538.
+- **Add a verification-vs-implementation triage step to the plan prompt**: When an issue references a prior decision that concludes "native support / no patch needed" (e.g., decision docs, E1-R3/#520), the plan should default to a verification-only approach (concrete N-instance proof + lock-step tests) and explicitly justify any new production code. This pattern worked well here and should be made repeatable.
 
 ## Metrics
 | Metric | Value |
