@@ -12,6 +12,7 @@
     "test:python": ".venv/bin/pytest",
     "test:frontend": "npm --prefix frontend test",
     "test:website": "npm --prefix website test",
+    "verify:minecraft-server": ".venv/bin/pytest tests/backend/test_minecraft_start_server.py tests/backend/test_minecraft_world_config.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",

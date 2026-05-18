@@ -47,6 +47,10 @@ test-results/
 # Docker
 docker/data/
 
+# Minecraft server runtime (default SERVER_DIR for scripts/minecraft/start-server.sh)
+# World data, the Paper jar, eula.txt and logs are local runtime artifacts.
+minecraft-server/
+
 # Build artifacts
 frontend/dist/
 website/.vercel/
