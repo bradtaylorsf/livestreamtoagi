@@ -51,6 +51,11 @@ docker/data/
 # World data, the Paper jar, eula.txt and logs are local runtime artifacts.
 minecraft-server/
 
+# Mindcraft working clone (default MINDCRAFT_DIR for scripts/minecraft/setup-mindcraft.sh)
+# A local pinned checkout + node_modules — NOT a vendored copy. The only
+# committed artifact is scripts/minecraft/mindcraft-package-lock.json.
+/mindcraft/
+
 # Build artifacts
 frontend/dist/
 website/.vercel/
