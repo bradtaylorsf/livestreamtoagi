@@ -1,0 +1,10 @@
+type: step
+step: test-fix
+eval_method: pending
+status: needs-annotation
+source: auto-captured
+captured_from:
+  issue: 526
+  session: session/epic-504-epic-e2-minecraft-server-setup-beginner
+  date: 2026-05-18
+checks: []

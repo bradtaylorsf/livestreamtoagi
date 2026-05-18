@@ -1,9 +1,12 @@
 # Minecraft Pivot — Epic & Issue Plan
 
 > Source of truth: `specs/MINECRAFT-PIVOT-CONTEXT.md` (Option C, disciplined).
-> This document is the Phase-1 plan. **No GitHub issues have been created yet.**
+> GitHub issues have been created for this plan: epics `#503`-`#517` and child
+> issues `#518`-`#630`.
 > It is dependency-ordered, flags every unverified technical assumption, and
 > routes anything unconfirmed to an explicit research issue rather than guessing.
+> E1 research is complete as of 2026-05-18; use `docs/decisions/` as the binding
+> decision record for downstream implementation.
 
 ---
 
@@ -13,6 +16,19 @@ The project owner has never played Minecraft. Per the task's critical accuracy
 rule, the following are treated as **unverified** and are NOT baked into
 implementation issues as fact. Each has a dedicated research issue in **Epic 1**,
 and downstream issues depend on those research issues instead of hardcoding a guess.
+
+### 0.0 Current tracker status
+
+- **E1 / #503 is complete pending GitHub closure.** Decision records live in
+  `docs/decisions/0000-summary.md` through `docs/decisions/0007-licensing.md`.
+- **Implementation may begin.** The critical path starts with `E2-1 / #526`
+  (local Paper server setup), then `E3-1 / #533` (Mindcraft fork/pin), then the
+  E4 bridge contract.
+- **All pivot implementation must validate locally through LM Studio before it
+  is accepted.** Use `LLM_PROVIDER=lmstudio`, `LOCAL_LLM_BASE_URL`, and
+  `LOCAL_LLM_MODEL`; use `LOCAL_LLM_MODEL_BUILDING` when an issue exercises
+  building/reflection/dream tiers. OpenRouter spend is not required for
+  acceptance.
 
 ### 0.1 What I verified (from the live Mindcraft repo / Mineflayer docs, May 2026)
 
@@ -29,21 +45,21 @@ and downstream issues depend on those research issues instead of hardcoding a gu
 | V9 | This codebase has **no real livestream/OBS/RTMP integration today** — `grep` for rtmp/obs/restream in `core/` and `scripts/` returns nothing. The only video path is a post-hoc Playwright capture of the Phaser replay page (`core/video/render_pipeline.py`). **The livestream pipeline is greenfield.** | High | code inspection |
 | V10 | There is **no hard per-agent hourly spend cap** in code today — only a per-simulation total `max_cost` (`core/simulation/orchestrator.py:_check_cost_limit`). The kill switch is real (`core/admin/kill_switch_routes.py`, Redis `kill_switch` key). | High | code inspection |
 
-### 0.2 What I could NOT verify — these block downstream work until resolved
+### 0.2 Questions E1 resolved — downstream issues bind to these
 
-| # | Open question | Why it matters | Routed to |
+| # | Question | Resolution | Record |
 |---|----------------|----------------|-----------|
-| U1 | Is OpenRouter **actually wired** for per-agent multi-model routing in current Mindcraft `main`, or is it partial/community-requested (issue #493)? | This is the **core research thesis** (per-agent multi-model). If unsupported it is a required fork patch. | `E1-R3` |
-| U2 | Exact Mindcraft mechanism for the decentralized **"respond or ignore"** inter-agent conversation model | The pivot replaces the Python conversation director with this. If it doesn't exist as described, scope changes materially. | `E1-R4` |
-| U3 | Mindcraft's **custom-skill / custom-action extension point** (how we add a "call Python" action without forking core) | Determines the entire bridge design. | `E1-R5` |
-| U4 | Correct **server software for 24/7 headless** (vanilla server jar vs Paper/Fabric) + offline-mode auth implications + Minecraft EULA/streaming-licensing posture | Beginner-critical; affects hosting, cost, and whether streaming gameplay is permitted. | `E1-R1`, `E1-R2`, `E1-R7` |
-| U5 | How to **capture the Minecraft world to video** for livestream (headless spectator client? OBS + a real client? server-side renderer?) | The entire livestream epic depends on the chosen capture method. | `E1-R6` |
-| U6 | Exact Minecraft version + Mindcraft commit we pin | Everything downstream pins to this. | `E1-R1` |
+| U1 | Is model routing wired in Mindcraft? | Native `model` and `code_model` routing exists. Downstream work should validate with LM Studio local model IDs, not require OpenRouter spend. | `0003-mindcraft-model-routing.md` |
+| U2 | How does decentralized respond/ignore work? | Mindcraft supports pairwise bot conversations; we need our own personality/proximity/eavesdrop layer. | `0004-decentralized-conversation.md` |
+| U3 | Where should the Python bridge attach? | Use a fork patch with an explicit Node bridge module and commands/skills. | `0005-skill-extension-point.md` |
+| U4 | What server/auth posture? | Use Paper `1.21.6` locally with offline/private auth for development; production auth/legal remains a human launch gate. | `0001-minecraft-version-and-server.md`, `0002-auth-mode.md`, `0007-licensing.md` |
+| U5 | How do we capture livestream video? | Use a real Minecraft Java camera client plus OBS for production; Prismarine Viewer is diagnostic/fallback only. | `0006-video-capture.md` |
+| U6 | What version/commit pins the stack? | Paper `1.21.6-48`, Mindcraft `35be480b4cc0bca990278e6103a1426392559d96`, Node 20 LTS, Java 21. | `0001-minecraft-version-and-server.md` |
 
-> **Rule applied throughout:** any issue that would otherwise hardcode an
-> unverified detail instead says *"use the value decided in E1-Rx"* and lists
-> that research issue as a dependency. A wrong invented detail is worse than a
-> research task.
+> **Rule applied after E1:** downstream issues should link back to the decision
+> records instead of re-litigating the research. If a later implementation
+> discovers contradictory evidence, update the relevant decision record first,
+> then update affected issues.
 
 ---
 
@@ -51,9 +67,9 @@ and downstream issues depend on those research issues instead of hardcoding a gu
 
 | Epic | Title | Goal (1 paragraph) | Depends on | ~Issues |
 |------|-------|--------------------|------------|---------|
-| **E1** | Research, Decisions & Spikes | Resolve every unverified Minecraft/Mindcraft fact (U1–U6) and produce written decision records the rest of the plan binds to: pinned MC version + server software, offline/auth posture, OpenRouter routing status, decentralized-conversation mechanism, custom-skill extension point, video-capture method, licensing/EULA posture. Output is decisions, not code. | — | 8 |
+| **E1** | Research, Decisions & Spikes | **Complete.** Resolved every unverified Minecraft/Mindcraft fact (U1–U6) and produced written decision records the rest of the plan binds to: pinned MC version + server software, offline/auth posture, model routing status, decentralized-conversation mechanism, bridge extension point, video-capture method, licensing/EULA posture. Output is decisions, not code. | — | 8 |
 | **E2** | Minecraft Server Setup (beginner) | Stand up a private Minecraft server a non-player can operate: chosen server software/version, runs 24/7, world generation as a configurable input, backup/restore, health checks, documented in plain language. | E1 | 7 |
-| **E3** | Mindcraft Fork & Evaluation | Fork Mindcraft, pin the commit, get one stock bot connecting to the E2 server, verify or patch per-agent multi-model OpenRouter routing, strip/disable unused features, make install reproducible. | E1, E2 | 8 |
+| **E3** | Mindcraft Fork & Evaluation | Fork Mindcraft, pin the commit, get one stock bot connecting to the E2 server, verify per-agent multi-model routing with LM Studio local profiles, strip/disable unused features, make install reproducible. | E1, E2 | 8 |
 | **E4** | Python↔Node Bridge | A bidirectional, authenticated transport: bots call Python services (memory, management, cost-gate); perception/action results flow back. Versioned contract, reconnect, backpressure, failure semantics. | E3 (impl); E1-R5 (design) | 9 |
 | **E5** | Memory Service Exposure | Expose the existing 3-tier pgvector memory (core/recall/archival) as a bridge service the bots query and write. **Preserve existing behavior — no regression.** | E4 | 7 |
 | **E6** | Embodiment / Action Layer | Real movement, building, and a curated skill set with **action-success verification**; retain code-writing as a tool alongside in-world building. | E3, E4 | 9 |
@@ -163,9 +179,9 @@ touch, and parallelizing it would hide integration bugs.
 
 ### Ordering risks (blunt)
 
-- **E1-R3 (OpenRouter routing) is the highest-leverage unknown.** If Mindcraft
-  does not support per-agent multi-model OpenRouter routing, `E3` grows a
-  fork-patch sub-epic and the timeline shifts right. Treat U1 as the gating risk.
+- **E1-R3 (model routing) was resolved.** Mindcraft supports separate `model`
+  and `code_model` providers. E3 should validate that locally with LM Studio
+  profiles before any OpenRouter-backed comparison.
 - **E1-R6 (video capture) is the second risk.** The livestream method is fully
   unverified and greenfield. Starting the E13 spike during E2/E3 is deliberate
   insurance — if the only viable capture is "a real Minecraft client + OBS on a
@@ -242,15 +258,15 @@ consolidates).
   - Acceptance: `docs/decisions/0002-auth-mode.md` with recommendation +
     plain-language risk explanation.
   - Deps: E1-R1. Track: parallelizable. Labels: `needs-research`,`minecraft`,`minecraft-beginner`,`area:server`
-- **E1-R3 — Verify Mindcraft per-agent multi-model OpenRouter routing (U1)**
-  - Context: **Highest-leverage unknown.** Core research thesis = each agent on a
-    different OpenRouter-routed model with separate conversation/building tiers.
+- **E1-R3 — Verify Mindcraft per-agent multi-model routing (U1)**
+  - Context: **Highest-leverage unknown.** Core research thesis = each agent can
+    run separate conversation/building model tiers.
   - Scope (in): inspect the pinned Mindcraft commit's provider code + profile
-    schema; determine whether OpenRouter is fully wired and whether `model` vs
+    schema; determine whether provider routing is fully wired and whether `model` vs
     `code_model` cleanly maps to our conversation vs building tiers; if not,
     specify the exact fork patch required. (out): writing the patch (E3).
   - Acceptance: `docs/decisions/0003-mindcraft-model-routing.md` answers: is
-    OpenRouter native? does per-agent-per-tier work? exact patch scope if not.
+    LM Studio/OpenRouter routing native? does per-agent-per-tier work? exact patch scope if not.
     Cites file/line in the Mindcraft commit.
   - Deps: E1-R1. Track: parallelizable. Labels: `needs-research`,`minecraft`,`backend`
 - **E1-R4 — Characterize Mindcraft's decentralized respond/ignore model (U2)**
@@ -376,7 +392,7 @@ parallelize after it; E2-6/E2-7 sequential at the end.
 ### EPIC 3 — Mindcraft Fork & Evaluation
 
 Goal: a pinned fork with one bot connecting to the E2 server and verified
-per-agent multi-model OpenRouter routing. E3-1 sequential; E3-2..E3-4 then
+per-agent multi-model routing through local LM Studio profiles. E3-1 sequential; E3-2..E3-4 then
 E3-5/E3-6 build on it; E3-7 conditional.
 
 - **E3-1 — Fork Mindcraft, pin the commit, reproducible install**
@@ -393,15 +409,15 @@ E3-5/E3-6 build on it; E3-7 conditional.
     moves. (out): our agents.
   - Acceptance: documented command launches a bot that visibly joins the E2 world.
   - Deps: E3-1, E2-1. Track: sequential. Labels: `minecraft`,`minecraft-beginner`
-- **E3-3 — Verify/patch per-agent multi-model OpenRouter routing**
+- **E3-3 — Verify/patch per-agent multi-model routing**
   - Context: **core thesis** (U1/E1-R3). `preserve-no-regress`: our model
     assignments must survive the pivot.
   - Scope (in): implement whatever E1-R3 concluded — either configure native
-    OpenRouter or apply the specified fork patch — so a profile can route `model`
-    (conversation tier) and `code_model` (building tier) to distinct OpenRouter
-    models per agent. (out): all 9 profiles (E8).
+    LM Studio/OpenRouter routing or apply the specified fork patch — so a
+    profile can route `model` (conversation tier) and `code_model` (building
+    tier) to distinct models per agent. (out): all 9 profiles (E8).
   - Acceptance: two bots with different profiles demonstrably hit two different
-    OpenRouter models for chat vs code; mirrors the mapping in
+    LM Studio local model IDs for chat vs code; mirrors the mapping in
     `core/llm_client.py` `MODEL_NAME_ALIASES`/`MODEL_REGISTRY`; documented.
   - Files: fork profile/provider config; cross-ref `core/llm_client.py`
   - Deps: E1-R3, E3-2. Track: sequential. Labels: `minecraft`,`backend`,`preserve-no-regress`
@@ -430,7 +446,7 @@ E3-5/E3-6 build on it; E3-7 conditional.
     none exists — then open a follow-up.
   - Acceptance: `docs/minecraft/fork-maintenance.md` + a green build check.
   - Deps: E3-1. Track: parallelizable. Labels: `minecraft`,`architecture`
-- **E3-7 — (Conditional) OpenRouter routing fork-patch hardening**
+- **E3-7 — (Conditional) provider-routing fork-patch hardening**
   - Context: only if E1-R3 concluded a patch is required and E3-3 was non-trivial.
   - Scope (in): tests for the routing patch (model selection, fallback, cost
     attribution) so an upstream rebase can't silently break the thesis.
@@ -670,7 +686,7 @@ integration of every piece and parallelizing hides bugs.
   - Context: `agents/alpha/config.yaml` (deepseek/deepseek-v3.2, chattiness 0),
     `agents/alpha/system_prompt.md` (symbols only).
   - Scope: generate Alpha's profile via E3-4; no chat participation; routed via
-    OpenRouter per E3-3.
+    local LM Studio profile IDs per E3-3.
   - Acceptance: Alpha spawns in the E2 world using its configured model; emits no
     chat.
   - Deps: E3-4, E2-1, E7 prerequisites (E2–E6). Track: sequential. Labels: `minecraft`,`area:embodiment`
@@ -734,7 +750,8 @@ sequential.
 - **E8-2..E8-4 — Embody the agent cohort (parallelizable, 1 issue per small group)**
   - Context: each agent has distinct personality/model; embody in parallel.
   - Scope: E8-2 = Vera+Rex; E8-3 = Aurora+Pixel+Fork; E8-4 = Sentinel+Grok.
-    Each: spawn with correct OpenRouter model, basic act/build, memory wired.
+    Each: spawn with correct local LM Studio model/profile, basic act/build,
+    memory wired.
   - Acceptance (each): the group's agents spawn with correct models and perform a
     verified action; per-agent model verified against config.
   - Deps: E8-1. Track: **parallelizable** (3 agents/people, one per issue).
@@ -1184,7 +1201,7 @@ Any issue labelled `preserve-no-regress` must keep these green (run via
 
 | Preserved system | Code | Guarding tests |
 |---|---|---|
-| Per-agent multi-model OpenRouter routing | `core/llm_client.py`, `core/agent_registry.py`, `agents/*/config.yaml` | `test_llm_client.py`, `test_model_versions.py`, `test_cost_tracking.py` |
+| Per-agent multi-model routing | `core/llm_client.py`, `core/agent_registry.py`, `agents/*/config.yaml` | `test_llm_client.py`, `test_model_versions.py`, `test_cost_tracking.py` |
 | 3-tier memory | `core/memory/*`, `core/repos/memory_repo.py` | `test_core_memory*.py`, `test_recall_memory.py`, `test_archival_memory.py`, `test_cross_conversation_memory.py`, `test_memory_tools.py`, `test_memory_snapshot.py` |
 | Memory seeding / scenarios | `core/memory/memory_seed.py`, `scenarios/seeds/*` | `test_memory_seed.py`, `test_public_scenarios.py`, `test_simulation_scenarios.py` |
 | Dreams / journals / reflection | `core/memory/dreams.py`, `core/memory/reflection*.py`, `core/blog.py` | `test_dreams.py`, `test_reflection*.py`, `test_reflection_goals.py`, `test_reflect_after.py` |
@@ -1194,17 +1211,15 @@ Any issue labelled `preserve-no-regress` must keep these green (run via
 
 ---
 
-## 7. Phase-3 creation plan (after approval only)
+## 7. GitHub tracker status
 
-1. Create the 10 new labels in §4.
-2. Create 15 epic issues (label `epic` + area labels). Each epic body contains
-   its child-issue checklist, dependency notes, and the parallel/sequential
-   split from §5.
-3. Create ~110 child issues with the §5 fields; cross-link dependencies by
-   referencing issue numbers; apply labels (`minecraft`, `minecraft-beginner`,
-   `needs-research`, `parallelizable`, `preserve-no-regress`, `area:*`,
-   `backend`/`frontend`, `priority-*`).
-4. Link each child to its epic (checklist item + back-reference).
-5. `gh` is authenticated as `bradtaylorsf` — creation will proceed via `gh issue create`.
+The Phase-3 issue creation pass is complete:
 
-**Awaiting approval before any GitHub mutation.**
+1. Labels were created.
+2. Epic issues were created as `#503`-`#517`.
+3. Child issues were created as `#518`-`#630`.
+4. E1 research decisions were posted back to the relevant E1 issues for
+   historical traceability.
+5. Future epic parents and the first unblocked starter issues should reference
+   `docs/decisions/0000-summary.md` instead of duplicating the entire decision
+   payload.
