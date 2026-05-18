@@ -200,8 +200,9 @@ clean stop does **not** restart.
   does **not** text/email/page you when it does. Alerting is owned by
   **E11/E13** and is explicitly out of scope here.
 - **Backups & restore.** A restart reloads the *existing* world; it does not
-  protect the world data. That's
-  [E2-5](https://github.com/bradtaylorsf/livestreamtoagi/issues/530).
+  protect the world data. That's E2-5 —
+  [backup-restore.md](./backup-restore.md)
+  ([issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).
 - **Health checks / status endpoint.** Knowing the world is *healthy* (not
   just *running*) is [E2-6](https://github.com/bradtaylorsf/livestreamtoagi/issues/531).
 - **Provisioning the host / IaC.** No Terraform/Ansible/cloud-init. Picking
@@ -215,8 +216,9 @@ clean stop does **not** restart.
 - **E2-3 — Where it runs 24/7:** [hosting.md](./hosting.md)
   (issue [#528](https://github.com/bradtaylorsf/livestreamtoagi/issues/528)) —
   the Ubuntu 24.04 host the systemd path targets and the `MEM=4G` recommendation.
-- **E2-5 — Backups & restore:**
-  [issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530).
+- **E2-5 — Backups & restore:** [backup-restore.md](./backup-restore.md)
+  (issue [#530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)) —
+  scheduled `backup.sh`, the documented restore, and the clean-reset path.
 - **E2-6 — Health check + status:**
   [issue #531](https://github.com/bradtaylorsf/livestreamtoagi/issues/531).
 - **Plan:** `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` → §5, **E2-4**.
