@@ -44,6 +44,10 @@ command is copy-paste, and every setting is explained in plain language.
   and **E3-4 ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))**.
 - **Any customization of the fork** — explicitly out of scope here. The fork is
   pinned *clean*; patches land in later E3/E4 issues.
+- **Taking upstream fixes / re-basing the pin** — that's the maintenance &
+  upstream-merge policy in **[`docs/minecraft/fork-maintenance.md`](./fork-maintenance.md)**
+  (E3-6, [#538](https://github.com/bradtaylorsf/livestreamtoagi/issues/538)):
+  how patches stay isolated, how to move the pin, and the CI build check.
 - **An LLM runtime path** — **this issue has none.** Forking, pinning, and
   installing dependencies never calls a model, so there is no LM Studio /
   OpenRouter step to validate for #533. The nearest local smoke path is the
