@@ -1,27 +1,17 @@
 {
   "name": "session/epic-505-epic-e3-mindcraft-fork-evaluation",
   "branch": "session/epic-505-epic-e3-mindcraft-fork-evaluation",
-  "completed": "2026-05-18T16:49:40.580Z",
+  "completed": "2026-05-18T17:34:14.005Z",
   "results": [
     {
-      "issueNum": 534,
-      "title": "E3-2 — One stock bot connects to the E2 server",
+      "issueNum": 535,
+      "title": "E3-3 — Verify/patch per-agent multi-model OpenRouter routing",
       "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/642",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/645",
       "testsPassing": true,
       "verifyPassing": true,
-      "duration": 1403,
-      "filesChanged": 1
-    },
-    {
-      "issueNum": 538,
-      "title": "E3-6 — Fork maintenance & upstream-merge policy",
-      "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/643",
-      "testsPassing": true,
-      "verifyPassing": true,
-      "duration": 765,
-      "filesChanged": 1
+      "duration": 1232,
+      "filesChanged": 3
     }
   ],
   "stages": [
@@ -192,6 +182,62 @@
       "stage_success": true,
       "started_at": "2026-05-18T16:44:47.738Z",
       "issue_num": 538
+    },
+    {
+      "stage": "plan",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 22,
+      "tokens_out": 12698,
+      "cost_usd": 0.820817,
+      "wall_time_s": 177.474,
+      "tool_calls": 18,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T17:10:12.469Z",
+      "issue_num": 535
+    },
+    {
+      "stage": "implement",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 9792,
+      "tokens_out": 47813,
+      "cost_usd": 3.518857,
+      "wall_time_s": 569.753,
+      "tool_calls": 39,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-18T17:13:10.454Z",
+      "issue_num": 535
+    },
+    {
+      "stage": "review",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 60,
+      "tokens_out": 21541,
+      "cost_usd": 1.946157,
+      "wall_time_s": 310.063,
+      "tool_calls": 37,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-18T17:24:07.470Z",
+      "issue_num": 535
+    },
+    {
+      "stage": "assumptions",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 8,
+      "tokens_out": 4196,
+      "cost_usd": 0.425513,
+      "wall_time_s": 63.247,
+      "tool_calls": 7,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-18T17:29:22.551Z",
+      "issue_num": 535
     }
   ]
 }

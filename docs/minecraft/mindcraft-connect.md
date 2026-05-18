@@ -29,7 +29,9 @@ Mindcraft experience is assumed. Every command is copy-paste.
 - **Our nine agents / their personalities & model assignments** — that's **E8**.
   This bot is deliberately generic.
 - **Per-agent multi-model routing verification** — that's **E3-3
-  ([#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535))**.
+  ([#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535))**, the
+  next step after this walkthrough (see *Related* in §9 →
+  `docs/minecraft/model-routing.md`).
 - **Profile generation from `agents/<id>/config.yaml`** — that's **E3-4
   ([#536](https://github.com/bradtaylorsf/livestreamtoagi/issues/536))**.
 - **Agent customization** — the pinned clone stays clean of persistent changes;
@@ -262,3 +264,10 @@ scripts/minecraft/connect-stock-bot.sh --verify
   vs `code_model` (building), LM Studio string syntax, no external spend.
 - **`docs/minecraft/mindcraft-fork.md`** — the prior step (pinned, reproducible
   install) this builds on.
+
+### Related
+
+- **`docs/minecraft/model-routing.md`** — the **next** step (E3-3 /
+  [#535](https://github.com/bradtaylorsf/livestreamtoagi/issues/535)): verify
+  per-agent multi-model routing with two bots, each routing a conversation
+  `model` to a distinct building `code_model`. No fork patch (decision 0003).
