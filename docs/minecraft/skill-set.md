@@ -32,6 +32,13 @@ safe. This table is the closed allowed surface for the E6 action layer.
 | `build-from-plan` | Code-generation skill in `src/agent/library/skills.js` backed by the safe `place`, `break`, `navigate`, `craft`, and `inventory` primitives; no arbitrary bridge verbs. | `{ action_id: string, origin: { x: number, y: number, z: number }, plan: { blocks: Array<{ dx: number, dy: number, dz: number, block_type: string }>, palette?: Record<string, string>, clear?: Array<{ dx: number, dy: number, dz: number }> }, max_steps?: number, timeout_ms?: number }` | Verified by per-step `action.result` records plus an actual-vs-intended completion metric from a final perception/world read: intended blocks present, unexpected blocks, missing blocks, and abandoned steps. | E6-4 / [#559](https://github.com/bradtaylorsf/livestreamtoagi/issues/559) |
 | `observe` / `perception` | Query in `src/agent/commands/queries.js`; may also be emitted as `perception.report` from the Node side. | `{ radius_blocks?: number, scope?: "pose" \| "nearby_blocks" \| "entities" \| "inventory" \| "all", include_air?: boolean }` | Verification is a schema-valid perception snapshot containing the requested pose, nearby blocks, entities, inventory, and relevant metadata. This is the source used to verify action results. | E6-6 / [#561](https://github.com/bradtaylorsf/livestreamtoagi/issues/561) |
 
+E6-4 implements `build-from-plan` as a staged action command,
+`!buildFromPlan`, rather than editing `src/agent/library/skills.js`. That keeps
+it aligned with the verified action triad from E6-2/E6-3: pure helper module,
+Node action command, Python verifier, and bridge-script staging/injection.
+There is no new LLM runtime path for this skill; it consumes an already
+structured plan and verifies observed block outcomes.
+
 Code-writing is retained as a separate tool through the existing bridge/sandbox
 path, tracked by E6-5 ([#560](https://github.com/bradtaylorsf/livestreamtoagi/issues/560)).
 It is not removed and it is not a substitute for the closed in-world action set
