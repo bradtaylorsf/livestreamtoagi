@@ -28,6 +28,7 @@ def is_schema_valid_snapshot(*args: Any, **kwargs: Any) -> Any:
 
     return _impl(*args, **kwargs)
 
+
 __all__ = [
     "FAILURE_CLASSES",
     "SAFE_FAIL_POLICY",
