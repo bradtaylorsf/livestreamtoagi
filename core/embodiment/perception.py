@@ -71,9 +71,7 @@ def _normalize_entity(value: Any) -> Any:
     if "name" in entity:
         name = _normalized_text(entity["name"])
         entity["name"] = (
-            name
-            if entity.get("kind") == "player"
-            else (_normalized_optional_id(name) or name)
+            name if entity.get("kind") == "player" else (_normalized_optional_id(name) or name)
         )
     if "entity_id" in entity:
         entity["entity_id"] = _normalized_text(entity["entity_id"])
@@ -99,9 +97,7 @@ def _normalize_inventory(value: Any) -> Any:
     if not isinstance(value, Mapping):
         return value
     inventory = dict(value)
-    inventory["items"] = [
-        _normalize_inventory_item(item) for item in inventory.get("items", [])
-    ]
+    inventory["items"] = [_normalize_inventory_item(item) for item in inventory.get("items", [])]
     inventory["equipment"] = _normalize_equipment(inventory.get("equipment", {}))
     return inventory
 
