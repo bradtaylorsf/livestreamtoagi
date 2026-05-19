@@ -295,6 +295,30 @@ def test_bridge_memory_write_matches_direct_compactor_call(token_env: str) -> No
     ]
 
 
+def test_bridge_memory_write_is_idempotent_on_request_id(token_env: str) -> None:
+    compactor = FakeCompactor()
+    services = FakeServices(core_memory=None, recall_memory=None, compactor=compactor)
+    request = _memory_write_request(
+        {
+            "content": "Rex finished the spawn bridge and Vera logged the handoff.",
+            "kind": "event",
+        }
+    )
+    client = _client(services)
+
+    first_response = _send_memory_request(client, request)
+    second_response = _send_memory_request(client, request)
+
+    first_payload = c.validate_response(first_response, service="memory", method="write")
+    second_payload = c.validate_response(second_response, service="memory", method="write")
+    assert isinstance(first_payload, c.MemoryWriteResponse)
+    assert isinstance(second_payload, c.MemoryWriteResponse)
+    assert first_payload.memory_id == second_payload.memory_id == "1"
+    assert len(compactor.calls) == 1
+    assert len(compactor.transcripts) == 1
+    assert len(compactor.recall_memories) == 1
+
+
 @pytest.mark.parametrize("missing", ["services", "compactor"])
 def test_bridge_memory_write_without_services_or_compactor_is_contract_valid_error(
     token_env: str,
