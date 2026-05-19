@@ -8,6 +8,7 @@ from typing import Any
 
 from core.bridge.contract import PROTOCOL_VERSION, BridgeRequest, CostContext
 from core.bridge.handlers.memory import handle_memory_read
+from core.memory.backend import DefaultMemoryBackend
 from tools.memory_tools import RecallMemoryTool
 
 SIMULATION_ID = "11111111-1111-1111-1111-111111111111"
@@ -30,6 +31,31 @@ class RecordingRecallMemory:
         return self.formatted
 
 
+class UnexpectedRecallMemory:
+    async def retrieve_recall_memories(self, *args: Any, **kwargs: Any) -> str:
+        raise AssertionError("bridge recall reads should use services.memory_backend")
+
+
+class RecordingArchivalMemory:
+    async def store_transcript(
+        self,
+        event_type: str,
+        participants: list[str],
+        content: str,
+        conversation_id: object | None = None,
+    ) -> Any:
+        raise AssertionError("archival writes are not part of recall parity")
+
+    async def retrieve_full_transcript(self, transcript_id: int) -> Any:
+        raise AssertionError("archival reads are not part of recall parity")
+
+    async def get_transcripts_by_agent(self, agent_id: str, limit: int = 100) -> list[Any]:
+        raise AssertionError("archival reads are not part of recall parity")
+
+    async def get_transcripts_by_type(self, event_type: str, limit: int = 100) -> list[Any]:
+        raise AssertionError("archival reads are not part of recall parity")
+
+
 class RecordingCoreMemory:
     def __init__(self, core_memory: str | None) -> None:
         self.core_memory = core_memory
@@ -46,8 +72,9 @@ class RecordingCoreMemory:
 
 @dataclass
 class FakeServices:
-    recall_memory: RecordingRecallMemory | None = None
+    recall_memory: Any | None = None
     core_memory: RecordingCoreMemory | None = None
+    memory_backend: Any | None = None
 
 
 def _memory_request(payload: dict[str, Any]) -> BridgeRequest:
@@ -74,6 +101,7 @@ async def test_recall_tool_and_bridge_return_equivalent_results() -> None:
     recall_manager = RecordingRecallMemory(
         "## Relevant memories\n- Rex and Vera coordinated the spawn bridge handoff."
     )
+    memory_backend = DefaultMemoryBackend(recall_manager, RecordingArchivalMemory())
     tool = RecallMemoryTool(recall_manager=recall_manager, agent_id="rex")
 
     tool_result = await tool.execute(
@@ -83,7 +111,10 @@ async def test_recall_tool_and_bridge_return_equivalent_results() -> None:
     )
     bridge_result = await handle_memory_read(
         _memory_request({"query": query, "tier": "recall", "limit": 2}),
-        FakeServices(recall_memory=recall_manager),
+        FakeServices(
+            recall_memory=UnexpectedRecallMemory(),
+            memory_backend=memory_backend,
+        ),
     )
 
     assert tool_result["status"] == "ok"
@@ -98,6 +129,7 @@ async def test_recall_tool_and_bridge_return_equivalent_results() -> None:
 async def test_recall_tool_and_bridge_return_equivalent_empty_results() -> None:
     query = "unrecorded topic"
     recall_manager = RecordingRecallMemory("")
+    memory_backend = DefaultMemoryBackend(recall_manager, RecordingArchivalMemory())
     tool = RecallMemoryTool(recall_manager=recall_manager, agent_id="rex")
 
     tool_result = await tool.execute(
@@ -107,7 +139,10 @@ async def test_recall_tool_and_bridge_return_equivalent_empty_results() -> None:
     )
     bridge_result = await handle_memory_read(
         _memory_request({"query": query, "tier": "recall", "limit": 4}),
-        FakeServices(recall_memory=recall_manager),
+        FakeServices(
+            recall_memory=UnexpectedRecallMemory(),
+            memory_backend=memory_backend,
+        ),
     )
 
     assert tool_result == {"status": "no_results", "memories": ""}

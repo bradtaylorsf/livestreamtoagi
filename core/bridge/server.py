@@ -234,6 +234,11 @@ def _memory_services_unavailable(env: BridgeRequest, services: Any | None) -> Br
     manager_name = "core_memory" if payload.tier == "core" else "recall_memory"
     if services is None:
         message = "memory services are unavailable; application lifespan has not initialized"
+    elif payload.tier == "recall" and (
+        getattr(services, "memory_backend", None) is not None
+        or getattr(services, "recall_memory", None) is not None
+    ):
+        return None
     elif getattr(services, manager_name, None) is None:
         message = f"memory manager {manager_name!r} is unavailable"
     else:

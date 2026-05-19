@@ -1,6 +1,7 @@
 """Memory system — core, recall, archival, compaction, reflection, and embeddings."""
 
 from core.memory.archival_memory import ArchivalMemoryManager
+from core.memory.backend import DefaultMemoryBackend, MemoryBackend, select_memory_backend
 from core.memory.compaction import MemoryCompactor
 from core.memory.core_memory import CoreMemoryManager
 from core.memory.embeddings import generate_embedding
@@ -12,11 +13,14 @@ from core.memory.validation import InvalidAgentIdError, validate_agent_id
 __all__ = [
     "ArchivalMemoryManager",
     "CoreMemoryManager",
+    "DefaultMemoryBackend",
     "InvalidAgentIdError",
+    "MemoryBackend",
     "MemoryCompactor",
     "RecallMemoryManager",
     "ReflectionManager",
     "TokenCounter",
     "generate_embedding",
+    "select_memory_backend",
     "validate_agent_id",
 ]

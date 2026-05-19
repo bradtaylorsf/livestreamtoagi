@@ -21,9 +21,8 @@ from core.memory.core_memory import (
 from .base import BaseTool
 
 if TYPE_CHECKING:
-    from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.backend import ArchivalMemoryBackend, RecallMemoryBackend
     from core.memory.core_memory import CoreMemoryManager
-    from core.memory.recall_memory import RecallMemoryManager
 
 
 class RecallMemoryTool(BaseTool):
@@ -43,7 +42,7 @@ class RecallMemoryTool(BaseTool):
         },
     }
 
-    def __init__(self, recall_manager: RecallMemoryManager, agent_id: str) -> None:
+    def __init__(self, recall_manager: RecallMemoryBackend, agent_id: str) -> None:
         self._recall_manager = recall_manager
         self._agent_id = agent_id
 
@@ -80,7 +79,7 @@ class RetrieveTranscriptTool(BaseTool):
         },
     }
 
-    def __init__(self, archival_manager: ArchivalMemoryManager) -> None:
+    def __init__(self, archival_manager: ArchivalMemoryBackend) -> None:
         self._archival_manager = archival_manager
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:

@@ -17,7 +17,7 @@ def test_services_dataclass_importable():
     field_names = {f.name for f in dataclasses.fields(Services)}
     expected = {
         "db", "redis", "http_client", "agent_registry", "llm_client",
-        "core_memory", "recall_memory", "archival_memory", "compactor",
+        "core_memory", "recall_memory", "archival_memory", "memory_backend", "compactor",
         "context_assembler", "token_counter", "memory_repo", "transcript_repo",
         "event_bus", "management", "cost_repo", "config_loader",
     }
