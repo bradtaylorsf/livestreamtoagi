@@ -23,10 +23,11 @@ point, proven end to end. E4-5 (#544) adds the resilience policy that keeps a
   staged into the git-ignored `./mindcraft` clone from the reviewed
   `scripts/minecraft/fork-src/` tree — the same committed-artifact pattern
   `connect-stock-bot.sh` uses for `settings.js` and the mcdata shim.
-- The `!bridgePing("hello")` action wired into Mindcraft's `actionsList`. In
-  chat, the bot answers with `bridge pong: hello`; the Python bridge logs the
-  `agent_id` + `request_id`. A bridge failure is logged as
-  `bridge ping failed [<error.code>]: …` — **logged, never a crash**.
+- The `!bridgePing("hello")` action and the E6 action-layer commands wired
+  into Mindcraft's `actionsList`. In chat, the bot answers with
+  `bridge pong: hello`; the Python bridge logs the `agent_id` + `request_id`.
+  A bridge failure is logged as `bridge ping failed [<error.code>]: …` —
+  **logged, never a crash**.
 
 ## What this does NOT cover (on purpose)
 
@@ -52,19 +53,22 @@ relative import resolves identically staged or driven by the contract test:
 | --- | --- |
 | `fork-src/agent/bridge/python_bridge.js` | `src/agent/bridge/python_bridge.js` |
 | `fork-src/agent/commands/bridge_ping_action.js` | `src/agent/commands/bridge_ping_action.js` |
+| `fork-src/agent/commands/*_action.js` for `move`, `navigate`, `place`, `break`, `build_from_plan`, `execute_code`, and `observe` | matching `src/agent/commands/*_action.js` files |
+| `fork-src/agent/skills/*.js` for movement/building/build-plan/perception helpers | matching `src/agent/skills/*.js` files |
 
-`connect-bridge-bot.sh` then injects `bridgePingAction` into
+`connect-bridge-bot.sh` then injects the staged actions into
 `src/agent/commands/actions.js`'s `actionsList` via an anchored, node-driven
-patch (anchor: `export const actionsList = [`, marker `LTAG E4-4 bridge ping
-action`). The patched `actions.js`, the mcdata runtime-version shim, and the two
-copied files are **all reverted on exit** (the same restore-on-exit trap as the
-mcdata shim) so the pinned tree stays clean and re-runnable.
+patch (anchor: `export const actionsList = [`, markers such as
+`LTAG E4-4 bridge ping action` and `LTAG E6-6 observe action`). The patched
+`actions.js`, the mcdata runtime-version shim, and copied files are **all
+reverted on exit** (the same restore-on-exit trap as the mcdata shim) so the
+pinned tree stays clean and re-runnable.
 
 ## The bridge contract this client speaks
 
 Fixed by ADR [`0010-bridge-protocol.md`](../decisions/0010-bridge-protocol.md)
 and the versioned contract (`core/bridge/contract.py`, E4-2). The client builds
-a contract-valid `BridgeRequest`: `version:"1.1"`, a unique `request_id`,
+a contract-valid `BridgeRequest`: `version:"1.4"`, a unique `request_id`,
 `agent_id`, `run_id`/`simulation_id`, `service`, `method`, `payload`,
 `deadline_ms`, `cost_context:{agent_tier:"conversation",
 budget_bucket:"bridge", estimated_cost_usd:0.0}`, and an additive `trace_id`
@@ -136,10 +140,11 @@ Mindcraft lockfile is frozen).
 Debugging a cross-language 24/7 system needs **correlation**: one request must
 be followable through both the Node logs and the Python logs by a single id.
 E4-7 ([#546](https://github.com/bradtaylorsf/livestreamtoagi/issues/546)) adds
-that with **no wire-contract change** — only the additive `trace_id`
-(protocol 1.1) and instrumentation. No new npm dependency (the lockfile is
-frozen): the logger is a stderr write and the metrics are a plain module
-object.
+that with the additive `trace_id` introduced in protocol 1.1 and lightweight
+instrumentation. The current client speaks protocol 1.4, which also includes
+the additive E6-6 perception snapshot definitions. No new npm dependency (the
+lockfile is frozen): the logger is a stderr write and the metrics are a plain
+module object.
 
 - **One trace id, end to end.** `!bridgePing` mints `trace-<uuid>` and passes
   it to `callBridge`, which puts it in the envelope; the Python server echoes
@@ -198,11 +203,14 @@ Then, in Minecraft chat:
 
 ```
 BridgeBot !bridgePing("hello")
+BridgeBot !observe(6, "all", false)
 ```
 
 Success looks like `bridge pong: hello` in chat/console, and the Python bridge
 logging the `agent_id` + `request_id`. A failure looks like
 `bridge ping failed [bridge_auth_refused]: …` — logged, the bot keeps running.
+The `!observe` smoke emits a schema-shaped `perception.report` snapshot and no
+`action.result`.
 
 ### Preview without launching (optional)
 

@@ -32,7 +32,7 @@
 //     unsafe action: callers (the action layer) degrade to safe-idle. This is
 //     exactly the fail-closed rule ADR 0010 §5 says E4-5 must preserve.
 //   * (E4-7 #546) Observability with no wire-contract change: each call carries
-//     an additive `trace_id` (protocol 1.1) the Python server echoes/mints, so
+//     an additive `trace_id` (introduced in protocol 1.1) the Python server echoes/mints, so
 //     one request greps end-to-end across BOTH logs by a single id; every call
 //     start and settle path emits a fixed `key=value` line to STDERR (matching
 //     core/bridge/observability.py) and feeds in-process counters exposed via
@@ -67,10 +67,11 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.1 is the E4-7 (#546) minor bump: the
-// optional `trace_id` correlation field is purely additive — the server only
-// gates on the major, so this stays wire-compatible with a 1.0 peer.
-export const PROTOCOL_VERSION = '1.1';
+// contract.PROTOCOL_VERSION (ADR §3). 1.4 is the E6-6 (#561) minor bump: typed
+// `PerceptionSnapshot` schema definitions are additive and
+// `perception.report.observations` stays backward-compatible. The server only
+// gates on the major, so this stays wire-compatible with earlier 1.x peers.
+export const PROTOCOL_VERSION = '1.4';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';
@@ -338,7 +339,7 @@ function buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId 
         },
         // E4-7 (#546): end-to-end correlation id. Accept a caller-supplied id
         // (so a chain of related calls shares one trace) and otherwise mint a
-        // unique one per call. Additive/optional (protocol 1.1) — the server
+        // unique one per call. Additive/optional since protocol 1.1 — the server
         // echoes it back, or mints its own when this is somehow absent.
         trace_id: traceId || `trace-${randomUUID()}`,
     };
