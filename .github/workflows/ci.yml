@@ -47,6 +47,41 @@ jobs:
       - name: Run backend tests
         run: pytest tests/backend/ -v -m "not integration" --cov=core --cov=tools
 
+  memory-regression:
+    name: Memory Regression Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-memory-${{ hashFiles('pyproject.toml') }}
+          restore-keys: ${{ runner.os }}-uv-memory-
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+      - name: Run memory regression gate
+        run: >
+          pytest
+          tests/backend/test_core_memory.py
+          tests/backend/test_core_memory_startup.py
+          tests/backend/test_recall_memory.py
+          tests/backend/test_archival_memory.py
+          tests/backend/test_cross_conversation_memory.py
+          tests/backend/test_memory_seed.py
+          tests/backend/test_memory_seed_bridge_compat.py
+          tests/backend/test_memory_snapshot.py
+          tests/backend/test_memory_tools.py
+          tests/backend/test_bridge_memory.py
+          tests/backend/test_bridge_perception_action_memory.py
+          -v
+          -m "not integration"
+
   frontend-test:
     name: Frontend Tests
     runs-on: ubuntu-latest
