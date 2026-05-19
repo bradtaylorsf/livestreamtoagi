@@ -30,6 +30,7 @@ from core.events.event_generator import EventGenerator
 from core.llm_client import LOCAL_LLM_BASE_URL, OpenRouterClient, refresh_pricing
 from core.management import Management
 from core.memory.archival_memory import ArchivalMemoryManager
+from core.memory.backend import MemoryBackend, select_memory_backend
 from core.memory.compaction import MemoryCompactor
 from core.memory.core_memory import CoreMemoryManager
 from core.memory.dreams import DreamManager
@@ -109,6 +110,7 @@ class Services:
     core_memory: CoreMemoryManager | None
     recall_memory: RecallMemoryManager | None
     archival_memory: ArchivalMemoryManager | None
+    memory_backend: MemoryBackend | None
     compactor: MemoryCompactor | None
     context_assembler: ContextAssembler
     token_counter: TokenCounter
@@ -293,6 +295,7 @@ async def bootstrap_services(
         transcript_repo=transcript_repo,
         token_counter=token_counter,
     )
+    memory_backend = select_memory_backend(recall_memory, archival_memory)
     compactor = MemoryCompactor(
         archival=archival_memory,
         recall=recall_memory,
@@ -405,6 +408,7 @@ async def bootstrap_services(
         core_memory=core_memory,
         recall_memory=recall_memory,
         archival_memory=archival_memory,
+        memory_backend=memory_backend,
         compactor=compactor,
         context_assembler=context_assembler,
         token_counter=token_counter,
@@ -476,6 +480,7 @@ async def _bootstrap_dry_run(
         core_memory=None,
         recall_memory=None,
         archival_memory=None,
+        memory_backend=None,
         compactor=None,
         context_assembler=context_assembler,
         token_counter=token_counter,

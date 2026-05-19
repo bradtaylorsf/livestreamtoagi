@@ -1,4 +1,12 @@
-"""Memory tools — recall_memory, retrieve_transcript, update_core_memory."""
+"""Memory tools — recall_memory, retrieve_transcript, update_core_memory.
+
+These agent-facing tools are thin adapters over the memory managers in
+``core.memory``. The bridge memory handlers in ``core.bridge.handlers.memory``
+share that manager layer as the source of truth: recall uses the same
+``RecallMemoryManager.retrieve_recall_memories`` call shape as
+``RecallMemoryTool``, while bridge-only core/write verbs still delegate directly
+to their ``core.memory`` managers instead of creating a second implementation.
+"""
 
 from __future__ import annotations
 
@@ -13,9 +21,8 @@ from core.memory.core_memory import (
 from .base import BaseTool
 
 if TYPE_CHECKING:
-    from core.memory.archival_memory import ArchivalMemoryManager
+    from core.memory.backend import ArchivalMemoryBackend, RecallMemoryBackend
     from core.memory.core_memory import CoreMemoryManager
-    from core.memory.recall_memory import RecallMemoryManager
 
 
 class RecallMemoryTool(BaseTool):
@@ -35,7 +42,7 @@ class RecallMemoryTool(BaseTool):
         },
     }
 
-    def __init__(self, recall_manager: RecallMemoryManager, agent_id: str) -> None:
+    def __init__(self, recall_manager: RecallMemoryBackend, agent_id: str) -> None:
         self._recall_manager = recall_manager
         self._agent_id = agent_id
 
@@ -72,7 +79,7 @@ class RetrieveTranscriptTool(BaseTool):
         },
     }
 
-    def __init__(self, archival_manager: ArchivalMemoryManager) -> None:
+    def __init__(self, archival_manager: ArchivalMemoryBackend) -> None:
         self._archival_manager = archival_manager
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:

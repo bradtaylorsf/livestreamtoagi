@@ -7,17 +7,18 @@ Starlette ``TestClient`` WebSocket.
 
 Dependency-free by design: ``TestClient(app)`` is used *without* its context
 manager, so the FastAPI ``lifespan`` (which bootstraps Postgres/Redis) never
-runs — the bridge endpoint touches no ``app.state``/services. No Docker, no
-network, no LLM, so this runs in the existing ``backend-test`` CI job and is
-the nearest local smoke path for this issue (which has no LLM runtime path).
+runs. Non-memory verbs remain stubs; memory service verbs fail closed with a
+retryable typed error until services are present. No Docker, no network, no
+LLM, so this runs in the existing ``backend-test`` CI job and is the nearest
+local smoke path for this bridge surface.
 
 What is covered:
 
 * **Fail-closed auth (ADR §4)** — no token, wrong token, malformed header,
   *and* a server with no token configured are all rejected with WS close
   ``1008`` before ``accept()``; nothing is dispatched.
-* **Authenticated happy path** — every one of the 7 closed-registry verbs
-  round-trips a committed valid fixture and gets a contract-valid stub
+* **Authenticated happy path** — every non-memory-service verb round-trips a
+  committed valid fixture and gets a contract-valid stub
   response (re-validated through ``contract.validate_response``).
 * **Fail-closed protocol errors (ADR §2/§3/§6)** — bad envelope, unknown
   major version, unknown service, and a non-JSON frame each come back as a
@@ -41,6 +42,9 @@ from core.bridge.server import (
     BRIDGE_QUERY_TOKEN_ENV,
     BRIDGE_TOKEN_ENV,
     BRIDGE_WS_PATH,
+    ERR_MEMORY_SERVICE_UNAVAILABLE,
+    MEMORY_HANDLER_VERBS,
+    MEMORY_WRITE_VERBS,
     STUB_HANDLERS,
     UNKNOWN_REQUEST_ID,
     build_bridge_response,
@@ -55,15 +59,13 @@ FIXTURES = REPO_ROOT / "tests" / "backend" / "fixtures" / "bridge"
 # request_id/message come from the committed request.valid.json fixtures.
 _EXPECTED_STUB_PAYLOAD: dict[str, dict[str, Any]] = {
     "bridge.ping": {"pong": "hello"},
-    "memory.recall": {"results": []},
-    "memory.write": {"memory_id": "req-memory-write-0001"},
     "management.review": {"verdict": "allow", "reason": "stub", "sanitized_text": None},
     "cost.gate": {"allowed": True, "reason": "stub", "remaining_budget_usd": 0.0},
     "perception.report": {"accepted": True},
     "action.result": {"accepted": True},
 }
 
-ALL_VERBS = sorted(c.SERVICE_REGISTRY)
+STUB_VERBS = sorted(STUB_HANDLERS)
 
 
 def _fixture(verb: str, name: str) -> dict[str, Any]:
@@ -78,9 +80,11 @@ def token_env(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # No `with TestClient(app)`: lifespan/bootstrap must not run (keeps this
-    # dependency-free). websocket_connect works without it.
+    # dependency-free). websocket_connect works without it. Also clear any
+    # services a previous app-level test may have left on the shared app.
+    monkeypatch.delattr(app.state, "services", raising=False)
     return TestClient(app)
 
 
@@ -135,7 +139,7 @@ def test_unauthenticated_socket_dispatches_nothing(token_env: str, client: TestC
 # ── Authenticated happy path: every verb round-trips a stub ─────────────────
 
 
-@pytest.mark.parametrize("verb", ALL_VERBS)
+@pytest.mark.parametrize("verb", STUB_VERBS)
 def test_valid_signed_message_echoes_contract_valid_stub(
     verb: str, token_env: str, client: TestClient
 ) -> None:
@@ -157,6 +161,44 @@ def test_valid_signed_message_echoes_contract_valid_stub(
     # committed contract — re-validate independently of the server.
     parsed = c.validate_response(response, service=request["service"], method=request["method"])
     assert parsed is not None
+
+
+def test_memory_recall_without_services_returns_retryable_typed_error(
+    token_env: str, client: TestClient
+) -> None:
+    request = _fixture("memory.recall", "request.valid.json")
+    with client.websocket_connect(
+        BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as ws:
+        ws.send_json(request)
+        raw_response = ws.receive_json()
+
+    response = c.BridgeResponse.model_validate(raw_response)
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_MEMORY_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
+def test_memory_write_without_services_returns_retryable_typed_error(
+    token_env: str, client: TestClient
+) -> None:
+    request = _fixture("memory.write", "request.valid.json")
+    with client.websocket_connect(
+        BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as ws:
+        ws.send_json(request)
+        raw_response = ws.receive_json()
+
+    response = c.BridgeResponse.model_validate(raw_response)
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_MEMORY_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
 
 
 def test_query_param_token_rejected_by_default(token_env: str, client: TestClient) -> None:
@@ -187,7 +229,7 @@ def test_connection_handles_multiple_sequential_messages(
     with client.websocket_connect(
         BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
     ) as ws:
-        for verb in ("bridge.ping", "memory.recall", "cost.gate"):
+        for verb in ("bridge.ping", "cost.gate", "action.result"):
             ws.send_json(_fixture(verb, "request.valid.json"))
             response = ws.receive_json()
             assert response["ok"] is True, verb
@@ -275,12 +317,23 @@ def test_non_json_frame_returns_typed_error(token_env: str, client: TestClient) 
 # ── Pure dispatch policy (no socket) ────────────────────────────────────────
 
 
-@pytest.mark.parametrize("verb", ALL_VERBS)
+@pytest.mark.parametrize("verb", STUB_VERBS)
 def test_build_bridge_response_is_contract_valid_per_verb(verb: str) -> None:
     request = _fixture(verb, "request.valid.json")
     response = build_bridge_response(request)
     assert response.ok is True
     assert response.payload == _EXPECTED_STUB_PAYLOAD[verb]
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
+@pytest.mark.parametrize("verb", ["memory.recall", "memory.write"])
+def test_build_bridge_response_returns_typed_error_for_async_memory_paths(verb: str) -> None:
+    request = _fixture(verb, "request.valid.json")
+    response = build_bridge_response(request)
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == ERR_MEMORY_SERVICE_UNAVAILABLE
+    assert response.retryable is True
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
@@ -300,5 +353,12 @@ def test_bridge_route_is_mounted_on_app() -> None:
     assert BRIDGE_WS_PATH in paths
 
 
-def test_stub_table_matches_closed_registry_exactly() -> None:
-    assert set(STUB_HANDLERS) == set(c.SERVICE_REGISTRY)
+def test_handlers_match_closed_registry_exactly() -> None:
+    assert {"memory.recall"} == MEMORY_HANDLER_VERBS
+    assert {"memory.write"} == MEMORY_WRITE_VERBS
+    assert "memory.recall" not in STUB_HANDLERS
+    assert "memory.write" not in STUB_HANDLERS
+    assert (
+        set(STUB_HANDLERS) | set(MEMORY_HANDLER_VERBS) | set(MEMORY_WRITE_VERBS)
+        == set(c.SERVICE_REGISTRY)
+    )

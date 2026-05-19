@@ -456,6 +456,16 @@
           ],
           "title": "Scope",
           "type": "string"
+        },
+        "tier": {
+          "default": "recall",
+          "description": "Memory tier to read. 'recall' performs semantic recall; 'core' fetches the agent's Tier 1 core memory. Query remains required for additive compatibility and is ignored for tier='core'.",
+          "enum": [
+            "recall",
+            "core"
+          ],
+          "title": "Tier",
+          "type": "string"
         }
       },
       "required": [
@@ -467,6 +477,32 @@
     "MemoryRecallResponse": {
       "additionalProperties": false,
       "properties": {
+        "core_memory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Core memory markdown returned by the core memory manager.",
+          "title": "Core Memory"
+        },
+        "formatted": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Formatted markdown returned by the recall memory manager.",
+          "title": "Formatted"
+        },
         "results": {
           "description": "Ranked recall hits (may be empty).",
           "items": {
@@ -601,7 +637,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.1",
+  "protocolVersion": "1.2",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",

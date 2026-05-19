@@ -27,6 +27,7 @@
     "verify:bridge-observability": ".venv/bin/pytest tests/backend/test_bridge_observability.py -v",
     "verify:bridge-integration-harness": ".venv/bin/pytest tests/integration/test_bridge_harness.py -v",
     "verify:bridge-security": ".venv/bin/pytest tests/backend/test_bridge_security.py -v",
+    "verify:memory-bridge-perf": ".venv/bin/pytest tests/backend/test_memory_bridge_perf.py -v -m \"not integration\"",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",

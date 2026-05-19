@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -15,12 +13,10 @@ from core.memory.snapshot import (
     SNAPSHOT_VERSION,
     AgentSnapshot,
     MemorySnapshot,
-    MemorySnapshotExporter,
     MemorySnapshotImporter,
     RestoreResult,
 )
-from core.models import CoreMemory, JournalEntry, RecallMemory, Relationship
-
+from core.models import CoreMemory, JournalEntry, RecallMemory
 
 # ── Schema model tests ─────────────────────────────────────────
 
@@ -175,7 +171,7 @@ def importer(mock_db, mock_memory_repo, mock_core_memory_mgr, mock_recall_memory
 
 
 @pytest.mark.asyncio
-async def test_restore_core_memory(importer, mock_core_memory_mgr):
+async def test_restore_core_memory(importer, mock_core_memory_mgr, mock_memory_repo):
     snapshot = {
         "version": 1,
         "agents": {
@@ -190,14 +186,16 @@ async def test_restore_core_memory(importer, mock_core_memory_mgr):
     result = await importer.restore(snapshot)
     assert result.core_memories_restored == 1
     assert "rex" in result.agents_restored
-    mock_core_memory_mgr.initialize_agent_memory.assert_called_once()
+    mock_core_memory_mgr.initialize_agent_memory.assert_not_called()
+    mock_memory_repo.upsert_core_memory.assert_called_once()
+    call = mock_memory_repo.upsert_core_memory.await_args
+    assert call.args[:3] == ("rex", "I am Rex the builder", 6)
+    assert call.kwargs["reason"] == "snapshot_restore"
 
 
 @pytest.mark.asyncio
-async def test_restore_with_existing_core_memory(importer, mock_core_memory_mgr, mock_memory_repo):
-    """When core memory already exists, should update rather than initialize."""
-    mock_core_memory_mgr.get_core_memory.return_value = "existing"
-
+async def test_restore_upserts_core_memory(importer, mock_memory_repo):
+    """Core-memory restore preserves the snapshot text through an upsert."""
     snapshot = {
         "version": 1,
         "agents": {
@@ -319,7 +317,7 @@ async def test_restore_clear_first(importer, mock_db):
         },
         "relationships": [],
     }
-    result = await importer.restore(snapshot, clear_first=True)
+    await importer.restore(snapshot, clear_first=True)
     # Should have called execute to delete recall and journal entries
     assert mock_db.execute.call_count >= 2
 
