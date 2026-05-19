@@ -19,7 +19,7 @@ MEMORY_REGRESSION_TESTS := \
 	tests/backend/test_bridge_memory.py \
 	tests/backend/test_bridge_perception_action_memory.py
 
-.PHONY: test test-backend test-memory-regression test-replay-cues render-install render-smoke render-verify
+.PHONY: test test-backend test-memory-regression bench-memory-bridge test-replay-cues render-install render-smoke render-verify
 
 # Run the full backend unit-test suite with coverage. Mirrors the CI
 # step in .github/workflows/ci.yml so local runs match CI exactly.
@@ -30,6 +30,10 @@ test test-backend:
 # bridge-path suite is checked the same way locally and in GitHub Actions.
 test-memory-regression:
 	$(PYTEST) $(MEMORY_REGRESSION_TESTS) -v -m "not integration"
+
+# Run the deterministic bridge memory latency budget check from issue #555.
+bench-memory-bridge:
+	$(PY) scripts/bench_memory_bridge.py --check-budget
 
 # Issue #477 — replay-cue parser + endpoint. The verification harness
 # auto-runs these on every change to core/video/cue_parser.py or
