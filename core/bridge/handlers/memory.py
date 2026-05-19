@@ -1,4 +1,15 @@
-"""Bridge handlers for the memory subsystem."""
+"""Bridge handlers for the memory subsystem.
+
+The memory managers in ``core.memory`` are the single source of truth:
+``RecallMemoryManager.retrieve_recall_memories`` for Tier 2 recall reads,
+``CoreMemoryManager.get_core_memory`` for Tier 1 core reads, and
+``MemoryCompactor.compact_interaction`` for append/write compaction. These
+bridge verbs intentionally remain thin adapters over that manager layer. The
+recall bridge path uses the same manager method and arguments as
+``tools.memory_tools.RecallMemoryTool``; core reads and writes delegate directly
+to their source-of-truth managers rather than introducing a bridge-specific
+memory implementation.
+"""
 
 from __future__ import annotations
 

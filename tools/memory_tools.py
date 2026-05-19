@@ -1,4 +1,12 @@
-"""Memory tools — recall_memory, retrieve_transcript, update_core_memory."""
+"""Memory tools — recall_memory, retrieve_transcript, update_core_memory.
+
+These agent-facing tools are thin adapters over the memory managers in
+``core.memory``. The bridge memory handlers in ``core.bridge.handlers.memory``
+share that manager layer as the source of truth: recall uses the same
+``RecallMemoryManager.retrieve_recall_memories`` call shape as
+``RecallMemoryTool``, while bridge-only core/write verbs still delegate directly
+to their ``core.memory`` managers instead of creating a second implementation.
+"""
 
 from __future__ import annotations
 
