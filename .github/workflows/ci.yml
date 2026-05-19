@@ -46,6 +46,8 @@ jobs:
         run: uv pip install --system -e ".[dev]"
       - name: Run backend tests
         run: pytest tests/backend/ -v -m "not integration" --cov=core --cov=tools
+      - name: Run no-server embodiment integration tests
+        run: pytest tests/integration/test_embodiment_skills.py -v
 
   memory-regression:
     name: Memory Regression Gate
