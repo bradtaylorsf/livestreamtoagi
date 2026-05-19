@@ -176,7 +176,7 @@ async def test_apply_custom_unknown_agent_raises(applier, tmp_path):
 
 @pytest.mark.asyncio
 async def test_apply_custom_loads_known_agents(
-    applier, mock_core_memory_mgr, tmp_path
+    applier, mock_memory_repo, mock_core_memory_mgr, tmp_path
 ):
     seed_file = tmp_path / "good.json"
     seed_file.write_text(
@@ -206,10 +206,15 @@ async def test_apply_custom_loads_known_agents(
     assert "vera" in result.agents_restored
     assert "rex" in result.agents_restored
 
-    # Importer used initialize_agent_memory with target sim id
-    mock_core_memory_mgr.initialize_agent_memory.assert_called()
-    for call in mock_core_memory_mgr.initialize_agent_memory.await_args_list:
+    mock_core_memory_mgr.initialize_agent_memory.assert_not_called()
+    calls_by_agent = {
+        call.args[0]: call for call in mock_memory_repo.upsert_core_memory.await_args_list
+    }
+    assert calls_by_agent["vera"].args[1] == "I am Vera, day 30 of the show."
+    assert calls_by_agent["rex"].args[1] == "I am Rex, frustrated with Fork."
+    for call in calls_by_agent.values():
         assert call.kwargs.get("simulation_id") == target_sim
+        assert call.kwargs["reason"] == "snapshot_restore"
 
 
 @pytest.mark.asyncio
@@ -270,9 +275,15 @@ async def test_apply_inherit_copies_core_memory(
     # Both agents had their memory exported and re-imported into target sim
     assert result.core_memories_restored == 2
     assert sorted(result.agents_restored) == ["rex", "vera"]
-    # Importer was called scoped to target sim
-    for call in mock_core_memory_mgr.initialize_agent_memory.await_args_list:
+    mock_core_memory_mgr.initialize_agent_memory.assert_not_called()
+    upserts_by_agent = {
+        call.args[0]: call for call in mock_memory_repo.upsert_core_memory.await_args_list
+    }
+    assert upserts_by_agent["vera"].args[1] == "vera mature memory"
+    assert upserts_by_agent["rex"].args[1] == "rex mature memory"
+    for call in upserts_by_agent.values():
         assert call.kwargs.get("simulation_id") == target_sim
+        assert call.kwargs["reason"] == "snapshot_restore"
 
 
 # ── Existing seed files are valid custom inputs ────────────────
