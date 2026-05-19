@@ -1,0 +1,636 @@
+{
+  "$defs": {
+    "ActionResultRequest": {
+      "additionalProperties": false,
+      "description": "``action.result`` \u2014 outcome of an in-world action (schema fixed now, channel E4-5).",
+      "properties": {
+        "action_id": {
+          "description": "Id of the action this reports on.",
+          "minLength": 1,
+          "title": "Action Id",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "description": "Optional human-readable detail.",
+          "title": "Detail",
+          "type": "string"
+        },
+        "status": {
+          "description": "Terminal status of the action.",
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_id",
+        "status"
+      ],
+      "title": "ActionResultRequest",
+      "type": "object"
+    },
+    "ActionResultResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "description": "Whether Python recorded the result.",
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "title": "ActionResultResponse",
+      "type": "object"
+    },
+    "BridgeError": {
+      "additionalProperties": false,
+      "description": "Typed error body carried by a failed response (ADR \u00a72).",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable error code.",
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable detail for logs/operators.",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "BridgeError",
+      "type": "object"
+    },
+    "BridgePingRequest": {
+      "additionalProperties": false,
+      "description": "``bridge.ping`` \u2014 connectivity probe for the ADR's ``!bridgePing`` proof.",
+      "properties": {
+        "message": {
+          "description": "Arbitrary text echoed back as 'pong'.",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "BridgePingRequest",
+      "type": "object"
+    },
+    "BridgePingResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "pong": {
+          "description": "Echo of the request message.",
+          "title": "Pong",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pong"
+      ],
+      "title": "BridgePingResponse",
+      "type": "object"
+    },
+    "BridgeRequest": {
+      "additionalProperties": false,
+      "description": "Request envelope \u2014 Node->Python, or Python->Node for control messages.\n\nField set is **exactly** ADR \u00a72's request table; ``extra='forbid'`` so an\nunknown top-level field is rejected on both sides rather than silently\nignored. ``payload`` is an opaque object here and is validated per-service\nvia :data:`SERVICE_REGISTRY` / :func:`validate_request`.",
+      "properties": {
+        "agent_id": {
+          "description": "Stable agent identity (e.g. 'vera'); a claim, not proof (ADR \u00a74).",
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "cost_context": {
+          "$ref": "#/$defs/CostContext",
+          "description": "Cost-attribution hints (ADR \u00a72)."
+        },
+        "deadline_ms": {
+          "description": "Caller's hard deadline in milliseconds (ADR \u00a75).",
+          "exclusiveMinimum": 0,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "method": {
+          "description": "Method within the service.",
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "description": "Service-specific body; schema owned per-verb below.",
+          "title": "Payload",
+          "type": "object"
+        },
+        "request_id": {
+          "description": "Unique id; correlation + idempotency key for retries (ADR \u00a75).",
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "Run this message belongs to (attribution).",
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "service": {
+          "description": "Typed service name (ADR \u00a76 closed set).",
+          "minLength": 1,
+          "title": "Service",
+          "type": "string"
+        },
+        "simulation_id": {
+          "description": "Simulation this message belongs to (journal + cost).",
+          "minLength": 1,
+          "title": "Simulation Id",
+          "type": "string"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "End-to-end correlation id for cross-language tracing (E4-7, #546). Optional and additive (ADR \u00a73 minor bump, protocol 1.1): a 1.0 peer omits it. The server mints one when absent so a request is always traceable in both Node and Python logs by a single id.",
+          "title": "Trace Id"
+        },
+        "version": {
+          "description": "Protocol semver (ADR \u00a73). Required on every message.",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "request_id",
+        "agent_id",
+        "run_id",
+        "simulation_id",
+        "service",
+        "method",
+        "deadline_ms",
+        "cost_context"
+      ],
+      "title": "BridgeRequest",
+      "type": "object"
+    },
+    "BridgeResponse": {
+      "additionalProperties": false,
+      "description": "Response envelope \u2014 the other direction (ADR \u00a72).\n\n``retryable`` defaults to ``False``: per ADR \u00a75 absence/ambiguity is\ntreated as *not* retryable, so the default must encode the safe choice.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BridgeError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed error when ok is False."
+        },
+        "ok": {
+          "description": "True = success, False = handled failure.",
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Result body on success; schema owned per-verb below.",
+          "title": "Payload"
+        },
+        "request_id": {
+          "description": "Echoes the originating request's request_id.",
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "description": "Whether the caller may safely retry (ADR \u00a75).",
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Echoes the request's correlation id (or the one the server minted when the request omitted it) so the same trace id appears on both halves of the round-trip (E4-7, #546). Optional/additive (ADR \u00a73).",
+          "title": "Trace Id"
+        }
+      },
+      "required": [
+        "request_id",
+        "ok"
+      ],
+      "title": "BridgeResponse",
+      "type": "object"
+    },
+    "CostContext": {
+      "additionalProperties": false,
+      "description": "Cost-attribution hints (ADR \u00a72 ``cost_context``).\n\nCarries enough metadata for E11 cost/kill controls to charge the right\naccount: which model tier the call is for and which budget bucket it draws\nfrom. ``estimated_cost_usd`` is an optional pre-flight hint the cost gate\nmay use; the authoritative number is computed Python-side.",
+      "properties": {
+        "agent_tier": {
+          "description": "Which model tier this call bills against (drives cost attribution).",
+          "enum": [
+            "conversation",
+            "building",
+            "errand",
+            "filter"
+          ],
+          "title": "Agent Tier",
+          "type": "string"
+        },
+        "budget_bucket": {
+          "description": "Budget account this draws from, e.g. 'daily-global' or 'weekly-vera'.",
+          "minLength": 1,
+          "title": "Budget Bucket",
+          "type": "string"
+        },
+        "estimated_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional pre-flight spend estimate hint (USD).",
+          "title": "Estimated Cost Usd"
+        }
+      },
+      "required": [
+        "agent_tier",
+        "budget_bucket"
+      ],
+      "title": "CostContext",
+      "type": "object"
+    },
+    "CostGateRequest": {
+      "additionalProperties": false,
+      "description": "``cost.gate`` \u2014 check whether a spend/action is allowed (ADR \u00a76).",
+      "properties": {
+        "action": {
+          "description": "What the spend is for.",
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "agent_id": {
+          "description": "Agent requesting the spend.",
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "estimated_cost_usd": {
+          "description": "Estimated spend (USD).",
+          "minimum": 0.0,
+          "title": "Estimated Cost Usd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "agent_id",
+        "action",
+        "estimated_cost_usd"
+      ],
+      "title": "CostGateRequest",
+      "type": "object"
+    },
+    "CostGateResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "description": "Whether the spend may proceed.",
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Why allowed/denied.",
+          "title": "Reason",
+          "type": "string"
+        },
+        "remaining_budget_usd": {
+          "description": "Budget left in the relevant bucket after this decision.",
+          "title": "Remaining Budget Usd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "allowed",
+        "reason",
+        "remaining_budget_usd"
+      ],
+      "title": "CostGateResponse",
+      "type": "object"
+    },
+    "ManagementReviewRequest": {
+      "additionalProperties": false,
+      "description": "``management.review`` \u2014 content-filter gate before broadcast (ADR \u00a75).",
+      "properties": {
+        "agent_id": {
+          "description": "Agent whose output is under review.",
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "context": {
+          "additionalProperties": true,
+          "description": "Optional surrounding context for the filter.",
+          "title": "Context",
+          "type": "object"
+        },
+        "text": {
+          "description": "Candidate agent speech/output.",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "text"
+      ],
+      "title": "ManagementReviewRequest",
+      "type": "object"
+    },
+    "ManagementReviewResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "description": "Why the verdict was reached.",
+          "title": "Reason",
+          "type": "string"
+        },
+        "sanitized_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cleaned text when the filter rewrote rather than vetoed.",
+          "title": "Sanitized Text"
+        },
+        "verdict": {
+          "description": "Filter decision.",
+          "enum": [
+            "allow",
+            "veto"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "reason"
+      ],
+      "title": "ManagementReviewResponse",
+      "type": "object"
+    },
+    "MemoryRecallRequest": {
+      "additionalProperties": false,
+      "description": "``memory.recall`` \u2014 semantic/recall memory read (ADR \u00a76; issue 'memory.read').",
+      "properties": {
+        "limit": {
+          "default": 5,
+          "description": "Max results to return.",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "query": {
+          "description": "Natural-language recall query.",
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "scope": {
+          "default": "agent",
+          "description": "Memory partition to search.",
+          "enum": [
+            "agent",
+            "shared",
+            "world"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "MemoryRecallRequest",
+      "type": "object"
+    },
+    "MemoryRecallResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "results": {
+          "description": "Ranked recall hits (may be empty).",
+          "items": {
+            "$ref": "#/$defs/MemoryRecallResult"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "title": "MemoryRecallResponse",
+      "type": "object"
+    },
+    "MemoryRecallResult": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "Recalled memory text.",
+          "title": "Content",
+          "type": "string"
+        },
+        "memory_id": {
+          "description": "Stable id of the recalled memory.",
+          "title": "Memory Id",
+          "type": "string"
+        },
+        "score": {
+          "description": "Similarity score.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "memory_id",
+        "content",
+        "score"
+      ],
+      "title": "MemoryRecallResult",
+      "type": "object"
+    },
+    "MemoryWriteRequest": {
+      "additionalProperties": false,
+      "description": "``memory.write`` \u2014 persist a memory. Idempotent on the request_id (ADR \u00a75).",
+      "properties": {
+        "content": {
+          "description": "Memory text to persist.",
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Memory category.",
+          "enum": [
+            "observation",
+            "reflection",
+            "fact",
+            "event"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Optional structured tags (free-form).",
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "content",
+        "kind"
+      ],
+      "title": "MemoryWriteRequest",
+      "type": "object"
+    },
+    "MemoryWriteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "memory_id": {
+          "description": "Id of the stored (or de-duplicated) memory.",
+          "title": "Memory Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_id"
+      ],
+      "title": "MemoryWriteResponse",
+      "type": "object"
+    },
+    "PerceptionReportRequest": {
+      "additionalProperties": false,
+      "description": "``perception.report`` \u2014 bot-observed world state (schema fixed now, channel E4-6).",
+      "properties": {
+        "observations": {
+          "description": "Structured world observations from the bot.",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Observations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "observations"
+      ],
+      "title": "PerceptionReportRequest",
+      "type": "object"
+    },
+    "PerceptionReportResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "description": "Whether Python ingested the report.",
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "title": "PerceptionReportResponse",
+      "type": "object"
+    }
+  },
+  "$id": "https://livestreamtoagi.dev/bridge/bridge-protocol.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Generated from core/bridge/contract.py \u2014 do not edit by hand. Run scripts/export_bridge_schemas.py to regenerate.",
+  "envelopes": {
+    "request": "#/$defs/BridgeRequest",
+    "response": "#/$defs/BridgeResponse"
+  },
+  "protocolVersion": "1.1",
+  "services": {
+    "action.result": {
+      "request": "#/$defs/ActionResultRequest",
+      "response": "#/$defs/ActionResultResponse"
+    },
+    "bridge.ping": {
+      "request": "#/$defs/BridgePingRequest",
+      "response": "#/$defs/BridgePingResponse"
+    },
+    "cost.gate": {
+      "request": "#/$defs/CostGateRequest",
+      "response": "#/$defs/CostGateResponse"
+    },
+    "management.review": {
+      "request": "#/$defs/ManagementReviewRequest",
+      "response": "#/$defs/ManagementReviewResponse"
+    },
+    "memory.recall": {
+      "request": "#/$defs/MemoryRecallRequest",
+      "response": "#/$defs/MemoryRecallResponse"
+    },
+    "memory.write": {
+      "request": "#/$defs/MemoryWriteRequest",
+      "response": "#/$defs/MemoryWriteResponse"
+    },
+    "perception.report": {
+      "request": "#/$defs/PerceptionReportRequest",
+      "response": "#/$defs/PerceptionReportResponse"
+    }
+  },
+  "title": "Livestream-to-AGI bridge protocol"
+}

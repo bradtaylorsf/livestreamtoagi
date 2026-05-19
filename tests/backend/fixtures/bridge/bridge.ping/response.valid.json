@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "payload": {
+    "pong": "hello"
+  },
+  "request_id": "req-bridge-ping-0001",
+  "retryable": false
+}

@@ -44,6 +44,12 @@ class EventType(str, Enum):
     AGENT_SPAWN = "agent_spawn"
     AGENT_DESPAWN = "agent_despawn"
     SIMULATION_ERROR = "simulation_error"
+    # Bridge-originated reports from Node Minecraft bots (E4-6, #545). Distinct
+    # from AGENT_ACTION (in-sim Phaser-world agent action): these carry a bot's
+    # perception of / outcome from an in-world action over the Python<->Node
+    # bridge, attributed by request_id/agent_id/run_id/simulation_id.
+    BRIDGE_PERCEPTION = "bridge_perception"
+    BRIDGE_ACTION_RESULT = "bridge_action_result"
 
 
 # Custom JSON encoder for Decimal, datetime, UUID

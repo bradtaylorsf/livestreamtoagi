@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "payload": {
+    "allowed": true,
+    "reason": "within daily budget",
+    "remaining_budget_usd": 12.5
+  },
+  "request_id": "req-cost-gate-0001",
+  "retryable": false
+}

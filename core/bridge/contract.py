@@ -1,0 +1,517 @@
+"""Versioned message contract for the Python<->Node bridge (issue #541, E4-2).
+
+This module is the **single source of truth** for the bridge wire format. The
+Python side validates with the Pydantic models defined here; the Node side
+validates against the JSON Schema document exported from these same models
+(:func:`export_json_schema`, committed at
+``core/bridge/schemas/bridge-protocol.schema.json``). Because the JSON Schema is
+*generated* from the Pydantic models — never hand-written — the two halves
+cannot drift, which is the whole point of E4-2.
+
+Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
+(issue #540, E4-1), which is the authoritative decision record:
+
+* §2 — the request/response envelope field set and semantics.
+* §3 — versioning: additive-compatible, fail-closed on an unknown *major*.
+* §5 — ``retryable`` defaults to not-retryable; ``request_id`` is the
+  idempotency key for side-effecting calls.
+* §6 — the bridge dispatches a **closed set** of typed ``service`` names; there
+  is no generic "run arbitrary Python" verb.
+
+**Vocabulary note (reconciles a known naming split).** Issue #541's scope text
+lists ``memory.read``; ADR §6 — the source of truth — calls the same verb
+``memory.recall``. This contract uses the ADR name ``memory.recall``
+everywhere so the Node and Python sides share one vocabulary and the split is
+closed rather than carried forward. The other initial verbs match the ADR
+verbatim. ``bridge.ping`` is added because the ADR's "First proof:
+``!bridgePing``" round-trip needs a schema before E4-3/E4-4 can prove the
+channel; it is the only registry entry not in the ADR §6 table and is justified
+solely by that ADR section.
+
+There is no LLM runtime path in this issue: the contract is pure schema/data
+plumbing with no model calls. The nearest local smoke path is the
+dependency-free contract test ``pnpm verify:bridge-contract``
+(``tests/backend/test_bridge_contract.py``).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.json_schema import models_json_schema
+
+# Protocol semver. ADR §3: every message carries this; the contract is
+# additive-compatible within a major and fail-closed across majors. 1.1 is a
+# minor bump: E4-7 (#546) adds the optional `trace_id` correlation field to
+# both envelopes. It is purely additive — `is_supported_version` only gates on
+# the major, so a 1.0 peer that omits `trace_id` stays wire-compatible.
+PROTOCOL_VERSION = "1.1"
+
+# JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
+# emits 2020-12, so the committed schema and the Node validator agree.
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+SCHEMA_ID = "https://livestreamtoagi.dev/bridge/bridge-protocol.schema.json"
+
+
+# ── Version negotiation (ADR §3) ────────────────────────────────────────────
+
+
+def parse_version(version: str) -> tuple[int, int, int]:
+    """Parse a ``MAJOR.MINOR`` or ``MAJOR.MINOR.PATCH`` semver string.
+
+    Raises :class:`ValueError` on anything malformed so callers can fail
+    closed rather than guess (ADR §3).
+    """
+    if not isinstance(version, str):
+        raise ValueError(f"version must be a string, got {type(version).__name__}")
+    parts = version.split(".")
+    if len(parts) not in (2, 3) or not all(p.isdigit() for p in parts):
+        raise ValueError(f"malformed protocol version: {version!r}")
+    major, minor = int(parts[0]), int(parts[1])
+    patch = int(parts[2]) if len(parts) == 3 else 0
+    return major, minor, patch
+
+
+SUPPORTED_MAJOR = parse_version(PROTOCOL_VERSION)[0]
+
+
+def is_supported_version(version: str) -> bool:
+    """Return whether *version* is wire-compatible with this peer.
+
+    ADR §3 rule: the contract is additive-compatible *within* a major (any
+    minor/patch of the same major is tolerated, in either direction, because
+    new fields/verbs are optional and additive). An unknown — i.e. different —
+    major is **not** supported, and a malformed version is treated as not
+    supported. This is deliberately fail-closed: ambiguity is rejected, never
+    guessed.
+    """
+    try:
+        major, _minor, _patch = parse_version(version)
+    except ValueError:
+        return False
+    return major == SUPPORTED_MAJOR
+
+
+# ── Errors ──────────────────────────────────────────────────────────────────
+
+# Stable, typed error codes used in the response envelope. Kept as constants so
+# the Node side and tests reference the same strings.
+ERR_UNSUPPORTED_VERSION = "unsupported_version"
+ERR_UNSUPPORTED_SERVICE = "unsupported_service"
+ERR_INVALID_PAYLOAD = "invalid_payload"
+
+
+class UnsupportedServiceError(ValueError):
+    """Raised when a ``service.method`` is not in the closed registry (ADR §6)."""
+
+    def __init__(self, service: str, method: str) -> None:
+        self.service = service
+        self.method = method
+        super().__init__(f"unsupported bridge service: {service}.{method}")
+
+
+class BridgeError(BaseModel):
+    """Typed error body carried by a failed response (ADR §2)."""
+
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=1, description="Stable machine-readable error code.")
+    message: str = Field(description="Human-readable detail for logs/operators.")
+
+
+# ── Envelope (ADR §2) ───────────────────────────────────────────────────────
+
+
+class CostContext(BaseModel):
+    """Cost-attribution hints (ADR §2 ``cost_context``).
+
+    Carries enough metadata for E11 cost/kill controls to charge the right
+    account: which model tier the call is for and which budget bucket it draws
+    from. ``estimated_cost_usd`` is an optional pre-flight hint the cost gate
+    may use; the authoritative number is computed Python-side.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    agent_tier: Literal["conversation", "building", "errand", "filter"] = Field(
+        description="Which model tier this call bills against (drives cost attribution)."
+    )
+    budget_bucket: str = Field(
+        min_length=1,
+        description="Budget account this draws from, e.g. 'daily-global' or 'weekly-vera'.",
+    )
+    estimated_cost_usd: float | None = Field(
+        default=None, ge=0.0, description="Optional pre-flight spend estimate hint (USD)."
+    )
+
+
+class BridgeRequest(BaseModel):
+    """Request envelope — Node->Python, or Python->Node for control messages.
+
+    Field set is **exactly** ADR §2's request table; ``extra='forbid'`` so an
+    unknown top-level field is rejected on both sides rather than silently
+    ignored. ``payload`` is an opaque object here and is validated per-service
+    via :data:`SERVICE_REGISTRY` / :func:`validate_request`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    version: str = Field(description="Protocol semver (ADR §3). Required on every message.")
+    request_id: str = Field(
+        min_length=1,
+        description="Unique id; correlation + idempotency key for retries (ADR §5).",
+    )
+    agent_id: str = Field(
+        min_length=1,
+        description="Stable agent identity (e.g. 'vera'); a claim, not proof (ADR §4).",
+    )
+    run_id: str = Field(min_length=1, description="Run this message belongs to (attribution).")
+    simulation_id: str = Field(
+        min_length=1, description="Simulation this message belongs to (journal + cost)."
+    )
+    service: str = Field(min_length=1, description="Typed service name (ADR §6 closed set).")
+    method: str = Field(min_length=1, description="Method within the service.")
+    payload: dict[str, Any] = Field(
+        default_factory=dict, description="Service-specific body; schema owned per-verb below."
+    )
+    deadline_ms: int = Field(gt=0, description="Caller's hard deadline in milliseconds (ADR §5).")
+    cost_context: CostContext = Field(description="Cost-attribution hints (ADR §2).")
+    trace_id: str | None = Field(
+        default=None,
+        description=(
+            "End-to-end correlation id for cross-language tracing (E4-7, #546). "
+            "Optional and additive (ADR §3 minor bump, protocol 1.1): a 1.0 peer "
+            "omits it. The server mints one when absent so a request is always "
+            "traceable in both Node and Python logs by a single id."
+        ),
+    )
+
+
+class BridgeResponse(BaseModel):
+    """Response envelope — the other direction (ADR §2).
+
+    ``retryable`` defaults to ``False``: per ADR §5 absence/ambiguity is
+    treated as *not* retryable, so the default must encode the safe choice.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(
+        min_length=1, description="Echoes the originating request's request_id."
+    )
+    ok: bool = Field(description="True = success, False = handled failure.")
+    payload: dict[str, Any] | None = Field(
+        default=None, description="Result body on success; schema owned per-verb below."
+    )
+    error: BridgeError | None = Field(default=None, description="Typed error when ok is False.")
+    retryable: bool = Field(
+        default=False, description="Whether the caller may safely retry (ADR §5)."
+    )
+    trace_id: str | None = Field(
+        default=None,
+        description=(
+            "Echoes the request's correlation id (or the one the server minted "
+            "when the request omitted it) so the same trace id appears on both "
+            "halves of the round-trip (E4-7, #546). Optional/additive (ADR §3)."
+        ),
+    )
+
+
+# ── Per-verb payload schemas (the six initial verbs + bridge.ping) ───────────
+
+
+class BridgePingRequest(BaseModel):
+    """``bridge.ping`` — connectivity probe for the ADR's ``!bridgePing`` proof."""
+
+    model_config = ConfigDict(extra="forbid")
+    message: str = Field(description="Arbitrary text echoed back as 'pong'.")
+
+
+class BridgePingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pong: str = Field(description="Echo of the request message.")
+
+
+class MemoryRecallRequest(BaseModel):
+    """``memory.recall`` — semantic/recall memory read (ADR §6; issue 'memory.read')."""
+
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, description="Natural-language recall query.")
+    scope: Literal["agent", "shared", "world"] = Field(
+        default="agent", description="Memory partition to search."
+    )
+    limit: int = Field(default=5, ge=1, le=50, description="Max results to return.")
+
+
+class MemoryRecallResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    memory_id: str = Field(description="Stable id of the recalled memory.")
+    content: str = Field(description="Recalled memory text.")
+    score: float = Field(ge=0.0, le=1.0, description="Similarity score.")
+
+
+class MemoryRecallResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    results: list[MemoryRecallResult] = Field(
+        default_factory=list, description="Ranked recall hits (may be empty)."
+    )
+
+
+class MemoryWriteRequest(BaseModel):
+    """``memory.write`` — persist a memory. Idempotent on the request_id (ADR §5)."""
+
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(min_length=1, description="Memory text to persist.")
+    kind: Literal["observation", "reflection", "fact", "event"] = Field(
+        description="Memory category."
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Optional structured tags (free-form)."
+    )
+
+
+class MemoryWriteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    memory_id: str = Field(description="Id of the stored (or de-duplicated) memory.")
+
+
+class ManagementReviewRequest(BaseModel):
+    """``management.review`` — content-filter gate before broadcast (ADR §5)."""
+
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str = Field(min_length=1, description="Agent whose output is under review.")
+    text: str = Field(description="Candidate agent speech/output.")
+    context: dict[str, Any] = Field(
+        default_factory=dict, description="Optional surrounding context for the filter."
+    )
+
+
+class ManagementReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    verdict: Literal["allow", "veto"] = Field(description="Filter decision.")
+    reason: str = Field(description="Why the verdict was reached.")
+    sanitized_text: str | None = Field(
+        default=None, description="Cleaned text when the filter rewrote rather than vetoed."
+    )
+
+
+class CostGateRequest(BaseModel):
+    """``cost.gate`` — check whether a spend/action is allowed (ADR §6)."""
+
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str = Field(min_length=1, description="Agent requesting the spend.")
+    action: str = Field(min_length=1, description="What the spend is for.")
+    estimated_cost_usd: float = Field(ge=0.0, description="Estimated spend (USD).")
+
+
+class CostGateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    allowed: bool = Field(description="Whether the spend may proceed.")
+    reason: str = Field(description="Why allowed/denied.")
+    remaining_budget_usd: float = Field(
+        description="Budget left in the relevant bucket after this decision."
+    )
+
+
+class PerceptionReportRequest(BaseModel):
+    """``perception.report`` — bot-observed world state (schema fixed now, channel E4-6)."""
+
+    model_config = ConfigDict(extra="forbid")
+    observations: list[dict[str, Any]] = Field(
+        description="Structured world observations from the bot."
+    )
+
+
+class PerceptionReportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool = Field(description="Whether Python ingested the report.")
+
+
+class ActionResultRequest(BaseModel):
+    """``action.result`` — outcome of an in-world action (schema fixed now, channel E4-5)."""
+
+    model_config = ConfigDict(extra="forbid")
+    action_id: str = Field(min_length=1, description="Id of the action this reports on.")
+    status: Literal["success", "failure", "partial"] = Field(
+        description="Terminal status of the action."
+    )
+    detail: str = Field(default="", description="Optional human-readable detail.")
+
+
+class ActionResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool = Field(description="Whether Python recorded the result.")
+
+
+# ── Service registry (ADR §6 closed set) ────────────────────────────────────
+
+# Maps "<service>.<method>" -> (request payload model, response payload model).
+# This is the *closed* dispatch set: anything not here is rejected with a typed
+# unsupported_service error. Keys are ADR §6 names (plus bridge.ping for the
+# ADR's first-proof round-trip). Other ADR §6 services (cost.reserve,
+# journal.event, kill.status) are intentionally out of E4-2's scope — their
+# schemas land with their owning issues; only the six initial verbs from #541
+# plus bridge.ping are defined here.
+SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
+    "bridge.ping": (BridgePingRequest, BridgePingResponse),
+    "memory.recall": (MemoryRecallRequest, MemoryRecallResponse),
+    "memory.write": (MemoryWriteRequest, MemoryWriteResponse),
+    "management.review": (ManagementReviewRequest, ManagementReviewResponse),
+    "cost.gate": (CostGateRequest, CostGateResponse),
+    "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
+    "action.result": (ActionResultRequest, ActionResultResponse),
+}
+
+# The six initial verbs #541 requires schemas for (ADR §6 names; the issue's
+# 'memory.read' is ADR 'memory.recall'). bridge.ping is extra, not in this set.
+INITIAL_VERBS: tuple[str, ...] = (
+    "memory.recall",
+    "memory.write",
+    "management.review",
+    "cost.gate",
+    "perception.report",
+    "action.result",
+)
+
+
+def service_key(service: str, method: str) -> str:
+    """Canonical registry key for a service/method pair."""
+    return f"{service}.{method}"
+
+
+def get_models(service: str, method: str) -> tuple[type[BaseModel], type[BaseModel]]:
+    """Resolve the (request, response) payload models for a verb.
+
+    Raises :class:`UnsupportedServiceError` for anything outside the closed
+    set so the dispatcher fails closed (ADR §6) instead of treating an unknown
+    verb as a generic passthrough.
+    """
+    try:
+        return SERVICE_REGISTRY[service_key(service, method)]
+    except KeyError:
+        raise UnsupportedServiceError(service, method) from None
+
+
+def validate_request(env: BridgeRequest) -> BaseModel:
+    """Validate a request envelope's payload against its per-verb schema.
+
+    Returns the parsed payload model instance. Raises
+    :class:`UnsupportedServiceError` for an unknown verb and
+    :class:`pydantic.ValidationError` for a payload that does not match the
+    verb's schema.
+    """
+    request_model, _response_model = get_models(env.service, env.method)
+    return request_model.model_validate(env.payload)
+
+
+def validate_response(env: BridgeResponse, *, service: str, method: str) -> BaseModel | None:
+    """Validate a response envelope against the verb identified by *service*/*method*.
+
+    The response envelope does not carry the verb (it is correlated to its
+    request by ``request_id``), so the caller passes the verb it issued. On a
+    successful response (``ok=True``) the payload is validated against the
+    verb's response schema and the parsed model is returned. On a handled
+    failure (``ok=False``) the envelope must carry a typed ``error`` and no
+    payload model is returned.
+    """
+    _request_model, response_model = get_models(service, method)
+    if env.ok:
+        if env.payload is None:
+            raise ValueError("successful response (ok=True) must carry a payload")
+        return response_model.model_validate(env.payload)
+    if env.error is None:
+        raise ValueError("failed response (ok=False) must carry a typed error")
+    return None
+
+
+# ── Typed response helpers (used by the E4-3 server; verified by the test) ───
+
+
+def make_error_response(
+    request_id: str, code: str, message: str, *, retryable: bool = False
+) -> BridgeResponse:
+    """Build a contract-valid failure response with a typed error."""
+    return BridgeResponse(
+        request_id=request_id,
+        ok=False,
+        error=BridgeError(code=code, message=message),
+        retryable=retryable,
+    )
+
+
+def unsupported_version_response(request_id: str, version: str) -> BridgeResponse:
+    """The exact fail-closed response ADR §3 mandates for an unknown major.
+
+    ``ok: false``, ``error.code = "unsupported_version"``, ``retryable: false``.
+    """
+    return make_error_response(
+        request_id,
+        ERR_UNSUPPORTED_VERSION,
+        f"unsupported protocol version {version!r}; this peer speaks {PROTOCOL_VERSION}",
+        retryable=False,
+    )
+
+
+# ── JSON Schema export (the Node-side artifact) ─────────────────────────────
+
+# Every model that must appear in the bundled $defs. Order is fixed so the
+# generated document is deterministic (the drift test depends on stability).
+_SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
+    BridgeError,
+    CostContext,
+    BridgeRequest,
+    BridgeResponse,
+    BridgePingRequest,
+    BridgePingResponse,
+    MemoryRecallRequest,
+    MemoryRecallResult,
+    MemoryRecallResponse,
+    MemoryWriteRequest,
+    MemoryWriteResponse,
+    ManagementReviewRequest,
+    ManagementReviewResponse,
+    CostGateRequest,
+    CostGateResponse,
+    PerceptionReportRequest,
+    PerceptionReportResponse,
+    ActionResultRequest,
+    ActionResultResponse,
+)
+
+
+def export_json_schema() -> dict[str, Any]:
+    """Build the single bundled JSON Schema document the Node side validates against.
+
+    One Draft 2020-12 document with a ``$defs`` entry for every envelope and
+    per-verb payload model (generated from the Pydantic models, so it cannot
+    drift), plus a ``services`` map from ``service.method`` to the
+    request/response ``$defs`` refs so the Node client can pick the right
+    payload schema for a verb.
+    """
+    _key_map, defs_doc = models_json_schema(
+        [(model, "validation") for model in _SCHEMA_MODELS],
+        ref_template="#/$defs/{model}",
+    )
+    defs = defs_doc.get("$defs", {})
+
+    services = {
+        key: {
+            "request": f"#/$defs/{request_model.__name__}",
+            "response": f"#/$defs/{response_model.__name__}",
+        }
+        for key, (request_model, response_model) in SERVICE_REGISTRY.items()
+    }
+
+    return {
+        "$schema": JSON_SCHEMA_DIALECT,
+        "$id": SCHEMA_ID,
+        "title": "Livestream-to-AGI bridge protocol",
+        "description": (
+            "Generated from core/bridge/contract.py — do not edit by hand. "
+            "Run scripts/export_bridge_schemas.py to regenerate."
+        ),
+        "protocolVersion": PROTOCOL_VERSION,
+        "envelopes": {
+            "request": "#/$defs/BridgeRequest",
+            "response": "#/$defs/BridgeResponse",
+        },
+        "services": services,
+        "$defs": defs,
+    }
