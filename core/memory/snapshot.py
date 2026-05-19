@@ -255,27 +255,18 @@ class MemorySnapshotImporter:
             # Restore core memory
             if agent_snap.core_memory:
                 try:
-                    existing = await self._core_memory.get_core_memory(
-                        agent_id, simulation_id=sim_uuid
-                    )
-                    if existing is None:
-                        await self._core_memory.initialize_agent_memory(
-                            agent_id, agent_snap.core_memory, simulation_id=sim_uuid
-                        )
+                    if self._token_counter:
+                        token_count = self._token_counter.count_tokens(agent_snap.core_memory)
                     else:
-                        # Use upsert_core_memory via the repo
-                        if self._token_counter:
-                            token_count = self._token_counter.count_tokens(agent_snap.core_memory)
-                        else:
-                            # Fallback: rough estimate (~1.3 tokens per word)
-                            token_count = int(len(agent_snap.core_memory.split()) * 1.3)
-                        await self._memory_repo.upsert_core_memory(
-                            agent_id,
-                            agent_snap.core_memory,
-                            token_count,
-                            reason="snapshot_restore",
-                            simulation_id=sim_uuid,
-                        )
+                        # Fallback: rough estimate (~1.3 tokens per word)
+                        token_count = max(1, int(len(agent_snap.core_memory.split()) * 1.3))
+                    await self._memory_repo.upsert_core_memory(
+                        agent_id,
+                        agent_snap.core_memory,
+                        token_count,
+                        reason="snapshot_restore",
+                        simulation_id=sim_uuid,
+                    )
                     result.core_memories_restored += 1
                 except Exception as exc:
                     result.warnings.append(f"Failed to restore core memory for {agent_id}: {exc}")
