@@ -14,6 +14,8 @@ MEMORY_REGRESSION_TESTS := \
 	tests/backend/test_memory_seed_bridge_compat.py \
 	tests/backend/test_memory_snapshot.py \
 	tests/backend/test_memory_tools.py \
+	tests/backend/test_memory_backend.py \
+	tests/backend/test_memory_parity.py \
 	tests/backend/test_bridge_memory.py \
 	tests/backend/test_bridge_perception_action_memory.py
 
