@@ -24,7 +24,7 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
-from core.bridge.handlers import handle_memory_read
+from core.bridge.handlers import handle_memory_read, handle_memory_write
 from core.bridge.inbound import INBOUND_VERBS, dispatch_inbound
 from core.bridge.observability import (
     bridge_metrics_snapshot,
@@ -47,6 +47,7 @@ __all__ = [
     "bridge_router",
     "dispatch_inbound",
     "handle_memory_read",
+    "handle_memory_write",
     "log_bridge_event",
     "record_call",
     "reset_metrics",

@@ -7,7 +7,7 @@ Starlette ``TestClient`` WebSocket.
 
 Dependency-free by design: ``TestClient(app)`` is used *without* its context
 manager, so the FastAPI ``lifespan`` (which bootstraps Postgres/Redis) never
-runs. Non-memory verbs remain stubs; ``memory.recall`` fails closed with a
+runs. Non-memory verbs remain stubs; memory service verbs fail closed with a
 retryable typed error until services are present. No Docker, no network, no
 LLM, so this runs in the existing ``backend-test`` CI job and is the nearest
 local smoke path for this bridge surface.
@@ -17,8 +17,8 @@ What is covered:
 * **Fail-closed auth (ADR §4)** — no token, wrong token, malformed header,
   *and* a server with no token configured are all rejected with WS close
   ``1008`` before ``accept()``; nothing is dispatched.
-* **Authenticated happy path** — every one of the 7 closed-registry verbs
-  round-trips a committed valid fixture and gets a contract-valid stub
+* **Authenticated happy path** — every non-memory-service verb round-trips a
+  committed valid fixture and gets a contract-valid stub
   response (re-validated through ``contract.validate_response``).
 * **Fail-closed protocol errors (ADR §2/§3/§6)** — bad envelope, unknown
   major version, unknown service, and a non-JSON frame each come back as a
@@ -44,6 +44,7 @@ from core.bridge.server import (
     BRIDGE_WS_PATH,
     ERR_MEMORY_SERVICE_UNAVAILABLE,
     MEMORY_HANDLER_VERBS,
+    MEMORY_WRITE_VERBS,
     STUB_HANDLERS,
     UNKNOWN_REQUEST_ID,
     build_bridge_response,
@@ -58,7 +59,6 @@ FIXTURES = REPO_ROOT / "tests" / "backend" / "fixtures" / "bridge"
 # request_id/message come from the committed request.valid.json fixtures.
 _EXPECTED_STUB_PAYLOAD: dict[str, dict[str, Any]] = {
     "bridge.ping": {"pong": "hello"},
-    "memory.write": {"memory_id": "req-memory-write-0001"},
     "management.review": {"verdict": "allow", "reason": "stub", "sanitized_text": None},
     "cost.gate": {"allowed": True, "reason": "stub", "remaining_budget_usd": 0.0},
     "perception.report": {"accepted": True},
@@ -167,6 +167,25 @@ def test_memory_recall_without_services_returns_retryable_typed_error(
     token_env: str, client: TestClient
 ) -> None:
     request = _fixture("memory.recall", "request.valid.json")
+    with client.websocket_connect(
+        BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as ws:
+        ws.send_json(request)
+        raw_response = ws.receive_json()
+
+    response = c.BridgeResponse.model_validate(raw_response)
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_MEMORY_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
+def test_memory_write_without_services_returns_retryable_typed_error(
+    token_env: str, client: TestClient
+) -> None:
+    request = _fixture("memory.write", "request.valid.json")
     with client.websocket_connect(
         BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
     ) as ws:
@@ -307,8 +326,9 @@ def test_build_bridge_response_is_contract_valid_per_verb(verb: str) -> None:
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
-def test_build_bridge_response_returns_typed_error_for_async_memory_path() -> None:
-    request = _fixture("memory.recall", "request.valid.json")
+@pytest.mark.parametrize("verb", ["memory.recall", "memory.write"])
+def test_build_bridge_response_returns_typed_error_for_async_memory_paths(verb: str) -> None:
+    request = _fixture(verb, "request.valid.json")
     response = build_bridge_response(request)
     assert response.ok is False
     assert response.error is not None
@@ -335,5 +355,10 @@ def test_bridge_route_is_mounted_on_app() -> None:
 
 def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.recall"} == MEMORY_HANDLER_VERBS
+    assert {"memory.write"} == MEMORY_WRITE_VERBS
     assert "memory.recall" not in STUB_HANDLERS
-    assert set(STUB_HANDLERS) | set(MEMORY_HANDLER_VERBS) == set(c.SERVICE_REGISTRY)
+    assert "memory.write" not in STUB_HANDLERS
+    assert (
+        set(STUB_HANDLERS) | set(MEMORY_HANDLER_VERBS) | set(MEMORY_WRITE_VERBS)
+        == set(c.SERVICE_REGISTRY)
+    )

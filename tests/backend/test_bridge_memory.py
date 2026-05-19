@@ -1,4 +1,4 @@
-"""Tests for the bridge memory read path (issue #549, E5-1)."""
+"""Tests for the bridge memory read/write paths (issues #549/#550, E5-1/E5-2)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ from core.bridge.server import (
     ERR_MEMORY_SERVICE_UNAVAILABLE,
     bridge_router,
 )
+from core.memory.compaction import CompactionResult
+from core.models import RecallMemory, Transcript
 
 TOKEN = "test-bridge-memory-secret"  # noqa: S105 - test-only shared secret
 SIMULATION_ID = "11111111-1111-1111-1111-111111111111"
@@ -54,10 +56,60 @@ class FakeRecallMemory:
         return self.value
 
 
+class FakeCompactor:
+    def __init__(self, embedding: list[float] | None = None) -> None:
+        self.embedding = embedding or [0.125, 0.25, 0.5]
+        self.calls: list[dict[str, Any]] = []
+        self.transcripts: list[Transcript] = []
+        self.recall_memories: list[RecallMemory] = []
+
+    async def compact_interaction(
+        self,
+        agent_id: str,
+        interaction: str,
+        event_type: str,
+        participants: list[str] | None = None,
+        conversation_id: object | None = None,
+    ) -> CompactionResult | None:
+        self.calls.append(
+            {
+                "agent_id": agent_id,
+                "interaction": interaction,
+                "event_type": event_type,
+                "participants": participants,
+                "conversation_id": conversation_id,
+            }
+        )
+        if not interaction or not interaction.strip():
+            return None
+
+        stored_participants = participants or [agent_id]
+        transcript = Transcript(
+            id=len(self.transcripts) + 1,
+            event_type=event_type,
+            participants=stored_participants,
+            content=interaction,
+            token_count=len(interaction.split()),
+        )
+        recall_memory = RecallMemory(
+            id=len(self.recall_memories) + 1,
+            agent_id=agent_id,
+            summary=f"{agent_id}:{event_type}:{interaction}",
+            embedding=list(self.embedding),
+            event_type=event_type,
+            participants=stored_participants,
+            transcript_id=transcript.id,
+        )
+        self.transcripts.append(transcript)
+        self.recall_memories.append(recall_memory)
+        return CompactionResult(transcript=transcript, recall_memory=recall_memory)
+
+
 @dataclass
 class FakeServices:
     core_memory: FakeCoreMemory | None
     recall_memory: FakeRecallMemory | None
+    compactor: FakeCompactor | None = None
 
 
 @pytest.fixture
@@ -83,6 +135,25 @@ def _memory_request(payload: dict[str, Any], simulation_id: str = SIMULATION_ID)
         simulation_id=simulation_id,
         service="memory",
         method="recall",
+        payload=payload,
+        deadline_ms=5000,
+        cost_context=c.CostContext(
+            agent_tier="conversation",
+            budget_bucket="bridge-memory-test",
+            estimated_cost_usd=0.0,
+        ),
+    ).model_dump()
+
+
+def _memory_write_request(payload: dict[str, Any]) -> dict[str, Any]:
+    return c.BridgeRequest(
+        version=c.PROTOCOL_VERSION,
+        request_id="req-memory-write-test",
+        agent_id="vera",
+        run_id="run-memory-write-test",
+        simulation_id=SIMULATION_ID,
+        service="memory",
+        method="write",
         payload=payload,
         deadline_ms=5000,
         cost_context=c.CostContext(
@@ -183,3 +254,117 @@ def test_bridge_memory_read_malformed_simulation_id_uses_unscoped_manager_call(
 
     assert response.ok is True
     assert services.core_memory.calls == [("vera", None)]
+
+
+def test_bridge_memory_write_matches_direct_compactor_call(token_env: str) -> None:
+    payload = {
+        "content": "Rex finished the spawn bridge and Vera logged the handoff.",
+        "kind": "event",
+        "metadata": {
+            "participants": ["vera", "rex"],
+            "conversation_id": "22222222-2222-2222-2222-222222222222",
+        },
+    }
+    direct_compactor = FakeCompactor()
+    expected = asyncio.run(
+        direct_compactor.compact_interaction(
+            agent_id="vera",
+            interaction=payload["content"],
+            event_type=payload["kind"],
+            participants=payload["metadata"]["participants"],
+            conversation_id=payload["metadata"]["conversation_id"],
+        )
+    )
+    assert expected is not None
+
+    bridge_compactor = FakeCompactor()
+    services = FakeServices(core_memory=None, recall_memory=None, compactor=bridge_compactor)
+    request = _memory_write_request(payload)
+    response = _send_memory_request(_client(services), request)
+
+    assert response.ok is True
+    parsed = c.validate_response(response, service="memory", method="write")
+    assert isinstance(parsed, c.MemoryWriteResponse)
+    assert parsed.memory_id == str(expected.recall_memory.id)
+    assert bridge_compactor.calls == direct_compactor.calls
+    assert [t.model_dump() for t in bridge_compactor.transcripts] == [
+        t.model_dump() for t in direct_compactor.transcripts
+    ]
+    assert [m.model_dump() for m in bridge_compactor.recall_memories] == [
+        m.model_dump() for m in direct_compactor.recall_memories
+    ]
+
+
+@pytest.mark.parametrize("missing", ["services", "compactor"])
+def test_bridge_memory_write_without_services_or_compactor_is_contract_valid_error(
+    token_env: str,
+    missing: str,
+) -> None:
+    services = None
+    if missing == "compactor":
+        services = FakeServices(
+            core_memory=FakeCoreMemory("## Core memory"),
+            recall_memory=FakeRecallMemory("## Relevant memories"),
+            compactor=None,
+        )
+    request = _memory_write_request({"content": "Remember this event", "kind": "event"})
+    response = _send_memory_request(_client(services), request)
+
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_MEMORY_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service="memory", method="write")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"kind": "event"},
+        {"content": "", "kind": "event"},
+        {"content": "Bridge event", "kind": "banter"},
+    ],
+)
+def test_bridge_memory_write_payload_validation_rejects_missing_empty_or_bad_kind(
+    token_env: str,
+    payload: dict[str, Any],
+) -> None:
+    compactor = FakeCompactor()
+    services = FakeServices(core_memory=None, recall_memory=None, compactor=compactor)
+    response = _send_memory_request(_client(services), _memory_write_request(payload))
+
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == c.ERR_INVALID_PAYLOAD
+    assert compactor.calls == []
+    c.validate_response(response, service="memory", method="write")
+
+
+def test_bridge_memory_write_whitespace_content_returns_contract_valid_error(
+    token_env: str,
+) -> None:
+    compactor = FakeCompactor()
+    services = FakeServices(core_memory=None, recall_memory=None, compactor=compactor)
+    response = _send_memory_request(
+        _client(services),
+        _memory_write_request({"content": "   ", "kind": "event"}),
+    )
+
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == c.ERR_INVALID_PAYLOAD
+    assert compactor.calls == [
+        {
+            "agent_id": "vera",
+            "interaction": "   ",
+            "event_type": "event",
+            "participants": ["vera"],
+            "conversation_id": None,
+        }
+    ]
+    assert compactor.transcripts == []
+    assert compactor.recall_memories == []
+    c.validate_response(response, service="memory", method="write")
