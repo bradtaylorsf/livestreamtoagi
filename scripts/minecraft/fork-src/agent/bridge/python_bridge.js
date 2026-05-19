@@ -58,9 +58,10 @@
 // ADR §4 mandates). Fall back to the Node ≥20 global WHATWG `WebSocket` when
 // `ws` is absent (e.g. the CI/contract-test environment with no Mindcraft
 // install); that implementation cannot set request headers, so it uses the
-// server's documented `?token=` query-param fallback
-// (core/bridge/server.py:_extract_bearer_token) — still the SAME shared secret,
-// still fail-closed, no anonymous path.
+// server's documented `?token=` query-param fallback. The server accepts that
+// fallback only when `MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN=1` is explicitly
+// enabled because bearer tokens in URLs are easier to leak. It is still the
+// SAME shared secret, still fail-closed, no anonymous path.
 
 import { randomUUID } from 'node:crypto';
 

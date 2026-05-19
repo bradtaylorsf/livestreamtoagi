@@ -84,7 +84,9 @@ The client prefers the `ws` package (a transitive dependency already pinned in
 `Authorization: Bearer` handshake header). When `ws` is absent (e.g. CI, no
 Mindcraft install) it falls back to the Node ≥20 global `WebSocket`, which
 cannot set request headers, so it uses the server's documented `?token=`
-query-param fallback — the **same shared secret**, still fail-closed.
+query-param fallback. The server accepts that fallback only when
+`MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN=1` is explicitly enabled; the default path
+is the Authorization header because bearer tokens in URLs are easier to leak.
 
 ## Reconnect, backpressure & safe-idle (E4-5)
 
@@ -166,6 +168,7 @@ are always on (stderr) and the counters are in-process.
 | --- | --- | --- | --- |
 | `MINECRAFT_BRIDGE_TOKEN` | **yes** (real run) | — | Shared bearer secret; must match the FastAPI bridge server's. The bridge has no unauthenticated path — unset ⇒ fail closed before connecting. Never committed. |
 | `MINECRAFT_BRIDGE_URL` | no | `ws://127.0.0.1:8010/api/minecraft/bridge/ws` | Bridge WebSocket URL the client dials. |
+| `MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN` | no | off | Server-side opt-in for the constrained-client `?token=` fallback. Leave off for real runs; use only for local harnesses that cannot set WS headers. |
 | `MINECRAFT_BRIDGE_MAX_INFLIGHT` | no | `8` | Max concurrent round-trips (E4-5). Past it, calls fail-closed with `bridge_overloaded` — bounded, never an unbounded queue. |
 | `MINECRAFT_BRIDGE_CIRCUIT_THRESHOLD` | no | `3` | Consecutive connect-class failures (`bridge_connect_failed`/`bridge_timeout`) before the circuit opens and calls fail-fast `bridge_unreachable` (E4-5). |
 | `MINECRAFT_BRIDGE_RECONNECT_BASE_MS` | no | `500` | First reconnect-probe backoff while the circuit is open; doubled + jittered per failed probe (E4-5). |

@@ -42,6 +42,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.integration.bridge_harness import copy_bridge_client_with_header_ws
+
 
 def _strip_js_comments(src: str) -> str:
     """Drop `//` line and `/* */` block comments so a token assertion checks
@@ -214,12 +216,14 @@ def test_env_example_documents_bridge_vars() -> None:
     env = ENV_EXAMPLE.read_text()
     assert "MINECRAFT_BRIDGE_TOKEN" in env
     assert "MINECRAFT_BRIDGE_URL" in env
+    assert "MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN" in env
 
 
 def test_client_doc_records_envvars_and_the_spike() -> None:
     doc = CLIENT_DOC.read_text()
     assert "MINECRAFT_BRIDGE_TOKEN" in doc
     assert "MINECRAFT_BRIDGE_URL" in doc
+    assert "MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN" in doc
     assert "!bridgePing" in doc
     assert "connect-bridge-bot.sh" in doc
 
@@ -332,16 +336,18 @@ def _run_client(
     token: str | None,
     deadline_ms: int = 5000,
     tmp_cwd: Path,
+    bridge_module: Path = BRIDGE_CLIENT,
 ) -> dict:
     """Drive the committed python_bridge.js from a Node subprocess.
 
-    cwd is an empty tmp dir so the bare `import('ws')` cannot resolve — the
-    client deterministically uses the Node global WebSocket + ?token= fallback
-    (the path CI exercises, no Mindcraft node_modules present).
+    By default this uses the committed module in-place. Tests that need the
+    primary Authorization-header path pass a temp copy beside a tiny `ws` shim;
+    tests that need the constrained-client fallback pass the in-place module,
+    where no Mindcraft node_modules exist and the global WebSocket path is used.
     """
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "BRIDGE_MODULE": str(BRIDGE_CLIENT),
+        "BRIDGE_MODULE": str(bridge_module),
         "MINECRAFT_BRIDGE_URL": url,
         "BR_SERVICE": service,
         "BR_METHOD": method,
@@ -368,7 +374,9 @@ def _run_client(
 
 
 @requires_node
-def test_happy_path_round_trips_a_pong(harness: Path, tmp_path: Path) -> None:
+def test_happy_path_round_trips_a_pong_over_bearer_header(
+    harness: Path, tmp_path: Path
+) -> None:
     port = _free_port()
     from core.bridge.server import BRIDGE_TOKEN_ENV
 
@@ -376,6 +384,7 @@ def test_happy_path_round_trips_a_pong(harness: Path, tmp_path: Path) -> None:
     try:
         with _ThreadedUvicorn(port):
             url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
+            bridge_module = copy_bridge_client_with_header_ws(tmp_path)
             result = _run_client(
                 harness,
                 url=url,
@@ -384,6 +393,7 @@ def test_happy_path_round_trips_a_pong(harness: Path, tmp_path: Path) -> None:
                 message="hello-bridge",
                 token=TOKEN,
                 tmp_cwd=tmp_path,
+                bridge_module=bridge_module,
             )
     finally:
         os.environ.pop(BRIDGE_TOKEN_ENV, None)
@@ -397,11 +407,15 @@ def test_happy_path_round_trips_a_pong(harness: Path, tmp_path: Path) -> None:
 
 
 @requires_node
-def test_wrong_token_is_a_structured_error_not_a_crash(harness: Path, tmp_path: Path) -> None:
+def test_query_param_fallback_round_trips_when_explicitly_enabled(
+    harness: Path, tmp_path: Path
+) -> None:
+    """The constrained-client ?token= path works only when the server opts in."""
     port = _free_port()
-    from core.bridge.server import BRIDGE_TOKEN_ENV
+    from core.bridge.server import BRIDGE_QUERY_TOKEN_ENV, BRIDGE_TOKEN_ENV
 
     os.environ[BRIDGE_TOKEN_ENV] = TOKEN
+    os.environ[BRIDGE_QUERY_TOKEN_ENV] = "1"
     try:
         with _ThreadedUvicorn(port):
             url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
@@ -410,9 +424,36 @@ def test_wrong_token_is_a_structured_error_not_a_crash(harness: Path, tmp_path: 
                 url=url,
                 service="bridge",
                 method="ping",
+                message="fallback-bridge",
+                token=TOKEN,
+                tmp_cwd=tmp_path,
+            )
+    finally:
+        os.environ.pop(BRIDGE_TOKEN_ENV, None)
+        os.environ.pop(BRIDGE_QUERY_TOKEN_ENV, None)
+    assert result["status"] == "ok", result
+    assert result["response"]["payload"]["pong"] == "fallback-bridge"
+
+
+@requires_node
+def test_wrong_token_is_a_structured_error_not_a_crash(harness: Path, tmp_path: Path) -> None:
+    port = _free_port()
+    from core.bridge.server import BRIDGE_TOKEN_ENV
+
+    os.environ[BRIDGE_TOKEN_ENV] = TOKEN
+    try:
+        with _ThreadedUvicorn(port):
+            url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
+            bridge_module = copy_bridge_client_with_header_ws(tmp_path)
+            result = _run_client(
+                harness,
+                url=url,
+                service="bridge",
+                method="ping",
                 message="nope",
                 token="the-wrong-secret",
                 tmp_cwd=tmp_path,
+                bridge_module=bridge_module,
             )
     finally:
         os.environ.pop(BRIDGE_TOKEN_ENV, None)
@@ -431,6 +472,7 @@ def test_server_ok_false_passes_through_the_typed_error(harness: Path, tmp_path:
     try:
         with _ThreadedUvicorn(port):
             url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
+            bridge_module = copy_bridge_client_with_header_ws(tmp_path)
             result = _run_client(
                 harness,
                 url=url,
@@ -439,6 +481,7 @@ def test_server_ok_false_passes_through_the_typed_error(harness: Path, tmp_path:
                 message="x",
                 token=TOKEN,
                 tmp_cwd=tmp_path,
+                bridge_module=bridge_module,
             )
     finally:
         os.environ.pop(BRIDGE_TOKEN_ENV, None)
@@ -469,6 +512,7 @@ def test_deadline_timeout_is_structured(harness: Path, tmp_path: Path) -> None:
     t = threading.Thread(target=_accept_and_hold, daemon=True)
     t.start()
     try:
+        bridge_module = copy_bridge_client_with_header_ws(tmp_path)
         result = _run_client(
             harness,
             url=f"ws://127.0.0.1:{hung_port}/api/minecraft/bridge/ws",
@@ -478,6 +522,7 @@ def test_deadline_timeout_is_structured(harness: Path, tmp_path: Path) -> None:
             token=TOKEN,
             deadline_ms=800,
             tmp_cwd=tmp_path,
+            bridge_module=bridge_module,
         )
     finally:
         for c in held:
@@ -665,10 +710,11 @@ def test_server_kill_safe_idles_then_auto_recovers(tmp_path: Path) -> None:
     url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
     harness = tmp_path / "loop_harness.mjs"
     harness.write_text(_LOOP_HARNESS)
+    bridge_module = copy_bridge_client_with_header_ws(tmp_path)
 
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "BRIDGE_MODULE": str(BRIDGE_CLIENT),
+        "BRIDGE_MODULE": str(bridge_module),
         "MINECRAFT_BRIDGE_URL": url,
         "MINECRAFT_BRIDGE_TOKEN": TOKEN,
         # Small values so the policy is fast to drive (defaults are big).
@@ -707,7 +753,7 @@ def test_server_kill_safe_idles_then_auto_recovers(tmp_path: Path) -> None:
             text=True,
             bufsize=1,
             env=env,
-            cwd=tmp_path,  # empty dir → global WebSocket + ?token= (CI path)
+            cwd=tmp_path,
         )
         threading.Thread(target=_reader, args=(proc.stdout,), daemon=True).start()
 
@@ -853,12 +899,13 @@ def test_bounded_in_flight_sheds_excess_as_retryable_backpressure(tmp_path: Path
     url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
     harness = tmp_path / "backpressure_harness.mjs"
     harness.write_text(_BACKPRESSURE_HARNESS)
+    bridge_module = copy_bridge_client_with_header_ws(tmp_path)
 
     max_inflight = 2
     fanout = 6
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "BRIDGE_MODULE": str(BRIDGE_CLIENT),
+        "BRIDGE_MODULE": str(bridge_module),
         "MINECRAFT_BRIDGE_URL": url,
         "MINECRAFT_BRIDGE_TOKEN": TOKEN,
         "MINECRAFT_BRIDGE_MAX_INFLIGHT": str(max_inflight),
@@ -873,7 +920,7 @@ def test_bounded_in_flight_sheds_excess_as_retryable_backpressure(tmp_path: Path
                 capture_output=True,
                 text=True,
                 env=env,
-                cwd=tmp_path,  # empty dir → global WebSocket + ?token= (CI path)
+                cwd=tmp_path,
                 timeout=30,
             )
     finally:

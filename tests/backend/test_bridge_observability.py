@@ -52,6 +52,7 @@ from core.bridge import inbound, observability
 from core.bridge.server import BRIDGE_TOKEN_ENV, BRIDGE_WS_PATH
 from core.event_bus import EventType, event_bus
 from core.main import app
+from tests.integration.bridge_harness import copy_bridge_client_with_header_ws
 
 TOKEN = "test-bridge-obs-secret"  # noqa: S105 — test-only shared secret
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -583,13 +584,20 @@ try {
 
 
 def _run_node(
-    harness: Path, *, url: str, trace_id: str, service: str, method: str, tmp_cwd: Path
+    harness: Path,
+    *,
+    url: str,
+    trace_id: str,
+    service: str,
+    method: str,
+    tmp_cwd: Path,
+    bridge_module: Path,
 ) -> tuple[dict, str]:
     """Returns (parsed stdout JSON, raw stderr) — stderr carries the client's
     structured `bridge_event` logs."""
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "BRIDGE_MODULE": str(BRIDGE_CLIENT),
+        "BRIDGE_MODULE": str(bridge_module),
         "MINECRAFT_BRIDGE_URL": url,
         "MINECRAFT_BRIDGE_TOKEN": TOKEN,
         "BR_SERVICE": service,
@@ -603,7 +611,7 @@ def _run_node(
         capture_output=True,
         text=True,
         env=env,
-        cwd=tmp_cwd,  # empty dir → global WebSocket + ?token= (the CI path)
+        cwd=tmp_cwd,
         timeout=30,
     )
     assert proc.returncode == 0, (
@@ -623,6 +631,7 @@ def test_one_trace_id_correlates_node_and_python_logs(tmp_path: Path) -> None:
     url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
     harness = tmp_path / "obs_harness.mjs"
     harness.write_text(_HARNESS)
+    bridge_module = copy_bridge_client_with_header_ws(tmp_path)
 
     os.environ[BRIDGE_TOKEN_ENV] = TOKEN
     try:
@@ -637,6 +646,7 @@ def test_one_trace_id_correlates_node_and_python_logs(tmp_path: Path) -> None:
                     service="bridge",
                     method="ping",
                     tmp_cwd=tmp_path,
+                    bridge_module=bridge_module,
                 )
                 # Give the server thread a beat to flush its log record.
                 deadline = time.time() + 5
@@ -686,6 +696,7 @@ def test_trace_id_correlates_an_error_path_too(tmp_path: Path) -> None:
     url = f"ws://127.0.0.1:{port}/api/minecraft/bridge/ws"
     harness = tmp_path / "obs_harness.mjs"
     harness.write_text(_HARNESS)
+    bridge_module = copy_bridge_client_with_header_ws(tmp_path)
 
     os.environ[BRIDGE_TOKEN_ENV] = TOKEN
     observability.reset_metrics()
@@ -699,6 +710,7 @@ def test_trace_id_correlates_an_error_path_too(tmp_path: Path) -> None:
                     service="filesystem",  # not in the ADR §6 closed registry
                     method="delete",
                     tmp_cwd=tmp_path,
+                    bridge_module=bridge_module,
                 )
                 deadline = time.time() + 5
                 while time.time() < deadline and not any(

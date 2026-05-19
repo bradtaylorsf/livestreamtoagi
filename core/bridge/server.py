@@ -24,7 +24,10 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
   code ``1008`` *before* ``accept()``. No ``service`` is ever dispatched on an
   unauthenticated connection: there is no anonymous or "auth optional in dev"
   path to spend or in-world actions. This mirrors the constant-time check in
-  ``core/admin/kill_switch_routes.py``.
+  ``core/admin/kill_switch_routes.py``. The primary credential transport is
+  ``Authorization: Bearer``; ``?token=`` is accepted only when
+  ``MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN`` is explicitly enabled for constrained
+  local clients.
 * ADR §2/§3/§6 — every inbound frame is parsed as a :class:`BridgeRequest`,
   version-negotiated fail-closed on an unknown major, and validated against the
   closed per-verb registry. Every failure after ``accept()`` goes back as a
@@ -75,6 +78,11 @@ BRIDGE_WS_PATH = "/api/minecraft/bridge/ws"
 
 # ADR §4: the env var the Node client and this server share the secret through.
 BRIDGE_TOKEN_ENV = "MINECRAFT_BRIDGE_TOKEN"
+
+# Query-string bearer tokens are easier for constrained WS clients but they are
+# also easier to leak through logs/proxies/history. Keep the fallback off unless
+# a local test or explicitly constrained client enables it.
+BRIDGE_QUERY_TOKEN_ENV = "MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN"
 
 # RFC 6455 policy-violation close code; used for every fail-closed handshake
 # rejection so the Node side sees one unambiguous "auth refused" signal.
@@ -219,15 +227,23 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
 def _extract_bearer_token(websocket: WebSocket) -> str | None:
     """Read the presented bearer token from the WS handshake (ADR §4).
 
-    Prefer the ``Authorization: Bearer <token>`` header; fall back to a
-    ``token`` query param for clients that cannot set WebSocket request headers.
-    Returns ``None`` when no usable token is present.
+    Prefer the ``Authorization: Bearer <token>`` header. A ``token`` query
+    param is accepted only when ``MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN`` is
+    explicitly enabled for constrained local clients that cannot set WebSocket
+    request headers. Returns ``None`` when no usable token is present.
     """
     auth = websocket.headers.get("authorization")
     if auth:
         scheme, _, param = auth.partition(" ")
         if scheme.lower() == "bearer" and param:
             return param
+    if os.environ.get(BRIDGE_QUERY_TOKEN_ENV, "").lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return None
     token = websocket.query_params.get("token")
     return token or None
 

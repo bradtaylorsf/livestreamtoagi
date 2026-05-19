@@ -38,6 +38,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from core.bridge import contract as c
 from core.bridge.server import (
+    BRIDGE_QUERY_TOKEN_ENV,
     BRIDGE_TOKEN_ENV,
     BRIDGE_WS_PATH,
     STUB_HANDLERS,
@@ -158,8 +159,19 @@ def test_valid_signed_message_echoes_contract_valid_stub(
     assert parsed is not None
 
 
-def test_token_accepted_via_query_param(token_env: str, client: TestClient) -> None:
-    """Clients that cannot set WS headers may pass ?token= (ADR §4 fallback)."""
+def test_query_param_token_rejected_by_default(token_env: str, client: TestClient) -> None:
+    """Bearer-in-URL auth is disabled by default to avoid token leakage."""
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"{BRIDGE_WS_PATH}?token={TOKEN}"):
+            pass
+    assert exc.value.code == 1008
+
+
+def test_token_accepted_via_query_param_when_explicitly_enabled(
+    token_env: str, monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    """Constrained local clients may opt into ?token=, still using the same secret."""
+    monkeypatch.setenv(BRIDGE_QUERY_TOKEN_ENV, "1")
     request = _fixture("bridge.ping", "request.valid.json")
     with client.websocket_connect(f"{BRIDGE_WS_PATH}?token={TOKEN}") as ws:
         ws.send_json(request)
@@ -249,16 +261,15 @@ def test_non_json_frame_returns_typed_error(token_env: str, client: TestClient) 
         ws.send_text("this is not json {")
         response = ws.receive_json()
 
-    assert response["ok"] is False
-    assert response["error"]["code"] == c.ERR_INVALID_PAYLOAD
-    assert response["request_id"] == UNKNOWN_REQUEST_ID
-    # Socket still open: a parse failure is a typed response, not a disconnect.
-    ws_request = _fixture("bridge.ping", "request.valid.json")
-    with client.websocket_connect(
-        BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
-    ) as ws2:
-        ws2.send_json(ws_request)
-        assert ws2.receive_json()["ok"] is True
+        assert response["ok"] is False
+        assert response["error"]["code"] == c.ERR_INVALID_PAYLOAD
+        assert response["request_id"] == UNKNOWN_REQUEST_ID
+
+        # Socket still open: a parse failure is a typed response, not a
+        # disconnect. Reuse the same socket to prove the loop continues.
+        ws_request = _fixture("bridge.ping", "request.valid.json")
+        ws.send_json(ws_request)
+        assert ws.receive_json()["ok"] is True
 
 
 # ── Pure dispatch policy (no socket) ────────────────────────────────────────

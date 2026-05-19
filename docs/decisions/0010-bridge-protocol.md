@@ -118,6 +118,12 @@ shape with a `service`/`method` the bot understands; the bot replies with the
   from the `MINECRAFT_BRIDGE_TOKEN` environment variable on the WebSocket
   handshake (matching [0005-skill-extension-point.md](0005-skill-extension-point.md)).
   The Python server compares it with a constant-time check.
+- **Authorization header is the default credential transport.** The primary
+  path is `Authorization: Bearer <token>`. The `?token=` fallback exists only
+  for constrained local clients that cannot set WebSocket headers, and the
+  server accepts it only when `MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN=1` is
+  explicitly enabled. Leave it off for real runs because tokens in URLs can
+  leak through logs/history.
 - **Local-only / private-network binding.** The bridge endpoint is bound to
   localhost or a private network only, never the public internet. This
   cross-references [0002-auth-mode.md](0002-auth-mode.md): in Minecraft offline

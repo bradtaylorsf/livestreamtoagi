@@ -25,6 +25,8 @@
     "verify:bridge-server": ".venv/bin/pytest tests/backend/test_bridge_server.py -v",
     "verify:bridge-node-client": ".venv/bin/pytest tests/backend/test_bridge_node_client.py -v",
     "verify:bridge-observability": ".venv/bin/pytest tests/backend/test_bridge_observability.py -v",
+    "verify:bridge-integration-harness": ".venv/bin/pytest tests/integration/test_bridge_harness.py -v",
+    "verify:bridge-security": ".venv/bin/pytest tests/backend/test_bridge_security.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",

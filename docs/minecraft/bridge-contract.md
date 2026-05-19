@@ -89,8 +89,11 @@ alongside `/ws`):
 - **Fail-closed auth (ADR §4).** A shared-secret bearer token is read from the
   `MINECRAFT_BRIDGE_TOKEN` env var and compared with `hmac.compare_digest`
   (constant-time, mirroring `core/admin/kill_switch_routes.py`). The presented
-  token comes from the handshake `Authorization: Bearer <token>` header, with a
-  `?token=` query-param fallback for clients that cannot set WS headers. An
+  token normally comes from the handshake `Authorization: Bearer <token>`
+  header. A `?token=` query-param fallback exists only for constrained local
+  clients that cannot set WS headers, and the server accepts it only when
+  `MINECRAFT_BRIDGE_ALLOW_QUERY_TOKEN=1` is explicitly enabled. It is disabled
+  by default because bearer tokens in URLs can leak through logs/history. An
   unset/empty server token, or a missing/malformed/wrong presented token,
   **closes the socket with code 1008 before `accept()`** — no `service` is ever
   dispatched on an unauthenticated connection. There is no anonymous or
