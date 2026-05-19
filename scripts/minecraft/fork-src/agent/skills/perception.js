@@ -256,11 +256,14 @@ function equipmentItem(bot, slotName) {
         off_hand: 45,
     };
     if (slotName === 'hand') {
-        return normalizeBlockType(
-            (bot && bot.heldItem) ||
-                slots[nonNegativeInteger(bot && bot.quickBarSlot) ?? -1] ||
-                null,
-        );
+        // mineflayer indexes the hotbar at window slots [hotbarStart, +8]
+        // (36..44 for the player inventory); `quickBarSlot` is the 0..8
+        // selection within it. `bot.heldItem` is the reliable primary; the
+        // slots[] lookup is a defensive fallback only.
+        const quickBar = nonNegativeInteger(bot && bot.quickBarSlot);
+        const hotbarStart = nonNegativeInteger(bot && bot.inventory && bot.inventory.hotbarStart);
+        const handSlot = quickBar === null ? -1 : (hotbarStart ?? 36) + quickBar;
+        return normalizeBlockType((bot && bot.heldItem) || slots[handSlot] || null);
     }
     return normalizeBlockType(slots[slotIndexes[slotName]]);
 }

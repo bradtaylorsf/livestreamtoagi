@@ -319,6 +319,39 @@ process.stdout.write(JSON.stringify({{ observation }}) + '\\n');
     assert build_perception_snapshot([observation]) is not None
 
 
+@requires_node
+def test_node_hand_equipment_falls_back_to_hotbar_slot(tmp_path: Path) -> None:
+    """When ``bot.heldItem`` is absent, the held-hand item must resolve via
+    ``hotbarStart + quickBarSlot`` — not ``slots[quickBarSlot]`` (which would
+    read the crafting-output cell and misreport equipment)."""
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(PERCEPTION_HELPERS))}).href);
+// Window slot 0 is the crafting-output cell; the selected hotbar item lives at
+// hotbarStart (36) + quickBarSlot (2) = 38. A correct fallback ignores slot 0.
+const slots = new Array(46).fill(null);
+slots[0] = {{ name: 'minecraft:Crafting Junk', count: 1 }};
+slots[38] = {{ name: 'minecraft:Iron Axe', count: 1 }};
+const bot = {{
+    username: 'HotbarFallbackBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }}, yaw: 0, pitch: 0, onGround: true }},
+    game: {{ dimension: 'minecraft:overworld' }},
+    quickBarSlot: 2,
+    inventory: {{
+        hotbarStart: 36,
+        slots,
+        items() {{ return this.slots.map((item, slot) => item ? {{ ...item, slot }} : null).filter(Boolean); }},
+    }},
+}};
+const inventory = mod.inventorySnapshot(bot, null, true);
+process.stdout.write(JSON.stringify({{ hand: inventory.equipment.hand }}) + '\\n');
+"""
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["hand"] == "iron_axe"
+
+
 def test_committed_perception_files_match_contract() -> None:
     assert PERCEPTION_HELPERS.is_file()
     assert OBSERVE_ACTION.is_file()
