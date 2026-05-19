@@ -11,8 +11,9 @@ attributed event — and deliberately nothing downstream of it:
   bridge; this re-parses the (already envelope/registry-validated) payload into
   its typed contract model so the emitted event is schema-validated, then emits
   it on the event bus with full attribution.
-* **Out of scope:** memory writes (E5) and eval consumption (E10). Those attach
-  later as ordinary ``event_bus.on(...)`` subscribers — no change here.
+* **Out of scope:** memory writes (E5) and eval consumption (E10). Downstream
+  consumers attach as ordinary ``event_bus.on(...)`` subscribers — no change
+  here.
 
 E4-7 (#546) adds the end-to-end ``trace_id`` to the emitted event's attribution
 and logs the emit with it, so a report is followable from the Node send
