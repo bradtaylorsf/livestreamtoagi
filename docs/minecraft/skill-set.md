@@ -28,9 +28,9 @@ safe. This table is the closed allowed surface for the E6 action layer.
 | `place` | Action in `src/agent/commands/actions.js`; safe helper in `src/agent/library/skills.js` for build plans. | `{ action_id: string, block_type: string, position: { x: number, y: number, z: number }, face?: "top" \| "bottom" \| "north" \| "south" \| "east" \| "west", source_slot?: number }` | Verified only when a post-action world read confirms `block_type` is present at `position`. `action.result` must not mark success just because the place command was issued. Inventory delta may be included as secondary evidence. | E6-3 / [#558](https://github.com/bradtaylorsf/livestreamtoagi/issues/558) |
 | `break` | Action in `src/agent/commands/actions.js`; safe helper in `src/agent/library/skills.js` for build plans. | `{ action_id: string, position: { x: number, y: number, z: number }, expected_block_type?: string, tool_slot?: number }` | Verified only when a post-action world read confirms the target block is absent or replaced by the expected residual state. `action.result` distinguishes success from blocked, protected, invalid, timed-out, or tool-missing outcomes. | E6-3 / [#558](https://github.com/bradtaylorsf/livestreamtoagi/issues/558) |
 | `craft` | Action in `src/agent/commands/actions.js`; safe helper in `src/agent/library/skills.js` only for explicit recipes/items. | `{ action_id: string, item_id: string, count: number, recipe_id?: string, station?: "inventory" \| "crafting_table" \| "furnace" }` | Bot reports `action.result`; Python verifies with an inventory snapshot showing the requested output count increased and required inputs decreased or remained consistent with recipe rules. | Later embodiment/backlog issue after E6-3, unless pulled into E6-4 for build-plan dependencies. |
-| `inventory` | Query in `src/agent/commands/queries.js`; read-only helper in `src/agent/library/skills.js` is allowed. | `{ filter?: { item_id?: string, tag?: string, slot?: number }, include_equipment?: boolean }` | Verification is the returned schema-valid inventory snapshot, optionally filtered, including counts, slots, and equipment. This is read-only; it reports `perception.report`/query data rather than changing the world. | E6-6 / [#561](https://github.com/bradtaylorsf/livestreamtoagi/issues/561) or the first implementation issue that needs inventory deltas. |
+| `inventory` | Read-only helper used by `!observe`; a separate query command may be added later if needed. | `{ filter?: { item_id?: string, tag?: string, slot?: number }, include_equipment?: boolean }` | Verification is the returned schema-valid inventory snapshot, optionally filtered, including counts, slots, and equipment. This is read-only; it reports `perception.report`/query data rather than changing the world. | E6-6 / [#561](https://github.com/bradtaylorsf/livestreamtoagi/issues/561) |
 | `build-from-plan` | Code-generation skill in `src/agent/library/skills.js` backed by the safe `place`, `break`, `navigate`, `craft`, and `inventory` primitives; no arbitrary bridge verbs. | `{ action_id: string, origin: { x: number, y: number, z: number }, plan: { blocks: Array<{ dx: number, dy: number, dz: number, block_type: string }>, palette?: Record<string, string>, clear?: Array<{ dx: number, dy: number, dz: number }> }, max_steps?: number, timeout_ms?: number }` | Verified by per-step `action.result` records plus an actual-vs-intended completion metric from a final perception/world read: intended blocks present, unexpected blocks, missing blocks, and abandoned steps. | E6-4 / [#559](https://github.com/bradtaylorsf/livestreamtoagi/issues/559) |
-| `observe` / `perception` | Query in `src/agent/commands/queries.js`; may also be emitted as `perception.report` from the Node side. | `{ radius_blocks?: number, scope?: "pose" \| "nearby_blocks" \| "entities" \| "inventory" \| "all", include_air?: boolean }` | Verification is a schema-valid perception snapshot containing the requested pose, nearby blocks, entities, inventory, and relevant metadata. This is the source used to verify action results. | E6-6 / [#561](https://github.com/bradtaylorsf/livestreamtoagi/issues/561) |
+| `observe` / `perception` | Read-only action `!observe` in `src/agent/commands/actions.js`; emits `perception.report` from the Node side. | `{ radius_blocks?: number, scope?: "pose" \| "nearby_blocks" \| "entities" \| "inventory" \| "all", include_air?: boolean }` | Verification is a schema-valid perception snapshot containing the requested pose, nearby blocks, entities, inventory, and relevant metadata. This is the source used to verify action results. | E6-6 / [#561](https://github.com/bradtaylorsf/livestreamtoagi/issues/561) |
 
 E6-4 implements `build-from-plan` as a staged action command,
 `!buildFromPlan`, rather than editing `src/agent/library/skills.js`. That keeps
@@ -43,6 +43,12 @@ Code-writing is retained as a separate tool through the existing bridge/sandbox
 path, tracked by E6-5 ([#560](https://github.com/bradtaylorsf/livestreamtoagi/issues/560)).
 It is not removed and it is not a substitute for the closed in-world action set
 above.
+
+E6-6 implements `observe` as a staged read-only Mindcraft action, `!observe`,
+plus a pure `perception.js` helper. The action emits one `perception.report`
+containing a typed `PerceptionSnapshot` (`pose`, `nearby_blocks`, `entities`,
+`inventory`, `radius_blocks`, `scope`, `include_air`, and `captured_tick`) and
+does not emit `action.result`.
 
 ## Verification Signal Model
 
@@ -97,17 +103,17 @@ it as part of the curated action layer.
 
 ## LM Studio Validation
 
-This issue is documentation-only and has no LLM runtime path: it does not add a
-model call, bridge handler, Mindcraft fork patch, or executable skill. Per the
-local-validation policy, record that explicitly in the issue/PR.
+E6-6 has no LLM runtime path: it adds schema/data plumbing and a read-only
+Mindcraft perception action, but no model call. Per the local-validation
+policy, confirm LM Studio reachability and run the nearest local smoke path.
 
-The nearest local smoke path is the stripped-bot verification from E3-5,
-because it proves the host bot configuration with Python-superseded features
-off still connects/acts when run for real:
+The nearest local smoke path is the perception verifier, which exercises the
+committed `!observe` action with a fake bot and validates the resulting bridge
+snapshot without a live server:
 
 ```bash
 pnpm llm:local --list-only
-pnpm verify:mindcraft-stripped
+pnpm verify:embodiment-perception
 ```
 
 For a real local Minecraft run, follow
@@ -115,4 +121,4 @@ For a real local Minecraft run, follow
 and use LM Studio/OpenAI-compatible local model ids in the generated profiles.
 Record the LM Studio model id(s), commands run, and whether the validation ran
 against the local Mac server. If LM Studio or the E2 server is not available,
-state that and attach the static verification output instead.
+state that and attach the static perception verification output instead.

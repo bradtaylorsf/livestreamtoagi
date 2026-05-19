@@ -31,6 +31,7 @@
     "verify:embodiment-building": ".venv/bin/pytest tests/backend/test_embodiment_building.py -v",
     "verify:embodiment-build-plan": ".venv/bin/pytest tests/backend/test_embodiment_build_plan.py -v",
     "verify:embodiment-code-execution": ".venv/bin/pytest tests/backend/test_embodiment_code_execution.py -v",
+    "verify:embodiment-perception": ".venv/bin/pytest tests/backend/test_embodiment_perception.py -v",
     "verify:memory-bridge-perf": ".venv/bin/pytest tests/backend/test_memory_bridge_perf.py -v -m \"not integration\"",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",

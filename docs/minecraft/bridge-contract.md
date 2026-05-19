@@ -46,11 +46,12 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.3"` (E4-7 added the optional `trace_id`, E5-1 added
-optional core-memory fields, and E6-5 added `code.execute`; all are additive
-minor bumps). Same-major versions are wire-compatible in either direction (new
-fields/verbs are additive). An unknown *major* — or any unparseable version —
-is **not supported**; the server replies with the exact ADR §3 shape
+`PROTOCOL_VERSION = "1.4"` (E4-7 added the optional `trace_id`, E5-1 added
+optional core-memory fields, E6-5 added `code.execute`, and E6-6 added typed
+perception snapshot definitions; all are additive minor bumps). Same-major
+versions are wire-compatible in either direction (new fields/verbs are
+additive). An unknown *major* — or any unparseable version — is **not
+supported**; the server replies with the exact ADR §3 shape
 (`unsupported_version_response`): `ok=false`,
 `error.code="unsupported_version"`, `retryable=false`. Ambiguity is rejected,
 never guessed.
@@ -70,7 +71,7 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `memory.write` | Node→Python | `{content, kind, metadata}` → `{memory_id}` (idempotent on `request_id`) |
 | `management.review` | Node→Python | `{agent_id, text, context}` → `{verdict, reason, sanitized_text}` |
 | `cost.gate` | Node→Python | `{agent_id, action, estimated_cost_usd}` → `{allowed, reason, remaining_budget_usd}` |
-| `perception.report` | Node→Python | `{observations[]}` → `{accepted}` |
+| `perception.report` | Node→Python | `{observations[]}` → `{accepted}`; observations may include a typed `PerceptionSnapshot` |
 | `action.result` | Node→Python | `{action_id, status, detail}` → `{accepted}` |
 | `code.execute` | Node→Python | `{language, code, timeout?}` → `{status, stdout?, stderr?, reason?, exit_code?, execution_time_ms?}` |
 
@@ -80,6 +81,53 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 `cost.reserve`, `journal.event`, and `kill.status` are named in ADR §6 but
 their schemas land with their owning issues — out of the current bridge
 registry.
+
+## Perception Snapshot (E6-6)
+
+`perception.report` keeps `observations: list[dict]` for backward
+compatibility with earlier pose/block/structure reports. E6-6 adds a stable
+typed observation inside that list:
+
+```json
+{
+  "type": "perception_snapshot",
+  "pose": {
+    "position": {"x": 0, "y": 64, "z": 0},
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "on_ground": true,
+    "dimension": "overworld"
+  },
+  "nearby_blocks": [
+    {"position": {"x": 1, "y": 64, "z": 0}, "block_type": "stone"}
+  ],
+  "entities": [
+    {
+      "entity_id": "mob-1",
+      "kind": "mob",
+      "name": "zombie",
+      "position": {"x": 0, "y": 64, "z": 1},
+      "distance": 1.0
+    }
+  ],
+  "inventory": {
+    "items": [{"slot": 1, "item_id": "oak_planks", "count": 4}],
+    "equipment": {"hand": "stone_pickaxe", "head": null},
+    "used_slots": 1,
+    "total_slots": 46
+  },
+  "radius_blocks": 8.0,
+  "scope": "all",
+  "include_air": false,
+  "captured_tick": 123
+}
+```
+
+The Python inbound handler still emits the original `observations` list
+unchanged. When a schema-valid `perception_snapshot` is present, it also adds a
+normalized `snapshot` field to the `bridge_perception` event payload. Invalid
+or absent snapshot observations do not reject the report; they simply omit the
+additive `snapshot` field so older reports keep flowing.
 
 ## Server endpoint (E4-3)
 
@@ -157,10 +205,13 @@ pnpm verify:bridge-contract        # .venv/bin/pytest tests/backend/test_bridge_
 pnpm verify:bridge-server          # .venv/bin/pytest tests/backend/test_bridge_server.py -v
 pnpm verify:bridge-observability   # .venv/bin/pytest tests/backend/test_bridge_observability.py -v
 pnpm verify:embodiment-code-execution
+pnpm verify:embodiment-perception
 ```
 
-This bridge contract path has **no LLM runtime path** (auth/schema plumbing and
-service dispatch, no model calls), so no LM Studio simulation is required.
-Contract/server tests run headless in the existing `backend-test` CI job; the
-code-execution bridge path is covered separately with a mocked Docker client by
-`tests/backend/test_embodiment_code_execution.py`.
+This bridge contract/perception path has **no LLM runtime path** (auth/schema
+plumbing, service dispatch, and bot world reads; no model calls), so no LM
+Studio simulation is required for the contract itself. Contract/server tests
+run headless in the existing `backend-test` CI job; the code-execution and
+perception bridge paths are covered separately by
+`tests/backend/test_embodiment_code_execution.py` and
+`tests/backend/test_embodiment_perception.py`.
