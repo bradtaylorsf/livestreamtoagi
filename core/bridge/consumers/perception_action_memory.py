@@ -74,9 +74,7 @@ async def on_bridge_perception(event: dict[str, Any], *, compactor: MemoryCompac
     )
 
 
-async def on_bridge_action_result(
-    event: dict[str, Any], *, compactor: MemoryCompactor
-) -> None:
+async def on_bridge_action_result(event: dict[str, Any], *, compactor: MemoryCompactor) -> None:
     """Compact a bridge action-result event into archival and recall memory."""
     data = event.get("data", {})
     if not isinstance(data, dict):
