@@ -10,7 +10,8 @@
   "payload": {
     "limit": 5,
     "query": "what did rex build yesterday",
-    "scope": "agent"
+    "scope": "agent",
+    "tier": "recall"
   },
   "request_id": "req-memory-recall-0001",
   "run_id": "run-0001",

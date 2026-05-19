@@ -288,15 +288,50 @@ def test_trace_id_is_optional_and_additive_on_both_envelopes(
         assert "trace_id" not in defs[env_name].get("required", []), env_name
 
 
+def test_memory_read_fields_are_additive_for_core_tier(
+    committed_schema: dict[str, Any],
+) -> None:
+    """E5-1 (#549): memory.recall can now read recall or core memory without
+    adding a new registry verb. The tier and response fields are optional so
+    older recall-only payloads remain valid; query stays required even for
+    core reads so the existing invalid fixture remains meaningful."""
+    recall_req = c.MemoryRecallRequest.model_validate({"query": "what happened"})
+    assert recall_req.tier == "recall"
+
+    core_req = c.MemoryRecallRequest.model_validate(
+        {"query": "ignored for core reads", "tier": "core"}
+    )
+    assert core_req.tier == "core"
+
+    with pytest.raises(ValidationError):
+        c.MemoryRecallRequest.model_validate({"tier": "core"})
+
+    response = c.MemoryRecallResponse()
+    assert response.results == []
+    assert response.formatted is None
+    assert response.core_memory is None
+
+    defs = committed_schema["$defs"]
+    req_schema = defs["MemoryRecallRequest"]
+    resp_schema = defs["MemoryRecallResponse"]
+    assert "tier" in req_schema["properties"]
+    assert "tier" not in req_schema.get("required", [])
+    assert "query" in req_schema.get("required", [])
+    assert "formatted" in resp_schema["properties"]
+    assert "core_memory" in resp_schema["properties"]
+    assert "formatted" not in resp_schema.get("required", [])
+    assert "core_memory" not in resp_schema.get("required", [])
+
+
 # ── Versioning (ADR §3, fail-closed) ────────────────────────────────────────
 
 
 def test_protocol_version_is_self_consistent() -> None:
-    # 1.1: E4-7 (#546) added the optional `trace_id` correlation field to both
-    # envelopes — an additive minor bump (ADR §3), same major as 1.0.
-    assert c.PROTOCOL_VERSION == "1.1"
+    # 1.2: E5-1 (#549) added optional memory read fields for core-memory
+    # exposure — an additive minor bump (ADR §3), same major as 1.0/1.1.
+    assert c.PROTOCOL_VERSION == "1.2"
     assert c.is_supported_version(c.PROTOCOL_VERSION)
-    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 1, 0)
+    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 2, 0)
 
 
 @pytest.mark.parametrize("version", ["1.0", "1.4", "1.0.9", "1.99.99"])

@@ -1,6 +1,8 @@
 {
   "ok": true,
   "payload": {
+    "core_memory": null,
+    "formatted": "## Relevant memories\n- [build] Rex built a bridge",
     "results": [
       {
         "content": "Rex built a bridge",

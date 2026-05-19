@@ -34,10 +34,10 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
   contract-valid :class:`BridgeResponse` (``ok=false`` + typed error); only the
   handshake closes the socket.
 
-There is no LLM runtime path in this issue: the endpoint dispatches to pure
-stubs with no model calls. The nearest local smoke path is the dependency-free
-``pnpm verify:bridge-server`` (``tests/backend/test_bridge_server.py``), which
-exercises the real endpoint over an in-process WebSocket with no Docker/network.
+There is no LLM runtime path in this bridge surface: dispatch is contract/data
+plumbing with no model calls. ``memory.recall`` delegates read-only to the
+existing memory managers when FastAPI lifespan has initialized services; other
+verbs remain contract-valid stubs until their owning issues wire them.
 """
 
 from __future__ import annotations
@@ -59,6 +59,7 @@ from core.bridge.contract import (
     ERR_UNSUPPORTED_SERVICE,
     BridgeRequest,
     BridgeResponse,
+    MemoryRecallRequest,
     UnsupportedServiceError,
     is_supported_version,
     make_error_response,
@@ -67,6 +68,7 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
+from core.bridge.handlers.memory import handle_memory_read
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,9 @@ WS_POLICY_VIOLATION = 1008
 # unparseable inbound frame.
 UNKNOWN_REQUEST_ID = "unknown"
 
+ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
+MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
+
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
 
@@ -108,7 +113,6 @@ StubHandler = Callable[[BridgeRequest], dict[str, Any]]
 # SERVICE_REGISTRY (asserted below + covered by the contract-parity test).
 STUB_HANDLERS: dict[str, StubHandler] = {
     "bridge.ping": lambda env: {"pong": env.payload["message"]},
-    "memory.recall": lambda env: {"results": []},
     "memory.write": lambda env: {"memory_id": env.request_id},
     "management.review": lambda env: {
         "verdict": "allow",
@@ -123,6 +127,11 @@ STUB_HANDLERS: dict[str, StubHandler] = {
     "perception.report": lambda env: {"accepted": True},
     "action.result": lambda env: {"accepted": True},
 }
+
+
+def _services_from_websocket(websocket: WebSocket) -> Any | None:
+    """Resolve initialized app services without assuming lifespan has run."""
+    return getattr(websocket.app.state, "services", None)
 
 
 def _summarize_validation_error(exc: ValidationError) -> str:
@@ -183,15 +192,8 @@ def _verb_from_raw(raw: Any) -> str:
     return "unparseable"
 
 
-def build_bridge_response(raw: Any) -> BridgeResponse:
-    """Turn one decoded inbound frame into a contract-valid response envelope.
-
-    Pure and synchronous so the dispatch policy is unit-testable without a
-    socket. Order mirrors ADR §2→§3→§6: envelope shape, then version, then the
-    closed per-verb registry, then the stub handler. Every branch returns a
-    :class:`BridgeResponse`; the socket is never closed from here (handshake
-    auth is the only path that closes it).
-    """
+def _validated_request_or_error(raw: Any) -> BridgeRequest | BridgeResponse:
+    """Validate envelope, version, and per-verb payload."""
     try:
         env = BridgeRequest.model_validate(raw)
     except ValidationError as exc:
@@ -215,13 +217,80 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             f"invalid {env.service}.{env.method} payload: {_summarize_validation_error(exc)}",
         )
 
-    payload = STUB_HANDLERS[service_key(env.service, env.method)](env)
+    return env
+
+
+def _success_response(env: BridgeRequest, payload: dict[str, Any]) -> BridgeResponse:
     response = BridgeResponse(request_id=env.request_id, ok=True, payload=payload)
-    # Prove the stub honours the verb's response schema before it goes on the
-    # wire — a stub that drifts from the contract should fail loudly here, not
-    # silently ship an invalid frame to the Node side.
+    # Prove the payload honours the verb's response schema before it goes on
+    # the wire — a handler that drifts from the contract should fail loudly
+    # here, not silently ship an invalid frame to the Node side.
     validate_response(response, service=env.service, method=env.method)
     return response
+
+
+def _memory_services_unavailable(env: BridgeRequest, services: Any | None) -> BridgeResponse | None:
+    payload = MemoryRecallRequest.model_validate(env.payload)
+    manager_name = "core_memory" if payload.tier == "core" else "recall_memory"
+    if services is None:
+        message = "memory services are unavailable; application lifespan has not initialized"
+    elif getattr(services, manager_name, None) is None:
+        message = f"memory manager {manager_name!r} is unavailable"
+    else:
+        return None
+
+    return make_error_response(
+        env.request_id,
+        ERR_MEMORY_SERVICE_UNAVAILABLE,
+        message,
+        retryable=True,
+    )
+
+
+def build_bridge_response(raw: Any) -> BridgeResponse:
+    """Turn one decoded non-memory frame into a contract-valid response envelope.
+
+    Pure and synchronous so the dispatch policy is unit-testable without a
+    socket. Order mirrors ADR §2→§3→§6: envelope shape, then version, then the
+    closed per-verb registry, then the stub handler. The async WebSocket loop
+    handles ``memory.recall`` separately because it delegates to service
+    managers.
+    """
+    validated = _validated_request_or_error(raw)
+    if isinstance(validated, BridgeResponse):
+        return validated
+
+    env = validated
+    key = service_key(env.service, env.method)
+    if key in MEMORY_HANDLER_VERBS:
+        return make_error_response(
+            env.request_id,
+            ERR_MEMORY_SERVICE_UNAVAILABLE,
+            "memory.recall requires initialized memory services",
+            retryable=True,
+        )
+
+    return _success_response(env, STUB_HANDLERS[key](env))
+
+
+async def build_bridge_response_with_services(
+    raw: Any,
+    services: Any | None,
+) -> BridgeResponse:
+    """Turn one decoded inbound frame into a contract-valid response envelope."""
+    validated = _validated_request_or_error(raw)
+    if isinstance(validated, BridgeResponse):
+        return validated
+
+    env = validated
+    key = service_key(env.service, env.method)
+    if key in MEMORY_HANDLER_VERBS:
+        unavailable = _memory_services_unavailable(env, services)
+        if unavailable is not None:
+            return unavailable
+        return _success_response(env, await handle_memory_read(env, services))
+
+    return _success_response(env, STUB_HANDLERS[key](env))
 
 
 def _extract_bearer_token(websocket: WebSocket) -> str | None:
@@ -287,7 +356,10 @@ async def bridge_ws(websocket: WebSocket) -> None:
                 )
             else:
                 started = time.perf_counter()
-                response = build_bridge_response(raw)
+                response = await build_bridge_response_with_services(
+                    raw,
+                    _services_from_websocket(websocket),
+                )
 
             # E4-7 (#546): one correlation id per frame. Echo the caller's
             # trace_id, or mint one when the (additive) field is absent, so the
@@ -345,11 +417,12 @@ async def bridge_ws(websocket: WebSocket) -> None:
 def _assert_handlers_cover_registry() -> None:
     from core.bridge.contract import SERVICE_REGISTRY
 
-    missing = set(SERVICE_REGISTRY) - set(STUB_HANDLERS)
-    extra = set(STUB_HANDLERS) - set(SERVICE_REGISTRY)
+    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS
+    missing = set(SERVICE_REGISTRY) - handled
+    extra = handled - set(SERVICE_REGISTRY)
     if missing or extra:
         raise RuntimeError(
-            f"STUB_HANDLERS out of sync with SERVICE_REGISTRY: "
+            f"bridge handlers out of sync with SERVICE_REGISTRY: "
             f"missing={sorted(missing)} extra={sorted(extra)}"
         )
 

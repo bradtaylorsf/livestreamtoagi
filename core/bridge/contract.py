@@ -42,11 +42,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.1 is a
-# minor bump: E4-7 (#546) adds the optional `trace_id` correlation field to
-# both envelopes. It is purely additive — `is_supported_version` only gates on
-# the major, so a 1.0 peer that omits `trace_id` stays wire-compatible.
-PROTOCOL_VERSION = "1.1"
+# additive-compatible within a major and fail-closed across majors. 1.2 is a
+# minor bump: E5-1 (#549) adds optional `memory.recall` read fields for core
+# memory exposure. It is purely additive — `is_supported_version` only gates on
+# the major, so a 1.0/1.1 peer that omits the new fields stays wire-compatible.
+PROTOCOL_VERSION = "1.2"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -234,6 +234,14 @@ class MemoryRecallRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=1, description="Natural-language recall query.")
+    tier: Literal["recall", "core"] = Field(
+        default="recall",
+        description=(
+            "Memory tier to read. 'recall' performs semantic recall; 'core' "
+            "fetches the agent's Tier 1 core memory. Query remains required "
+            "for additive compatibility and is ignored for tier='core'."
+        ),
+    )
     scope: Literal["agent", "shared", "world"] = Field(
         default="agent", description="Memory partition to search."
     )
@@ -251,6 +259,14 @@ class MemoryRecallResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     results: list[MemoryRecallResult] = Field(
         default_factory=list, description="Ranked recall hits (may be empty)."
+    )
+    formatted: str | None = Field(
+        default=None,
+        description="Formatted markdown returned by the recall memory manager.",
+    )
+    core_memory: str | None = Field(
+        default=None,
+        description="Core memory markdown returned by the core memory manager.",
     )
 
 
