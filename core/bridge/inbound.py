@@ -30,6 +30,9 @@ There is no LLM runtime path in this issue: it is pure event plumbing with no
 model calls. The nearest local smoke path is the dependency-free
 ``tests/backend/test_bridge_inbound.py`` (event observed in-process, no
 Docker/network/LLM).
+
+E6-2 (#557) movement/navigation skills reuse this same channel: they emit a
+pose ``perception.report`` followed by a terminal ``action.result``.
 """
 
 from __future__ import annotations
