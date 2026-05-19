@@ -10,6 +10,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from core.llm_client import agent_cost_context
+
 if TYPE_CHECKING:
     from uuid import UUID
 
@@ -127,12 +129,13 @@ async def execute_tool_calls(
         else:
             try:
                 logger.debug("Executing tool %s for %s", tc.name, agent_id)
-                result = await tool.run(
-                    agent_id=agent_id,
-                    simulation_id=simulation_id,
-                    conversation_id=conversation_id,
-                    **tc.arguments,
-                )
+                with agent_cost_context(agent_id):
+                    result = await tool.run(
+                        agent_id=agent_id,
+                        simulation_id=simulation_id,
+                        conversation_id=conversation_id,
+                        **tc.arguments,
+                    )
                 result_content = json.dumps(result, default=str)
             except Exception as exc:
                 logger.warning("Tool %s failed for %s: %s", tc.name, agent_id, exc)

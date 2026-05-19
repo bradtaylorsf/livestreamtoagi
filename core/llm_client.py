@@ -10,6 +10,9 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
@@ -25,6 +28,8 @@ if TYPE_CHECKING:
     from core.repos.cost_repo import CostRepo
 
 logger = logging.getLogger(__name__)
+
+current_agent_id: ContextVar[str | None] = ContextVar("current_agent_id", default=None)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 LOCAL_LLM_BASE_URL = "http://localhost:1234/v1"
@@ -66,6 +71,16 @@ BUILDING_TIER_MODELS = frozenset(
         "grok-3",
     }
 )
+
+
+@contextmanager
+def agent_cost_context(agent_id: str | None) -> Iterator[None]:
+    """Attribute nested LLM cost events to the current agent."""
+    token = current_agent_id.set(agent_id)
+    try:
+        yield
+    finally:
+        current_agent_id.reset(token)
 
 
 @dataclass
@@ -557,6 +572,7 @@ class OpenRouterClient:
     ) -> LLMResponse:
         model_config = self._resolve_model(model)
         runtime_model = self.runtime_model_id(model)
+        effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
         payload: dict[str, Any] = {
             "model": runtime_model,
             "messages": messages,
@@ -624,7 +640,7 @@ class OpenRouterClient:
         cost = self._estimate_call_cost(model_config, input_tokens, output_tokens)
 
         await self._log_cost(
-            agent_id,
+            effective_agent_id,
             model,
             input_tokens,
             output_tokens,
@@ -663,6 +679,7 @@ class OpenRouterClient:
     ) -> AsyncGenerator[StreamChunk, None]:
         model_config = self._resolve_model(model)
         runtime_model = self.runtime_model_id(model)
+        effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
         payload: dict[str, Any] = {
             "model": runtime_model,
             "messages": messages,
@@ -732,7 +749,7 @@ class OpenRouterClient:
             cost = self._estimate_call_cost(model_config, input_tokens, output_tokens)
 
             await self._log_cost(
-                agent_id,
+                effective_agent_id,
                 model,
                 input_tokens,
                 output_tokens,
