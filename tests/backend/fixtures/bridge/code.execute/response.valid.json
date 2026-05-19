@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "payload": {
+    "execution_time_ms": 12,
+    "exit_code": 0,
+    "status": "ok",
+    "stderr": "",
+    "stdout": "hello from bridge\n"
+  },
+  "request_id": "req-code-execute-0001",
+  "retryable": false
+}

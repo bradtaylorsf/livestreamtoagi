@@ -1,0 +1,19 @@
+{
+  "agent_id": "rex",
+  "cost_context": {
+    "agent_tier": "building",
+    "budget_bucket": "daily-global",
+    "estimated_cost_usd": 0.0
+  },
+  "deadline_ms": 5000,
+  "method": "execute",
+  "payload": {
+    "code": "",
+    "language": "python"
+  },
+  "request_id": "req-code-execute-invalid-0001",
+  "run_id": "run-0001",
+  "service": "code",
+  "simulation_id": "11111111-1111-1111-1111-111111111111",
+  "version": "1.0"
+}

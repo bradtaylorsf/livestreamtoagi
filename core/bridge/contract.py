@@ -42,11 +42,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.2 is a
-# minor bump: E5-1 (#549) adds optional `memory.recall` read fields for core
-# memory exposure. It is purely additive — `is_supported_version` only gates on
-# the major, so a 1.0/1.1 peer that omits the new fields stays wire-compatible.
-PROTOCOL_VERSION = "1.2"
+# additive-compatible within a major and fail-closed across majors. 1.3 is a
+# minor bump: E6-5 (#560) adds the additive `code.execute` service. Earlier
+# 1.x peers remain wire-compatible because `is_supported_version` gates only on
+# the major.
+PROTOCOL_VERSION = "1.3"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -356,6 +356,36 @@ class ActionResultResponse(BaseModel):
     accepted: bool = Field(description="Whether Python recorded the result.")
 
 
+class CodeExecuteRequest(BaseModel):
+    """``code.execute`` — run code in the existing Docker/gVisor sandbox."""
+
+    model_config = ConfigDict(extra="forbid")
+    language: Literal["python", "javascript"] = Field(
+        description="Runtime language supported by ExecuteCodeTool."
+    )
+    code: str = Field(min_length=1, description="Source code to run in the sandbox.")
+    timeout: int | None = Field(
+        default=None,
+        ge=1,
+        le=120,
+        description="Optional max execution time in seconds; omitted uses the tool default.",
+    )
+
+
+class CodeExecuteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["ok", "error", "rejected"] = Field(
+        description="Sandbox result state returned by ExecuteCodeTool."
+    )
+    stdout: str | None = Field(default=None, description="Captured standard output.")
+    stderr: str | None = Field(default=None, description="Captured standard error.")
+    reason: str | None = Field(default=None, description="Error or rejection reason.")
+    exit_code: int | None = Field(default=None, description="Process exit code when run.")
+    execution_time_ms: int | None = Field(
+        default=None, description="Elapsed execution time in milliseconds."
+    )
+
+
 # ── Service registry (ADR §6 closed set) ────────────────────────────────────
 
 # Maps "<service>.<method>" -> (request payload model, response payload model).
@@ -363,8 +393,8 @@ class ActionResultResponse(BaseModel):
 # unsupported_service error. Keys are ADR §6 names (plus bridge.ping for the
 # ADR's first-proof round-trip). Other ADR §6 services (cost.reserve,
 # journal.event, kill.status) are intentionally out of E4-2's scope — their
-# schemas land with their owning issues; only the six initial verbs from #541
-# plus bridge.ping are defined here.
+# schemas land with their owning issues; the frozen #541 initial verbs remain
+# tracked separately in INITIAL_VERBS.
 SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "bridge.ping": (BridgePingRequest, BridgePingResponse),
     "memory.recall": (MemoryRecallRequest, MemoryRecallResponse),
@@ -373,6 +403,7 @@ SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "cost.gate": (CostGateRequest, CostGateResponse),
     "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
     "action.result": (ActionResultRequest, ActionResultResponse),
+    "code.execute": (CodeExecuteRequest, CodeExecuteResponse),
 }
 
 # The six initial verbs #541 requires schemas for (ADR §6 names; the issue's
@@ -489,6 +520,8 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     PerceptionReportResponse,
     ActionResultRequest,
     ActionResultResponse,
+    CodeExecuteRequest,
+    CodeExecuteResponse,
 )
 
 

@@ -79,6 +79,7 @@ ACTIONS_NAVIGATE_PATCH_MARKER="LTAG E6-2 navigate action"
 ACTIONS_PLACE_PATCH_MARKER="LTAG E6-3 place action"
 ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
+ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_REL="src/agent/commands/move_action.js"
@@ -86,6 +87,7 @@ NAVIGATE_ACTION_REL="src/agent/commands/navigate_action.js"
 PLACE_ACTION_REL="src/agent/commands/place_action.js"
 BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
+EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
@@ -102,6 +104,7 @@ NAVIGATE_ACTION_DEST=""
 PLACE_ACTION_DEST=""
 BREAK_ACTION_DEST=""
 BUILD_FROM_PLAN_ACTION_DEST=""
+EXECUTE_CODE_ACTION_DEST=""
 MOVEMENT_SKILL_DEST=""
 BUILDING_SKILL_DEST=""
 BUILD_PLAN_SKILL_DEST=""
@@ -119,6 +122,7 @@ NAVIGATE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/navigate_action.js"
 PLACE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/place_action.js"
 BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
+EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
@@ -161,6 +165,7 @@ restore_clone_patches() {
     [ -n "${PLACE_ACTION_DEST:-}" ] && rm -f "$PLACE_ACTION_DEST" 2> /dev/null || true
     [ -n "${BREAK_ACTION_DEST:-}" ] && rm -f "$BREAK_ACTION_DEST" 2> /dev/null || true
     [ -n "${BUILD_FROM_PLAN_ACTION_DEST:-}" ] && rm -f "$BUILD_FROM_PLAN_ACTION_DEST" 2> /dev/null || true
+    [ -n "${EXECUTE_CODE_ACTION_DEST:-}" ] && rm -f "$EXECUTE_CODE_ACTION_DEST" 2> /dev/null || true
     [ -n "${MOVEMENT_SKILL_DEST:-}" ] && rm -f "$MOVEMENT_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILDING_SKILL_DEST:-}" ] && rm -f "$BUILDING_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILD_PLAN_SKILL_DEST:-}" ] && rm -f "$BUILD_PLAN_SKILL_DEST" 2> /dev/null || true
@@ -344,6 +349,19 @@ verify_committed_assets() {
         fi
     fi
 
+    if [ ! -s "$EXECUTE_CODE_ACTION_SRC" ]; then
+        fail "Execute-code action missing or empty: $EXECUTE_CODE_ACTION_SRC"; problems=1
+    else
+        grep -q "'!executeCode'" "$EXECUTE_CODE_ACTION_SRC" || { fail "execute-code action name is not !executeCode"; problems=1; }
+        grep -q "service: 'code'" "$EXECUTE_CODE_ACTION_SRC" || { fail "execute-code action does not call code.execute"; problems=1; }
+        grep -q "method: 'execute'" "$EXECUTE_CODE_ACTION_SRC" || { fail "execute-code action does not call code.execute"; problems=1; }
+        grep -q 'safe-idling' "$EXECUTE_CODE_ACTION_SRC" || { fail "execute-code action missing bridge safe-idle path"; problems=1; }
+        grep -q 'BridgeClientError' "$EXECUTE_CODE_ACTION_SRC" || { fail "execute-code action missing structured bridge errors"; problems=1; }
+        if grep -q 'openrouter' "$EXECUTE_CODE_ACTION_SRC"; then
+            fail "execute-code action must NOT reference openrouter"; problems=1
+        fi
+    fi
+
     return $problems
 }
 
@@ -355,7 +373,8 @@ info "bridge:    ${MINECRAFT_BRIDGE_URL}  (bearer token via MINECRAFT_BRIDGE_TOK
 info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
 info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
 info "client:    staged → $BRIDGE_CLIENT_REL  (from fork-src/)"
-info "actions:   !bridgePing, !move, !navigate, !place, !break, !buildFromPlan injected into $ACTIONS_REL"
+info "actions:   !bridgePing, !move, !navigate, !place, !break, !buildFromPlan,"
+info "           !executeCode injected into $ACTIONS_REL"
 info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (local only, decision 0003)"
 
 # ── --verify: static, CI/network-safe checks only ──
@@ -364,8 +383,8 @@ if [ "$MODE" = "verify" ]; then
         ok "Static verify passed: settings → E2 server, bridge profile is"
         info "local-only (lmstudio/), python_bridge.js carries the envelope fields,"
         info "bearer auth, bridge endpoint, a deadline timeout and a structured"
-        info "error type, and !bridgePing/!move/!navigate/!place/!break/!buildFromPlan are"
-        info "wrapped so failures never crash and movement/building outcomes"
+        info "error type, and !bridgePing/!move/!navigate/!place/!break/!buildFromPlan/"
+        info "!executeCode are wrapped so failures never crash and movement/building outcomes"
         info "report through the E4-6 channel."
         info "(No clone, no network, no Node, no launch — drop --verify to connect.)"
         exit 0
@@ -407,10 +426,11 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would copy:   fork-src/ → $MINDCRAFT_DIR/$BRIDGE_CLIENT_REL +"
     info "              $BRIDGE_ACTION_REL + $MOVE_ACTION_REL + $NAVIGATE_ACTION_REL +"
     info "              $PLACE_ACTION_REL + $BREAK_ACTION_REL + $BUILD_FROM_PLAN_ACTION_REL +"
-    info "              $MOVEMENT_SKILL_REL + $BUILDING_SKILL_REL + $BUILD_PLAN_SKILL_REL"
+    info "              $EXECUTE_CODE_ACTION_REL + $MOVEMENT_SKILL_REL +"
+    info "              $BUILDING_SKILL_REL + $BUILD_PLAN_SKILL_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
-    info "              placeAction, breakAction, buildFromPlanAction into"
-    info "              $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
+    info "              placeAction, breakAction, buildFromPlanAction, executeCodeAction"
+    info "              into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL (restored on exit)"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
     exit 0
@@ -502,7 +522,7 @@ ok "Staged profile → $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}        (conversation tier — decision 0003)"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 0003)"
 
-# (f) Copy the committed bridge client + movement/building actions verbatim into the
+# (f) Copy the committed bridge client + movement/building/code actions verbatim into the
 #     clone (the decision 0005 extension points). Removed again on exit.
 BRIDGE_CLIENT_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_CLIENT_REL"
 BRIDGE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_ACTION_REL"
@@ -511,6 +531,7 @@ NAVIGATE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$NAVIGATE_ACTION_REL"
 PLACE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$PLACE_ACTION_REL"
 BREAK_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BREAK_ACTION_REL"
 BUILD_FROM_PLAN_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BUILD_FROM_PLAN_ACTION_REL"
+EXECUTE_CODE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$EXECUTE_CODE_ACTION_REL"
 MOVEMENT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$MOVEMENT_SKILL_REL"
 BUILDING_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILDING_SKILL_REL"
 BUILD_PLAN_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILD_PLAN_SKILL_REL"
@@ -522,6 +543,7 @@ mkdir -p \
     "$(dirname -- "$PLACE_ACTION_DEST")" \
     "$(dirname -- "$BREAK_ACTION_DEST")" \
     "$(dirname -- "$BUILD_FROM_PLAN_ACTION_DEST")" \
+    "$(dirname -- "$EXECUTE_CODE_ACTION_DEST")" \
     "$(dirname -- "$MOVEMENT_SKILL_DEST")" \
     "$(dirname -- "$BUILDING_SKILL_DEST")" \
     "$(dirname -- "$BUILD_PLAN_SKILL_DEST")"
@@ -532,6 +554,7 @@ cp "$NAVIGATE_ACTION_SRC" "$NAVIGATE_ACTION_DEST"
 cp "$PLACE_ACTION_SRC" "$PLACE_ACTION_DEST"
 cp "$BREAK_ACTION_SRC" "$BREAK_ACTION_DEST"
 cp "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_DEST"
+cp "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_DEST"
 cp "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_DEST"
 cp "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_DEST"
 cp "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_DEST"
@@ -542,11 +565,12 @@ ok "Copied navigate action → $NAVIGATE_ACTION_REL"
 ok "Copied place action → $PLACE_ACTION_REL"
 ok "Copied break action → $BREAK_ACTION_REL"
 ok "Copied build-from-plan action → $BUILD_FROM_PLAN_ACTION_REL"
+ok "Copied execute-code action → $EXECUTE_CODE_ACTION_REL"
 ok "Copied movement helpers → $MOVEMENT_SKILL_REL"
 ok "Copied building helpers → $BUILDING_SKILL_REL"
 ok "Copied build-plan helpers → $BUILD_PLAN_SKILL_REL"
 
-# (g) Inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction into the actionsList
+# (g) Inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/executeCodeAction into the actionsList
 #     array via an anchored node-driven patch. Backed up + restored on exit
 #     (the mcdata shim pattern).
 ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
@@ -559,7 +583,8 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_NAVIGATE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PLACE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
-   grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH"; then
+   grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -578,6 +603,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_PLACE_PATCH_MARKER="$ACTIONS_PLACE_PATCH_MARKER" \
     ACTIONS_BREAK_PATCH_MARKER="$ACTIONS_BREAK_PATCH_MARKER" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
+    ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -588,6 +614,7 @@ const navigateMarker = process.env.ACTIONS_NAVIGATE_PATCH_MARKER;
 const placeMarker = process.env.ACTIONS_PLACE_PATCH_MARKER;
 const breakMarker = process.env.ACTIONS_BREAK_PATCH_MARKER;
 const buildFromPlanMarker = process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER;
+const executeCodeMarker = process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 // Anchor on the exact array opener at the pinned commit
@@ -628,6 +655,11 @@ const actions = [
         importLine: `import { buildFromPlanAction } from './build_from_plan_action.js'; // ${buildFromPlanMarker}\n`,
         itemLine: `    buildFromPlanAction, // ${buildFromPlanMarker}`,
     },
+    {
+        marker: executeCodeMarker,
+        importLine: `import { executeCodeAction } from './execute_code_action.js'; // ${executeCodeMarker}\n`,
+        itemLine: `    executeCodeAction, // ${executeCodeMarker}`,
+    },
 ];
 
 const missing = actions.filter((a) => !source.includes(a.marker));
@@ -638,10 +670,10 @@ if (missing.length > 0) {
 }
 NODE
 then
-    fail "Failed to inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction into $ACTIONS_REL"
+    fail "Failed to inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/executeCodeAction into $ACTIONS_REL"
     exit 1
 fi
-ok "Injected !bridgePing, !move, !navigate, !place, !break, !buildFromPlan into $ACTIONS_REL"
+ok "Injected !bridgePing, !move, !navigate, !place, !break, !buildFromPlan, !executeCode into $ACTIONS_REL"
 info "  Restores $ACTIONS_REL automatically when this launch exits."
 
 # (h) Runtime-version shim (identical to connect-stock-bot.sh — same marker /
@@ -707,8 +739,10 @@ info "Movement smoke:          ${BRIDGE_BOT_NAME} !move(\"act-1\", \"north\", 1,
 info "Building smoke:          ${BRIDGE_BOT_NAME} !place(\"act-2\", \"dirt\", {\"x\":0,\"y\":65,\"z\":0})"
 info "                         ${BRIDGE_BOT_NAME} !break(\"act-3\", {\"x\":0,\"y\":65,\"z\":0}, \"dirt\")"
 info "Build-plan smoke:        ${BRIDGE_BOT_NAME} !buildFromPlan(\"act-4\", {\"x\":0,\"y\":65,\"z\":0}, {\"blocks\":[{\"dx\":0,\"dy\":0,\"dz\":0,\"block_type\":\"dirt\"}]})"
+info "Code smoke:              ${BRIDGE_BOT_NAME} !executeCode(\"python\", \"print(2 + 2)\", 5)"
 info "Success: the bot logs 'bridge pong: hello'; the Python bridge logs the"
 info "agent_id + request_id. Movement/building emit perception.report + action.result."
+info "Code execution returns the existing sandbox result through code.execute."
 info "A bridge failure is logged [error.code] — not a crash."
 cd "$MINDCRAFT_DIR_ABS"
 node main.js --profiles "$MINDCRAFT_PROFILE"

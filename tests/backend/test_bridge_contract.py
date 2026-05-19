@@ -15,9 +15,9 @@ the contract honest:
 * the committed schema equals a fresh export — Pydantic is the single source
   of truth, so the Node-side artifact cannot silently drift;
 * version negotiation is fail-closed on an unknown major (ADR §3);
-* the registry is exactly the six initial verbs from #541 (+ ``bridge.ping``)
-  and uses ADR §6 names only — including the ``memory.read`` ->
-  ``memory.recall`` reconciliation the issue text and the ADR disagreed on.
+* the registry uses ADR §6 names only, the frozen six initial verbs from #541
+  stay intact, and the ``memory.read`` -> ``memory.recall`` reconciliation the
+  issue text and the ADR disagreed on remains closed.
 
 Dependency-free by design: pure file reads + ``pydantic`` + ``jsonschema``.
 No Node, no Docker, no network, no LLM — it runs headless in the existing
@@ -75,6 +75,7 @@ ADR_SERVICE_NAMES = {
     "kill.status",
     "perception.report",
     "action.result",
+    "code.execute",
 }
 ALLOWED_REGISTRY_KEYS = ADR_SERVICE_NAMES | {"bridge.ping"}
 
@@ -327,11 +328,11 @@ def test_memory_read_fields_are_additive_for_core_tier(
 
 
 def test_protocol_version_is_self_consistent() -> None:
-    # 1.2: E5-1 (#549) added optional memory read fields for core-memory
-    # exposure — an additive minor bump (ADR §3), same major as 1.0/1.1.
-    assert c.PROTOCOL_VERSION == "1.2"
+    # 1.3: E6-5 (#560) added code.execute — an additive minor bump
+    # (ADR §3), same major as 1.0/1.1/1.2.
+    assert c.PROTOCOL_VERSION == "1.3"
     assert c.is_supported_version(c.PROTOCOL_VERSION)
-    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 2, 0)
+    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 3, 0)
 
 
 @pytest.mark.parametrize("version", ["1.0", "1.4", "1.0.9", "1.99.99"])

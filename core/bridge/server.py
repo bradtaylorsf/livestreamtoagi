@@ -36,8 +36,9 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
 
 ``memory.recall`` delegates read-only to the existing memory managers and
 ``memory.write`` delegates append/write work to the existing memory compactor
-when FastAPI lifespan has initialized services; other verbs remain
-contract-valid stubs until their owning issues wire them.
+when FastAPI lifespan has initialized services. ``code.execute`` delegates to
+the existing Docker/gVisor sandbox tool; other verbs remain contract-valid
+stubs until their owning issues wire them.
 """
 
 from __future__ import annotations
@@ -68,6 +69,7 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
+from core.bridge.handlers.code_execution import handle_code_execute
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
 
 logger = logging.getLogger(__name__)
@@ -99,8 +101,10 @@ WS_POLICY_VIOLATION = 1008
 UNKNOWN_REQUEST_ID = "unknown"
 
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
+ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
+CODE_EXECUTE_VERBS = frozenset({"code.execute"})
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -270,6 +274,24 @@ def _memory_write_services_unavailable(
     )
 
 
+def _code_services_unavailable(env: BridgeRequest, services: Any | None) -> BridgeResponse | None:
+    if services is None:
+        message = (
+            "code execution services are unavailable; application lifespan has not initialized"
+        )
+    elif getattr(services, "event_bus", None) is None:
+        message = "event bus is unavailable for code execution"
+    else:
+        return None
+
+    return make_error_response(
+        env.request_id,
+        ERR_CODE_SERVICE_UNAVAILABLE,
+        message,
+        retryable=True,
+    )
+
+
 def build_bridge_response(raw: Any) -> BridgeResponse:
     """Turn one decoded non-memory frame into a contract-valid response envelope.
 
@@ -290,6 +312,13 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             env.request_id,
             ERR_MEMORY_SERVICE_UNAVAILABLE,
             f"{key} requires initialized memory services",
+            retryable=True,
+        )
+    if key in CODE_EXECUTE_VERBS:
+        return make_error_response(
+            env.request_id,
+            ERR_CODE_SERVICE_UNAVAILABLE,
+            f"{key} requires initialized code execution services",
             retryable=True,
         )
 
@@ -322,6 +351,12 @@ async def build_bridge_response_with_services(
         except ValueError as exc:
             return make_error_response(env.request_id, ERR_INVALID_PAYLOAD, str(exc))
         return _success_response(env, payload)
+
+    if key in CODE_EXECUTE_VERBS:
+        unavailable = _code_services_unavailable(env, services)
+        if unavailable is not None:
+            return unavailable
+        return _success_response(env, await handle_code_execute(env, services))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -450,7 +485,7 @@ async def bridge_ws(websocket: WebSocket) -> None:
 def _assert_handlers_cover_registry() -> None:
     from core.bridge.contract import SERVICE_REGISTRY
 
-    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS
+    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS | CODE_EXECUTE_VERBS
     missing = set(SERVICE_REGISTRY) - handled
     extra = handled - set(SERVICE_REGISTRY)
     if missing or extra:
