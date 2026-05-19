@@ -53,7 +53,9 @@ def _run_node_harness(tmp_path: Path, source: str, env: dict[str, str] | None = 
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-def _stage_move_action_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
+def _stage_action_with_stub_bridge(
+    tmp_path: Path, action_src: Path, action_filename: str
+) -> tuple[Path, Path]:
     root = tmp_path / "fork-src"
     commands = root / "agent" / "commands"
     skills = root / "agent" / "skills"
@@ -61,7 +63,7 @@ def _stage_move_action_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
     commands.mkdir(parents=True)
     skills.mkdir(parents=True)
     bridge.mkdir(parents=True)
-    shutil.copy2(MOVE_ACTION, commands / "move_action.js")
+    shutil.copy2(action_src, commands / action_filename)
     shutil.copy2(MOVEMENT_HELPERS, skills / "movement.js")
     calls_path = tmp_path / "bridge_calls.jsonl"
     (bridge / "python_bridge.js").write_text(
@@ -88,7 +90,7 @@ export async function callBridge(opts = {}) {
 }
 """.lstrip()
     )
-    return commands / "move_action.js", calls_path
+    return commands / action_filename, calls_path
 
 
 async def _dispatch_recorded_inbound_calls(calls_path: Path) -> None:
@@ -280,7 +282,9 @@ async def test_move_action_reports_verified_success_observable_on_python_side(
     tmp_path: Path,
     captured_bridge_events: dict[str, list[dict[str, Any]]],
 ) -> None:
-    move_action, calls_path = _stage_move_action_with_stub_bridge(tmp_path)
+    move_action, calls_path = _stage_action_with_stub_bridge(
+        tmp_path, MOVE_ACTION, "move_action.js"
+    )
     harness = f"""
 import {{ pathToFileURL }} from 'node:url';
 
@@ -346,6 +350,91 @@ process.stdout.write(JSON.stringify({{ status: 'ok', result, position, logs }}) 
     assert observation["class"] == "reached"
     assert observation["after"] == {"x": 0, "y": 64, "z": 2}
     assert action["action_id"] == "move-action-1"
+    assert action["status"] == "success"
+    assert "reached:" in action["detail"]
+    assert verify_movement(observation)["verified"] is True
+
+
+@requires_node
+async def test_navigate_action_reports_verified_success_observable_on_python_side(
+    tmp_path: Path,
+    captured_bridge_events: dict[str, list[dict[str, Any]]],
+) -> None:
+    """The acceptance criterion names navigate explicitly: a navigate action
+    must report a verified success/failure observable on the Python side. This
+    exercises ``navigateAction.perform`` (including coordinate ``resolveTarget``)
+    end-to-end with a fake bot/pathfinder and confirms the resulting
+    ``perception.report``/``action.result`` reach the Python event bus and that
+    Python independently verifies the final pose against the target.
+    """
+    navigate_action, calls_path = _stage_action_with_stub_bridge(
+        tmp_path, NAVIGATE_ACTION, "navigate_action.js"
+    )
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.on('uncaughtException', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+process.on('unhandledRejection', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+
+const mod = await import(pathToFileURL({json.dumps(str(navigate_action))}).href);
+const position = {{ x: 0, y: 64, z: 0 }};
+const bot = {{
+    username: 'NavHarnessBot',
+    entity: {{ position, yaw: 0 }},
+    pathfinder: {{
+        async goto(goal) {{
+            position.x = Number(goal.x);
+            position.y = Number(goal.y);
+            position.z = Number(goal.z);
+            bot.entity.position = position;
+        }},
+        stop() {{}},
+    }},
+}};
+const logs = [];
+const result = await mod.navigateAction.perform(
+    {{ name: 'vera', bot, openChat: (line) => logs.push(line) }},
+    'navigate-action-1',
+    {{ x: 6, y: 64, z: -3 }},
+    1.0,
+    1000,
+);
+process.stdout.write(JSON.stringify({{ status: 'ok', result, position, logs }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "vera",
+            "LTAG_RUN_ID": "run-movement-test",
+            "LTAG_SIMULATION_ID": "00000000-0000-0000-0000-000000000557",
+        },
+    )
+    await _dispatch_recorded_inbound_calls(calls_path)
+
+    assert result["status"] == "ok"
+    assert result["position"] == {"x": 6, "y": 64, "z": -3}
+    assert len(captured_bridge_events["perception"]) == 1
+    assert len(captured_bridge_events["action"]) == 1
+
+    perception = captured_bridge_events["perception"][0]
+    action = captured_bridge_events["action"][0]
+    observation = perception["observations"][0]
+
+    assert observation["type"] == "pose"
+    assert observation["action"] == "navigate"
+    assert observation["action_id"] == "navigate-action-1"
+    assert observation["class"] == "reached"
+    assert observation["after"] == {"x": 6, "y": 64, "z": -3}
+    assert action["action_id"] == "navigate-action-1"
     assert action["status"] == "success"
     assert "reached:" in action["detail"]
     assert verify_movement(observation)["verified"] is True
