@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "payload": {
+    "status": "finished",
+    "stdout": "hello from bridge\n"
+  },
+  "request_id": "req-code-execute-invalid-0001",
+  "retryable": false
+}

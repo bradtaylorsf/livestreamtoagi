@@ -260,6 +260,133 @@
       "title": "BridgeResponse",
       "type": "object"
     },
+    "CodeExecuteRequest": {
+      "additionalProperties": false,
+      "description": "``code.execute`` \u2014 run code in the existing Docker/gVisor sandbox.",
+      "properties": {
+        "code": {
+          "description": "Source code to run in the sandbox.",
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "language": {
+          "description": "Runtime language supported by ExecuteCodeTool.",
+          "enum": [
+            "python",
+            "javascript"
+          ],
+          "title": "Language",
+          "type": "string"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "maximum": 120,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional max execution time in seconds; omitted uses the tool default.",
+          "title": "Timeout"
+        }
+      },
+      "required": [
+        "language",
+        "code"
+      ],
+      "title": "CodeExecuteRequest",
+      "type": "object"
+    },
+    "CodeExecuteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_time_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Elapsed execution time in milliseconds.",
+          "title": "Execution Time Ms"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Process exit code when run.",
+          "title": "Exit Code"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Error or rejection reason.",
+          "title": "Reason"
+        },
+        "status": {
+          "description": "Sandbox result state returned by ExecuteCodeTool.",
+          "enum": [
+            "ok",
+            "error",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "stderr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Captured standard error.",
+          "title": "Stderr"
+        },
+        "stdout": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Captured standard output.",
+          "title": "Stdout"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "CodeExecuteResponse",
+      "type": "object"
+    },
     "CostContext": {
       "additionalProperties": false,
       "description": "Cost-attribution hints (ADR \u00a72 ``cost_context``).\n\nCarries enough metadata for E11 cost/kill controls to charge the right\naccount: which model tier the call is for and which budget bucket it draws\nfrom. ``estimated_cost_usd`` is an optional pre-flight hint the cost gate\nmay use; the authoritative number is computed Python-side.",
@@ -637,7 +764,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.2",
+  "protocolVersion": "1.3",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -646,6 +773,10 @@
     "bridge.ping": {
       "request": "#/$defs/BridgePingRequest",
       "response": "#/$defs/BridgePingResponse"
+    },
+    "code.execute": {
+      "request": "#/$defs/CodeExecuteRequest",
+      "response": "#/$defs/CodeExecuteResponse"
     },
     "cost.gate": {
       "request": "#/$defs/CostGateRequest",

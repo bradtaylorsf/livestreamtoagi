@@ -46,19 +46,22 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.1"` (E4-7 added the optional `trace_id`; 1.0→1.1 is an
-additive minor bump). Same-major versions are wire-compatible in either
-direction (new fields/verbs are additive). An unknown *major* — or any
-unparseable version — is **not supported**; the server replies with the exact
-ADR §3 shape (`unsupported_version_response`): `ok=false`,
+`PROTOCOL_VERSION = "1.3"` (E4-7 added the optional `trace_id`, E5-1 added
+optional core-memory fields, and E6-5 added `code.execute`; all are additive
+minor bumps). Same-major versions are wire-compatible in either direction (new
+fields/verbs are additive). An unknown *major* — or any unparseable version —
+is **not supported**; the server replies with the exact ADR §3 shape
+(`unsupported_version_response`): `ok=false`,
 `error.code="unsupported_version"`, `retryable=false`. Ambiguity is rejected,
 never guessed.
 
 ## Closed service set
 
 The bridge dispatches a **closed** registry — there is no generic "run
-arbitrary Python" verb. The six initial verbs from issue #541 plus
-`bridge.ping` (the ADR's `!bridgePing` first-proof round-trip):
+arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
+`INITIAL_VERBS`; the live registry also includes `bridge.ping` (the ADR's
+`!bridgePing` first-proof round-trip) and additive service verbs such as
+`code.execute`:
 
 | `service.method` | Direction | Request → Response |
 | --- | --- | --- |
@@ -69,12 +72,14 @@ arbitrary Python" verb. The six initial verbs from issue #541 plus
 | `cost.gate` | Node→Python | `{agent_id, action, estimated_cost_usd}` → `{allowed, reason, remaining_budget_usd}` |
 | `perception.report` | Node→Python | `{observations[]}` → `{accepted}` |
 | `action.result` | Node→Python | `{action_id, status, detail}` → `{accepted}` |
+| `code.execute` | Node→Python | `{language, code, timeout?}` → `{status, stdout?, stderr?, reason?, exit_code?, execution_time_ms?}` |
 
 **Naming reconciliation:** issue #541's scope text says `memory.read`; ADR §6
 (authoritative) calls the same verb `memory.recall`. The contract uses
 `memory.recall` everywhere so the split is *closed*, not carried forward.
 `cost.reserve`, `journal.event`, and `kill.status` are named in ADR §6 but
-their schemas land with their owning issues — out of E4-2 scope.
+their schemas land with their owning issues — out of the current bridge
+registry.
 
 ## Server endpoint (E4-3)
 
@@ -103,12 +108,13 @@ alongside `/ws`):
   validated against the closed per-verb registry. Every post-handshake failure
   comes back as a contract-valid `BridgeResponse` (`ok=false` + typed `error`)
   on a still-open socket — only the handshake closes the socket.
-- **Stub dispatch only.** Each of the 7 registry verbs maps to a handler that
-  returns a contract-valid placeholder payload with **no business logic**
-  (e.g. `bridge.ping` → `{pong}`, `memory.recall` → `{results: []}`). Real
-  memory/management/cost wiring is E5/E8; the perception/action inbound channel
-  is E4-5/E4-6. Each stub response is re-validated through
-  `validate_response` before it goes on the wire.
+- **Real service vs stub dispatch.** `memory.recall`, `memory.write`, and
+  `code.execute` require initialized FastAPI services. Code execution delegates
+  to `tools/code_execution.py` and its existing Docker/gVisor sandbox; if those
+  services are unavailable the bridge returns a retryable
+  `code_service_unavailable` error. The remaining verbs use contract-valid
+  placeholders until their owning issues wire them. Each success payload is
+  re-validated through `validate_response` before it goes on the wire.
 
 ## Observability (E4-7)
 
@@ -150,9 +156,11 @@ correlates the Node stderr logs with the Python server logs, plus the counters:
 pnpm verify:bridge-contract        # .venv/bin/pytest tests/backend/test_bridge_contract.py -v
 pnpm verify:bridge-server          # .venv/bin/pytest tests/backend/test_bridge_server.py -v
 pnpm verify:bridge-observability   # .venv/bin/pytest tests/backend/test_bridge_observability.py -v
+pnpm verify:embodiment-code-execution
 ```
 
-This epic step has **no LLM runtime path** (auth + schema plumbing dispatching
-to pure stubs, no model calls), so no LM Studio simulation is required. Both
-tests are the nearest local smoke path and run headless — dependency-free, no
-Docker/network — in the existing `backend-test` CI job.
+This bridge contract path has **no LLM runtime path** (auth/schema plumbing and
+service dispatch, no model calls), so no LM Studio simulation is required.
+Contract/server tests run headless in the existing `backend-test` CI job; the
+code-execution bridge path is covered separately with a mocked Docker client by
+`tests/backend/test_embodiment_code_execution.py`.
