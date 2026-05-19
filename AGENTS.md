@@ -1,4 +1,7 @@
 <!-- managed by alpha-loop -->
+The file is accurate except four counts. Verified: 48 migrations (up to `048`), 19 repos, 9 admin modules / 66 endpoints, 54 public routes, 18 scenarios, 12 eval prompts. Corrections: tool classes 33→32 (BaseTool subclasses, incl. 2 stubs), models ~107→~108, test files ~110→~140.
+
+<!-- managed by alpha-loop -->
 # AGENTS.md — Livestream to AGI
 
 ## Overview
@@ -12,7 +15,7 @@ The live codebase includes:
 - a multi-tier memory system: core memory (persistent identity), recall memory (pgvector semantic search), archival memory (long-term storage), dreams, memory seeding, and reflection (LLM-driven 6-hour + weekly cycles with journaling and self-modification proposals)
 - a conversation engine orchestrator with speaker selection, energy model, interrupts, topic detection, pacing, proximity groups, Management safety review, and TTS output
 - a context assembly pipeline that builds three-layer prompts: infrastructure rules → character identity → mutable memory state
-- a tool registry with functional tool modules exporting 33 tool classes (plus simulation stubs): messaging, audience interaction, memory operations, code execution (Docker sandbox), tilemap generation, revenue/social drafts, web search, Alpha dispatch, self-modification, task management, world state, evolution log viewer, alliances, economy/budget, and character proposals
+- a tool registry with functional tool modules exporting 32 tool classes (including 2 simulation stubs): messaging, audience interaction, memory operations, code execution (Docker sandbox), tilemap generation, revenue/social drafts, web search, Alpha dispatch, self-modification, task management, world state, evolution log viewer, alliances, economy/budget, and character proposals
 - raw SQL migrations (48 pairs, up to `048_simulation_video_failure_reason`) and typed repository classes
 - YAML-backed agent config loading from `agents/*`, including `config.yaml`, `behaviors.yaml`, `system_prompt.md`, and optional extra YAML files (e.g., management's `content_rules.yaml` and `intervention_levels.yaml`)
 - an OpenRouter LLM client with a 9-model registry, cost tracking, retry logic, and optional Langfuse hooks
@@ -45,7 +48,7 @@ Treat `specs/CHARACTER-SHEETS.md` and the YAML files in `agents/` as the source 
 - TTS: Edge TTS pipeline in `core/tts.py` with per-agent voice support; `core/speech_parser.py` for structured dialogue/action parsing
 - Management: `core/management.py` reviews all agent output before broadcast (content filter with intervention levels)
 - Scheduling: APScheduler runs reflection cycles (6-hour at 2/8/14/20 UTC, weekly Sunday 20 UTC) via `core/scheduler.py`
-- Tools: `tools/` package with functional tool modules, 33 tool classes, simulation stubs, and a `ToolRegistry`; includes code execution via Docker sandbox with gVisor; `tools/journal_image_tool.py` provides a separate `JournalImageGenerator` utility
+- Tools: `tools/` package with functional tool modules, 32 tool classes (including 2 simulation stubs), and a `ToolRegistry`; includes code execution via Docker sandbox with gVisor; `tools/journal_image_tool.py` provides a separate `JournalImageGenerator` utility
 - Auth/notifications: `core/auth/` (email magic-link user auth) and `core/notifications/` (simulation-complete emails)
 - Video/publishing: `core/video/` renders simulations to MP4; `core/youtube/` publishes them; rendered files are served from `/videos/{filename}`
 - Characters/social/events: `core/characters/` (spawner, voting, departure), `core/social/` (relationship_tracker, alliances), `core/events/` (event_generator, event_templates)
@@ -92,7 +95,7 @@ scripts/                chat.py, test_agent.py, watch_conversations.py, run_simu
 skills/                 Skill definitions (code-review, git-workflow, implementation-planning, playwright-cli, security-analysis, test-robustness, testing-patterns)
 specs/                  Product and architecture reference docs; useful context, not the runtime source of truth
 tools/                  Agent tool implementations + ToolRegistry (messaging, audience, memory, code execution, tilemap, revenue, web, Alpha dispatch, self-modification, task management, world state, evolution log, alliances, economy, character proposals); journal_image_tool utility; stubs
-tests/                  ~110 test files: backend/ (unit), integration/ (Python integration), frontend/ (vitest), website/ (vitest + playwright e2e)
+tests/                  ~140 test files: backend/ (unit), integration/ (Python integration), frontend/ (vitest), website/ (vitest + playwright e2e)
 ```
 
 Important files:
@@ -101,7 +104,7 @@ Important files:
 - `core/bootstrap.py` unified service initialization for all subsystems with dry-run mode support
 - `core/agent_registry.py` loads agent configs from disk, validates model names via aliases, and syncs status through Redis
 - `core/llm_client.py` defines 9 allowed models with aliases and per-token cost metadata
-- `core/models.py` is the source of backend Pydantic schemas (~107 BaseModel classes)
+- `core/models.py` is the source of backend Pydantic schemas (~108 BaseModel classes)
 - `core/conversation_engine.py` is the central runtime loop — ties together triggers, speaker selection, energy, interrupts, Management review, TTS, and event emission
 - `core/context_assembly.py` builds three-layer prompts: infrastructure → character → memory
 - `core/memory/reflection.py` drives 6-hour and weekly reflection cycles with journaling and self-modification proposals
