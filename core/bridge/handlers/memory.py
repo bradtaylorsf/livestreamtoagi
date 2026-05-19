@@ -1,14 +1,14 @@
 """Bridge handlers for the memory subsystem.
 
-The memory managers in ``core.memory`` are the single source of truth:
-``RecallMemoryManager.retrieve_recall_memories`` for Tier 2 recall reads,
-``CoreMemoryManager.get_core_memory`` for Tier 1 core reads, and
-``MemoryCompactor.compact_interaction`` for append/write compaction. These
-bridge verbs intentionally remain thin adapters over that manager layer. The
-recall bridge path uses the same manager method and arguments as
+The memory backend protocol in ``core.memory`` is the single source of truth for
+Tier 2 recall reads, with ``RecallMemoryManager`` behind the default backend.
+``CoreMemoryManager.get_core_memory`` remains the Tier 1 core read path, and
+``MemoryCompactor.compact_interaction`` remains the append/write compaction
+path. These bridge verbs intentionally stay thin adapters over that manager
+layer. The recall bridge path uses the same method and arguments as
 ``tools.memory_tools.RecallMemoryTool``; core reads and writes delegate directly
-to their source-of-truth managers rather than introducing a bridge-specific
-memory implementation.
+to their source-of-truth managers rather than introducing bridge-specific
+memory logic.
 """
 
 from __future__ import annotations
@@ -38,7 +38,8 @@ async def handle_memory_read(env: BridgeRequest, services: Any) -> dict[str, Any
         )
         return {"results": [], "core_memory": core_memory}
 
-    formatted = await services.recall_memory.retrieve_recall_memories(
+    recall_backend = getattr(services, "memory_backend", None) or services.recall_memory
+    formatted = await recall_backend.retrieve_recall_memories(
         env.agent_id,
         payload.query,
         limit=payload.limit,
