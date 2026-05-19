@@ -9,7 +9,8 @@
   "method": "recall",
   "payload": {
     "limit": 5,
-    "scope": "agent"
+    "scope": "agent",
+    "tier": "core"
   },
   "request_id": "req-memory-recall-0001",
   "run_id": "run-0001",
