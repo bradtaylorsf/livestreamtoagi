@@ -124,6 +124,30 @@ async def test_missing_event_bus_reports_code_service_unavailable() -> None:
     assert response.retryable is True
 
 
+async def test_unreachable_docker_daemon_degrades_to_error_payload_not_a_crash() -> None:
+    """Regression: ``ExecuteCodeTool`` acquires its Docker client outside its
+    own try/except, so an unreachable daemon raises. The bridge dispatch path
+    and shared WebSocket loop only catch ``WebSocketDisconnect``; an uncaught
+    exception here would kill the connection for every verb. The handler must
+    fail-closed to a contract-valid error payload instead.
+    """
+    import unittest.mock
+
+    services = FakeServices(event_bus=AsyncMock(), docker_client=None)
+
+    with unittest.mock.patch(
+        "tools.code_execution.ExecuteCodeTool._get_docker",
+        side_effect=RuntimeError("Error while fetching server API version"),
+    ):
+        response = await build_bridge_response_with_services(_code_request("rex"), services)
+
+    assert response.ok is True
+    assert response.payload is not None
+    assert response.payload["status"] == "error"
+    assert "sandbox unavailable" in response.payload["reason"]
+    c.validate_response(response, service="code", method="execute")
+
+
 def test_code_execute_is_a_real_service_not_a_stub() -> None:
     assert frozenset({"code.execute"}) == CODE_EXECUTE_VERBS
     assert EXECUTE_CODE_ACTION.is_file()
