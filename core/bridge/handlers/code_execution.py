@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.bridge.contract import BridgeRequest, CodeExecuteRequest
+from core.llm_client import agent_cost_context
 from tools.code_execution import ExecuteCodeTool
 
 
@@ -25,4 +26,5 @@ async def handle_code_execute(env: BridgeRequest, services: Any) -> dict[str, An
     kwargs: dict[str, Any] = {"language": payload.language, "code": payload.code}
     if payload.timeout is not None:
         kwargs["timeout"] = payload.timeout
-    return await tool.execute(**kwargs)
+    with agent_cost_context(env.agent_id):
+        return await tool.execute(**kwargs)

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from decimal import Decimal
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from core.memory.compaction import MemoryCompactor
@@ -22,6 +25,47 @@ def _make_llm_response(content: str = "summary") -> LLMResponse:
         latency_ms=200,
         openrouter_id="test-123",
     )
+
+
+def _make_chat_response(content: str = "ok") -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "id": "chatcmpl-test",
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 25, "completion_tokens": 5},
+        },
+    )
+
+
+def _make_stream_response() -> httpx.Response:
+    chunks = [
+        {
+            "id": "chatcmpl-stream-test",
+            "choices": [{"delta": {"content": "ok"}, "finish_reason": None}],
+        },
+        {
+            "id": "chatcmpl-stream-test",
+            "usage": {"prompt_tokens": 25, "completion_tokens": 5},
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+        },
+    ]
+    body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks)
+    body += "data: [DONE]\n\n"
+    return httpx.Response(200, content=body.encode())
+
+
+def _make_cost_tracking_client() -> tuple[Any, AsyncMock]:
+    from core.llm_client import OpenRouterClient
+
+    cost_repo = AsyncMock()
+    client = OpenRouterClient(
+        api_key="test-key",
+        cost_repo=cost_repo,
+        http_client=AsyncMock(),
+    )
+    client._request_with_retry = AsyncMock(return_value=_make_chat_response())
+    return client, cost_repo
 
 
 # ── MemoryCompactor simulation_id passthrough ─────────────────
@@ -113,6 +157,106 @@ class TestLLMClientSimulationIdFallback:
         sim_id = uuid.uuid4()
         client._simulation_id = sim_id
         assert client._simulation_id == sim_id
+
+
+# ── Skill cost attribution ─────────────────────────────────────
+
+
+class TestSkillCostAttribution:
+    """Verify skill-triggered LLM calls inherit the executing agent."""
+
+    @pytest.mark.asyncio
+    async def test_context_agent_attributes_llm_call_without_explicit_agent_id(self) -> None:
+        from core.llm_client import agent_cost_context
+
+        client, cost_repo = _make_cost_tracking_client()
+
+        with agent_cost_context("rex"):
+            await client.complete(
+                messages=[{"role": "user", "content": "Generate code"}],
+                model="gpt-4o-mini",
+            )
+
+        cost_repo.add_cost.assert_awaited_once()
+        event = cost_repo.add_cost.await_args.args[0]
+        assert event.agent_id == "rex"
+
+    @pytest.mark.asyncio
+    async def test_explicit_agent_id_overrides_context_agent(self) -> None:
+        from core.llm_client import agent_cost_context
+
+        client, cost_repo = _make_cost_tracking_client()
+
+        with agent_cost_context("rex"):
+            await client.complete(
+                messages=[{"role": "user", "content": "Generate code"}],
+                model="gpt-4o-mini",
+                agent_id="fork",
+            )
+
+        event = cost_repo.add_cost.await_args.args[0]
+        assert event.agent_id == "fork"
+
+    @pytest.mark.asyncio
+    async def test_context_agent_attributes_stream_call_without_explicit_agent_id(self) -> None:
+        from core.llm_client import agent_cost_context
+
+        client, cost_repo = _make_cost_tracking_client()
+        client._request_with_retry = AsyncMock(return_value=_make_stream_response())
+
+        with agent_cost_context("pixel"):
+            chunks = [
+                chunk
+                async for chunk in client.stream(
+                    messages=[{"role": "user", "content": "Stream code"}],
+                    model="gpt-4o-mini",
+                )
+            ]
+
+        assert chunks[-1].finish_reason == "stop"
+        event = cost_repo.add_cost.await_args.args[0]
+        assert event.agent_id == "pixel"
+
+    def test_agent_cost_context_resets_after_exit(self) -> None:
+        from core.llm_client import agent_cost_context, current_agent_id
+
+        assert current_agent_id.get() is None
+        with agent_cost_context("rex"):
+            assert current_agent_id.get() == "rex"
+        assert current_agent_id.get() is None
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_context_attributes_internal_llm_call(self) -> None:
+        from core.models import ToolCall
+        from core.tool_executor import execute_tool_calls
+
+        client, cost_repo = _make_cost_tracking_client()
+
+        class LLMBackedCodegenTool:
+            name = "codegen"
+
+            async def run(self, **kwargs: Any) -> dict[str, str]:
+                await client.complete(
+                    messages=[{"role": "user", "content": kwargs["prompt"]}],
+                    model="gpt-4o-mini",
+                )
+                return {"status": "ok"}
+
+        tool_call = ToolCall(
+            id="call_codegen",
+            name="codegen",
+            arguments={"prompt": "write a tiny function"},
+        )
+
+        results = await execute_tool_calls(
+            [tool_call],
+            {"codegen": LLMBackedCodegenTool()},
+            "sentinel",
+        )
+
+        assert json.loads(results[0]["content"]) == {"status": "ok"}
+        event = cost_repo.add_cost.await_args.args[0]
+        assert event.agent_id == "sentinel"
 
 
 # ── SimulationRepo.get_total_cost_from_events ────────────────
