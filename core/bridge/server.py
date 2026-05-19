@@ -34,10 +34,10 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
   contract-valid :class:`BridgeResponse` (``ok=false`` + typed error); only the
   handshake closes the socket.
 
-There is no LLM runtime path in this bridge surface: dispatch is contract/data
-plumbing with no model calls. ``memory.recall`` delegates read-only to the
-existing memory managers when FastAPI lifespan has initialized services; other
-verbs remain contract-valid stubs until their owning issues wire them.
+``memory.recall`` delegates read-only to the existing memory managers and
+``memory.write`` delegates append/write work to the existing memory compactor
+when FastAPI lifespan has initialized services; other verbs remain
+contract-valid stubs until their owning issues wire them.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
-from core.bridge.handlers.memory import handle_memory_read
+from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ UNKNOWN_REQUEST_ID = "unknown"
 
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
+MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -113,7 +114,6 @@ StubHandler = Callable[[BridgeRequest], dict[str, Any]]
 # SERVICE_REGISTRY (asserted below + covered by the contract-parity test).
 STUB_HANDLERS: dict[str, StubHandler] = {
     "bridge.ping": lambda env: {"pong": env.payload["message"]},
-    "memory.write": lambda env: {"memory_id": env.request_id},
     "management.review": lambda env: {
         "verdict": "allow",
         "reason": "stub",
@@ -247,6 +247,24 @@ def _memory_services_unavailable(env: BridgeRequest, services: Any | None) -> Br
     )
 
 
+def _memory_write_services_unavailable(
+    env: BridgeRequest, services: Any | None
+) -> BridgeResponse | None:
+    if services is None:
+        message = "memory services are unavailable; application lifespan has not initialized"
+    elif getattr(services, "compactor", None) is None:
+        message = "memory compactor is unavailable"
+    else:
+        return None
+
+    return make_error_response(
+        env.request_id,
+        ERR_MEMORY_SERVICE_UNAVAILABLE,
+        message,
+        retryable=True,
+    )
+
+
 def build_bridge_response(raw: Any) -> BridgeResponse:
     """Turn one decoded non-memory frame into a contract-valid response envelope.
 
@@ -262,11 +280,11 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
 
     env = validated
     key = service_key(env.service, env.method)
-    if key in MEMORY_HANDLER_VERBS:
+    if key in MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS:
         return make_error_response(
             env.request_id,
             ERR_MEMORY_SERVICE_UNAVAILABLE,
-            "memory.recall requires initialized memory services",
+            f"{key} requires initialized memory services",
             retryable=True,
         )
 
@@ -289,6 +307,16 @@ async def build_bridge_response_with_services(
         if unavailable is not None:
             return unavailable
         return _success_response(env, await handle_memory_read(env, services))
+
+    if key in MEMORY_WRITE_VERBS:
+        unavailable = _memory_write_services_unavailable(env, services)
+        if unavailable is not None:
+            return unavailable
+        try:
+            payload = await handle_memory_write(env, services)
+        except ValueError as exc:
+            return make_error_response(env.request_id, ERR_INVALID_PAYLOAD, str(exc))
+        return _success_response(env, payload)
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -417,7 +445,7 @@ async def bridge_ws(websocket: WebSocket) -> None:
 def _assert_handlers_cover_registry() -> None:
     from core.bridge.contract import SERVICE_REGISTRY
 
-    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS
+    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS
     missing = set(SERVICE_REGISTRY) - handled
     extra = handled - set(SERVICE_REGISTRY)
     if missing or extra:

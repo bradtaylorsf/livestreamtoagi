@@ -1,11 +1,11 @@
-"""Read-only bridge handlers for the memory subsystem."""
+"""Bridge handlers for the memory subsystem."""
 
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
-from core.bridge.contract import BridgeRequest, MemoryRecallRequest
+from core.bridge.contract import BridgeRequest, MemoryRecallRequest, MemoryWriteRequest
 
 
 def _simulation_uuid(value: str) -> uuid.UUID | None:
@@ -34,3 +34,19 @@ async def handle_memory_read(env: BridgeRequest, services: Any) -> dict[str, Any
         simulation_id=simulation_id,
     )
     return {"results": [], "formatted": formatted}
+
+
+async def handle_memory_write(env: BridgeRequest, services: Any) -> dict[str, Any]:
+    """Append memory through the existing compactor write path only."""
+    payload = MemoryWriteRequest.model_validate(env.payload)
+    metadata = payload.metadata
+    result = await services.compactor.compact_interaction(
+        agent_id=env.agent_id,
+        interaction=payload.content,
+        event_type=payload.kind,
+        participants=metadata.get("participants") or [env.agent_id],
+        conversation_id=metadata.get("conversation_id"),
+    )
+    if result is None:
+        raise ValueError("memory.write produced no memory for empty content")
+    return {"memory_id": str(result.recall_memory.id)}
