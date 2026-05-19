@@ -13,6 +13,8 @@ real movement, building, perception, and verified outcomes.
 > and [`docs/minecraft/mindcraft-stripped-features.md`](mindcraft-stripped-features.md).
 > **Scope:** In = enumerate allowed skills, excluded skills, inputs, and
 > verification signals. Out = implement the skills; E6-2 through E6-6 do that.
+> **Failure policy:** E6-7 is documented in
+> [`failure-taxonomy.md`](failure-taxonomy.md).
 
 ## Allowed Skills
 
@@ -64,22 +66,23 @@ Mindcraft command was accepted, queued, or attempted. The Python side should be
 able to answer: what changed, what did not change, and which failure class
 applies.
 
-Expected terminal classes are intentionally small until E6-7 formalizes them:
+Expected terminal classes normalize through the E6-7 failure taxonomy
+([`failure-taxonomy.md`](failure-taxonomy.md)):
 
-| Class | Meaning | E6-7 direction |
+| Class | Meaning | Safe behavior |
 | --- | --- | --- |
 | `success` | The post-action read confirms the intended world/inventory/pose state. | Record and continue. |
-| `partial` | Some steps or deltas verified, but not the whole requested outcome. | Return detailed progress; caller may retry bounded or abandon. |
-| `blocked` | Physical obstruction, protected block, missing reachability, or missing required item/tool prevented completion. | Safe-idle or retry bounded based on action type. |
-| `timed-out` | The action did not reach a terminal verified state before `timeout_ms`. | Retry bounded or abandon. |
-| `invalid` | Input failed schema, range, whitelist, recipe, or target validation. | Abandon; do not retry unchanged. |
-| `unreachable` | Pathfinding cannot reach the target or required interaction point. | Abandon or request a new plan. |
-| `bridge-down` | The bridge is disconnected or overloaded. | Safe-idle; never perform unverified or ungated action. |
+| `partial` | Some steps or deltas verified, but not the whole requested outcome. | Return detailed progress; not a canonical failure class. |
+| `blocked` | Physical obstruction, protected block, missing reachability, or missing required item/tool prevented completion. | Normalize to `blocked`; safe action `idle`. |
+| `timed-out` | The action did not reach a terminal verified state before `timeout_ms`. | Normalize to `timeout`; retry bounded, then abandon. |
+| `invalid` | Input failed schema, range, whitelist, recipe, auth, protocol, or target validation. | Normalize to `invalid`; safe action `abandon`. |
+| `unreachable` | Pathfinding cannot reach the target or required interaction point. | Normalize to `unreachable`; safe action `idle`. |
+| `bridge-down` | The bridge cannot be connected to or the send path failed. | Normalize to `bridge-down`; safe action `abandon`. |
 
-The exact failure taxonomy and safe behavior tests are E6-7
-([#562](https://github.com/bradtaylorsf/livestreamtoagi/issues/562)). This
-document only fixes the skill surface and the requirement that success is
-confirmed by observation.
+The exact safe-fail API is `core/embodiment/failure.py`, mirrored for the
+fork in `scripts/minecraft/fork-src/agent/skills/safe_fail.js`. This document
+fixes the skill surface and the requirement that success is confirmed by
+observation.
 
 ## Excluded Skills
 
@@ -103,17 +106,16 @@ it as part of the curated action layer.
 
 ## LM Studio Validation
 
-E6-6 has no LLM runtime path: it adds schema/data plumbing and a read-only
-Mindcraft perception action, but no model call. Per the local-validation
-policy, confirm LM Studio reachability and run the nearest local smoke path.
+E6-7 has no LLM runtime path: it adds deterministic taxonomy/safe-fail logic,
+documentation, and no model call. Per the local-validation policy, confirm LM
+Studio reachability and run the nearest local smoke path.
 
-The nearest local smoke path is the perception verifier, which exercises the
-committed `!observe` action with a fake bot and validates the resulting bridge
-snapshot without a live server:
+The nearest local smoke path is the failure verifier, which exercises the
+Python source of truth and the committed fork mirror without a live server:
 
 ```bash
 pnpm llm:local --list-only
-pnpm verify:embodiment-perception
+pnpm verify:embodiment-failure
 ```
 
 For a real local Minecraft run, follow
@@ -121,4 +123,4 @@ For a real local Minecraft run, follow
 and use LM Studio/OpenAI-compatible local model ids in the generated profiles.
 Record the LM Studio model id(s), commands run, and whether the validation ran
 against the local Mac server. If LM Studio or the E2 server is not available,
-state that and attach the static perception verification output instead.
+state that and attach the static failure verification output instead.

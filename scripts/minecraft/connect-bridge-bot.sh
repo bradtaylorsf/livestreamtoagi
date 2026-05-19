@@ -94,6 +94,7 @@ MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
+SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -113,6 +114,7 @@ MOVEMENT_SKILL_DEST=""
 BUILDING_SKILL_DEST=""
 BUILD_PLAN_SKILL_DEST=""
 PERCEPTION_SKILL_DEST=""
+SAFE_FAIL_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
 # cwd) so the reviewed copies are used no matter where it is invoked.
@@ -133,6 +135,7 @@ MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
+SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 
 MODE="run"
 case "${1:-}" in
@@ -305,6 +308,17 @@ verify_committed_assets() {
         fi
     fi
 
+    if [ ! -s "$SAFE_FAIL_SKILL_SRC" ]; then
+        fail "Safe-fail skill helpers missing or empty: $SAFE_FAIL_SKILL_SRC"; problems=1
+    else
+        grep -q 'decideSafeFail' "$SAFE_FAIL_SKILL_SRC" || { fail "safe-fail helpers missing decideSafeFail"; problems=1; }
+        grep -q 'bridge-overloaded' "$SAFE_FAIL_SKILL_SRC" || { fail "safe-fail helpers missing bridge_overloaded normalization"; problems=1; }
+        grep -q 'retry-bounded' "$SAFE_FAIL_SKILL_SRC" || { fail "safe-fail helpers missing retry-bounded policy"; problems=1; }
+        if grep -q 'callBridge' "$SAFE_FAIL_SKILL_SRC"; then
+            fail "safe-fail helpers must stay pure (no bridge calls)"; problems=1
+        fi
+    fi
+
     if [ ! -s "$MOVE_ACTION_SRC" ]; then
         fail "Move action missing or empty: $MOVE_ACTION_SRC"; problems=1
     else
@@ -465,7 +479,8 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $PLACE_ACTION_REL + $BREAK_ACTION_REL + $BUILD_FROM_PLAN_ACTION_REL +"
     info "              $EXECUTE_CODE_ACTION_REL + $OBSERVE_ACTION_REL +"
     info "              $MOVEMENT_SKILL_REL + $BUILDING_SKILL_REL +"
-    info "              $BUILD_PLAN_SKILL_REL + $PERCEPTION_SKILL_REL"
+    info "              $BUILD_PLAN_SKILL_REL + $PERCEPTION_SKILL_REL +"
+    info "              $SAFE_FAIL_SKILL_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
     info "              placeAction, breakAction, buildFromPlanAction, executeCodeAction"
     info "              and observeAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
@@ -575,6 +590,7 @@ MOVEMENT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$MOVEMENT_SKILL_REL"
 BUILDING_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILDING_SKILL_REL"
 BUILD_PLAN_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILD_PLAN_SKILL_REL"
 PERCEPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$PERCEPTION_SKILL_REL"
+SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
     "$(dirname -- "$BRIDGE_ACTION_DEST")" \
@@ -588,7 +604,8 @@ mkdir -p \
     "$(dirname -- "$MOVEMENT_SKILL_DEST")" \
     "$(dirname -- "$BUILDING_SKILL_DEST")" \
     "$(dirname -- "$BUILD_PLAN_SKILL_DEST")" \
-    "$(dirname -- "$PERCEPTION_SKILL_DEST")"
+    "$(dirname -- "$PERCEPTION_SKILL_DEST")" \
+    "$(dirname -- "$SAFE_FAIL_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
 cp "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_DEST"
 cp "$MOVE_ACTION_SRC" "$MOVE_ACTION_DEST"
@@ -602,6 +619,7 @@ cp "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_DEST"
 cp "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_DEST"
 cp "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_DEST"
 cp "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_DEST"
+cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
 ok "Copied bridge action → $BRIDGE_ACTION_REL"
 ok "Copied move action → $MOVE_ACTION_REL"
@@ -615,6 +633,7 @@ ok "Copied movement helpers → $MOVEMENT_SKILL_REL"
 ok "Copied building helpers → $BUILDING_SKILL_REL"
 ok "Copied build-plan helpers → $BUILD_PLAN_SKILL_REL"
 ok "Copied perception helpers → $PERCEPTION_SKILL_REL"
+ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
 
 # (g) Inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/executeCodeAction/observeAction into the actionsList
 #     array via an anchored node-driven patch. Backed up + restored on exit
