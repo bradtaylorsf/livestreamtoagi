@@ -69,6 +69,23 @@ NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
 
 
+def _node_has_global_websocket() -> bool:
+    if NODE is None:
+        return False
+    res = subprocess.run(
+        [NODE, "-e", "process.exit(globalThis.WebSocket ? 0 : 1)"],
+        capture_output=True,
+        text=True,
+    )
+    return res.returncode == 0
+
+
+requires_global_websocket = pytest.mark.skipif(
+    not _node_has_global_websocket(),
+    reason="node runtime does not expose globalThis.WebSocket",
+)
+
+
 # ── (a) Static contract of the committed JS ─────────────────────────────────
 
 
@@ -407,6 +424,7 @@ def test_happy_path_round_trips_a_pong_over_bearer_header(
 
 
 @requires_node
+@requires_global_websocket
 def test_query_param_fallback_round_trips_when_explicitly_enabled(
     harness: Path, tmp_path: Path
 ) -> None:
