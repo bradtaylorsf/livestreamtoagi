@@ -82,8 +82,9 @@ and downstream issues depend on those research issues instead of hardcoding a gu
 | **E13** | Livestream Pipeline | Greenfield: capture the live Minecraft world (method decided in E1-R6), encode, and stream to Twitch/YouTube with overlays, 24/7 resilience, and a kill path. | E1-R6, E2; full value after E8 | 8 |
 | **E14** | Retire the Phaser Layer | Delete the Phaser frontend, tilemap generation, pixel-office layout, sprite/PixelLab pipeline, custom A* pathfinding, and the Phaser-canvas replay + its video render — **only after** Minecraft capture + website adaptation replace them. | E13, E15 | 7 |
 | **E15** | Website Adaptation | Replace the world page and simulation/replay pages so they reflect the Minecraft world and Minecraft recordings; adapt the simulation list/creator to the new run modes. | E12, E13 | 7 |
+| **E16** | Pluggable Memory Backend + Memory Eval Harness | Behind the E5-8 seam (#658), make recall/archival storage swappable; add an Answer Engine backend to dogfood our own data platform; add a substrate-agnostic write-time / retrieval-time memory eval harness that scores the toy store and real traffic. Preserve `default`-backend behavior — no regression. | E5 (E5-8 #658); real value after E7/E8 | 9 |
 
-**Total: ~110 micro-issues across 15 epics.**
+**Total: ~120 micro-issues across 16 epics.**
 
 ---
 
@@ -150,6 +151,9 @@ and downstream issues depend on those research issues instead of hardcoding a gu
 - **After E4 completes:** `E5` and `E6` are independent and parallel.
 - **After E8 completes:** `E9`, `E10`, `E12`, and full `E13` are largely
   parallel (E12 also needs E5, already done by then).
+- **After E5 completes:** `E16` (pluggable backend + eval harness, #659) runs
+  parallel with `E9`, off the critical-path spine. E7/E8 ship on the `default`
+  backend; the Answer Engine path is an E16-only concern.
 
 ### Strictly sequential spine (critical path)
 
@@ -598,6 +602,22 @@ E5-5..E5-7 sequential.
   - Acceptance: latency report committed; within documented budget or a
     follow-up issue filed.
   - Deps: E5-1,E5-2. Track: sequential. Labels: `area:bridge`,`backend`
+- **E5-8 — MemoryBackend protocol seam** (#658)
+  - Context: E5-3 funnels bridge + `tools/memory_tools.py` through one path;
+    formalize it as a `MemoryBackend` Protocol so recall/archival is swappable
+    without touching callers. Pure refactor; existing managers = `default` impl.
+    Enables E16 without putting any backend change on the E5→E7 critical path.
+  - Scope (in): `MemoryBackend` Protocol in `core/memory/`; managers become the
+    `default` backend behind it; config-driven selection (`default` only here).
+    (out): any new backend / Answer Engine / graph / Core memory (E16).
+  - Acceptance: zero behavior change — full memory regression suite green via
+    the protocol path; test asserts `default` satisfies the protocol and is
+    selected by default; deterministic-embedding local path unaffected.
+  - Files: `core/memory/backend.py` (new), `core/memory/*`; cross-ref
+    `tools/memory_tools.py`, `core/bridge/handlers/memory.py`
+  - Deps: E5-3. Positioned in the #507 checklist before E5-6 so the regression
+    gate covers the refactor; E5-6's dep list intentionally unchanged.
+  - Track: sequential. Labels: `backend`,`preserve-no-regress`
 
 ---
 
@@ -1191,6 +1211,98 @@ sequential; E15-2..E15-5 parallel; E15-6/E15-7 sequential.
     creator all reflect Minecraft; gates E14.
   - Acceptance: `docs/website-adaptation-report.md` + sign-off.
   - Deps: E15-6. Track: sequential. Labels: `frontend`,`needs-human-input`
+
+---
+
+### EPIC 16 — Pluggable Memory Backend + Memory Eval Harness (#659)
+
+Goal: swap recall/archival storage behind the E5-8 seam; dogfood Answer Engine;
+add a substrate-agnostic memory eval harness. `default`-backend behavior is
+preserve-no-regress. Off the critical path. E16-1..E16-3 sequential; E16-4..E16-6
+parallel; E16-7..E16-9 sequential. Filed: E16-1 #660, E16-2 #662, E16-3 #665,
+E16-4 #663, E16-5 #664, E16-6 #661, E16-7 #666, E16-8 #667, E16-9 #668.
+
+- **E16-1 — Recall/Archival backend provider abstraction** (#660)
+  - Context: E5-8 (#658) defines the protocol; E16-1 turns it into a provider
+    registry with a `default` (in-process Postgres/pgvector) provider that is
+    byte-for-byte current behavior, selected by config.
+  - Scope (in): provider registry + `default` provider + config switch.
+    (out): non-default providers, Core memory.
+  - Acceptance: memory regression suite green on `default`; switching providers
+    is a config change touching zero callers.
+  - Deps: E5-8 (#658). Track: sequential. Labels: `backend`,`preserve-no-regress`
+- **E16-2 — Answer Engine adapter: recall + archival** (#662)
+  - Context: dogfood `../answer-engine` as durable recall/archival store.
+  - Scope (in): `core/memory/backends/answer_engine.py` mapping recall and
+    archival onto Answer Engine REST/MCP; namespace by `simulation_id`+`agent_id`;
+    1536-dim parity check. (out): graph/edges (E16-4), Core memory, eval (E16-6).
+  - Acceptance: recall write→search and transcript store→fetch via the
+    `answer_engine` backend return results equivalent to `default`.
+  - Deps: E16-1 (#660). Track: sequential. Labels: `backend`,`area:bridge`
+- **E16-3 — Embedding ownership boundary + Answer Engine validation path** (#665)
+  - Context: Answer Engine owns embedding for the `answer_engine` backend
+    (decision recorded); the deterministic/LM Studio bar stays on `default`.
+  - Scope (in): let Answer Engine embed; document the boundary and that the
+    `answer_engine` path is validated against a live Answer Engine instance;
+    feed the E16-9 ADR. (out): precomputed-vector passthrough.
+  - Acceptance: recall round-trip via `answer_engine` against a live instance;
+    boundary documented.
+  - Deps: E16-2 (#662). Track: sequential. Labels: `backend`,`documentation`
+- **E16-4 — Typed memory-edge / graph layer** (#663)
+  - Context: net-new (neither repo has typed edges/traversal); enables graph
+    recall and the harness's edge metrics.
+  - Scope (in): edges (ENTITY_LINK, TEMPORAL_NEXT, SUPERSEDES, DERIVED_FROM,
+    CONTRADICTS) + 1-hop traversal boost, behind a flag default off; home
+    decided in the E16-9 ADR. (out): multi-hop beyond depth 1 (follow-up).
+  - Acceptance: a SUPERSEDES edge measurably reorders a recall result with the
+    flag on; flag off → regression suite unchanged.
+  - Deps: E16-1 (#660). Track: parallelizable. Labels: `backend`,`eval-finding`
+- **E16-5 — Write-time decision capture on the compaction path** (#664)
+  - Context: `core/memory/compaction.py` already decides what to store; capture
+    the decision as a trace so the harness can score it.
+  - Scope (in): record `{should_store, granularity, entities, proposed_edges,
+    reason}` per decision; no change to what is stored unless a flag flips.
+    (out): the judges (E16-6).
+  - Acceptance: a run emits a decision trace per compaction; compaction tests
+    green.
+  - Deps: E16-1 (#660). Track: parallelizable. Labels: `backend`,`eval-finding`
+- **E16-6 — Standalone eval harness + MemoryBackend protocol** (#661)
+  - Context: the Alpha-Recall IP — substrate-agnostic write/retrieval eval. Own
+    public repo `github.com/bradtaylorsf/alpha-recall`; ships a SQLite toy
+    backend for the portfolio demo.
+  - Scope (in): write-time judge (storage P/R, granularity, entity F1, edge
+    P/R), retrieval-time judge (recall@k, precision@k, LLM utility,
+    counterfactual delta), benchmark runner, fixtures, report, `MemoryBackend`
+    protocol. (out): livestreamtoagi wiring (E16-7).
+  - Acceptance: `alpha-recall benchmark --suite all` runs clean with non-zero
+    metrics and a real failures section; judge mockable without an API key.
+  - Deps: —. Track: parallelizable. Labels: `eval-finding`
+- **E16-7 — livestreamtoagi adapter for the eval harness (dogfood)** (#666)
+  - Context: run the *same* loops on real simulation traffic.
+  - Scope (in): adapter implementing the harness `MemoryBackend` protocol
+    against the memory facade (`default` or `answer_engine`) + the E16-5
+    decision traces. (out): new memory semantics.
+  - Acceptance: the harness scores write-time and retrieval-time metrics on a
+    real local run's memory.
+  - Deps: E16-1 (#660), E16-5 (#664), E16-6 (#661). Track: sequential.
+    Labels: `backend`,`eval-finding`
+- **E16-8 — Eval-harness reporting + CI smoke integration** (#667)
+  - Context: make memory eval part of normal run reporting (cross-ref E10-4).
+  - Scope (in): surface harness output in `core/reporting/` scorecard; CI smoke
+    with deterministic embeddings + mocked judge. (out): production tracing.
+  - Acceptance: a scorecard includes write/retrieval eval fields; CI smoke green
+    without network or API keys.
+  - Deps: E16-6 (#661), E16-7 (#666). Track: sequential. Labels: `qa`,`eval-finding`
+- **E16-9 — Backend parity + latency gate, ADR, docs** (#668)
+  - Context: lock in equivalence and cost-of-indirection.
+  - Scope (in): parity test (`default` vs `answer_engine` over the memory
+    regression suite); latency comparison vs the E5-7 baseline with a budget;
+    ADR `docs/decisions/00NN-pluggable-memory-backend.md`; companion doc.
+    (out): perf tuning beyond the budget (follow-up).
+  - Acceptance: parity test required + green (or documented divergences);
+    latency report within budget or follow-up filed; ADR merged.
+  - Deps: E16-2 (#662), E16-3 (#665), E16-4 (#663). Track: sequential.
+    Labels: `qa`,`documentation`
 
 ---
 

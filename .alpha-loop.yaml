@@ -1,24 +1,170 @@
-# Alpha Loop configuration
-repo: bradtaylorsf/livestreamtoagi
-project: 5
-agent: claude
-label: ready
-base_branch: main
-test_command: pnpm test:python && pnpm test:frontend && pnpm test:website
-dev_command: pnpm dev
-auto_merge: true
-setup_command: "/opt/homebrew/bin/uv venv --python 3.13 .venv && /opt/homebrew/bin/uv pip install --python .venv/bin/python -r requirements.txt && npm ci --silent --prefix frontend && npm ci --silent --prefix website"
-# Safety limits (0 = unlimited)
-# batch: true
-# batch_size: 2
-max_issues: 25
-max_session_duration: 18000  # 5 hours in seconds
-agent_timeout: 7200  # 120 minutes in seconds
-
-# === Added by alpha-loop init (new settings) ===
-# These options were added in a newer alpha-loop release. They're commented out
-# so your current behavior is unchanged — uncomment to opt in.
-
-harnesses:
-  - claude-code
+# Alpha Loop configuration — Livestream to AGI
+# ----------------------------------------------------------------------------
+# Stack: Python 3.13 backend (FastAPI + CrewAI) + TypeScript frontend/website,
+# orchestrated via pnpm scripts over a docker compose stack (Redis/PG/Langfuse).
+# Docs: https://github.com/bradtaylorsf/alpha-loop#configuration
 #
+# This is a HYBRID multi-harness setup: Claude (Opus) drives the judgment- and
+# tool-heavy stages (plan / review / verify); Codex (gpt-5.5) drives the
+# token-heavy execution stages (implement / test_fix / learn). See the
+# `pipeline:` section near the bottom for the per-stage routing.
+# ----------------------------------------------------------------------------
+
+# === Project ================================================================
+# Identifies the GitHub repo + project board the loop reads from.
+repo: bradtaylorsf/livestreamtoagi
+project: 5                    # GitHub Project number (from project URL: /projects/N)
+# milestone: ""               # Only process issues in this milestone (empty = all)
+
+# === Agent ==================================================================
+# Top-level default agent. Used for any operation NOT explicitly overridden in
+# `pipeline:` below — batch plan/implement, post-session holistic review, and
+# eval judging. Per-stage overrides in `pipeline:` win for the main loop steps.
+#   claude   - Anthropic Claude Code (best tool-use support)
+#   codex    - OpenAI Codex CLI
+#   opencode / lmstudio / ollama - see docs/local-models.md
+agent: claude
+# model: ""                   # Top-level model (omit -> Claude Code default).
+                              # Per-stage models are set in `pipeline:` below.
+review_model: opus            # Model for post-session code review + learning
+                              # extraction (judgment-heavy -> max quality).
+agent_timeout: 7200           # Per-issue agent timeout (2h). Heavy stack
+                              # (docker + venv + dual npm) -> generous net.
+
+# === Workflow ===============================================================
+base_branch: main
+label: ready                  # Issues with this label are queued for the loop
+auto_merge: true              # Auto-merge issue PRs into the session branch
+# merge_to: ""                # Reuse an existing session branch instead of new
+auto_cleanup: true            # Remove worktrees after each issue
+# prefer_epics: false         # Auto-pick the single open epic instead of prompt
+
+# === Commands (one distinct command per task) ===============================
+# setup_command  — one-time bootstrap per fresh worktree (idempotent).
+#                  Creates the Python 3.13 venv, installs backend deps, and
+#                  installs frontend + website node deps. `npm ci` is used so
+#                  lockfiles are respected and runs are reproducible.
+setup_command: "/opt/homebrew/bin/uv venv --python 3.13 .venv && /opt/homebrew/bin/uv pip install --python .venv/bin/python -r requirements.txt && npm ci --silent --prefix frontend && npm ci --silent --prefix website"
+
+# test_command   — the validation GATE run after every issue (and as preflight
+#                  against `main` before the session). Full three-layer suite:
+#                  backend pytest + frontend vitest + website vitest. All three
+#                  pnpm scripts pin `.venv/bin/pytest` / `npm --prefix`, so they
+#                  are PATH-safe under `/bin/sh` in the runner.
+test_command: pnpm test:python && pnpm test:frontend && pnpm test:website
+
+# dev_command    — boots the full stack (docker + backend + frontend + website)
+#                  so the `verify` stage / Playwright has a live target.
+dev_command: pnpm dev
+
+# smoke_test     — FAST post-session sanity check (distinct from the full
+#                  test gate above). Brings the docker services up, asserts all
+#                  5 service checks pass (Redis/PG/pgvector/pg_trgm/Langfuse),
+#                  then runs the python<->node bridge contract tests — the most
+#                  recently shipped epic (#506) and the integration seam most
+#                  likely to regress. Real signal, ~1 min, not the 3-suite gate.
+smoke_test: |
+  docker compose up -d --wait && \
+  bash scripts/check-services.sh && \
+  .venv/bin/pytest -q tests/backend/test_bridge_contract.py tests/backend/test_bridge_server.py 2>&1 | tail -5
+
+# === Testing toggles ========================================================
+max_test_retries: 3           # Times the agent may retry failing tests
+skip_preflight: false         # Run test_command against main before starting
+# skip_tests: false           # Never skip the gate (not recommended)
+# skip_review: false          # Keep the Claude review stage
+# skip_verify: false          # Keep live verification (epic mode)
+# skip_learn: false           # Keep learning extraction
+# skip_e2e: false             # Keep Playwright/E2E
+# skip_install: false         # Keep auto-running setup_command on new worktrees
+
+# === Safety limits (0 = unlimited) ==========================================
+# Posture: "open caps, batch off" — long unattended overnight backlog drains
+# with strict one-issue-at-a-time isolation (no batch cross-contamination).
+max_issues: 60                # Cap per session (well above current backlog)
+max_session_duration: 0       # Unlimited — exits when the queue drains
+poll_interval: 60             # Seconds between queue polls when running long
+
+# === Harnesses ==============================================================
+# Sync skills/agents to BOTH harnesses since the pipeline routes across them.
+# Claude syncs to .claude/ ; Codex syncs skills to .agents/ and agents to
+# .codex/ (both directories already exist in this repo).
+harnesses:
+  - claude
+  - codex
+
+# === Pipeline (per-stage harness + model routing) ===========================
+# The core of this config. Judgment- and tool-heavy stages -> Claude Opus
+# (correctness on a 9-agent system + multi-service verification matters most).
+# Token-heavy execution stages -> Codex gpt-5.5 (cost-effective bulk coding).
+# Each step accepts { agent?, model? }; unset steps fall back to top-level.
+pipeline:
+  plan:                       # Architecture & task decomposition
+    agent: claude
+  implement:                  # Bulk code generation
+    agent: codex
+  test_fix:                   # Mechanical iteration on failing tests
+    agent: codex
+  review:                     # Catch subtle correctness / security issues
+    agent: claude
+    model: opus
+  verify:                     # Live verification across the docker/multi-svc/
+    agent: claude             # Phaser stack — Claude has the best tool-use
+    model: opus
+  learn:                      # Learning extraction (cheap summarization)
+    agent: codex
+
+# === Batch mode =============================================================
+# OFF by design (chosen posture). One issue per agent call -> full isolation;
+# safer for an unattended overnight drain on a complex monorepo.
+batch: false
+# batch_size: 5
+
+# === Post-session review ====================================================
+# Holistic review + security scan of the full session diff (uses `review_model`
+# / top-level `agent` = Claude). Defaults are true; listed here for visibility.
+post_session:
+  review: true
+  security_scan: true
+
+# === Evaluation =============================================================
+auto_capture: true            # Capture session failures as eval cases
+eval_dir: .alpha-loop/evals
+# eval_model: ""              # Defaults to review_model
+# eval_timeout: 300
+# eval:
+#   include_agent_prompts: true
+#   include_skills: true
+
+# === Pricing (cost tracking) ================================================
+# Opus is built-in but pinned here for clarity. gpt-5.5 is NOT in the built-in
+# table — values below are PLACEHOLDER estimates; update with real per-Mtok
+# numbers once known so `alpha-loop` cost reports are accurate.
+# pricing:
+#   claude-opus-4-7: { input: 15.0, output: 75.0 }
+#   opus:            { input: 15.0, output: 75.0 }
+#   gpt-5.5:         { input: 0,    output: 0 }   # TODO: set real pricing
+
+# === Routing (advanced, hybrid local/cloud) — reference, disabled ==========
+# This repo uses CLI-harness routing (`pipeline:` above), not API routing.
+# Uncomment + adapt only if offloading token-heavy stages to a local model.
+# routing:
+#   profile: hybrid-v1
+#   stages:
+#     plan:       { model: claude-opus-4-7,     endpoint: anthropic }
+#     build:      { model: qwen3-coder-30b-a3b, endpoint: lmstudio_local }
+#     test_write: { model: qwen3-coder-30b-a3b, endpoint: lmstudio_local }
+#     test_exec:  { model: qwen3-coder-30b-a3b, endpoint: lmstudio_local }
+#     review:     { model: claude-opus-4-7,     endpoint: anthropic }
+#     summary:    { model: claude-haiku-4-5,    endpoint: anthropic }
+#   endpoints:
+#     anthropic:      { type: anthropic,        base_url: "https://api.anthropic.com" }
+#     lmstudio_local: { type: anthropic_compat, base_url: "http://localhost:1234" }
+#   fallback:
+#     on_tool_error: escalate
+#     escalate_to: { model: claude-sonnet-4-6, endpoint: anthropic }
+
+# === Logging ================================================================
+# log_dir: logs
+# verbose: false
+# dry_run: false
