@@ -74,8 +74,13 @@ MCDATA_REL="src/utils/mcdata.js"
 MCDATA_VERSION_PATCH_MARKER="LTAG E3-2 runtime version refresh"
 ACTIONS_REL="src/agent/commands/actions.js"
 ACTIONS_PATCH_MARKER="LTAG E4-4 bridge ping action"
+ACTIONS_MOVE_PATCH_MARKER="LTAG E6-2 move action"
+ACTIONS_NAVIGATE_PATCH_MARKER="LTAG E6-2 navigate action"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
+MOVE_ACTION_REL="src/agent/commands/move_action.js"
+NAVIGATE_ACTION_REL="src/agent/commands/navigate_action.js"
+MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -84,6 +89,9 @@ ACTIONS_BACKUP=""
 ACTIONS_PATH=""
 BRIDGE_CLIENT_DEST=""
 BRIDGE_ACTION_DEST=""
+MOVE_ACTION_DEST=""
+NAVIGATE_ACTION_DEST=""
+MOVEMENT_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
 # cwd) so the reviewed copies are used no matter where it is invoked.
@@ -93,6 +101,9 @@ PROFILE_TEMPLATE="$SCRIPT_DIR/profiles/bridge-bot.json"
 FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
 BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
 BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
+MOVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/move_action.js"
+NAVIGATE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/navigate_action.js"
+MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 
 MODE="run"
 case "${1:-}" in
@@ -127,6 +138,9 @@ restore_clone_patches() {
     fi
     [ -n "${BRIDGE_CLIENT_DEST:-}" ] && rm -f "$BRIDGE_CLIENT_DEST" 2> /dev/null || true
     [ -n "${BRIDGE_ACTION_DEST:-}" ] && rm -f "$BRIDGE_ACTION_DEST" 2> /dev/null || true
+    [ -n "${MOVE_ACTION_DEST:-}" ] && rm -f "$MOVE_ACTION_DEST" 2> /dev/null || true
+    [ -n "${NAVIGATE_ACTION_DEST:-}" ] && rm -f "$NAVIGATE_ACTION_DEST" 2> /dev/null || true
+    [ -n "${MOVEMENT_SKILL_DEST:-}" ] && rm -f "$MOVEMENT_SKILL_DEST" 2> /dev/null || true
 }
 
 # ── Node / npm check (identical posture to connect-stock-bot.sh) ──
@@ -211,6 +225,42 @@ verify_committed_assets() {
         grep -q 'try {'         "$BRIDGE_ACTION_SRC" || { fail "action is not wrapped to never crash the bot"; problems=1; }
     fi
 
+    if [ ! -s "$MOVEMENT_SKILL_SRC" ]; then
+        fail "Movement skill helpers missing or empty: $MOVEMENT_SKILL_SRC"; problems=1
+    else
+        grep -q 'classifyMovement' "$MOVEMENT_SKILL_SRC" || { fail "movement helpers missing classifyMovement"; problems=1; }
+        grep -q 'targetFromMove'   "$MOVEMENT_SKILL_SRC" || { fail "movement helpers missing targetFromMove"; problems=1; }
+        if grep -q 'callBridge' "$MOVEMENT_SKILL_SRC"; then
+            fail "movement helpers must stay pure (no bridge calls)"; problems=1
+        fi
+    fi
+
+    if [ ! -s "$MOVE_ACTION_SRC" ]; then
+        fail "Move action missing or empty: $MOVE_ACTION_SRC"; problems=1
+    else
+        grep -q "'!move'" "$MOVE_ACTION_SRC" || { fail "move action name is not !move"; problems=1; }
+        grep -q "service: 'perception'" "$MOVE_ACTION_SRC" || { fail "move action does not emit perception.report"; problems=1; }
+        grep -q "service: 'action'"     "$MOVE_ACTION_SRC" || { fail "move action does not emit action.result"; problems=1; }
+        grep -q 'classifyMovement'      "$MOVE_ACTION_SRC" || { fail "move action does not classify observed movement"; problems=1; }
+        grep -q 'safe-idling'           "$MOVE_ACTION_SRC" || { fail "move action missing bridge safe-idle path"; problems=1; }
+        if grep -q 'openrouter' "$MOVE_ACTION_SRC"; then
+            fail "move action must NOT reference openrouter"; problems=1
+        fi
+    fi
+
+    if [ ! -s "$NAVIGATE_ACTION_SRC" ]; then
+        fail "Navigate action missing or empty: $NAVIGATE_ACTION_SRC"; problems=1
+    else
+        grep -q "'!navigate'" "$NAVIGATE_ACTION_SRC" || { fail "navigate action name is not !navigate"; problems=1; }
+        grep -q "service: 'perception'" "$NAVIGATE_ACTION_SRC" || { fail "navigate action does not emit perception.report"; problems=1; }
+        grep -q "service: 'action'"     "$NAVIGATE_ACTION_SRC" || { fail "navigate action does not emit action.result"; problems=1; }
+        grep -q 'classifyMovement'      "$NAVIGATE_ACTION_SRC" || { fail "navigate action does not classify observed movement"; problems=1; }
+        grep -q 'safe-idling'           "$NAVIGATE_ACTION_SRC" || { fail "navigate action missing bridge safe-idle path"; problems=1; }
+        if grep -q 'openrouter' "$NAVIGATE_ACTION_SRC"; then
+            fail "navigate action must NOT reference openrouter"; problems=1
+        fi
+    fi
+
     return $problems
 }
 
@@ -222,7 +272,7 @@ info "bridge:    ${MINECRAFT_BRIDGE_URL}  (bearer token via MINECRAFT_BRIDGE_TOK
 info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
 info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
 info "client:    staged → $BRIDGE_CLIENT_REL  (from fork-src/)"
-info "action:    !bridgePing injected into $ACTIONS_REL"
+info "actions:   !bridgePing, !move, !navigate injected into $ACTIONS_REL"
 info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (local only, decision 0003)"
 
 # ── --verify: static, CI/network-safe checks only ──
@@ -231,7 +281,8 @@ if [ "$MODE" = "verify" ]; then
         ok "Static verify passed: settings → E2 server, bridge profile is"
         info "local-only (lmstudio/), python_bridge.js carries the envelope fields,"
         info "bearer auth, bridge endpoint, a deadline timeout and a structured"
-        info "error type, and !bridgePing is wrapped so a failure never crashes."
+        info "error type, and !bridgePing/!move/!navigate are wrapped so failures"
+        info "never crash and movement outcomes report through the E4-6 channel."
         info "(No clone, no network, no Node, no launch — drop --verify to connect.)"
         exit 0
     fi
@@ -269,8 +320,10 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would assert: $MINDCRAFT_DIR HEAD == $MINDCRAFT_COMMIT"
     info "Would stage:  $SETTINGS_TEMPLATE → $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $PROFILE_TEMPLATE  → $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
-    info "Would copy:   fork-src/ → $MINDCRAFT_DIR/$BRIDGE_CLIENT_REL + $BRIDGE_ACTION_REL"
-    info "Would patch:  inject bridgePingAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
+    info "Would copy:   fork-src/ → $MINDCRAFT_DIR/$BRIDGE_CLIENT_REL +"
+    info "              $BRIDGE_ACTION_REL + $MOVE_ACTION_REL + $NAVIGATE_ACTION_REL + $MOVEMENT_SKILL_REL"
+    info "Would patch:  inject bridgePingAction, moveAction, navigateAction into"
+    info "              $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL (restored on exit)"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
     exit 0
@@ -362,24 +415,41 @@ ok "Staged profile → $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}        (conversation tier — decision 0003)"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 0003)"
 
-# (f) Copy the committed bridge client + action verbatim into the clone (the
-#     decision 0005 extension points). Removed again on exit.
+# (f) Copy the committed bridge client + movement actions verbatim into the
+#     clone (the decision 0005 extension points). Removed again on exit.
 BRIDGE_CLIENT_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_CLIENT_REL"
 BRIDGE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_ACTION_REL"
-mkdir -p "$(dirname -- "$BRIDGE_CLIENT_DEST")" "$(dirname -- "$BRIDGE_ACTION_DEST")"
+MOVE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$MOVE_ACTION_REL"
+NAVIGATE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$NAVIGATE_ACTION_REL"
+MOVEMENT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$MOVEMENT_SKILL_REL"
+mkdir -p \
+    "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
+    "$(dirname -- "$BRIDGE_ACTION_DEST")" \
+    "$(dirname -- "$MOVE_ACTION_DEST")" \
+    "$(dirname -- "$NAVIGATE_ACTION_DEST")" \
+    "$(dirname -- "$MOVEMENT_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
 cp "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_DEST"
+cp "$MOVE_ACTION_SRC" "$MOVE_ACTION_DEST"
+cp "$NAVIGATE_ACTION_SRC" "$NAVIGATE_ACTION_DEST"
+cp "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
 ok "Copied bridge action → $BRIDGE_ACTION_REL"
+ok "Copied move action → $MOVE_ACTION_REL"
+ok "Copied navigate action → $NAVIGATE_ACTION_REL"
+ok "Copied movement helpers → $MOVEMENT_SKILL_REL"
 
-# (g) Inject bridgePingAction into the actionsList array via an anchored
-#     node-driven patch. Backed up + restored on exit (the mcdata shim pattern).
+# (g) Inject bridgePingAction/moveAction/navigateAction into the actionsList
+#     array via an anchored node-driven patch. Backed up + restored on exit
+#     (the mcdata shim pattern).
 ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
 if [ ! -f "$ACTIONS_PATH" ]; then
     fail "Mindcraft source file missing: $ACTIONS_PATH"
     exit 1
 fi
-if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH"; then
+if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_MOVE_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_NAVIGATE_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -391,11 +461,17 @@ cp "$ACTIONS_PATH" "$ACTIONS_BACKUP"
 trap restore_clone_patches EXIT
 trap 'restore_clone_patches; exit 130' INT
 trap 'restore_clone_patches; exit 143' TERM
-if ! ACTIONS_PATH="$ACTIONS_PATH" ACTIONS_PATCH_MARKER="$ACTIONS_PATCH_MARKER" node --input-type=module <<'NODE'
+if ! ACTIONS_PATH="$ACTIONS_PATH" \
+    ACTIONS_PATCH_MARKER="$ACTIONS_PATCH_MARKER" \
+    ACTIONS_MOVE_PATCH_MARKER="$ACTIONS_MOVE_PATCH_MARKER" \
+    ACTIONS_NAVIGATE_PATCH_MARKER="$ACTIONS_NAVIGATE_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = process.env.ACTIONS_PATH;
-const marker = process.env.ACTIONS_PATCH_MARKER;
+const bridgeMarker = process.env.ACTIONS_PATCH_MARKER;
+const moveMarker = process.env.ACTIONS_MOVE_PATCH_MARKER;
+const navigateMarker = process.env.ACTIONS_NAVIGATE_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 // Anchor on the exact array opener at the pinned commit
@@ -404,19 +480,37 @@ const anchor = 'export const actionsList = [';
 if (!source.includes(anchor)) {
     throw new Error('actionsList anchor not found — pinned fork shape changed');
 }
-if (!source.includes(marker)) {
-    const importLine =
-        `import { bridgePingAction } from './bridge_ping_action.js'; // ${marker}\n`;
-    source = importLine + source;
-    source = source.replace(anchor, `${anchor}\n    bridgePingAction, // ${marker}`);
+
+const actions = [
+    {
+        marker: bridgeMarker,
+        importLine: `import { bridgePingAction } from './bridge_ping_action.js'; // ${bridgeMarker}\n`,
+        itemLine: `    bridgePingAction, // ${bridgeMarker}`,
+    },
+    {
+        marker: moveMarker,
+        importLine: `import { moveAction } from './move_action.js'; // ${moveMarker}\n`,
+        itemLine: `    moveAction, // ${moveMarker}`,
+    },
+    {
+        marker: navigateMarker,
+        importLine: `import { navigateAction } from './navigate_action.js'; // ${navigateMarker}\n`,
+        itemLine: `    navigateAction, // ${navigateMarker}`,
+    },
+];
+
+const missing = actions.filter((a) => !source.includes(a.marker));
+if (missing.length > 0) {
+    source = missing.map((a) => a.importLine).join('') + source;
+    source = source.replace(anchor, `${anchor}\n${missing.map((a) => a.itemLine).join('\n')}`);
     writeFileSync(path, source);
 }
 NODE
 then
-    fail "Failed to inject bridgePingAction into $ACTIONS_REL"
+    fail "Failed to inject bridgePingAction/moveAction/navigateAction into $ACTIONS_REL"
     exit 1
 fi
-ok "Injected !bridgePing into $ACTIONS_REL"
+ok "Injected !bridgePing, !move, !navigate into $ACTIONS_REL"
 info "  Restores $ACTIONS_REL automatically when this launch exits."
 
 # (h) Runtime-version shim (identical to connect-stock-bot.sh — same marker /
@@ -478,7 +572,9 @@ echo
 # (j) Launch.
 ok "Launching ${BRIDGE_BOT_NAME} → ${MC_HOST}:${MC_PORT} … (Ctrl+C to stop)"
 info "Then in Minecraft chat:  ${BRIDGE_BOT_NAME} !bridgePing(\"hello\")"
+info "Movement smoke:          ${BRIDGE_BOT_NAME} !move(\"act-1\", \"north\", 1, 10000)"
 info "Success: the bot logs 'bridge pong: hello'; the Python bridge logs the"
-info "agent_id + request_id. A bridge failure is logged [error.code] — not a crash."
+info "agent_id + request_id. Movement emits perception.report + action.result."
+info "A bridge failure is logged [error.code] — not a crash."
 cd "$MINDCRAFT_DIR_ABS"
 node main.js --profiles "$MINDCRAFT_PROFILE"
