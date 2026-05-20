@@ -59,6 +59,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     proc = _run("--help")
     assert proc.returncode == 0
     assert "--duration-hours" in proc.stdout
+    assert "--log-dir" in proc.stdout
     assert "LOCAL_LLM_MODEL" in proc.stdout
     assert "SOAK_AGENT_HOURLY_CAP_USD" in proc.stdout
     assert "SOAK_START_MINECRAFT_IF_DOWN" in proc.stdout
@@ -87,6 +88,12 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "shared local clones" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
+
+
+def test_log_dir_flag_overrides_soak_log_root() -> None:
+    proc = _run("--log-dir", "/tmp/e8-8-soak", "--dry-run")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "log root:       /tmp/e8-8-soak" in proc.stdout
 
 
 def test_real_run_fails_closed_when_local_model_is_missing() -> None:

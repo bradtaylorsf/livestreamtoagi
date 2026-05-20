@@ -11,6 +11,7 @@
 # Usage:
 #   scripts/minecraft/soak.sh
 #   scripts/minecraft/soak.sh --duration-hours 2
+#   scripts/minecraft/soak.sh --log-dir /tmp/e8-8-soak
 #   scripts/minecraft/soak.sh --dry-run
 #   scripts/minecraft/soak.sh --verify
 #   scripts/minecraft/soak.sh --help
@@ -60,6 +61,11 @@ while [ "$#" -gt 0 ]; do
         --duration-hours)
             [ "$#" -ge 2 ] || { echo "x --duration-hours needs a value" >&2; exit 2; }
             SOAK_DURATION_HOURS="$2"
+            shift 2
+            ;;
+        --log-dir)
+            [ "$#" -ge 2 ] || { echo "x --log-dir needs a value" >&2; exit 2; }
+            SOAK_LOG_ROOT="$2"
             shift 2
             ;;
         --dry-run)

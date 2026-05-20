@@ -82,7 +82,7 @@ export LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 export EMBEDDING_PROVIDER=deterministic
 export MINECRAFT_BRIDGE_TOKEN=<same-secret-as-backend>
 
-scripts/minecraft/soak.sh --duration-hours 2
+scripts/minecraft/soak.sh --duration-hours 2 --log-dir logs/soak
 ```
 
 If you want the soak to fail instead of auto-starting Paper:
@@ -94,7 +94,7 @@ SOAK_START_MINECRAFT_IF_DOWN=0 scripts/minecraft/soak.sh --duration-hours 2
 Package aliases:
 
 ```bash
-pnpm mc:soak -- --duration-hours 2
+pnpm mc:soak -- --duration-hours 2 --log-dir logs/soak
 pnpm verify:minecraft-soak
 ```
 
@@ -228,7 +228,7 @@ pnpm verify:embodiment-failure
 Results:
 
 - `scripts/minecraft/soak.sh --verify`: passed.
-- `pnpm verify:minecraft-soak`: 14 passed.
+- `pnpm verify:minecraft-soak`: 15 passed.
 - `pnpm verify:bridge-server`: 35 passed.
 - `pnpm verify:embodiment-failure`: 34 passed.
 - Cohort + Management + cost tracking suite: 152 passed, 1 skipped
