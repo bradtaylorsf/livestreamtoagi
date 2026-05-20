@@ -8,6 +8,7 @@ from typing import Any
 from core.bridge import contract as c
 from core.bridge.errand_queue import ErrandQueue, errand_queue
 from core.bridge.server import build_bridge_response_with_services
+from core.models import ContentReviewResult
 from tests.backend.test_bridge_memory import FakeCompactor
 
 
@@ -42,6 +43,35 @@ class ErrandMemoryServices:
     recall_memory: RecallFromCompactor | None = None
     core_memory: object | None = None
     memory_backend: object | None = None
+    management: object | None = None
+
+
+class FakeManagement:
+    def __init__(self, result: ContentReviewResult) -> None:
+        self.result = result
+        self.review_calls: list[dict[str, object]] = []
+        self.intervene_calls: list[tuple[int, str, str]] = []
+
+    async def review(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        conversation_id: object | None = None,
+        simulation_id: object | None = None,
+    ) -> ContentReviewResult:
+        self.review_calls.append(
+            {
+                "agent_id": agent_id,
+                "content": content,
+                "conversation_id": conversation_id,
+                "simulation_id": simulation_id,
+            }
+        )
+        return self.result
+
+    async def intervene(self, severity: int, agent_id: str, reason: str) -> None:
+        self.intervene_calls.append((severity, agent_id, reason))
 
 
 def _request(
@@ -278,6 +308,93 @@ async def test_bridge_errand_complete_writes_retrievable_memory() -> None:
         assert "task-bridge-memory-1" in recalled.formatted
         assert "✓ success" in recalled.formatted
         assert "placed: torch at position=0,64,0" in recalled.formatted
+    finally:
+        errand_queue.clear()
+
+
+async def test_bridge_errand_complete_reviews_alpha_symbolic_outcome() -> None:
+    errand_queue.clear()
+    management = FakeManagement(
+        ContentReviewResult(approved=True, reason="clean", severity=1)
+    )
+    services = ErrandMemoryServices(
+        compactor=FakeCompactor(),
+        management=management,
+    )
+    try:
+        response = await build_bridge_response_with_services(
+            _request(
+                method="complete",
+                payload={
+                    "task_id": "task-bridge-management-review",
+                    "status": "success",
+                    "symbol": "✓",
+                    "detail": "1/1 steps finished near the sheep pen",
+                    "step_results": [
+                        {
+                            "action_id": "place-1",
+                            "status": "success",
+                            "detail": "placed: torch at position=0,64,0",
+                        }
+                    ],
+                },
+            ),
+            services=services,
+        )
+
+        assert response.ok is True
+        assert response.payload == {"accepted": True}
+        assert len(management.review_calls) == 1
+        review_call = management.review_calls[0]
+        assert review_call["agent_id"] == "alpha"
+        assert review_call["simulation_id"] == "sim-test"
+        assert review_call["conversation_id"] is None
+        content = review_call["content"]
+        assert isinstance(content, str)
+        assert "task_id: task-bridge-management-review" in content
+        assert "agent_id: alpha" in content
+        assert "outcome: ✓ success" in content
+        assert "1/1 steps finished near the sheep pen" in content
+        assert "action_id: place-1" in content
+        assert "placed: torch at position=0,64,0" in content
+        assert management.intervene_calls == []
+    finally:
+        errand_queue.clear()
+
+
+async def test_bridge_errand_complete_ack_is_independent_from_blocked_review() -> None:
+    errand_queue.clear()
+    management = FakeManagement(
+        ContentReviewResult(approved=False, reason="blocked symbolic output", severity=3)
+    )
+    services = ErrandMemoryServices(
+        compactor=FakeCompactor(),
+        management=management,
+    )
+    try:
+        response = await build_bridge_response_with_services(
+            _request(
+                method="complete",
+                payload={
+                    "task_id": "task-bridge-management-blocked",
+                    "status": "failure",
+                    "symbol": "✗",
+                    "detail": "path blocked",
+                    "step_results": [],
+                },
+            ),
+            services=services,
+        )
+
+        assert response.ok is True
+        assert response.payload == {"accepted": True}
+        assert len(management.review_calls) == 1
+        assert management.intervene_calls == [
+            (3, "alpha", "blocked symbolic output")
+        ]
+        completion = errand_queue.get_completion("task-bridge-management-blocked")
+        assert completion is not None
+        assert completion.status == "failure"
     finally:
         errand_queue.clear()
 
