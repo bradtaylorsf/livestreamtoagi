@@ -101,9 +101,17 @@ SOAK_START_MINECRAFT_IF_DOWN=0 scripts/minecraft/soak.sh --duration-hours 2
 Package aliases:
 
 ```bash
+pnpm mc:sim:smoke
+pnpm mc:sim:soak
+pnpm mc:sim -- --duration-hours 0.5 --log-dir logs/soak
 pnpm mc:soak -- --duration-hours 2 --log-dir logs/soak
 pnpm verify:minecraft-soak
 ```
+
+`pnpm mc:sim*` loads the same repo `.env` used by `pnpm dev`, adds the common
+local Java 21 / Node 20 Homebrew paths on macOS, then delegates to
+`scripts/minecraft/soak.sh`. Use it for the normal local operator flow: start
+`pnpm dev`, then run the desired Minecraft sim command in a second terminal.
 
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 

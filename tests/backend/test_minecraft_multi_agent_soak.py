@@ -18,6 +18,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
+RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 DOC = REPO_ROOT / "docs" / "minecraft" / "multi-agent-soak.md"
 PACKAGE = REPO_ROOT / "package.json"
 
@@ -42,10 +43,14 @@ def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedP
 def test_soak_script_exists_and_is_executable() -> None:
     assert SCRIPT.is_file(), f"missing {SCRIPT}"
     assert os.access(SCRIPT, os.X_OK), "soak.sh must be executable"
+    assert RUN_SCRIPT.is_file(), f"missing {RUN_SCRIPT}"
+    assert os.access(RUN_SCRIPT, os.X_OK), "run-local-sim.sh must be executable"
 
 
 def test_soak_script_bash_syntax_is_valid() -> None:
     proc = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    proc = subprocess.run(["bash", "-n", str(RUN_SCRIPT)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
 
@@ -66,6 +71,19 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
     assert "run_cost_query()" not in proc.stdout
+
+    wrapper = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert wrapper.returncode == 0
+    assert "pnpm dev" in wrapper.stdout
+    assert "Required in .env" in wrapper.stdout
+    assert "MINECRAFT_BRIDGE_TOKEN" in wrapper.stdout
+    assert "set -euo pipefail" not in wrapper.stdout
 
 
 def test_unknown_argument_is_rejected() -> None:
@@ -88,6 +106,39 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "shared local clones" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
+    assert "no services checked, no bots launched" in proc.stdout
+
+
+def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_BASE_URL=http://localhost:1234/v1",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "LOCAL_LLM_MODEL_BUILDING=google/gemma-4-26b-a4b",
+                "EMBEDDING_PROVIDER=deterministic",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "Launching local Minecraft sim" in proc.stdout
+    assert "duration:       0.25h" in proc.stdout
+    assert "chat model:     google/gemma-4-e4b" in proc.stdout
+    assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
 
@@ -143,6 +194,9 @@ def test_package_json_exposes_soak_commands() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
     scripts = package["scripts"]
     assert scripts["mc:soak"] == "scripts/minecraft/soak.sh"
+    assert scripts["mc:sim"] == "scripts/minecraft/run-local-sim.sh"
+    assert scripts["mc:sim:smoke"] == "scripts/minecraft/run-local-sim.sh smoke"
+    assert scripts["mc:sim:soak"] == "scripts/minecraft/run-local-sim.sh soak"
     assert scripts["verify:minecraft-soak"] == (
         ".venv/bin/pytest tests/backend/test_minecraft_multi_agent_soak.py -v"
     )
