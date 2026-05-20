@@ -21,9 +21,7 @@ def get_conversation_mode() -> ConversationMode:
     raw_mode = os.environ.get(_ENV_VAR, "director").strip().lower()
     if raw_mode in _VALID_MODES:
         return cast("ConversationMode", raw_mode)
-    raise ValueError(
-        f"Unknown {_ENV_VAR}={raw_mode!r}; expected one of: director, embodied"
-    )
+    raise ValueError(f"Unknown {_ENV_VAR}={raw_mode!r}; expected one of: director, embodied")
 
 
 def is_embodied_run() -> bool:
