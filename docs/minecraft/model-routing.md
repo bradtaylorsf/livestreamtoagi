@@ -236,14 +236,20 @@ pnpm mc:gen-profiles vera --provider lmstudio --local-chat <id> --local-code <id
 
 # Write to a profile file instead of stdout:
 pnpm mc:gen-profiles vera --out ./mindcraft/profiles/vera.json
+
+# E8-1: batch mode — emit a profile for every conversational agent. Pass an
+# existing directory (or a trailing slash) to write one `<id>-bot.json` per
+# agent; otherwise emits one combined JSON object to stdout / --out file.
+pnpm mc:gen-profiles --all --out ./mindcraft/profiles/
 ```
 
 The emitted schema is exactly `{name, model, code_model}` — the same minimal
 shape as the committed sibling templates (`stock-bot.json`,
 `routing-bot-a.json`). **Management is refused** (a content filter, never a
 world bot — E7-5); **Alpha generates** (its non-verbal/no-chat behavior is an
-E7-1 runtime concern, not a profile field). Mapping *all nine* agents at launch
-is **E8**; this generator emits one profile per call.
+E7-1 runtime concern, not a profile field). E8-1 (`--all`) discovers every
+`agents/*/config.yaml` and emits the eight conversational profiles in one call;
+launching them remains an E8 concern.
 
 The headless, dependency-free pytest equivalent (what CI runs):
 

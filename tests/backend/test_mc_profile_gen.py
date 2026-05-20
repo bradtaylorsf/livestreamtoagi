@@ -269,6 +269,22 @@ def test_cli_all_writes_directory(tmp_path):
         _assert_openrouter_profile_matches_config(agent_id, profile)
 
 
+def test_cli_all_creates_directory_output_without_trailing_slash(tmp_path):
+    out_dir = tmp_path / "issue572-profiles"
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all", "--out", str(out_dir)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert out_dir.is_dir()
+    assert sorted(path.name for path in out_dir.iterdir()) == [
+        f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS
+    ]
+
+
 def test_cli_all_stdout_emits_combined_json():
     proc = subprocess.run(
         [sys.executable, str(GEN_SCRIPT), "--all"],

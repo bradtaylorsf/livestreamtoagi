@@ -223,11 +223,6 @@ def _profile_filename(agent_id: str) -> str:
     return f"{agent_id.replace('_', '-')}-bot.json"
 
 
-def _is_directory_out(raw_out: str) -> bool:
-    """Whether ``--out`` should be treated as a directory for batch output."""
-    return Path(raw_out).is_dir() or raw_out.endswith("/")
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gen_profiles.py",
@@ -268,7 +263,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--out",
         default="-",
-        help="Output path; '-' or omitted writes the JSON to stdout.",
+        help=(
+            "Output path; '-' or omitted writes JSON to stdout. "
+            "With --all, non-stdout paths are profile directories."
+        ),
     )
     args = parser.parse_args(argv)
     if args.all_agents and args.agent_id:
@@ -294,17 +292,13 @@ def main(argv: list[str] | None = None) -> int:
         rendered = json.dumps(profiles, indent=4)
         if args.out in ("-", ""):
             print(rendered)
-        elif _is_directory_out(args.out):
+        else:
             out_dir = Path(args.out)
             out_dir.mkdir(parents=True, exist_ok=True)
             for agent_id, profile in profiles.items():
                 profile_path = out_dir / _profile_filename(agent_id)
                 profile_path.write_text(json.dumps(profile, indent=4) + "\n")
             print(f"✓ Wrote {len(profiles)} profiles to {out_dir}", file=sys.stderr)
-        else:
-            out_path = Path(args.out)
-            out_path.write_text(rendered + "\n")
-            print(f"✓ Wrote {args.out}", file=sys.stderr)
         return 0
 
     try:
