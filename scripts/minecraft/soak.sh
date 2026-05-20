@@ -34,6 +34,9 @@
 #   SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS
 #                               Seconds to wait for health after auto-start.
 #                               Default: 180.
+#   SOAK_MINDSERVER_BASE_PORT    First local MindServer UI/control port.
+#                               Each bot gets a unique incrementing port.
+#                               Default: 8080.
 #   MINDCRAFT_DIR               Pinned setup-mindcraft.sh checkout. Default:
 #                               ./mindcraft.
 set -euo pipefail
@@ -53,6 +56,7 @@ SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
+SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
 MODE="run"
@@ -185,6 +189,7 @@ print_plan() {
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
+    info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
     info "bots:           $SOAK_BOTS"
     info "cost agents:    $SOAK_COST_AGENTS"
     info "Mindcraft base: $MINDCRAFT_DIR"
@@ -235,6 +240,12 @@ if [ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]; then
     fail "Node ${NODE_MAJOR:-<missing>} found, but Mindcraft soak requires Node $REQUIRED_NODE_MAJOR LTS."
     exit 1
 fi
+case "$SOAK_MINDSERVER_BASE_PORT" in
+    ""|*[!0-9]*)
+        fail "SOAK_MINDSERVER_BASE_PORT must be a numeric TCP port."
+        exit 2
+        ;;
+esac
 
 MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd || true)"
 if [ -z "$MINDCRAFT_BASE_ABS" ] || [ ! -d "$MINDCRAFT_BASE_ABS/.git" ]; then
@@ -302,6 +313,7 @@ write_metadata() {
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
         echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
+        echo "mindserver_base_port=$SOAK_MINDSERVER_BASE_PORT"
         echo "bots=$SOAK_BOTS"
         echo "cost_agents=$SOAK_COST_AGENTS"
     } > "$RUN_DIR/metadata.env"
@@ -396,14 +408,16 @@ prepare_mindcraft_clone() {
 }
 
 launch_bot() {
-    local bot="$1" script worktree log pid
+    local bot="$1" bot_index="$2" script worktree log pid mindserver_port
     script="$(script_for_bot "$bot")"
     worktree="$(prepare_mindcraft_clone "$bot")"
+    mindserver_port=$((SOAK_MINDSERVER_BASE_PORT + bot_index))
     log="$RUN_DIR/bots/$bot.log"
-    info "launching $bot with isolated Mindcraft clone $worktree"
+    info "launching $bot with isolated Mindcraft clone $worktree (MindServer :$mindserver_port)"
     (
         cd "$REPO_ROOT"
         export MINDCRAFT_DIR="$worktree"
+        export MINDSERVER_PORT="$mindserver_port"
         export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
         exec "$script"
@@ -627,8 +641,10 @@ run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS 
 
 start_log_capture
 
+BOT_INDEX=0
 for bot in $SOAK_BOTS; do
-    launch_bot "$bot"
+    launch_bot "$bot" "$BOT_INDEX"
+    BOT_INDEX=$((BOT_INDEX + 1))
 done
 
 MONITOR_STATUS=0

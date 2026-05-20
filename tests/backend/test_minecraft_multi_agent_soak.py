@@ -86,6 +86,7 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     for bot in BOT_IDS:
         assert bot in proc.stdout
     assert "shared local clones" in proc.stdout
+    assert "MindServer:     8080+ per bot" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
@@ -115,6 +116,8 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
         assert f"connect-{bot}-bot.sh" in text
     assert "git clone --shared" in text
     assert "node_modules" in text
+    assert "SOAK_MINDSERVER_BASE_PORT + bot_index" in text
+    assert 'export MINDSERVER_PORT="$mindserver_port"' in text
 
 
 def test_script_auto_starts_minecraft_when_health_is_down() -> None:
@@ -147,8 +150,9 @@ def test_package_json_exposes_soak_commands() -> None:
 
 def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     text = DOC.read_text(encoding="utf-8")
-    assert "STATIC-EVIDENCE ONLY" in text
+    assert "PARTIAL LIVE STARTUP SMOKE" in text
     assert "NO-GO for E8-9" in text
+    assert "0.02-hour live startup smoke" in text
     assert "SOAK_START_MINECRAFT_IF_DOWN=0" in text
     assert "google/gemma-4-26b-a4b" in text
     assert "pnpm llm:local --list-only" in text

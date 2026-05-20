@@ -7,7 +7,8 @@ Scope: Vera, Rex, Aurora, Pixel, Fork, Sentinel, Grok, Alpha, Management out of 
 
 ## Decision
 
-Status: **NO-GO for downstream fan-out epics until the live LM Studio soak is rerun and appended to `multi-agent-soak.md`.**
+Status: **NO-GO for downstream fan-out epics until a full multi-hour LM Studio
+soak is rerun and appended to `multi-agent-soak.md`.**
 
 The committed E8 chain has strong static evidence: all world-bot profiles are
 generated from config, launcher scripts stage local LM Studio profiles, embodied
@@ -16,10 +17,12 @@ metadata is present, and Management review is wired out of band before bot chat
 is emitted.
 
 The blocking gate is the E8-8 soak. `docs/minecraft/multi-agent-soak.md`
-currently records **STATIC-EVIDENCE ONLY** and says NO-GO until a live LM Studio
-soak is rerun. The current E8-9 validation also could not reach LM Studio at
-`http://localhost:1234/v1/models`, so no live cohort launch or multi-hour soak
-ran in this Codex environment. No OpenRouter validation was run or required.
+currently records a **PARTIAL LIVE STARTUP SMOKE** and says NO-GO until a full
+multi-hour LM Studio soak is rerun. Post-loop manual review reached LM Studio,
+started the backend, launched BridgeBot plus all eight agents, and completed a
+short 0.02-hour startup smoke after fixing per-bot MindServer port collisions.
+That proves startup wiring, but it is not the documented multi-hour acceptance
+run. No OpenRouter validation was run or required.
 
 This is a cohort acceptance report with an explicit rerun gate. It is not a
 production livestream launch sign-off.
@@ -56,7 +59,7 @@ by the cohort tests.
 | E8-5 Personality mapping | #576 / #701 / `b59291d` | Map `chattiness`, `initiative`, `interrupt_tendency`, `eavesdrop_tendency`, adjacency, and related knobs into Mindcraft conversation metadata. | `docs/minecraft/personality-mapping.md`; generated `personality` blocks; `bot_responder`; `tests/backend/test_mc_personality_mapping.py`. | Pass for deterministic mapping; native enforcement gaps remain documented. |
 | E8-6 Director retirement | #577 / #702 / `e75548f` | Embodied runs avoid the old Python conversation director while legacy mode still works. | `core/conversation_mode.py`; embodied-mode test in `tests/backend/test_conversation_engine.py`; `CONVERSATION_MODE=embodied`. | Pass for run-mode gate. |
 | E8-7 Management out of band | #578 / #703 / `6f95e20` | Bot chat is reviewed by Management before display; failures block chat. | `scripts/minecraft/fork-src/agent/bridge/management_review.js`; `connect-*-bot.sh` chat gate patch; `docs/minecraft/bridge-contract.md`; `tests/backend/test_bridge_node_client.py`; `tests/backend/test_management.py`. | Pass for service-backed chat gate; no Management world bot. |
-| E8-8 Multi-agent soak | #579 / #704 / `1dd4806` | Multi-hour local run with all bots, bridge stability, respond/ignore counts, and spend within caps. | `docs/minecraft/multi-agent-soak.md`; `scripts/minecraft/soak.sh`; `scripts/minecraft/soak.sh --verify`; `pnpm verify:minecraft-soak` -> 15 passed in this E8-9 run. | **Deviation:** static evidence only. Live LM Studio soak is still required before fan-out. |
+| E8-8 Multi-agent soak | #579 / #704 / `1dd4806` | Multi-hour local run with all bots, bridge stability, respond/ignore counts, and spend within caps. | `docs/minecraft/multi-agent-soak.md`; `scripts/minecraft/soak.sh`; `scripts/minecraft/soak.sh --verify`; `pnpm verify:minecraft-soak`; post-loop 0.02-hour live startup smoke with all bots. | **Deviation:** startup smoke only. Full multi-hour LM Studio soak is still required before fan-out. |
 
 ## Decentralized Conversation Confirmation
 
@@ -84,12 +87,14 @@ review blocks chat rather than leaking unreviewed text.
 
 ## Deviations And Gates
 
-- **Live multi-hour soak missing.** The E8-8 report is static-only and remains
-  the fan-out gate. Downstream E9/E10/E12/E13 work should wait for the live
-  addendum or explicitly accept this risk.
-- **LM Studio unreachable in this E8-9 run.** `pnpm llm:local --list-only`
-  failed against the local Mac URL, so no model IDs were available and no live
-  local bot validation ran.
+- **Live multi-hour soak missing.** The E8-8 report includes only a short
+  post-loop startup smoke and remains the fan-out gate. Downstream
+  E9/E10/E12/E13 work should wait for the live addendum or explicitly accept
+  this risk.
+- **Management review timed out in the startup smoke.** Bot logs showed
+  fail-closed `management_review_event ... outcome=bridge_timeout` entries.
+  The full soak should tune or explicitly accept the local Management review
+  deadline before GO sign-off.
 - **Local profiles are placeholders, not production OpenRouter IDs.** This is
   intentional for zero-spend validation. The generator's OpenRouter form still
   resolves from `agents/<id>/config.yaml` and is tested against `CLAUDE.md`.
@@ -110,7 +115,7 @@ Fork, Sentinel, or Grok against `agents/<id>/config.yaml`, `CLAUDE.md`, and
 
 ## Local LM Studio Validation
 
-Current E8-9 command:
+Post-loop local command:
 
 ```bash
 pnpm llm:local --list-only
@@ -119,12 +124,14 @@ pnpm llm:local --list-only
 Result:
 
 ```text
-FAIL: could not reach http://localhost:1234/v1/models
-      All connection attempts failed
+OK: connected to http://localhost:1234/v1
+Models:
+    text-embedding-nomic-embed-text-v1.5
+    google/gemma-4-e4b
+    google/gemma-4-26b-a4b
 ```
 
-No LM Studio model IDs were available in this run. No OpenRouter spend was used
-or required.
+No OpenRouter spend was used or required.
 
 Launcher model substitution contract:
 
@@ -160,6 +167,9 @@ Results:
 
 - `scripts/minecraft/soak.sh --verify`: passed.
 - `pnpm verify:minecraft-soak`: 15 passed.
+- Post-loop live startup smoke:
+  `scripts/minecraft/soak.sh --duration-hours 0.02 --log-dir /tmp/e8-8-soak-after-port-fix`
+  passed with all nine bots logged in and zero early exits.
 
 See `docs/minecraft/multi-agent-soak.md` for the live run addendum template and
 the prior static evidence block.

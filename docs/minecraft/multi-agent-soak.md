@@ -7,8 +7,8 @@ Scope: BridgeBot plus Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok
 
 ## Decision
 
-Status: **STATIC-EVIDENCE ONLY in this Codex run; NO-GO for E8-9 until a live
-LM Studio soak is rerun and appended here.**
+Status: **PARTIAL LIVE STARTUP SMOKE in this Codex run; NO-GO for E8-9 until a
+full multi-hour LM Studio soak is rerun and appended here.**
 
 The operator entrypoint now exists at `scripts/minecraft/soak.sh` and is wired
 for a multi-hour local run using LM Studio, the existing bot launchers, the
@@ -16,6 +16,13 @@ Minecraft health probe, backend health, log capture, and the `cost_events`
 ledger. If the local Paper server is down, the soak runner starts
 `scripts/minecraft/supervise.sh` and waits for `scripts/minecraft/health.sh`
 to pass before launching bots.
+
+Post-loop manual review found and fixed a live startup blocker: every isolated
+bot launch was trying to bind the default MindServer port `8080`. The soak
+runner now assigns unique `MINDSERVER_PORT` values from
+`SOAK_MINDSERVER_BASE_PORT` upward. A short 0.02-hour live startup smoke then
+launched BridgeBot plus all eight agents and completed without unrecovered bot
+exits. This proves startup wiring, not the required multi-hour acceptance gate.
 
 No OpenRouter validation was run or required.
 
@@ -152,6 +159,77 @@ separate cap table in a later branch, this script should be pointed at that
 table, but it must keep using `cost_events` as the spend ledger.
 
 ## Evidence From This Codex Run
+
+### Post-Loop Manual Live Startup Smoke
+
+After the alpha-loop session, the local environment had LM Studio, Docker
+services, Paper, and the FastAPI backend reachable. The smoke used Node 20 from
+Homebrew and a throwaway local bridge token shared by the backend and bots.
+
+```bash
+pnpm llm:local --list-only
+```
+
+Result: **passed**.
+
+```text
+OK: connected to http://localhost:1234/v1
+Models:
+    text-embedding-nomic-embed-text-v1.5
+    google/gemma-4-e4b
+    google/gemma-4-26b-a4b
+```
+
+```bash
+CHECK_MINECRAFT=1 bash scripts/check-services.sh
+curl -fsS http://127.0.0.1:8010/api/health
+```
+
+Result: **passed**. The backend health response was
+`{"status":"ok","database":"ok","redis":"ok"}`.
+
+```bash
+PATH=/opt/homebrew/opt/node@20/bin:$PATH \
+MINECRAFT_BRIDGE_TOKEN=<local-smoke-token> \
+DATABASE_URL=postgresql://agi:devpassword@localhost:5434/livestream_agi \
+REDIS_URL=redis://:devpassword@localhost:6381 \
+LLM_PROVIDER=lmstudio \
+LOCAL_LLM_BASE_URL=http://localhost:1234/v1 \
+LOCAL_LLM_MODEL=google/gemma-4-e4b \
+LOCAL_LLM_MODEL_BUILDING=google/gemma-4-26b-a4b \
+EMBEDDING_PROVIDER=deterministic \
+CONVERSATION_MODE=embodied \
+SOAK_LAUNCH_STAGGER_SECONDS=1 \
+bash scripts/minecraft/soak.sh --duration-hours 0.02 --log-dir /tmp/e8-8-soak-after-port-fix
+```
+
+Result: **passed**.
+
+Evidence directory:
+`/tmp/e8-8-soak-after-port-fix/20260520T100403Z`
+
+Summary:
+
+| Counter | Result |
+| --- | --- |
+| Early bot exits | `0` |
+| Bridge drop lines | `0` |
+| Management event lines | `38` |
+| Crash candidate lines | `1` |
+| Respond count | `2` |
+| Ignore count | `0` |
+| Cost cap | pass for all tracked agents |
+
+Paper logs confirmed BridgeBot, Alpha, Vera, Rex, Aurora, Pixel, Fork,
+Sentinel, and Grok all logged into the local server. Bot logs also showed
+`management_review_event ... outcome=bridge_timeout` during the startup smoke;
+that is fail-closed behavior, but the full acceptance soak should either tune
+or explicitly accept the local Management review deadline before GO sign-off.
+
+This was deliberately short and does **not** satisfy the E8-8 multi-hour
+acceptance criterion.
+
+### Original Alpha-Loop Evidence
 
 Initial Codex execution did not meet live-soak prerequisites. Verification
 attempt 1 later confirmed Docker services and LM Studio were reachable, but
