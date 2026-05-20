@@ -60,6 +60,7 @@ from core.bridge.contract import (
     ERR_UNSUPPORTED_SERVICE,
     BridgeRequest,
     BridgeResponse,
+    ErrandCompleteRequest,
     ErrandPollRequest,
     MemoryRecallRequest,
     UnsupportedServiceError,
@@ -107,7 +108,9 @@ ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
-ERRAND_VERBS = frozenset({"errand.poll"})
+ERRAND_POLL_VERBS = frozenset({"errand.poll"})
+ERRAND_COMPLETE_VERBS = frozenset({"errand.complete"})
+ERRAND_VERBS = ERRAND_POLL_VERBS | ERRAND_COMPLETE_VERBS
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -318,6 +321,18 @@ def _handle_errand_poll(env: BridgeRequest) -> dict[str, Any]:
     return _errand_payload(errand_queue.poll(payload.agent_id))
 
 
+def _handle_errand_complete(env: BridgeRequest) -> dict[str, Any]:
+    payload = ErrandCompleteRequest.model_validate(env.payload)
+    errand_queue.record_completion(
+        payload.task_id,
+        payload.status,
+        payload.symbol,
+        payload.detail,
+        [step.model_dump() for step in payload.step_results],
+    )
+    return {"accepted": True}
+
+
 def build_bridge_response(raw: Any) -> BridgeResponse:
     """Turn one decoded non-memory frame into a contract-valid response envelope.
 
@@ -347,8 +362,10 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             f"{key} requires initialized code execution services",
             retryable=True,
         )
-    if key in ERRAND_VERBS:
+    if key in ERRAND_POLL_VERBS:
         return _success_response(env, _handle_errand_poll(env))
+    if key in ERRAND_COMPLETE_VERBS:
+        return _success_response(env, _handle_errand_complete(env))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -386,8 +403,10 @@ async def build_bridge_response_with_services(
             return unavailable
         return _success_response(env, await handle_code_execute(env, services))
 
-    if key in ERRAND_VERBS:
+    if key in ERRAND_POLL_VERBS:
         return _success_response(env, _handle_errand_poll(env))
+    if key in ERRAND_COMPLETE_VERBS:
+        return _success_response(env, _handle_errand_complete(env))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 

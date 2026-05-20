@@ -41,6 +41,11 @@ existing `dispatch_alpha` tool path, including its 60-second Alpha LLM timeout
 and events; the same task id is also queued for Alpha to receive through
 `!pollErrand`.
 
+E7-3 adds structured errand execution through `!runErrand`. The bot polls a
+JSON errand plan, reuses the verified `!navigate`/`!place` action surface, and
+reports one `errand.complete` result with Alpha's `✓`/`✗`/`?` semantics. See
+[`alpha-errand.md`](alpha-errand.md) for the task schema and validation path.
+
 ## Local LM Studio Validation
 
 Confirm LM Studio is reachable and record the served model id:

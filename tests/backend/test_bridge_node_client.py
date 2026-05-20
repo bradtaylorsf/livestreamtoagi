@@ -118,9 +118,9 @@ def test_client_carries_the_full_request_envelope() -> None:
     assert "agent_tier" in src and "conversation" in src
     assert "budget_bucket" in src and "'bridge'" in src
     assert "estimated_cost_usd" in src
-    # 1.5: E7-2 (#566) added errand.poll — a minor
+    # 1.6: E7-3 (#567) added errand.complete — a minor
     # bump (ADR §3), still wire-compatible with earlier 1.x peers.
-    assert "PROTOCOL_VERSION = '1.5'" in src, "protocol version must be 1.5"
+    assert "PROTOCOL_VERSION = '1.6'" in src, "protocol version must be 1.6"
 
 
 def test_client_uses_bearer_auth_and_the_bridge_endpoint() -> None:
