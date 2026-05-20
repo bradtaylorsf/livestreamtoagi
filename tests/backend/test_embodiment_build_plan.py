@@ -1,0 +1,572 @@
+"""Tests for E6-4 verified build-from-plan outcomes (#559).
+
+No live Minecraft server is required. The Node helper tests exercise the
+committed fork source directly, and the bridge smoke test uses a fake bot plus
+the existing Python inbound dispatch so the emitted ``perception.report`` and
+``action.result`` records are observable on the Python event bus.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from core.bridge import contract as c
+from core.bridge import inbound
+from core.embodiment import verify_build_plan
+from core.event_bus import EventType, event_bus
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
+BUILDING_HELPERS = FORK_SRC / "agent" / "skills" / "building.js"
+BUILD_PLAN_HELPERS = FORK_SRC / "agent" / "skills" / "build_plan.js"
+BUILD_FROM_PLAN_ACTION = FORK_SRC / "agent" / "commands" / "build_from_plan_action.js"
+CONNECT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-bridge-bot.sh"
+PACKAGE_JSON = REPO_ROOT / "package.json"
+
+NODE = shutil.which("node")
+requires_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
+
+
+def _run_node_harness(tmp_path: Path, source: str, env: dict[str, str] | None = None) -> dict:
+    harness = tmp_path / "build_plan_harness.mjs"
+    harness.write_text(source)
+    proc = subprocess.run(
+        [NODE, str(harness)],
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ.get("PATH", ""), **(env or {})},
+        cwd=tmp_path,
+        timeout=30,
+    )
+    assert proc.returncode == 0, (
+        f"node exited {proc.returncode}\nstdout={proc.stdout}\nstderr={proc.stderr}"
+    )
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def _stage_action_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "fork-src"
+    commands = root / "agent" / "commands"
+    skills = root / "agent" / "skills"
+    bridge = root / "agent" / "bridge"
+    commands.mkdir(parents=True)
+    skills.mkdir(parents=True)
+    bridge.mkdir(parents=True)
+    shutil.copy2(BUILD_FROM_PLAN_ACTION, commands / "build_from_plan_action.js")
+    shutil.copy2(BUILDING_HELPERS, skills / "building.js")
+    shutil.copy2(BUILD_PLAN_HELPERS, skills / "build_plan.js")
+    calls_path = tmp_path / "bridge_calls.jsonl"
+    (bridge / "python_bridge.js").write_text(
+        """
+import { appendFileSync } from 'node:fs';
+
+export class BridgeClientError extends Error {
+    constructor(code, message) {
+        super(message);
+        this.name = 'BridgeClientError';
+        this.code = code;
+    }
+}
+
+export async function callBridge(opts = {}) {
+    appendFileSync(process.env.BRIDGE_CALLS_PATH, JSON.stringify(opts) + '\\n');
+    return {
+        request_id: 'stub-request',
+        ok: true,
+        payload: opts.service === 'bridge' ? { pong: opts.payload && opts.payload.message } : { accepted: true },
+        retryable: false,
+        trace_id: opts.traceId || 'trace-stub',
+    };
+}
+""".lstrip()
+    )
+    return commands / "build_from_plan_action.js", calls_path
+
+
+async def _dispatch_recorded_inbound_calls(calls_path: Path) -> None:
+    for idx, raw in enumerate(calls_path.read_text().splitlines()):
+        call = json.loads(raw)
+        if c.service_key(call["service"], call["method"]) not in inbound.INBOUND_VERBS:
+            continue
+        env = c.BridgeRequest(
+            version=c.PROTOCOL_VERSION,
+            request_id=f"build-plan-stub-{idx}",
+            agent_id="vera",
+            run_id="run-build-plan-test",
+            simulation_id="00000000-0000-0000-0000-000000000559",
+            service=call["service"],
+            method=call["method"],
+            payload=call["payload"],
+            deadline_ms=call.get("deadlineMs", 5000),
+            cost_context=c.CostContext(
+                agent_tier="conversation",
+                budget_bucket="bridge-test",
+                estimated_cost_usd=0.0,
+            ),
+            trace_id=call.get("traceId") or "trace-build-plan-test",
+        )
+        await inbound.dispatch_inbound(env, env.trace_id)
+
+
+@pytest.fixture
+def captured_bridge_events() -> Iterator[dict[str, list[dict[str, Any]]]]:
+    seen: dict[str, list[dict[str, Any]]] = {"perception": [], "action": []}
+
+    async def on_perception(event: dict[str, Any]) -> None:
+        seen["perception"].append(event["data"])
+
+    async def on_action(event: dict[str, Any]) -> None:
+        seen["action"].append(event["data"])
+
+    event_bus.on(EventType.BRIDGE_PERCEPTION, on_perception)
+    event_bus.on(EventType.BRIDGE_ACTION_RESULT, on_action)
+    try:
+        yield seen
+    finally:
+        event_bus.off(EventType.BRIDGE_PERCEPTION, on_perception)
+        event_bus.off(EventType.BRIDGE_ACTION_RESULT, on_action)
+
+
+def _structure_observation(
+    *,
+    steps: list[dict[str, Any]],
+    final_blocks: list[dict[str, Any]],
+    outcome_class: str = "success",
+) -> dict[str, Any]:
+    return {
+        "type": "structure",
+        "action": "build-from-plan",
+        "action_id": "build-plan-python",
+        "origin": {"x": 0, "y": 64, "z": 0},
+        "steps": steps,
+        "final_blocks": final_blocks,
+        "class": outcome_class,
+    }
+
+
+def test_python_verifies_full_build_plan_match() -> None:
+    steps = [
+        {
+            "index": 0,
+            "action": "place",
+            "position": {"x": 0, "y": 64, "z": 0},
+            "block_type": "minecraft:stone",
+            "final_block": "stone",
+        },
+        {
+            "index": 1,
+            "action": "place",
+            "position": {"x": 1, "y": 64, "z": 0},
+            "block_type": "stone",
+            "final_block": "minecraft:stone",
+        },
+    ]
+    observation = _structure_observation(
+        steps=steps,
+        final_blocks=[
+            {"position": {"x": 0, "y": 64, "z": 0}, "block_type": "stone"},
+            {"position": {"x": 1, "y": 64, "z": 0}, "block_type": "minecraft:stone"},
+        ],
+    )
+
+    result = verify_build_plan(observation)
+
+    assert result == {
+        "verified": True,
+        "class": "success",
+        "intended": 2,
+        "present": 2,
+        "missing": 0,
+        "unexpected": 0,
+        "steps_verified": 2,
+        "steps_abandoned": 0,
+        "completion": 1.0,
+    }
+
+
+def test_python_marks_missing_blocks_partial() -> None:
+    observation = _structure_observation(
+        steps=[
+            {
+                "index": 0,
+                "action": "place",
+                "position": {"x": 0, "y": 64, "z": 0},
+                "block_type": "stone",
+                "final_block": "stone",
+            },
+            {
+                "index": 1,
+                "action": "place",
+                "position": {"x": 1, "y": 64, "z": 0},
+                "block_type": "stone",
+                "final_block": "air",
+            },
+        ],
+        final_blocks=[
+            {"position": {"x": 0, "y": 64, "z": 0}, "block_type": "stone"},
+            {"position": {"x": 1, "y": 64, "z": 0}, "block_type": "air"},
+        ],
+        outcome_class="partial",
+    )
+
+    result = verify_build_plan(observation)
+
+    assert result["verified"] is False
+    assert result["class"] == "partial"
+    assert result["intended"] == 2
+    assert result["present"] == 1
+    assert result["missing"] == 1
+    assert result["completion"] == 0.5
+
+
+def test_python_counts_unexpected_final_blocks() -> None:
+    observation = _structure_observation(
+        steps=[
+            {
+                "index": 0,
+                "action": "break",
+                "source": "clear",
+                "position": {"x": 2, "y": 64, "z": 0},
+                "final_block": "dirt",
+            },
+            {
+                "index": 1,
+                "action": "place",
+                "position": {"x": 0, "y": 64, "z": 0},
+                "block_type": "stone",
+                "final_block": "stone",
+            },
+        ],
+        final_blocks=[
+            {"position": {"x": 2, "y": 64, "z": 0}, "block_type": "dirt"},
+            {"position": {"x": 0, "y": 64, "z": 0}, "block_type": "stone"},
+        ],
+        outcome_class="partial",
+    )
+
+    result = verify_build_plan(observation)
+
+    assert result["class"] == "partial"
+    assert result["present"] == 1
+    assert result["missing"] == 0
+    assert result["unexpected"] == 1
+    assert result["steps_verified"] == 1
+
+
+def test_python_marks_invalid_plan_invalid() -> None:
+    observation = _structure_observation(
+        steps=[],
+        final_blocks=[],
+        outcome_class="invalid",
+    )
+
+    result = verify_build_plan(
+        observation,
+        plan={
+            "origin": {"x": 0, "y": 64, "z": 0},
+            "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "air"}]},
+        },
+    )
+
+    assert result == {
+        "verified": False,
+        "class": "invalid",
+        "intended": 0,
+        "present": 0,
+        "missing": 0,
+        "unexpected": 0,
+        "steps_verified": 0,
+        "steps_abandoned": 0,
+        "completion": 0.0,
+    }
+
+
+def test_python_downgrades_false_node_success_label() -> None:
+    observation = _structure_observation(
+        steps=[
+            {
+                "index": 0,
+                "action": "place",
+                "position": {"x": 0, "y": 64, "z": 0},
+                "block_type": "stone",
+                "final_block": "air",
+                "class": "placed",
+            }
+        ],
+        final_blocks=[{"position": {"x": 0, "y": 64, "z": 0}, "block_type": "air"}],
+        outcome_class="success",
+    )
+
+    result = verify_build_plan(observation)
+
+    assert result["verified"] is False
+    assert result["class"] == "partial"
+    assert result["missing"] == 1
+
+
+@requires_node
+def test_node_build_plan_helpers_expand_and_score_plan(tmp_path: Path) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_HELPERS))}).href);
+const normalized = mod.normalizePlan({{
+    origin: {{ x: 10.9, y: 64, z: -2.1 }},
+    plan: {{
+        palette: {{ wall: 'minecraft:Oak Planks' }},
+        clear: [{{ dx: 0, dy: 0, dz: 0 }}],
+        blocks: [
+            {{ dx: 0, dy: 0, dz: 0, block_type: 'wall' }},
+            {{ dx: 1, dy: 0, dz: 0, block_type: 'stone' }},
+        ],
+    }},
+}});
+const metric = mod.completionMetric({{
+    steps: normalized.steps,
+    finalBlocks: [
+        {{ position: {{ x: 10, y: 64, z: -3 }}, block_type: 'oak_planks' }},
+        {{ position: {{ x: 11, y: 64, z: -3 }}, block_type: 'air' }},
+        {{ position: {{ x: 12, y: 64, z: -3 }}, block_type: 'dirt' }},
+    ],
+}});
+const partial = mod.classifyPlan({{ metric, failureClass: 'blocked' }});
+const fullMetric = mod.completionMetric({{
+    steps: normalized.steps,
+    finalBlocks: [
+        {{ position: {{ x: 10, y: 64, z: -3 }}, block_type: 'oak_planks' }},
+        {{ position: {{ x: 11, y: 64, z: -3 }}, block_type: 'stone' }},
+    ],
+}});
+process.stdout.write(JSON.stringify({{
+    origin: normalized.origin,
+    actions: normalized.steps.map((step) => step.action),
+    blockTypes: normalized.steps.map((step) => step.block_type || null),
+    firstPosition: normalized.steps[0].position,
+    metric,
+    partial,
+    success: mod.classifyPlan({{ metric: fullMetric }}),
+    status: mod.statusForPlanClass('partial'),
+    observationType: mod.structureObservation({{
+        actionId: 'node-helper',
+        origin: normalized.origin,
+        steps: normalized.steps,
+        metric: fullMetric,
+        outcomeClass: 'success',
+    }}).type,
+}}) + '\\n');
+"""
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["origin"] == {"x": 10, "y": 64, "z": -3}
+    assert result["actions"] == ["break", "place", "place"]
+    assert result["blockTypes"] == [None, "oak_planks", "stone"]
+    assert result["firstPosition"] == {"x": 10, "y": 64, "z": -3}
+    assert result["metric"]["intended_count"] == 2
+    assert result["metric"]["blocks_present"] == 1
+    assert result["metric"]["blocks_missing"] == 1
+    assert result["metric"]["blocks_unexpected"] == 1
+    assert result["metric"]["completion_ratio"] == 0.5
+    assert result["partial"] == "partial"
+    assert result["success"] == "success"
+    assert result["status"] == "partial"
+    assert result["observationType"] == "structure"
+
+
+def test_committed_build_plan_files_match_contract() -> None:
+    assert BUILD_PLAN_HELPERS.is_file()
+    assert BUILD_FROM_PLAN_ACTION.is_file()
+
+    helper_src = BUILD_PLAN_HELPERS.read_text()
+    assert "normalizePlan" in helper_src
+    assert "completionMetric" in helper_src
+    assert "structureObservation" in helper_src
+    assert "callBridge" not in helper_src
+
+    action_src = BUILD_FROM_PLAN_ACTION.read_text()
+    assert "'!buildFromPlan'" in action_src
+    assert "service: 'perception'" in action_src and "method: 'report'" in action_src
+    assert "service: 'action'" in action_src and "method: 'result'" in action_src
+    assert "completionMetric" in action_src
+    assert "safe-idling" in action_src
+    assert "openrouter" not in action_src.lower()
+
+
+def test_connect_script_stages_and_injects_build_plan_action() -> None:
+    src = CONNECT_SCRIPT.read_text()
+    for token in (
+        "BUILD_FROM_PLAN_ACTION_REL",
+        "BUILD_PLAN_SKILL_REL",
+        "LTAG E6-4 build-from-plan action",
+        "buildFromPlanAction",
+        "!buildFromPlan",
+    ):
+        assert token in src
+
+
+def test_package_json_wires_embodiment_build_plan_verifier() -> None:
+    scripts = json.loads(PACKAGE_JSON.read_text())["scripts"]
+
+    assert (
+        scripts.get("verify:embodiment-build-plan")
+        == ".venv/bin/pytest tests/backend/test_embodiment_build_plan.py -v"
+    )
+
+
+@requires_node
+async def test_build_from_plan_action_reports_actual_vs_intended_structure(
+    tmp_path: Path,
+    captured_bridge_events: dict[str, list[dict[str, Any]]],
+) -> None:
+    build_action, calls_path = _stage_action_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.on('uncaughtException', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+process.on('unhandledRejection', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+
+const mod = await import(pathToFileURL({json.dumps(str(build_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([
+    ['0,63,0', 'stone'],
+    ['1,63,0', 'stone'],
+]);
+const bot = {{
+    username: 'BuildPlanHarnessBot',
+    inventory: {{
+        slots: [{{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const plan = {{
+    palette: {{ wall: 'minecraft:oak_planks' }},
+    blocks: [
+        {{ dx: 0, dy: 0, dz: 0, block_type: 'wall' }},
+        {{ dx: 1, dy: 0, dz: 0, block_type: 'wall' }},
+        {{ dx: 0, dy: 1, dz: 0, block_type: 'wall' }},
+        {{ dx: 1, dy: 1, dz: 0, block_type: 'wall' }},
+    ],
+}};
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'vera', bot }},
+    'build-plan-1',
+    {{ x: 0, y: 64, z: 0 }},
+    plan,
+    10,
+    10000,
+);
+process.stdout.write(JSON.stringify({{
+    status: 'ok',
+    result,
+    finalBlocks: {{
+        a: world.get('0,64,0'),
+        b: world.get('1,64,0'),
+        c: world.get('0,65,0'),
+        d: world.get('1,65,0'),
+    }},
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "vera",
+            "LTAG_RUN_ID": "run-build-plan-test",
+            "LTAG_SIMULATION_ID": "00000000-0000-0000-0000-000000000559",
+        },
+    )
+    await _dispatch_recorded_inbound_calls(calls_path)
+
+    assert result["status"] == "ok"
+    assert result["finalBlocks"] == {
+        "a": "oak_planks",
+        "b": "oak_planks",
+        "c": "oak_planks",
+        "d": "oak_planks",
+    }
+
+    step_actions = [
+        action
+        for action in captured_bridge_events["action"]
+        if action["action_id"].startswith("build-plan-1#")
+    ]
+    terminal_actions = [
+        action
+        for action in captured_bridge_events["action"]
+        if action["action_id"] == "build-plan-1"
+    ]
+    structure_observations = [
+        observation
+        for event in captured_bridge_events["perception"]
+        for observation in event["observations"]
+        if observation.get("type") == "structure"
+    ]
+
+    assert [action["action_id"] for action in step_actions] == [
+        "build-plan-1#1",
+        "build-plan-1#2",
+        "build-plan-1#3",
+        "build-plan-1#4",
+    ]
+    assert all(action["status"] == "success" for action in step_actions)
+    assert len(terminal_actions) == 1
+    assert terminal_actions[0]["status"] == "success"
+    assert len(structure_observations) == 1
+
+    structure = structure_observations[0]
+    assert structure["metric"] == {
+        "intended_count": 4,
+        "blocks_present": 4,
+        "blocks_missing": 0,
+        "blocks_unexpected": 0,
+        "steps_verified": 4,
+        "steps_abandoned": 0,
+        "completion_ratio": 1,
+    }
+    assert "intended=4" in terminal_actions[0]["detail"]
+    assert "present=4" in terminal_actions[0]["detail"]
+    assert verify_build_plan(structure) == {
+        "verified": True,
+        "class": "success",
+        "intended": 4,
+        "present": 4,
+        "missing": 0,
+        "unexpected": 0,
+        "steps_verified": 4,
+        "steps_abandoned": 0,
+        "completion": 1.0,
+    }

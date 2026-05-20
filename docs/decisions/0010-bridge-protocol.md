@@ -166,7 +166,7 @@ shape with a `service`/`method` the bot understands; the bot replies with the
 The bridge dispatches on a **closed set of typed service names**, never a
 generic "run arbitrary Python" verb (consistent with the
 [0005-skill-extension-point.md](0005-skill-extension-point.md) guardrails). The
-initial set:
+live closed set:
 
 | Service | Direction | Purpose |
 | --- | --- | --- |
@@ -179,6 +179,7 @@ initial set:
 | `kill.status` | Node → Python (and Python → Node push) | Query/receive kill-switch state. |
 | `perception.report` | Node → Python | Bot-observed world state (E4-6). |
 | `action.result` | Node → Python | Outcome of an in-world action (E4-5). |
+| `code.execute` | Node → Python | Run code in the existing gVisor sandbox. |
 
 `perception.report` and `action.result` are listed so the envelope and naming
 scheme are fixed now; their schemas and the inbound channel are E4-5/E4-6.

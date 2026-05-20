@@ -15,9 +15,9 @@ the contract honest:
 * the committed schema equals a fresh export — Pydantic is the single source
   of truth, so the Node-side artifact cannot silently drift;
 * version negotiation is fail-closed on an unknown major (ADR §3);
-* the registry is exactly the six initial verbs from #541 (+ ``bridge.ping``)
-  and uses ADR §6 names only — including the ``memory.read`` ->
-  ``memory.recall`` reconciliation the issue text and the ADR disagreed on.
+* the registry uses ADR §6 names only, the frozen six initial verbs from #541
+  stay intact, and the ``memory.read`` -> ``memory.recall`` reconciliation the
+  issue text and the ADR disagreed on remains closed.
 
 Dependency-free by design: pure file reads + ``pydantic`` + ``jsonschema``.
 No Node, no Docker, no network, no LLM — it runs headless in the existing
@@ -75,6 +75,7 @@ ADR_SERVICE_NAMES = {
     "kill.status",
     "perception.report",
     "action.result",
+    "code.execute",
 }
 ALLOWED_REGISTRY_KEYS = ADR_SERVICE_NAMES | {"bridge.ping"}
 
@@ -323,18 +324,85 @@ def test_memory_read_fields_are_additive_for_core_tier(
     assert "core_memory" not in resp_schema.get("required", [])
 
 
+def test_perception_snapshot_models_are_exported_and_report_is_backward_compatible(
+    committed_schema: dict[str, Any],
+) -> None:
+    """E6-6 (#561): typed snapshots are exported for Node/Python agreement,
+    while ``perception.report`` keeps its raw observations list so older
+    pose/block/structure reports remain valid."""
+    snapshot = {
+        "type": "perception_snapshot",
+        "pose": {
+            "position": {"x": 0, "y": 64, "z": 0},
+            "yaw": 0,
+            "pitch": 0,
+            "on_ground": True,
+            "dimension": "overworld",
+        },
+        "nearby_blocks": [
+            {"position": {"x": 1, "y": 64, "z": 0}, "block_type": "stone"}
+        ],
+        "entities": [
+            {
+                "entity_id": "mob-1",
+                "kind": "mob",
+                "name": "zombie",
+                "position": {"x": 0, "y": 64, "z": 1},
+                "distance": 1.0,
+            }
+        ],
+        "inventory": {
+            "items": [{"slot": 1, "item_id": "oak_planks", "count": 4}],
+            "equipment": {"hand": "stone_pickaxe", "head": None},
+            "used_slots": 1,
+            "total_slots": 46,
+        },
+        "radius_blocks": 8,
+        "scope": "all",
+        "include_air": False,
+        "captured_tick": 123,
+    }
+
+    parsed = c.PerceptionSnapshot.model_validate(snapshot)
+    assert parsed.nearby_blocks[0].block_type == "stone"
+    assert parsed.inventory.items[0].item_id == "oak_planks"
+
+    # Report payload remains additive/backward-compatible: raw observations are
+    # accepted even when they are not a full PerceptionSnapshot.
+    c.PerceptionReportRequest.model_validate({"observations": [{"type": "pose"}]})
+    c.PerceptionReportRequest.model_validate(
+        {"observations": [{"type": "perception_snapshot", "bad": True}]}
+    )
+
+    with pytest.raises(ValidationError):
+        c.PerceptionSnapshot.model_validate(snapshot | {"unexpected": True})
+
+    defs = committed_schema["$defs"]
+    for model_name in (
+        "Vec3",
+        "PoseObservation",
+        "BlockObservation",
+        "EntityObservation",
+        "InventoryItem",
+        "InventoryObservation",
+        "PerceptionSnapshot",
+    ):
+        assert model_name in defs
+        assert defs[model_name]["additionalProperties"] is False
+
+
 # ── Versioning (ADR §3, fail-closed) ────────────────────────────────────────
 
 
 def test_protocol_version_is_self_consistent() -> None:
-    # 1.2: E5-1 (#549) added optional memory read fields for core-memory
-    # exposure — an additive minor bump (ADR §3), same major as 1.0/1.1.
-    assert c.PROTOCOL_VERSION == "1.2"
+    # 1.4: E6-6 (#561) added typed perception snapshot definitions — an
+    # additive minor bump (ADR §3), same major as earlier 1.x peers.
+    assert c.PROTOCOL_VERSION == "1.4"
     assert c.is_supported_version(c.PROTOCOL_VERSION)
-    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 2, 0)
+    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 4, 0)
 
 
-@pytest.mark.parametrize("version", ["1.0", "1.4", "1.0.9", "1.99.99"])
+@pytest.mark.parametrize("version", ["1.0", "1.3", "1.4", "1.0.9", "1.99.99"])
 def test_additive_same_major_versions_supported(version: str) -> None:
     """ADR §3: new optional fields/verbs are minor/patch and must not break a
     peer — any same-major version is wire-compatible in either direction."""

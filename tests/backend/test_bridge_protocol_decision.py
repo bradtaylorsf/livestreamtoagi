@@ -51,9 +51,9 @@ ENVELOPE_REQUEST_FIELDS = (
 )
 ENVELOPE_RESPONSE_FIELDS = ("request_id", "ok", "payload", "error", "retryable")
 
-# Typed service names. ADR 0005 fixes the first six; the E4-1 plan extends the
-# set with cost.gate and the perception/action result channel verbs. ADR 0010
-# must name all of them so E4-2's schemas have a fixed vocabulary.
+# Typed service names. ADR 0005 fixes the first six; later bridge issues extend
+# the set with cost.gate, perception/action result, and code execution verbs.
+# ADR 0010 must name all of them so the schemas have a fixed vocabulary.
 ADR0005_SERVICE_NAMES = (
     "memory.recall",
     "memory.write",
@@ -62,7 +62,7 @@ ADR0005_SERVICE_NAMES = (
     "journal.event",
     "kill.status",
 )
-EXTENDED_SERVICE_NAMES = ("cost.gate", "perception.report", "action.result")
+EXTENDED_SERVICE_NAMES = ("cost.gate", "perception.report", "action.result", "code.execute")
 
 # The headed sections the issue scope requires (transport, envelope, versioning,
 # auth, failure semantics), keyed to a stable lowercase substring.
@@ -166,8 +166,8 @@ def test_envelope_fields_are_consistent_with_adr_0005(adr_text: str) -> None:
 @pytest.mark.parametrize("service", ADR0005_SERVICE_NAMES + EXTENDED_SERVICE_NAMES)
 def test_adr_names_the_typed_services(service: str, adr_text: str) -> None:
     """The bridge dispatches a closed set of typed services (no generic
-    'run arbitrary Python'). ADR 0005's six plus the E4-1 plan's extensions
-    must all be named so E4-2 has a fixed vocabulary."""
+    untyped Python bridge). ADR 0005's six plus later extensions must all be
+    named so the schemas have a fixed vocabulary."""
     assert service in adr_text, (
         f"0010-bridge-protocol.md does not name the typed service {service!r}"
     )

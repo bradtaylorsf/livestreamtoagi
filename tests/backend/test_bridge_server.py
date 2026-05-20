@@ -7,7 +7,7 @@ Starlette ``TestClient`` WebSocket.
 
 Dependency-free by design: ``TestClient(app)`` is used *without* its context
 manager, so the FastAPI ``lifespan`` (which bootstraps Postgres/Redis) never
-runs. Non-memory verbs remain stubs; memory service verbs fail closed with a
+runs. Stub verbs remain stubs; memory and code service verbs fail closed with a
 retryable typed error until services are present. No Docker, no network, no
 LLM, so this runs in the existing ``backend-test`` CI job and is the nearest
 local smoke path for this bridge surface.
@@ -42,6 +42,8 @@ from core.bridge.server import (
     BRIDGE_QUERY_TOKEN_ENV,
     BRIDGE_TOKEN_ENV,
     BRIDGE_WS_PATH,
+    CODE_EXECUTE_VERBS,
+    ERR_CODE_SERVICE_UNAVAILABLE,
     ERR_MEMORY_SERVICE_UNAVAILABLE,
     MEMORY_HANDLER_VERBS,
     MEMORY_WRITE_VERBS,
@@ -201,6 +203,25 @@ def test_memory_write_without_services_returns_retryable_typed_error(
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
+def test_code_execute_without_services_returns_retryable_typed_error(
+    token_env: str, client: TestClient
+) -> None:
+    request = _fixture("code.execute", "request.valid.json")
+    with client.websocket_connect(
+        BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as ws:
+        ws.send_json(request)
+        raw_response = ws.receive_json()
+
+    response = c.BridgeResponse.model_validate(raw_response)
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_CODE_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
 def test_query_param_token_rejected_by_default(token_env: str, client: TestClient) -> None:
     """Bearer-in-URL auth is disabled by default to avoid token leakage."""
     with pytest.raises(WebSocketDisconnect) as exc:
@@ -337,6 +358,16 @@ def test_build_bridge_response_returns_typed_error_for_async_memory_paths(verb: 
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
+def test_build_bridge_response_returns_typed_error_for_code_path() -> None:
+    request = _fixture("code.execute", "request.valid.json")
+    response = build_bridge_response(request)
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == ERR_CODE_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
 def test_build_bridge_response_rejects_bad_envelope() -> None:
     response = build_bridge_response("definitely not an envelope")
     assert response.ok is False
@@ -356,9 +387,10 @@ def test_bridge_route_is_mounted_on_app() -> None:
 def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.recall"} == MEMORY_HANDLER_VERBS
     assert {"memory.write"} == MEMORY_WRITE_VERBS
+    assert {"code.execute"} == CODE_EXECUTE_VERBS
     assert "memory.recall" not in STUB_HANDLERS
     assert "memory.write" not in STUB_HANDLERS
-    assert (
-        set(STUB_HANDLERS) | set(MEMORY_HANDLER_VERBS) | set(MEMORY_WRITE_VERBS)
-        == set(c.SERVICE_REGISTRY)
-    )
+    assert "code.execute" not in STUB_HANDLERS
+    assert set(STUB_HANDLERS) | set(MEMORY_HANDLER_VERBS) | set(MEMORY_WRITE_VERBS) | set(
+        CODE_EXECUTE_VERBS
+    ) == set(c.SERVICE_REGISTRY)

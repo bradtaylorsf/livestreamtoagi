@@ -30,6 +30,9 @@ There is no LLM runtime path in this issue: it is pure event plumbing with no
 model calls. The nearest local smoke path is the dependency-free
 ``tests/backend/test_bridge_inbound.py`` (event observed in-process, no
 Docker/network/LLM).
+
+E6-2 (#557) movement/navigation skills reuse this same channel: they emit a
+pose ``perception.report`` followed by a terminal ``action.result``.
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from core.bridge.contract import (
     service_key,
 )
 from core.bridge.observability import log_bridge_inbound_event
+from core.embodiment import build_perception_snapshot
 from core.event_bus import EventType, event_bus
 
 logger = logging.getLogger(__name__)
@@ -100,9 +104,16 @@ async def handle_perception_report(
     """
     payload = PerceptionReportRequest.model_validate(env.payload)
     tid = _resolve_trace_id(env, trace_id)
+    event_payload: dict[str, Any] = {
+        **_attribution(env, tid),
+        "observations": payload.observations,
+    }
+    snapshot = build_perception_snapshot(payload.observations)
+    if snapshot is not None:
+        event_payload["snapshot"] = snapshot.model_dump()
     await event_bus.emit(
         EventType.BRIDGE_PERCEPTION,
-        {**_attribution(env, tid), "observations": payload.observations},
+        event_payload,
     )
     log_bridge_inbound_event(
         logger,

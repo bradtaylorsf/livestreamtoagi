@@ -42,11 +42,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.2 is a
-# minor bump: E5-1 (#549) adds optional `memory.recall` read fields for core
-# memory exposure. It is purely additive — `is_supported_version` only gates on
-# the major, so a 1.0/1.1 peer that omits the new fields stays wire-compatible.
-PROTOCOL_VERSION = "1.2"
+# additive-compatible within a major and fail-closed across majors. 1.4 is a
+# minor bump: E6-6 (#561) adds typed `PerceptionSnapshot` schema definitions
+# while keeping `perception.report.observations` backward-compatible. Earlier
+# 1.x peers remain wire-compatible because `is_supported_version` gates only on
+# the major.
+PROTOCOL_VERSION = "1.4"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -326,6 +327,91 @@ class CostGateResponse(BaseModel):
     )
 
 
+class Vec3(BaseModel):
+    """3D coordinate in world space or a block cell."""
+
+    model_config = ConfigDict(extra="forbid")
+    x: float = Field(description="X coordinate.")
+    y: float = Field(description="Y coordinate.")
+    z: float = Field(description="Z coordinate.")
+
+
+class PoseObservation(BaseModel):
+    """Bot pose at the instant a perception snapshot was captured."""
+
+    model_config = ConfigDict(extra="forbid")
+    position: Vec3 = Field(description="Current bot position.")
+    yaw: float = Field(description="Current yaw in radians.")
+    pitch: float = Field(description="Current pitch in radians.")
+    on_ground: bool = Field(description="Whether the bot is on the ground.")
+    dimension: str = Field(min_length=1, description="Minecraft dimension id.")
+
+
+class BlockObservation(BaseModel):
+    """Observed block near the bot."""
+
+    model_config = ConfigDict(extra="forbid")
+    position: Vec3 = Field(description="Block cell position.")
+    block_type: str = Field(min_length=1, description="Normalized block id.")
+
+
+class EntityObservation(BaseModel):
+    """Observed entity near the bot."""
+
+    model_config = ConfigDict(extra="forbid")
+    entity_id: str = Field(min_length=1, description="Stable entity id when available.")
+    kind: Literal["player", "mob", "item", "object"] = Field(description="Entity category.")
+    name: str | None = Field(default=None, description="Display/user name when known.")
+    position: Vec3 = Field(description="Entity position.")
+    distance: float = Field(ge=0.0, description="Distance from the observing bot.")
+
+
+class InventoryItem(BaseModel):
+    """Observed inventory stack."""
+
+    model_config = ConfigDict(extra="forbid")
+    slot: int = Field(ge=0, description="Inventory slot index.")
+    item_id: str = Field(min_length=1, description="Normalized item id.")
+    count: int = Field(ge=0, description="Stack count.")
+
+
+class InventoryObservation(BaseModel):
+    """Observed inventory state."""
+
+    model_config = ConfigDict(extra="forbid")
+    items: list[InventoryItem] = Field(
+        default_factory=list, description="Inventory stacks included in this snapshot."
+    )
+    equipment: dict[str, str | None] = Field(
+        default_factory=dict, description="Equipment slot name -> normalized item id or null."
+    )
+    used_slots: int = Field(ge=0, description="Number of populated slots returned.")
+    total_slots: int = Field(ge=0, description="Total known inventory slots.")
+
+
+class PerceptionSnapshot(BaseModel):
+    """Stable perception snapshot for E6 embodied decisions."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["perception_snapshot"] = Field(description="Snapshot discriminator.")
+    pose: PoseObservation = Field(description="Current bot pose.")
+    nearby_blocks: list[BlockObservation] = Field(
+        default_factory=list, description="Blocks observed within radius."
+    )
+    entities: list[EntityObservation] = Field(
+        default_factory=list, description="Entities observed within radius."
+    )
+    inventory: InventoryObservation = Field(description="Inventory state.")
+    radius_blocks: float = Field(ge=0.0, description="Perception radius in blocks.")
+    scope: Literal["pose", "nearby_blocks", "entities", "inventory", "all"] = Field(
+        description="Requested snapshot scope."
+    )
+    include_air: bool = Field(description="Whether air blocks are included.")
+    captured_tick: int | None = Field(
+        default=None, ge=0, description="Minecraft/world tick when known."
+    )
+
+
 class PerceptionReportRequest(BaseModel):
     """``perception.report`` — bot-observed world state (schema fixed now, channel E4-6)."""
 
@@ -356,6 +442,36 @@ class ActionResultResponse(BaseModel):
     accepted: bool = Field(description="Whether Python recorded the result.")
 
 
+class CodeExecuteRequest(BaseModel):
+    """``code.execute`` — run code in the existing Docker/gVisor sandbox."""
+
+    model_config = ConfigDict(extra="forbid")
+    language: Literal["python", "javascript"] = Field(
+        description="Runtime language supported by ExecuteCodeTool."
+    )
+    code: str = Field(min_length=1, description="Source code to run in the sandbox.")
+    timeout: int | None = Field(
+        default=None,
+        ge=1,
+        le=120,
+        description="Optional max execution time in seconds; omitted uses the tool default.",
+    )
+
+
+class CodeExecuteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["ok", "error", "rejected"] = Field(
+        description="Sandbox result state returned by ExecuteCodeTool."
+    )
+    stdout: str | None = Field(default=None, description="Captured standard output.")
+    stderr: str | None = Field(default=None, description="Captured standard error.")
+    reason: str | None = Field(default=None, description="Error or rejection reason.")
+    exit_code: int | None = Field(default=None, description="Process exit code when run.")
+    execution_time_ms: int | None = Field(
+        default=None, description="Elapsed execution time in milliseconds."
+    )
+
+
 # ── Service registry (ADR §6 closed set) ────────────────────────────────────
 
 # Maps "<service>.<method>" -> (request payload model, response payload model).
@@ -363,8 +479,8 @@ class ActionResultResponse(BaseModel):
 # unsupported_service error. Keys are ADR §6 names (plus bridge.ping for the
 # ADR's first-proof round-trip). Other ADR §6 services (cost.reserve,
 # journal.event, kill.status) are intentionally out of E4-2's scope — their
-# schemas land with their owning issues; only the six initial verbs from #541
-# plus bridge.ping are defined here.
+# schemas land with their owning issues; the frozen #541 initial verbs remain
+# tracked separately in INITIAL_VERBS.
 SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "bridge.ping": (BridgePingRequest, BridgePingResponse),
     "memory.recall": (MemoryRecallRequest, MemoryRecallResponse),
@@ -373,6 +489,7 @@ SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "cost.gate": (CostGateRequest, CostGateResponse),
     "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
     "action.result": (ActionResultRequest, ActionResultResponse),
+    "code.execute": (CodeExecuteRequest, CodeExecuteResponse),
 }
 
 # The six initial verbs #541 requires schemas for (ADR §6 names; the issue's
@@ -485,10 +602,19 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     ManagementReviewResponse,
     CostGateRequest,
     CostGateResponse,
+    Vec3,
+    PoseObservation,
+    BlockObservation,
+    EntityObservation,
+    InventoryItem,
+    InventoryObservation,
+    PerceptionSnapshot,
     PerceptionReportRequest,
     PerceptionReportResponse,
     ActionResultRequest,
     ActionResultResponse,
+    CodeExecuteRequest,
+    CodeExecuteResponse,
 )
 
 
