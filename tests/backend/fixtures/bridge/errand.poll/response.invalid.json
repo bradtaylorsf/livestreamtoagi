@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "payload": {
+    "dispatched_at_ms": 1710000000000,
+    "from_agent": "vera",
+    "task": "",
+    "task_id": "alpha-task-1",
+    "urgency": "when_free"
+  },
+  "request_id": "req-errand-poll-0001",
+  "retryable": false
+}

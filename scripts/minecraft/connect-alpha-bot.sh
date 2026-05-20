@@ -59,6 +59,7 @@ ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
+ACTIONS_POLL_ERRAND_PATCH_MARKER="LTAG E7-2 poll errand action"
 
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
@@ -69,6 +70,7 @@ BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
+POLL_ERRAND_ACTION_REL="src/agent/commands/poll_errand_action.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
@@ -95,6 +97,7 @@ BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
+POLL_ERRAND_ACTION_SRC="$FORK_SRC_DIR/agent/commands/poll_errand_action.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
@@ -195,14 +198,26 @@ verify_committed_assets() {
     for required in \
         "$BRIDGE_CLIENT_SRC" "$BRIDGE_ACTION_SRC" "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
-        "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$MOVEMENT_SKILL_SRC" \
-        "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" "$PERCEPTION_SKILL_SRC" \
-        "$SAFE_FAIL_SKILL_SRC"
+        "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$POLL_ERRAND_ACTION_SRC" \
+        "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" \
+        "$PERCEPTION_SKILL_SRC" "$SAFE_FAIL_SKILL_SRC"
     do
         if [ ! -s "$required" ]; then
             fail "Committed bridge asset missing or empty: $required"; problems=1
         fi
     done
+
+    if [ -s "$POLL_ERRAND_ACTION_SRC" ]; then
+        grep -q "'!pollErrand'" "$POLL_ERRAND_ACTION_SRC" || { fail "poll errand action name is not !pollErrand"; problems=1; }
+        grep -q "service: 'errand'" "$POLL_ERRAND_ACTION_SRC" || { fail "poll errand action does not call errand.poll"; problems=1; }
+        grep -q "method: 'poll'" "$POLL_ERRAND_ACTION_SRC" || { fail "poll errand action method is not poll"; problems=1; }
+        grep -q "agent_id: ALPHA_AGENT_ID" "$POLL_ERRAND_ACTION_SRC" || { fail "poll errand action does not poll Alpha"; problems=1; }
+        grep -q "agent_tier: 'errand'" "$POLL_ERRAND_ACTION_SRC" || { fail "poll errand action cost tier is not errand"; problems=1; }
+        grep -q 'safe-idling' "$POLL_ERRAND_ACTION_SRC" || { fail "poll errand action missing bridge safe-idle path"; problems=1; }
+        if grep -qi 'openrouter' "$POLL_ERRAND_ACTION_SRC"; then
+            fail "poll errand action must NOT reference openrouter"; problems=1
+        fi
+    fi
 
     return $problems
 }
@@ -265,6 +280,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would stage:  $SETTINGS_TEMPLATE -> $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $PROFILE_TEMPLATE  -> $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
     info "Would copy:   fork-src/ bridge client, actions, and helper skills"
+    info "Would inject: !pollErrand for Alpha errand polling"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
@@ -366,6 +382,7 @@ stage_file "$BREAK_ACTION_SRC" "$BREAK_ACTION_REL"
 stage_file "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_REL"
 stage_file "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_REL"
 stage_file "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_REL"
+stage_file "$POLL_ERRAND_ACTION_SRC" "$POLL_ERRAND_ACTION_REL"
 stage_file "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_REL"
 stage_file "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_REL"
 stage_file "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_REL"
@@ -385,7 +402,8 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
-   grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH"; then
+   grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_POLL_ERRAND_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -406,6 +424,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
+    ACTIONS_POLL_ERRAND_PATCH_MARKER="$ACTIONS_POLL_ERRAND_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -425,6 +444,7 @@ const actions = [
     ['buildFromPlanAction', './build_from_plan_action.js', process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER],
     ['executeCodeAction', './execute_code_action.js', process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER],
     ['observeAction', './observe_action.js', process.env.ACTIONS_OBSERVE_PATCH_MARKER],
+    ['pollErrandAction', './poll_errand_action.js', process.env.ACTIONS_POLL_ERRAND_PATCH_MARKER],
 ];
 const missing = actions.filter(([, , marker]) => !source.includes(marker));
 if (missing.length > 0) {
@@ -494,6 +514,7 @@ echo
 
 ok "Launching ${ALPHA_BOT_NAME} -> ${MC_HOST}:${MC_PORT} ... (Ctrl+C to stop)"
 info "Alpha is non-verbal: no init chat, no in-game chat, no narration, no bot messages."
+info "Errand smoke: ${ALPHA_BOT_NAME} !pollErrand()"
 info "Bridge action smoke: ${ALPHA_BOT_NAME} !observe(6, \"all\", false)"
 cd "$MINDCRAFT_DIR_ABS"
 node main.js --profiles "$MINDCRAFT_PROFILE"

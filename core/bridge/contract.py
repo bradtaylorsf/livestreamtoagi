@@ -42,12 +42,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.4 is a
-# minor bump: E6-6 (#561) adds typed `PerceptionSnapshot` schema definitions
-# while keeping `perception.report.observations` backward-compatible. Earlier
-# 1.x peers remain wire-compatible because `is_supported_version` gates only on
-# the major.
-PROTOCOL_VERSION = "1.4"
+# additive-compatible within a major and fail-closed across majors. 1.5 is a
+# minor bump: E7-2 (#566) adds the `errand.poll` bridge verb so Alpha can
+# receive dispatched tasks from Python. Earlier 1.x peers remain wire-compatible
+# because `is_supported_version` gates only on the major.
+PROTOCOL_VERSION = "1.5"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -215,7 +214,7 @@ class BridgeResponse(BaseModel):
     )
 
 
-# ── Per-verb payload schemas (the six initial verbs + bridge.ping) ───────────
+# ── Per-verb payload schemas ────────────────────────────────────────────────
 
 
 class BridgePingRequest(BaseModel):
@@ -442,6 +441,32 @@ class ActionResultResponse(BaseModel):
     accepted: bool = Field(description="Whether Python recorded the result.")
 
 
+class ErrandPollRequest(BaseModel):
+    """``errand.poll`` — bot asks Python for its next dispatched task."""
+
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str = Field(min_length=1, description="Stable id of the polling agent.")
+
+
+class ErrandPollResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str | None = Field(
+        default=None, min_length=1, description="Dispatched task id, if any."
+    )
+    task: str | None = Field(
+        default=None, min_length=1, description="Natural-language errand text."
+    )
+    from_agent: str | None = Field(
+        default=None, min_length=1, description="Agent that dispatched the errand."
+    )
+    dispatched_at_ms: int | None = Field(
+        default=None, ge=0, description="Unix epoch milliseconds when the task was queued."
+    )
+    urgency: Literal["when_free", "now"] | None = Field(
+        default=None, description="Dispatch urgency, or null when no task is pending."
+    )
+
+
 class CodeExecuteRequest(BaseModel):
     """``code.execute`` — run code in the existing Docker/gVisor sandbox."""
 
@@ -476,11 +501,12 @@ class CodeExecuteResponse(BaseModel):
 
 # Maps "<service>.<method>" -> (request payload model, response payload model).
 # This is the *closed* dispatch set: anything not here is rejected with a typed
-# unsupported_service error. Keys are ADR §6 names (plus bridge.ping for the
-# ADR's first-proof round-trip). Other ADR §6 services (cost.reserve,
-# journal.event, kill.status) are intentionally out of E4-2's scope — their
-# schemas land with their owning issues; the frozen #541 initial verbs remain
-# tracked separately in INITIAL_VERBS.
+# unsupported_service error. Keys are ADR §6 names, plus bridge.ping for the
+# ADR's first-proof round-trip and errand.poll for the E7 Alpha dispatch slice.
+# Other ADR §6 services (cost.reserve, journal.event, kill.status) are
+# intentionally out of E4-2's scope — their schemas land with their owning
+# issues; the frozen #541 initial verbs remain tracked separately in
+# INITIAL_VERBS.
 SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "bridge.ping": (BridgePingRequest, BridgePingResponse),
     "memory.recall": (MemoryRecallRequest, MemoryRecallResponse),
@@ -489,6 +515,7 @@ SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "cost.gate": (CostGateRequest, CostGateResponse),
     "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
     "action.result": (ActionResultRequest, ActionResultResponse),
+    "errand.poll": (ErrandPollRequest, ErrandPollResponse),
     "code.execute": (CodeExecuteRequest, CodeExecuteResponse),
 }
 
@@ -613,6 +640,8 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     PerceptionReportResponse,
     ActionResultRequest,
     ActionResultResponse,
+    ErrandPollRequest,
+    ErrandPollResponse,
     CodeExecuteRequest,
     CodeExecuteResponse,
 )

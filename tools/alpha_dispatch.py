@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from core.event_bus import EventType
 
@@ -33,6 +33,10 @@ ALPHA_SYSTEM_PROMPT = (
 
 # All agents that may dispatch Alpha (everyone except Alpha itself)
 ALLOWED_AGENTS = frozenset({"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"})
+
+
+def _normalize_urgency(value: Any) -> Literal["when_free", "now"]:
+    return "now" if value == "now" else "when_free"
 
 
 class DispatchAlphaTool(BaseTool):
@@ -80,6 +84,18 @@ class DispatchAlphaTool(BaseTool):
             return {"status": "error", "reason": "Task cannot be empty"}
 
         task_id = str(uuid.uuid4())
+        urgency = _normalize_urgency(kwargs.get("urgency"))
+
+        # Lazy import keeps the constructor/backward-compat surface unchanged.
+        from core.bridge.errand_queue import errand_queue
+
+        errand_queue.enqueue(
+            "alpha",
+            task_id,
+            task,
+            from_agent=self._agent_id,
+            urgency=urgency,
+        )
 
         # Emit dispatch event — wolf runs off screen
         await self._event_bus.emit(

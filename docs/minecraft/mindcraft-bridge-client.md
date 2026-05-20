@@ -68,7 +68,7 @@ pinned tree stays clean and re-runnable.
 
 Fixed by ADR [`0010-bridge-protocol.md`](../decisions/0010-bridge-protocol.md)
 and the versioned contract (`core/bridge/contract.py`, E4-2). The client builds
-a contract-valid `BridgeRequest`: `version:"1.4"`, a unique `request_id`,
+a contract-valid `BridgeRequest`: `version:"1.5"`, a unique `request_id`,
 `agent_id`, `run_id`/`simulation_id`, `service`, `method`, `payload`,
 `deadline_ms`, `cost_context:{agent_tier:"conversation",
 budget_bucket:"bridge", estimated_cost_usd:0.0}`, and an additive `trace_id`

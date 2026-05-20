@@ -17,6 +17,9 @@ only the Mindcraft profile and launch settings.
 - Model routing: `model` and `code_model` are local LM Studio ids:
   `lmstudio/<LOCAL_LLM_MODEL>` and
   `lmstudio/<LOCAL_LLM_MODEL_BUILDING>`.
+- Errand polling: `scripts/minecraft/connect-alpha-bot.sh` stages
+  `!pollErrand`, which calls `errand.poll` as `agent_id: "alpha"` and logs the
+  task without sending Minecraft chat.
 
 Alpha must not emit chat. The launch settings enforce that with:
 
@@ -32,6 +35,11 @@ Alpha must not emit chat. The launch settings enforce that with:
 The system prompt still limits Alpha's symbolic vocabulary (alert, question,
 happy, success, failure symbols). E7-1 is stricter at the Mindcraft layer:
 Alpha should act, not chat.
+
+E7-2 adds bridge delivery for dispatched errands. Another agent still uses the
+existing `dispatch_alpha` tool path, including its 60-second Alpha LLM timeout
+and events; the same task id is also queued for Alpha to receive through
+`!pollErrand`.
 
 ## Local LM Studio Validation
 

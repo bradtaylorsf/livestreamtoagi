@@ -67,11 +67,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.4 is the E6-6 (#561) minor bump: typed
-// `PerceptionSnapshot` schema definitions are additive and
-// `perception.report.observations` stays backward-compatible. The server only
-// gates on the major, so this stays wire-compatible with earlier 1.x peers.
-export const PROTOCOL_VERSION = '1.4';
+// contract.PROTOCOL_VERSION (ADR §3). 1.5 is the E7-2 (#566) minor bump:
+// `errand.poll` lets Alpha receive dispatched tasks over the bridge. The server
+// only gates on the major, so this stays wire-compatible with earlier 1.x peers.
+export const PROTOCOL_VERSION = '1.5';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';
@@ -321,7 +320,7 @@ function attachHandlers(sock, { onOpen, onMessage, onClose, onError }) {
 
 // ── Envelope construction (ADR §2 — exact field set) ───────────────────────
 
-function buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId }) {
+function buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId, costContext }) {
     return {
         version: PROTOCOL_VERSION,
         request_id: `bridge-${randomUUID()}`, // unique correlation + idempotency key (ADR §5)
@@ -332,7 +331,7 @@ function buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId 
         method,
         payload: payload || {},
         deadline_ms: deadlineMs,
-        cost_context: {
+        cost_context: costContext || {
             agent_tier: 'conversation',
             budget_bucket: 'bridge',
             estimated_cost_usd: 0.0,
@@ -404,6 +403,7 @@ async function _callBridgeOnce({
     deadlineMs = DEFAULT_DEADLINE_MS,
     agentId,
     traceId,
+    costContext,
 } = {}) {
     const token = process.env[BRIDGE_TOKEN_ENV];
     if (!token) {
@@ -417,7 +417,15 @@ async function _callBridgeOnce({
     await resolveWebSocket();
 
     const url = process.env[BRIDGE_URL_ENV] || DEFAULT_BRIDGE_URL;
-    const envelope = buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId });
+    const envelope = buildEnvelope({
+        service,
+        method,
+        payload,
+        deadlineMs,
+        agentId,
+        traceId,
+        costContext,
+    });
 
     return await new Promise((resolve, reject) => {
         let settled = false;
@@ -685,6 +693,7 @@ export function bridgeIsReachable() {
  * @param {object}  [opts.payload]   service-specific body
  * @param {number}  [opts.deadlineMs] hard local deadline (ADR §5), default 5000
  * @param {string}  [opts.agentId]   stable agent identity (a claim, not proof)
+ * @param {object}  [opts.costContext] optional cost attribution override
  * @param {string}  [opts.traceId]   E4-7 correlation id; reuse one to tie a
  *                                   chain of related calls together. Defaults
  *                                   to a unique `trace-<uuid>` per call.
