@@ -34,11 +34,12 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
   contract-valid :class:`BridgeResponse` (``ok=false`` + typed error); only the
   handshake closes the socket.
 
-``memory.recall`` delegates read-only to the existing memory managers and
-``memory.write`` delegates append/write work to the existing memory compactor
-when FastAPI lifespan has initialized services. ``code.execute`` delegates to
-the existing Docker/gVisor sandbox tool; other verbs remain contract-valid
-stubs until their owning issues wire them.
+``memory.recall`` delegates read-only to the existing memory managers,
+``memory.write`` delegates append/write work to the existing memory compactor,
+and ``errand.complete`` records Alpha outcomes to that same compactor when
+FastAPI lifespan has initialized services. ``code.execute`` delegates to the
+existing Docker/gVisor sandbox tool; remaining verbs stay contract-valid stubs
+until their owning issues wire them.
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ from core.bridge.contract import (
 )
 from core.bridge.errand_queue import Errand, errand_queue
 from core.bridge.handlers.code_execution import handle_code_execute
+from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
 
 logger = logging.getLogger(__name__)
@@ -406,7 +408,7 @@ async def build_bridge_response_with_services(
     if key in ERRAND_POLL_VERBS:
         return _success_response(env, _handle_errand_poll(env))
     if key in ERRAND_COMPLETE_VERBS:
-        return _success_response(env, _handle_errand_complete(env))
+        return _success_response(env, await handle_errand_complete(env, services))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
