@@ -268,6 +268,7 @@ if [ "$MODE" = "dry-run" ]; then
     if [ -n "$LLM_MODEL" ]; then
         info "model:       lmstudio/$LLM_MODEL  (conversation tier)"
         info "code_model:  lmstudio/$LLM_MODEL_BUILDING  (building tier)"
+        info "model hint:  if LOCAL_LLM_MODEL unset, list ids with: pnpm llm:local --list-only"
     else
         info "model:       (LOCAL_LLM_MODEL unset — REQUIRED for a real run;"
         info "             list ids with: pnpm llm:local --list-only)"

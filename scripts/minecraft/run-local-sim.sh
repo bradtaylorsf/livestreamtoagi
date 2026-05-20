@@ -82,19 +82,19 @@ load_env_file() {
                 ;;
         esac
 
-        if [ -z "${!key+x}" ]; then
-            case "$value" in
-                \"*\")
-                    value="${value#\"}"
-                    value="${value%\"}"
-                    ;;
-                \'*\')
-                    value="${value#\'}"
-                    value="${value%\'}"
-                    ;;
-            esac
-            export "$key=$value"
-        fi
+        # This wrapper is .env-driven; keep local-sim runs reproducible even
+        # when the caller's shell has stale MC_SIM/SOAK variables exported.
+        case "$value" in
+            \"*\")
+                value="${value#\"}"
+                value="${value%\"}"
+                ;;
+            \'*\')
+                value="${value#\'}"
+                value="${value%\'}"
+                ;;
+        esac
+        export "$key=$value"
     done < "$file"
 }
 
@@ -159,21 +159,19 @@ if [ "$MC_SIM_DISABLE_MANAGEMENT" = "1" ]; then
 fi
 export MINECRAFT_MANAGEMENT_REVIEW_MODE
 MC_SIM_INCLUDE_BRIDGE_BOT="${MC_SIM_INCLUDE_BRIDGE_BOT:-0}"
-if [ -z "${SOAK_BOTS+x}" ]; then
-    if [ "$MC_SIM_INCLUDE_BRIDGE_BOT" = "1" ]; then
-        SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
-    else
-        SOAK_BOTS="alpha vera rex aurora pixel fork sentinel grok"
-    fi
+# Derive soak knobs from MC_SIM_* on every wrapper run so unrelated exported
+# SOAK_* variables cannot silently change the local-sim preset.
+if [ "$MC_SIM_INCLUDE_BRIDGE_BOT" = "1" ]; then
+    SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
+else
+    SOAK_BOTS="alpha vera rex aurora pixel fork sentinel grok"
 fi
-SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-${MC_SIM_BLOCK_PRIVATE_CONVERSATIONS:-1}}"
+SOAK_BLOCK_PRIVATE_CONVERSATIONS="${MC_SIM_BLOCK_PRIVATE_CONVERSATIONS:-1}"
 MC_SIM_ALLOW_NEW_ACTION="${MC_SIM_ALLOW_NEW_ACTION:-0}"
-if [ -z "${SOAK_BLOCK_SLOW_SIM_ACTIONS+x}" ]; then
-    if [ "$MC_SIM_ALLOW_NEW_ACTION" = "1" ]; then
-        SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
-    else
-        SOAK_BLOCK_SLOW_SIM_ACTIONS="1"
-    fi
+if [ "$MC_SIM_ALLOW_NEW_ACTION" = "1" ]; then
+    SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
+else
+    SOAK_BLOCK_SLOW_SIM_ACTIONS="1"
 fi
 export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS SOAK_BLOCK_SLOW_SIM_ACTIONS
 MC_SIM_SUPPRESS_ACTION_CHAT="${MC_SIM_SUPPRESS_ACTION_CHAT:-1}"
@@ -182,7 +180,7 @@ export MINECRAFT_SUPPRESS_ACTION_CHAT
 
 DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: spread out, scout nearby terrain, gather any reachable hand-safe materials, set a useful goal, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. Use movement and exploration before repeated collection: good early commands are !searchForBlock(\"sand\", 64), !move(\"scout_1\", \"forward\", 8), !searchForBlock(\"oak_log\", 64), !collectBlocks(\"sand\", 8), and, after finding wood or exposed stone, !collectBlocks(\"oak_log\", 4) or !collectBlocks(\"stone\", 8). Do not repeatedly collect a block that was reported missing or tool-locked. Keep actions safe, narrate briefly in character, and continue until the run ends."
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
-SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
+SOAK_INIT_MESSAGE="$MC_SIM_INIT_MESSAGE"
 if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
     case "$SOAK_INIT_MESSAGE" in
         *"Private bot-conversation commands are disabled"*|*"ordinary public Minecraft chat"*) ;;
@@ -195,10 +193,12 @@ if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
     case "$SOAK_INIT_MESSAGE" in
         *"!searchForBlock(\"sand\", 64)"*|*"Use movement and exploration before repeated collection"*) ;;
         *)
-            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use movement and exploration before repeated collection: good early commands are !searchForBlock(\"sand\", 64), !move(\"scout_1\", \"forward\", 8), !searchForBlock(\"oak_log\", 64), !collectBlocks(\"sand\", 8), and, after finding wood or exposed stone, !collectBlocks(\"oak_log\", 4) or !collectBlocks(\"stone\", 8). Do not repeatedly collect a block that was reported missing or tool-locked."
+            # shellcheck disable=SC2089
+            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE"' Use movement and exploration before repeated collection: good early commands are !searchForBlock("sand", 64), !move("scout_1", "forward", 8), !searchForBlock("oak_log", 64), !collectBlocks("sand", 8), and, after finding wood or exposed stone, !collectBlocks("oak_log", 4) or !collectBlocks("stone", 8). Do not repeatedly collect a block that was reported missing or tool-locked.'
             ;;
     esac
 fi
+# shellcheck disable=SC2090
 export SOAK_INIT_MESSAGE
 
 if [ "${LLM_PROVIDER:-}" != "lmstudio" ]; then

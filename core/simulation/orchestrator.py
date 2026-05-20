@@ -101,6 +101,7 @@ class SimulationConfig:
         factions: list[dict[str, Any] | FactionConfig] | None = None,
         initial_agent_energy: dict[str, float] | None = None,
         conversation_cadence: float = 1.0,
+        conversation_mode: str = "director",
         submitted_params: dict[str, Any] | None = None,
         source: str | None = None,
     ) -> None:
@@ -139,6 +140,10 @@ class SimulationConfig:
         self.excluded_agents = list(excluded_agents or [])
         self.initial_agent_energy = dict(initial_agent_energy or {})
         self.conversation_cadence = max(0.1, float(conversation_cadence or 1.0))
+        normalized_conversation_mode = conversation_mode.strip().lower()
+        if normalized_conversation_mode not in {"director", "embodied"}:
+            raise ValueError("conversation_mode must be one of: director, embodied")
+        self.conversation_mode = normalized_conversation_mode
         self.submitted_params = dict(submitted_params or {})
         self.source = source
 
@@ -438,6 +443,7 @@ class SimulationOrchestrator:
             debug_prompts=self._config.debug_prompts,
             prompt_log_repo=self._prompt_log_repo,
             factions=list(self._config.factions),
+            conversation_mode=self._config.conversation_mode,
         )
 
     def _idle_gap(self) -> timedelta:
