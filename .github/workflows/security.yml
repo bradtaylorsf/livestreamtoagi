@@ -35,8 +35,10 @@ jobs:
       - name: Run pip-audit
         # CVE-2026-3219 and CVE-2026-6357 both live in the `pip` runtime
         # that GitHub-hosted runners ship; they are not in our application
-        # dependencies. Ignore them so the audit reflects shipped code only.
-        run: pip-audit --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357
+        # dependencies. PYSEC-2025-183/CVE-2025-45768 is a disputed PyJWT
+        # key-strength advisory with no fixed version; app JWT secrets are
+        # enforced at 32+ bytes in core/auth/jwt_secrets.py.
+        run: pip-audit --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357 --ignore-vuln PYSEC-2025-183
 
   npm-audit:
     name: NPM Dependency Audit

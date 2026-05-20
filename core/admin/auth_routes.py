@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -14,6 +13,7 @@ from core.admin.dependencies import (
     _record_failed_auth,
     _validate_password,
 )
+from core.auth.jwt_secrets import get_hs256_secret, hs256_secret_error
 
 router = APIRouter(tags=["auth"])
 
@@ -37,11 +37,11 @@ async def admin_login(
         await _record_failed_auth(request)
         raise HTTPException(status_code=401, detail="Invalid admin password")
 
-    secret = os.environ.get("ADMIN_JWT_SECRET", "")
+    secret = get_hs256_secret("ADMIN_JWT_SECRET")
     if not secret:
         raise HTTPException(
             status_code=503,
-            detail="ADMIN_JWT_SECRET not configured — cannot issue session cookie",
+            detail=f"{hs256_secret_error('ADMIN_JWT_SECRET')} — cannot issue session cookie",
         )
 
     token = jwt.encode(

@@ -12,9 +12,11 @@ import pytest
 from core.admin.dependencies import (
     _check_admin_rate_limit,
     _record_failed_auth,
-    _validate_password,
     _validate_jwt_cookie,
+    _validate_password,
 )
+
+TEST_ADMIN_JWT_SECRET = "a" * 32
 
 
 # -- Password validation -----------------------------------------------
@@ -50,27 +52,35 @@ class TestValidatePassword:
 
 class TestJWTCookie:
     def test_valid_jwt(self) -> None:
-        secret = "test-jwt-secret"
+        secret = TEST_ADMIN_JWT_SECRET
         from datetime import UTC, datetime, timedelta
+
         token = jwt.encode(
             {"sub": "admin", "exp": datetime.now(UTC) + timedelta(hours=1)},
-            secret, algorithm="HS256",
+            secret,
+            algorithm="HS256",
         )
         with patch.dict(os.environ, {"ADMIN_JWT_SECRET": secret}):
             assert _validate_jwt_cookie(token) is True
 
     def test_expired_jwt(self) -> None:
-        secret = "test-jwt-secret"
+        secret = TEST_ADMIN_JWT_SECRET
         from datetime import UTC, datetime, timedelta
+
         token = jwt.encode(
             {"sub": "admin", "exp": datetime.now(UTC) - timedelta(hours=1)},
-            secret, algorithm="HS256",
+            secret,
+            algorithm="HS256",
         )
         with patch.dict(os.environ, {"ADMIN_JWT_SECRET": secret}):
             assert _validate_jwt_cookie(token) is False
 
     def test_invalid_jwt(self) -> None:
-        with patch.dict(os.environ, {"ADMIN_JWT_SECRET": "real-secret"}):
+        with patch.dict(os.environ, {"ADMIN_JWT_SECRET": TEST_ADMIN_JWT_SECRET}):
+            assert _validate_jwt_cookie("not-a-jwt") is False
+
+    def test_short_secret_rejected(self) -> None:
+        with patch.dict(os.environ, {"ADMIN_JWT_SECRET": "short"}):
             assert _validate_jwt_cookie("not-a-jwt") is False
 
     def test_no_secret_configured(self) -> None:
@@ -102,6 +112,7 @@ class TestAdminRateLimit:
         mock_request.app.state.services.redis = mock_redis
 
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             await _check_admin_rate_limit(mock_request)
         assert exc_info.value.status_code == 429

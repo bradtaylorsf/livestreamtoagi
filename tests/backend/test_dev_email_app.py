@@ -33,12 +33,10 @@ def test_magic_link_writes_jsonl_with_link(tmp_path) -> None:
         "EMAIL_FROM": "no-reply@dev",
         "PUBLIC_BASE_URL": "http://localhost:8000",
         "EMAIL_CONSOLE_LOG": str(log_path),
-        "AUTH_JWT_SECRET": "devsecret",
+        "AUTH_JWT_SECRET": "d" * 32,
     }
     with patch.dict(os.environ, env), TestClient(app) as client:
-        resp = client.post(
-            "/api/auth/magic-link", json={"email": "qa@example.com"}
-        )
+        resp = client.post("/api/auth/magic-link", json={"email": "qa@example.com"})
     assert resp.status_code == 200
     record = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
     assert record["to"] == "qa@example.com"
