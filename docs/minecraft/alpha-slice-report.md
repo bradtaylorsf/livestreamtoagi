@@ -131,8 +131,24 @@ Code review result: **PASS**, with no blocking findings in the bridge contract,
 errand queue, Alpha dispatch path, Mindcraft errand actions, memory persistence,
 Management review hook, or kill-switch enforcement.
 
-This addendum upgrades the local LM Studio reachability evidence. It still does
-not claim a live Minecraft server launch or production livestream sign-off.
+Live local Alpha run evidence, captured after setup on 2026-05-20 UTC:
+
+- Java 21 and Node 20 were placed on PATH for the Minecraft scripts.
+- `scripts/minecraft/start-server.sh` booted Paper `1.21.6-48` on
+  `127.0.0.1:25565`, and the server console reported
+  `There are 1 of a max of 20 players online: Alpha`.
+- `scripts/minecraft/connect-alpha-bot.sh` launched the staged non-verbal Alpha
+  profile against the local server and bridge.
+- MindServer reported Alpha's live state at `(10.5, 67, -1.5)`, idle, full
+  health, in the `desert` biome.
+- A dev-only local wrapper enqueued a current-position structured navigate
+  errand, then the MindServer admin channel sent `!runErrand` to Alpha.
+- Alpha logged bridge `errand.poll`, `perception.report`, `action.result`, and
+  `errand.complete` calls, then printed
+  `errand demo-6143b1e3-cd01-48ee-93e5-f3c0ffd16bef ✓ success: 1/1 steps finished`.
+
+This addendum upgrades the local LM Studio and live Minecraft evidence. It
+still does not claim production livestream sign-off.
 
 ## Deviations and Boundaries vs `MINECRAFT-PIVOT-CONTEXT.md`
 
