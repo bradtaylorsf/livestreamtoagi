@@ -42,11 +42,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.5 is a
-# minor bump: E7-2 (#566) adds the `errand.poll` bridge verb so Alpha can
-# receive dispatched tasks from Python. Earlier 1.x peers remain wire-compatible
-# because `is_supported_version` gates only on the major.
-PROTOCOL_VERSION = "1.5"
+# additive-compatible within a major and fail-closed across majors. 1.6 is a
+# minor bump: E7-3 (#567) adds the `errand.complete` bridge verb so Alpha can
+# tie a verified in-world errand outcome back to its dispatcher with ✓/✗/?
+# semantics. Earlier 1.x peers remain wire-compatible because
+# `is_supported_version` gates only on the major.
+PROTOCOL_VERSION = "1.6"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -467,6 +468,44 @@ class ErrandPollResponse(BaseModel):
     )
 
 
+class ErrandStepResult(BaseModel):
+    """One terminal in-world action outcome within an Alpha errand."""
+
+    model_config = ConfigDict(extra="forbid")
+    action_id: str = Field(min_length=1, description="Step action id from the errand plan.")
+    status: Literal["success", "failure", "partial"] = Field(
+        description="Verified terminal status reported by the action surface."
+    )
+    detail: str = Field(default="", description="Human-readable verifier detail.")
+
+
+class ErrandCompleteRequest(BaseModel):
+    """``errand.complete`` — Alpha reports a verified errand outcome.
+
+    E7-3 uses this verb to connect the embodied action result back to the
+    dispatcher: ``symbol`` is Alpha's non-verbal ✓/✗/? summary, while
+    ``step_results`` preserves the per-action verified outcome.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    task_id: str = Field(min_length=1, description="Dispatched errand task id.")
+    status: Literal["success", "failure", "partial"] = Field(
+        description="Overall verified errand status."
+    )
+    symbol: Literal["✓", "✗", "?"] = Field(
+        description="Alpha's non-verbal outcome symbol: success, failure, or confused."
+    )
+    detail: str = Field(default="", description="Human-readable errand outcome detail.")
+    step_results: list[ErrandStepResult] = Field(
+        default_factory=list, description="Verified terminal results for each errand step."
+    )
+
+
+class ErrandCompleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool = Field(description="Whether Python recorded the errand completion.")
+
+
 class CodeExecuteRequest(BaseModel):
     """``code.execute`` — run code in the existing Docker/gVisor sandbox."""
 
@@ -502,7 +541,7 @@ class CodeExecuteResponse(BaseModel):
 # Maps "<service>.<method>" -> (request payload model, response payload model).
 # This is the *closed* dispatch set: anything not here is rejected with a typed
 # unsupported_service error. Keys are ADR §6 names, plus bridge.ping for the
-# ADR's first-proof round-trip and errand.poll for the E7 Alpha dispatch slice.
+# ADR's first-proof round-trip and errand.* for the E7 Alpha dispatch slice.
 # Other ADR §6 services (cost.reserve, journal.event, kill.status) are
 # intentionally out of E4-2's scope — their schemas land with their owning
 # issues; the frozen #541 initial verbs remain tracked separately in
@@ -516,6 +555,7 @@ SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
     "action.result": (ActionResultRequest, ActionResultResponse),
     "errand.poll": (ErrandPollRequest, ErrandPollResponse),
+    "errand.complete": (ErrandCompleteRequest, ErrandCompleteResponse),
     "code.execute": (CodeExecuteRequest, CodeExecuteResponse),
 }
 
@@ -642,6 +682,9 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     ActionResultResponse,
     ErrandPollRequest,
     ErrandPollResponse,
+    ErrandStepResult,
+    ErrandCompleteRequest,
+    ErrandCompleteResponse,
     CodeExecuteRequest,
     CodeExecuteResponse,
 )

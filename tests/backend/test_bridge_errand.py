@@ -1,4 +1,4 @@
-"""Tests for Alpha errand delivery over the bridge (E7-2, #566)."""
+"""Tests for Alpha errand delivery and completion over the bridge (E7-2/E7-3)."""
 
 from __future__ import annotations
 
@@ -9,16 +9,21 @@ from core.bridge.errand_queue import ErrandQueue, errand_queue
 from core.bridge.server import build_bridge_response_with_services
 
 
-def _request(agent_id: str = "alpha") -> dict[str, Any]:
+def _request(
+    agent_id: str = "alpha",
+    *,
+    method: str = "poll",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "version": c.PROTOCOL_VERSION,
-        "request_id": "req-errand-poll-test",
+        "request_id": f"req-errand-{method}-test",
         "agent_id": agent_id,
         "run_id": "run-test",
         "simulation_id": "sim-test",
         "service": "errand",
-        "method": "poll",
-        "payload": {"agent_id": agent_id},
+        "method": method,
+        "payload": payload if payload is not None else {"agent_id": agent_id},
         "deadline_ms": 5000,
         "cost_context": {
             "agent_tier": "errand",
@@ -74,6 +79,26 @@ def test_errand_queue_drops_duplicate_task_ids_within_ttl() -> None:
     assert queue.poll("alpha") is None
 
 
+def test_errand_queue_records_completion_by_task_id() -> None:
+    queue = ErrandQueue()
+
+    result = queue.record_completion(
+        "task-complete-1",
+        "success",
+        "✓",
+        "1/1 steps finished",
+        [{"action_id": "place-1", "status": "success", "detail": "placed"}],
+    )
+
+    assert result.completed_at_ms > 0
+    assert queue.get_completion("task-complete-1") == result
+    assert result.status == "success"
+    assert result.symbol == "✓"
+    assert result.step_results == (
+        {"action_id": "place-1", "status": "success", "detail": "placed"},
+    )
+
+
 async def test_bridge_errand_poll_returns_next_queued_errand() -> None:
     errand_queue.clear()
     try:
@@ -100,6 +125,67 @@ async def test_bridge_errand_poll_returns_next_queued_errand() -> None:
         assert payload["dispatched_at_ms"] > 0
         c.validate_response(response, service="errand", method="poll")
         assert errand_queue.poll("alpha") is None
+    finally:
+        errand_queue.clear()
+
+
+async def test_bridge_errand_complete_records_result() -> None:
+    errand_queue.clear()
+    try:
+        response = await build_bridge_response_with_services(
+            _request(
+                method="complete",
+                payload={
+                    "task_id": "task-bridge-complete-1",
+                    "status": "success",
+                    "symbol": "✓",
+                    "detail": "1/1 steps finished",
+                    "step_results": [
+                        {
+                            "action_id": "place-1",
+                            "status": "success",
+                            "detail": "placed: position=0,64,0",
+                        }
+                    ],
+                },
+            ),
+            services=object(),
+        )
+
+        assert response.ok is True
+        assert response.payload == {"accepted": True}
+        c.validate_response(response, service="errand", method="complete")
+        completion = errand_queue.get_completion("task-bridge-complete-1")
+        assert completion is not None
+        assert completion.status == "success"
+        assert completion.symbol == "✓"
+        assert completion.detail == "1/1 steps finished"
+        assert completion.step_results[0]["action_id"] == "place-1"
+    finally:
+        errand_queue.clear()
+
+
+async def test_bridge_errand_complete_rejects_unknown_status() -> None:
+    errand_queue.clear()
+    try:
+        response = await build_bridge_response_with_services(
+            _request(
+                method="complete",
+                payload={
+                    "task_id": "task-bridge-complete-bad",
+                    "status": "done",
+                    "symbol": "✓",
+                    "detail": "bad status",
+                    "step_results": [],
+                },
+            ),
+            services=object(),
+        )
+
+        assert response.ok is False
+        assert response.error is not None
+        assert response.error.code == c.ERR_INVALID_PAYLOAD
+        assert errand_queue.get_completion("task-bridge-complete-bad") is None
     finally:
         errand_queue.clear()
 
