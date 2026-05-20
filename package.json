@@ -17,7 +17,7 @@
     "verify:mindcraft-fork-maintenance": ".venv/bin/pytest tests/backend/test_minecraft_fork_maintenance.py -v",
     "verify:mindcraft-connect": ".venv/bin/pytest tests/backend/test_minecraft_connect_stock_bot.py -v",
     "verify:mindcraft-routing": ".venv/bin/pytest tests/backend/test_mc_model_routing.py -v",
-    "verify:mindcraft-profiles": ".venv/bin/pytest tests/backend/test_mc_profile_gen.py -v",
+    "verify:mindcraft-profiles": ".venv/bin/pytest tests/backend/test_mc_profile_gen.py tests/backend/test_mc_personality_mapping.py -v",
     "verify:mindcraft-stripped": ".venv/bin/pytest tests/backend/test_mc_stripped_features.py -v",
     "verify:mindcraft-routing-contract": ".venv/bin/pytest tests/backend/test_mc_routing_fork_contract.py -v",
     "verify:bridge-protocol": ".venv/bin/pytest tests/backend/test_bridge_protocol_decision.py -v",
