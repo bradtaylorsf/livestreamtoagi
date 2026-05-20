@@ -564,6 +564,103 @@
       "title": "EntityObservation",
       "type": "object"
     },
+    "ErrandPollRequest": {
+      "additionalProperties": false,
+      "description": "``errand.poll`` \u2014 bot asks Python for its next dispatched task.",
+      "properties": {
+        "agent_id": {
+          "description": "Stable id of the polling agent.",
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id"
+      ],
+      "title": "ErrandPollRequest",
+      "type": "object"
+    },
+    "ErrandPollResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatched_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unix epoch milliseconds when the task was queued.",
+          "title": "Dispatched At Ms"
+        },
+        "from_agent": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent that dispatched the errand.",
+          "title": "From Agent"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Natural-language errand text.",
+          "title": "Task"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dispatched task id, if any.",
+          "title": "Task Id"
+        },
+        "urgency": {
+          "anyOf": [
+            {
+              "enum": [
+                "when_free",
+                "now"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dispatch urgency, or null when no task is pending.",
+          "title": "Urgency"
+        }
+      },
+      "title": "ErrandPollResponse",
+      "type": "object"
+    },
     "InventoryItem": {
       "additionalProperties": false,
       "description": "Observed inventory stack.",
@@ -1069,7 +1166,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.4",
+  "protocolVersion": "1.5",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -1086,6 +1183,10 @@
     "cost.gate": {
       "request": "#/$defs/CostGateRequest",
       "response": "#/$defs/CostGateResponse"
+    },
+    "errand.poll": {
+      "request": "#/$defs/ErrandPollRequest",
+      "response": "#/$defs/ErrandPollResponse"
     },
     "management.review": {
       "request": "#/$defs/ManagementReviewRequest",

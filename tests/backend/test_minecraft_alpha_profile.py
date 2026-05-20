@@ -21,6 +21,9 @@ SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-alpha-bot.sh"
 SETTINGS_TEMPLATE = REPO_ROOT / "scripts" / "minecraft" / "mindcraft-settings-alpha.js"
 STOCK_SETTINGS_TEMPLATE = REPO_ROOT / "scripts" / "minecraft" / "mindcraft-settings.js"
 PROFILE_TEMPLATE = REPO_ROOT / "scripts" / "minecraft" / "profiles" / "alpha-bot.json"
+POLL_ERRAND_ACTION = (
+    REPO_ROOT / "scripts" / "minecraft" / "fork-src" / "agent" / "commands" / "poll_errand_action.js"
+)
 ALPHA_DOC = REPO_ROOT / "docs" / "minecraft" / "alpha-profile.md"
 CONNECT_DOC = REPO_ROOT / "docs" / "minecraft" / "mindcraft-connect.md"
 PACKAGE_JSON = REPO_ROOT / "package.json"
@@ -231,6 +234,9 @@ def test_script_real_run_guards_and_staging_contract() -> None:
     assert "profiles/alpha-bot.json" in src
     assert "fork-src" in src
     assert "src/agent/bridge/python_bridge.js" in src
+    assert "src/agent/commands/poll_errand_action.js" in src
+    assert "LTAG E7-2 poll errand action" in src
+    assert "pollErrandAction" in src
     assert "src/agent/commands/actions.js" in src
     assert "restore_clone_patches" in src
     assert "trap restore_clone_patches EXIT" in src
@@ -238,6 +244,19 @@ def test_script_real_run_guards_and_staging_contract() -> None:
     assert "JSON.parse(readFileSync" in src
     assert "JSON.stringify(profile" in src
     assert "openrouter/" not in src
+
+
+def test_alpha_poll_errand_action_is_non_verbal_and_bridge_backed() -> None:
+    src = POLL_ERRAND_ACTION.read_text()
+    assert "'!pollErrand'" in src
+    assert "service: 'errand'" in src
+    assert "method: 'poll'" in src
+    assert "payload: { agent_id: ALPHA_AGENT_ID }" in src
+    assert "agentId: ALPHA_AGENT_ID" in src
+    assert "agent_tier: 'errand'" in src
+    assert "safe-idling" in src
+    assert "openChat" not in src
+    assert "openrouter" not in src.lower()
 
 
 def test_docs_record_alpha_launch_and_lm_studio_evidence() -> None:

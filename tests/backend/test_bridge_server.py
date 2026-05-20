@@ -45,6 +45,7 @@ from core.bridge.server import (
     CODE_EXECUTE_VERBS,
     ERR_CODE_SERVICE_UNAVAILABLE,
     ERR_MEMORY_SERVICE_UNAVAILABLE,
+    ERRAND_VERBS,
     MEMORY_HANDLER_VERBS,
     MEMORY_WRITE_VERBS,
     STUB_HANDLERS,
@@ -388,9 +389,16 @@ def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.recall"} == MEMORY_HANDLER_VERBS
     assert {"memory.write"} == MEMORY_WRITE_VERBS
     assert {"code.execute"} == CODE_EXECUTE_VERBS
+    assert {"errand.poll"} == ERRAND_VERBS
     assert "memory.recall" not in STUB_HANDLERS
     assert "memory.write" not in STUB_HANDLERS
     assert "code.execute" not in STUB_HANDLERS
-    assert set(STUB_HANDLERS) | set(MEMORY_HANDLER_VERBS) | set(MEMORY_WRITE_VERBS) | set(
-        CODE_EXECUTE_VERBS
-    ) == set(c.SERVICE_REGISTRY)
+    assert "errand.poll" not in STUB_HANDLERS
+    handled = (
+        set(STUB_HANDLERS)
+        | set(MEMORY_HANDLER_VERBS)
+        | set(MEMORY_WRITE_VERBS)
+        | set(CODE_EXECUTE_VERBS)
+        | set(ERRAND_VERBS)
+    )
+    assert handled == set(c.SERVICE_REGISTRY)

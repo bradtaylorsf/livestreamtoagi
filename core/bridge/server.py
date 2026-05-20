@@ -60,6 +60,7 @@ from core.bridge.contract import (
     ERR_UNSUPPORTED_SERVICE,
     BridgeRequest,
     BridgeResponse,
+    ErrandPollRequest,
     MemoryRecallRequest,
     UnsupportedServiceError,
     is_supported_version,
@@ -69,6 +70,7 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
+from core.bridge.errand_queue import Errand, errand_queue
 from core.bridge.handlers.code_execution import handle_code_execute
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
 
@@ -105,6 +107,7 @@ ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
+ERRAND_VERBS = frozenset({"errand.poll"})
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -292,6 +295,29 @@ def _code_services_unavailable(env: BridgeRequest, services: Any | None) -> Brid
     )
 
 
+def _errand_payload(errand: Errand | None) -> dict[str, Any]:
+    if errand is None:
+        return {
+            "task_id": None,
+            "task": None,
+            "from_agent": None,
+            "dispatched_at_ms": None,
+            "urgency": None,
+        }
+    return {
+        "task_id": errand.task_id,
+        "task": errand.task,
+        "from_agent": errand.from_agent,
+        "dispatched_at_ms": errand.dispatched_at_ms,
+        "urgency": errand.urgency,
+    }
+
+
+def _handle_errand_poll(env: BridgeRequest) -> dict[str, Any]:
+    payload = ErrandPollRequest.model_validate(env.payload)
+    return _errand_payload(errand_queue.poll(payload.agent_id))
+
+
 def build_bridge_response(raw: Any) -> BridgeResponse:
     """Turn one decoded non-memory frame into a contract-valid response envelope.
 
@@ -321,6 +347,8 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             f"{key} requires initialized code execution services",
             retryable=True,
         )
+    if key in ERRAND_VERBS:
+        return _success_response(env, _handle_errand_poll(env))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -357,6 +385,9 @@ async def build_bridge_response_with_services(
         if unavailable is not None:
             return unavailable
         return _success_response(env, await handle_code_execute(env, services))
+
+    if key in ERRAND_VERBS:
+        return _success_response(env, _handle_errand_poll(env))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -485,7 +516,13 @@ async def bridge_ws(websocket: WebSocket) -> None:
 def _assert_handlers_cover_registry() -> None:
     from core.bridge.contract import SERVICE_REGISTRY
 
-    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS | CODE_EXECUTE_VERBS
+    handled = (
+        set(STUB_HANDLERS)
+        | MEMORY_HANDLER_VERBS
+        | MEMORY_WRITE_VERBS
+        | CODE_EXECUTE_VERBS
+        | ERRAND_VERBS
+    )
     missing = set(SERVICE_REGISTRY) - handled
     extra = handled - set(SERVICE_REGISTRY)
     if missing or extra:

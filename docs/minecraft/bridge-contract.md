@@ -46,11 +46,12 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.4"` (E4-7 added the optional `trace_id`, E5-1 added
-optional core-memory fields, E6-5 added `code.execute`, and E6-6 added typed
-perception snapshot definitions; all are additive minor bumps). Same-major
-versions are wire-compatible in either direction (new fields/verbs are
-additive). An unknown *major* — or any unparseable version — is **not
+`PROTOCOL_VERSION = "1.5"` (E4-7 added the optional `trace_id`, E5-1 added
+optional core-memory fields, E6-5 added `code.execute`, E6-6 added typed
+perception snapshot definitions, and E7-2 added `errand.poll`; all are
+additive minor bumps). Same-major versions are wire-compatible in either
+direction (new fields/verbs are additive). An unknown *major* — or any
+unparseable version — is **not
 supported**; the server replies with the exact ADR §3 shape
 (`unsupported_version_response`): `ok=false`,
 `error.code="unsupported_version"`, `retryable=false`. Ambiguity is rejected,
@@ -62,7 +63,7 @@ The bridge dispatches a **closed** registry — there is no generic "run
 arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 `INITIAL_VERBS`; the live registry also includes `bridge.ping` (the ADR's
 `!bridgePing` first-proof round-trip) and additive service verbs such as
-`code.execute`:
+`code.execute` and `errand.poll`:
 
 | `service.method` | Direction | Request → Response |
 | --- | --- | --- |
@@ -73,6 +74,7 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `cost.gate` | Node→Python | `{agent_id, action, estimated_cost_usd}` → `{allowed, reason, remaining_budget_usd}` |
 | `perception.report` | Node→Python | `{observations[]}` → `{accepted}`; observations may include a typed `PerceptionSnapshot` |
 | `action.result` | Node→Python | `{action_id, status, detail}` → `{accepted}` |
+| `errand.poll` | Node→Python | `{agent_id}` → `{task_id?, task?, from_agent?, dispatched_at_ms?, urgency?}` |
 | `code.execute` | Node→Python | `{language, code, timeout?}` → `{status, stdout?, stderr?, reason?, exit_code?, execution_time_ms?}` |
 
 **Naming reconciliation:** issue #541's scope text says `memory.read`; ADR §6
