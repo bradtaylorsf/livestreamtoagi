@@ -164,7 +164,14 @@ alongside `/ws`):
   `code.execute` require initialized FastAPI services. Code execution delegates
   to `tools/code_execution.py` and its existing Docker/gVisor sandbox; if those
   services are unavailable the bridge returns a retryable
-  `code_service_unavailable` error. The remaining verbs use contract-valid
+  `code_service_unavailable` error. `errand.poll` and `errand.complete` are
+  also wired: poll drains the in-process queue populated by
+  `tools/alpha_dispatch.py`, and complete records the verified outcome and —
+  when the memory compactor is initialized — persists it through
+  `MemoryCompactor.compact_interaction` as an `errand_outcome` event so it is
+  retrievable on the same `memory.recall` path. The completion ack is
+  intentionally independent of memory availability and the write is idempotent
+  per `(simulation_id, task_id)`. The remaining verbs use contract-valid
   placeholders until their owning issues wire them. Each success payload is
   re-validated through `validate_response` before it goes on the wire.
 

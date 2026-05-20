@@ -1,8 +1,10 @@
-# Alpha Structured Errands (E7-3)
+# Alpha Structured Errands (E7-3, E7-4)
 
 Alpha executes structured errands through `!runErrand`. The task is delivered
 by `errand.poll`, parsed as JSON, executed with the existing verified action
-surface, then reported to Python through `errand.complete`.
+surface, then reported to Python through `errand.complete`. E7-4 persists the
+reported outcome through the existing memory compactor so the result is
+retrievable via the standard `memory.recall` path.
 
 ## Errand Plan JSON
 
@@ -62,6 +64,22 @@ Every step needs a stable `action_id`. `navigate` reuses `!navigate` parameters.
 
 `!runErrand` is non-verbal. It logs to the console and does not send Minecraft
 chat.
+
+## Memory persistence (E7-4)
+
+The bridge handler for `errand.complete` writes the verified outcome into the
+agent's recall memory through `MemoryCompactor.compact_interaction` as an
+`errand_outcome` event. The body includes the `task_id`, the dispatcher (when
+still retained in the in-process queue), the overall `status`/`symbol`/`detail`,
+and every `step_results[]` entry; participants default to
+`[agent_id, from_agent]` so a later `memory.recall` returns the outcome for
+either side of the dispatch.
+
+The completion ack is **independent** of memory availability — if the
+compactor is unwired or fails, the bridge still answers `{accepted: true}`
+and only logs a warning. Memory writes are idempotent per
+`(simulation_id, task_id)`, so a retried `errand.complete` frame with the
+same `task_id` will not create a duplicate memory.
 
 ## Symbol Semantics
 
