@@ -1,0 +1,5 @@
+{
+    "name": "Fork",
+    "model": "lmstudio/__LOCAL_LLM_MODEL__",
+    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"
+}
