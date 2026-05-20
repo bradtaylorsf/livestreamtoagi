@@ -76,7 +76,8 @@ async function ensureBridge(agent, traceId) {
 async function makeGoalNear(target, tolerance) {
     try {
         const mod = await import('mineflayer-pathfinder');
-        const GoalNear = mod && mod.goals && mod.goals.GoalNear;
+        const goals = (mod && mod.goals) || (mod && mod.default && mod.default.goals);
+        const GoalNear = goals && goals.GoalNear;
         if (GoalNear) return new GoalNear(target.x, target.y, target.z, tolerance);
     } catch {
         /* Test and static environments may not have the Mindcraft dependency. */
