@@ -107,6 +107,8 @@ UNKNOWN_REQUEST_ID = "unknown"
 
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
+ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
+KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
@@ -300,6 +302,27 @@ def _code_services_unavailable(env: BridgeRequest, services: Any | None) -> Brid
     )
 
 
+async def _kill_switch_active(services: Any | None) -> bool:
+    """Return whether the global Redis kill switch is active.
+
+    ``kill_switch`` is intentionally read from the raw app Redis client, not
+    ``scoped_redis``; it is a global emergency control.
+    """
+    if services is None:
+        return False
+    redis = getattr(services, "redis", None)
+    if redis is None:
+        return False
+    try:
+        return await redis.get(KILL_SWITCH_KEY) == "active"
+    except Exception:
+        logger.warning(
+            "Bridge kill-switch lookup failed; treating Alpha errand gate as active",
+            exc_info=True,
+        )
+        return True
+
+
 def _errand_payload(errand: Errand | None) -> dict[str, Any]:
     if errand is None:
         return {
@@ -333,6 +356,15 @@ def _handle_errand_complete(env: BridgeRequest) -> dict[str, Any]:
         [step.model_dump() for step in payload.step_results],
     )
     return {"accepted": True}
+
+
+def _errand_poll_targets_alpha(env: BridgeRequest) -> bool:
+    payload = ErrandPollRequest.model_validate(env.payload)
+    return env.agent_id == "alpha" or payload.agent_id == "alpha"
+
+
+def _errand_complete_targets_alpha(env: BridgeRequest) -> bool:
+    return env.agent_id == "alpha"
 
 
 def build_bridge_response(raw: Any) -> BridgeResponse:
@@ -406,8 +438,17 @@ async def build_bridge_response_with_services(
         return _success_response(env, await handle_code_execute(env, services))
 
     if key in ERRAND_POLL_VERBS:
+        if _errand_poll_targets_alpha(env) and await _kill_switch_active(services):
+            return _success_response(env, _errand_payload(None))
         return _success_response(env, _handle_errand_poll(env))
     if key in ERRAND_COMPLETE_VERBS:
+        if _errand_complete_targets_alpha(env) and await _kill_switch_active(services):
+            return make_error_response(
+                env.request_id,
+                ERR_KILL_SWITCH_ACTIVE,
+                "kill switch active; Alpha errand completion is paused",
+                retryable=True,
+            )
         return _success_response(env, await handle_errand_complete(env, services))
 
     return _success_response(env, STUB_HANDLERS[key](env))

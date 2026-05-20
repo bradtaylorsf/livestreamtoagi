@@ -259,6 +259,34 @@ class TestSkillCostAttribution:
         assert event.agent_id == "sentinel"
 
 
+# ── Alpha cost attribution ─────────────────────────────────────
+
+
+class TestAlphaCostAttribution:
+    """Verify Alpha dispatch spend is billed to Alpha, not the dispatcher."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_alpha_attributes_llm_spend_to_alpha(self) -> None:
+        from tools.alpha_dispatch import ALPHA_MODEL, DispatchAlphaTool
+
+        client, cost_repo = _make_cost_tracking_client()
+        event_bus = AsyncMock()
+        event_bus.emit = AsyncMock()
+        tool = DispatchAlphaTool(
+            event_bus=event_bus,
+            agent_id="vera",
+            llm_client=client,
+        )
+
+        result = await tool.execute(task="summarize the latest sheep pen status")
+
+        assert result["status"] == "success"
+        cost_repo.add_cost.assert_awaited_once()
+        event = cost_repo.add_cost.await_args.args[0]
+        assert event.agent_id == "alpha"
+        assert event.details["model"] == ALPHA_MODEL
+
+
 # ── SimulationRepo.get_total_cost_from_events ────────────────
 
 
