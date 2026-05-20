@@ -109,7 +109,7 @@ export const observeAction = {
     description: 'Read nearby pose, blocks, entities, and inventory through perception.report.',
     params: {
         radius_blocks: {
-            type: 'number',
+            type: 'float',
             description: 'Optional perception radius in blocks.',
         },
         scope: {

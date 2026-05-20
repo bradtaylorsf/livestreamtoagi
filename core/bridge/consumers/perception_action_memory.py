@@ -9,8 +9,10 @@ storage, summary generation, embedding creation, and recall persistence.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import Awaitable
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,6 +24,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _registered_callbacks: dict[int, tuple[EventCallback, EventCallback]] = {}
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _track_background_task(coro: Awaitable[None]) -> None:
+    """Run memory compaction without blocking the bridge acknowledgement path."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+
+    def _discard(completed: asyncio.Task[None]) -> None:
+        _background_tasks.discard(completed)
+        try:
+            completed.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Unhandled bridge memory consumer task failure")
+
+    task.add_done_callback(_discard)
 
 
 def _clean_text(value: object) -> str:
@@ -93,6 +113,18 @@ async def on_bridge_action_result(event: dict[str, Any], *, compactor: MemoryCom
     )
 
 
+async def _enqueue_bridge_perception(
+    event: dict[str, Any], *, compactor: MemoryCompactor
+) -> None:
+    _track_background_task(on_bridge_perception(event, compactor=compactor))
+
+
+async def _enqueue_bridge_action_result(
+    event: dict[str, Any], *, compactor: MemoryCompactor
+) -> None:
+    _track_background_task(on_bridge_action_result(event, compactor=compactor))
+
+
 async def _compact_bridge_event(
     *,
     data: dict[str, Any],
@@ -126,11 +158,11 @@ def register_memory_consumer(event_bus: EventBus, compactor: MemoryCompactor) ->
 
     perception_cb = cast(
         "EventCallback",
-        partial(on_bridge_perception, compactor=compactor),
+        partial(_enqueue_bridge_perception, compactor=compactor),
     )
     action_cb = cast(
         "EventCallback",
-        partial(on_bridge_action_result, compactor=compactor),
+        partial(_enqueue_bridge_action_result, compactor=compactor),
     )
 
     _registered_callbacks[id(event_bus)] = (perception_cb, action_cb)

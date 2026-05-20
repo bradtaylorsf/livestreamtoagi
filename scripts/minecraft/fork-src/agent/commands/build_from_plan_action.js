@@ -473,11 +473,11 @@ export const buildFromPlanAction = {
                 'Structured plan with blocks[{dx,dy,dz,block_type}], optional palette, and optional clear[].',
         },
         max_steps: {
-            type: 'number',
+            type: 'int',
             description: 'Optional cap on attempted expanded steps.',
         },
         timeout_ms: {
-            type: 'number',
+            type: 'float',
             description: 'Optional total build deadline in milliseconds.',
         },
     },

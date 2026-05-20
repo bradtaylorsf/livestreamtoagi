@@ -282,6 +282,9 @@ def test_committed_movement_action_files_match_contract() -> None:
 
     move_src = MOVE_ACTION.read_text()
     assert "timeout_ms: {" not in move_src
+    assert "type: 'float'" in move_src
+    assert "type: 'number'" not in move_src
+    assert "MINECRAFT_SUPPRESS_ACTION_CHAT" in move_src
     assert "perform: async function (agent, action_id, direction, distance_blocks, timeout_ms)" in move_src
 
 

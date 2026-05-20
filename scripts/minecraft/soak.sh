@@ -41,8 +41,9 @@
 #                               bot-to-bot conversation commands and force
 #                               normal public Minecraft chat/action routing.
 #                               Default: 0.
-#   SOAK_BLOCK_SLOW_SIM_ACTIONS Set to 1 to disable slow code-generation
-#                               actions such as !newAction for quick sims.
+#   SOAK_BLOCK_SLOW_SIM_ACTIONS Set to 1 to disable slow/noisy/structured
+#                               actions such as !newAction, !observe, and
+#                               object-param bridge actions for quick sims.
 #                               Default: 0.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
@@ -214,7 +215,7 @@ print_plan() {
         info "private conv:   allowed"
     fi
     if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
-        info "slow actions:   blocked (!newAction)"
+        info "slow actions:   blocked (!newAction/!observe/structured bridge actions)"
     else
         info "slow actions:   allowed"
     fi
@@ -267,13 +268,24 @@ if (process.env.SOAK_BLOCK_PRIVATE_CONVERSATIONS === '1') {
     }
     settings.blocked_actions = blocked;
     if (!Object.hasOwn(settings, 'num_examples')) settings.num_examples = 0;
+    if (!Object.hasOwn(settings, 'show_command_syntax')) settings.show_command_syntax = 'none';
 }
 
 if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {
     const blocked = Array.isArray(settings.blocked_actions)
         ? [...settings.blocked_actions]
         : [...baseBlockedActions];
-    if (!blocked.includes('!newAction')) blocked.push('!newAction');
+    for (const command of [
+        '!newAction',
+        '!observe',
+        '!navigate',
+        '!place',
+        '!break',
+        '!buildFromPlan',
+        '!executeCode',
+    ]) {
+        if (!blocked.includes(command)) blocked.push(command);
+    }
     settings.blocked_actions = blocked;
 }
 

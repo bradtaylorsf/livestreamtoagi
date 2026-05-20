@@ -251,11 +251,11 @@ export const navigateAction = {
             description: 'Coordinates {x,y,z}, a block target, or an entity_id target.',
         },
         arrive_within_blocks: {
-            type: 'number',
+            type: 'float',
             description: 'Arrival tolerance in blocks.',
         },
         timeout_ms: {
-            type: 'number',
+            type: 'float',
             description: 'Navigation deadline in milliseconds.',
         },
     },

@@ -45,9 +45,16 @@ function positiveNumber(value, fallback) {
     return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function suppressActionChat() {
+    const raw = String(process.env.MINECRAFT_SUPPRESS_ACTION_CHAT || '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on'].includes(raw);
+}
+
 function announce(agent, traceId, line, isError = false) {
     try {
-        if (agent && typeof agent.openChat === 'function') agent.openChat(line);
+        if (!suppressActionChat() && agent && typeof agent.openChat === 'function') {
+            agent.openChat(line);
+        }
     } catch {
         /* chat is cosmetic; never let it mask the verified outcome */
     }
@@ -205,7 +212,7 @@ export const moveAction = {
                 'forward, back, left, right, up, down, north, south, east, or west.',
         },
         distance_blocks: {
-            type: 'number',
+            type: 'float',
             description: 'Requested movement distance in blocks.',
         },
     },

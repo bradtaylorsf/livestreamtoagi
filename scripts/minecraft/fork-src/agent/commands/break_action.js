@@ -224,7 +224,7 @@ export const breakAction = {
             description: 'Optional expected block type at the target before digging.',
         },
         tool_slot: {
-            type: 'number',
+            type: 'int',
             description: 'Optional inventory slot containing the tool to use.',
         },
     },

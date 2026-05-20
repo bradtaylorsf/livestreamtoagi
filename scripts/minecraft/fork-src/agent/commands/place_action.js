@@ -267,7 +267,7 @@ export const placeAction = {
             description: 'Reference face to place against: up, down, north, south, east, west.',
         },
         source_slot: {
-            type: 'number',
+            type: 'int',
             description: 'Optional inventory slot containing the block to place.',
         },
     },

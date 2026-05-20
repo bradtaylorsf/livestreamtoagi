@@ -119,11 +119,18 @@ test bot rather than a character. The wrapper also sets
 `SOAK_BLOCK_PRIVATE_CONVERSATIONS=1` by default so isolated MindServer launches
 do not use Mindcraft's private `!startConversation`/`!endConversation` channel;
 the characters coordinate through ordinary public Minecraft chat and visible
-actions instead. It also blocks slow startup code-generation via `!newAction`
-by default, pushing the local smoke path toward direct built-in commands such as
-`!collectBlocks`, `!searchForBlock`, `!move`, and `!placeHere`. Set
-`MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately want the local model to
-spend extra time synthesizing custom action code.
+actions instead. It also blocks slow startup code-generation via `!newAction`,
+the noisy local `!observe` action, and structured bridge actions that are not
+friendly to Mindcraft's simple chat-command parser by default, pushing the
+local smoke path toward direct commands such as `!move`, `!searchForBlock`,
+`!collectBlocks`, and `!placeHere`. In this local public-chat mode the wrapper
+also hides command syntax from in-game chat, so one character's command does not
+get rebroadcast as a forced command for every other isolated MindServer
+instance. Low-level bridge action result chatter is suppressed by default with
+`MC_SIM_SUPPRESS_ACTION_CHAT=1`; the action still logs to each bot log and
+still reports over the Python bridge, but it does not interrupt the other local
+models mid-turn. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
+want the local model to spend extra time synthesizing custom action code.
 
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 

@@ -144,8 +144,9 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "management review: disabled" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
     assert "slow sim actions: 1" in proc.stdout
+    assert "suppress action chat: 1" in proc.stdout
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
-    assert "slow actions:   blocked (!newAction)" in proc.stdout
+    assert "slow actions:   blocked (!newAction/!observe/structured bridge actions)" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
     assert SOAK_BOTS_LINE not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
@@ -262,6 +263,33 @@ def test_local_sim_wrapper_can_allow_new_action_when_requested(tmp_path) -> None
     assert "slow actions:   allowed" in proc.stdout
 
 
+def test_local_sim_wrapper_can_allow_action_chat_when_requested(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_SUPPRESS_ACTION_CHAT=0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "suppress action chat: 0" in proc.stdout
+
+
 def test_local_sim_wrapper_accepts_pnpm_separator(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -328,9 +356,12 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "settings_json_for_bot" in text
     assert "settings.init_message = ''" in text
     assert "settings.num_examples = 0" in text
+    assert "settings.show_command_syntax = 'none'" in text
     assert "!startConversation" in text
     assert "!endConversation" in text
     assert "!newAction" in text
+    assert "!observe" in text
+    assert "!buildFromPlan" in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text
