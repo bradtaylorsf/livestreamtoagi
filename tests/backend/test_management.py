@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.util
 import uuid
 from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.bridge import contract as bridge_contract
+from core.bridge.errand_queue import errand_queue
+from core.bridge.handlers.errand import handle_errand_complete
 from core.event_bus import EventType
 from core.management import CONTENT_RULES_PATH, Management
 from core.models import ContentReviewResult, LLMResponse
@@ -58,6 +64,52 @@ def management(mock_redis: MagicMock, mock_llm: MagicMock, mock_event_bus: Magic
     )
 
 
+def _alpha_errand_complete_request(
+    task_id: str,
+    *,
+    status: str = "success",
+    symbol: str = "✓",
+    detail: str = "1/1 steps finished",
+) -> bridge_contract.BridgeRequest:
+    return bridge_contract.BridgeRequest(
+        version=bridge_contract.PROTOCOL_VERSION,
+        request_id=f"req-{task_id}",
+        agent_id="alpha",
+        run_id="run-management-alpha-test",
+        simulation_id="11111111-1111-1111-1111-111111111111",
+        service="errand",
+        method="complete",
+        payload={
+            "task_id": task_id,
+            "status": status,
+            "symbol": symbol,
+            "detail": detail,
+            "step_results": [],
+        },
+        deadline_ms=5000,
+        cost_context=bridge_contract.CostContext(
+            agent_tier="errand",
+            budget_bucket="bridge-management-test",
+            estimated_cost_usd=0.0,
+        ),
+    )
+
+
+class _RaisingManagement:
+    async def review(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        conversation_id: object | None = None,
+        simulation_id: object | None = None,
+    ) -> ContentReviewResult:
+        raise RuntimeError("review service unavailable")
+
+    async def intervene(self, severity: int, agent_id: str, reason: str) -> None:
+        raise AssertionError("intervene should not be called after review failure")
+
+
 # -- Layer 1: Keyword blocklist ----------------------------------------
 
 
@@ -74,6 +126,85 @@ async def test_blocked_keyword_case_insensitive(management: Management) -> None:
     result = await management.review("fork", "GRAPHIC VIOLENCE is bad")
     assert result.approved is False
     assert result.severity == 3
+
+
+# -- Alpha symbolic output review -------------------------------------
+
+
+async def test_alpha_errand_outcome_review_allows_without_intervention(
+    management: Management, mock_event_bus: MagicMock
+) -> None:
+    """Approved Alpha errand output is reviewed without emitting an intervention."""
+    errand_queue.clear()
+    try:
+        result = await handle_errand_complete(
+            _alpha_errand_complete_request("task-management-alpha-approved"),
+            SimpleNamespace(compactor=None, management=management),
+        )
+
+        assert result == {"accepted": True}
+        mock_event_bus.emit.assert_not_called()
+    finally:
+        errand_queue.clear()
+
+
+async def test_alpha_errand_outcome_blocked_review_emits_intervention(
+    management: Management,
+    mock_event_bus: MagicMock,
+) -> None:
+    """Blocked Alpha symbolic output emits the standard Management intervention event."""
+    errand_queue.clear()
+    try:
+        result = await handle_errand_complete(
+            _alpha_errand_complete_request(
+                "task-management-alpha-blocked",
+                status="failure",
+                symbol="✗",
+                detail="graphic violence was reported in the errand outcome",
+            ),
+            SimpleNamespace(compactor=None, management=management),
+        )
+
+        assert result == {"accepted": True}
+        mock_event_bus.emit.assert_called_once()
+        call_args = mock_event_bus.emit.call_args
+        assert call_args[0][0] == EventType.MANAGEMENT_INTERVENTION.value
+        assert call_args[0][1]["agent_id"] == "alpha"
+        assert call_args[0][1]["severity"] == 3
+        assert "graphic violence" in call_args[0][1]["reason"].lower()
+    finally:
+        errand_queue.clear()
+
+
+async def test_alpha_errand_outcome_review_failure_does_not_reject_ack() -> None:
+    """Management review failures are logged and do not escape the bridge handler."""
+    errand_queue.clear()
+    try:
+        result = await handle_errand_complete(
+            _alpha_errand_complete_request("task-management-alpha-review-failure"),
+            SimpleNamespace(compactor=None, management=_RaisingManagement()),
+        )
+
+        assert result == {"accepted": True}
+        assert errand_queue.get_completion("task-management-alpha-review-failure") is not None
+    finally:
+        errand_queue.clear()
+
+
+def test_management_is_not_mindcraft_world_bot() -> None:
+    """Management is excluded from Mindcraft profile generation and committed bot profiles."""
+    repo_root = Path(__file__).resolve().parents[2]
+    gen_script = repo_root / "scripts" / "minecraft" / "gen_profiles.py"
+    spec = importlib.util.spec_from_file_location("mc_gen_profiles_for_management", gen_script)
+    assert spec is not None
+    assert spec.loader is not None
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+
+    assert "management" in gen.NON_BOT_AGENTS
+    assert not (repo_root / "scripts" / "minecraft" / "profiles" / "management-bot.json").exists()
+    with pytest.raises(ValueError, match="never a world bot"):
+        gen.build_profile("management")
 
 
 # -- Layer 2: LLM review (clean content) -------------------------------

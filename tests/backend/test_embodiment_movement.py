@@ -93,6 +93,33 @@ export async function callBridge(opts = {}) {
     return commands / action_filename, calls_path
 
 
+def _write_pathfinder_default_export_stub(tmp_path: Path) -> None:
+    package = tmp_path / "node_modules" / "mineflayer-pathfinder"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text(
+        json.dumps({"type": "module", "main": "index.js"})
+    )
+    (package / "index.js").write_text(
+        """
+class GoalNear {
+    constructor(x, y, z, range) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.range = range;
+    }
+
+    isValid() {
+        return true;
+    }
+}
+
+export const pathfinder = {};
+export default { pathfinder, goals: { GoalNear } };
+""".lstrip()
+    )
+
+
 async def _dispatch_recorded_inbound_calls(calls_path: Path) -> None:
     for idx, raw in enumerate(calls_path.read_text().splitlines()):
         call = json.loads(raw)
@@ -252,6 +279,63 @@ def test_committed_movement_action_files_match_contract() -> None:
         assert "classifyMovement" in src
         assert "safe-idling" in src
         assert "openrouter" not in src.lower()
+
+
+@requires_node
+def test_navigate_action_uses_pathfinder_default_export_goals(tmp_path: Path) -> None:
+    """mineflayer-pathfinder exposes ``goals`` via the default export under ESM.
+
+    Passing the fallback plain object into a real pathfinder crashes later in
+    the physics tick because it lacks ``isValid``; this catches that live shape.
+    """
+    navigate_action, calls_path = _stage_action_with_stub_bridge(
+        tmp_path, NAVIGATE_ACTION, "navigate_action.js"
+    )
+    _write_pathfinder_default_export_stub(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(navigate_action))}).href);
+const position = {{ x: 0, y: 64, z: 0 }};
+const bot = {{
+    username: 'NavHarnessBot',
+    entity: {{ position, yaw: 0 }},
+    pathfinder: {{
+        async goto(goal) {{
+            if (typeof goal.isValid !== 'function') {{
+                throw new Error('goal must expose isValid');
+            }}
+            position.x = Number(goal.x);
+            position.y = Number(goal.y);
+            position.z = Number(goal.z);
+            bot.entity.position = position;
+        }},
+        stop() {{}},
+    }},
+}};
+const result = await mod.navigateAction.perform(
+    {{ name: 'vera', bot, openChat: () => {{}} }},
+    'navigate-action-default-export',
+    {{ x: 6, y: 64, z: -3 }},
+    1.0,
+    1000,
+);
+process.stdout.write(JSON.stringify({{ result, position }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "vera",
+            "LTAG_RUN_ID": "run-movement-test",
+            "LTAG_SIMULATION_ID": "00000000-0000-0000-0000-000000000557",
+        },
+    )
+
+    assert result["position"] == {"x": 6, "y": 64, "z": -3}
+    assert "reached:" in result["result"]
 
 
 def test_connect_script_stages_and_injects_movement_actions() -> None:

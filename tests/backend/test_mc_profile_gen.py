@@ -280,6 +280,24 @@ def test_alpha_generates_single_tier_profile():
     assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
     assert profile["model"] == profile["code_model"]
 
+    committed_local_template = json.loads(
+        (
+            REPO_ROOT
+            / "scripts"
+            / "minecraft"
+            / "profiles"
+            / "alpha-bot.json"
+        ).read_text()
+    )
+    generated_local_template = gen.build_profile(
+        "alpha",
+        provider="lmstudio",
+        local_chat="__LOCAL_LLM_MODEL__",
+        local_code="__LOCAL_LLM_MODEL_BUILDING__",
+    )
+    assert committed_local_template == generated_local_template
+    assert "openrouter/" not in json.dumps(committed_local_template)
+
 
 def test_unknown_provider_raises():
     with pytest.raises(ValueError, match="Unknown provider"):

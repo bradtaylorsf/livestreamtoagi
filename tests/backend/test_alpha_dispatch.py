@@ -12,6 +12,7 @@ from core.models import LLMResponse
 from tools.alpha_dispatch import (
     ALLOWED_AGENTS,
     ALPHA_MODEL,
+    KILL_SWITCH_KEY,
     DispatchAlphaTool,
 )
 
@@ -53,12 +54,14 @@ def _make_tool(
     llm_client: AsyncMock,
     agent_id: str = "vera",
     cost_repo: AsyncMock | None = None,
+    redis_client: AsyncMock | None = None,
 ) -> DispatchAlphaTool:
     return DispatchAlphaTool(
         event_bus=event_bus,
         agent_id=agent_id,
         llm_client=llm_client,
         cost_repo=cost_repo,
+        redis_client=redis_client,
     )
 
 
@@ -253,6 +256,46 @@ class TestAccessControl:
         result = await tool.execute(task="  ")
         assert result["status"] == "error"
         assert "empty" in result["reason"].lower()
+
+
+# --- Kill switch ---
+
+
+class TestKillSwitch:
+    async def test_active_kill_switch_rejects_without_side_effects(
+        self,
+        event_bus: AsyncMock,
+        llm_client: AsyncMock,
+    ) -> None:
+        redis_client = AsyncMock()
+        redis_client.get = AsyncMock(return_value="active")
+        tool = _make_tool(event_bus, llm_client, redis_client=redis_client)
+
+        result = await tool.execute(task="check the sheep pen")
+
+        assert result == {
+            "status": "rejected",
+            "reason": "kill_switch_active",
+        }
+        redis_client.get.assert_awaited_once_with(KILL_SWITCH_KEY)
+        event_bus.emit.assert_not_called()
+        llm_client.complete.assert_not_called()
+
+    async def test_inactive_kill_switch_allows_dispatch(
+        self,
+        event_bus: AsyncMock,
+        llm_client: AsyncMock,
+    ) -> None:
+        redis_client = AsyncMock()
+        redis_client.get = AsyncMock(return_value=None)
+        tool = _make_tool(event_bus, llm_client, redis_client=redis_client)
+
+        result = await tool.execute(task="check the sheep pen")
+
+        assert result["status"] == "success"
+        redis_client.get.assert_awaited_once_with(KILL_SWITCH_KEY)
+        llm_client.complete.assert_called_once()
+        assert event_bus.emit.call_count == 4
 
 
 # --- Cost tracking ---

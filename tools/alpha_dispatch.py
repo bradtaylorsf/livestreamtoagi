@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from core.event_bus import EventType
 
@@ -14,6 +14,7 @@ from .base import BaseTool
 if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
+    from core.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,10 @@ ALPHA_MODEL = "deepseek/deepseek-v3.2"
 
 # Hard timeout for Alpha tasks
 ALPHA_TIMEOUT_SECONDS = 60
+
+# Global Redis key used by the admin kill-switch routes. This is deliberately
+# not simulation-scoped; see core/redis_keys.py.
+KILL_SWITCH_KEY = "kill_switch"
 
 # System prompt constraining Alpha's capabilities
 ALPHA_SYSTEM_PROMPT = (
@@ -33,6 +38,10 @@ ALPHA_SYSTEM_PROMPT = (
 
 # All agents that may dispatch Alpha (everyone except Alpha itself)
 ALLOWED_AGENTS = frozenset({"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"})
+
+
+def _normalize_urgency(value: Any) -> Literal["when_free", "now"]:
+    return "now" if value == "now" else "when_free"
 
 
 class DispatchAlphaTool(BaseTool):
@@ -55,10 +64,24 @@ class DispatchAlphaTool(BaseTool):
         agent_id: str,
         llm_client: LLMClient,
         cost_repo: object | None = None,  # Kept for backward compat, unused
+        redis_client: RedisClient | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._agent_id = agent_id
         self._llm_client = llm_client
+        self._redis_client = redis_client
+
+    async def _kill_switch_active(self) -> bool:
+        if self._redis_client is None:
+            return False
+        try:
+            return await self._redis_client.get(KILL_SWITCH_KEY) == "active"
+        except Exception:
+            logger.warning(
+                "Alpha dispatch kill-switch lookup failed; rejecting dispatch",
+                exc_info=True,
+            )
+            return True
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         task: str = kwargs.get("task", "")
@@ -79,7 +102,25 @@ class DispatchAlphaTool(BaseTool):
         if not task.strip():
             return {"status": "error", "reason": "Task cannot be empty"}
 
+        if await self._kill_switch_active():
+            return {
+                "status": "rejected",
+                "reason": "kill_switch_active",
+            }
+
         task_id = str(uuid.uuid4())
+        urgency = _normalize_urgency(kwargs.get("urgency"))
+
+        # Lazy import keeps the constructor/backward-compat surface unchanged.
+        from core.bridge.errand_queue import errand_queue
+
+        errand_queue.enqueue(
+            "alpha",
+            task_id,
+            task,
+            from_agent=self._agent_id,
+            urgency=urgency,
+        )
 
         # Emit dispatch event — wolf runs off screen
         await self._event_bus.emit(

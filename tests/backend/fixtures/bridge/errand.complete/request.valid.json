@@ -1,0 +1,28 @@
+{
+  "agent_id": "alpha",
+  "cost_context": {
+    "agent_tier": "errand",
+    "budget_bucket": "bridge",
+    "estimated_cost_usd": 0.0
+  },
+  "deadline_ms": 5000,
+  "method": "complete",
+  "payload": {
+    "detail": "1/1 steps finished",
+    "status": "success",
+    "step_results": [
+      {
+        "action_id": "place-1",
+        "detail": "placed: position=0,64,0",
+        "status": "success"
+      }
+    ],
+    "symbol": "✓",
+    "task_id": "alpha-task-1"
+  },
+  "request_id": "req-errand-complete-0001",
+  "run_id": "run-0001",
+  "service": "errand",
+  "simulation_id": "11111111-1111-1111-1111-111111111111",
+  "version": "1.6"
+}

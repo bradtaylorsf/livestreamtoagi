@@ -235,6 +235,7 @@ def get_core_tools(
                 agent_id=agent_id,
                 llm_client=llm_client,
                 cost_repo=cost_repo,
+                redis_client=redis_client,
             )
         )
 

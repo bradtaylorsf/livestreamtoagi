@@ -77,7 +77,7 @@ ADR_SERVICE_NAMES = {
     "action.result",
     "code.execute",
 }
-ALLOWED_REGISTRY_KEYS = ADR_SERVICE_NAMES | {"bridge.ping"}
+ALLOWED_REGISTRY_KEYS = ADR_SERVICE_NAMES | {"bridge.ping", "errand.poll", "errand.complete"}
 
 # The six initial verbs #541 scopes (issue 'memory.read' == ADR 'memory.recall').
 ISSUE_INITIAL_VERBS = {
@@ -395,14 +395,16 @@ def test_perception_snapshot_models_are_exported_and_report_is_backward_compatib
 
 
 def test_protocol_version_is_self_consistent() -> None:
-    # 1.4: E6-6 (#561) added typed perception snapshot definitions — an
+    # 1.6: E7-3 (#567) added errand.complete — an
     # additive minor bump (ADR §3), same major as earlier 1.x peers.
-    assert c.PROTOCOL_VERSION == "1.4"
+    assert c.PROTOCOL_VERSION == "1.6"
     assert c.is_supported_version(c.PROTOCOL_VERSION)
-    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 4, 0)
+    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 6, 0)
 
 
-@pytest.mark.parametrize("version", ["1.0", "1.3", "1.4", "1.0.9", "1.99.99"])
+@pytest.mark.parametrize(
+    "version", ["1.0", "1.3", "1.4", "1.5", "1.6", "1.0.9", "1.99.99"]
+)
 def test_additive_same_major_versions_supported(version: str) -> None:
     """ADR §3: new optional fields/verbs are minor/patch and must not break a
     peer — any same-major version is wire-compatible in either direction."""
@@ -444,7 +446,8 @@ def test_registry_is_closed_and_uses_adr_names_only() -> None:
     assert ISSUE_INITIAL_VERBS.issubset(keys), "all six #541 verbs must be registered"
     unexpected = keys - ALLOWED_REGISTRY_KEYS
     assert not unexpected, (
-        f"registry has out-of-contract verbs not in ADR §6 (+bridge.ping): {sorted(unexpected)}"
+        "registry has out-of-contract verbs not in ADR §6 "
+        f"(+bridge.ping/+errand.*): {sorted(unexpected)}"
     )
 
 

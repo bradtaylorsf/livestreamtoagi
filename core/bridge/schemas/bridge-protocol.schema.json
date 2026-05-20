@@ -564,6 +564,205 @@
       "title": "EntityObservation",
       "type": "object"
     },
+    "ErrandCompleteRequest": {
+      "additionalProperties": false,
+      "description": "``errand.complete`` \u2014 Alpha reports a verified errand outcome.\n\nE7-3 uses this verb to connect the embodied action result back to the\ndispatcher: ``symbol`` is Alpha's non-verbal \u2713/\u2717/? summary, while\n``step_results`` preserves the per-action verified outcome.",
+      "properties": {
+        "detail": {
+          "default": "",
+          "description": "Human-readable errand outcome detail.",
+          "title": "Detail",
+          "type": "string"
+        },
+        "status": {
+          "description": "Overall verified errand status.",
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "step_results": {
+          "description": "Verified terminal results for each errand step.",
+          "items": {
+            "$ref": "#/$defs/ErrandStepResult"
+          },
+          "title": "Step Results",
+          "type": "array"
+        },
+        "symbol": {
+          "description": "Alpha's non-verbal outcome symbol: success, failure, or confused.",
+          "enum": [
+            "\u2713",
+            "\u2717",
+            "?"
+          ],
+          "title": "Symbol",
+          "type": "string"
+        },
+        "task_id": {
+          "description": "Dispatched errand task id.",
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "status",
+        "symbol"
+      ],
+      "title": "ErrandCompleteRequest",
+      "type": "object"
+    },
+    "ErrandCompleteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "description": "Whether Python recorded the errand completion.",
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "title": "ErrandCompleteResponse",
+      "type": "object"
+    },
+    "ErrandPollRequest": {
+      "additionalProperties": false,
+      "description": "``errand.poll`` \u2014 bot asks Python for its next dispatched task.",
+      "properties": {
+        "agent_id": {
+          "description": "Stable id of the polling agent.",
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id"
+      ],
+      "title": "ErrandPollRequest",
+      "type": "object"
+    },
+    "ErrandPollResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatched_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unix epoch milliseconds when the task was queued.",
+          "title": "Dispatched At Ms"
+        },
+        "from_agent": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent that dispatched the errand.",
+          "title": "From Agent"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Natural-language errand text.",
+          "title": "Task"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dispatched task id, if any.",
+          "title": "Task Id"
+        },
+        "urgency": {
+          "anyOf": [
+            {
+              "enum": [
+                "when_free",
+                "now"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dispatch urgency, or null when no task is pending.",
+          "title": "Urgency"
+        }
+      },
+      "title": "ErrandPollResponse",
+      "type": "object"
+    },
+    "ErrandStepResult": {
+      "additionalProperties": false,
+      "description": "One terminal in-world action outcome within an Alpha errand.",
+      "properties": {
+        "action_id": {
+          "description": "Step action id from the errand plan.",
+          "minLength": 1,
+          "title": "Action Id",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "description": "Human-readable verifier detail.",
+          "title": "Detail",
+          "type": "string"
+        },
+        "status": {
+          "description": "Verified terminal status reported by the action surface.",
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_id",
+        "status"
+      ],
+      "title": "ErrandStepResult",
+      "type": "object"
+    },
     "InventoryItem": {
       "additionalProperties": false,
       "description": "Observed inventory stack.",
@@ -1069,7 +1268,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.4",
+  "protocolVersion": "1.6",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -1086,6 +1285,14 @@
     "cost.gate": {
       "request": "#/$defs/CostGateRequest",
       "response": "#/$defs/CostGateResponse"
+    },
+    "errand.complete": {
+      "request": "#/$defs/ErrandCompleteRequest",
+      "response": "#/$defs/ErrandCompleteResponse"
+    },
+    "errand.poll": {
+      "request": "#/$defs/ErrandPollRequest",
+      "response": "#/$defs/ErrandPollResponse"
     },
     "management.review": {
       "request": "#/$defs/ManagementReviewRequest",

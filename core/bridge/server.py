@@ -34,11 +34,12 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
   contract-valid :class:`BridgeResponse` (``ok=false`` + typed error); only the
   handshake closes the socket.
 
-``memory.recall`` delegates read-only to the existing memory managers and
-``memory.write`` delegates append/write work to the existing memory compactor
-when FastAPI lifespan has initialized services. ``code.execute`` delegates to
-the existing Docker/gVisor sandbox tool; other verbs remain contract-valid
-stubs until their owning issues wire them.
+``memory.recall`` delegates read-only to the existing memory managers,
+``memory.write`` delegates append/write work to the existing memory compactor,
+and ``errand.complete`` records Alpha outcomes to that same compactor when
+FastAPI lifespan has initialized services. ``code.execute`` delegates to the
+existing Docker/gVisor sandbox tool; remaining verbs stay contract-valid stubs
+until their owning issues wire them.
 """
 
 from __future__ import annotations
@@ -60,6 +61,8 @@ from core.bridge.contract import (
     ERR_UNSUPPORTED_SERVICE,
     BridgeRequest,
     BridgeResponse,
+    ErrandCompleteRequest,
+    ErrandPollRequest,
     MemoryRecallRequest,
     UnsupportedServiceError,
     is_supported_version,
@@ -69,7 +72,9 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
+from core.bridge.errand_queue import Errand, errand_queue
 from core.bridge.handlers.code_execution import handle_code_execute
+from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
 
 logger = logging.getLogger(__name__)
@@ -102,9 +107,14 @@ UNKNOWN_REQUEST_ID = "unknown"
 
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
+ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
+KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
+ERRAND_POLL_VERBS = frozenset({"errand.poll"})
+ERRAND_COMPLETE_VERBS = frozenset({"errand.complete"})
+ERRAND_VERBS = ERRAND_POLL_VERBS | ERRAND_COMPLETE_VERBS
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -292,6 +302,71 @@ def _code_services_unavailable(env: BridgeRequest, services: Any | None) -> Brid
     )
 
 
+async def _kill_switch_active(services: Any | None) -> bool:
+    """Return whether the global Redis kill switch is active.
+
+    ``kill_switch`` is intentionally read from the raw app Redis client, not
+    ``scoped_redis``; it is a global emergency control.
+    """
+    if services is None:
+        return False
+    redis = getattr(services, "redis", None)
+    if redis is None:
+        return False
+    try:
+        return await redis.get(KILL_SWITCH_KEY) == "active"
+    except Exception:
+        logger.warning(
+            "Bridge kill-switch lookup failed; treating Alpha errand gate as active",
+            exc_info=True,
+        )
+        return True
+
+
+def _errand_payload(errand: Errand | None) -> dict[str, Any]:
+    if errand is None:
+        return {
+            "task_id": None,
+            "task": None,
+            "from_agent": None,
+            "dispatched_at_ms": None,
+            "urgency": None,
+        }
+    return {
+        "task_id": errand.task_id,
+        "task": errand.task,
+        "from_agent": errand.from_agent,
+        "dispatched_at_ms": errand.dispatched_at_ms,
+        "urgency": errand.urgency,
+    }
+
+
+def _handle_errand_poll(env: BridgeRequest) -> dict[str, Any]:
+    payload = ErrandPollRequest.model_validate(env.payload)
+    return _errand_payload(errand_queue.poll(payload.agent_id))
+
+
+def _handle_errand_complete(env: BridgeRequest) -> dict[str, Any]:
+    payload = ErrandCompleteRequest.model_validate(env.payload)
+    errand_queue.record_completion(
+        payload.task_id,
+        payload.status,
+        payload.symbol,
+        payload.detail,
+        [step.model_dump() for step in payload.step_results],
+    )
+    return {"accepted": True}
+
+
+def _errand_poll_targets_alpha(env: BridgeRequest) -> bool:
+    payload = ErrandPollRequest.model_validate(env.payload)
+    return env.agent_id == "alpha" or payload.agent_id == "alpha"
+
+
+def _errand_complete_targets_alpha(env: BridgeRequest) -> bool:
+    return env.agent_id == "alpha"
+
+
 def build_bridge_response(raw: Any) -> BridgeResponse:
     """Turn one decoded non-memory frame into a contract-valid response envelope.
 
@@ -321,6 +396,10 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             f"{key} requires initialized code execution services",
             retryable=True,
         )
+    if key in ERRAND_POLL_VERBS:
+        return _success_response(env, _handle_errand_poll(env))
+    if key in ERRAND_COMPLETE_VERBS:
+        return _success_response(env, _handle_errand_complete(env))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -357,6 +436,20 @@ async def build_bridge_response_with_services(
         if unavailable is not None:
             return unavailable
         return _success_response(env, await handle_code_execute(env, services))
+
+    if key in ERRAND_POLL_VERBS:
+        if _errand_poll_targets_alpha(env) and await _kill_switch_active(services):
+            return _success_response(env, _errand_payload(None))
+        return _success_response(env, _handle_errand_poll(env))
+    if key in ERRAND_COMPLETE_VERBS:
+        if _errand_complete_targets_alpha(env) and await _kill_switch_active(services):
+            return make_error_response(
+                env.request_id,
+                ERR_KILL_SWITCH_ACTIVE,
+                "kill switch active; Alpha errand completion is paused",
+                retryable=True,
+            )
+        return _success_response(env, await handle_errand_complete(env, services))
 
     return _success_response(env, STUB_HANDLERS[key](env))
 
@@ -485,7 +578,13 @@ async def bridge_ws(websocket: WebSocket) -> None:
 def _assert_handlers_cover_registry() -> None:
     from core.bridge.contract import SERVICE_REGISTRY
 
-    handled = set(STUB_HANDLERS) | MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS | CODE_EXECUTE_VERBS
+    handled = (
+        set(STUB_HANDLERS)
+        | MEMORY_HANDLER_VERBS
+        | MEMORY_WRITE_VERBS
+        | CODE_EXECUTE_VERBS
+        | ERRAND_VERBS
+    )
     missing = set(SERVICE_REGISTRY) - handled
     extra = handled - set(SERVICE_REGISTRY)
     if missing or extra:
