@@ -39,6 +39,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Keep simulation rollups observable when a real conversation used tokens but
+# the provider reports zero billable spend (local LM Studio) or the DB's
+# NUMERIC(10,4) cost columns would round a tiny call down to zero.
+MIN_ACCOUNTED_PHASE_COST = Decimal("0.0001")
+
 # ── Live display helpers (Rich output during simulation) ─────
 
 _AGENT_STYLES: dict[str, str] = {
@@ -753,9 +758,13 @@ class PhaseRunner:
                 self._topic_history[topic] = []
             self._topic_history[topic].extend(timestamps)
 
+        accounted_cost = cost_in_conv
+        if tokens_in_conv > 0 and accounted_cost < MIN_ACCOUNTED_PHASE_COST:
+            accounted_cost = MIN_ACCOUNTED_PHASE_COST
+
         # Accumulate stats
         self._phase_conversations += 1
         self._phase_turns += turns_in_conv
-        self._phase_cost += cost_in_conv
+        self._phase_cost += accounted_cost
         self._phase_tokens += tokens_in_conv
         self._phase_agents.update(agents_in_conv)
