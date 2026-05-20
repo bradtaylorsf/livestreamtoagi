@@ -48,6 +48,7 @@ class ErrandQueue:
         self._duplicate_ttl_seconds = duplicate_ttl_seconds
         self._queues: dict[str, asyncio.Queue[Errand]] = {}
         self._seen_task_ids: dict[str, float] = {}
+        self._dispatchers: dict[str, str] = {}
         self._completion_expires_at: dict[str, float] = {}
         self._completions: dict[str, ErrandResult] = {}
 
@@ -83,6 +84,7 @@ class ErrandQueue:
             )
         )
         self._seen_task_ids[task_id] = now + self._duplicate_ttl_seconds
+        self._dispatchers[task_id] = from_agent
         return True
 
     def poll(self, agent_id: str) -> Errand | None:
@@ -106,9 +108,9 @@ class ErrandQueue:
     ) -> ErrandResult:
         """Record Alpha's verified completion for *task_id*.
 
-        The store is intentionally in-process for E7-3. E7-4 owns durable
-        memory writes; this short-lived result cache is only the bridge-visible
-        handoff proving the errand surfaced a verified ✓/✗/? outcome.
+        Durable memory persistence is wired by the bridge completion handler.
+        This short-lived cache remains the bridge-visible handoff proving the
+        errand surfaced a verified ✓/✗/? outcome.
         """
         now = time.monotonic()
         self._prune_expired(now)
@@ -129,6 +131,11 @@ class ErrandQueue:
         self._prune_expired(time.monotonic())
         return self._completions.get(task_id)
 
+    def from_agent_for(self, task_id: str) -> str | None:
+        """Return the dispatcher for a recently queued task, if still retained."""
+        self._prune_expired(time.monotonic())
+        return self._dispatchers.get(task_id)
+
     def clear(self, *, agent_ids: Iterable[str] | None = None) -> None:
         """Clear queued errands and duplicate state.
 
@@ -138,12 +145,14 @@ class ErrandQueue:
         if agent_ids is None:
             self._queues.clear()
             self._seen_task_ids.clear()
+            self._dispatchers.clear()
             self._completion_expires_at.clear()
             self._completions.clear()
             return
         for agent_id in agent_ids:
             self._queues.pop(_agent_key(agent_id), None)
         self._seen_task_ids.clear()
+        self._dispatchers.clear()
         self._completion_expires_at.clear()
         self._completions.clear()
 
@@ -155,6 +164,7 @@ class ErrandQueue:
         ]
         for task_id in expired:
             self._seen_task_ids.pop(task_id, None)
+            self._dispatchers.pop(task_id, None)
         expired_results = [
             task_id
             for task_id, expires_at in self._completion_expires_at.items()
