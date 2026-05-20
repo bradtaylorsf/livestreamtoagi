@@ -63,6 +63,22 @@
 #   SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS
 #                               Seconds to wait after bot launch before giving
 #                               the online starter kit. Default: 5.
+#   SOAK_MIN_INTENT_TO_COMMAND_RATIO
+#                               Minimum commands emitted per intended action
+#                               utterance before the reliability gate fails.
+#                               Default: 0.6.
+#   SOAK_MIN_PARSE_SUCCESS      Minimum command parse success rate. Default: 0.8.
+#   SOAK_MIN_EXECUTION_RATE     Minimum emitted-command execution rate.
+#                               Default: 0.7.
+#   SOAK_MIN_VERIFIED_SUCCESS   Minimum execution-success entries corroborated
+#                               by world-state evidence. Default: 0.5.
+#   SOAK_RELIABILITY_MIN_INTENTS
+#                               Only enforce reliability thresholds for agents
+#                               with at least this many intended action events.
+#                               Default: 5.
+#   SOAK_RELIABILITY_FAIL_ON_VIOLATION
+#                               Exit nonzero when the reliability gate reports
+#                               threshold violations. Default: 1.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -96,6 +112,12 @@ SOAK_BLOCK_SLOW_SIM_ACTIONS="${SOAK_BLOCK_SLOW_SIM_ACTIONS:-0}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
 SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
+SOAK_MIN_INTENT_TO_COMMAND_RATIO="${SOAK_MIN_INTENT_TO_COMMAND_RATIO:-0.6}"
+SOAK_MIN_PARSE_SUCCESS="${SOAK_MIN_PARSE_SUCCESS:-0.8}"
+SOAK_MIN_EXECUTION_RATE="${SOAK_MIN_EXECUTION_RATE:-0.7}"
+SOAK_MIN_VERIFIED_SUCCESS="${SOAK_MIN_VERIFIED_SUCCESS:-0.5}"
+SOAK_RELIABILITY_MIN_INTENTS="${SOAK_RELIABILITY_MIN_INTENTS:-5}"
+SOAK_RELIABILITY_FAIL_ON_VIOLATION="${SOAK_RELIABILITY_FAIL_ON_VIOLATION:-1}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
@@ -241,6 +263,7 @@ verify_static() {
     [ -x "$SCRIPT_DIR/supervise.sh" ] || { fail "missing executable: $SCRIPT_DIR/supervise.sh"; problems=1; }
     [ -x "$SCRIPT_DIR/start-server.sh" ] || { fail "missing executable: $SCRIPT_DIR/start-server.sh"; problems=1; }
     [ -x "$SCRIPT_DIR/setup-easy-spawn.mjs" ] || { fail "missing executable: $SCRIPT_DIR/setup-easy-spawn.mjs"; problems=1; }
+    [ -x "$SCRIPT_DIR/analyze_action_reliability.py" ] || { fail "missing executable: $SCRIPT_DIR/analyze_action_reliability.py"; problems=1; }
     [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
     grep -q 'CHECK_MINECRAFT=1 bash scripts/check-services.sh' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
@@ -249,6 +272,14 @@ verify_static() {
     }
     grep -q 'pnpm llm:local --list-only' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document LM Studio validation"
+        problems=1
+    }
+    grep -q 'Action-Command Reliability Gate' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document the action-command reliability gate"
+        problems=1
+    }
+    grep -q 'Intent Detection' "$REPO_ROOT/docs/minecraft/action-command-reliability.md" 2> /dev/null || {
+        fail "action-command reliability methodology doc is missing"
         problems=1
     }
 
@@ -279,6 +310,7 @@ print_plan() {
     info "server dir:     ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
     info "world config:   ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
+    info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -521,6 +553,12 @@ write_metadata() {
         echo "safe_terrain_actions=$SOAK_SAFE_TERRAIN_ACTIONS"
         echo "easy_spawn=$SOAK_EASY_SPAWN"
         echo "easy_spawn_online_delay_seconds=$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
+        echo "min_intent_to_command_ratio=$SOAK_MIN_INTENT_TO_COMMAND_RATIO"
+        echo "min_parse_success=$SOAK_MIN_PARSE_SUCCESS"
+        echo "min_execution_rate=$SOAK_MIN_EXECUTION_RATE"
+        echo "min_verified_success=$SOAK_MIN_VERIFIED_SUCCESS"
+        echo "reliability_min_intents=$SOAK_RELIABILITY_MIN_INTENTS"
+        echo "reliability_fail_on_violation=$SOAK_RELIABILITY_FAIL_ON_VIOLATION"
         echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
@@ -979,6 +1017,76 @@ write_summary() {
     } > "$RUN_DIR/summary.txt"
 }
 
+run_action_reliability() {
+    "${PYTHON:-python3}" "$SCRIPT_DIR/analyze_action_reliability.py" \
+        --run-dir "$RUN_DIR" \
+        --min-intent-to-command "$SOAK_MIN_INTENT_TO_COMMAND_RATIO" \
+        --min-parse-success "$SOAK_MIN_PARSE_SUCCESS" \
+        --min-execution-rate "$SOAK_MIN_EXECUTION_RATE" \
+        --min-verified-success "$SOAK_MIN_VERIFIED_SUCCESS" \
+        --min-intents "$SOAK_RELIABILITY_MIN_INTENTS"
+}
+
+append_action_reliability_summary() {
+    local status="$1" status_label
+    if [ "$status" -eq 0 ]; then
+        status_label="pass"
+    else
+        status_label="not acceptable"
+    fi
+
+    {
+        echo
+        echo "Action-command reliability"
+        echo "status: $status_label"
+        echo "report: $RUN_DIR/action-reliability.md"
+        if [ -s "$RUN_DIR/action-reliability.json" ]; then
+            ACTION_RELIABILITY_JSON="$RUN_DIR/action-reliability.json" "${PYTHON:-python3}" <<'PY' || echo "unable to render action reliability JSON"
+import json
+import os
+
+path = os.environ["ACTION_RELIABILITY_JSON"]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+
+print(f"acceptable: {'yes' if data.get('acceptable') else 'no'}")
+print("agent\tintents\tcommands\tintent_to_command\tparse\texecution\tverified\tviolations")
+for agent, stats in sorted(data.get("agents", {}).items()):
+    counts = stats.get("counts", {})
+    metrics = stats.get("metrics", {})
+    violations = len(stats.get("threshold_violations", []))
+    print(
+        "\t".join(
+            [
+                agent,
+                str(counts.get("intended_action_events", 0)),
+                str(counts.get("emitted_commands", 0)),
+                str(metrics.get("intent_to_command_ratio", "n/a")),
+                str(metrics.get("parse_success_rate", "n/a")),
+                str(metrics.get("command_execution_rate", "n/a")),
+                str(metrics.get("verified_success_rate", "n/a")),
+                str(violations),
+            ]
+        )
+    )
+
+violations = data.get("threshold_violations", [])
+if violations:
+    print("violations:")
+    for item in violations[:10]:
+        print(
+            f"- {item['agent']} {item['metric']}={item['observed']} "
+            f"< {item['required']} (intents={item['intended_action_events']})"
+        )
+else:
+    print("violations: none")
+PY
+        else
+            echo "not available"
+        fi
+    } >> "$RUN_DIR/summary.txt"
+}
+
 print_plan
 write_metadata
 
@@ -1016,6 +1124,9 @@ monitor_bots || MONITOR_STATUS=$?
 SOAK_END_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 run_cost_query "$SOAK_END_ISO"
 write_summary "$SOAK_END_ISO"
+RELIABILITY_STATUS=0
+run_action_reliability || RELIABILITY_STATUS=$?
+append_action_reliability_summary "$RELIABILITY_STATUS"
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 if [ "$MONITOR_STATUS" -ne 0 ]; then
@@ -1026,6 +1137,10 @@ if [ "$EXCEEDED" != "0" ]; then
     fail "Soak failed: at least one agent exceeded the hourly cap. See $RUN_DIR/cost-ledger.tsv"
     exit 1
 fi
+if [ "$SOAK_RELIABILITY_FAIL_ON_VIOLATION" = "1" ] && [ "$RELIABILITY_STATUS" -ne 0 ]; then
+    fail "Soak failed: action-command reliability below threshold. See $RUN_DIR/action-reliability.md"
+    exit 1
+fi
 
-ok "Soak completed without unrecovered bot exits and within hourly cap"
+ok "Soak completed without unrecovered bot exits, within hourly cap, and with acceptable action-command reliability"
 info "evidence: $RUN_DIR"

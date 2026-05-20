@@ -158,6 +158,34 @@ Mindcraft clones and refuses pathfinder routes that require digging or
 one-block towers. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
 want the local model to spend extra time synthesizing custom action code.
 
+## Action-Command Reliability Gate
+
+The soak now runs `scripts/minecraft/analyze_action_reliability.py` after the
+timed bot loop. This is the E8-10 gate that checks whether local LM Studio
+intent becomes parsed, executed, and verified Minecraft action. It writes
+`action-reliability.json` and `action-reliability.md` into the evidence
+directory, appends an `Action-command reliability` block to `summary.txt`, and
+fails the soak by default when an agent with enough intended action events falls
+below threshold.
+
+Methodology, caveats, and the issue/PR evidence template live in
+[`action-command-reliability.md`](action-command-reliability.md).
+
+Configuration:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `SOAK_MIN_INTENT_TO_COMMAND_RATIO` | `0.6` | Minimum commands emitted per intended-action utterance. |
+| `SOAK_MIN_PARSE_SUCCESS` | `0.8` | Minimum parse success rate after local-model output. |
+| `SOAK_MIN_EXECUTION_RATE` | `0.7` | Minimum emitted-command execution rate. |
+| `SOAK_MIN_VERIFIED_SUCCESS` | `0.5` | Minimum execution successes with world-state corroboration. |
+| `SOAK_RELIABILITY_MIN_INTENTS` | `5` | Only enforce thresholds for agents with this many intended action events. |
+| `SOAK_RELIABILITY_FAIL_ON_VIOLATION` | `1` | Exit nonzero when threshold violations are present. |
+| `MC_SIM_MIN_INTENT_TO_COMMAND_RATIO` | unset | Wrapper override forwarded to `SOAK_MIN_INTENT_TO_COMMAND_RATIO` when the soak var is unset. |
+| `MC_SIM_MIN_PARSE_SUCCESS` | unset | Wrapper override forwarded to `SOAK_MIN_PARSE_SUCCESS` when the soak var is unset. |
+| `MC_SIM_MIN_EXECUTION_RATE` | unset | Wrapper override forwarded to `SOAK_MIN_EXECUTION_RATE` when the soak var is unset. |
+| `MC_SIM_MIN_VERIFIED_SUCCESS` | unset | Wrapper override forwarded to `SOAK_MIN_VERIFIED_SUCCESS` when the soak var is unset. |
+
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 
 | File | Contents |
@@ -172,6 +200,8 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `logs/paper-latest.log` | Paper `latest.log` when present. |
 | `cost-ledger.tsv` | Per-agent token/USD totals, max hourly USD, cap, and pass/fail. |
 | `early-exits.tsv` | Any bot process that exited before the planned end. |
+| `action-reliability.json` | Per-agent intent, parse, execution, verification metrics and threshold violations. |
+| `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
 | `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table. |
 
 ## Failure Classes Monitored
@@ -197,6 +227,7 @@ Additional stability counters:
 | Management interventions | Bot/bridge logs and DB shadow log evidence when available. |
 | Per-agent token + USD spend | `cost_events` grouped by agent and hour. |
 | Decentralized respond-vs-ignore ratio | Rough `respond`/`ignore` counts from bot logs. |
+| Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 
 ## Cost Cap Accounting
 
@@ -388,9 +419,16 @@ Append the completed live run here before advancing E8-9:
 | Respond count |  |
 | Ignore count |  |
 | Cost ledger result |  |
+| Action reliability result | PASS / NOT ACCEPTABLE |
+| Intent-to-command / parse / execution / verified rates |  |
+| Top parser failure classes |  |
+| Failed parse examples |  |
+| Verified action examples |  |
 | Tunings applied mid-soak |  |
 | Final decision | GO / NO-GO |
 
 Decision rule: **GO** only if the run lasts at least 2 hours, every bot either
 stays up or recovers automatically, there are no unrecovered bridge drops or
-runaway loops, and every tracked agent stays within the E11 hourly cap.
+runaway loops, every tracked agent stays within the E11 hourly cap, and the
+action-command reliability gate passes or any override is explicitly accepted
+in the issue/PR evidence.

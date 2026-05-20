@@ -22,7 +22,9 @@ multi-hour LM Studio soak is rerun. Post-loop manual review reached LM Studio,
 started the backend, launched BridgeBot plus all eight agents, and completed a
 short 0.02-hour startup smoke after fixing per-bot MindServer port collisions.
 That proves startup wiring, but it is not the documented multi-hour acceptance
-run. No OpenRouter validation was run or required.
+run. E8-10 adds an action-command reliability gate to that soak, so the rerun
+must also show local-model intent becoming parsed, executed, and verified
+Minecraft action. No OpenRouter validation was run or required.
 
 This is a cohort acceptance report with an explicit rerun gate. It is not a
 production livestream launch sign-off.
@@ -87,6 +89,11 @@ review blocks chat rather than leaking unreviewed text.
 
 ## Deviations And Gates
 
+- **Action-command reliability gate now blocks acceptance.** E8 sign-off no
+  longer accepts process health alone. A full local LM Studio soak must include
+  `action-reliability.json`, `action-reliability.md`, and the `summary.txt`
+  reliability block, with failed-parse examples and verified-action examples
+  visible in the issue/PR evidence.
 - **Live multi-hour soak missing.** The E8-8 report includes only a short
   post-loop startup smoke and remains the fan-out gate. Downstream
   E9/E10/E12/E13 work should wait for the live addendum or explicitly accept
@@ -174,10 +181,22 @@ Results:
 See `docs/minecraft/multi-agent-soak.md` for the live run addendum template and
 the prior static evidence block.
 
+## Live Evidence Checklist
+
+| Evidence item | Required artifact |
+| --- | --- |
+| LM Studio model availability | `pnpm llm:local --list-only` output. |
+| Multi-agent soak health | `summary.txt`, `early-exits.tsv`, and bot logs from a full run. |
+| Cost cap | `cost-ledger.tsv` showing pass for tracked agents. |
+| Action-Command Reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
+| Representative failures | Failed parse excerpts from `action-reliability.md`, or `none captured`. |
+| Representative verified actions | Verified success excerpts from `action-reliability.md`. |
+| Final go/no-go | Completed live addendum in `docs/minecraft/multi-agent-soak.md` or issue/PR comment. |
+
 ## Sign-Off
 
 Automated acceptance recommendation: **NO-GO for downstream fan-out epics until
-the live LM Studio soak is appended and passes the E8-8 decision rule.**
+the live LM Studio soak is appended and passes the E8-8/E8-10 decision rules.**
 
 Human reviewer sign-off: **pending**
 Reviewer: Brad Taylor
