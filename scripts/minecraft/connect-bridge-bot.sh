@@ -81,7 +81,10 @@ ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
+AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
+AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
+MANAGEMENT_REVIEW_REL="src/agent/bridge/management_review.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_REL="src/agent/commands/move_action.js"
 NAVIGATE_ACTION_REL="src/agent/commands/navigate_action.js"
@@ -101,7 +104,10 @@ MCDATA_BACKUP=""
 MCDATA_PATH=""
 ACTIONS_BACKUP=""
 ACTIONS_PATH=""
+AGENT_BACKUP=""
+AGENT_PATH=""
 BRIDGE_CLIENT_DEST=""
+MANAGEMENT_REVIEW_DEST=""
 BRIDGE_ACTION_DEST=""
 MOVE_ACTION_DEST=""
 NAVIGATE_ACTION_DEST=""
@@ -123,6 +129,7 @@ SETTINGS_TEMPLATE="$SCRIPT_DIR/mindcraft-settings.js"
 PROFILE_TEMPLATE="$SCRIPT_DIR/profiles/bridge-bot.json"
 FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
 BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
+MANAGEMENT_REVIEW_SRC="$FORK_SRC_DIR/agent/bridge/management_review.js"
 BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/move_action.js"
 NAVIGATE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/navigate_action.js"
@@ -168,7 +175,12 @@ restore_clone_patches() {
         cp "$ACTIONS_BACKUP" "$ACTIONS_PATH" 2> /dev/null || true
         rm -f "$ACTIONS_BACKUP"
     fi
+    if [ -n "${AGENT_BACKUP:-}" ] && [ -f "$AGENT_BACKUP" ] && [ -n "${AGENT_PATH:-}" ]; then
+        cp "$AGENT_BACKUP" "$AGENT_PATH" 2> /dev/null || true
+        rm -f "$AGENT_BACKUP"
+    fi
     [ -n "${BRIDGE_CLIENT_DEST:-}" ] && rm -f "$BRIDGE_CLIENT_DEST" 2> /dev/null || true
+    [ -n "${MANAGEMENT_REVIEW_DEST:-}" ] && rm -f "$MANAGEMENT_REVIEW_DEST" 2> /dev/null || true
     [ -n "${BRIDGE_ACTION_DEST:-}" ] && rm -f "$BRIDGE_ACTION_DEST" 2> /dev/null || true
     [ -n "${MOVE_ACTION_DEST:-}" ] && rm -f "$MOVE_ACTION_DEST" 2> /dev/null || true
     [ -n "${NAVIGATE_ACTION_DEST:-}" ] && rm -f "$NAVIGATE_ACTION_DEST" 2> /dev/null || true
@@ -181,6 +193,7 @@ restore_clone_patches() {
     [ -n "${BUILDING_SKILL_DEST:-}" ] && rm -f "$BUILDING_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILD_PLAN_SKILL_DEST:-}" ] && rm -f "$BUILD_PLAN_SKILL_DEST" 2> /dev/null || true
     [ -n "${PERCEPTION_SKILL_DEST:-}" ] && rm -f "$PERCEPTION_SKILL_DEST" 2> /dev/null || true
+    [ -n "${SAFE_FAIL_SKILL_DEST:-}" ] && rm -f "$SAFE_FAIL_SKILL_DEST" 2> /dev/null || true
 }
 
 # ── Node / npm check (identical posture to connect-stock-bot.sh) ──
@@ -254,6 +267,18 @@ verify_committed_assets() {
         grep -q 'BridgeClientError'        "$BRIDGE_CLIENT_SRC" || { fail "client missing the structured error type"; problems=1; }
         if grep -q 'openrouter' "$BRIDGE_CLIENT_SRC"; then
             fail "bridge client must NOT reference openrouter"; problems=1
+        fi
+    fi
+
+    if [ ! -s "$MANAGEMENT_REVIEW_SRC" ]; then
+        fail "Management review helper missing or empty: $MANAGEMENT_REVIEW_SRC"; problems=1
+    else
+        grep -q "service: 'management'" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper does not call management.review"; problems=1; }
+        grep -q "method: 'review'" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper method is not review"; problems=1; }
+        grep -q "MANAGEMENT_REVIEW_DEADLINE_MS = 3000" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper deadline is not 3000ms"; problems=1; }
+        grep -q "agent_tier: 'filter'" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper cost tier is not filter"; problems=1; }
+        if grep -q 'openrouter' "$MANAGEMENT_REVIEW_SRC"; then
+            fail "management helper must NOT reference openrouter"; problems=1
         fi
     fi
 
@@ -578,6 +603,7 @@ info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 
 # (f) Copy the committed bridge client + movement/building/code/perception actions verbatim into the
 #     clone (the decision 0005 extension points). Removed again on exit.
 BRIDGE_CLIENT_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_CLIENT_REL"
+MANAGEMENT_REVIEW_DEST="$MINDCRAFT_DIR_ABS/$MANAGEMENT_REVIEW_REL"
 BRIDGE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_ACTION_REL"
 MOVE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$MOVE_ACTION_REL"
 NAVIGATE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$NAVIGATE_ACTION_REL"
@@ -593,6 +619,7 @@ PERCEPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$PERCEPTION_SKILL_REL"
 SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
+    "$(dirname -- "$MANAGEMENT_REVIEW_DEST")" \
     "$(dirname -- "$BRIDGE_ACTION_DEST")" \
     "$(dirname -- "$MOVE_ACTION_DEST")" \
     "$(dirname -- "$NAVIGATE_ACTION_DEST")" \
@@ -607,6 +634,7 @@ mkdir -p \
     "$(dirname -- "$PERCEPTION_SKILL_DEST")" \
     "$(dirname -- "$SAFE_FAIL_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
+cp "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_DEST"
 cp "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_DEST"
 cp "$MOVE_ACTION_SRC" "$MOVE_ACTION_DEST"
 cp "$NAVIGATE_ACTION_SRC" "$NAVIGATE_ACTION_DEST"
@@ -621,6 +649,7 @@ cp "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_DEST"
 cp "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_DEST"
 cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
+ok "Copied Management review helper → $MANAGEMENT_REVIEW_REL"
 ok "Copied bridge action → $BRIDGE_ACTION_REL"
 ok "Copied move action → $MOVE_ACTION_REL"
 ok "Copied navigate action → $NAVIGATE_ACTION_REL"
@@ -634,6 +663,89 @@ ok "Copied building helpers → $BUILDING_SKILL_REL"
 ok "Copied build-plan helpers → $BUILD_PLAN_SKILL_REL"
 ok "Copied perception helpers → $PERCEPTION_SKILL_REL"
 ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
+
+AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
+if [ ! -f "$AGENT_PATH" ]; then
+    fail "Mindcraft source file missing: $AGENT_PATH"
+    exit 1
+fi
+if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH"; then
+    info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
+        fail "Could not restore pinned $AGENT_REL before patching."
+        exit 1
+    fi
+fi
+AGENT_BACKUP="$(mktemp -t mindcraft-agent.XXXXXX)"
+cp "$AGENT_PATH" "$AGENT_BACKUP"
+if ! AGENT_PATH="$AGENT_PATH" \
+    AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.AGENT_PATH;
+const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+
+const importAnchor = "import { speak } from './speak.js';\n";
+const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
+if (!source.includes(importLine)) {
+    if (!source.includes(importAnchor)) {
+        throw new Error('speak import anchor not found while applying Management chat gate');
+    }
+    source = source.replace(importAnchor, importAnchor + importLine);
+}
+
+let methodStart = source.indexOf('    async openChat(message) {');
+if (methodStart === -1) methodStart = source.indexOf('        async openChat(message) {');
+let methodEnd = source.indexOf('\n    startEvents() {', methodStart);
+if (methodEnd === -1) methodEnd = source.indexOf('\n        startEvents() {', methodStart);
+if (methodStart === -1 || methodEnd === -1) {
+    throw new Error('openChat method shape changed while applying Management chat gate');
+}
+
+const replacement = `    async openChat(message) { // ${marker}
+        let to_translate = message;
+        let remaining = '';
+        let command_name = containsCommand(message);
+        let translate_up_to = command_name ? message.indexOf(command_name) : -1;
+        if (translate_up_to != -1) { // don't translate the command
+            to_translate = to_translate.substring(0, translate_up_to);
+            remaining = message.substring(translate_up_to);
+        }
+        message = (await handleTranslation(to_translate)).trim() + " " + remaining;
+        // newlines are interpreted as separate chats, which triggers spam filters. replace them with spaces
+        message = message.replaceAll('\\n', ' ');
+
+        const review = await reviewChat({ agentId: this.name, text: message });
+        if (!review.allow) return;
+        if (review.sanitized) {
+            message = review.sanitized.replaceAll('\\n', ' ');
+            to_translate = review.sanitized;
+        }
+
+        if (settings.only_chat_with.length > 0) {
+            for (let username of settings.only_chat_with) {
+                this.bot.whisper(username, message);
+            }
+        }
+        else {
+            if (settings.speak) {
+                speak(to_translate, this.prompter.profile.speak_model);
+            }
+            if (settings.chat_ingame) {this.bot.chat(message);}
+            sendOutputToServer(this.name, message);
+        }
+    }
+`;
+source = source.slice(0, methodStart) + replacement + source.slice(methodEnd);
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply Management chat gate to $AGENT_REL"
+    exit 1
+fi
+ok "Applied Management chat gate to $AGENT_REL"
 
 # (g) Inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/executeCodeAction/observeAction into the actionsList
 #     array via an anchored node-driven patch. Backed up + restored on exit

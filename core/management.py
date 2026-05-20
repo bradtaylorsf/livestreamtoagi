@@ -168,7 +168,14 @@ class Management:
             severity=1,
         )
 
-    async def intervene(self, severity: int, agent_id: str, reason: str) -> None:
+    async def intervene(
+        self,
+        severity: int,
+        agent_id: str,
+        reason: str,
+        *,
+        replacement: str | None = None,
+    ) -> None:
         """Trigger severity-based intervention with environmental effects."""
         if severity <= 2:
             await self._event_bus.emit(
@@ -181,7 +188,7 @@ class Management:
                 },
             )
         elif severity == 3:
-            replacement = await self.generate_replacement(agent_id, reason)
+            replacement = replacement or await self.generate_replacement(agent_id, reason)
             await self._event_bus.emit(
                 EventType.MANAGEMENT_INTERVENTION.value,
                 {

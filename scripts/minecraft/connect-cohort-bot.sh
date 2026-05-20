@@ -63,8 +63,11 @@ ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
+AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 
+AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
+MANAGEMENT_REVIEW_REL="src/agent/bridge/management_review.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_REL="src/agent/commands/move_action.js"
 NAVIGATE_ACTION_REL="src/agent/commands/navigate_action.js"
@@ -84,11 +87,14 @@ MCDATA_BACKUP=""
 MCDATA_PATH=""
 ACTIONS_BACKUP=""
 ACTIONS_PATH=""
+AGENT_BACKUP=""
+AGENT_PATH=""
 STAGED_DESTS=()
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
 BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
+MANAGEMENT_REVIEW_SRC="$FORK_SRC_DIR/agent/bridge/management_review.js"
 BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/move_action.js"
 NAVIGATE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/navigate_action.js"
@@ -151,6 +157,10 @@ restore_clone_patches() {
     if [ -n "${ACTIONS_BACKUP:-}" ] && [ -f "$ACTIONS_BACKUP" ] && [ -n "${ACTIONS_PATH:-}" ]; then
         cp "$ACTIONS_BACKUP" "$ACTIONS_PATH" 2> /dev/null || true
         rm -f "$ACTIONS_BACKUP"
+    fi
+    if [ -n "${AGENT_BACKUP:-}" ] && [ -f "$AGENT_BACKUP" ] && [ -n "${AGENT_PATH:-}" ]; then
+        cp "$AGENT_BACKUP" "$AGENT_PATH" 2> /dev/null || true
+        rm -f "$AGENT_BACKUP"
     fi
     local staged
     for staged in "${STAGED_DESTS[@]:-}"; do
@@ -217,7 +227,8 @@ verify_committed_assets() {
     fi
 
     for required in \
-        "$BRIDGE_CLIENT_SRC" "$BRIDGE_ACTION_SRC" "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
+        "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
+        "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" \
         "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" \
@@ -389,6 +400,7 @@ trap 'restore_clone_patches; exit 130' INT
 trap 'restore_clone_patches; exit 143' TERM
 
 stage_file "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_REL"
+stage_file "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_REL"
 stage_file "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_REL"
 stage_file "$MOVE_ACTION_SRC" "$MOVE_ACTION_REL"
 stage_file "$NAVIGATE_ACTION_SRC" "$NAVIGATE_ACTION_REL"
@@ -403,6 +415,89 @@ stage_file "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_REL"
 stage_file "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_REL"
 stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
 ok "Copied bridge client, action handlers, and helper skills from fork-src"
+
+AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
+if [ ! -f "$AGENT_PATH" ]; then
+    fail "Mindcraft source file missing: $AGENT_PATH"
+    exit 1
+fi
+if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH"; then
+    info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
+        fail "Could not restore pinned $AGENT_REL before patching."
+        exit 1
+    fi
+fi
+AGENT_BACKUP="$(mktemp -t mindcraft-agent.XXXXXX)"
+cp "$AGENT_PATH" "$AGENT_BACKUP"
+if ! AGENT_PATH="$AGENT_PATH" \
+    AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.AGENT_PATH;
+const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+
+const importAnchor = "import { speak } from './speak.js';\n";
+const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
+if (!source.includes(importLine)) {
+    if (!source.includes(importAnchor)) {
+        throw new Error('speak import anchor not found while applying Management chat gate');
+    }
+    source = source.replace(importAnchor, importAnchor + importLine);
+}
+
+let methodStart = source.indexOf('    async openChat(message) {');
+if (methodStart === -1) methodStart = source.indexOf('        async openChat(message) {');
+let methodEnd = source.indexOf('\n    startEvents() {', methodStart);
+if (methodEnd === -1) methodEnd = source.indexOf('\n        startEvents() {', methodStart);
+if (methodStart === -1 || methodEnd === -1) {
+    throw new Error('openChat method shape changed while applying Management chat gate');
+}
+
+const replacement = `    async openChat(message) { // ${marker}
+        let to_translate = message;
+        let remaining = '';
+        let command_name = containsCommand(message);
+        let translate_up_to = command_name ? message.indexOf(command_name) : -1;
+        if (translate_up_to != -1) { // don't translate the command
+            to_translate = to_translate.substring(0, translate_up_to);
+            remaining = message.substring(translate_up_to);
+        }
+        message = (await handleTranslation(to_translate)).trim() + " " + remaining;
+        // newlines are interpreted as separate chats, which triggers spam filters. replace them with spaces
+        message = message.replaceAll('\\n', ' ');
+
+        const review = await reviewChat({ agentId: this.name, text: message });
+        if (!review.allow) return;
+        if (review.sanitized) {
+            message = review.sanitized.replaceAll('\\n', ' ');
+            to_translate = review.sanitized;
+        }
+
+        if (settings.only_chat_with.length > 0) {
+            for (let username of settings.only_chat_with) {
+                this.bot.whisper(username, message);
+            }
+        }
+        else {
+            if (settings.speak) {
+                speak(to_translate, this.prompter.profile.speak_model);
+            }
+            if (settings.chat_ingame) {this.bot.chat(message);}
+            sendOutputToServer(this.name, message);
+        }
+    }
+`;
+source = source.slice(0, methodStart) + replacement + source.slice(methodEnd);
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply Management chat gate to $AGENT_REL"
+    exit 1
+fi
+ok "Applied Management chat gate to $AGENT_REL"
 
 ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
 if [ ! -f "$ACTIONS_PATH" ]; then

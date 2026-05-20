@@ -27,6 +27,7 @@ from core.bridge.contract import (
 from core.bridge.handlers import (
     handle_code_execute,
     handle_errand_complete,
+    handle_management_review,
     handle_memory_read,
     handle_memory_write,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "dispatch_inbound",
     "handle_code_execute",
     "handle_errand_complete",
+    "handle_management_review",
     "handle_memory_read",
     "handle_memory_write",
     "log_bridge_event",

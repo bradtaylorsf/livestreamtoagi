@@ -56,6 +56,7 @@ def _strip_js_comments(src: str) -> str:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
 BRIDGE_CLIENT = FORK_SRC / "agent" / "bridge" / "python_bridge.js"
+MANAGEMENT_REVIEW = FORK_SRC / "agent" / "bridge" / "management_review.js"
 BRIDGE_ACTION = FORK_SRC / "agent" / "commands" / "bridge_ping_action.js"
 CONNECT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-bridge-bot.sh"
 BRIDGE_PROFILE = REPO_ROOT / "scripts" / "minecraft" / "profiles" / "bridge-bot.json"
@@ -91,10 +92,12 @@ requires_global_websocket = pytest.mark.skipif(
 
 def test_committed_bridge_files_exist() -> None:
     assert BRIDGE_CLIENT.is_file(), f"missing {BRIDGE_CLIENT}"
+    assert MANAGEMENT_REVIEW.is_file(), f"missing {MANAGEMENT_REVIEW}"
     assert BRIDGE_ACTION.is_file(), f"missing {BRIDGE_ACTION}"
     # Layout must mirror the clone so `../bridge/python_bridge.js` resolves both
     # staged-in-the-clone and when driven directly by this test.
     assert BRIDGE_CLIENT.parent.name == "bridge"
+    assert MANAGEMENT_REVIEW.parent.name == "bridge"
     assert BRIDGE_ACTION.parent.name == "commands"
 
 
@@ -149,7 +152,19 @@ def test_client_enforces_a_local_deadline_and_structured_errors() -> None:
 
 def test_client_is_local_only_no_external_spend() -> None:
     assert "openrouter" not in BRIDGE_CLIENT.read_text().lower()
+    assert "openrouter" not in MANAGEMENT_REVIEW.read_text().lower()
     assert "openrouter" not in BRIDGE_ACTION.read_text().lower()
+
+
+def test_management_review_helper_fails_closed_and_uses_filter_tier() -> None:
+    src = MANAGEMENT_REVIEW.read_text()
+    assert "reviewChat" in src
+    assert "service: 'management'" in src
+    assert "method: 'review'" in src
+    assert "MANAGEMENT_REVIEW_DEADLINE_MS = 3000" in src
+    assert "agent_id: agentId" in src
+    assert "agent_tier: 'filter'" in src
+    assert "allow: false" in src, "bridge failures must block chat"
 
 
 def test_ping_action_matches_mindcraft_shape_and_never_crashes() -> None:
@@ -205,6 +220,8 @@ def test_connect_script_stages_the_committed_assets() -> None:
     src = CONNECT_SCRIPT.read_text()
     assert "fork-src" in src, "stages from the committed fork-src tree"
     assert "src/agent/bridge/python_bridge.js" in src
+    assert "src/agent/bridge/management_review.js" in src
+    assert "LTAG E8-7 management chat gate" in src
     assert "src/agent/commands/bridge_ping_action.js" in src
     assert "src/agent/commands/actions.js" in src
     assert "LTAG E4-4 bridge ping action" in src, "anchored injection marker"

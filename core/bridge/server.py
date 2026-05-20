@@ -4,7 +4,7 @@ A single authenticated, namespaced WebSocket surface that Node Minecraft bots
 connect to, mounted into the existing FastAPI app alongside ``/ws``. This issue
 is *only* the bridge surface: handshake auth, envelope/version/contract
 validation, and a dispatch table whose handlers return contract-valid **stub**
-payloads. Real memory/management/cost wiring is explicitly out of scope (E5/E8);
+payloads. Real cost wiring is explicitly out of scope (E11);
 the perception/action inbound channel is E4-5/E4-6.
 
 E4-7 (#546) layers observability on the receive loop without changing the wire
@@ -36,10 +36,11 @@ Everything here is fixed by ADR ``docs/decisions/0010-bridge-protocol.md``
 
 ``memory.recall`` delegates read-only to the existing memory managers,
 ``memory.write`` delegates append/write work to the existing memory compactor,
-and ``errand.complete`` records Alpha outcomes to that same compactor when
-FastAPI lifespan has initialized services. ``code.execute`` delegates to the
-existing Docker/gVisor sandbox tool; remaining verbs stay contract-valid stubs
-until their owning issues wire them.
+``management.review`` gates bot chat through Management, and ``errand.complete``
+records Alpha outcomes to that same compactor when FastAPI lifespan has
+initialized services. ``code.execute`` delegates to the existing Docker/gVisor
+sandbox tool; remaining verbs stay contract-valid stubs until their owning
+issues wire them.
 """
 
 from __future__ import annotations
@@ -75,6 +76,7 @@ from core.bridge.contract import (
 from core.bridge.errand_queue import Errand, errand_queue
 from core.bridge.handlers.code_execution import handle_code_execute
 from core.bridge.handlers.errand import handle_errand_complete
+from core.bridge.handlers.management import handle_management_review
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
 
 logger = logging.getLogger(__name__)
@@ -106,11 +108,13 @@ WS_POLICY_VIOLATION = 1008
 UNKNOWN_REQUEST_ID = "unknown"
 
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
+ERR_MANAGEMENT_SERVICE_UNAVAILABLE = "management_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
 KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
+MANAGEMENT_REVIEW_VERBS = frozenset({"management.review"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
 ERRAND_POLL_VERBS = frozenset({"errand.poll"})
 ERRAND_COMPLETE_VERBS = frozenset({"errand.complete"})
@@ -128,11 +132,6 @@ StubHandler = Callable[[BridgeRequest], dict[str, Any]]
 # SERVICE_REGISTRY (asserted below + covered by the contract-parity test).
 STUB_HANDLERS: dict[str, StubHandler] = {
     "bridge.ping": lambda env: {"pong": env.payload["message"]},
-    "management.review": lambda env: {
-        "verdict": "allow",
-        "reason": "stub",
-        "sanitized_text": None,
-    },
     "cost.gate": lambda env: {
         "allowed": True,
         "reason": "stub",
@@ -284,6 +283,24 @@ def _memory_write_services_unavailable(
     )
 
 
+def _management_services_unavailable(
+    env: BridgeRequest, services: Any | None
+) -> BridgeResponse | None:
+    if services is None:
+        message = "management service is unavailable; application lifespan has not initialized"
+    elif getattr(services, "management", None) is None:
+        message = "management service is unavailable"
+    else:
+        return None
+
+    return make_error_response(
+        env.request_id,
+        ERR_MANAGEMENT_SERVICE_UNAVAILABLE,
+        message,
+        retryable=True,
+    )
+
+
 def _code_services_unavailable(env: BridgeRequest, services: Any | None) -> BridgeResponse | None:
     if services is None:
         message = (
@@ -373,8 +390,8 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
     Pure and synchronous so the dispatch policy is unit-testable without a
     socket. Order mirrors ADR §2→§3→§6: envelope shape, then version, then the
     closed per-verb registry, then the stub handler. The async WebSocket loop
-    handles ``memory.recall`` separately because it delegates to service
-    managers.
+    handles service-backed verbs separately because they delegate to initialized
+    app services.
     """
     validated = _validated_request_or_error(raw)
     if isinstance(validated, BridgeResponse):
@@ -387,6 +404,13 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             env.request_id,
             ERR_MEMORY_SERVICE_UNAVAILABLE,
             f"{key} requires initialized memory services",
+            retryable=True,
+        )
+    if key in MANAGEMENT_REVIEW_VERBS:
+        return make_error_response(
+            env.request_id,
+            ERR_MANAGEMENT_SERVICE_UNAVAILABLE,
+            f"{key} requires initialized management services",
             retryable=True,
         )
     if key in CODE_EXECUTE_VERBS:
@@ -430,6 +454,12 @@ async def build_bridge_response_with_services(
         except ValueError as exc:
             return make_error_response(env.request_id, ERR_INVALID_PAYLOAD, str(exc))
         return _success_response(env, payload)
+
+    if key in MANAGEMENT_REVIEW_VERBS:
+        unavailable = _management_services_unavailable(env, services)
+        if unavailable is not None:
+            return unavailable
+        return _success_response(env, await handle_management_review(env, services))
 
     if key in CODE_EXECUTE_VERBS:
         unavailable = _code_services_unavailable(env, services)
@@ -582,6 +612,7 @@ def _assert_handlers_cover_registry() -> None:
         set(STUB_HANDLERS)
         | MEMORY_HANDLER_VERBS
         | MEMORY_WRITE_VERBS
+        | MANAGEMENT_REVIEW_VERBS
         | CODE_EXECUTE_VERBS
         | ERRAND_VERBS
     )
