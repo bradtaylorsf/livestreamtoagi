@@ -247,7 +247,11 @@ case "$SOAK_MINDSERVER_BASE_PORT" in
         ;;
 esac
 
-MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd || true)"
+if MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd)"; then
+    :
+else
+    MINDCRAFT_BASE_ABS=""
+fi
 if [ -z "$MINDCRAFT_BASE_ABS" ] || [ ! -d "$MINDCRAFT_BASE_ABS/.git" ]; then
     fail "No pinned Mindcraft clone at $MINDCRAFT_DIR. Run scripts/minecraft/setup-mindcraft.sh first."
     exit 1

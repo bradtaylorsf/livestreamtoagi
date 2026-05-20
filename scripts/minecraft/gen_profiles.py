@@ -56,14 +56,28 @@ VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 BOOTSTRAP_ENV = "LTAG_GEN_PROFILES_BOOTSTRAPPED"
 
 
+def _bootstrap_python_candidates() -> list[Path]:
+    """Return interpreters that may have repo dependencies visible."""
+    candidates: list[Path] = []
+    if VENV_PYTHON.is_file():
+        candidates.append(VENV_PYTHON)
+
+    current_python = Path(sys.executable)
+    if sys.flags.no_site and current_python.is_file() and current_python not in candidates:
+        candidates.append(current_python)
+
+    return candidates
+
+
 def _load_yaml_module() -> Any:
-    """Import PyYAML, re-execing through the repo venv when needed.
+    """Import PyYAML, re-execing through an interpreter with site packages.
 
     Live verification can invoke this script directly via ``/usr/bin/env
     python3``. On machines where that interpreter lacks repo dependencies, the
-    old top-level ``import yaml`` failed before argument parsing. Re-execing
-    once through ``.venv/bin/python`` keeps direct script execution compatible
-    with the repo's PATH-safe command convention.
+    old top-level ``import yaml`` failed before argument parsing. Re-execing once
+    through ``.venv/bin/python`` or the current interpreter without ``-S`` keeps
+    direct script execution compatible with the repo's PATH-safe command
+    convention and CI's ``python -S`` bootstrap check.
     """
     try:
         import yaml as yaml_module
@@ -72,9 +86,11 @@ def _load_yaml_module() -> Any:
     except ModuleNotFoundError as exc:
         if exc.name != "yaml":
             raise
-        if VENV_PYTHON.is_file() and os.environ.get(BOOTSTRAP_ENV) != "1":
+        candidates = _bootstrap_python_candidates()
+        if candidates and os.environ.get(BOOTSTRAP_ENV) != "1":
             os.environ[BOOTSTRAP_ENV] = "1"
-            os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), *sys.argv])
+            python = candidates[0]
+            os.execv(str(python), [str(python), *sys.argv])
         raise ModuleNotFoundError(
             "PyYAML is required to read agents/<id>/config.yaml. "
             "Run this script with .venv/bin/python or install repo dependencies."
@@ -173,12 +189,8 @@ def build_personality(cfg: dict[str, Any]) -> dict[str, Any]:
         respond_probability = 0.0
         initiate_probability = 0.0
     else:
-        respond_probability = _clamp(
-            0.15 + 0.7 * chattiness + 0.15 * interrupt_tendency
-        )
-        initiate_probability = _clamp(
-            0.05 + 0.7 * chattiness * (0.5 + 0.5 * initiative)
-        )
+        respond_probability = _clamp(0.15 + 0.7 * chattiness + 0.15 * interrupt_tendency)
+        initiate_probability = _clamp(0.05 + 0.7 * chattiness * (0.5 + 0.5 * initiative))
 
     personality: dict[str, Any] = {
         "chattiness": chattiness,
@@ -320,9 +332,7 @@ def build_profile(
 
     personality_with_prompt = build_personality(cfg)
     bot_responder = str(personality_with_prompt["bot_responder"])
-    personality = {
-        key: personality_with_prompt[key] for key in PERSONALITY_PROFILE_KEYS
-    }
+    personality = {key: personality_with_prompt[key] for key in PERSONALITY_PROFILE_KEYS}
 
     return {
         "name": _bot_name(agent_id),
