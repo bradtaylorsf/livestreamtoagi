@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a Mindcraft profile JSON from ``agents/<id>/config.yaml`` (E3-4, #536).
+"""Generate Mindcraft profile JSON from ``agents/<id>/config.yaml`` (E3-4 / E8-1).
 
 Single source of truth: each agent's model assignment lives **only** in
 ``agents/<id>/config.yaml`` (``model_conversation`` / ``model_building``) and is
@@ -36,7 +36,8 @@ Policy bindings (E1 inputs on #536, cross-checked against the pivot plan):
   **E7-1** ("Alpha spawns ... emits no chat"), not a field of the profile
   schema at the pinned fork commit — see this issue's final notes.
 
-Out of scope (E8): launching all agents. This only emits one profile per call.
+E8-1 extends the E3-4 single-agent generator with batch output for every
+conversational agent. Launching those agents remains out of scope here.
 """
 
 from __future__ import annotations
@@ -99,6 +100,22 @@ def load_agent_config(agent_id: str, agents_dir: Path = AGENTS_DIR) -> dict[str,
     if not isinstance(data, dict):
         raise ValueError(f"{config_path} did not parse to a mapping")
     return data
+
+
+def discover_agent_ids(agents_dir: Path = AGENTS_DIR) -> list[str]:
+    """Return real conversational agent ids discovered from ``agents/*/config.yaml``.
+
+    ``template`` is skipped because it is a placeholder config, and
+    ``management`` is skipped because it is an out-of-band content filter, not a
+    Mindcraft world bot.
+    """
+    ids: list[str] = []
+    for config_path in agents_dir.glob("*/config.yaml"):
+        agent_id = config_path.parent.name
+        if agent_id in PSEUDO_AGENTS or agent_id in NON_BOT_AGENTS:
+            continue
+        ids.append(agent_id)
+    return sorted(ids)
 
 
 def _assert_resolves_into_registry(raw_model_id: str) -> None:
@@ -179,6 +196,33 @@ def build_profile(
     }
 
 
+def build_all_profiles(
+    provider: str = "openrouter",
+    local_chat: str | None = None,
+    local_code: str | None = None,
+    agents_dir: Path = AGENTS_DIR,
+) -> dict[str, dict[str, str]]:
+    """Build profiles for every discovered conversational agent."""
+    profiles: dict[str, dict[str, str]] = {}
+    for agent_id in discover_agent_ids(agents_dir=agents_dir):
+        try:
+            profiles[agent_id] = build_profile(
+                agent_id,
+                provider=provider,
+                local_chat=local_chat,
+                local_code=local_code,
+                agents_dir=agents_dir,
+            )
+        except ValueError as exc:
+            raise ValueError(f"Failed to build profile for {agent_id!r}: {exc}") from exc
+    return profiles
+
+
+def _profile_filename(agent_id: str) -> str:
+    """Output filename for a generated per-agent profile."""
+    return f"{agent_id.replace('_', '-')}-bot.json"
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="gen_profiles.py",
@@ -189,7 +233,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "agent_id",
+        nargs="?",
         help="Agent id, e.g. 'vera' (must match an agents/<id>/ directory).",
+    )
+    parser.add_argument(
+        "--all",
+        dest="all_agents",
+        action="store_true",
+        help="Generate profiles for all conversational agents.",
     )
     parser.add_argument(
         "--provider",
@@ -212,13 +263,44 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--out",
         default="-",
-        help="Output path; '-' or omitted writes the JSON to stdout.",
+        help=(
+            "Output path; '-' or omitted writes JSON to stdout. "
+            "With --all, non-stdout paths are profile directories."
+        ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.all_agents and args.agent_id:
+        parser.error("pass either an agent_id or --all, not both")
+    if not args.all_agents and not args.agent_id:
+        parser.error("pass an agent_id or --all")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.all_agents:
+        try:
+            profiles = build_all_profiles(
+                provider=args.provider,
+                local_chat=args.local_chat,
+                local_code=args.local_code,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            return 1
+
+        rendered = json.dumps(profiles, indent=4)
+        if args.out in ("-", ""):
+            print(rendered)
+        else:
+            out_dir = Path(args.out)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for agent_id, profile in profiles.items():
+                profile_path = out_dir / _profile_filename(agent_id)
+                profile_path.write_text(json.dumps(profile, indent=4) + "\n")
+            print(f"✓ Wrote {len(profiles)} profiles to {out_dir}", file=sys.stderr)
+        return 0
+
     try:
         profile = build_profile(
             args.agent_id,

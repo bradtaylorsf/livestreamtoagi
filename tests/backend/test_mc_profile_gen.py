@@ -1,4 +1,4 @@
-"""Tests for the Mindcraft profile generator (issue #536, epic E3-4).
+"""Tests for the Mindcraft profile generator (issues #536 and #572).
 
 `scripts/minecraft/gen_profiles.py` turns the single source of truth
 (`agents/<id>/config.yaml`) into a Mindcraft profile. These tests prove:
@@ -12,7 +12,8 @@
 * (e) the CLI prints a valid profile to stdout;
 * (f) every real agent (not `template`, not refused `management`) generates a
   valid profile — E8 readiness — and Management is explicitly refused while
-  Alpha (the E7-1 vertical-slice agent) generates fine.
+  Alpha (the E7-1 vertical-slice agent) generates fine;
+* (g) E8-1 batch mode discovers and emits all conversational agents from config.
 
 `scripts/` is not a Python package, so the module is loaded from its file path
 via importlib.
@@ -37,6 +38,16 @@ AGENTS_DIR = REPO_ROOT / "agents"
 VERA_CONFIG = AGENTS_DIR / "vera" / "config.yaml"
 
 PROFILE_KEYS = {"name", "model", "code_model"}
+EXPECTED_CONVERSATIONAL_AGENT_IDS = [
+    "alpha",
+    "aurora",
+    "fork",
+    "grok",
+    "pixel",
+    "rex",
+    "sentinel",
+    "vera",
+]
 
 
 def _load_gen_module():
@@ -69,6 +80,15 @@ def _real_agent_ids() -> list[str]:
             continue
         ids.append(child.name)
     return ids
+
+
+def _assert_openrouter_profile_matches_config(agent_id: str, profile: dict[str, str]) -> None:
+    cfg = yaml.safe_load((AGENTS_DIR / agent_id / "config.yaml").read_text())
+    assert set(profile) == PROFILE_KEYS
+    assert profile["name"] == gen._bot_name(agent_id)
+    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
+    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
+    assert json.loads(json.dumps(profile)) == profile
 
 
 # ── (a) acceptance: vera's openrouter profile mirrors its config ────────────
@@ -216,6 +236,98 @@ def test_cli_writes_out_file(tmp_path):
     assert set(written) == PROFILE_KEYS
 
 
+def test_discover_agent_ids_excludes_template_and_management():
+    assert gen.discover_agent_ids() == EXPECTED_CONVERSATIONAL_AGENT_IDS
+
+
+def test_build_all_profiles_emits_all_eight():
+    profiles = gen.build_all_profiles()
+
+    assert list(profiles) == EXPECTED_CONVERSATIONAL_AGENT_IDS
+    assert "management" not in profiles
+    assert len(profiles) == 8
+    for agent_id, profile in profiles.items():
+        _assert_openrouter_profile_matches_config(agent_id, profile)
+
+
+def test_cli_all_writes_directory(tmp_path):
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all", "--out", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    expected_files = {
+        f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS
+    }
+    assert {path.name for path in tmp_path.iterdir()} == expected_files
+
+    for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS:
+        profile = json.loads((tmp_path / f"{agent_id}-bot.json").read_text())
+        _assert_openrouter_profile_matches_config(agent_id, profile)
+
+
+def test_cli_all_creates_directory_output_without_trailing_slash(tmp_path):
+    out_dir = tmp_path / "issue572-profiles"
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all", "--out", str(out_dir)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert out_dir.is_dir()
+    assert sorted(path.name for path in out_dir.iterdir()) == [
+        f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS
+    ]
+
+
+def test_cli_all_stdout_emits_combined_json():
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    profiles = json.loads(proc.stdout)
+    assert list(profiles) == EXPECTED_CONVERSATIONAL_AGENT_IDS
+    for agent_id, profile in profiles.items():
+        _assert_openrouter_profile_matches_config(agent_id, profile)
+
+
+def test_cli_all_with_lmstudio():
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GEN_SCRIPT),
+            "--all",
+            "--provider",
+            "lmstudio",
+            "--local-chat",
+            "qwen3-8b",
+            "--local-code",
+            "qwen3-30b",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    profiles = json.loads(proc.stdout)
+    assert list(profiles) == EXPECTED_CONVERSATIONAL_AGENT_IDS
+    assert "openrouter/" not in json.dumps(profiles)
+    for profile in profiles.values():
+        assert set(profile) == PROFILE_KEYS
+        assert profile["model"] == "lmstudio/qwen3-8b"
+        assert profile["code_model"] == "lmstudio/qwen3-30b"
+
+
 def test_cli_unknown_agent_exits_nonzero():
     proc = subprocess.run(
         [sys.executable, str(GEN_SCRIPT), "nope"],
@@ -246,14 +358,7 @@ def test_bot_name_normalizes_agent_ids_to_pascal_case(agent_id, expected):
 def test_every_real_agent_generates_valid_json(agent_id):
     """Every real agent emits a valid 3-key profile from its own config."""
     profile = gen.build_profile(agent_id)
-    cfg = yaml.safe_load((AGENTS_DIR / agent_id / "config.yaml").read_text())
-
-    assert set(profile) == PROFILE_KEYS
-    assert profile["name"] == gen._bot_name(agent_id)
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
-    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
-    # Round-trips as JSON with all-string values.
-    assert json.loads(json.dumps(profile)) == profile
+    _assert_openrouter_profile_matches_config(agent_id, profile)
 
 
 def test_management_profile_is_refused():
