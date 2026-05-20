@@ -50,6 +50,10 @@ docker/data/
 # Minecraft server runtime (default SERVER_DIR for scripts/minecraft/start-server.sh)
 # World data, the Paper jar, eula.txt and logs are local runtime artifacts.
 minecraft-server/
+# Easy-mode Minecraft server runtime (default SERVER_DIR when MC_SIM_EASY_MODE=1
+# in scripts/minecraft/run-local-sim.sh and soak.sh). Same shape as
+# minecraft-server/: world data, Paper jar, libraries — all regenerated locally.
+minecraft-server-easy/
 
 # Mindcraft working clone (default MINDCRAFT_DIR for scripts/minecraft/setup-mindcraft.sh)
 # A local pinned checkout + node_modules — NOT a vendored copy. The only

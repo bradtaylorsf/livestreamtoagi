@@ -22,7 +22,12 @@ multi-hour LM Studio soak is rerun. Post-loop manual review reached LM Studio,
 started the backend, launched BridgeBot plus all eight agents, and completed a
 short 0.02-hour startup smoke after fixing per-bot MindServer port collisions.
 That proves startup wiring, but it is not the documented multi-hour acceptance
-run. No OpenRouter validation was run or required.
+run. E8-10 adds an action-command reliability gate to that soak, so the rerun
+must also show local-model intent becoming parsed, executed, and verified
+Minecraft action. E8-11 adds a behavioral acceptance gate, so the rerun must
+also prove safe spawns, meaningful movement, public collaboration,
+gather/build attempts, and at least one shared artifact. No OpenRouter
+validation was run or required.
 
 This is a cohort acceptance report with an explicit rerun gate. It is not a
 production livestream launch sign-off.
@@ -48,6 +53,24 @@ by the cohort tests.
 | Management | #572 / #697; #578 / #703 | No world profile by design | `anthropic/claude-haiku-4.5`; no world `code_model` route | Claude Haiku 4.5 -> `-` | No launcher; out-of-band `management.review` only |
 | BridgeBot | Included in #579 / #704 | `scripts/minecraft/profiles/bridge-bot.json` | Technical bridge support bot, local LM Studio placeholders only | Not in agent routing table | `scripts/minecraft/connect-bridge-bot.sh` |
 
+## Behavior Acceptance Table
+
+This table is filled from `logs/soak/<timestamp>/behavior.tsv` after the next
+full LM Studio run. Until every tracked agent has a safe spawn and enough
+movement, and the cohort shows public conversation, gather/build attempts, and
+at least one shared artifact, E8 remains a NO-GO regardless of process health.
+
+| Agent | Safe spawn | Movement | Public chat | Inter-agent mentions | Gather | Build | Deaths | Stuck/dig-hole | Notes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Alpha | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must prove action-only contribution without relying on private chat. |
+| Vera | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+| Rex | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+| Aurora | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+| Pixel | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+| Fork | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+| Sentinel | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+| Grok | Pending live `behavior.tsv` |  |  |  |  |  |  |  | Must show public collaboration and a safe spawn. |
+
 ## Child Issue Evidence
 
 | Slice | Issue / PR / commit | Acceptance | Evidence | Status |
@@ -60,6 +83,7 @@ by the cohort tests.
 | E8-6 Director retirement | #577 / #702 / `e75548f` | Embodied runs avoid the old Python conversation director while legacy mode still works. | `core/conversation_mode.py`; embodied-mode test in `tests/backend/test_conversation_engine.py`; `CONVERSATION_MODE=embodied`. | Pass for run-mode gate. |
 | E8-7 Management out of band | #578 / #703 / `6f95e20` | Bot chat is reviewed by Management before display; failures block chat. | `scripts/minecraft/fork-src/agent/bridge/management_review.js`; `connect-*-bot.sh` chat gate patch; `docs/minecraft/bridge-contract.md`; `tests/backend/test_bridge_node_client.py`; `tests/backend/test_management.py`. | Pass for service-backed chat gate; no Management world bot. |
 | E8-8 Multi-agent soak | #579 / #704 / `1dd4806` | Multi-hour local run with all bots, bridge stability, respond/ignore counts, and spend within caps. | `docs/minecraft/multi-agent-soak.md`; `scripts/minecraft/soak.sh`; `scripts/minecraft/soak.sh --verify`; `pnpm verify:minecraft-soak`; post-loop 0.02-hour live startup smoke with all bots. | **Deviation:** startup smoke only. Full multi-hour LM Studio soak is still required before fan-out. |
+| E8-11 Behavioral acceptance gate | #707 / pending | E8 cannot complete from process health alone; a local run must prove safe spawn, meaningful movement, public inter-agent conversation, gather/build attempts, and at least one shared artifact. | `scripts/minecraft/soak.sh` writes `behavior.tsv` and `summary.txt` `Behavioral acceptance`; this report carries the per-agent behavior table. | **Gate pending:** requires a full LM Studio run with `behavior_gate_status=pass`. |
 
 ## Decentralized Conversation Confirmation
 
@@ -87,10 +111,19 @@ review blocks chat rather than leaking unreviewed text.
 
 ## Deviations And Gates
 
+- **Action-command reliability gate now blocks acceptance.** E8 sign-off no
+  longer accepts process health alone. A full local LM Studio soak must include
+  `action-reliability.json`, `action-reliability.md`, and the `summary.txt`
+  reliability block, with failed-parse examples and verified-action examples
+  visible in the issue/PR evidence.
 - **Live multi-hour soak missing.** The E8-8 report includes only a short
   post-loop startup smoke and remains the fan-out gate. Downstream
   E9/E10/E12/E13 work should wait for the live addendum or explicitly accept
   this risk.
+- **Behavioral gate pending for every tracked agent.** No full live
+  `behavior.tsv` row has yet proven safe spawn, enough movement, public
+  inter-agent chat, gather/build contribution, and absence of destructive-loop
+  behavior for Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok.
 - **Management review timed out in the startup smoke.** Bot logs showed
   fail-closed `management_review_event ... outcome=bridge_timeout` entries.
   The full soak should tune or explicitly accept the local Management review
@@ -174,10 +207,30 @@ Results:
 See `docs/minecraft/multi-agent-soak.md` for the live run addendum template and
 the prior static evidence block.
 
+## Live Evidence Checklist
+
+| Evidence item | Required artifact |
+| --- | --- |
+| LM Studio model availability | `pnpm llm:local --list-only` output. |
+| Multi-agent soak health | `summary.txt`, `early-exits.tsv`, and bot logs from a full run. |
+| Cost cap | `cost-ledger.tsv` showing pass for tracked agents. |
+| Action-Command Reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
+| Representative failures | Failed parse excerpts from `action-reliability.md`, or `none captured`. |
+| Representative verified actions | Verified success excerpts from `action-reliability.md`. |
+| Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and `summary.txt` with `behavior_gate_status=pass`. |
+| Final go/no-go | Completed live addendum in `docs/minecraft/multi-agent-soak.md` or issue/PR comment. |
+
 ## Sign-Off
 
 Automated acceptance recommendation: **NO-GO for downstream fan-out epics until
-the live LM Studio soak is appended and passes the E8-8 decision rule.**
+the live LM Studio soak is appended and passes the E8-8/E8-10/E8-11 decision
+rules.**
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Stability soak | NO-GO pending full rerun | `multi-agent-soak.md` currently records only the startup smoke. |
+| Action-Command Reliability | NO-GO pending full rerun | `action-reliability.json`, `action-reliability.md`, and summary reliability block are required. |
+| Behavioral Acceptance Gate | NO-GO pending full rerun | E8 acceptance cannot be marked complete from process health alone; `behavior_gate_status=pass` in `summary.txt` and complete per-agent rows are required. |
 
 Human reviewer sign-off: **pending**
 Reviewer: Brad Taylor

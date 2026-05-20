@@ -111,6 +111,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     from core.bootstrap import bootstrap_services, shutdown_services
+    from core.conversation_mode import get_conversation_mode
     from core.conversation.proximity import ProximityManager
     from core.conversation.selection_logger import SelectionLogger
     from core.conversation.triggers import TriggerSystem
@@ -161,6 +162,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         factions=run_config.get("factions"),
         initial_agent_energy=run_config.get("energy"),
         conversation_cadence=run_config.get("conversation_cadence", 1.0),
+        conversation_mode=get_conversation_mode(),
         submitted_params=run_config.get("params"),
         source=run_config.get("source"),
     )

@@ -158,6 +158,76 @@ Mindcraft clones and refuses pathfinder routes that require digging or
 one-block towers. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
 want the local model to spend extra time synthesizing custom action code.
 
+## Action-Command Reliability Gate
+
+The soak now runs `scripts/minecraft/analyze_action_reliability.py` after the
+timed bot loop. This is the E8-10 gate that checks whether local LM Studio
+intent becomes parsed, executed, and verified Minecraft action. It writes
+`action-reliability.json` and `action-reliability.md` into the evidence
+directory, appends an `Action-command reliability` block to `summary.txt`, and
+fails the soak by default when an agent with enough intended action events falls
+below threshold.
+
+Methodology, caveats, and the issue/PR evidence template live in
+[`action-command-reliability.md`](action-command-reliability.md).
+
+Configuration:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `SOAK_MIN_INTENT_TO_COMMAND_RATIO` | `0.6` | Minimum commands emitted per intended-action utterance. |
+| `SOAK_MIN_PARSE_SUCCESS` | `0.8` | Minimum parse success rate after local-model output. |
+| `SOAK_MIN_EXECUTION_RATE` | `0.7` | Minimum emitted-command execution rate. |
+| `SOAK_MIN_VERIFIED_SUCCESS` | `0.5` | Minimum execution successes with world-state corroboration. |
+| `SOAK_RELIABILITY_MIN_INTENTS` | `5` | Only enforce thresholds for agents with this many intended action events. |
+| `SOAK_RELIABILITY_FAIL_ON_VIOLATION` | `1` | Exit nonzero when threshold violations are present. |
+| `MC_SIM_MIN_INTENT_TO_COMMAND_RATIO` | unset | Wrapper override forwarded to `SOAK_MIN_INTENT_TO_COMMAND_RATIO` when the soak var is unset. |
+| `MC_SIM_MIN_PARSE_SUCCESS` | unset | Wrapper override forwarded to `SOAK_MIN_PARSE_SUCCESS` when the soak var is unset. |
+| `MC_SIM_MIN_EXECUTION_RATE` | unset | Wrapper override forwarded to `SOAK_MIN_EXECUTION_RATE` when the soak var is unset. |
+| `MC_SIM_MIN_VERIFIED_SUCCESS` | unset | Wrapper override forwarded to `SOAK_MIN_VERIFIED_SUCCESS` when the soak var is unset. |
+
+## Behavioral Acceptance Gate
+
+E8 acceptance cannot be marked complete from process health alone. The soak
+runner writes `behavior.tsv` and appends a `Behavioral acceptance` block to
+`summary.txt` before making the final decision. The gate is log-derived and
+best-effort: if the logs do not prove collaborative embodied behavior, the run
+is a NO-GO until the cohort report explains the deviation.
+
+Per-agent counters are parsed from `logs/soak/<timestamp>/bots/<agent>.log`
+plus agent-tagged bridge/server logs:
+
+| Counter | Parsed evidence |
+| --- | --- |
+| `spawn_safe` | A spawn/login line with no `died`, `death`, `respawn`, or drowning line in the next roughly 30 log lines. |
+| `movement` | Direct movement/search commands such as `!move`, `!goToPlayer`, `!goToCoordinates`, `!searchForBlock`, `!searchForEntity`, or `!navigate`. |
+| `public_chat` | Public chat emits like `<Agent> message`, `Agent: message`, or `chat ... msg=...`, excluding `[action]`, management review lines, and command-only messages. |
+| `inter_agent_chat` | Public chat lines that mention another tracked agent by name. |
+| `gather` | Gather/equipment commands such as `!collectBlocks`, `!collectAllBlocks`, `!consume`, `!equip`, or `!smeltItem`. |
+| `build` | Build/place commands such as `!place`, `!placeHere`, `!placeBlock`, `!build`, or `!buildFromPlan`. |
+| `deaths` / `drownings` | Death, respawn, and drowning terms in the agent log stream. |
+| `stuck` / `dig_holes` | Stuck, path-failure, unreachable, trapped, or hole-digging phrases. |
+| `shared_artifact_count` | Cohort-wide shared-work evidence from shared/together camp-marker-wall-chest-shelter-fire language, nearby place coordinates by multiple agents, or at least two distinct agents emitting place/build commands. |
+
+The default behavioral thresholds are env-overridable:
+
+| Env var | Default | Gate |
+| --- | ---: | --- |
+| `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. |
+| `SOAK_MAX_DEATHS_PER_AGENT` | `2` | Any agent above this death/respawn count fails. |
+| `SOAK_MAX_STUCK_PER_AGENT` | `5` | Any agent above this stuck/path-failure count fails. |
+| `SOAK_MIN_PUBLIC_CHAT_COHORT` | `10` | The cohort must emit at least this many public chat lines. |
+| `SOAK_MIN_GATHER_OR_BUILD_COHORT` | `3` | Gather plus build attempts across the cohort must meet this count. |
+| `SOAK_MIN_SHARED_ARTIFACTS` | `1` | The run must show at least one visible shared improvement or shared work artifact. |
+| `SOAK_REQUIRE_BEHAVIOR_GATE` | `1` | When `1`, an unmet behavioral threshold exits the soak with status 1. |
+
+Decision rule: any unmet per-agent or cohort threshold is a NO-GO regardless
+of stability, cost, process-health, or action-reliability results.
+`SOAK_REQUIRE_BEHAVIOR_GATE=0` is only an operator override for collecting a
+soft-pass evidence bundle; the `summary.txt` block still records
+`behavior_gate_status=fail`, and `docs/minecraft/cohort-report.md` must explain
+why the deviation was accepted.
+
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 
 | File | Contents |
@@ -172,7 +242,10 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `logs/paper-latest.log` | Paper `latest.log` when present. |
 | `cost-ledger.tsv` | Per-agent token/USD totals, max hourly USD, cap, and pass/fail. |
 | `early-exits.tsv` | Any bot process that exited before the planned end. |
-| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table. |
+| `action-reliability.json` | Per-agent intent, parse, execution, verification metrics and threshold violations. |
+| `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
+| `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
+| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, and behavioral acceptance. |
 
 ## Failure Classes Monitored
 
@@ -197,6 +270,8 @@ Additional stability counters:
 | Management interventions | Bot/bridge logs and DB shadow log evidence when available. |
 | Per-agent token + USD spend | `cost_events` grouped by agent and hour. |
 | Decentralized respond-vs-ignore ratio | Rough `respond`/`ignore` counts from bot logs. |
+| Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
+| Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
 
 ## Cost Cap Accounting
 
@@ -388,9 +463,25 @@ Append the completed live run here before advancing E8-9:
 | Respond count |  |
 | Ignore count |  |
 | Cost ledger result |  |
+| Action reliability result | PASS / NOT ACCEPTABLE |
+| Intent-to-command / parse / execution / verified rates |  |
+| Top parser failure classes |  |
+| Failed parse examples |  |
+| Verified action examples |  |
+| Spawn safety (per agent) |  |
+| Movement distance / count |  |
+| Public chat lines (cohort) |  |
+| Inter-agent mentions |  |
+| Gather actions |  |
+| Build actions |  |
+| Deaths / drownings |  |
+| Stuck / dig-hole events |  |
+| Shared artifact(s) observed |  |
+| Behavioral gate result | PASS / FAIL |
 | Tunings applied mid-soak |  |
 | Final decision | GO / NO-GO |
 
 Decision rule: **GO** only if the run lasts at least 2 hours, every bot either
 stays up or recovers automatically, there are no unrecovered bridge drops or
-runaway loops, and every tracked agent stays within the E11 hourly cap.
+runaway loops, every tracked agent stays within the E11 hourly cap, and the
+action-command reliability gate and behavioral acceptance gate both pass.

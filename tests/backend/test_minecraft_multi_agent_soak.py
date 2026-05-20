@@ -21,6 +21,8 @@ SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
 RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 EASY_SETUP_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "setup-easy-spawn.mjs"
 DOC = REPO_ROOT / "docs" / "minecraft" / "multi-agent-soak.md"
+ACTION_DOC = REPO_ROOT / "docs" / "minecraft" / "action-command-reliability.md"
+COHORT_REPORT = REPO_ROOT / "docs" / "minecraft" / "cohort-report.md"
 PACKAGE = REPO_ROOT / "package.json"
 
 BOT_IDS = ("bridge", "alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
@@ -28,11 +30,35 @@ AGENT_IDS = ("alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "gro
 SIM_BOTS_LINE = "bots:           alpha vera rex aurora pixel fork sentinel grok"
 SOAK_BOTS_LINE = "bots:           bridge alpha vera rex aurora pixel fork sentinel grok"
 
+_MINECRAFT_ENV_KEYS = {
+    "CONVERSATION_MODE",
+    "EMBEDDING_PROVIDER",
+    "ENV_FILE",
+    "LLM_PROVIDER",
+    "MC_HOST",
+    "MC_PORT",
+    "SERVER_DIR",
+    "SERVER_PORT",
+    "WHITELIST",
+    "WORLD_CONFIG",
+}
+_MINECRAFT_ENV_PREFIXES = ("LOCAL_LLM", "MC_SIM", "MINECRAFT_", "SOAK_")
+
+
+def _clean_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _MINECRAFT_ENV_KEYS
+        and not key.startswith(_MINECRAFT_ENV_PREFIXES)
+    }
+    if overrides:
+        env.update(overrides)
+    return env
+
 
 def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    full_env = {**os.environ}
-    if env:
-        full_env.update(env)
+    full_env = _clean_env(env)
     return subprocess.run(
         ["bash", str(SCRIPT), *args],
         cwd=REPO_ROOT,
@@ -76,6 +102,14 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "SOAK_AGENT_HOURLY_CAP_USD" in proc.stdout
     assert "SOAK_START_MINECRAFT_IF_DOWN" in proc.stdout
     assert "SOAK_EASY_SPAWN" in proc.stdout
+    assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in proc.stdout
+    assert "SOAK_MIN_PARSE_SUCCESS" in proc.stdout
+    assert "SOAK_MIN_EXECUTION_RATE" in proc.stdout
+    assert "SOAK_MIN_VERIFIED_SUCCESS" in proc.stdout
+    assert "SOAK_RELIABILITY_FAIL_ON_VIOLATION" in proc.stdout
+    assert "SOAK_MIN_MOVEMENT_PER_AGENT" in proc.stdout
+    assert "SOAK_REQUIRE_BEHAVIOR_GATE" in proc.stdout
+    assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
     assert "run_cost_query()" not in proc.stdout
@@ -92,6 +126,10 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "Required in .env" in wrapper.stdout
     assert "MINECRAFT_BRIDGE_TOKEN" in wrapper.stdout
     assert "MC_SIM_EASY_MODE" in wrapper.stdout
+    assert "MC_SIM_MIN_INTENT_TO_COMMAND_RATIO" in wrapper.stdout
+    assert "MC_SIM_MIN_PARSE_SUCCESS" in wrapper.stdout
+    assert "MC_SIM_MIN_EXECUTION_RATE" in wrapper.stdout
+    assert "MC_SIM_MIN_VERIFIED_SUCCESS" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
 
@@ -115,6 +153,7 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "temp local clones" in proc.stdout
     assert "work root:      <per-run temp>" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
+    assert "behavior:       require=1; movement>=5/agent" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
     assert "keep MC alive:  0" in proc.stdout
     assert "easy spawn:     disabled" in proc.stdout
@@ -140,7 +179,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -162,6 +201,8 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "server dir:" in proc.stdout and "minecraft-server-easy" in proc.stdout
     assert "world config:" in proc.stdout and "world-easy.config" in proc.stdout
     assert "MindServer base port:" in proc.stdout
+    assert "reliability thresholds: intent>=0.6 parse>=0.8 execution>=0.7 verified>=0.5" in proc.stdout
+    assert "reliability:    intent>=0.6 parse>=0.8 exec>=0.7 verified>=0.5 min_intents=5 fail=1" in proc.stdout
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
     assert "slow actions:   blocked (!newAction/!observe/!navigate/plan/code)" in proc.stdout
     assert "safe terrain:   enabled" in proc.stdout
@@ -191,7 +232,7 @@ def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -199,6 +240,37 @@ def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "duration:       0.1h" in proc.stdout
+
+
+def test_local_sim_wrapper_echoes_reliability_threshold_overrides(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_MIN_INTENT_TO_COMMAND_RATIO=0.4",
+                "MC_SIM_MIN_PARSE_SUCCESS=0.9",
+                "MC_SIM_MIN_EXECUTION_RATE=0.8",
+                "MC_SIM_MIN_VERIFIED_SUCCESS=0.7",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "reliability thresholds: intent>=0.4 parse>=0.9 execution>=0.8 verified>=0.7" in proc.stdout
+    assert "reliability:    intent>=0.4 parse>=0.9 exec>=0.8 verified>=0.7 min_intents=5 fail=1" in proc.stdout
 
 
 def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
@@ -218,7 +290,40 @@ def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "management review: enabled" in proc.stdout
+
+
+def test_local_sim_wrapper_env_file_management_toggle_wins_over_pollution(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_DISABLE_MANAGEMENT=0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env(
+            {
+                "ENV_FILE": str(env_file),
+                "MC_SIM_DISABLE_MANAGEMENT": "1",
+                "MINECRAFT_MANAGEMENT_REVIEW_MODE": "disabled",
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=30,
@@ -245,7 +350,7 @@ def test_local_sim_wrapper_can_include_bridge_bot_when_requested(tmp_path) -> No
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -272,7 +377,7 @@ def test_local_sim_wrapper_can_allow_new_action_when_requested(tmp_path) -> None
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -300,7 +405,7 @@ def test_local_sim_wrapper_can_allow_action_chat_when_requested(tmp_path) -> Non
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -326,7 +431,7 @@ def test_local_sim_wrapper_accepts_pnpm_separator(tmp_path) -> None:
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "--", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -386,6 +491,10 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "settings.show_command_syntax = 'none'" in text
     assert "SOAK_SAFE_TERRAIN_ACTIONS" in text
     assert "SOAK_EASY_SPAWN" in text
+    assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
+    assert "SOAK_RELIABILITY_FAIL_ON_VIOLATION" in text
+    assert "analyze_action_reliability.py" in text
+    assert "action-reliability.md" in text
     assert "setup-easy-spawn.mjs" in text
     assert "world-easy.config" in text
     assert "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS" in text
@@ -411,13 +520,12 @@ def test_easy_spawn_access_writer_is_offline_safe(tmp_path) -> None:
     proc = subprocess.run(
         ["node", str(EASY_SETUP_SCRIPT), "--write-access-only"],
         cwd=REPO_ROOT,
-        env={
-            **os.environ,
+        env=_clean_env({
             "SERVER_DIR": str(tmp_path / "easy-server"),
             "EASY_SETUP_PLAYERS": "Alpha Vera",
             "EASY_SETUP_OBSERVERS": "bradtaylorsf",
             "EASY_SETUP_OPERATORS": "bradtaylorsf",
-        },
+        }),
         capture_output=True,
         text=True,
         timeout=30,
@@ -474,6 +582,87 @@ def test_script_records_cost_ledger_and_hourly_cap() -> None:
         assert f"'{agent_id}'" in text
 
 
+def test_script_defines_behavioral_acceptance_gate_contract() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "compute_behavior_table()" in text
+    assert "--verify-behavior" in text
+    for agent_id in AGENT_IDS:
+        assert agent_id in text
+    for env_name in (
+        "SOAK_MIN_MOVEMENT_PER_AGENT",
+        "SOAK_MAX_DEATHS_PER_AGENT",
+        "SOAK_MAX_STUCK_PER_AGENT",
+        "SOAK_MIN_PUBLIC_CHAT_COHORT",
+        "SOAK_MIN_GATHER_OR_BUILD_COHORT",
+        "SOAK_MIN_SHARED_ARTIFACTS",
+        "SOAK_REQUIRE_BEHAVIOR_GATE",
+    ):
+        assert env_name in text
+    assert (
+        '"agent",\n    "spawn_safe",\n    "movement",\n    "public_chat",\n    "inter_agent_chat",'
+        in text
+    )
+    assert "behavior_gate_status" in text
+    assert "Behavioral acceptance gate failed" in text
+    assert "behavior.tsv" in text
+
+
+def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        movement_count = 1 if agent_id == "alpha" else 5
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(movement_count))
+        if agent_id == "alpha":
+            lines.append("!collectBlocks oak_log 1")
+        if agent_id == "vera":
+            lines.append('!placeHere("stone")')
+        if agent_id == "rex":
+            lines.append('!place("stone", {"x": 1, "y": 64, "z": 1}, "up")')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 1
+    assert "Behavioral acceptance gate failed" in proc.stderr
+
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert (
+        "agent\tspawn_safe\tmovement\tpublic_chat\tinter_agent_chat\tgather\tbuild\tdeaths\t"
+        "drownings\tstuck\tdig_holes\tbehavior_status"
+    ) in behavior_tsv
+    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\tfail" in behavior_tsv
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\tpass" in behavior_tsv
+
+    summary = (run_dir / "summary.txt").read_text(encoding="utf-8")
+    assert "Behavioral acceptance" in summary
+    assert "behavior_gate_status=fail" in summary
+    assert "agent alpha movement expected >= 5 got 1" in summary
+
+
 def test_package_json_exposes_soak_commands() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
     scripts = package["scripts"]
@@ -500,6 +689,19 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "All connection attempts failed" in text
     assert "Live Run Addendum Template" in text
     assert "GO / NO-GO" in text
+    assert "Action-Command Reliability Gate" in text
+    assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
+    assert "Action reliability result" in text
+    assert "Behavioral gate result" in text
+
+    assert ACTION_DOC.is_file()
+    action_text = ACTION_DOC.read_text(encoding="utf-8")
+    assert "## Methodology" in action_text
+    assert "### Intent Detection" in action_text
+    assert "### Parse Results" in action_text
+    assert "### Execution Results" in action_text
+    assert "### Verification Results" in action_text
+    assert "## Live Run Evidence Template" in action_text
 
 
 def test_report_names_failure_classes_and_observed_counters() -> None:
@@ -513,5 +715,31 @@ def test_report_names_failure_classes_and_observed_counters() -> None:
         "Management interventions",
         "Per-agent token + USD spend",
         "Decentralized respond-vs-ignore ratio",
+        "Action-command reliability",
+        "Behavioral acceptance",
     ):
         assert counter in text
+
+
+def test_behavior_gate_docs_are_complete() -> None:
+    soak_doc = DOC.read_text(encoding="utf-8")
+    cohort_doc = COHORT_REPORT.read_text(encoding="utf-8")
+
+    assert "## Behavioral Acceptance Gate" in soak_doc
+    assert "behavior.tsv" in soak_doc
+    for env_name in (
+        "SOAK_MIN_MOVEMENT_PER_AGENT",
+        "SOAK_MAX_DEATHS_PER_AGENT",
+        "SOAK_MAX_STUCK_PER_AGENT",
+        "SOAK_MIN_PUBLIC_CHAT_COHORT",
+        "SOAK_MIN_GATHER_OR_BUILD_COHORT",
+        "SOAK_MIN_SHARED_ARTIFACTS",
+        "SOAK_REQUIRE_BEHAVIOR_GATE",
+    ):
+        assert env_name in soak_doc
+    assert "any unmet per-agent or cohort threshold is a NO-GO regardless" in soak_doc
+    assert "process health alone" in cohort_doc
+    assert "## Behavior Acceptance Table" in cohort_doc
+    assert "| Behavioral Acceptance Gate |" in cohort_doc
+    for agent_id in AGENT_IDS:
+        assert f"| {agent_id.title()} |" in cohort_doc

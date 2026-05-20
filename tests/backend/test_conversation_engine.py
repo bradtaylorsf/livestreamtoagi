@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import core.simulation.phases as phases_module
 from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
 from core.conversation_engine import ConversationEngine
 from core.event_bus import EventType
@@ -410,6 +412,14 @@ class TestEmbodiedModeGate:
         assert runner._phase_turns == 0
         assert runner._phase_tokens == 0
         assert runner._phase_cost == Decimal("0")
+
+    def test_phase_runner_does_not_fabricate_zero_cost_local_tokens(self) -> None:
+        """Local-LLM phases can have tokens and true zero spend."""
+        source = inspect.getsource(phases_module.PhaseRunner._run_conversation)
+
+        assert not hasattr(phases_module, "MIN_ACCOUNTED_PHASE_COST")
+        assert "self._phase_cost += cost_in_conv" in source
+        assert "accounted_cost" not in source
 
 
 # ── Test: Trigger detection starts new conversation ────────────
