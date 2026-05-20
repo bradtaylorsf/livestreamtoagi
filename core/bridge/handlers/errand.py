@@ -70,6 +70,102 @@ async def _cache_errand_memory_id(services: Any, key: str, memory_id: str) -> No
     _local_errand_complete_cache(services)[key] = memory_id
 
 
+async def _review_errand_outcome(
+    env: BridgeRequest,
+    payload: ErrandCompleteRequest,
+    services: Any | None,
+    outcome: str,
+) -> None:
+    """Run Alpha's symbolic errand output through Management as a side effect."""
+    management = getattr(services, "management", None) if services is not None else None
+    if management is None:
+        return
+
+    try:
+        review = await management.review(
+            agent_id=env.agent_id,
+            content=outcome,
+            simulation_id=env.simulation_id,
+        )
+    except Exception:
+        logger.warning(
+            "Errand completion accepted but Management review failed",
+            exc_info=True,
+            extra={"agent_id": env.agent_id, "task_id": payload.task_id},
+        )
+        return
+
+    if review.approved:
+        return
+
+    try:
+        await management.intervene(review.severity, env.agent_id, review.reason)
+    except Exception:
+        logger.warning(
+            "Errand completion accepted but Management intervention failed",
+            exc_info=True,
+            extra={
+                "agent_id": env.agent_id,
+                "task_id": payload.task_id,
+                "severity": review.severity,
+            },
+        )
+
+
+async def _persist_errand_outcome_memory(
+    env: BridgeRequest,
+    payload: ErrandCompleteRequest,
+    services: Any | None,
+    outcome: str,
+    *,
+    from_agent: str | None,
+) -> None:
+    """Best-effort durable memory write for an accepted errand completion."""
+    compactor = getattr(services, "compactor", None) if services is not None else None
+    if compactor is None:
+        logger.warning(
+            "Errand completion accepted without durable memory; memory compactor unavailable",
+            extra={"agent_id": env.agent_id, "task_id": payload.task_id},
+        )
+        return
+
+    idempotency_key = _errand_complete_idempotency_key(env, payload.task_id)
+    lock = await _errand_complete_lock(idempotency_key)
+    async with lock:
+        cached_memory_id = await _cached_errand_memory_id(services, idempotency_key)
+        if cached_memory_id is not None:
+            return
+
+        try:
+            result = await compactor.compact_interaction(
+                agent_id=env.agent_id,
+                interaction=outcome,
+                event_type="errand_outcome",
+                participants=_participants(env.agent_id, from_agent),
+                conversation_id=None,
+            )
+        except Exception:
+            logger.warning(
+                "Errand completion accepted but durable memory write failed",
+                exc_info=True,
+                extra={"agent_id": env.agent_id, "task_id": payload.task_id},
+            )
+            return
+
+        if result is None:
+            logger.warning(
+                "Errand completion accepted but durable memory write returned no memory",
+                extra={"agent_id": env.agent_id, "task_id": payload.task_id},
+            )
+            return
+
+        await _cache_errand_memory_id(
+            services,
+            idempotency_key,
+            str(result.recall_memory.id),
+        )
+
+
 def _participants(agent_id: str, from_agent: str | None) -> list[str]:
     participants = [agent_id]
     if from_agent and from_agent not in participants:
@@ -124,6 +220,7 @@ async def handle_errand_complete(env: BridgeRequest, services: Any | None) -> di
     """
     payload = ErrandCompleteRequest.model_validate(env.payload)
     from_agent = errand_queue.from_agent_for(payload.task_id)
+    outcome = _format_errand_outcome(env, payload, from_agent=from_agent)
     errand_queue.record_completion(
         payload.task_id,
         payload.status,
@@ -132,47 +229,12 @@ async def handle_errand_complete(env: BridgeRequest, services: Any | None) -> di
         [step.model_dump() for step in payload.step_results],
     )
 
-    compactor = getattr(services, "compactor", None) if services is not None else None
-    if compactor is None:
-        logger.warning(
-            "Errand completion accepted without durable memory; memory compactor unavailable",
-            extra={"agent_id": env.agent_id, "task_id": payload.task_id},
-        )
-        return {"accepted": True}
-
-    idempotency_key = _errand_complete_idempotency_key(env, payload.task_id)
-    lock = await _errand_complete_lock(idempotency_key)
-    async with lock:
-        cached_memory_id = await _cached_errand_memory_id(services, idempotency_key)
-        if cached_memory_id is not None:
-            return {"accepted": True}
-
-        try:
-            result = await compactor.compact_interaction(
-                agent_id=env.agent_id,
-                interaction=_format_errand_outcome(env, payload, from_agent=from_agent),
-                event_type="errand_outcome",
-                participants=_participants(env.agent_id, from_agent),
-                conversation_id=None,
-            )
-        except Exception:
-            logger.warning(
-                "Errand completion accepted but durable memory write failed",
-                exc_info=True,
-                extra={"agent_id": env.agent_id, "task_id": payload.task_id},
-            )
-            return {"accepted": True}
-
-        if result is None:
-            logger.warning(
-                "Errand completion accepted but durable memory write returned no memory",
-                extra={"agent_id": env.agent_id, "task_id": payload.task_id},
-            )
-            return {"accepted": True}
-
-        await _cache_errand_memory_id(
-            services,
-            idempotency_key,
-            str(result.recall_memory.id),
-        )
-        return {"accepted": True}
+    await _persist_errand_outcome_memory(
+        env,
+        payload,
+        services,
+        outcome,
+        from_agent=from_agent,
+    )
+    await _review_errand_outcome(env, payload, services, outcome)
+    return {"accepted": True}
