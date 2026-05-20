@@ -256,14 +256,17 @@ The headless, dependency-free pytest equivalent (what CI runs):
 
 ```bash
 pnpm verify:mindcraft-profiles
-# shorthand for: .venv/bin/pytest tests/backend/test_mc_profile_gen.py -v
-.venv/bin/pytest tests/backend/test_mc_personality_mapping.py -v
+# shorthand for:
+# .venv/bin/pytest tests/backend/test_mc_profile_gen.py tests/backend/test_mc_personality_mapping.py -v
 ```
 
 > This generator has **no LLM runtime path** — it only emits JSON. The nearest
 > local smoke is `pnpm verify:mindcraft-profiles` plus the
 > `--provider lmstudio` form above (no OpenRouter spend required for
 > acceptance).
+> Do not use bare `python` for this validation; developer machines may have
+> PATH shims that point at unrelated worktrees. Use `pnpm llm:local` or
+> `.venv/bin/python scripts/check_local_llm.py --list-only`.
 
 ## Troubleshooting
 

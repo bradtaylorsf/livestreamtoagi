@@ -64,8 +64,12 @@ profile templates. Validate the nearest local path with:
 
 ```bash
 pnpm llm:local --list-only
-.venv/bin/pytest tests/backend/test_mc_personality_mapping.py tests/backend/test_mc_profile_gen.py -v
+pnpm verify:mindcraft-profiles
 ```
+
+Do not use bare `python` for this validation. This repo intentionally routes
+Python commands through `pnpm` scripts or `.venv/bin/python` so stale PATH shims
+cannot point at another worktree.
 
 For real bot validation, use the committed `lmstudio/__LOCAL_LLM_MODEL__`
 templates and the existing `connect-*-bot.sh` launchers so profiles resolve to

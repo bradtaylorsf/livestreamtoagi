@@ -2,8 +2,9 @@
 """Check a local OpenAI-compatible LLM server before running simulations.
 
 Usage:
-    python scripts/check_local_llm.py
-    LLM_PROVIDER=lmstudio LOCAL_LLM_MODEL=qwen3 python scripts/check_local_llm.py
+    pnpm llm:local --list-only
+    .venv/bin/python scripts/check_local_llm.py --list-only
+    LLM_PROVIDER=lmstudio LOCAL_LLM_MODEL=qwen3 .venv/bin/python scripts/check_local_llm.py
 """
 
 from __future__ import annotations
