@@ -1,0 +1,132 @@
+# Alpha Vertical-Slice Acceptance Report
+
+Issue: #571 E7-7 - Vertical-slice acceptance report  
+Epic: #509 E7 - Alpha Vertical Slice  
+Prepared: 2026-05-19 PDT  
+Scope: E7-1 through E7-6, Alpha only
+
+## Decision
+
+Status: **GO for E8 implementation, with live-run caveats recorded below.**
+
+The committed E7 chain proves Alpha's local-dev vertical slice at the contract,
+bridge, non-verbal profile, errand execution, memory, Management, cost
+attribution, and kill-switch layers. The report does **not** claim a fresh live
+Minecraft server launch on this host: LM Studio was not reachable at
+`http://localhost:1234/v1` during this E7-7 verification, and no local Mac
+Minecraft server was launched for this docs-only issue.
+
+Before using this as a production or livestream launch sign-off, rerun the live
+Alpha connection with LM Studio serving a model and the E2 Paper server running.
+
+## End-to-End Chain
+
+1. Another agent dispatches Alpha through the existing `dispatch_alpha` tool.
+2. The tool preserves the existing LLM/event behavior and enqueues the same task
+   for the Python-to-Node bridge.
+3. Alpha's Mindcraft profile polls `errand.poll` as `agent_id: "alpha"` without
+   speaking in Minecraft chat.
+4. Alpha executes a structured navigate/place errand through `!runErrand`,
+   using the verified action surface.
+5. Alpha reports one `errand.complete` result with step-level evidence and a
+   symbolic outcome.
+6. Python persists the verified outcome through the memory compactor so it is
+   retrievable through `memory.recall`.
+7. Python routes Alpha's symbolic result through Management out of band.
+8. Cost attribution charges Alpha's LLM call path, and an active `kill_switch`
+   blocks new dispatches, safe-idles `errand.poll`, and rejects
+   `errand.complete` before side effects.
+
+## Child Issue Evidence
+
+| Slice | Issue / PR / commit | Acceptance | Evidence | Status |
+| --- | --- | --- | --- | --- |
+| E7-1 Alpha Mindcraft profile | #565 / #689 / `3ec0497` | Alpha profile targets the E2 world, uses local LM Studio model IDs, and emits no chat. | `docs/minecraft/alpha-profile.md`; `scripts/minecraft/profiles/alpha-bot.json`; `scripts/minecraft/mindcraft-settings-alpha.js`; `scripts/minecraft/connect-alpha-bot.sh --verify`; `pnpm verify:mindcraft-alpha` -> 18 passed. | Pass, headless/static. Live spawn not rerun here. |
+| E7-2 Alpha receives dispatched errand | #566 / #690 / `6e3d6d7` | A dispatched task reaches Alpha through the bridge while preserving `dispatch_alpha` semantics. | `core/bridge/errand_queue.py`; `tools/alpha_dispatch.py`; `errand.poll` in `core/bridge/contract.py`; `tests/backend/test_alpha_dispatch_bridge_delivery.py` -> 2 passed; `pnpm verify:bridge-contract` -> 74 passed. | Pass. |
+| E7-3 Alpha executes verified errand | #567 / #691 / `a11061b` | A known errand completes with verified success/failure surfaced. | `docs/minecraft/alpha-errand.md`; `scripts/minecraft/fork-src/agent/commands/run_errand_action.js`; `scripts/minecraft/fork-src/agent/skills/errand_plan.js`; `errand.complete` fixtures; `pnpm verify:alpha-errand` -> 19 passed. | Pass, fake-bot/headless. |
+| E7-4 Alpha writes outcome to memory | #568 / #692 / `da6fd40` | The errand outcome persists and can be recalled through the memory bridge path. | `core/bridge/handlers/errand.py`; `docs/minecraft/alpha-errand.md`; `docs/minecraft/bridge-contract.md`; `tests/backend/test_alpha_errand_memory.py` -> 1 passed; `pnpm verify:alpha-errand` includes retrievable-memory and idempotency coverage. | Pass. |
+| E7-5 Management out of band | #569 / #693 / `8fb55f5` | Alpha's symbolic output is reviewed by Management, and Management is not spawned as a world bot. | `core/bridge/handlers/errand.py`; `tests/backend/test_bridge_errand.py::test_bridge_errand_complete_reviews_alpha_symbolic_outcome`; `tests/backend/test_management.py` -> 42 passed, 1 skipped; `tests/backend/test_management.py::test_management_is_not_mindcraft_world_bot`. | Pass. |
+| E7-6 Cost gate and kill switch | #570 / #694 / `abc10bd` | Alpha spend is attributed, and `kill_switch` prevents Alpha acting through dispatch, poll, and completion paths. | `tools/alpha_dispatch.py`; `core/bridge/server.py`; `docs/minecraft/alpha-errand.md`; `.venv/bin/pytest tests/backend/test_alpha_dispatch.py tests/backend/test_cost_tracking.py -v` -> 35 passed; `pnpm verify:bridge-server` -> 34 passed. | Pass, bridge/tool enforced. |
+
+## Local Validation Commands
+
+Ran on this Mac worktree:
+
+```bash
+pnpm llm:local --list-only
+```
+
+Result: **failed**, because no LM Studio-compatible server was reachable at
+`http://localhost:1234/v1/models`.
+
+```text
+FAIL: could not reach http://localhost:1234/v1/models
+      All connection attempts failed
+```
+
+No LM Studio model IDs were available to record. No OpenRouter validation was
+run or required for this issue.
+
+Nearest local smoke paths run:
+
+```bash
+scripts/minecraft/connect-alpha-bot.sh --verify
+pnpm verify:mindcraft-alpha
+pnpm verify:alpha-errand
+.venv/bin/pytest tests/backend/test_alpha_dispatch_bridge_delivery.py tests/backend/test_alpha_errand_memory.py -v
+pnpm verify:bridge-contract
+.venv/bin/pytest tests/backend/test_alpha_dispatch.py tests/backend/test_cost_tracking.py -v
+pnpm verify:bridge-server
+.venv/bin/pytest tests/backend/test_management.py -v
+```
+
+Results:
+
+- `scripts/minecraft/connect-alpha-bot.sh --verify`: passed; static Alpha
+  profile is local-only, non-verbal, E2-targeted, and bridge assets are present.
+- `pnpm verify:mindcraft-alpha`: 18 passed.
+- `pnpm verify:alpha-errand`: 19 passed.
+- `tests/backend/test_alpha_dispatch_bridge_delivery.py`
+  + `tests/backend/test_alpha_errand_memory.py`: 3 passed.
+- `pnpm verify:bridge-contract`: 74 passed.
+- `tests/backend/test_alpha_dispatch.py`
+  + `tests/backend/test_cost_tracking.py`: 35 passed.
+- `pnpm verify:bridge-server`: 34 passed.
+- `tests/backend/test_management.py`: 42 passed, 1 skipped
+  (`test_end_to_end_review_with_llm` is an opt-in LLM test).
+
+## Deviations and Boundaries vs `MINECRAFT-PIVOT-CONTEXT.md`
+
+- **No fresh live Minecraft spawn in this report.** The context's direction is
+  real Minecraft embodiment. E7 validates the committed Alpha wiring through
+  headless/static scripts and fake-bot bridge tests here; a live
+  `pnpm mc:connect-alpha` run still requires LM Studio plus the E2 Paper server
+  on `127.0.0.1:25565`.
+- **LM Studio was not reachable on this host.** The pivot acceptance path
+  requires local models instead of OpenRouter spend. This E7-7 report records
+  the failed reachability check and the model IDs are therefore absent.
+- **Only Alpha is embodied.** This matches E7 scope. Other agents and
+  decentralized Mindcraft conversation remain E8 work.
+- **Management stays out of band.** This is not a deviation from the context;
+  it is the intended preservation boundary. The verified path reviews Alpha's
+  symbolic errand outcome in Python and confirms no Management world bot.
+- **Kill switch is enforced at the Alpha slice boundary, not as a full process
+  supervisor.** E7-6 blocks new dispatches, safe-idles Alpha's next
+  `errand.poll`, and rejects `errand.complete` before memory/Management side
+  effects. Full 24/7 process halt and broader per-agent hourly cap hardening
+  remain later safety-hardening work.
+- **OpenRouter production routing is not exercised.** The E7 local-dev profile
+  intentionally uses `lmstudio/<model-id>` and `lmstudio/<code-model-id>` to
+  avoid external spend, while production OpenRouter mappings remain documented
+  and guarded elsewhere.
+
+## Sign-Off
+
+Automated acceptance recommendation: **GO for E8 implementation**, based on the
+passing headless/local smoke evidence above.
+
+Human reviewer sign-off: **pending**.
+
+Reviewer: ____________________  
+Date: ____________________  
+Decision: GO / NO-GO
