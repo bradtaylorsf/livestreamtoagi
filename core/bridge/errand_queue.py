@@ -42,9 +42,7 @@ class ErrandResult:
 class ErrandQueue:
     """FIFO errand queues keyed by agent id with short-lived idempotency."""
 
-    def __init__(
-        self, *, duplicate_ttl_seconds: float = DEFAULT_DUPLICATE_TTL_SECONDS
-    ) -> None:
+    def __init__(self, *, duplicate_ttl_seconds: float = DEFAULT_DUPLICATE_TTL_SECONDS) -> None:
         self._duplicate_ttl_seconds = duplicate_ttl_seconds
         self._queues: dict[str, asyncio.Queue[Errand]] = {}
         self._seen_task_ids: dict[str, float] = {}
@@ -158,9 +156,7 @@ class ErrandQueue:
 
     def _prune_expired(self, now: float) -> None:
         expired = [
-            task_id
-            for task_id, expires_at in self._seen_task_ids.items()
-            if expires_at <= now
+            task_id for task_id, expires_at in self._seen_task_ids.items() if expires_at <= now
         ]
         for task_id in expired:
             self._seen_task_ids.pop(task_id, None)
