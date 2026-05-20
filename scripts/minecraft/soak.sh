@@ -266,6 +266,7 @@ if (process.env.SOAK_BLOCK_PRIVATE_CONVERSATIONS === '1') {
         if (!blocked.includes(command)) blocked.push(command);
     }
     settings.blocked_actions = blocked;
+    if (!Object.hasOwn(settings, 'num_examples')) settings.num_examples = 0;
 }
 
 if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {

@@ -327,6 +327,7 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
     assert "settings_json_for_bot" in text
     assert "settings.init_message = ''" in text
+    assert "settings.num_examples = 0" in text
     assert "!startConversation" in text
     assert "!endConversation" in text
     assert "!newAction" in text
