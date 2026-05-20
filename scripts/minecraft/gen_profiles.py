@@ -319,7 +319,11 @@ def build_profile(
                 "lmstudio provider needs a chat model id: pass --local-chat "
                 "or set LOCAL_LLM_MODEL (a served LM Studio model id)."
             )
-        code = local_code or os.environ.get("LOCAL_LLM_MODEL_BUILDING") or chat
+        # An explicit chat model should be self-contained: if the caller did
+        # not also pass a code model, use the same local id rather than letting
+        # a stray shell default override only the building tier.
+        env_code = None if local_chat else os.environ.get("LOCAL_LLM_MODEL_BUILDING")
+        code = local_code or env_code or chat
         model = f"lmstudio/{chat}"
         code_model = f"lmstudio/{code}"
     else:  # openrouter

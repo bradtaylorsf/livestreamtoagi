@@ -29,11 +29,35 @@ AGENT_IDS = ("alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "gro
 SIM_BOTS_LINE = "bots:           alpha vera rex aurora pixel fork sentinel grok"
 SOAK_BOTS_LINE = "bots:           bridge alpha vera rex aurora pixel fork sentinel grok"
 
+_MINECRAFT_ENV_KEYS = {
+    "CONVERSATION_MODE",
+    "EMBEDDING_PROVIDER",
+    "ENV_FILE",
+    "LLM_PROVIDER",
+    "MC_HOST",
+    "MC_PORT",
+    "SERVER_DIR",
+    "SERVER_PORT",
+    "WHITELIST",
+    "WORLD_CONFIG",
+}
+_MINECRAFT_ENV_PREFIXES = ("LOCAL_LLM", "MC_SIM", "MINECRAFT_", "SOAK_")
+
+
+def _clean_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _MINECRAFT_ENV_KEYS
+        and not key.startswith(_MINECRAFT_ENV_PREFIXES)
+    }
+    if overrides:
+        env.update(overrides)
+    return env
+
 
 def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    full_env = {**os.environ}
-    if env:
-        full_env.update(env)
+    full_env = _clean_env(env)
     return subprocess.run(
         ["bash", str(SCRIPT), *args],
         cwd=REPO_ROOT,
@@ -150,7 +174,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -203,7 +227,7 @@ def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -233,7 +257,7 @@ def test_local_sim_wrapper_echoes_reliability_threshold_overrides(tmp_path) -> N
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -261,7 +285,7 @@ def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -288,7 +312,7 @@ def test_local_sim_wrapper_can_include_bridge_bot_when_requested(tmp_path) -> No
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -315,7 +339,7 @@ def test_local_sim_wrapper_can_allow_new_action_when_requested(tmp_path) -> None
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -343,7 +367,7 @@ def test_local_sim_wrapper_can_allow_action_chat_when_requested(tmp_path) -> Non
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -369,7 +393,7 @@ def test_local_sim_wrapper_accepts_pnpm_separator(tmp_path) -> None:
     proc = subprocess.run(
         ["bash", str(RUN_SCRIPT), "--", "--dry-run"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ENV_FILE": str(env_file)},
+        env=_clean_env({"ENV_FILE": str(env_file)}),
         capture_output=True,
         text=True,
         timeout=30,
@@ -458,13 +482,12 @@ def test_easy_spawn_access_writer_is_offline_safe(tmp_path) -> None:
     proc = subprocess.run(
         ["node", str(EASY_SETUP_SCRIPT), "--write-access-only"],
         cwd=REPO_ROOT,
-        env={
-            **os.environ,
+        env=_clean_env({
             "SERVER_DIR": str(tmp_path / "easy-server"),
             "EASY_SETUP_PLAYERS": "Alpha Vera",
             "EASY_SETUP_OBSERVERS": "bradtaylorsf",
             "EASY_SETUP_OPERATORS": "bradtaylorsf",
-        },
+        }),
         capture_output=True,
         text=True,
         timeout=30,
