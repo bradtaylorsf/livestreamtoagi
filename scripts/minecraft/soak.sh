@@ -36,6 +36,14 @@
 #                               Default: 180.
 #   SOAK_INIT_MESSAGE           Optional initial objective sent to each
 #                               Mindcraft bot through settings.init_message.
+#   SOAK_BLOCK_PRIVATE_CONVERSATIONS
+#                               Set to 1 to disable Mindcraft's private
+#                               bot-to-bot conversation commands and force
+#                               normal public Minecraft chat/action routing.
+#                               Default: 0.
+#   SOAK_BOTS                   Space-separated bot ids to launch. Default:
+#                               bridge alpha vera rex aurora pixel fork
+#                               sentinel grok.
 #   SOAK_MINDSERVER_BASE_PORT    First local MindServer UI/control port.
 #                               Each bot gets a unique incrementing port.
 #                               Default: 8080.
@@ -59,6 +67,7 @@ SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
+SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-0}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -100,8 +109,10 @@ ok() { echo "ok $*"; }
 info() { echo "  $*"; }
 fail() { echo "x $*" >&2; }
 
-SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
-SOAK_COST_AGENTS="alpha vera rex aurora pixel fork sentinel grok"
+DEFAULT_SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
+DEFAULT_SOAK_COST_AGENTS="alpha vera rex aurora pixel fork sentinel grok"
+SOAK_BOTS="${SOAK_BOTS:-$DEFAULT_SOAK_BOTS}"
+SOAK_COST_AGENTS="${SOAK_COST_AGENTS:-$DEFAULT_SOAK_COST_AGENTS}"
 
 script_for_bot() {
     case "$1" in
@@ -193,6 +204,11 @@ print_plan() {
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
+    if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
+        info "private conv:   blocked (!startConversation/!endConversation)"
+    else
+        info "private conv:   allowed"
+    fi
     if [ -n "$SOAK_INIT_MESSAGE" ]; then
         info "init prompt:    set (${#SOAK_INIT_MESSAGE} chars)"
     else
@@ -205,14 +221,58 @@ print_plan() {
 }
 
 build_settings_json() {
-    if [ -z "$SOAK_INIT_MESSAGE" ] || [ -n "${SETTINGS_JSON:-}" ]; then
+    if [ -z "$SOAK_INIT_MESSAGE" ] && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ]; then
         return 0
     fi
     SETTINGS_JSON="$(
-        SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" node -e \
-            'process.stdout.write(JSON.stringify({init_message: process.env.SOAK_INIT_MESSAGE || ""}))'
+        SETTINGS_JSON_CURRENT="${SETTINGS_JSON:-}" \
+        SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+        SOAK_BLOCK_PRIVATE_CONVERSATIONS="$SOAK_BLOCK_PRIVATE_CONVERSATIONS" \
+        node --input-type=module <<'NODE'
+const baseBlockedActions = [
+    '!checkBlueprint',
+    '!checkBlueprintLevel',
+    '!getBlueprint',
+    '!getBlueprintLevel',
+];
+
+let settings = {};
+const existing = process.env.SETTINGS_JSON_CURRENT || '';
+if (existing.trim().length > 0) {
+    settings = JSON.parse(existing);
+}
+
+if (process.env.SOAK_INIT_MESSAGE && !Object.hasOwn(settings, 'init_message')) {
+    settings.init_message = process.env.SOAK_INIT_MESSAGE;
+}
+
+if (process.env.SOAK_BLOCK_PRIVATE_CONVERSATIONS === '1') {
+    const blocked = Array.isArray(settings.blocked_actions)
+        ? [...settings.blocked_actions]
+        : [...baseBlockedActions];
+    for (const command of ['!startConversation', '!endConversation']) {
+        if (!blocked.includes(command)) blocked.push(command);
+    }
+    settings.blocked_actions = blocked;
+}
+
+process.stdout.write(JSON.stringify(settings));
+NODE
     )"
     export SETTINGS_JSON
+}
+
+settings_json_for_bot() {
+    local bot="$1"
+    [ -n "${SETTINGS_JSON:-}" ] || return 1
+    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+        node --input-type=module <<'NODE'
+const settings = JSON.parse(process.env.SETTINGS_JSON_INPUT);
+if (process.env.BOT_ID === 'bridge' && process.env.SOAK_INIT_MESSAGE) {
+    settings.init_message = '';
+}
+process.stdout.write(JSON.stringify(settings));
+NODE
 }
 
 if [ "$MODE" = "verify" ]; then
@@ -337,6 +397,7 @@ write_metadata() {
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
         echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
+        echo "block_private_conversations=$SOAK_BLOCK_PRIVATE_CONVERSATIONS"
         if [ -n "$SOAK_INIT_MESSAGE" ]; then
             echo "init_message_set=yes"
             echo "init_message_chars=${#SOAK_INIT_MESSAGE}"
@@ -439,7 +500,7 @@ prepare_mindcraft_clone() {
 }
 
 launch_bot() {
-    local bot="$1" bot_index="$2" script worktree log pid mindserver_port
+    local bot="$1" bot_index="$2" script worktree log pid mindserver_port bot_settings_json
     script="$(script_for_bot "$bot")"
     worktree="$(prepare_mindcraft_clone "$bot")"
     mindserver_port=$((SOAK_MINDSERVER_BASE_PORT + bot_index))
@@ -452,10 +513,9 @@ launch_bot() {
         export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
-        if [ "$bot" = "bridge" ] && [ -n "$SOAK_INIT_MESSAGE" ]; then
-            exec env SETTINGS_JSON='{"init_message":""}' "$script"
-        elif [ -n "${SETTINGS_JSON:-}" ]; then
-            exec env SETTINGS_JSON="$SETTINGS_JSON" "$script"
+        bot_settings_json="$(settings_json_for_bot "$bot" || true)"
+        if [ -n "$bot_settings_json" ]; then
+            exec env SETTINGS_JSON="$bot_settings_json" "$script"
         else
             exec "$script"
         fi

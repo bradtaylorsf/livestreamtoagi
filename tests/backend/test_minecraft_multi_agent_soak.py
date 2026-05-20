@@ -24,6 +24,8 @@ PACKAGE = REPO_ROOT / "package.json"
 
 BOT_IDS = ("bridge", "alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
 AGENT_IDS = ("alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
+SIM_BOTS_LINE = "bots:           alpha vera rex aurora pixel fork sentinel grok"
+SOAK_BOTS_LINE = "bots:           bridge alpha vera rex aurora pixel fork sentinel grok"
 
 
 def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -140,6 +142,10 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "chat model:     google/gemma-4-e4b" in proc.stdout
     assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
     assert "management review: disabled" in proc.stdout
+    assert "private bot conversations: 1" in proc.stdout
+    assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
+    assert SIM_BOTS_LINE in proc.stdout
+    assert SOAK_BOTS_LINE not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
@@ -197,6 +203,33 @@ def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "management review: enabled" in proc.stdout
+
+
+def test_local_sim_wrapper_can_include_bridge_bot_when_requested(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_INCLUDE_BRIDGE_BOT=1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert SOAK_BOTS_LINE in proc.stdout
 
 
 def test_local_sim_wrapper_accepts_pnpm_separator(tmp_path) -> None:
@@ -260,7 +293,11 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "SOAK_START_MINECRAFT_IF_DOWN" in text
     assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
     assert "SOAK_INIT_MESSAGE" in text
-    assert 'env SETTINGS_JSON=\'{"init_message":""}\'' in text
+    assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
+    assert "settings_json_for_bot" in text
+    assert "settings.init_message = ''" in text
+    assert "!startConversation" in text
+    assert "!endConversation" in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text

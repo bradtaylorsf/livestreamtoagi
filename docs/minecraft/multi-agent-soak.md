@@ -112,6 +112,14 @@ pnpm verify:minecraft-soak
 local Java 21 / Node 20 Homebrew paths on macOS, then delegates to
 `scripts/minecraft/soak.sh`. Use it for the normal local operator flow: start
 `pnpm dev`, then run the desired Minecraft sim command in a second terminal.
+The sim wrapper defaults to the real character cast only:
+Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. BridgeBot is excluded
+unless `MC_SIM_INCLUDE_BRIDGE_BOT=1` is set, because it is a technical bridge
+test bot rather than a character. The wrapper also sets
+`SOAK_BLOCK_PRIVATE_CONVERSATIONS=1` by default so isolated MindServer launches
+do not use Mindcraft's private `!startConversation`/`!endConversation` channel;
+the characters coordinate through ordinary public Minecraft chat and visible
+actions instead.
 
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 

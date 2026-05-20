@@ -29,6 +29,8 @@
 #
 # Optional in .env:
 #   MC_SIM_DISABLE_MANAGEMENT=1
+#   MC_SIM_INCLUDE_BRIDGE_BOT=0
+#   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
 #   MC_SIM_INIT_MESSAGE=<initial objective for the character bots>
 #   MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS=10000
 set -euo pipefail
@@ -154,10 +156,28 @@ if [ "$MC_SIM_DISABLE_MANAGEMENT" = "1" ]; then
     MINECRAFT_MANAGEMENT_REVIEW_MODE="disabled"
 fi
 export MINECRAFT_MANAGEMENT_REVIEW_MODE
+MC_SIM_INCLUDE_BRIDGE_BOT="${MC_SIM_INCLUDE_BRIDGE_BOT:-0}"
+if [ -z "${SOAK_BOTS+x}" ]; then
+    if [ "$MC_SIM_INCLUDE_BRIDGE_BOT" = "1" ]; then
+        SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
+    else
+        SOAK_BOTS="alpha vera rex aurora pixel fork sentinel grok"
+    fi
+fi
+SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-${MC_SIM_BLOCK_PRIVATE_CONVERSATIONS:-1}}"
+export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS
 
-DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Talk with the nearby characters, choose roles, and visibly do useful things: gather wood or stone, explore nearby terrain, and start a tiny shared camp or marker build. Keep actions safe, narrate briefly in character, and continue until the run ends."
+DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: gather wood or stone, explore nearby terrain, set a useful goal, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. Keep actions safe, narrate briefly in character, and continue until the run ends."
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
+if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
+    case "$SOAK_INIT_MESSAGE" in
+        *"Private bot-conversation commands are disabled"*|*"ordinary public Minecraft chat"*) ;;
+        *)
+            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use ordinary public Minecraft chat for coordination. Private bot-conversation commands are disabled in this local sim."
+            ;;
+    esac
+fi
 export SOAK_INIT_MESSAGE
 
 if [ "${LLM_PROVIDER:-}" != "lmstudio" ]; then
@@ -198,6 +218,8 @@ info "duration: ${duration_hours}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"
+info "sim bots: ${SOAK_BOTS}"
+info "private bot conversations: ${SOAK_BLOCK_PRIVATE_CONVERSATIONS}"
 info "init prompt: ${SOAK_INIT_MESSAGE}"
 info "logs: ${log_dir}"
 
