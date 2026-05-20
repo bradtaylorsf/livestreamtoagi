@@ -12,6 +12,7 @@ import { placeAction } from './place_action.js';
 import { deriveOverallStatus, parseErrandPlan } from '../skills/errand_plan.js';
 
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
+const ERRAND_COMPLETE_TIMEOUT_MS = 20000;
 const ALPHA_AGENT_ID = 'alpha';
 const SYMBOLS = new Set(['✓', '✗', '?']);
 const CHAT_METHOD = ['open', 'Chat'].join('');
@@ -44,6 +45,7 @@ function alphaOnly(agent) {
     return new Proxy(agent, {
         get(target, prop, receiver) {
             if (prop === CHAT_METHOD) return undefined;
+            if (prop === 'name') return ALPHA_AGENT_ID;
             return Reflect.get(target, prop, receiver);
         },
     });
@@ -71,7 +73,7 @@ async function reportCompletion(traceId, payload) {
         service: 'errand',
         method: 'complete',
         payload,
-        deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
+        deadlineMs: ERRAND_COMPLETE_TIMEOUT_MS,
         agentId: ALPHA_AGENT_ID,
         costContext: {
             agent_tier: 'errand',

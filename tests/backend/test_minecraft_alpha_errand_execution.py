@@ -255,7 +255,7 @@ const bot = {{
     }},
 }};
 const result = await mod.runErrandAction.perform({{
-    name: 'alpha',
+    name: 'Alpha',
     bot,
     openChat: () => {{ throw new Error('chat should not be used'); }},
 }});
@@ -285,6 +285,8 @@ process.stdout.write(JSON.stringify({{
     assert result["position"] == {"x": 2, "y": 64, "z": 0}
     assert result["finalBlock"] == "dirt"
     assert "✓ success" in result["result"]
+    assert {call["agentId"] for call in calls} == {"alpha"}
+    assert complete_call["deadlineMs"] == 20000
     assert [call["payload"]["status"] for call in action_results] == ["success", "success"]
     assert complete_call["payload"] == {
         "task_id": "alpha-known-errand",
