@@ -494,7 +494,9 @@ SQL
 count_matches() {
     local pattern="$1"
     shift
-    grep -Eihc "$pattern" "$@" 2> /dev/null | awk '{sum += $1} END {print sum + 0}'
+    # grep -c returns 1 when nothing matches, which would trip pipefail in
+    # the success path. Swallow that so the summary always renders.
+    { grep -Eihc "$pattern" "$@" 2> /dev/null || true; } | awk '{sum += $1} END {print sum + 0}'
 }
 
 write_summary() {
