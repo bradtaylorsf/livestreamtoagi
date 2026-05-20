@@ -275,7 +275,8 @@ verify_committed_assets() {
     else
         grep -q "service: 'management'" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper does not call management.review"; problems=1; }
         grep -q "method: 'review'" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper method is not review"; problems=1; }
-        grep -q "MANAGEMENT_REVIEW_DEADLINE_MS = 3000" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper deadline is not 3000ms"; problems=1; }
+        grep -q "DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS = 10000" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper deadline default is not 10000ms"; problems=1; }
+        grep -q "MINECRAFT_MANAGEMENT_REVIEW_MODE" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper is missing simulation disable mode"; problems=1; }
         grep -q "agent_tier: 'filter'" "$MANAGEMENT_REVIEW_SRC" || { fail "management helper cost tier is not filter"; problems=1; }
         if grep -q 'openrouter' "$MANAGEMENT_REVIEW_SRC"; then
             fail "management helper must NOT reference openrouter"; problems=1
