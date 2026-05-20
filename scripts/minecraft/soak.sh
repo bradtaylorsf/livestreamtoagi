@@ -2,11 +2,11 @@
 # Run the E8-8 multi-agent Minecraft stability soak.
 #
 # This is a thin ops orchestrator around the existing single-bot launchers. A
-# real run expects the backend bridge, Paper server, Docker services, LM Studio,
-# and the pinned Mindcraft checkout to already be up. It then starts BridgeBot
-# plus Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok, captures logs
-# under logs/soak/<UTC timestamp>/, watches for unrecovered bot exits, and
-# checks the cost ledger before returning.
+# real run expects the backend bridge, Docker services, LM Studio, and the
+# pinned Mindcraft checkout to already be up. If Paper is down locally, it
+# starts the portable Minecraft supervisor before launching BridgeBot plus
+# Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. Evidence lands
+# under logs/soak/<UTC timestamp>/.
 #
 # Usage:
 #   scripts/minecraft/soak.sh
@@ -28,6 +28,11 @@
 #   SOAK_AGENT_HOURLY_CAP_USD   Per-agent hourly cap assertion. Default: 0.01.
 #   SOAK_LOG_ROOT               Default: ./logs/soak.
 #   SOAK_LAUNCH_STAGGER_SECONDS Default: 3.
+#   SOAK_START_MINECRAFT_IF_DOWN Start supervise.sh when health is down.
+#                               Default: 1.
+#   SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS
+#                               Seconds to wait for health after auto-start.
+#                               Default: 180.
 #   MINDCRAFT_DIR               Pinned setup-mindcraft.sh checkout. Default:
 #                               ./mindcraft.
 set -euo pipefail
@@ -45,6 +50,8 @@ SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_LOG_ROOT="${SOAK_LOG_ROOT:-$REPO_ROOT/logs/soak}"
 SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
+SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
+SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
 REQUIRED_NODE_MAJOR="20"
 
 MODE="run"
@@ -73,6 +80,8 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+cd "$REPO_ROOT"
 
 ok() { echo "ok $*"; }
 info() { echo "  $*"; }
@@ -137,6 +146,9 @@ verify_static() {
         fi
     done
 
+    [ -x "$SCRIPT_DIR/supervise.sh" ] || { fail "missing executable: $SCRIPT_DIR/supervise.sh"; problems=1; }
+    [ -x "$SCRIPT_DIR/start-server.sh" ] || { fail "missing executable: $SCRIPT_DIR/start-server.sh"; problems=1; }
+
     grep -q 'CHECK_MINECRAFT=1 bash scripts/check-services.sh' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document the Minecraft service gate"
         problems=1
@@ -165,6 +177,8 @@ print_plan() {
     info "chat model:     ${LOCAL_LLM_MODEL:-<unset>}"
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
+    info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
+    info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
     info "bots:           $SOAK_BOTS"
     info "cost agents:    $SOAK_COST_AGENTS"
     info "Mindcraft base: $MINDCRAFT_DIR"
@@ -280,6 +294,8 @@ write_metadata() {
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
+        echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
+        echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
         echo "bots=$SOAK_BOTS"
         echo "cost_agents=$SOAK_COST_AGENTS"
     } > "$RUN_DIR/metadata.env"
@@ -321,6 +337,44 @@ start_log_capture() {
     else
         echo "MANAGEMENT_LOG_FILE not set; Management interventions are queried from DB when possible" > "$RUN_DIR/logs/management.log"
     fi
+}
+
+ensure_minecraft_server() {
+    if "$SCRIPT_DIR/health.sh" --quiet; then
+        ok "Minecraft server already up"
+        return 0
+    fi
+
+    if [ "$SOAK_START_MINECRAFT_IF_DOWN" != "1" ]; then
+        fail "Minecraft server is down and SOAK_START_MINECRAFT_IF_DOWN is not 1."
+        info "  Start it with scripts/minecraft/start-server.sh or enable auto-start."
+        return 1
+    fi
+
+    info "Minecraft server down; starting portable supervisor for the soak"
+    SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/minecraft-server}" \
+        "$SCRIPT_DIR/supervise.sh" > "$RUN_DIR/logs/minecraft-supervisor-stdout.log" 2>&1 &
+    local supervisor_pid="$!"
+    echo "$supervisor_pid" > "$RUN_DIR/minecraft-supervisor.pid"
+
+    local waited=0
+    while [ "$waited" -lt "$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" ]; do
+        if "$SCRIPT_DIR/health.sh" --quiet; then
+            ok "Minecraft server became healthy after ${waited}s"
+            return 0
+        fi
+        if ! kill -0 "$supervisor_pid" 2> /dev/null; then
+            fail "Minecraft supervisor exited before the server became healthy."
+            tail -40 "$RUN_DIR/logs/minecraft-supervisor-stdout.log" >&2 || true
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    fail "Minecraft server did not become healthy within ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s."
+    tail -40 "$RUN_DIR/logs/minecraft-supervisor-stdout.log" >&2 || true
+    return 1
 }
 
 prepare_mindcraft_clone() {
@@ -376,9 +430,18 @@ stop_bots() {
     done < "$PID_FILE"
 }
 
+stop_minecraft_supervisor() {
+    local pid
+    [ -f "$RUN_DIR/minecraft-supervisor.pid" ] || return 0
+    pid="$(cat "$RUN_DIR/minecraft-supervisor.pid" 2> /dev/null || true)"
+    [ -n "$pid" ] || return 0
+    kill "$pid" 2> /dev/null || true
+}
+
 cleanup() {
     local status=$?
     stop_bots
+    stop_minecraft_supervisor
     stop_process_file "$TAIL_PID_FILE"
     exit "$status"
 }
@@ -552,6 +615,7 @@ write_metadata
 
 run_checked "docker services" "$RUN_DIR/preflight/check-services.txt" bash "$REPO_ROOT/scripts/check-services.sh"
 run_checked "LM Studio models" "$RUN_DIR/preflight/llm-local.txt" pnpm llm:local --list-only
+ensure_minecraft_server
 run_checked "Minecraft health" "$RUN_DIR/preflight/minecraft-health.json" "$SCRIPT_DIR/health.sh" --json
 run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS "$BACKEND_HEALTH_URL"
 

@@ -13,9 +13,9 @@ LM Studio soak is rerun and appended here.**
 The operator entrypoint now exists at `scripts/minecraft/soak.sh` and is wired
 for a multi-hour local run using LM Studio, the existing bot launchers, the
 Minecraft health probe, backend health, log capture, and the `cost_events`
-ledger. This machine could not run the live soak because LM Studio, Paper,
-the backend bridge, Java, and the local `mindcraft/` checkout were not present
-or not on the pinned runtime.
+ledger. If the local Paper server is down, the soak runner starts
+`scripts/minecraft/supervise.sh` and waits for `scripts/minecraft/health.sh`
+to pass before launching bots.
 
 No OpenRouter validation was run or required.
 
@@ -65,7 +65,7 @@ Required runtime state:
 | Node | Node 20 LTS |
 | Java | Java 21 for Paper |
 | Mindcraft | `./mindcraft` at `35be480b4cc0bca990278e6103a1426392559d96` with `node_modules/` installed |
-| Paper | `scripts/minecraft/health.sh --json` returns `"up":true` |
+| Paper | `scripts/minecraft/health.sh --json` returns `"up":true`; if down, `soak.sh` starts `scripts/minecraft/supervise.sh` by default. |
 | Backend | `core.main:app` reachable on `http://127.0.0.1:8010/api/health` |
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
 | LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1` |
@@ -85,6 +85,12 @@ export MINECRAFT_BRIDGE_TOKEN=<same-secret-as-backend>
 scripts/minecraft/soak.sh --duration-hours 2
 ```
 
+If you want the soak to fail instead of auto-starting Paper:
+
+```bash
+SOAK_START_MINECRAFT_IF_DOWN=0 scripts/minecraft/soak.sh --duration-hours 2
+```
+
 Package aliases:
 
 ```bash
@@ -101,6 +107,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `bots/<bot>.log` | Per-bot Mindcraft stdout/stderr. |
 | `logs/journalctl-minecraft.log` | Linux `journalctl -u minecraft -f`, or a note when unavailable. |
 | `logs/supervisor.log` | Portable supervisor log when present. |
+| `logs/minecraft-supervisor-stdout.log` | Supervisor + Paper stdout when `soak.sh` auto-starts the server. |
 | `logs/paper-latest.log` | Paper `latest.log` when present. |
 | `cost-ledger.tsv` | Per-agent token/USD totals, max hourly USD, cap, and pass/fail. |
 | `early-exits.tsv` | Any bot process that exited before the planned end. |
@@ -146,7 +153,12 @@ table, but it must keep using `cost_events` as the spend ledger.
 
 ## Evidence From This Codex Run
 
-This run did not meet live-soak prerequisites.
+Initial Codex execution did not meet live-soak prerequisites. Verification
+attempt 1 later confirmed Docker services and LM Studio were reachable, but
+the local Minecraft health check was down. The root cause was that the first
+soak runner treated Paper as an external precondition instead of starting it
+when absent. `scripts/minecraft/soak.sh` now auto-starts the portable
+supervisor unless `SOAK_START_MINECRAFT_IF_DOWN=0`.
 
 ```bash
 pnpm llm:local --list-only
@@ -160,6 +172,13 @@ FAIL: could not reach http://localhost:1234/v1/models
 ```
 
 No LM Studio model IDs were available to record.
+
+Verification attempt 1 later reached LM Studio at `http://localhost:1234/v1`
+and listed:
+
+- `text-embedding-nomic-embed-text-v1.5`
+- `google/gemma-4-26b-a4b`
+- `google/gemma-4-e4b`
 
 ```bash
 scripts/minecraft/health.sh --json
@@ -209,7 +228,7 @@ pnpm verify:embodiment-failure
 Results:
 
 - `scripts/minecraft/soak.sh --verify`: passed.
-- `pnpm verify:minecraft-soak`: 13 passed.
+- `pnpm verify:minecraft-soak`: 14 passed.
 - `pnpm verify:bridge-server`: 35 passed.
 - `pnpm verify:embodiment-failure`: 34 passed.
 - Cohort + Management + cost tracking suite: 152 passed, 1 skipped

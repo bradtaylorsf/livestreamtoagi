@@ -61,6 +61,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "--duration-hours" in proc.stdout
     assert "LOCAL_LLM_MODEL" in proc.stdout
     assert "SOAK_AGENT_HOURLY_CAP_USD" in proc.stdout
+    assert "SOAK_START_MINECRAFT_IF_DOWN" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
     assert "run_cost_query()" not in proc.stdout
@@ -84,6 +85,7 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     for bot in BOT_IDS:
         assert bot in proc.stdout
     assert "shared local clones" in proc.stdout
+    assert "auto-start MC:  1" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
 
@@ -108,6 +110,16 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
     assert "node_modules" in text
 
 
+def test_script_auto_starts_minecraft_when_health_is_down() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "SOAK_START_MINECRAFT_IF_DOWN" in text
+    assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
+    assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
+    assert '"$SCRIPT_DIR/supervise.sh"' in text
+    assert "minecraft-supervisor.pid" in text
+    assert "minecraft-supervisor-stdout.log" in text
+
+
 def test_script_records_cost_ledger_and_hourly_cap() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "cost_events" in text
@@ -130,6 +142,8 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     text = DOC.read_text(encoding="utf-8")
     assert "STATIC-EVIDENCE ONLY" in text
     assert "NO-GO for E8-9" in text
+    assert "SOAK_START_MINECRAFT_IF_DOWN=0" in text
+    assert "google/gemma-4-26b-a4b" in text
     assert "pnpm llm:local --list-only" in text
     assert "scripts/minecraft/soak.sh --duration-hours 2" in text
     assert "All connection attempts failed" in text
