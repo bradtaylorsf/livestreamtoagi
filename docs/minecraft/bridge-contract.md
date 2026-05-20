@@ -160,14 +160,21 @@ alongside `/ws`):
   validated against the closed per-verb registry. Every post-handshake failure
   comes back as a contract-valid `BridgeResponse` (`ok=false` + typed `error`)
   on a still-open socket — only the handshake closes the socket.
-- **Real service vs stub dispatch.** `memory.recall`, `memory.write`, and
-  `code.execute` require initialized FastAPI services. Code execution delegates
-  to `tools/code_execution.py` and its existing Docker/gVisor sandbox; if those
-  services are unavailable the bridge returns a retryable
-  `code_service_unavailable` error. `errand.poll` and `errand.complete` are
-  also wired: poll drains the in-process queue populated by
-  `tools/alpha_dispatch.py`, and complete records the verified outcome and —
-  when the memory compactor is initialized — persists it through
+- **Real service vs stub dispatch.** `memory.recall`, `memory.write`,
+  `management.review`, and `code.execute` require initialized FastAPI services.
+  Code execution delegates to `tools/code_execution.py` and its existing
+  Docker/gVisor sandbox; if those services are unavailable the bridge returns a
+  retryable `code_service_unavailable` error. `management.review` (E8-7) routes
+  candidate bot speech through the Management content filter out-of-band: the
+  bridge handler awaits `Management.review`, preserves the severity ladder
+  (including the severity-5 mute + kill-switch ladder), and returns
+  `{verdict, reason, sanitized_text}` so the Node-side `openChat` gate can
+  either emit the original text, emit a sanitized replacement, or stay silent.
+  When the management service is unavailable the bridge returns a retryable
+  `management_service_unavailable` error so the bot fails closed. `errand.poll`
+  and `errand.complete` are also wired: poll drains the in-process queue
+  populated by `tools/alpha_dispatch.py`, and complete records the verified
+  outcome and — when the memory compactor is initialized — persists it through
   `MemoryCompactor.compact_interaction` as an `errand_outcome` event so it is
   retrievable on the same `memory.recall` path. The completion ack is
   intentionally independent of memory availability and the write is idempotent
