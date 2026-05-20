@@ -32,18 +32,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from core.bridge import contract as c
+from core.bridge.errand_queue import errand_queue
 from core.bridge.server import (
     BRIDGE_QUERY_TOKEN_ENV,
     BRIDGE_TOKEN_ENV,
     BRIDGE_WS_PATH,
     CODE_EXECUTE_VERBS,
     ERR_CODE_SERVICE_UNAVAILABLE,
+    ERR_KILL_SWITCH_ACTIVE,
     ERR_MEMORY_SERVICE_UNAVAILABLE,
     ERRAND_COMPLETE_VERBS,
     ERRAND_POLL_VERBS,
@@ -53,6 +56,7 @@ from core.bridge.server import (
     STUB_HANDLERS,
     UNKNOWN_REQUEST_ID,
     build_bridge_response,
+    build_bridge_response_with_services,
 )
 from core.main import app
 
@@ -75,6 +79,12 @@ STUB_VERBS = sorted(STUB_HANDLERS)
 
 def _fixture(verb: str, name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / verb / name).read_text())
+
+
+class _KillSwitchServices:
+    def __init__(self, value: str | None) -> None:
+        self.redis = AsyncMock()
+        self.redis.get = AsyncMock(return_value=value)
 
 
 @pytest.fixture
@@ -223,6 +233,63 @@ def test_code_execute_without_services_returns_retryable_typed_error(
     assert response.error.code == ERR_CODE_SERVICE_UNAVAILABLE
     assert response.retryable is True
     c.validate_response(response, service=request["service"], method=request["method"])
+
+
+async def test_alpha_errand_poll_safe_idles_when_kill_switch_active() -> None:
+    errand_queue.clear()
+    try:
+        assert errand_queue.enqueue(
+            "alpha",
+            "task-kill-switch-poll",
+            "check the sheep pen",
+            "vera",
+            "now",
+        )
+        services = _KillSwitchServices("active")
+
+        response = await build_bridge_response_with_services(
+            _fixture("errand.poll", "request.valid.json"),
+            services,
+        )
+
+        assert response.ok is True
+        assert response.payload == {
+            "task_id": None,
+            "task": None,
+            "from_agent": None,
+            "dispatched_at_ms": None,
+            "urgency": None,
+        }
+        services.redis.get.assert_awaited_once_with("kill_switch")
+        c.validate_response(response, service="errand", method="poll")
+
+        queued = errand_queue.poll("alpha")
+        assert queued is not None
+        assert queued.task_id == "task-kill-switch-poll"
+    finally:
+        errand_queue.clear()
+
+
+async def test_alpha_errand_complete_returns_kill_switch_error() -> None:
+    errand_queue.clear()
+    try:
+        services = _KillSwitchServices("active")
+
+        response = await build_bridge_response_with_services(
+            _fixture("errand.complete", "request.valid.json"),
+            services,
+        )
+
+        assert response.ok is False
+        assert response.payload is None
+        assert response.error is not None
+        assert response.error.code == ERR_KILL_SWITCH_ACTIVE
+        assert response.retryable is True
+        services.redis.get.assert_awaited_once_with("kill_switch")
+        c.validate_response(response, service="errand", method="complete")
+        assert errand_queue.get_completion("alpha-task-1") is None
+    finally:
+        errand_queue.clear()
 
 
 def test_query_param_token_rejected_by_default(token_env: str, client: TestClient) -> None:

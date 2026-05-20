@@ -65,6 +65,27 @@ Every step needs a stable `action_id`. `navigate` reuses `!navigate` parameters.
 `!runErrand` is non-verbal. It logs to the console and does not send Minecraft
 chat.
 
+## Kill switch & response window
+
+The admin kill switch is the global Redis key `kill_switch`, set to `active`
+by `core/admin/kill_switch_routes.py` through the router-local `POST /kill`
+endpoint (mounted as `POST /api/admin/kill`). This key is not simulation-scoped.
+
+When `kill_switch` is active:
+
+1. `dispatch_alpha` rejects new Alpha errands before queueing work or making an
+   LLM call.
+2. Alpha's next `errand.poll` returns the same empty payload used when no
+   errand is pending, so the Node bot safe-idles without acting.
+3. Any Alpha `errand.complete` frame receives a retryable `kill_switch_active`
+   bridge error before memory persistence or Management review side effects.
+
+Documented halt window: the next bridge poll cycle plus any already-in-flight
+Alpha LLM call. The Mindcraft Alpha profile polls via `!pollErrand`/`errand.poll`
+on its tick cadence, so newly available work is suppressed on the next poll.
+An LLM dispatch that was already in flight may run until `ALPHA_TIMEOUT_SECONDS`
+in `tools/alpha_dispatch.py`, currently 60 seconds.
+
 ## Memory persistence (E7-4)
 
 The bridge handler for `errand.complete` writes the verified outcome into the
