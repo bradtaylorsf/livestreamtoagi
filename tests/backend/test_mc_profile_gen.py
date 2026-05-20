@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -243,6 +244,33 @@ def test_cli_lmstudio_stdout():
     assert profile["name"] == "Alpha"
     assert profile["model"] == "lmstudio/qwen3-8b"
     assert profile["code_model"] == "lmstudio/qwen3-8b"
+
+
+def test_cli_bootstraps_repo_venv_when_site_packages_are_missing():
+    """Direct script execution should recover from an initial interpreter without PyYAML."""
+    env = {**os.environ}
+    env.pop("LTAG_GEN_PROFILES_BOOTSTRAPPED", None)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            str(GEN_SCRIPT),
+            "alpha",
+            "--provider",
+            "lmstudio",
+            "--local-chat",
+            "qwen3-8b",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    profile = json.loads(proc.stdout)
+    assert profile["name"] == "Alpha"
+    assert profile["model"] == "lmstudio/qwen3-8b"
 
 
 def test_cli_writes_out_file(tmp_path):

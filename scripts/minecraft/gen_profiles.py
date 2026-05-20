@@ -50,10 +50,38 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "agents"
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+BOOTSTRAP_ENV = "LTAG_GEN_PROFILES_BOOTSTRAPPED"
+
+
+def _load_yaml_module() -> Any:
+    """Import PyYAML, re-execing through the repo venv when needed.
+
+    Live verification can invoke this script directly via ``/usr/bin/env
+    python3``. On machines where that interpreter lacks repo dependencies, the
+    old top-level ``import yaml`` failed before argument parsing. Re-execing
+    once through ``.venv/bin/python`` keeps direct script execution compatible
+    with the repo's PATH-safe command convention.
+    """
+    try:
+        import yaml as yaml_module
+
+        return yaml_module
+    except ModuleNotFoundError as exc:
+        if exc.name != "yaml":
+            raise
+        if VENV_PYTHON.is_file() and os.environ.get(BOOTSTRAP_ENV) != "1":
+            os.environ[BOOTSTRAP_ENV] = "1"
+            os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), *sys.argv])
+        raise ModuleNotFoundError(
+            "PyYAML is required to read agents/<id>/config.yaml. "
+            "Run this script with .venv/bin/python or install repo dependencies."
+        ) from exc
+
+
+yaml = _load_yaml_module()
 
 # Make ``core`` importable when this file is run as a standalone script
 # (mirrors scripts/check_local_llm.py); harmless/idempotent under importlib.
