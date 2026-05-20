@@ -277,3 +277,8 @@ scripts/minecraft/connect-stock-bot.sh --verify
   (memory/examples/auto-narration/voice/vision) disabled behind reversible
   `settings.js` flags; decentralized conversation deliberately kept
   (decision 0004).
+- **`docs/minecraft/alpha-profile.md`** — the E7-1
+  ([#565](https://github.com/bradtaylorsf/livestreamtoagi/issues/565)) Alpha
+  vertical-slice profile: one local LM Studio-driven `Alpha` bot with
+  Mindcraft chat emission disabled (`chat_ingame`, `narrate_behavior`,
+  `chat_bot_messages`, `init_message`, `speak`).
