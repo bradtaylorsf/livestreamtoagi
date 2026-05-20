@@ -95,6 +95,45 @@ Results:
 - `tests/backend/test_management.py`: 42 passed, 1 skipped
   (`test_end_to_end_review_with_llm` is an opt-in LLM test).
 
+## Post-Run Review Addendum
+
+Codex reviewed the completed session branch after the alpha-loop run and reran
+the current verification set on 2026-05-20 UTC.
+
+Current LM Studio reachability:
+
+```bash
+pnpm llm:local --list-only
+```
+
+Result: **passed**. The local OpenAI-compatible server at
+`http://localhost:1234/v1` returned these model ids:
+
+- `text-embedding-nomic-embed-text-v1.5`
+- `google/gemma-4-26b-a4b`
+- `google/gemma-4-e4b`
+
+Additional post-run checks:
+
+- `pnpm test:python && pnpm test:frontend && pnpm test:website`: passed
+  (`2817 passed, 10 skipped`; frontend `337 passed`; website `420 passed`).
+- `.venv/bin/ruff check core/ tools/`: passed.
+- `.venv/bin/ruff format --check core/ tools/`: passed.
+- `.venv/bin/python scripts/export_bridge_schemas.py --check`: passed.
+- `scripts/minecraft/connect-alpha-bot.sh --verify`: passed.
+- `pnpm verify:mindcraft-alpha`: 18 passed.
+- `pnpm verify:alpha-errand`: 19 passed.
+- `pnpm verify:bridge-contract`: 74 passed.
+- `pnpm verify:bridge-server`: 34 passed.
+- PR #688 GitHub checks: clean after the formatting-only follow-up commit.
+
+Code review result: **PASS**, with no blocking findings in the bridge contract,
+errand queue, Alpha dispatch path, Mindcraft errand actions, memory persistence,
+Management review hook, or kill-switch enforcement.
+
+This addendum upgrades the local LM Studio reachability evidence. It still does
+not claim a live Minecraft server launch or production livestream sign-off.
+
 ## Deviations and Boundaries vs `MINECRAFT-PIVOT-CONTEXT.md`
 
 - **No fresh live Minecraft spawn in this report.** The context's direction is
