@@ -280,6 +280,10 @@ def test_committed_movement_action_files_match_contract() -> None:
         assert "safe-idling" in src
         assert "openrouter" not in src.lower()
 
+    move_src = MOVE_ACTION.read_text()
+    assert "timeout_ms: {" not in move_src
+    assert "perform: async function (agent, action_id, direction, distance_blocks, timeout_ms)" in move_src
+
 
 @requires_node
 def test_navigate_action_uses_pathfinder_default_export_goals(tmp_path: Path) -> None:

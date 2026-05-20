@@ -208,10 +208,6 @@ export const moveAction = {
             type: 'number',
             description: 'Requested movement distance in blocks.',
         },
-        timeout_ms: {
-            type: 'number',
-            description: 'Optional movement deadline in milliseconds.',
-        },
     },
     perform: async function (agent, action_id, direction, distance_blocks, timeout_ms) {
         const traceId = `trace-${randomUUID()}`;
