@@ -6,12 +6,14 @@ Single source of truth: each agent's model assignment lives **only** in
 mirrored in the CLAUDE.md table. This generator turns those tiers into a
 Mindcraft profile so the routing never gets hand-copied.
 
-The emitted schema is exactly ``{"name", "model", "code_model"}`` — the same
-minimal shape as the committed sibling templates
-(``scripts/minecraft/profiles/stock-bot.json`` / ``routing-bot-a.json``):
+The emitted schema keeps ``{"name", "model", "code_model"}`` as the required
+Mindcraft routing keys and adds E8 conversation metadata:
+``{"bot_responder", "personality"}``.
 
 * ``model``      ← conversation tier (Mindcraft's chat model)
 * ``code_model`` ← building tier      (Mindcraft's ``!newAction`` / code model)
+* ``bot_responder`` ← Mindcraft's respond/ignore prompt override
+* ``personality``   ← numeric thresholds the fork conversation layer can read
 
 Two provider forms (E1 inputs on #536):
 
@@ -31,10 +33,9 @@ Policy bindings (E1 inputs on #536, cross-checked against the pivot plan):
   bot (E7-5: "Management is a filter, never a bot"); no profile is generated.
 * **Alpha is generated.** Alpha is the first vertical-slice agent (E7-1). Its
   config sets both tiers to the same model, so its profile has
-  ``model == code_model`` — expected and correct. Alpha's *non-verbal /
-  no-chat-initiation* behavior is a Mindcraft settings/runtime concern owned by
-  **E7-1** ("Alpha spawns ... emits no chat"), not a field of the profile
-  schema at the pinned fork commit — see this issue's final notes.
+  ``model == code_model`` — expected and correct. Alpha's profile now also pins
+  ``respond_probability == initiate_probability == 0`` so the E8
+  conversation layer treats it as action-only.
 
 E8-1 extends the E3-4 single-agent generator with batch output for every
 conversational agent. Launching those agents remains out of scope here.
@@ -68,6 +69,104 @@ NON_BOT_AGENTS = frozenset({"management"})
 PSEUDO_AGENTS = frozenset({"template"})
 
 VALID_PROVIDERS = ("openrouter", "lmstudio")
+
+PERSONALITY_PROFILE_KEYS = (
+    "chattiness",
+    "initiative",
+    "interrupt_tendency",
+    "eavesdrop_tendency",
+    "closing_weight",
+    "role_priority_bonus",
+    "respond_probability",
+    "initiate_probability",
+    "interrupt_bias",
+    "eavesdrop_probability",
+    "adjacency",
+)
+
+
+def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    """Clamp a probability-like value into the inclusive ``[lower, upper]`` range."""
+    return max(lower, min(upper, value))
+
+
+def _float_knob(cfg: dict[str, Any], key: str, default: float = 0.0) -> float:
+    """Read a numeric agent config knob with a stable default for optional fields."""
+    return float(cfg.get(key, default) or 0.0)
+
+
+def _adjacency_map(cfg: dict[str, Any]) -> dict[str, float]:
+    """Return the raw adjacency map as JSON-safe ``str -> float`` values."""
+    raw = cfg.get("adjacency") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("agent config field 'adjacency' must be a mapping when present")
+    return {str(agent_id): float(weight) for agent_id, weight in raw.items()}
+
+
+def _bot_responder_prompt(personality: dict[str, Any]) -> str:
+    """Build the Mindcraft ``bot_responder`` prompt from the mapped knobs."""
+    if personality["respond_probability"] == 0:
+        return (
+            "Decide whether this action-only bot should answer a bot-to-bot "
+            "message. Return exactly one word: ignore. This profile does not "
+            "participate in normal conversation."
+        )
+
+    return (
+        "Decide whether this bot should answer a bot-to-bot message. Return "
+        "exactly one word: respond or ignore.\n"
+        f"Chattiness is {personality['chattiness']:.2f}; target respond rate is "
+        f"{personality['respond_probability']:.3f}. Lean toward respond in "
+        "rough proportion to that target when the message is addressed to this "
+        "bot, advances its current goal, or fits the nearby conversation.\n"
+        f"Interrupt tendency is {personality['interrupt_tendency']:.2f}. Only "
+        "override a busy/current-action state when that tendency is high and "
+        "the new message is urgent or directly blocks the current task; "
+        "otherwise return ignore until free."
+    )
+
+
+def build_personality(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Map agent config knobs onto Mindcraft conversation metadata.
+
+    Decision 0004 says Mindcraft's native decentralized hook is the
+    ``bot_responder`` prompt, while numeric chattiness/initiative/eavesdrop/
+    adjacency behavior needs our fork layer. This function is pure so tests can
+    prove the acceptance criterion without launching Minecraft or an LLM.
+    """
+    chattiness = _float_knob(cfg, "chattiness")
+    initiative = _float_knob(cfg, "initiative")
+    interrupt_tendency = _float_knob(cfg, "interrupt_tendency")
+    eavesdrop_tendency = _float_knob(cfg, "eavesdrop_tendency")
+    closing_weight = _float_knob(cfg, "closing_weight")
+    role_priority_bonus = _float_knob(cfg, "role_priority_bonus")
+
+    if cfg.get("id") == "alpha":
+        respond_probability = 0.0
+        initiate_probability = 0.0
+    else:
+        respond_probability = _clamp(
+            0.15 + 0.7 * chattiness + 0.15 * interrupt_tendency
+        )
+        initiate_probability = _clamp(
+            0.05 + 0.7 * chattiness * (0.5 + 0.5 * initiative)
+        )
+
+    personality: dict[str, Any] = {
+        "chattiness": chattiness,
+        "initiative": initiative,
+        "interrupt_tendency": interrupt_tendency,
+        "eavesdrop_tendency": eavesdrop_tendency,
+        "closing_weight": closing_weight,
+        "role_priority_bonus": role_priority_bonus,
+        "respond_probability": respond_probability,
+        "initiate_probability": initiate_probability,
+        "interrupt_bias": interrupt_tendency,
+        "eavesdrop_probability": eavesdrop_tendency,
+        "adjacency": _adjacency_map(cfg),
+    }
+    personality["bot_responder"] = _bot_responder_prompt(personality)
+    return personality
 
 
 def _bot_name(agent_id: str) -> str:
@@ -143,10 +242,12 @@ def build_profile(
     local_chat: str | None = None,
     local_code: str | None = None,
     agents_dir: Path = AGENTS_DIR,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Build the Mindcraft profile dict for one agent.
 
-    Returns exactly ``{"name", "model", "code_model"}``.
+    Returns ``{"name", "model", "code_model", "bot_responder", "personality"}``.
+    The first three keys are the required Mindcraft routing surface; the added
+    keys drive E8 decentralized conversation behavior.
 
     * ``provider="openrouter"`` — ``openrouter/<config value>`` for each tier,
       validated through ``core.llm_client`` (raises on registry drift).
@@ -189,10 +290,18 @@ def build_profile(
         model = f"openrouter/{conv}"
         code_model = f"openrouter/{build}"
 
+    personality_with_prompt = build_personality(cfg)
+    bot_responder = str(personality_with_prompt["bot_responder"])
+    personality = {
+        key: personality_with_prompt[key] for key in PERSONALITY_PROFILE_KEYS
+    }
+
     return {
         "name": _bot_name(agent_id),
         "model": model,
         "code_model": code_model,
+        "bot_responder": bot_responder,
+        "personality": personality,
     }
 
 
@@ -201,9 +310,9 @@ def build_all_profiles(
     local_chat: str | None = None,
     local_code: str | None = None,
     agents_dir: Path = AGENTS_DIR,
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, Any]]:
     """Build profiles for every discovered conversational agent."""
-    profiles: dict[str, dict[str, str]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
     for agent_id in discover_agent_ids(agents_dir=agents_dir):
         try:
             profiles[agent_id] = build_profile(

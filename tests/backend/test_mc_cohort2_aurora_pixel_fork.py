@@ -50,7 +50,7 @@ COHORT = {
     },
 }
 
-PROFILE_KEYS = {"name", "model", "code_model"}
+PROFILE_KEYS = {"name", "model", "code_model", "bot_responder", "personality"}
 E2_CONTRACT = {
     "host": "127.0.0.1",
     "port": 25565,

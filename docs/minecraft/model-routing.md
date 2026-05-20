@@ -243,11 +243,12 @@ pnpm mc:gen-profiles vera --out ./mindcraft/profiles/vera.json
 pnpm mc:gen-profiles --all --out ./mindcraft/profiles/
 ```
 
-The emitted schema is exactly `{name, model, code_model}` — the same minimal
-shape as the committed sibling templates (`stock-bot.json`,
-`routing-bot-a.json`). **Management is refused** (a content filter, never a
-world bot — E7-5); **Alpha generates** (its non-verbal/no-chat behavior is an
-E7-1 runtime concern, not a profile field). E8-1 (`--all`) discovers every
+The emitted schema keeps `{name, model, code_model}` as the required Mindcraft
+routing keys and adds E8 conversation metadata: `bot_responder` and
+`personality`. The personality mapping is documented in
+[`personality-mapping.md`](personality-mapping.md). **Management is refused** (a
+content filter, never a world bot — E7-5); **Alpha generates** with zero normal
+conversation respond/initiate probability. E8-1 (`--all`) discovers every
 `agents/*/config.yaml` and emits the eight conversational profiles in one call;
 launching them remains an E8 concern.
 
@@ -256,6 +257,7 @@ The headless, dependency-free pytest equivalent (what CI runs):
 ```bash
 pnpm verify:mindcraft-profiles
 # shorthand for: .venv/bin/pytest tests/backend/test_mc_profile_gen.py -v
+.venv/bin/pytest tests/backend/test_mc_personality_mapping.py -v
 ```
 
 > This generator has **no LLM runtime path** — it only emits JSON. The nearest

@@ -1,5 +1,19 @@
 {
     "name": "Alpha",
     "model": "lmstudio/__LOCAL_LLM_MODEL__",
-    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"
+    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__",
+    "bot_responder": "Decide whether this action-only bot should answer a bot-to-bot message. Return exactly one word: ignore. This profile does not participate in normal conversation.",
+    "personality": {
+        "chattiness": 0.0,
+        "initiative": 0.0,
+        "interrupt_tendency": 0.0,
+        "eavesdrop_tendency": 0.0,
+        "closing_weight": 0.0,
+        "role_priority_bonus": 0.0,
+        "respond_probability": 0.0,
+        "initiate_probability": 0.0,
+        "interrupt_bias": 0.0,
+        "eavesdrop_probability": 0.0,
+        "adjacency": {}
+    }
 }

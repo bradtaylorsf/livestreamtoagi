@@ -1,5 +1,26 @@
 {
     "name": "Vera",
     "model": "lmstudio/__LOCAL_LLM_MODEL__",
-    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"
+    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__",
+    "bot_responder": "Decide whether this bot should answer a bot-to-bot message. Return exactly one word: respond or ignore.\nChattiness is 0.70; target respond rate is 0.670. Lean toward respond in rough proportion to that target when the message is addressed to this bot, advances its current goal, or fits the nearby conversation.\nInterrupt tendency is 0.20. Only override a busy/current-action state when that tendency is high and the new message is urgent or directly blocks the current task; otherwise return ignore until free.",
+    "personality": {
+        "chattiness": 0.7,
+        "initiative": 0.8,
+        "interrupt_tendency": 0.2,
+        "eavesdrop_tendency": 0.6,
+        "closing_weight": 0.35,
+        "role_priority_bonus": 0.5,
+        "respond_probability": 0.6699999999999999,
+        "initiate_probability": 0.49099999999999994,
+        "interrupt_bias": 0.2,
+        "eavesdrop_probability": 0.6,
+        "adjacency": {
+            "rex": 0.7,
+            "aurora": 0.6,
+            "sentinel": 0.8,
+            "pixel": 0.5,
+            "fork": 0.5,
+            "grok": 0.6
+        }
+    }
 }
