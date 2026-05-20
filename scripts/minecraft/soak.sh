@@ -34,6 +34,8 @@
 #   SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS
 #                               Seconds to wait for health after auto-start.
 #                               Default: 180.
+#   SOAK_INIT_MESSAGE           Optional initial objective sent to each
+#                               Mindcraft bot through settings.init_message.
 #   SOAK_MINDSERVER_BASE_PORT    First local MindServer UI/control port.
 #                               Each bot gets a unique incrementing port.
 #                               Default: 8080.
@@ -56,6 +58,7 @@ SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
+SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -190,10 +193,26 @@ print_plan() {
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
+    if [ -n "$SOAK_INIT_MESSAGE" ]; then
+        info "init prompt:    set (${#SOAK_INIT_MESSAGE} chars)"
+    else
+        info "init prompt:    <none>"
+    fi
     info "bots:           $SOAK_BOTS"
     info "cost agents:    $SOAK_COST_AGENTS"
     info "Mindcraft base: $MINDCRAFT_DIR"
     info "isolation:      shared local clones with node_modules symlink"
+}
+
+build_settings_json() {
+    if [ -z "$SOAK_INIT_MESSAGE" ] || [ -n "${SETTINGS_JSON:-}" ]; then
+        return 0
+    fi
+    SETTINGS_JSON="$(
+        SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" node -e \
+            'process.stdout.write(JSON.stringify({init_message: process.env.SOAK_INIT_MESSAGE || ""}))'
+    )"
+    export SETTINGS_JSON
 }
 
 if [ "$MODE" = "verify" ]; then
@@ -240,6 +259,7 @@ if [ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]; then
     fail "Node ${NODE_MAJOR:-<missing>} found, but Mindcraft soak requires Node $REQUIRED_NODE_MAJOR LTS."
     exit 1
 fi
+build_settings_json
 case "$SOAK_MINDSERVER_BASE_PORT" in
     ""|*[!0-9]*)
         fail "SOAK_MINDSERVER_BASE_PORT must be a numeric TCP port."
@@ -317,6 +337,13 @@ write_metadata() {
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
         echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
+        if [ -n "$SOAK_INIT_MESSAGE" ]; then
+            echo "init_message_set=yes"
+            echo "init_message_chars=${#SOAK_INIT_MESSAGE}"
+        else
+            echo "init_message_set=no"
+            echo "init_message_chars=0"
+        fi
         echo "mindserver_base_port=$SOAK_MINDSERVER_BASE_PORT"
         echo "bots=$SOAK_BOTS"
         echo "cost_agents=$SOAK_COST_AGENTS"
@@ -424,7 +451,14 @@ launch_bot() {
         export MINDSERVER_PORT="$mindserver_port"
         export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
-        exec "$script"
+        export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        if [ "$bot" = "bridge" ] && [ -n "$SOAK_INIT_MESSAGE" ]; then
+            exec env SETTINGS_JSON='{"init_message":""}' "$script"
+        elif [ -n "${SETTINGS_JSON:-}" ]; then
+            exec env SETTINGS_JSON="$SETTINGS_JSON" "$script"
+        else
+            exec "$script"
+        fi
     ) > "$log" 2>&1 &
     pid="$!"
     printf '%s\t%s\t%s\t%s\t%s\n' "$bot" "$pid" "$script" "$worktree" "$log" >> "$PID_FILE"

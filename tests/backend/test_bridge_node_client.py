@@ -161,7 +161,9 @@ def test_management_review_helper_fails_closed_and_uses_filter_tier() -> None:
     assert "reviewChat" in src
     assert "service: 'management'" in src
     assert "method: 'review'" in src
-    assert "MANAGEMENT_REVIEW_DEADLINE_MS = 3000" in src
+    assert "DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS = 10000" in src
+    assert "MINECRAFT_MANAGEMENT_REVIEW_MODE" in src
+    assert "management review disabled for local simulation" in src
     assert "agent_id: agentId" in src
     assert "agent_tier: 'filter'" in src
     assert "allow: false" in src, "bridge failures must block chat"

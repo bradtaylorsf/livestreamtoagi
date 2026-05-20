@@ -26,6 +26,11 @@
 #   EMBEDDING_PROVIDER=deterministic
 #   CONVERSATION_MODE=embodied
 #   MINECRAFT_BRIDGE_TOKEN=<same secret the backend reads>
+#
+# Optional in .env:
+#   MC_SIM_DISABLE_MANAGEMENT=1
+#   MC_SIM_INIT_MESSAGE=<initial objective for the character bots>
+#   MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS=10000
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,6 +113,10 @@ case "${1:-}" in
         ;;
 esac
 
+if [ "${1:-}" = "--" ]; then
+    shift
+fi
+
 load_env_file "$ENV_FILE"
 
 mode="${1:-smoke}"
@@ -138,6 +147,18 @@ export PATH
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-}}"
 export LOCAL_LLM_BASE_URL LOCAL_LLM_MODEL_BUILDING
+MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS="${MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS:-10000}"
+export MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+MC_SIM_DISABLE_MANAGEMENT="${MC_SIM_DISABLE_MANAGEMENT:-1}"
+if [ "$MC_SIM_DISABLE_MANAGEMENT" = "1" ]; then
+    MINECRAFT_MANAGEMENT_REVIEW_MODE="disabled"
+fi
+export MINECRAFT_MANAGEMENT_REVIEW_MODE
+
+DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Talk with the nearby characters, choose roles, and visibly do useful things: gather wood or stone, explore nearby terrain, and start a tiny shared camp or marker build. Keep actions safe, narrate briefly in character, and continue until the run ends."
+MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
+SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
+export SOAK_INIT_MESSAGE
 
 if [ "${LLM_PROVIDER:-}" != "lmstudio" ]; then
     fail "LLM_PROVIDER must be lmstudio for the local Minecraft sim."
@@ -176,6 +197,8 @@ info "mode: ${mode}"
 info "duration: ${duration_hours}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
+info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"
+info "init prompt: ${SOAK_INIT_MESSAGE}"
 info "logs: ${log_dir}"
 
 exec "${cmd[@]}"

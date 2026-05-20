@@ -139,6 +139,8 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "duration:       0.25h" in proc.stdout
     assert "chat model:     google/gemma-4-e4b" in proc.stdout
     assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
+    assert "management review: disabled" in proc.stdout
+    assert "init prompt:    set (" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
 
@@ -168,6 +170,60 @@ def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "duration:       0.1h" in proc.stdout
+
+
+def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_DISABLE_MANAGEMENT=0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "management review: enabled" in proc.stdout
+
+
+def test_local_sim_wrapper_accepts_pnpm_separator(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "--", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "mode: --dry-run" in proc.stdout
+    assert "no services checked, no bots launched" in proc.stdout
 
 
 def test_log_dir_flag_overrides_soak_log_root() -> None:
@@ -203,6 +259,8 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "SOAK_START_MINECRAFT_IF_DOWN" in text
     assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
+    assert "SOAK_INIT_MESSAGE" in text
+    assert 'env SETTINGS_JSON=\'{"init_message":""}\'' in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text

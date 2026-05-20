@@ -6,7 +6,25 @@
 
 import { callBridge } from './python_bridge.js';
 
-export const MANAGEMENT_REVIEW_DEADLINE_MS = 3000;
+export const MANAGEMENT_REVIEW_MODE_ENV = 'MINECRAFT_MANAGEMENT_REVIEW_MODE';
+export const MANAGEMENT_REVIEW_DEADLINE_MS_ENV = 'MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS';
+export const DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS = 10000;
+
+function managementReviewDisabled() {
+    const raw = (process.env[MANAGEMENT_REVIEW_MODE_ENV] || '').trim().toLowerCase();
+    return raw === 'disabled' || raw === 'off' || raw === '0';
+}
+
+function managementReviewDeadlineMs() {
+    const raw = process.env[MANAGEMENT_REVIEW_DEADLINE_MS_ENV];
+    if (raw === undefined || raw === null || raw === '') {
+        return DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS;
+    }
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS;
+}
+
+export const MANAGEMENT_REVIEW_DEADLINE_MS = managementReviewDeadlineMs();
 
 function _cleanSanitizedText(value) {
     if (typeof value !== 'string') return null;
@@ -20,6 +38,14 @@ export async function reviewChat({ agentId, text, context = {} } = {}) {
             allow: false,
             sanitized: null,
             reason: 'invalid management review input',
+            retryable: false,
+        };
+    }
+    if (managementReviewDisabled()) {
+        return {
+            allow: true,
+            sanitized: null,
+            reason: 'management review disabled for local simulation',
             retryable: false,
         };
     }
@@ -69,6 +95,7 @@ export async function reviewChat({ agentId, text, context = {} } = {}) {
 }
 
 export default {
+    MANAGEMENT_REVIEW_MODE_ENV,
     MANAGEMENT_REVIEW_DEADLINE_MS,
     reviewChat,
 };
