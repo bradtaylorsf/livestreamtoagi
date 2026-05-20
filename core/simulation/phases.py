@@ -551,10 +551,17 @@ class PhaseRunner:
 
     async def _run_conversation(self, trigger: dict[str, Any], phase: Phase) -> None:
         """Run a single conversation via ConversationEngine and collect stats."""
-        from core.conversation_engine import ConversationEngine
 
         if self._dry_run:
             logger.info("[DRY RUN] Would run conversation: %s", trigger)
+            return
+        from core.conversation_mode import is_embodied_run
+
+        if is_embodied_run():
+            logger.info(
+                "E8-6: conversation director gated off for embodied run; "
+                "relying on Mindcraft decentralized respond/ignore"
+            )
             return
         if not self._agent_ids:
             logger.warning("No active agents configured; skipping conversation")
@@ -647,6 +654,7 @@ class PhaseRunner:
 
         try:
             from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+            from core.conversation_engine import ConversationEngine
 
             engine = ConversationEngine(
                 infra=InfraServices(

@@ -33,6 +33,7 @@ from core.models import (
     Transcript,
     TriggerConfig,
 )
+from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 # ── Test config factories ──────────────────────────────────────
 
@@ -361,6 +362,54 @@ def engine(
         context_assembler=mock_context_assembler,
         conversation_repo=mock_conversation_repo,
     )
+
+
+# ── Test: Embodied mode gates off simulation director ───────────
+
+
+class TestEmbodiedModeGate:
+    async def test_embodied_phase_never_constructs_conversation_engine(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Embodied simulation phases rely on Mindcraft respond/ignore."""
+        monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+        event_bus = MagicMock(emit=AsyncMock())
+        proximity = MagicMock()
+        runner = PhaseRunner(
+            config_loader=MagicMock(),
+            agent_registry=MagicMock(),
+            event_bus=event_bus,
+            llm_client=MagicMock(),
+            management=MagicMock(),
+            context_assembler=MagicMock(),
+            conversation_repo=MagicMock(),
+            archival_memory=MagicMock(),
+            proximity=proximity,
+            trigger_system=MagicMock(),
+            selection_logger=MagicMock(),
+            reflection_manager=MagicMock(),
+            simulation_id=uuid.uuid4(),
+            agents=["vera", "rex"],
+        )
+        phase = Phase(name="standup", type=PhaseType.scheduled, required_agents=["vera"])
+        trigger = {
+            "type": "scheduled",
+            "starter_agent_id": "vera",
+            "location": "town_square",
+        }
+
+        with patch("core.conversation_engine.ConversationEngine") as engine_cls:
+            await runner._run_conversation(trigger, phase)
+
+        engine_cls.assert_not_called()
+        event_bus.on.assert_not_called()
+        event_bus.emit.assert_not_called()
+        proximity.update_location.assert_not_called()
+        assert runner._phase_conversations == 0
+        assert runner._phase_turns == 0
+        assert runner._phase_tokens == 0
+        assert runner._phase_cost == Decimal("0")
 
 
 # ── Test: Trigger detection starts new conversation ────────────

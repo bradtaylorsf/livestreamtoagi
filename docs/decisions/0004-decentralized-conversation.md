@@ -30,6 +30,21 @@ and personality-calibrated initiation.
 - Treat eavesdropping and group chat as explicit new work, not native Mindcraft
   behavior.
 
+## Implementation: E8-6 Gate
+
+Embodied runs set `CONVERSATION_MODE=embodied`. The default remains
+`CONVERSATION_MODE=director` so legacy simulations still use the Python
+conversation director.
+
+The gate is applied at the two Python callsites that construct the director:
+
+- `core/simulation/phases.py::_run_conversation`
+- `core/main.py::dev_simulate`
+
+This flag does not delete `core/conversation_engine.py` or
+`core/conversation/speaker_selector.py`; that removal is reserved for E14-era
+cleanup after the embodied path is stable.
+
 > **Verified by E3-5 ([#537](https://github.com/bradtaylorsf/livestreamtoagi/issues/537)).**
 > When E3-5 stripped the Python-superseded Mindcraft features, the
 > decentralized bot-to-bot conversation was **deliberately KEPT**:
