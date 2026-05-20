@@ -108,6 +108,8 @@ case "${1:-}" in
         ;;
 esac
 
+load_env_file "$ENV_FILE"
+
 mode="${1:-smoke}"
 case "$mode" in
     smoke|short)
@@ -127,8 +129,6 @@ case "$mode" in
         exit 2
         ;;
 esac
-
-load_env_file "$ENV_FILE"
 
 prepend_path_if_dir "/opt/homebrew/opt/openjdk@21/bin"
 prepend_path_if_dir "/opt/homebrew/Cellar/openjdk@21/21.0.11/bin"

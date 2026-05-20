@@ -142,6 +142,34 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "no services checked, no bots launched" in proc.stdout
 
 
+def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_SMOKE_HOURS=0.1",
+                "MC_SIM_SOAK_HOURS=0.2",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "duration:       0.1h" in proc.stdout
+
+
 def test_log_dir_flag_overrides_soak_log_root() -> None:
     proc = _run("--log-dir", "/tmp/e8-8-soak", "--dry-run")
     assert proc.returncode == 0, proc.stdout + proc.stderr
