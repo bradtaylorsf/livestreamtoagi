@@ -145,7 +145,8 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `logs/paper-latest.log` | Paper `latest.log` when present. |
 | `cost-ledger.tsv` | Per-agent token/USD totals, max hourly USD, cap, and pass/fail. |
 | `early-exits.tsv` | Any bot process that exited before the planned end. |
-| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table. |
+| `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
+| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, and the Behavioral acceptance block. |
 
 ## Failure Classes Monitored
 
@@ -170,6 +171,47 @@ Additional stability counters:
 | Management interventions | Bot/bridge logs and DB shadow log evidence when available. |
 | Per-agent token + USD spend | `cost_events` grouped by agent and hour. |
 | Decentralized respond-vs-ignore ratio | Rough `respond`/`ignore` counts from bot logs. |
+
+## Behavioral Acceptance Gate
+
+E8 acceptance cannot be marked complete from process health alone. The soak
+runner writes `behavior.tsv` and appends a `Behavioral acceptance` block to
+`summary.txt` before making the final decision. The gate is log-derived and
+best-effort: if the logs do not prove collaborative embodied behavior, the run
+is a NO-GO until the cohort report explains the deviation.
+
+Per-agent counters are parsed from `logs/soak/<timestamp>/bots/<agent>.log`
+plus agent-tagged bridge/server logs:
+
+| Counter | Parsed evidence |
+| --- | --- |
+| `spawn_safe` | A spawn/login line with no `died`, `death`, `respawn`, or drowning line in the next roughly 30 log lines. |
+| `movement` | Direct movement/search commands such as `!move`, `!goToPlayer`, `!goToCoordinates`, `!searchForBlock`, `!searchForEntity`, or `!navigate`. |
+| `public_chat` | Public chat emits like `<Agent> message`, `Agent: message`, or `chat ... msg=...`, excluding `[action]`, management review lines, and command-only messages. |
+| `inter_agent_chat` | Public chat lines that mention another tracked agent by name. |
+| `gather` | Gather/equipment commands such as `!collectBlocks`, `!collectAllBlocks`, `!consume`, `!equip`, or `!smeltItem`. |
+| `build` | Build/place commands such as `!place`, `!placeHere`, `!placeBlock`, `!build`, or `!buildFromPlan`. |
+| `deaths` / `drownings` | Death, respawn, and drowning terms in the agent log stream. |
+| `stuck` / `dig_holes` | Stuck, path-failure, unreachable, trapped, or hole-digging phrases. |
+| `shared_artifact_count` | Cohort-wide shared-work evidence from shared/together camp-marker-wall-chest-shelter-fire language, nearby place coordinates by multiple agents, or at least two distinct agents emitting place/build commands. |
+
+The default behavioral thresholds are env-overridable:
+
+| Env var | Default | Gate |
+| --- | ---: | --- |
+| `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. |
+| `SOAK_MAX_DEATHS_PER_AGENT` | `2` | Any agent above this death/respawn count fails. |
+| `SOAK_MAX_STUCK_PER_AGENT` | `5` | Any agent above this stuck/path-failure count fails. |
+| `SOAK_MIN_PUBLIC_CHAT_COHORT` | `10` | The cohort must emit at least this many public chat lines. |
+| `SOAK_MIN_GATHER_OR_BUILD_COHORT` | `3` | Gather plus build attempts across the cohort must meet this count. |
+| `SOAK_MIN_SHARED_ARTIFACTS` | `1` | The run must show at least one visible shared improvement or shared work artifact. |
+| `SOAK_REQUIRE_BEHAVIOR_GATE` | `1` | When `1`, an unmet behavioral threshold exits the soak with status 1. |
+
+Decision rule: any unmet per-agent or cohort threshold is a NO-GO regardless
+of stability, cost, or process-health results. `SOAK_REQUIRE_BEHAVIOR_GATE=0`
+is only an operator override for collecting a soft-pass evidence bundle; the
+`summary.txt` block still records `behavior_gate_status=fail`, and
+`docs/minecraft/cohort-report.md` must explain why the deviation was accepted.
 
 ## Cost Cap Accounting
 
@@ -361,9 +403,21 @@ Append the completed live run here before advancing E8-9:
 | Respond count |  |
 | Ignore count |  |
 | Cost ledger result |  |
+| Spawn safety (per agent) |  |
+| Movement distance / count |  |
+| Public chat lines (cohort) |  |
+| Inter-agent mentions |  |
+| Gather actions |  |
+| Build actions |  |
+| Deaths / drownings |  |
+| Stuck / dig-hole events |  |
+| Shared artifact(s) observed |  |
+| Behavioral gate result |  |
 | Tunings applied mid-soak |  |
 | Final decision | GO / NO-GO |
 
 Decision rule: **GO** only if the run lasts at least 2 hours, every bot either
 stays up or recovers automatically, there are no unrecovered bridge drops or
-runaway loops, and every tracked agent stays within the E11 hourly cap.
+runaway loops, every tracked agent stays within the E11 hourly cap, and the
+behavioral acceptance gate passes with a shared artifact or documented visible
+shared improvement.

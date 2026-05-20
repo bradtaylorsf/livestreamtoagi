@@ -14,6 +14,7 @@
 #   scripts/minecraft/soak.sh --log-dir /tmp/e8-8-soak
 #   scripts/minecraft/soak.sh --dry-run
 #   scripts/minecraft/soak.sh --verify
+#   scripts/minecraft/soak.sh --verify-behavior <run-dir>
 #   scripts/minecraft/soak.sh --help
 #
 # Required for a real run:
@@ -27,6 +28,21 @@
 #                               commit. Default: http://localhost:1234/v1.
 #   SOAK_DURATION_HOURS         Default: 2.
 #   SOAK_AGENT_HOURLY_CAP_USD   Per-agent hourly cap assertion. Default: 0.01.
+#   SOAK_MIN_MOVEMENT_PER_AGENT Minimum movement actions per tracked agent.
+#                               Default: 5.
+#   SOAK_MAX_DEATHS_PER_AGENT   Maximum death/respawn lines per tracked agent.
+#                               Default: 2.
+#   SOAK_MAX_STUCK_PER_AGENT    Maximum stuck/path-failure lines per tracked
+#                               agent. Default: 5.
+#   SOAK_MIN_PUBLIC_CHAT_COHORT Minimum public chat lines across the cohort.
+#                               Default: 10.
+#   SOAK_MIN_GATHER_OR_BUILD_COHORT
+#                               Minimum gather+build actions across the cohort.
+#                               Default: 3.
+#   SOAK_MIN_SHARED_ARTIFACTS   Minimum shared work artifacts inferred from
+#                               logs. Default: 1.
+#   SOAK_REQUIRE_BEHAVIOR_GATE  Exit nonzero when behavioral acceptance fails.
+#                               Default: 1.
 #   SOAK_LOG_ROOT               Default: ./logs/soak.
 #   SOAK_LAUNCH_STAGGER_SECONDS Default: 3.
 #   SOAK_START_MINECRAFT_IF_DOWN Start supervise.sh when health is down.
@@ -65,6 +81,13 @@ MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/
 BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8010/api/health}"
 SOAK_DURATION_HOURS="${SOAK_DURATION_HOURS:-2}"
 SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
+SOAK_MIN_MOVEMENT_PER_AGENT="${SOAK_MIN_MOVEMENT_PER_AGENT:-5}"
+SOAK_MAX_DEATHS_PER_AGENT="${SOAK_MAX_DEATHS_PER_AGENT:-2}"
+SOAK_MAX_STUCK_PER_AGENT="${SOAK_MAX_STUCK_PER_AGENT:-5}"
+SOAK_MIN_PUBLIC_CHAT_COHORT="${SOAK_MIN_PUBLIC_CHAT_COHORT:-10}"
+SOAK_MIN_GATHER_OR_BUILD_COHORT="${SOAK_MIN_GATHER_OR_BUILD_COHORT:-3}"
+SOAK_MIN_SHARED_ARTIFACTS="${SOAK_MIN_SHARED_ARTIFACTS:-1}"
+SOAK_REQUIRE_BEHAVIOR_GATE="${SOAK_REQUIRE_BEHAVIOR_GATE:-1}"
 SOAK_LOG_ROOT="${SOAK_LOG_ROOT:-$REPO_ROOT/logs/soak}"
 SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
@@ -77,6 +100,7 @@ SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
 MODE="run"
+BEHAVIOR_RUN_DIR=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --duration-hours)
@@ -96,6 +120,12 @@ while [ "$#" -gt 0 ]; do
         --verify)
             MODE="verify"
             shift
+            ;;
+        --verify-behavior)
+            [ "$#" -ge 2 ] || { echo "x --verify-behavior needs a run directory" >&2; exit 2; }
+            MODE="verify-behavior"
+            BEHAVIOR_RUN_DIR="$2"
+            shift 2
             ;;
         --help|-h)
             awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"
@@ -186,6 +216,18 @@ verify_static() {
         fail "multi-agent soak doc must document LM Studio validation"
         problems=1
     }
+    grep -qi 'behavioral acceptance gate' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document the behavioral acceptance gate"
+        problems=1
+    }
+    grep -q 'behavior.tsv' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document behavior.tsv"
+        problems=1
+    }
+    grep -q 'Behavior Acceptance Table' "$REPO_ROOT/docs/minecraft/cohort-report.md" 2> /dev/null || {
+        fail "cohort report must carry the per-agent behavior table heading"
+        problems=1
+    }
 
     if [ "$problems" -eq 0 ]; then
         ok "Static soak verify passed: all launchers/profiles/docs are present"
@@ -209,6 +251,7 @@ print_plan() {
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
+    info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -308,9 +351,321 @@ process.stdout.write(JSON.stringify(settings));
 NODE
 }
 
+compute_behavior_table() {
+    local run_dir="${1:-$RUN_DIR}"
+    mkdir -p "$run_dir"
+    python3 - "$run_dir" <<'PY'
+import math
+import os
+import re
+import sys
+from pathlib import Path
+
+
+DEFAULT_AGENTS = "alpha vera rex aurora pixel fork sentinel grok"
+
+
+def int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(f"{name} must be an integer, got {raw!r}")
+
+
+run_dir = Path(sys.argv[1])
+agents = [agent.strip().lower() for agent in os.environ.get("SOAK_COST_AGENTS", DEFAULT_AGENTS).split() if agent.strip()]
+agent_set = set(agents)
+
+min_movement = int_env("SOAK_MIN_MOVEMENT_PER_AGENT", 5)
+max_deaths = int_env("SOAK_MAX_DEATHS_PER_AGENT", 2)
+max_stuck = int_env("SOAK_MAX_STUCK_PER_AGENT", 5)
+min_public_chat = int_env("SOAK_MIN_PUBLIC_CHAT_COHORT", 10)
+min_gather_or_build = int_env("SOAK_MIN_GATHER_OR_BUILD_COHORT", 3)
+min_shared_artifacts = int_env("SOAK_MIN_SHARED_ARTIFACTS", 1)
+
+movement_re = re.compile(r"!(move|goToPlayer|goToCoordinates|searchForBlock|searchForEntity|navigate)\b", re.IGNORECASE)
+death_re = re.compile(r"(died|death|respawn(ed)?)", re.IGNORECASE)
+drowning_re = re.compile(r"drown(ed|ing)?", re.IGNORECASE)
+stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
+dig_hole_re = re.compile(r"(dig.?hole|stuck in (a )?hole|trapped)", re.IGNORECASE)
+gather_re = re.compile(r"!(collectBlocks|collectAllBlocks|consume|equip|smeltItem)\b", re.IGNORECASE)
+build_re = re.compile(r"!(place|placeHere|placeBlock|build|buildFromPlan)\b", re.IGNORECASE)
+shared_text_re = re.compile(r"(shared|cohort|together).*(camp|marker|wall|chest|shelter|fire)", re.IGNORECASE)
+spawn_re = re.compile(r"(Spawned at|\bspawn(ed)?\b|joined the game|logged in)", re.IGNORECASE)
+coord_re = re.compile(
+    r"x['\"]?\s*[:=]\s*(-?\d+(?:\.\d+)?).*?"
+    r"y['\"]?\s*[:=]\s*(-?\d+(?:\.\d+)?).*?"
+    r"z['\"]?\s*[:=]\s*(-?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def read_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return path.read_text(encoding="utf-8", errors="ignore").splitlines()
+
+
+def agent_in_line(line: str, agent: str) -> bool:
+    return re.search(rf"\b{re.escape(agent)}\b", line, re.IGNORECASE) is not None
+
+
+global_lines: list[str] = []
+for log_path in sorted((run_dir / "logs").glob("*.log")):
+    global_lines.extend(read_lines(log_path))
+
+all_lines: list[tuple[str, str]] = []
+for agent in agents:
+    for line in read_lines(run_dir / "bots" / f"{agent}.log"):
+        all_lines.append((agent, line))
+for line in global_lines:
+    for agent in agents:
+        if agent_in_line(line, agent):
+            all_lines.append((agent, line))
+
+
+def is_command_chat(line: str) -> bool:
+    if re.search(r"(<[^>]+>|\b[a-z][\w-]*\s*:)\s*!", line, re.IGNORECASE):
+        return True
+    if re.search(r"\bmsg\s*=\s*['\"]?!", line, re.IGNORECASE):
+        return True
+    return False
+
+
+def is_public_chat(line: str, agent: str, own_log: bool) -> bool:
+    lowered = line.lower()
+    if "[action]" in lowered or "management_review_event" in lowered:
+        return False
+    if is_command_chat(line):
+        return False
+    if re.search(rf"<\s*{re.escape(agent)}\s*>", line, re.IGNORECASE):
+        return True
+    if re.search(rf"\b{re.escape(agent)}\s*:\s+\S", line, re.IGNORECASE):
+        return True
+    if re.search(r"\bchat\b.*\bmsg\s*=", line, re.IGNORECASE):
+        return own_log or agent_in_line(line, agent)
+    return False
+
+
+def count_regex(lines: list[str], pattern: re.Pattern[str]) -> int:
+    return sum(1 for line in lines if pattern.search(line))
+
+
+def spawn_safe(lines: list[str]) -> int:
+    for index, line in enumerate(lines):
+        if spawn_re.search(line):
+            window = lines[index : index + 30]
+            return 0 if any(death_re.search(candidate) or drowning_re.search(candidate) for candidate in window) else 1
+    return 0
+
+
+rows: list[dict[str, int | str]] = []
+unmet: list[str] = []
+totals = {
+    "total_movement": 0,
+    "total_public_chat": 0,
+    "total_inter_agent_chat": 0,
+    "total_gather": 0,
+    "total_build": 0,
+    "total_deaths": 0,
+    "total_drownings": 0,
+    "total_stuck": 0,
+    "total_dig_holes": 0,
+}
+
+for agent in agents:
+    own_lines = read_lines(run_dir / "bots" / f"{agent}.log")
+    agent_global_lines = [line for line in global_lines if agent_in_line(line, agent)]
+    counter_lines = own_lines + agent_global_lines
+    own_public_chat = [line for line in own_lines if is_public_chat(line, agent, own_log=True)]
+    global_public_chat = [line for line in agent_global_lines if is_public_chat(line, agent, own_log=False)]
+    public_chat_lines = own_public_chat + global_public_chat
+
+    movement = count_regex(counter_lines, movement_re)
+    gather = count_regex(counter_lines, gather_re)
+    build = count_regex(counter_lines, build_re)
+    deaths = count_regex(counter_lines, death_re)
+    drownings = count_regex(counter_lines, drowning_re)
+    stuck = count_regex(counter_lines, stuck_re)
+    dig_holes = count_regex(counter_lines, dig_hole_re)
+    inter_agent_chat = sum(
+        1
+        for line in public_chat_lines
+        if any(other != agent and agent_in_line(line, other) for other in agent_set)
+    )
+    safe_spawn = spawn_safe(counter_lines)
+
+    agent_unmet: list[str] = []
+    if safe_spawn != 1:
+        agent_unmet.append(f"agent {agent} safe spawn expected 1 got {safe_spawn}")
+    if movement < min_movement:
+        agent_unmet.append(f"agent {agent} movement expected >= {min_movement} got {movement}")
+    if deaths > max_deaths:
+        agent_unmet.append(f"agent {agent} deaths expected <= {max_deaths} got {deaths}")
+    if stuck > max_stuck:
+        agent_unmet.append(f"agent {agent} stuck expected <= {max_stuck} got {stuck}")
+    unmet.extend(agent_unmet)
+
+    row = {
+        "agent": agent,
+        "spawn_safe": safe_spawn,
+        "movement": movement,
+        "public_chat": len(public_chat_lines),
+        "inter_agent_chat": inter_agent_chat,
+        "gather": gather,
+        "build": build,
+        "deaths": deaths,
+        "drownings": drownings,
+        "stuck": stuck,
+        "dig_holes": dig_holes,
+        "behavior_status": "fail" if agent_unmet else "pass",
+    }
+    rows.append(row)
+
+    totals["total_movement"] += movement
+    totals["total_public_chat"] += len(public_chat_lines)
+    totals["total_inter_agent_chat"] += inter_agent_chat
+    totals["total_gather"] += gather
+    totals["total_build"] += build
+    totals["total_deaths"] += deaths
+    totals["total_drownings"] += drownings
+    totals["total_stuck"] += stuck
+    totals["total_dig_holes"] += dig_holes
+
+
+place_agents: set[str] = set()
+place_coords: list[tuple[str, tuple[float, float, float]]] = []
+shared_text_count = 0
+for agent, line in all_lines:
+    if shared_text_re.search(line):
+        shared_text_count += 1
+    if build_re.search(line):
+        place_agents.add(agent)
+        coord_match = coord_re.search(line)
+        if coord_match:
+            place_coords.append((agent, tuple(float(part) for part in coord_match.groups())))
+
+nearby_place_pairs = 0
+for index, (agent, coord) in enumerate(place_coords):
+    for other_agent, other_coord in place_coords[:index]:
+        if other_agent == agent:
+            continue
+        distance = math.dist(coord, other_coord)
+        if distance <= 10:
+            nearby_place_pairs += 1
+
+shared_artifact_count = max(shared_text_count, nearby_place_pairs, 1 if len(place_agents) >= 2 else 0)
+totals["total_gather_or_build"] = totals["total_gather"] + totals["total_build"]
+totals["shared_artifact_count"] = shared_artifact_count
+
+if totals["total_public_chat"] < min_public_chat:
+    unmet.append(f"cohort public chat expected >= {min_public_chat} got {totals['total_public_chat']}")
+if totals["total_gather_or_build"] < min_gather_or_build:
+    unmet.append(
+        f"cohort gather+build expected >= {min_gather_or_build} got {totals['total_gather_or_build']}"
+    )
+if shared_artifact_count < min_shared_artifacts:
+    unmet.append(f"cohort shared artifacts expected >= {min_shared_artifacts} got {shared_artifact_count}")
+
+status = "fail" if unmet else "pass"
+
+header = [
+    "agent",
+    "spawn_safe",
+    "movement",
+    "public_chat",
+    "inter_agent_chat",
+    "gather",
+    "build",
+    "deaths",
+    "drownings",
+    "stuck",
+    "dig_holes",
+    "behavior_status",
+]
+with (run_dir / "behavior.tsv").open("w", encoding="utf-8") as handle:
+    handle.write("\t".join(header) + "\n")
+    for row in rows:
+        handle.write("\t".join(str(row[column]) for column in header) + "\n")
+
+with (run_dir / "behavior-totals.env").open("w", encoding="utf-8") as handle:
+    for key in sorted(totals):
+        handle.write(f"{key}={totals[key]}\n")
+    handle.write(f"behavior_gate_status={status}\n")
+    handle.write(f"behavior_gate_required={os.environ.get('SOAK_REQUIRE_BEHAVIOR_GATE', '1')}\n")
+
+with (run_dir / "behavior-unmet-thresholds.txt").open("w", encoding="utf-8") as handle:
+    for item in unmet:
+        handle.write(item + "\n")
+
+with (run_dir / "behavior-gate-status.txt").open("w", encoding="utf-8") as handle:
+    handle.write(status + "\n")
+PY
+}
+
+behavior_metric() {
+    local run_dir="${1:-$RUN_DIR}" key="$2"
+    awk -F= -v key="$key" '$1 == key {print $2}' "$run_dir/behavior-totals.env" 2> /dev/null
+}
+
+append_behavior_summary() {
+    local run_dir="${1:-$RUN_DIR}"
+    {
+        echo
+        echo "Behavioral acceptance"
+        echo "behavior.tsv: $run_dir/behavior.tsv"
+        echo
+        echo "Per-agent behavior table"
+        cat "$run_dir/behavior.tsv"
+        echo
+        echo "Cohort behavior totals"
+        echo "total_movement: $(behavior_metric "$run_dir" total_movement)"
+        echo "total_public_chat: $(behavior_metric "$run_dir" total_public_chat)"
+        echo "total_inter_agent_chat: $(behavior_metric "$run_dir" total_inter_agent_chat)"
+        echo "total_gather: $(behavior_metric "$run_dir" total_gather)"
+        echo "total_build: $(behavior_metric "$run_dir" total_build)"
+        echo "total_gather_or_build: $(behavior_metric "$run_dir" total_gather_or_build)"
+        echo "total_deaths: $(behavior_metric "$run_dir" total_deaths)"
+        echo "total_drownings: $(behavior_metric "$run_dir" total_drownings)"
+        echo "total_stuck: $(behavior_metric "$run_dir" total_stuck)"
+        echo "total_dig_holes: $(behavior_metric "$run_dir" total_dig_holes)"
+        echo "shared_artifact_count: $(behavior_metric "$run_dir" shared_artifact_count)"
+        echo
+        echo "behavior_gate_status=$(behavior_metric "$run_dir" behavior_gate_status)"
+        echo "behavior_gate_required=$(behavior_metric "$run_dir" behavior_gate_required)"
+        echo "unmet_thresholds:"
+        if [ -s "$run_dir/behavior-unmet-thresholds.txt" ]; then
+            sed 's/^/- /' "$run_dir/behavior-unmet-thresholds.txt"
+        else
+            echo "none"
+        fi
+    } >> "$run_dir/summary.txt"
+}
+
+run_behavior_gate() {
+    local run_dir="${1:-$RUN_DIR}"
+    compute_behavior_table "$run_dir"
+    append_behavior_summary "$run_dir"
+}
+
 if [ "$MODE" = "verify" ]; then
     verify_static
     exit $?
+fi
+
+if [ "$MODE" = "verify-behavior" ]; then
+    RUN_DIR="$BEHAVIOR_RUN_DIR"
+    [ -d "$RUN_DIR" ] || { fail "behavior run directory does not exist: $RUN_DIR"; exit 2; }
+    : > "$RUN_DIR/summary.txt"
+    run_behavior_gate "$RUN_DIR"
+    BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
+    if [ "$SOAK_REQUIRE_BEHAVIOR_GATE" = "1" ] && [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then
+        fail "Behavioral acceptance gate failed: $(paste -sd '; ' "$RUN_DIR/behavior-unmet-thresholds.txt" 2> /dev/null || echo 'see behavior.tsv')"
+        exit 1
+    fi
+    ok "Behavioral acceptance gate $BEHAVIOR_GATE_STATUS for $RUN_DIR"
+    exit 0
 fi
 
 if [ "$MODE" = "dry-run" ]; then
@@ -428,6 +783,13 @@ write_metadata() {
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
+        echo "min_movement_per_agent=$SOAK_MIN_MOVEMENT_PER_AGENT"
+        echo "max_deaths_per_agent=$SOAK_MAX_DEATHS_PER_AGENT"
+        echo "max_stuck_per_agent=$SOAK_MAX_STUCK_PER_AGENT"
+        echo "min_public_chat_cohort=$SOAK_MIN_PUBLIC_CHAT_COHORT"
+        echo "min_gather_or_build_cohort=$SOAK_MIN_GATHER_OR_BUILD_COHORT"
+        echo "min_shared_artifacts=$SOAK_MIN_SHARED_ARTIFACTS"
+        echo "require_behavior_gate=$SOAK_REQUIRE_BEHAVIOR_GATE"
         echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
         echo "block_private_conversations=$SOAK_BLOCK_PRIVATE_CONVERSATIONS"
@@ -785,8 +1147,10 @@ monitor_bots || MONITOR_STATUS=$?
 SOAK_END_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 run_cost_query "$SOAK_END_ISO"
 write_summary "$SOAK_END_ISO"
+run_behavior_gate "$RUN_DIR"
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
+BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
 if [ "$MONITOR_STATUS" -ne 0 ]; then
     fail "Soak failed: at least one bot exited before the planned end. See $EARLY_EXIT_FILE"
     exit 1
@@ -795,6 +1159,13 @@ if [ "$EXCEEDED" != "0" ]; then
     fail "Soak failed: at least one agent exceeded the hourly cap. See $RUN_DIR/cost-ledger.tsv"
     exit 1
 fi
+if [ "$SOAK_REQUIRE_BEHAVIOR_GATE" = "1" ] && [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then
+    fail "Behavioral acceptance gate failed: $(paste -sd '; ' "$RUN_DIR/behavior-unmet-thresholds.txt" 2> /dev/null || echo 'see behavior.tsv')"
+    exit 1
+fi
+if [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then
+    info "behavior gate failed but SOAK_REQUIRE_BEHAVIOR_GATE=$SOAK_REQUIRE_BEHAVIOR_GATE; document the deviation in docs/minecraft/cohort-report.md"
+fi
 
-ok "Soak completed without unrecovered bot exits and within hourly cap"
+ok "Soak completed without unrecovered bot exits, within hourly cap, and behavior_gate_status=$BEHAVIOR_GATE_STATUS"
 info "evidence: $RUN_DIR"

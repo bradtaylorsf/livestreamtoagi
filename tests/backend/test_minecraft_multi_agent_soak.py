@@ -1,9 +1,9 @@
-"""Static tests for the E8-8 multi-agent stability soak.
+"""Static tests for the E8-8/E8-11 multi-agent Minecraft acceptance soak.
 
 The live soak is intentionally not exercised in CI: it needs LM Studio, Paper,
 the backend bridge, Java 21, Node 20, and a pinned Mindcraft checkout. These
-tests verify the committed operator entrypoint, package targets, and acceptance
-report structure without touching those services.
+tests verify the committed operator entrypoint, package targets, behavioral
+gate, and acceptance report structure without touching those services.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
 RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 DOC = REPO_ROOT / "docs" / "minecraft" / "multi-agent-soak.md"
+COHORT_REPORT = REPO_ROOT / "docs" / "minecraft" / "cohort-report.md"
 PACKAGE = REPO_ROOT / "package.json"
 
 BOT_IDS = ("bridge", "alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
@@ -69,7 +70,10 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "--log-dir" in proc.stdout
     assert "LOCAL_LLM_MODEL" in proc.stdout
     assert "SOAK_AGENT_HOURLY_CAP_USD" in proc.stdout
+    assert "SOAK_MIN_MOVEMENT_PER_AGENT" in proc.stdout
+    assert "SOAK_REQUIRE_BEHAVIOR_GATE" in proc.stdout
     assert "SOAK_START_MINECRAFT_IF_DOWN" in proc.stdout
+    assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
     assert "run_cost_query()" not in proc.stdout
@@ -108,6 +112,7 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "shared local clones" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
+    assert "behavior:       require=1; movement>=5/agent" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
 
@@ -377,6 +382,87 @@ def test_script_records_cost_ledger_and_hourly_cap() -> None:
         assert f"'{agent_id}'" in text
 
 
+def test_script_defines_behavioral_acceptance_gate_contract() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "compute_behavior_table()" in text
+    assert "--verify-behavior" in text
+    for agent_id in AGENT_IDS:
+        assert agent_id in text
+    for env_name in (
+        "SOAK_MIN_MOVEMENT_PER_AGENT",
+        "SOAK_MAX_DEATHS_PER_AGENT",
+        "SOAK_MAX_STUCK_PER_AGENT",
+        "SOAK_MIN_PUBLIC_CHAT_COHORT",
+        "SOAK_MIN_GATHER_OR_BUILD_COHORT",
+        "SOAK_MIN_SHARED_ARTIFACTS",
+        "SOAK_REQUIRE_BEHAVIOR_GATE",
+    ):
+        assert env_name in text
+    assert (
+        '"agent",\n    "spawn_safe",\n    "movement",\n    "public_chat",\n    "inter_agent_chat",'
+        in text
+    )
+    assert "behavior_gate_status" in text
+    assert "Behavioral acceptance gate failed" in text
+    assert "behavior.tsv" in text
+
+
+def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        movement_count = 1 if agent_id == "alpha" else 5
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(movement_count))
+        if agent_id == "alpha":
+            lines.append("!collectBlocks oak_log 1")
+        if agent_id == "vera":
+            lines.append('!placeHere("stone")')
+        if agent_id == "rex":
+            lines.append('!place("stone", {"x": 1, "y": 64, "z": 1}, "up")')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 1
+    assert "Behavioral acceptance gate failed" in proc.stderr
+
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert (
+        "agent\tspawn_safe\tmovement\tpublic_chat\tinter_agent_chat\tgather\tbuild\tdeaths\t"
+        "drownings\tstuck\tdig_holes\tbehavior_status"
+    ) in behavior_tsv
+    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\tfail" in behavior_tsv
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\tpass" in behavior_tsv
+
+    summary = (run_dir / "summary.txt").read_text(encoding="utf-8")
+    assert "Behavioral acceptance" in summary
+    assert "behavior_gate_status=fail" in summary
+    assert "agent alpha movement expected >= 5 got 1" in summary
+
+
 def test_package_json_exposes_soak_commands() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
     scripts = package["scripts"]
@@ -400,6 +486,7 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "scripts/minecraft/soak.sh --duration-hours 2" in text
     assert "All connection attempts failed" in text
     assert "Live Run Addendum Template" in text
+    assert "Behavioral gate result" in text
     assert "GO / NO-GO" in text
 
 
@@ -416,3 +503,27 @@ def test_report_names_failure_classes_and_observed_counters() -> None:
         "Decentralized respond-vs-ignore ratio",
     ):
         assert counter in text
+
+
+def test_behavior_gate_docs_are_complete() -> None:
+    soak_doc = DOC.read_text(encoding="utf-8")
+    cohort_doc = COHORT_REPORT.read_text(encoding="utf-8")
+
+    assert "## Behavioral Acceptance Gate" in soak_doc
+    assert "behavior.tsv" in soak_doc
+    for env_name in (
+        "SOAK_MIN_MOVEMENT_PER_AGENT",
+        "SOAK_MAX_DEATHS_PER_AGENT",
+        "SOAK_MAX_STUCK_PER_AGENT",
+        "SOAK_MIN_PUBLIC_CHAT_COHORT",
+        "SOAK_MIN_GATHER_OR_BUILD_COHORT",
+        "SOAK_MIN_SHARED_ARTIFACTS",
+        "SOAK_REQUIRE_BEHAVIOR_GATE",
+    ):
+        assert env_name in soak_doc
+    assert "any unmet per-agent or cohort threshold is a NO-GO regardless" in soak_doc
+    assert "process health alone" in cohort_doc
+    assert "## Behavior Acceptance Table" in cohort_doc
+    assert "| Behavioral Acceptance Gate |" in cohort_doc
+    for agent_id in AGENT_IDS:
+        assert f"| {agent_id.title()} |" in cohort_doc
