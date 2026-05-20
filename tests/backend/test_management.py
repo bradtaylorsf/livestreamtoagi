@@ -14,6 +14,7 @@ import pytest
 from core.bridge import contract as bridge_contract
 from core.bridge.errand_queue import errand_queue
 from core.bridge.handlers.errand import handle_errand_complete
+from core.bridge.handlers.management import handle_management_review
 from core.event_bus import EventType
 from core.management import CONTENT_RULES_PATH, Management
 from core.models import ContentReviewResult, LLMResponse
@@ -95,6 +96,25 @@ def _alpha_errand_complete_request(
     )
 
 
+def _management_review_request(text: str = "Candidate speech") -> bridge_contract.BridgeRequest:
+    return bridge_contract.BridgeRequest(
+        version=bridge_contract.PROTOCOL_VERSION,
+        request_id="req-management-bridge-test",
+        agent_id="vera",
+        run_id="run-management-bridge-test",
+        simulation_id="22222222-2222-2222-2222-222222222222",
+        service="management",
+        method="review",
+        payload={"agent_id": "grok", "text": text, "context": {}},
+        deadline_ms=3000,
+        cost_context=bridge_contract.CostContext(
+            agent_tier="filter",
+            budget_bucket="management-test",
+            estimated_cost_usd=0.0,
+        ),
+    )
+
+
 class _RaisingManagement:
     async def review(
         self,
@@ -108,6 +128,46 @@ class _RaisingManagement:
 
     async def intervene(self, severity: int, agent_id: str, reason: str) -> None:
         raise AssertionError("intervene should not be called after review failure")
+
+
+class _BridgeManagement:
+    def __init__(self, review: ContentReviewResult) -> None:
+        self.review_result = review
+        self.review_calls: list[dict[str, object]] = []
+        self.intervene_calls: list[tuple[int, str, str, str | None]] = []
+        self.generate_calls: list[tuple[str, str]] = []
+
+    async def review(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        conversation_id: object | None = None,
+        simulation_id: object | None = None,
+    ) -> ContentReviewResult:
+        self.review_calls.append(
+            {
+                "agent_id": agent_id,
+                "content": content,
+                "conversation_id": conversation_id,
+                "simulation_id": simulation_id,
+            }
+        )
+        return self.review_result
+
+    async def intervene(
+        self,
+        severity: int,
+        agent_id: str,
+        reason: str,
+        *,
+        replacement: str | None = None,
+    ) -> None:
+        self.intervene_calls.append((severity, agent_id, reason, replacement))
+
+    async def generate_replacement(self, agent_id: str, reason: str) -> str:
+        self.generate_calls.append((agent_id, reason))
+        return "Management replacement text"
 
 
 # -- Layer 1: Keyword blocklist ----------------------------------------
@@ -205,6 +265,85 @@ def test_management_is_not_mindcraft_world_bot() -> None:
     assert not (repo_root / "scripts" / "minecraft" / "profiles" / "management-bot.json").exists()
     with pytest.raises(ValueError, match="never a world bot"):
         gen.build_profile("management")
+
+
+# -- Bridge management.review handler ---------------------------------
+
+
+async def test_management_review_bridge_handler_allows_clean_content() -> None:
+    """Approved Management review lets the bot emit the original text."""
+    fake = _BridgeManagement(ContentReviewResult(approved=True, reason="clean", severity=1))
+    env = _management_review_request("We should build a safer bridge.")
+
+    result = await handle_management_review(env, SimpleNamespace(management=fake))
+
+    assert result == {"verdict": "allow", "reason": "clean", "sanitized_text": None}
+    assert fake.review_calls == [
+        {
+            "agent_id": "grok",
+            "content": "We should build a safer bridge.",
+            "conversation_id": None,
+            "simulation_id": "22222222-2222-2222-2222-222222222222",
+        }
+    ]
+    assert fake.intervene_calls == []
+    assert fake.generate_calls == []
+
+
+async def test_management_review_bridge_handler_vetoes_with_replacement() -> None:
+    """Severity-3 veto returns Management replacement text for the bot to speak."""
+    fake = _BridgeManagement(
+        ContentReviewResult(approved=False, reason="blocked keyword", severity=3)
+    )
+    env = _management_review_request("blocked speech")
+
+    result = await handle_management_review(env, SimpleNamespace(management=fake))
+
+    assert result == {
+        "verdict": "veto",
+        "reason": "blocked keyword",
+        "sanitized_text": "Management replacement text",
+    }
+    assert fake.generate_calls == [("grok", "blocked keyword")]
+    assert fake.intervene_calls == [
+        (3, "grok", "blocked keyword", "Management replacement text")
+    ]
+
+
+async def test_management_review_bridge_handler_severity_5_triggers_kill_switch(
+    management: Management,
+    mock_llm: MagicMock,
+    mock_redis: MagicMock,
+    mock_event_bus: MagicMock,
+) -> None:
+    """Severity-5 veto preserves the existing mute + kill-switch ladder."""
+    mock_llm.complete.return_value = LLMResponse(
+        content='{"approved": false, "reason": "emergency policy violation", "severity": 5}',
+        model="claude-haiku-4-5",
+        input_tokens=100,
+        output_tokens=20,
+        estimated_cost=Decimal("0.0001"),
+        latency_ms=200,
+        openrouter_id="test-id",
+    )
+
+    result = await handle_management_review(
+        _management_review_request("Emergency content"),
+        SimpleNamespace(management=management),
+    )
+
+    assert result == {
+        "verdict": "veto",
+        "reason": "emergency policy violation",
+        "sanitized_text": None,
+    }
+    mock_redis.set.assert_any_call("mute:grok", "muted", ex=300)
+    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)
+    mock_event_bus.emit.assert_called_once()
+    call_args = mock_event_bus.emit.call_args
+    assert call_args[0][0] == EventType.MANAGEMENT_INTERVENTION.value
+    assert call_args[0][1]["kill_switch"] is True
+    assert call_args[0][1]["severity"] == 5
 
 
 # -- Layer 2: LLM review (clean content) -------------------------------
@@ -389,6 +528,22 @@ async def test_intervene_severity_3_emits_intervention_with_replacement(
     assert call_args[0][0] == EventType.MANAGEMENT_INTERVENTION.value
     assert call_args[0][1]["severity"] == 3
     assert "replacement" in call_args[0][1]
+
+
+async def test_intervene_severity_3_reuses_supplied_replacement(
+    management: Management, mock_event_bus: MagicMock, mock_llm: MagicMock
+) -> None:
+    """Severity 3 can reuse the bridge-visible replacement without a second LLM call."""
+    await management.intervene(
+        3,
+        "grok",
+        "harassment",
+        replacement="Content redacted per Section 3.1(c).",
+    )
+    call_args = mock_event_bus.emit.call_args
+    assert call_args[0][0] == EventType.MANAGEMENT_INTERVENTION.value
+    assert call_args[0][1]["replacement"] == "Content redacted per Section 3.1(c)."
+    mock_llm.complete.assert_not_called()
 
 
 async def test_intervene_severity_4_emits_broadcast_interrupt(
