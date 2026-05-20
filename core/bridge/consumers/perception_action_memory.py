@@ -117,9 +117,7 @@ async def on_bridge_action_result(event: dict[str, Any], *, compactor: MemoryCom
     )
 
 
-async def _enqueue_bridge_perception(
-    event: dict[str, Any], *, compactor: MemoryCompactor
-) -> None:
+async def _enqueue_bridge_perception(event: dict[str, Any], *, compactor: MemoryCompactor) -> None:
     _track_background_task(on_bridge_perception(event, compactor=compactor))
 
 
