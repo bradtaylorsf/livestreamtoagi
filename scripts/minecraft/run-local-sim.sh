@@ -31,6 +31,7 @@
 #   MC_SIM_DISABLE_MANAGEMENT=1
 #   MC_SIM_INCLUDE_BRIDGE_BOT=0
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
+#   MC_SIM_ALLOW_NEW_ACTION=0
 #   MC_SIM_INIT_MESSAGE=<initial objective for the character bots>
 #   MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS=10000
 set -euo pipefail
@@ -165,9 +166,17 @@ if [ -z "${SOAK_BOTS+x}" ]; then
     fi
 fi
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-${MC_SIM_BLOCK_PRIVATE_CONVERSATIONS:-1}}"
-export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS
+MC_SIM_ALLOW_NEW_ACTION="${MC_SIM_ALLOW_NEW_ACTION:-0}"
+if [ -z "${SOAK_BLOCK_SLOW_SIM_ACTIONS+x}" ]; then
+    if [ "$MC_SIM_ALLOW_NEW_ACTION" = "1" ]; then
+        SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
+    else
+        SOAK_BLOCK_SLOW_SIM_ACTIONS="1"
+    fi
+fi
+export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS SOAK_BLOCK_SLOW_SIM_ACTIONS
 
-DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: gather wood or stone, explore nearby terrain, set a useful goal, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. Keep actions safe, narrate briefly in character, and continue until the run ends."
+DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: gather wood or stone, explore nearby terrain, set a useful goal, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. Use direct built-in Minecraft commands first, for example !collectBlocks(\"oak_log\", 4), !collectBlocks(\"stone\", 8), !searchForBlock(\"oak_log\", 64), !move(\"action_1\", \"forward\", 5), or !placeHere(\"oak_planks\"). Keep actions safe, narrate briefly in character, and continue until the run ends."
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
 if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
@@ -175,6 +184,14 @@ if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         *"Private bot-conversation commands are disabled"*|*"ordinary public Minecraft chat"*) ;;
         *)
             SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use ordinary public Minecraft chat for coordination. Private bot-conversation commands are disabled in this local sim."
+            ;;
+    esac
+fi
+if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
+    case "$SOAK_INIT_MESSAGE" in
+        *"!collectBlocks(\"oak_log\", 4)"*|*"Use direct built-in Minecraft commands first"*) ;;
+        *)
+            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use direct built-in Minecraft commands first, for example !collectBlocks(\"oak_log\", 4), !collectBlocks(\"stone\", 8), !searchForBlock(\"oak_log\", 64), !move(\"action_1\", \"forward\", 5), or !placeHere(\"oak_planks\")."
             ;;
     esac
 fi
@@ -220,6 +237,7 @@ info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"
 info "sim bots: ${SOAK_BOTS}"
 info "private bot conversations: ${SOAK_BLOCK_PRIVATE_CONVERSATIONS}"
+info "slow sim actions: ${SOAK_BLOCK_SLOW_SIM_ACTIONS}"
 info "init prompt: ${SOAK_INIT_MESSAGE}"
 info "logs: ${log_dir}"
 

@@ -143,7 +143,9 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
     assert "management review: disabled" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
+    assert "slow sim actions: 1" in proc.stdout
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
+    assert "slow actions:   blocked (!newAction)" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
     assert SOAK_BOTS_LINE not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
@@ -232,6 +234,34 @@ def test_local_sim_wrapper_can_include_bridge_bot_when_requested(tmp_path) -> No
     assert SOAK_BOTS_LINE in proc.stdout
 
 
+def test_local_sim_wrapper_can_allow_new_action_when_requested(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_ALLOW_NEW_ACTION=1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ENV_FILE": str(env_file)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "slow sim actions: 0" in proc.stdout
+    assert "slow actions:   allowed" in proc.stdout
+
+
 def test_local_sim_wrapper_accepts_pnpm_separator(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -294,10 +324,12 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
     assert "SOAK_INIT_MESSAGE" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
+    assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
     assert "settings_json_for_bot" in text
     assert "settings.init_message = ''" in text
     assert "!startConversation" in text
     assert "!endConversation" in text
+    assert "!newAction" in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text

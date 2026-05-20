@@ -41,6 +41,9 @@
 #                               bot-to-bot conversation commands and force
 #                               normal public Minecraft chat/action routing.
 #                               Default: 0.
+#   SOAK_BLOCK_SLOW_SIM_ACTIONS Set to 1 to disable slow code-generation
+#                               actions such as !newAction for quick sims.
+#                               Default: 0.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -68,6 +71,7 @@ SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-0}"
+SOAK_BLOCK_SLOW_SIM_ACTIONS="${SOAK_BLOCK_SLOW_SIM_ACTIONS:-0}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -209,6 +213,11 @@ print_plan() {
     else
         info "private conv:   allowed"
     fi
+    if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
+        info "slow actions:   blocked (!newAction)"
+    else
+        info "slow actions:   allowed"
+    fi
     if [ -n "$SOAK_INIT_MESSAGE" ]; then
         info "init prompt:    set (${#SOAK_INIT_MESSAGE} chars)"
     else
@@ -221,13 +230,16 @@ print_plan() {
 }
 
 build_settings_json() {
-    if [ -z "$SOAK_INIT_MESSAGE" ] && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ]; then
+    if [ -z "$SOAK_INIT_MESSAGE" ] \
+        && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ] \
+        && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ]; then
         return 0
     fi
     SETTINGS_JSON="$(
         SETTINGS_JSON_CURRENT="${SETTINGS_JSON:-}" \
         SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
         SOAK_BLOCK_PRIVATE_CONVERSATIONS="$SOAK_BLOCK_PRIVATE_CONVERSATIONS" \
+        SOAK_BLOCK_SLOW_SIM_ACTIONS="$SOAK_BLOCK_SLOW_SIM_ACTIONS" \
         node --input-type=module <<'NODE'
 const baseBlockedActions = [
     '!checkBlueprint',
@@ -253,6 +265,14 @@ if (process.env.SOAK_BLOCK_PRIVATE_CONVERSATIONS === '1') {
     for (const command of ['!startConversation', '!endConversation']) {
         if (!blocked.includes(command)) blocked.push(command);
     }
+    settings.blocked_actions = blocked;
+}
+
+if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {
+    const blocked = Array.isArray(settings.blocked_actions)
+        ? [...settings.blocked_actions]
+        : [...baseBlockedActions];
+    if (!blocked.includes('!newAction')) blocked.push('!newAction');
     settings.blocked_actions = blocked;
 }
 
@@ -398,6 +418,7 @@ write_metadata() {
         echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
         echo "block_private_conversations=$SOAK_BLOCK_PRIVATE_CONVERSATIONS"
+        echo "block_slow_sim_actions=$SOAK_BLOCK_SLOW_SIM_ACTIONS"
         if [ -n "$SOAK_INIT_MESSAGE" ]; then
             echo "init_message_set=yes"
             echo "init_message_chars=${#SOAK_INIT_MESSAGE}"

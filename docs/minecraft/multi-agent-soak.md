@@ -119,7 +119,11 @@ test bot rather than a character. The wrapper also sets
 `SOAK_BLOCK_PRIVATE_CONVERSATIONS=1` by default so isolated MindServer launches
 do not use Mindcraft's private `!startConversation`/`!endConversation` channel;
 the characters coordinate through ordinary public Minecraft chat and visible
-actions instead.
+actions instead. It also blocks slow startup code-generation via `!newAction`
+by default, pushing the local smoke path toward direct built-in commands such as
+`!collectBlocks`, `!searchForBlock`, `!move`, and `!placeHere`. Set
+`MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately want the local model to
+spend extra time synthesizing custom action code.
 
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 
