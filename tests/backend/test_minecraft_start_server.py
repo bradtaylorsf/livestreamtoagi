@@ -61,6 +61,7 @@ def test_help_exits_zero_and_describes_usage():
     assert proc.returncode == 0
     assert "--dry-run" in proc.stdout
     assert "--smoke" in proc.stdout
+    assert "SERVER_PORT" in proc.stdout
     # Help must print only the comment header — never leak script source
     # (regression guard for the hardcoded sed line-range bug).
     assert "set -euo pipefail" not in proc.stdout
@@ -73,6 +74,13 @@ def test_unknown_argument_is_rejected():
     )
     assert proc.returncode == 2
     assert "Unknown argument" in proc.stderr
+
+
+def test_invalid_server_port_is_rejected(tmp_path):
+    proc = _run(["--dry-run"], tmp_path / "mc", {"SERVER_PORT": "nope"})
+
+    assert proc.returncode == 2
+    assert "Invalid SERVER_PORT" in proc.stderr
 
 
 def test_dry_run_generates_eula_and_pinned_defaults(tmp_path):
@@ -91,6 +99,7 @@ def test_dry_run_generates_eula_and_pinned_defaults(tmp_path):
     assert "white-list=true" in props
     assert "difficulty=" in props
     assert "max-players=" in props
+    assert "server-port=25565" in props
     assert "motd=" in props
     # E2-2 (#527): world-gen inputs now come from scripts/minecraft/world.config
     # and are written into a freshly generated server.properties. The committed
@@ -118,6 +127,7 @@ def test_env_vars_override_defaults(tmp_path):
             "MEM": "4G",
             "ONLINE_MODE": "true",
             "WHITELIST": "false",
+            "SERVER_PORT": "25566",
         },
     )
 
@@ -128,6 +138,7 @@ def test_env_vars_override_defaults(tmp_path):
     props = (server_dir / "server.properties").read_text()
     assert "online-mode=true" in props
     assert "white-list=false" in props
+    assert "server-port=25566" in props
 
 
 def test_existing_server_properties_is_not_clobbered(tmp_path):

@@ -28,9 +28,15 @@
 #   SOAK_DURATION_HOURS         Default: 2.
 #   SOAK_AGENT_HOURLY_CAP_USD   Per-agent hourly cap assertion. Default: 0.01.
 #   SOAK_LOG_ROOT               Default: ./logs/soak.
+#   SOAK_WORK_ROOT              Temp directory for isolated Mindcraft clones.
+#                               Default: system temp/livestreamtoagi-soak-worktrees/<run id>.
+#   SOAK_KEEP_WORKTREES         Keep temp Mindcraft clones after cleanup for
+#                               debugging. Default: 0.
 #   SOAK_LAUNCH_STAGGER_SECONDS Default: 3.
 #   SOAK_START_MINECRAFT_IF_DOWN Start supervise.sh when health is down.
 #                               Default: 1.
+#   SOAK_KEEP_MINECRAFT_RUNNING Keep an auto-started Paper server running after
+#                               the timed sim ends. Default: 0.
 #   SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS
 #                               Seconds to wait for health after auto-start.
 #                               Default: 180.
@@ -41,10 +47,22 @@
 #                               bot-to-bot conversation commands and force
 #                               normal public Minecraft chat/action routing.
 #                               Default: 0.
-#   SOAK_BLOCK_SLOW_SIM_ACTIONS Set to 1 to disable slow/noisy/structured
-#                               actions such as !newAction, !observe, and
-#                               object-param bridge actions for quick sims.
+#   SOAK_BLOCK_SLOW_SIM_ACTIONS Set to 1 to disable slow/noisy actions such as
+#                               !newAction, !observe, !navigate, generated
+#                               plan building, and code execution. Basic
+#                               !place/!break stay available for quick builds.
 #                               Default: 0.
+#   SOAK_SAFE_TERRAIN_ACTIONS   Set to 1 to stage local-sim terrain guards:
+#                               disable auto elbow-room/item pickup/torch modes
+#                               and refuse destructive pathfinding.
+#                               Default: 0.
+#   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
+#                               bootstrap: a side Paper server, peaceful rules,
+#                               a flat grass starter meadow, resource piles,
+#                               and starter tools/materials. Default: 0.
+#   SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS
+#                               Seconds to wait after bot launch before giving
+#                               the online starter kit. Default: 5.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -66,15 +84,31 @@ BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8010/api/health}"
 SOAK_DURATION_HOURS="${SOAK_DURATION_HOURS:-2}"
 SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_LOG_ROOT="${SOAK_LOG_ROOT:-$REPO_ROOT/logs/soak}"
+SOAK_KEEP_WORKTREES="${SOAK_KEEP_WORKTREES:-0}"
 SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
+SOAK_KEEP_MINECRAFT_RUNNING="${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-0}"
 SOAK_BLOCK_SLOW_SIM_ACTIONS="${SOAK_BLOCK_SLOW_SIM_ACTIONS:-0}"
+SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
+SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
+SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
+MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
+
+if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+    SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/minecraft-server-easy}"
+    WORLD_CONFIG="${WORLD_CONFIG:-$SCRIPT_DIR/world-easy.config}"
+    MC_HOST="${MC_HOST:-127.0.0.1}"
+    MC_PORT="${MC_PORT:-${SERVER_PORT:-25566}}"
+    SERVER_PORT="${SERVER_PORT:-$MC_PORT}"
+    WHITELIST="${WHITELIST:-false}"
+    export SERVER_DIR WORLD_CONFIG MC_HOST MC_PORT SERVER_PORT WHITELIST
+fi
 
 MODE="run"
 while [ "$#" -gt 0 ]; do
@@ -139,6 +173,35 @@ node_major() {
     node -v 2>&1 | sed -nE 's/^v?([0-9]+).*/\1/p'
 }
 
+mindserver_port_is_free() {
+    local port="$1"
+    PORT="$port" node --input-type=module <<'NODE'
+import net from 'node:net';
+
+const port = Number(process.env.PORT);
+const server = net.createServer();
+server.once('error', () => process.exit(1));
+server.once('listening', () => server.close(() => process.exit(0)));
+server.listen(port, '127.0.0.1');
+NODE
+}
+
+check_mindserver_ports_available() {
+    local bot bot_index=0 port problems=0
+    for bot in $SOAK_BOTS; do
+        port=$((SOAK_MINDSERVER_BASE_PORT + bot_index))
+        if ! mindserver_port_is_free "$port"; then
+            fail "MindServer port $port for $bot is already in use."
+            problems=1
+        fi
+        bot_index=$((bot_index + 1))
+    done
+    if [ "$problems" -ne 0 ]; then
+        info "  Set SOAK_MINDSERVER_BASE_PORT to a free range, or stop stale Mindcraft/MindServer processes."
+        return 1
+    fi
+}
+
 duration_seconds() {
     awk -v hours="$SOAK_DURATION_HOURS" 'BEGIN {
         if (hours !~ /^[0-9]+([.][0-9]+)?$/ || hours <= 0) exit 1;
@@ -177,6 +240,8 @@ verify_static() {
 
     [ -x "$SCRIPT_DIR/supervise.sh" ] || { fail "missing executable: $SCRIPT_DIR/supervise.sh"; problems=1; }
     [ -x "$SCRIPT_DIR/start-server.sh" ] || { fail "missing executable: $SCRIPT_DIR/start-server.sh"; problems=1; }
+    [ -x "$SCRIPT_DIR/setup-easy-spawn.mjs" ] || { fail "missing executable: $SCRIPT_DIR/setup-easy-spawn.mjs"; problems=1; }
+    [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
     grep -q 'CHECK_MINECRAFT=1 bash scripts/check-services.sh' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document the Minecraft service gate"
@@ -200,6 +265,7 @@ print_plan() {
     ok "E8-8 multi-agent soak plan"
     info "duration:       ${SOAK_DURATION_HOURS}h (${seconds:-invalid} seconds)"
     info "log root:       $SOAK_LOG_ROOT"
+    info "work root:      ${SOAK_WORK_ROOT:-<per-run temp>}"
     info "bridge:         $MINECRAFT_BRIDGE_URL"
     info "backend health: $BACKEND_HEALTH_URL"
     info "LM Studio:      $LOCAL_LLM_BASE_URL"
@@ -207,7 +273,11 @@ print_plan() {
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
+    info "keep MC alive:  $SOAK_KEEP_MINECRAFT_RUNNING"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
+    info "MC target:      ${MC_HOST:-127.0.0.1}:${MC_PORT:-${SERVER_PORT:-25565}}"
+    info "server dir:     ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
+    info "world config:   ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
@@ -215,9 +285,19 @@ print_plan() {
         info "private conv:   allowed"
     fi
     if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
-        info "slow actions:   blocked (!newAction/!observe/structured bridge actions)"
+        info "slow actions:   blocked (!newAction/!observe/!navigate/plan/code)"
     else
         info "slow actions:   allowed"
+    fi
+    if [ "$SOAK_SAFE_TERRAIN_ACTIONS" = "1" ]; then
+        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing)"
+    else
+        info "safe terrain:   disabled"
+    fi
+    if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+        info "easy spawn:     enabled (peaceful starter meadow + online starter kit)"
+    else
+        info "easy spawn:     disabled"
     fi
     if [ -n "$SOAK_INIT_MESSAGE" ]; then
         info "init prompt:    set (${#SOAK_INIT_MESSAGE} chars)"
@@ -227,7 +307,7 @@ print_plan() {
     info "bots:           $SOAK_BOTS"
     info "cost agents:    $SOAK_COST_AGENTS"
     info "Mindcraft base: $MINDCRAFT_DIR"
-    info "isolation:      shared local clones with node_modules symlink"
+    info "isolation:      temp local clones with node_modules symlink"
 }
 
 build_settings_json() {
@@ -279,8 +359,6 @@ if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {
         '!newAction',
         '!observe',
         '!navigate',
-        '!place',
-        '!break',
         '!buildFromPlan',
         '!executeCode',
     ]) {
@@ -359,6 +437,7 @@ case "$SOAK_MINDSERVER_BASE_PORT" in
         exit 2
         ;;
 esac
+check_mindserver_ports_available || exit 1
 
 if MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd)"; then
     :
@@ -382,7 +461,11 @@ fi
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
 RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
-mkdir -p "$RUN_DIR"/{bots,preflight,logs,worktrees}
+SOAK_WORK_ROOT="${SOAK_WORK_ROOT:-${TMPDIR:-/tmp}/livestreamtoagi-soak-worktrees/$RUN_ID}"
+mkdir -p "$SOAK_WORK_ROOT"
+SOAK_WORK_ROOT="$(cd -- "$SOAK_WORK_ROOT" && pwd)"
+mkdir -p "$RUN_DIR"/{bots,preflight,logs}
+printf '%s\n' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"
 PID_FILE="$RUN_DIR/pids.tsv"
 TAIL_PID_FILE="$RUN_DIR/tail-pids.txt"
 EARLY_EXIT_FILE="$RUN_DIR/early-exits.tsv"
@@ -428,10 +511,21 @@ write_metadata() {
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
+        echo "work_root=$SOAK_WORK_ROOT"
+        echo "keep_worktrees=$SOAK_KEEP_WORKTREES"
         echo "start_minecraft_if_down=$SOAK_START_MINECRAFT_IF_DOWN"
+        echo "keep_minecraft_running=$SOAK_KEEP_MINECRAFT_RUNNING"
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
         echo "block_private_conversations=$SOAK_BLOCK_PRIVATE_CONVERSATIONS"
         echo "block_slow_sim_actions=$SOAK_BLOCK_SLOW_SIM_ACTIONS"
+        echo "safe_terrain_actions=$SOAK_SAFE_TERRAIN_ACTIONS"
+        echo "easy_spawn=$SOAK_EASY_SPAWN"
+        echo "easy_spawn_online_delay_seconds=$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
+        echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
+        echo "minecraft_host=${MC_HOST:-127.0.0.1}"
+        echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
+        echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
+        echo "world_config=${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
         if [ -n "$SOAK_INIT_MESSAGE" ]; then
             echo "init_message_set=yes"
             echo "init_message_chars=${#SOAK_INIT_MESSAGE}"
@@ -523,14 +617,103 @@ ensure_minecraft_server() {
 
 prepare_mindcraft_clone() {
     local bot="$1" dest
-    dest="$RUN_DIR/worktrees/mindcraft-$bot"
+    dest="$SOAK_WORK_ROOT/mindcraft-$bot"
     git clone --shared --quiet "$MINDCRAFT_BASE_ABS" "$dest"
     git -C "$dest" checkout --quiet --detach "$MINDCRAFT_COMMIT"
     ln -s "$MINDCRAFT_BASE_ABS/node_modules" "$dest/node_modules"
     if [ -f "$MINDCRAFT_BASE_ABS/keys.json" ]; then
         ln -s "$MINDCRAFT_BASE_ABS/keys.json" "$dest/keys.json"
     fi
+    apply_safe_terrain_patch "$dest"
     printf '%s\n' "$dest"
+}
+
+apply_safe_terrain_patch() {
+    local dest="$1" profile skills
+    [ "$SOAK_SAFE_TERRAIN_ACTIONS" = "1" ] || return 0
+    profile="$dest/profiles/defaults/assistant.json"
+    skills="$dest/src/agent/library/skills.js"
+    if [ ! -f "$profile" ] || [ ! -f "$skills" ]; then
+        fail "Safe terrain patch could not find Mindcraft profile/skills files in $dest"
+        return 1
+    fi
+    SAFE_TERRAIN_PROFILE="$profile" SAFE_TERRAIN_SKILLS="$skills" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const profilePath = process.env.SAFE_TERRAIN_PROFILE;
+const skillsPath = process.env.SAFE_TERRAIN_SKILLS;
+const marker = 'LTAG safe terrain local sim';
+
+const profile = JSON.parse(readFileSync(profilePath, 'utf8'));
+profile.modes = {
+    ...(profile.modes || {}),
+    self_preservation: true,
+    unstuck: true,
+    cowardice: false,
+    self_defense: true,
+    hunting: false,
+    item_collecting: false,
+    torch_placing: false,
+    elbow_room: false,
+    idle_staring: true,
+    cheat: false,
+};
+writeFileSync(profilePath, `${JSON.stringify(profile, null, 4)}\n`);
+
+let source = readFileSync(skillsPath, 'utf8');
+if (!source.includes(marker)) {
+    const movementNeedle = `    const nonDestructiveMovements = new pf.Movements(bot);
+    const dontBreakBlocks = ['glass', 'glass_pane'];
+`;
+    const movementPatch = `    const nonDestructiveMovements = new pf.Movements(bot);
+    const allowDestructivePaths = !['0', 'false', 'no', 'off'].includes(String(process.env.MINECRAFT_ALLOW_DESTRUCTIVE_PATHS || '1').trim().toLowerCase()); // ${marker}
+    if (!allowDestructivePaths) {
+        nonDestructiveMovements.canDig = false;
+        nonDestructiveMovements.allow1by1towers = false;
+    }
+    const dontBreakBlocks = ['glass', 'glass_pane'];
+`;
+    if (!source.includes(movementNeedle)) {
+        throw new Error('goToGoal movement initialization shape changed');
+    }
+    source = source.replace(movementNeedle, movementPatch);
+
+    source = source.replace(
+        `    const destructiveMovements = new pf.Movements(bot);
+
+    let final_movements = destructiveMovements;
+`,
+        `    const destructiveMovements = new pf.Movements(bot);
+
+    let final_movements = allowDestructivePaths ? destructiveMovements : nonDestructiveMovements;
+`,
+    );
+
+    const fallbackNeedle = `    else if (await bot.pathfinder.getPathTo(destructiveMovements, goal, pathfind_timeout).status === 'success') {
+        log(bot, \`Found destructive path.\`);
+    }
+    else {
+        log(bot, \`Path not found, but attempting to navigate anyway using destructive movements.\`);
+    }
+`;
+    const fallbackPatch = `    else if (allowDestructivePaths && await bot.pathfinder.getPathTo(destructiveMovements, goal, pathfind_timeout).status === 'success') {
+        log(bot, \`Found destructive path.\`);
+    }
+    else if (allowDestructivePaths) {
+        log(bot, \`Path not found, but attempting to navigate anyway using destructive movements.\`);
+    }
+    else {
+        log(bot, \`Path not found without terrain digging; refusing destructive navigation.\`);
+        return false;
+    }
+`;
+    if (!source.includes(fallbackNeedle)) {
+        throw new Error('goToGoal destructive fallback shape changed');
+    }
+    source = source.replace(fallbackNeedle, fallbackPatch);
+    writeFileSync(skillsPath, source);
+}
+NODE
 }
 
 launch_bot() {
@@ -546,6 +729,8 @@ launch_bot() {
         export MINDSERVER_PORT="$mindserver_port"
         export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
+        export MC_HOST MC_PORT
+        export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"
         if [ -n "$bot_settings_json" ]; then
@@ -568,26 +753,57 @@ stop_process_file() {
     done < "$file"
 }
 
+signal_process_tree() {
+    local pid="$1" signal="$2" child
+    for child in $(pgrep -P "$pid" 2> /dev/null || true); do
+        signal_process_tree "$child" "$signal"
+    done
+    kill "-$signal" "$pid" 2> /dev/null || true
+}
+
 stop_bots() {
     local bot pid rest
     [ -f "$PID_FILE" ] || return 0
     while IFS="$(printf '\t')" read -r bot pid rest; do
         [ -n "${pid:-}" ] || continue
-        kill "$pid" 2> /dev/null || true
+        signal_process_tree "$pid" TERM
     done < "$PID_FILE"
     sleep 5
     while IFS="$(printf '\t')" read -r bot pid rest; do
         [ -n "${pid:-}" ] || continue
-        kill -KILL "$pid" 2> /dev/null || true
+        if kill -0 "$pid" 2> /dev/null; then
+            signal_process_tree "$pid" KILL
+        fi
+        wait "$pid" 2> /dev/null || true
     done < "$PID_FILE"
 }
 
 stop_minecraft_supervisor() {
     local pid
     [ -f "$RUN_DIR/minecraft-supervisor.pid" ] || return 0
+    if [ "$SOAK_KEEP_MINECRAFT_RUNNING" = "1" ]; then
+        info "leaving auto-started Minecraft supervisor running"
+        return 0
+    fi
     pid="$(cat "$RUN_DIR/minecraft-supervisor.pid" 2> /dev/null || true)"
     [ -n "$pid" ] || return 0
     kill "$pid" 2> /dev/null || true
+    wait "$pid" 2> /dev/null || true
+}
+
+cleanup_worktrees() {
+    [ -n "${SOAK_WORK_ROOT:-}" ] || return 0
+    if [ "$SOAK_KEEP_WORKTREES" = "1" ]; then
+        info "keeping temp Mindcraft clones at $SOAK_WORK_ROOT"
+        return 0
+    fi
+    case "$SOAK_WORK_ROOT" in
+        ""|"/"|"$REPO_ROOT"|"$REPO_ROOT"/*)
+            info "not auto-removing work root at $SOAK_WORK_ROOT"
+            return 0
+            ;;
+    esac
+    rm -rf "$SOAK_WORK_ROOT"
 }
 
 cleanup() {
@@ -595,6 +811,7 @@ cleanup() {
     stop_bots
     stop_minecraft_supervisor
     stop_process_file "$TAIL_PID_FILE"
+    cleanup_worktrees
     exit "$status"
 }
 trap cleanup EXIT
@@ -767,8 +984,16 @@ write_metadata
 
 run_checked "docker services" "$RUN_DIR/preflight/check-services.txt" bash "$REPO_ROOT/scripts/check-services.sh"
 run_checked "LM Studio models" "$RUN_DIR/preflight/llm-local.txt" pnpm llm:local --list-only
+if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+    run_checked "easy spawn access files" "$RUN_DIR/preflight/easy-spawn-access.txt" \
+        node "$SCRIPT_DIR/setup-easy-spawn.mjs" --write-access-only
+fi
 ensure_minecraft_server
 run_checked "Minecraft health" "$RUN_DIR/preflight/minecraft-health.json" "$SCRIPT_DIR/health.sh" --json
+if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+    run_checked "easy spawn terrain" "$RUN_DIR/preflight/easy-spawn-terrain.txt" \
+        node "$SCRIPT_DIR/setup-easy-spawn.mjs" --terrain-only
+fi
 run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS "$BACKEND_HEALTH_URL"
 
 start_log_capture
@@ -778,6 +1003,12 @@ for bot in $SOAK_BOTS; do
     launch_bot "$bot" "$BOT_INDEX"
     BOT_INDEX=$((BOT_INDEX + 1))
 done
+
+if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+    sleep "$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
+    run_checked "easy spawn starter kit" "$RUN_DIR/preflight/easy-spawn-kit.txt" \
+        node "$SCRIPT_DIR/setup-easy-spawn.mjs"
+fi
 
 MONITOR_STATUS=0
 monitor_bots || MONITOR_STATUS=$?

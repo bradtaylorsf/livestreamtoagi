@@ -74,6 +74,11 @@ def _resolve_trace_id(env: BridgeRequest, trace_id: str | None) -> str:
     return trace_id or env.trace_id or f"trace-{uuid4()}"
 
 
+def _canonical_agent_id(agent_id: str) -> str:
+    """Return the database/runtime canonical agent id carried by bridge events."""
+    return agent_id.strip().lower()
+
+
 def _attribution(env: BridgeRequest, trace_id: str) -> dict[str, str]:
     """Envelope-carried attribution every inbound event must carry.
 
@@ -84,7 +89,7 @@ def _attribution(env: BridgeRequest, trace_id: str) -> dict[str, str]:
     return {
         "trace_id": trace_id,
         "request_id": env.request_id,
-        "agent_id": env.agent_id,
+        "agent_id": _canonical_agent_id(env.agent_id),
         "run_id": env.run_id,
         "simulation_id": env.simulation_id,
     }
@@ -119,7 +124,7 @@ async def handle_perception_report(
         logger,
         trace_id=tid,
         request_id=env.request_id,
-        agent_id=env.agent_id,
+        agent_id=_canonical_agent_id(env.agent_id),
         event_type=EventType.BRIDGE_PERCEPTION.value,
     )
     return {"accepted": True}
@@ -143,7 +148,7 @@ async def handle_action_result(env: BridgeRequest, trace_id: str | None = None) 
         logger,
         trace_id=tid,
         request_id=env.request_id,
-        agent_id=env.agent_id,
+        agent_id=_canonical_agent_id(env.agent_id),
         event_type=EventType.BRIDGE_ACTION_RESULT.value,
     )
     return {"accepted": True}

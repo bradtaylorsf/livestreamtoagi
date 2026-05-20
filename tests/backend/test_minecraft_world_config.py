@@ -21,6 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "start-server.sh"
 WORLD_CONFIG = REPO_ROOT / "scripts" / "minecraft" / "world.config"
+EASY_WORLD_CONFIG = REPO_ROOT / "scripts" / "minecraft" / "world-easy.config"
 
 # The fixed allow-list the start script reads. Keep in sync with world.config
 # and the parser in start-server.sh.
@@ -74,6 +75,19 @@ def test_world_config_exists_and_parses():
     assert cfg["LEVEL_SEED"] == ""  # empty → random world
     assert cfg["LEVEL_TYPE"] == "minecraft:normal"
     assert cfg["LEVEL_NAME"] == "world"
+    assert cfg["GENERATE_STRUCTURES"] == "true"
+    assert cfg["SPAWN_PROTECTION"] == "0"
+
+
+def test_easy_world_config_exists_and_parses():
+    assert EASY_WORLD_CONFIG.is_file(), f"missing {EASY_WORLD_CONFIG}"
+    cfg = _parse_config(EASY_WORLD_CONFIG.read_text())
+    assert EXPECTED_KEYS.issubset(cfg.keys()), (
+        f"world-easy.config missing keys: {EXPECTED_KEYS - set(cfg)}"
+    )
+    assert cfg["LEVEL_SEED"] == "livestreamtoagi-easy-meadow-v1"
+    assert cfg["LEVEL_TYPE"] == "minecraft:normal"
+    assert cfg["LEVEL_NAME"] == "easy_world"
     assert cfg["GENERATE_STRUCTURES"] == "true"
     assert cfg["SPAWN_PROTECTION"] == "0"
 

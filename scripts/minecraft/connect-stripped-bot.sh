@@ -75,7 +75,7 @@ MINDCRAFT_DIR="${MINDCRAFT_DIR:-./mindcraft}"
 REQUIRED_NODE_MAJOR="20"
 MC_VERSION="1.21.6"                       # E1-R1 / decisions 0001 (matches start-server.sh + the settings template)
 MC_HOST="${MC_HOST:-127.0.0.1}"           # E1-R2 / decisions 0002 — localhost only in offline mode
-MC_PORT="${MC_PORT:-25565}"               # E2 start-server.sh default (server-port left unset)
+MC_PORT="${MC_PORT:-25565}"               # E2 start-server.sh default
 MC_AUTH="offline"                         # E1-R2 / decisions 0002 — matches Paper online-mode=false
 MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/stock-bot.json}"
 # Pre-flight reachability-check URL only (consumed by `pnpm llm:local`, which

@@ -50,6 +50,10 @@ def _clean_text(value: object) -> str:
     return str(value).strip()
 
 
+def _canonical_agent_id(value: object) -> str:
+    return _clean_text(value).lower()
+
+
 def _render_observation(observation: object) -> str:
     try:
         return json.dumps(observation, sort_keys=True, default=str)
@@ -132,7 +136,7 @@ async def _compact_bridge_event(
     interaction: str,
     event_type: str,
 ) -> None:
-    agent_id = _clean_text(data.get("agent_id"))
+    agent_id = _canonical_agent_id(data.get("agent_id"))
     if not agent_id:
         logger.debug("Skipping %s memory compaction with missing agent_id", event_type)
         return

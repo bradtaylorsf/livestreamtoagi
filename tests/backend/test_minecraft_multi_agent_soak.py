@@ -19,6 +19,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
 RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
+EASY_SETUP_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "setup-easy-spawn.mjs"
 DOC = REPO_ROOT / "docs" / "minecraft" / "multi-agent-soak.md"
 PACKAGE = REPO_ROOT / "package.json"
 
@@ -47,12 +48,16 @@ def test_soak_script_exists_and_is_executable() -> None:
     assert os.access(SCRIPT, os.X_OK), "soak.sh must be executable"
     assert RUN_SCRIPT.is_file(), f"missing {RUN_SCRIPT}"
     assert os.access(RUN_SCRIPT, os.X_OK), "run-local-sim.sh must be executable"
+    assert EASY_SETUP_SCRIPT.is_file(), f"missing {EASY_SETUP_SCRIPT}"
+    assert os.access(EASY_SETUP_SCRIPT, os.X_OK), "setup-easy-spawn.mjs must be executable"
 
 
 def test_soak_script_bash_syntax_is_valid() -> None:
     proc = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     proc = subprocess.run(["bash", "-n", str(RUN_SCRIPT)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    proc = subprocess.run(["node", "--check", str(EASY_SETUP_SCRIPT)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
 
@@ -70,6 +75,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "LOCAL_LLM_MODEL" in proc.stdout
     assert "SOAK_AGENT_HOURLY_CAP_USD" in proc.stdout
     assert "SOAK_START_MINECRAFT_IF_DOWN" in proc.stdout
+    assert "SOAK_EASY_SPAWN" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
     assert "run_cost_query()" not in proc.stdout
@@ -85,6 +91,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "pnpm dev" in wrapper.stdout
     assert "Required in .env" in wrapper.stdout
     assert "MINECRAFT_BRIDGE_TOKEN" in wrapper.stdout
+    assert "MC_SIM_EASY_MODE" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
 
@@ -105,9 +112,12 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
     for bot in BOT_IDS:
         assert bot in proc.stdout
-    assert "shared local clones" in proc.stdout
+    assert "temp local clones" in proc.stdout
+    assert "work root:      <per-run temp>" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
+    assert "keep MC alive:  0" in proc.stdout
+    assert "easy spawn:     disabled" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
 
 
@@ -145,8 +155,18 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "private bot conversations: 1" in proc.stdout
     assert "slow sim actions: 1" in proc.stdout
     assert "suppress action chat: 1" in proc.stdout
+    assert "safe terrain actions: 1" in proc.stdout
+    assert "easy mode: 1" in proc.stdout
+    assert "keep MC server running: 1" in proc.stdout
+    assert "minecraft: 127.0.0.1:25566" in proc.stdout
+    assert "server dir:" in proc.stdout and "minecraft-server-easy" in proc.stdout
+    assert "world config:" in proc.stdout and "world-easy.config" in proc.stdout
+    assert "MindServer base port:" in proc.stdout
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
-    assert "slow actions:   blocked (!newAction/!observe/structured bridge actions)" in proc.stdout
+    assert "slow actions:   blocked (!newAction/!observe/!navigate/plan/code)" in proc.stdout
+    assert "safe terrain:   enabled" in proc.stdout
+    assert "easy spawn:     enabled" in proc.stdout
+    assert "keep MC alive:  1" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
     assert SOAK_BOTS_LINE not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
@@ -341,6 +361,8 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
     for bot in BOT_IDS:
         assert f"connect-{bot}-bot.sh" in text
     assert "git clone --shared" in text
+    assert 'dest="$SOAK_WORK_ROOT/mindcraft-$bot"' in text
+    assert 'printf \'%s\\n\' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"' in text
     assert "node_modules" in text
     assert "SOAK_MINDSERVER_BASE_PORT + bot_index" in text
     assert 'export MINDSERVER_PORT="$mindserver_port"' in text
@@ -349,6 +371,11 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
 def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "SOAK_START_MINECRAFT_IF_DOWN" in text
+    assert "SOAK_WORK_ROOT" in text
+    assert "SOAK_KEEP_WORKTREES" in text
+    assert "SOAK_KEEP_MINECRAFT_RUNNING" in text
+    assert "check_mindserver_ports_available" in text
+    assert "signal_process_tree" in text
     assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
     assert "SOAK_INIT_MESSAGE" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
@@ -357,15 +384,85 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "settings.init_message = ''" in text
     assert "settings.num_examples = 0" in text
     assert "settings.show_command_syntax = 'none'" in text
+    assert "SOAK_SAFE_TERRAIN_ACTIONS" in text
+    assert "SOAK_EASY_SPAWN" in text
+    assert "setup-easy-spawn.mjs" in text
+    assert "world-easy.config" in text
+    assert "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS" in text
+    assert "apply_safe_terrain_patch" in text
+    assert "allowDestructivePaths" in text
+    assert "nonDestructiveMovements.canDig = false" in text
+    assert "elbow_room: false" in text
+    assert "item_collecting: false" in text
     assert "!startConversation" in text
     assert "!endConversation" in text
     assert "!newAction" in text
     assert "!observe" in text
     assert "!buildFromPlan" in text
+    assert "'!place'," not in text
+    assert "'!break'," not in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text
     assert "minecraft-supervisor-stdout.log" in text
+
+
+def test_easy_spawn_access_writer_is_offline_safe(tmp_path) -> None:
+    proc = subprocess.run(
+        ["node", str(EASY_SETUP_SCRIPT), "--write-access-only"],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "SERVER_DIR": str(tmp_path / "easy-server"),
+            "EASY_SETUP_PLAYERS": "Alpha Vera",
+            "EASY_SETUP_OBSERVERS": "bradtaylorsf",
+            "EASY_SETUP_OPERATORS": "bradtaylorsf",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    ops = json.loads((tmp_path / "easy-server" / "ops.json").read_text(encoding="utf-8"))
+    whitelist = json.loads(
+        (tmp_path / "easy-server" / "whitelist.json").read_text(encoding="utf-8")
+    )
+    assert {entry["name"] for entry in whitelist} >= {"WorldBuilder", "Alpha", "Vera"}
+    assert any(
+        entry["name"] == "WorldBuilder"
+        and entry["level"] == 4
+        and entry["bypassesPlayerLimit"] is True
+        for entry in ops
+    )
+    assert any(entry["name"] == "bradtaylorsf" and entry["level"] == 4 for entry in ops)
+
+
+def test_easy_spawn_script_builds_safe_starter_arena() -> None:
+    text = EASY_SETUP_SCRIPT.read_text(encoding="utf-8")
+    assert "/gamerule spawnRadius 0" in text
+    assert "/gamerule drowningDamage false" in text
+    assert "/gamerule fallDamage false" in text
+    assert "/fill -23 64 -23 23 68 -23 minecraft:glass replace" in text
+    assert "/spawnpoint @a 0 64 0" in text
+    assert "EASY_SETUP_OBSERVERS" in text
+    assert "EASY_SETUP_OPERATORS" in text
+    assert "EASY_SETUP_SPECTATORS" in text
+    assert "/gamemode spectator" in text
+    assert "minecraft:oak_log 32" in text
+    assert "minecraft:stone_pickaxe 1" in text
+
+
+def test_bridge_move_actions_respect_non_destructive_path_env() -> None:
+    for relative in (
+        "scripts/minecraft/fork-src/agent/commands/move_action.js",
+        "scripts/minecraft/fork-src/agent/commands/navigate_action.js",
+    ):
+        text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        assert "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS" in text
+        assert "destructivePathsAllowed" in text
+        assert "movements.canDig = false" in text
+        assert "movements.allow1by1towers = false" in text
 
 
 def test_script_records_cost_ledger_and_hourly_cap() -> None:
@@ -395,6 +492,8 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "NO-GO for E8-9" in text
     assert "0.02-hour live startup smoke" in text
     assert "SOAK_START_MINECRAFT_IF_DOWN=0" in text
+    assert "minecraft-server-easy" in text
+    assert "setup-easy-spawn.mjs" in text
     assert "google/gemma-4-26b-a4b" in text
     assert "pnpm llm:local --list-only" in text
     assert "scripts/minecraft/soak.sh --duration-hours 2" in text

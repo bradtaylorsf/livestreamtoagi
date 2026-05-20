@@ -21,7 +21,7 @@
 const settings = {
     "minecraft_version": "1.21.6", // E3-2: pinned to the E2 Paper version (E1-R1 / decisions 0001), was "auto"
     "host": "127.0.0.1", // E1-R2: localhost only - offline-mode bots must not be public (decisions 0002)
-    "port": 25565, // E3-2: E2 server default (start-server.sh leaves server-port unset), was 55916
+    "port": 25565, // E3-2: E2 server default, was 55916
     "auth": "offline", // E1-R2: matches Paper online-mode=false (decisions 0002)
 
     // the mindserver manages all agents and hosts the UI

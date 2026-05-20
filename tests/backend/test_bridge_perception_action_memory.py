@@ -208,6 +208,27 @@ async def test_perception_event_compacts_to_existing_memory_path() -> None:
     ]
 
 
+async def test_capitalized_agent_id_is_compacted_lowercase() -> None:
+    compactor = FakeCompactor()
+    register_memory_consumer(event_bus, compactor)
+
+    await event_bus.emit(
+        EventType.BRIDGE_PERCEPTION,
+        {
+            "trace_id": "trace-1",
+            "request_id": "req-1",
+            "agent_id": "Alpha",
+            "run_id": "run-1",
+            "simulation_id": "sim-1",
+            "observations": [{"type": "block", "x": 1, "y": 64, "z": 1}],
+        },
+    )
+
+    await _wait_for(lambda: len(compactor.calls) == 1)
+    assert compactor.calls[0]["agent_id"] == "alpha"
+    assert compactor.calls[0]["participants"] == ["alpha"]
+
+
 async def test_action_result_event_compacts_to_existing_memory_path() -> None:
     compactor = FakeCompactor()
     register_memory_consumer(event_bus, compactor)

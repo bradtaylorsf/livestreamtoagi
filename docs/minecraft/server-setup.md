@@ -147,6 +147,7 @@ command, e.g. `MEM=4G scripts/minecraft/start-server.sh`.
 | `MEM` | `2G` | JVM heap, used for both `-Xms` and `-Xmx`. |
 | `ONLINE_MODE` | `false` | See §7. Keep `false` for our private setup. |
 | `WHITELIST` | `true` | Reject players not on the whitelist. See §7. |
+| `SERVER_PORT` | `25565` | TCP port written into a fresh `server.properties`. |
 | `SMOKE_TIMEOUT` | `180` | Seconds `--smoke` waits for boot (verification only). |
 | `WORLD_CONFIG` | `<script dir>/world.config` | World-generation input file (seed/type/spawn). See **[world-config.md](./world-config.md)**. |
 
@@ -269,7 +270,7 @@ Run `pnpm verify:minecraft-server` to validate this issue headlessly; reserve
 | `✗ Java not found on PATH` | No JRE installed. | Do §2, open a **new** terminal. |
 | `✗ Java 17 found, but Paper 1.21.6 needs Java 21` | Wrong Java major. | Install Java 21; ensure it's first on `PATH` (`java -version` must say 21). |
 | `Paper jar download failed` | No network, or that version/build doesn't exist. | Check connectivity; confirm the build at <https://papermc.io/downloads/paper>; re-run (download is retried automatically). |
-| `FAILED TO BIND TO PORT! ... 25565` | Another server already uses port 25565. | Stop the other server, or change `server-port=` in `server.properties` and reconnect on the new port. |
+| `FAILED TO BIND TO PORT! ... 25565` | Another server already uses port 25565. | Stop the other server, set `SERVER_PORT=<port>` before first generation, or change `server-port=` in `server.properties` and reconnect on the new port. |
 | Client gets *"You are not white-listed on this server!"* | `white-list=true` and your name isn't added. | Run `whitelist add <name>` in the console (§9). |
 | Console says *"You need to agree to the EULA..."* and exits | `eula.txt` missing/`false`. | Re-run the start script (it writes `eula=true`); or set `eula=true` in `<SERVER_DIR>/eula.txt`. |
 | World looks wrong / want a different one | World gen is a config input. | Edit `scripts/minecraft/world.config` and start a **fresh** world — see [world-config.md](./world-config.md). |

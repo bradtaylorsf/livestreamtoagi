@@ -45,7 +45,11 @@ The soak starts one process for each committed Mindcraft launcher:
 Each bot gets an isolated local clone of the pinned Mindcraft checkout, with
 `node_modules` symlinked from the base `./mindcraft` install. That prevents the
 single-bot staging scripts from racing over `settings.js`, profile JSON, or
-patched action files while still reusing the reviewed launchers.
+patched action files while still reusing the reviewed launchers. These clones
+are created outside the repository by default so `pnpm dev` / uvicorn reload
+watchers do not restart the backend when the soak prepares bot worktrees. The
+evidence directory records their location in `worktrees.path`; set
+`SOAK_KEEP_WORKTREES=1` to inspect them after a run.
 
 ## Pre-Flight Checklist
 
@@ -112,6 +116,24 @@ pnpm verify:minecraft-soak
 local Java 21 / Node 20 Homebrew paths on macOS, then delegates to
 `scripts/minecraft/soak.sh`. Use it for the normal local operator flow: start
 `pnpm dev`, then run the desired Minecraft sim command in a second terminal.
+By default the local sim uses an isolated easy-mode Paper server at
+`127.0.0.1:25566`, with files in `minecraft-server-easy/` and world-generation
+inputs from `scripts/minecraft/world-easy.config`. This avoids disturbing the
+normal `minecraft-server/` world on `25565`. `SOAK_EASY_SPAWN=1` runs
+`scripts/minecraft/setup-easy-spawn.mjs` before and after bot launch: it writes
+access files for a temporary op setup bot, sets peaceful/daylight rules, creates
+a flat grass starter meadow with visible resource piles and work blocks, then
+teleports online bots into the meadow with a small starter kit. The easy arena
+also pins spawn radius to zero, disables drowning/fall/freeze damage for local
+validation, and wraps the starter meadow in a glass boundary so agents have a
+small safe place to learn before exploring. Set `MC_SIM_EASY_MODE=0` to use the
+normal Minecraft target instead, or set `MC_SIM_MC_PORT=<port>` if `25566` is
+busy. In easy mode, `MC_SIM_KEEP_SERVER_RUNNING=1` by default so the Paper
+server remains available after the timed bot run for manual inspection; set it
+to `0` when you want the runner to stop its auto-started server. Local sims
+also choose a high run-specific MindServer base port by default to avoid stale
+`8080+` listeners from previous experiments; set
+`MC_SIM_MINDSERVER_BASE_PORT=<port>` if you need a fixed range.
 The sim wrapper defaults to the real character cast only:
 Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. BridgeBot is excluded
 unless `MC_SIM_INCLUDE_BRIDGE_BOT=1` is set, because it is a technical bridge
@@ -120,16 +142,20 @@ test bot rather than a character. The wrapper also sets
 do not use Mindcraft's private `!startConversation`/`!endConversation` channel;
 the characters coordinate through ordinary public Minecraft chat and visible
 actions instead. It also blocks slow startup code-generation via `!newAction`,
-the noisy local `!observe` action, and structured bridge actions that are not
-friendly to Mindcraft's simple chat-command parser by default, pushing the
-local smoke path toward direct commands such as `!move`, `!searchForBlock`,
-`!collectBlocks`, and `!placeHere`. In this local public-chat mode the wrapper
-also hides command syntax from in-game chat, so one character's command does not
-get rebroadcast as a forced command for every other isolated MindServer
-instance. Low-level bridge action result chatter is suppressed by default with
-`MC_SIM_SUPPRESS_ACTION_CHAT=1`; the action still logs to each bot log and
-still reports over the Python bridge, but it does not interrupt the other local
-models mid-turn. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
+the noisy local `!observe` action, generated plan building, and code execution
+by default, while leaving simple `!place`, `!placeHere`, and `!break` available
+so the agents can make visible camp markers during short runs. In this local
+public-chat mode the wrapper also hides command syntax from in-game chat, so one
+character's command does not get rebroadcast as a forced command for every other
+isolated MindServer instance. Low-level bridge action result chatter is
+suppressed by default with `MC_SIM_SUPPRESS_ACTION_CHAT=1`; the action still
+logs to each bot log and still reports over the Python bridge, but it does not
+interrupt the other local models mid-turn. Safe terrain behavior is also on by
+default: `MC_SIM_SAFE_TERRAIN_ACTIONS=1` sets
+`SOAK_SAFE_TERRAIN_ACTIONS=1` and `MINECRAFT_ALLOW_DESTRUCTIVE_PATHS=0`, which
+disables automatic elbow-room/item-pickup/torch modes in the disposable
+Mindcraft clones and refuses pathfinder routes that require digging or
+one-block towers. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
 want the local model to spend extra time synthesizing custom action code.
 
 Outputs are written to `logs/soak/<UTC timestamp>/`:
@@ -137,6 +163,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | File | Contents |
 | --- | --- |
 | `metadata.env` | Start/end plan, host info, git head, model ids, bridge URL, cost cap. |
+| `worktrees.path` | Temp directory containing disposable Mindcraft clones, when kept. |
 | `preflight/` | Raw pre-flight command output. |
 | `bots/<bot>.log` | Per-bot Mindcraft stdout/stderr. |
 | `logs/journalctl-minecraft.log` | Linux `journalctl -u minecraft -f`, or a note when unavailable. |

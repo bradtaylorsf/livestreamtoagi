@@ -17,9 +17,7 @@
 //   - minecraft_version "auto" -> "1.21.6"  (E1-R1 / docs/decisions/0001 — pin to
 //     the Paper version scripts/minecraft/start-server.sh provisions; "auto"
 //     can mis-detect against a modded/anti-cheat handshake)
-//   - port 55916 -> 25565                   (E2 / start-server.sh leaves
-//     server.properties server-port unset, so the server listens on Minecraft's
-//     default 25565)
+//   - port 55916 -> 25565                   (E2 / start-server.sh default)
 //   - host stays "127.0.0.1"                (E1-R2 / docs/decisions/0002 —
 //     offline-mode bots only on localhost / a private network)
 //   - auth stays "offline"                  (E1-R2 / docs/decisions/0002)
@@ -33,7 +31,7 @@
 const settings = {
     "minecraft_version": "1.21.6", // E3-2: pinned to the E2 Paper version (E1-R1 / decisions 0001), was "auto"
     "host": "127.0.0.1", // E1-R2: localhost only — offline-mode bots must not be public (decisions 0002)
-    "port": 25565, // E3-2: E2 server default (start-server.sh leaves server-port unset), was 55916
+    "port": 25565, // E3-2: E2 server default, was 55916
     "auth": "offline", // E1-R2: matches Paper online-mode=false (decisions 0002)
 
     // the mindserver manages all agents and hosts the UI

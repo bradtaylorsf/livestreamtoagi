@@ -33,6 +33,14 @@
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
 #   MC_SIM_ALLOW_NEW_ACTION=0
 #   MC_SIM_SUPPRESS_ACTION_CHAT=1
+#   MC_SIM_SAFE_TERRAIN_ACTIONS=1
+#   MC_SIM_EASY_MODE=1
+#   MC_SIM_MC_PORT=25566
+#   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
+#   MC_SIM_KEEP_SERVER_RUNNING=1
+#   MC_SIM_PLAYER_NAMES=<human names to teleport into the easy meadow>
+#   MC_SIM_OPERATOR_NAMES=<human names to op for gamemode/tp>
+#   MC_SIM_SPECTATOR_NAMES=<human names to auto-switch to spectator>
 #   MC_SIM_INIT_MESSAGE=<initial objective for the character bots>
 #   MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS=10000
 set -euo pipefail
@@ -110,6 +118,19 @@ has_arg() {
     return 1
 }
 
+arg_value_after() {
+    local needle="$1"
+    shift
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = "$needle" ] && [ "$#" -ge 2 ]; then
+            printf '%s\n' "$2"
+            return 0
+        fi
+        shift
+    done
+    return 1
+}
+
 case "${1:-}" in
     --help|-h)
         awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"
@@ -178,9 +199,39 @@ fi
 export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS SOAK_BLOCK_SLOW_SIM_ACTIONS
 MC_SIM_SUPPRESS_ACTION_CHAT="${MC_SIM_SUPPRESS_ACTION_CHAT:-1}"
 MINECRAFT_SUPPRESS_ACTION_CHAT="$MC_SIM_SUPPRESS_ACTION_CHAT"
-export MINECRAFT_SUPPRESS_ACTION_CHAT
+MC_SIM_SAFE_TERRAIN_ACTIONS="${MC_SIM_SAFE_TERRAIN_ACTIONS:-1}"
+SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-$MC_SIM_SAFE_TERRAIN_ACTIONS}"
+MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-0}"
+export MINECRAFT_SUPPRESS_ACTION_CHAT SOAK_SAFE_TERRAIN_ACTIONS MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
 
-DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: spread out, scout nearby terrain, gather any reachable hand-safe materials, set a useful goal, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. Use movement and exploration before repeated collection: good early commands are !searchForBlock(\"sand\", 64), !move(\"scout_1\", \"forward\", 8), !searchForBlock(\"oak_log\", 64), !collectBlocks(\"sand\", 8), and, after finding wood or exposed stone, !collectBlocks(\"oak_log\", 4) or !collectBlocks(\"stone\", 8). Do not repeatedly collect a block that was reported missing or tool-locked. Keep actions safe, narrate briefly in character, and continue until the run ends."
+MC_SIM_EASY_MODE="${MC_SIM_EASY_MODE:-1}"
+if [ "$MC_SIM_EASY_MODE" = "1" ]; then
+    SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/minecraft-server-easy}"
+    WORLD_CONFIG="${WORLD_CONFIG:-$SCRIPT_DIR/world-easy.config}"
+    MC_HOST="${MC_HOST:-127.0.0.1}"
+    MC_PORT="${MC_PORT:-${MC_SIM_MC_PORT:-${SERVER_PORT:-25566}}}"
+    SERVER_PORT="${SERVER_PORT:-$MC_PORT}"
+    WHITELIST="${WHITELIST:-false}"
+    SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-1}"
+    SOAK_KEEP_MINECRAFT_RUNNING="${SOAK_KEEP_MINECRAFT_RUNNING:-${MC_SIM_KEEP_SERVER_RUNNING:-1}}"
+elif [ -n "${MC_SIM_KEEP_SERVER_RUNNING+x}" ]; then
+    SOAK_KEEP_MINECRAFT_RUNNING="${SOAK_KEEP_MINECRAFT_RUNNING:-$MC_SIM_KEEP_SERVER_RUNNING}"
+fi
+export SERVER_DIR WORLD_CONFIG MC_HOST MC_PORT SERVER_PORT WHITELIST SOAK_EASY_SPAWN SOAK_KEEP_MINECRAFT_RUNNING
+SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-${MC_SIM_MINDSERVER_BASE_PORT:-$((18080 + (RANDOM % 1000) * 10))}}"
+export SOAK_MINDSERVER_BASE_PORT
+if [ -n "${MC_SIM_PLAYER_NAMES:-}" ]; then
+    EASY_SETUP_OBSERVERS="${EASY_SETUP_OBSERVERS:-$MC_SIM_PLAYER_NAMES}"
+fi
+if [ -n "${MC_SIM_OPERATOR_NAMES:-}" ]; then
+    EASY_SETUP_OPERATORS="${EASY_SETUP_OPERATORS:-$MC_SIM_OPERATOR_NAMES}"
+fi
+if [ -n "${MC_SIM_SPECTATOR_NAMES:-}" ]; then
+    EASY_SETUP_SPECTATORS="${EASY_SETUP_SPECTATORS:-$MC_SIM_SPECTATOR_NAMES}"
+fi
+export EASY_SETUP_OBSERVERS EASY_SETUP_OPERATORS EASY_SETUP_SPECTATORS
+
+DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation in an easy starter meadow with nearby surface resources and a starter kit already in your inventory. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: inspect the meadow, pick a shared camp spot, place blocks, add torches, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Good early commands are !inventory, !nearbyBlocks, !searchForBlock(\"crafting_table\", 16), !move(\"scout_1\", \"forward\", 2), !placeHere(\"oak_log\"), !placeHere(\"cobblestone\"), and !place(\"camp-1\", \"oak_log\", {\"x\": 0, \"y\": 64, \"z\": 4}, \"up\"). After one nearby/inventory check, stop looping on gathering and place visible camp blocks. Avoid digging down, avoid underground targets, and only collect blocks that are reachable on the surface or already in the starter meadow. Keep actions safe, use public chat every few actions, and continue until the run ends."
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
 if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
@@ -191,11 +242,18 @@ if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
             ;;
     esac
 fi
+if [ "$MC_SIM_EASY_MODE" = "1" ]; then
+    EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\"), !placeHere(\"cobblestone\"), and !place(\"marker-1\", \"torch\", {\"x\": 2, \"y\": 64, \"z\": 2}, \"up\")."
+    case "$SOAK_INIT_MESSAGE" in
+        *"Easy-mode rules:"*) ;;
+        *) SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE $EASY_MODE_GUIDANCE" ;;
+    esac
+fi
 if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
     case "$SOAK_INIT_MESSAGE" in
-        *"!searchForBlock(\"sand\", 64)"*|*"Use movement and exploration before repeated collection"*) ;;
+        *"Use movement and inspection before collection"*|*"Use movement and exploration before collection"*) ;;
         *)
-            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use movement and exploration before repeated collection: good early commands are !searchForBlock(\"sand\", 64), !move(\"scout_1\", \"forward\", 8), !searchForBlock(\"oak_log\", 64), !collectBlocks(\"sand\", 8), and, after finding wood or exposed stone, !collectBlocks(\"oak_log\", 4) or !collectBlocks(\"stone\", 8). Do not repeatedly collect a block that was reported missing or tool-locked."
+            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use movement and inspection before collection: good early commands are !inventory, !nearbyBlocks, !searchForBlock(\"oak_log\", 32), !searchForBlock(\"crafting_table\", 16), !move(\"scout_1\", \"forward\", 2), !placeHere(\"oak_log\"), and !placeHere(\"cobblestone\"). Avoid digging down and avoid underground targets. Do not repeatedly collect or search for a block that was reported missing, unreachable, buried, or tool-locked."
             ;;
     esac
 fi
@@ -233,9 +291,18 @@ if ! has_arg "--log-dir" "$@"; then
 fi
 cmd+=("$@")
 
+display_duration="$(arg_value_after "--duration-hours" "$@" || true)"
+if [ -z "$display_duration" ]; then
+    display_duration="$duration_hours"
+fi
+display_log_dir="$(arg_value_after "--log-dir" "$@" || true)"
+if [ -z "$display_log_dir" ]; then
+    display_log_dir="$log_dir"
+fi
+
 ok "Launching local Minecraft sim from $ENV_FILE"
 info "mode: ${mode}"
-info "duration: ${duration_hours}h"
+info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"
@@ -243,7 +310,17 @@ info "sim bots: ${SOAK_BOTS}"
 info "private bot conversations: ${SOAK_BLOCK_PRIVATE_CONVERSATIONS}"
 info "slow sim actions: ${SOAK_BLOCK_SLOW_SIM_ACTIONS}"
 info "suppress action chat: ${MINECRAFT_SUPPRESS_ACTION_CHAT}"
+info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
+info "easy mode: ${MC_SIM_EASY_MODE}"
+info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
+info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"
+info "server dir: ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
+info "world config: ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
+info "MindServer base port: ${SOAK_MINDSERVER_BASE_PORT}"
+if [ -n "${EASY_SETUP_OBSERVERS:-}${EASY_SETUP_OPERATORS:-}${EASY_SETUP_SPECTATORS:-}" ]; then
+    info "human observers: players='${EASY_SETUP_OBSERVERS:-}' ops='${EASY_SETUP_OPERATORS:-}' spectators='${EASY_SETUP_SPECTATORS:-}'"
+fi
 info "init prompt: ${SOAK_INIT_MESSAGE}"
-info "logs: ${log_dir}"
+info "logs: ${display_log_dir}"
 
 exec "${cmd[@]}"

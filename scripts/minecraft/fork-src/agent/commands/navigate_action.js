@@ -147,11 +147,33 @@ async function ensurePathfinder(bot) {
     return !!(bot && bot.pathfinder && typeof bot.pathfinder.goto === 'function');
 }
 
+function destructivePathsAllowed() {
+    const raw = String(process.env.MINECRAFT_ALLOW_DESTRUCTIVE_PATHS || '1').trim().toLowerCase();
+    return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+async function configureMovementSafety(bot) {
+    if (destructivePathsAllowed()) return;
+    try {
+        const mod = await import('mineflayer-pathfinder');
+        const Movements = (mod && mod.Movements) || (mod && mod.default && mod.default.Movements);
+        if (Movements && bot && bot.pathfinder && typeof bot.pathfinder.setMovements === 'function') {
+            const movements = new Movements(bot);
+            movements.canDig = false;
+            movements.allow1by1towers = false;
+            bot.pathfinder.setMovements(movements);
+        }
+    } catch {
+        /* If safety setup is unavailable, normal pathfinder failure handling still applies. */
+    }
+}
+
 async function pathfindTo(agent, target, tolerance, timeoutMs) {
     const bot = getBot(agent);
     if (!(await ensurePathfinder(bot))) {
         return { failureClass: 'unreachable', detail: 'pathfinder unavailable' };
     }
+    await configureMovementSafety(bot);
 
     const goal = await makeGoalNear(target, tolerance);
     let timer;
