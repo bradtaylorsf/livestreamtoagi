@@ -542,6 +542,22 @@ class SimulationRepo:
         )
         return Decimal(str(val)) if val is not None else Decimal("0")
 
+    async def get_rolling_cost_from_events(
+        self,
+        simulation_id: uuid.UUID,
+        window: timedelta,
+    ) -> Decimal:
+        """Derive spend within a rolling window from cost_events."""
+        val = await self.db.fetchval(
+            """SELECT COALESCE(SUM(amount), 0)
+               FROM cost_events
+               WHERE simulation_id = $1
+                 AND created_at >= NOW() - $2::interval""",
+            simulation_id,
+            window,
+        )
+        return Decimal(str(val)) if val is not None else Decimal("0")
+
     async def get_timeline_events(
         self,
         simulation_id: uuid.UUID,

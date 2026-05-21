@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -316,6 +317,106 @@ class TestSimulationRepoTotalCost:
 
         result = await repo.get_total_cost_from_events(uuid.uuid4())
         assert result == Decimal("0")
+
+    @pytest.mark.asyncio
+    async def test_get_rolling_cost_from_events(self) -> None:
+        from core.repos.simulation_repo import SimulationRepo
+
+        db = AsyncMock()
+        db.fetchval.return_value = Decimal("0.75")
+        repo = SimulationRepo(db)
+
+        sim_id = uuid.uuid4()
+        window = timedelta(hours=1)
+        result = await repo.get_rolling_cost_from_events(sim_id, window)
+
+        assert result == Decimal("0.75")
+        db.fetchval.assert_awaited_once()
+        query, *params = db.fetchval.await_args.args
+        assert "created_at >= NOW() - $2::interval" in query
+        assert params == [sim_id, window]
+
+
+class TestRollingCostLimit:
+    """Verify rolling cost caps reuse authoritative cost_events totals."""
+
+    def _make_orchestrator(
+        self,
+        *,
+        max_cost: float = 10.0,
+        max_cost_rolling: float | None = None,
+        rolling_window: timedelta | None = None,
+        total_cost: Decimal = Decimal("1.00"),
+        rolling_cost: Decimal = Decimal("0"),
+    ) -> tuple[Any, MagicMock, uuid.UUID]:
+        from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
+
+        sim_id = uuid.uuid4()
+        config = SimulationConfig(
+            name="rolling-cost-test",
+            agents=["vera"],
+            max_cost=max_cost,
+            max_cost_rolling=max_cost_rolling,
+            rolling_window=rolling_window,
+        )
+        repo = MagicMock()
+        repo.get_total_cost_from_events = AsyncMock(return_value=total_cost)
+        repo.get_rolling_cost_from_events = AsyncMock(return_value=rolling_cost)
+        repo.increment_stats = AsyncMock()
+
+        orchestrator = SimulationOrchestrator.__new__(SimulationOrchestrator)
+        orchestrator._config = config
+        orchestrator._sim_repo = repo
+        orchestrator._simulation_id = sim_id
+        orchestrator._total_cost = Decimal("0")
+        return orchestrator, repo, sim_id
+
+    @pytest.mark.asyncio
+    async def test_rolling_limit_raises_when_window_exceeds_ceiling(self) -> None:
+        from core.simulation.orchestrator import CostLimitExceededError
+
+        window = timedelta(hours=1)
+        orchestrator, repo, sim_id = self._make_orchestrator(
+            max_cost=10.0,
+            max_cost_rolling=1.0,
+            rolling_window=window,
+            total_cost=Decimal("2.50"),
+            rolling_cost=Decimal("1.25"),
+        )
+
+        with pytest.raises(CostLimitExceededError, match="Rolling spend"):
+            await orchestrator._check_cost_limit()
+
+        repo.get_total_cost_from_events.assert_awaited_once_with(sim_id)
+        repo.get_rolling_cost_from_events.assert_awaited_once_with(sim_id, window)
+
+    @pytest.mark.asyncio
+    async def test_rolling_limit_allows_spend_below_ceiling(self) -> None:
+        window = timedelta(hours=24)
+        orchestrator, repo, sim_id = self._make_orchestrator(
+            max_cost=10.0,
+            max_cost_rolling=1.0,
+            rolling_window=window,
+            total_cost=Decimal("2.50"),
+            rolling_cost=Decimal("0.75"),
+        )
+
+        await orchestrator._check_cost_limit()
+
+        repo.get_total_cost_from_events.assert_awaited_once_with(sim_id)
+        repo.get_rolling_cost_from_events.assert_awaited_once_with(sim_id, window)
+
+    @pytest.mark.asyncio
+    async def test_no_rolling_config_skips_rolling_repo_call(self) -> None:
+        orchestrator, repo, sim_id = self._make_orchestrator(
+            max_cost=10.0,
+            total_cost=Decimal("2.50"),
+        )
+
+        await orchestrator._check_cost_limit()
+
+        repo.get_total_cost_from_events.assert_awaited_once_with(sim_id)
+        repo.get_rolling_cost_from_events.assert_not_awaited()
 
 
 class TestCostRepoSimulationBreakdown:
