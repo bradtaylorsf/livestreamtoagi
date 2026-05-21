@@ -10,6 +10,9 @@ and :mod:`core.bridge.server` is the authenticated FastAPI WebSocket surface
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import Any
+
 from core.bridge.contract import (
     PROTOCOL_VERSION,
     SERVICE_REGISTRY,
@@ -24,22 +27,6 @@ from core.bridge.contract import (
     validate_request,
     validate_response,
 )
-from core.bridge.handlers import (
-    handle_code_execute,
-    handle_director_gate,
-    handle_errand_complete,
-    handle_management_review,
-    handle_memory_read,
-    handle_memory_write,
-)
-from core.bridge.inbound import INBOUND_VERBS, dispatch_inbound
-from core.bridge.observability import (
-    bridge_metrics_snapshot,
-    log_bridge_event,
-    record_call,
-    reset_metrics,
-)
-from core.bridge.server import bridge_router
 
 __all__ = [
     "INBOUND_VERBS",
@@ -68,3 +55,32 @@ __all__ = [
     "validate_request",
     "validate_response",
 ]
+
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "INBOUND_VERBS": ("core.bridge.inbound", "INBOUND_VERBS"),
+    "bridge_metrics_snapshot": ("core.bridge.observability", "bridge_metrics_snapshot"),
+    "bridge_router": ("core.bridge.server", "bridge_router"),
+    "dispatch_inbound": ("core.bridge.inbound", "dispatch_inbound"),
+    "handle_code_execute": ("core.bridge.handlers", "handle_code_execute"),
+    "handle_director_gate": ("core.bridge.handlers", "handle_director_gate"),
+    "handle_errand_complete": ("core.bridge.handlers", "handle_errand_complete"),
+    "handle_management_review": ("core.bridge.handlers", "handle_management_review"),
+    "handle_memory_read": ("core.bridge.handlers", "handle_memory_read"),
+    "handle_memory_write": ("core.bridge.handlers", "handle_memory_write"),
+    "log_bridge_event": ("core.bridge.observability", "log_bridge_event"),
+    "record_call": ("core.bridge.observability", "record_call"),
+    "reset_metrics": ("core.bridge.observability", "reset_metrics"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy-load bridge runtime exports to keep contract imports lightweight."""
+
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module_name, attr_name = target
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
