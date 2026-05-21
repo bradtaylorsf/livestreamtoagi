@@ -41,6 +41,7 @@ The goal is a local evidence clip, not a production streaming service.
 | E2 Paper server running | The camera needs a live world. | `scripts/minecraft/start-server.sh`; wait for `Done (` in the server console. |
 | `CameraSpike` allowed to join | E2 defaults to `white-list=true`. | In the server console: `whitelist add CameraSpike`, or restart local dev with `WHITELIST=false`. |
 | Node 20 or newer | Runs the Mineflayer camera bot. | `node -v` shows `v20...` or newer. |
+| Native build tools for `canvas` | Prismarine Viewer imports `canvas` at startup. | macOS: Xcode Command Line Tools. Debian/Ubuntu: `build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev`. |
 | `ffmpeg` and `ffprobe` | Records and validates the MP4. | `ffmpeg -version` and `ffprobe -version`. |
 | Playwright Chromium | Opens the viewer page for display capture. | `make render-install`. |
 | macOS screen recording permission, or Linux X11 display | Lets `ffmpeg` capture the browser window. | macOS: grant Terminal screen recording permission if prompted. Linux: `DISPLAY` must be set. |
@@ -147,5 +148,5 @@ to `capture-prototype.sh`.
 - The camera is a single fixed viewer. Subject selection and camera automation
   are future work.
 - The script installs prototype Node dependencies under `scripts/livestream/`
-  and intentionally does not modify `core/`, `frontend/`, `website/`, or the
-  bridge contract.
+  and includes Prismarine Viewer's runtime `canvas` dependency. It intentionally
+  does not modify `core/`, `frontend/`, `website/`, or the bridge contract.
