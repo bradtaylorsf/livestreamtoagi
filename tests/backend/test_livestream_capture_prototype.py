@@ -111,6 +111,9 @@ def test_capture_script_contains_real_run_guards() -> None:
     assert "avfoundation" in src
     assert "x11grab" in src
     assert "testsrc2" in src
+    assert "start_viewer_browser_with_system_open" in src
+    assert 'open "$VIEWER_URL"' in src
+    assert 'xdg-open "$VIEWER_URL"' in src
     assert "ffprobe" in src
 
 
