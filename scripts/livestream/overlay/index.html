@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Livestream Agent Overlay</title>
+    <link rel="stylesheet" href="./overlay.css" />
+  </head>
+  <body>
+    <main id="stream-overlay" aria-live="polite">
+      <section id="overlay-top-bar" class="overlay-top-bar">
+        <div class="overlay-brand">LIVE WORLD</div>
+        <div class="overlay-topic">
+          <span class="overlay-label">Topic</span>
+          <span id="overlay-topic-value" class="overlay-value">-</span>
+        </div>
+        <div class="overlay-updated">
+          <span class="overlay-label">Updated</span>
+          <span id="overlay-updated-value" class="overlay-value">-</span>
+        </div>
+        <span id="overlay-connection" class="status-chip" data-state="connecting">
+          CONNECTING
+        </span>
+      </section>
+
+      <aside class="overlay-right-sidebar" aria-label="Agent status">
+        <div class="overlay-agents-header">Agents</div>
+        <div id="overlay-agents" class="overlay-agents"></div>
+      </aside>
+    </main>
+
+    <script src="./overlay.js" defer></script>
+  </body>
+</html>

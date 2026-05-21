@@ -35,6 +35,7 @@
     "verify:embodiment-failure": ".venv/bin/pytest tests/backend/test_embodiment_failure.py -v",
     "verify:embodiment-integration": ".venv/bin/pytest tests/integration/test_embodiment_skills.py -v",
     "verify:memory-bridge-perf": ".venv/bin/pytest tests/backend/test_memory_bridge_perf.py -v -m \"not integration\"",
+    "verify:livestream-overlay": ".venv/bin/pytest tests/backend/test_livestream_stream_overlay.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",
