@@ -64,8 +64,10 @@ rounded up. Estimated records set:
 - `estimated: true`
 
 `timeline-totals.json` aggregates counts by event type, agent, model, and token
-source. Token totals are de-duplicated by LLM trace where a request and response
-pair both exist.
+source. It includes a top-level `tokens` quick summary with `total`,
+`estimated`, and `provider_reported` token counts, plus the richer
+`token_totals`, `tokens_by_agent`, and `tokens_by_model` breakdowns. Token totals
+are de-duplicated by LLM trace where a request and response pair both exist.
 
 ## Trace Correlation
 

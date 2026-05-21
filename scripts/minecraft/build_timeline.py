@@ -828,6 +828,17 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
             target["completion_tokens"] += usage["completion_tokens"]
             target["total_tokens"] += usage["total_tokens"]
 
+    tokens = {
+        "requests": token_totals["requests"],
+        "prompt": token_totals["prompt_tokens"],
+        "completion": token_totals["completion_tokens"],
+        "total": token_totals["total_tokens"],
+        "provider_reported": token_totals["provider_reported"]["total_tokens"],
+        "provider_reported_requests": token_totals["provider_reported"]["requests"],
+        "estimated": token_totals["estimated"]["total_tokens"],
+        "estimated_requests": token_totals["estimated"]["requests"],
+    }
+
     return {
         "run_dir": str(run_dir),
         "generated_at_utc": isoformat_z(datetime.now(UTC).replace(microsecond=0)),
@@ -835,6 +846,7 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
         "counts_by_event_type": dict(sorted(by_event_type.items())),
         "counts_by_agent": dict(sorted(by_agent.items())),
         "counts_by_model": dict(sorted(by_model.items())),
+        "tokens": tokens,
         "token_totals": token_totals,
         "tokens_by_agent": dict(sorted(tokens_by_agent.items())),
         "tokens_by_model": dict(sorted(tokens_by_model.items())),

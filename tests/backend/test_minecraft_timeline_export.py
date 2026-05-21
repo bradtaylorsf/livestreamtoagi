@@ -68,6 +68,9 @@ def test_fixture_export_writes_ordered_timeline_and_totals(tmp_path: Path) -> No
     assert totals["token_totals"]["requests"] == 1
     assert totals["token_totals"]["provider_reported"]["requests"] == 1
     assert totals["token_totals"]["total_tokens"] == 17
+    assert totals["tokens"]["total"] == 17
+    assert totals["tokens"]["provider_reported"] == 17
+    assert totals["tokens"]["estimated"] == 0
 
 
 def test_cli_accepts_explicit_output_and_totals_paths(tmp_path: Path) -> None:
@@ -102,6 +105,9 @@ def test_cli_accepts_explicit_output_and_totals_paths(tmp_path: Path) -> None:
     totals = json.loads(totals_path.read_text(encoding="utf-8"))
     assert any(event["event_type"] == "llm.response" for event in events)
     assert totals["counts_by_event_type"]["llm.response"] == 1
+    assert totals["tokens"]["total"] > 0
+    assert "estimated" in totals["tokens"]
+    assert "provider_reported" in totals["tokens"]
 
 
 def test_missing_lmstudio_usage_is_estimated_and_marked(tmp_path: Path) -> None:
@@ -138,6 +144,7 @@ def test_missing_lmstudio_usage_is_estimated_and_marked(tmp_path: Path) -> None:
     assert event.payload["prompt_tokens"] > 0
     assert event.payload["completion_tokens"] > 0
     assert result.totals["token_totals"]["estimated"]["requests"] == 1
+    assert result.totals["tokens"]["estimated"] == result.totals["tokens"]["total"]
 
 
 def test_trace_id_correlates_intent_start_and_result_chain(tmp_path: Path) -> None:
