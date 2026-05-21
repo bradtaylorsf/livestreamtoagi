@@ -14,6 +14,7 @@
     "test:frontend": "npm --prefix frontend test",
     "test:website": "npm --prefix website test",
     "verify:minecraft-server": ".venv/bin/pytest tests/backend/test_minecraft_start_server.py tests/backend/test_minecraft_world_config.py tests/backend/test_minecraft_supervision.py tests/backend/test_minecraft_backup_restore.py tests/backend/test_minecraft_health.py tests/backend/test_minecraft_runbook.py -v",
+    "verify:livestream-capture": ".venv/bin/pytest tests/backend/test_livestream_capture_prototype.py -v",
     "verify:mindcraft-fork": ".venv/bin/pytest tests/backend/test_minecraft_setup_mindcraft.py -v",
     "verify:mindcraft-fork-maintenance": ".venv/bin/pytest tests/backend/test_minecraft_fork_maintenance.py -v",
     "verify:mindcraft-connect": ".venv/bin/pytest tests/backend/test_minecraft_connect_stock_bot.py -v",
