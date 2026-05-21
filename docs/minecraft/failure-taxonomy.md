@@ -50,6 +50,14 @@ abandon instead of retrying or taking an unverified action.
 idle instead of retrying so `mode:unstuck` cycles do not loop. The default
 budget is:
 
+During embodied soaks, the staged Mindcraft launchers patch interrupted
+non-timeout actions to return a structured `interrupted: ...` action result
+instead of `undefined`. They also patch unrecovered `mode:unstuck` recovery to
+idle and emit status telemetry by default rather than killing the bot process.
+Public clean-exit chat is gated behind `MINECRAFT_CLEAN_EXIT=1`; normal soak
+runs keep lifecycle/status chatter out of public conversation and record it as
+timeline telemetry.
+
 | Field | Default |
 | --- | --- |
 | `max_attempts` | `3` |

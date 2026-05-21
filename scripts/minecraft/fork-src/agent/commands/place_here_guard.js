@@ -8,6 +8,7 @@ import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
 import { classifyInterruption, interruptionDetail } from '../skills/action_interruption.js';
 
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
+const recentPlaceFailures = new Map();
 
 function getBot(agent) {
     return agent && agent.bot ? agent.bot : agent;
@@ -33,6 +34,28 @@ function bridgeErrorLine(prefix, err) {
     const code = err instanceof BridgeClientError ? err.code : 'bridge_unknown';
     const detail = err && err.message ? err.message : String(err);
     return `${prefix} [${code}]: ${detail}`;
+}
+
+function rememberPlaceHereResult(agent, blockType, result) {
+    const text = String(result || '');
+    const failed = text.match(/Failed to place\s+([A-Za-z0-9_:-]+)\s+at\s+\(([^)]+)\)/i);
+    const missing = text.match(/Don'?t have any\s+([A-Za-z0-9_:-]+)\s+to place/i);
+    if (!failed && !missing) {
+        if (/Placed\s+[A-Za-z0-9_:-]+\s+at\s+\(/i.test(text)) {
+            recentPlaceFailures.clear();
+        }
+        return result;
+    }
+    const item = (failed && failed[1]) || (missing && missing[1]) || blockType || 'block';
+    const target = (failed && failed[2]) || 'inventory';
+    const key = `${agentId(agent)}:${item}:${target}`;
+    const count = (recentPlaceFailures.get(key) || 0) + 1;
+    recentPlaceFailures.set(key, count);
+    if (count < 2) return result;
+    return (
+        `${text}\nrepeated_failure: ${item} at ${target} failed ${count} times; ` +
+        'inspect nearby blocks or choose a different target before retrying.'
+    );
 }
 
 async function emitInterruptedActionResult(agent, actionName, outcomeClass, err) {
@@ -66,7 +89,8 @@ export function wrapPlaceHere(originalPerform, actionName = '!placeHere') {
     if (typeof originalPerform !== 'function') return originalPerform;
     return async function guardedPlaceHere(agent, ...args) {
         try {
-            return await originalPerform.apply(this, [agent, ...args]);
+            const result = await originalPerform.apply(this, [agent, ...args]);
+            return rememberPlaceHereResult(agent, args[0], result);
         } catch (err) {
             const outcomeClass = classifyInterruption(err);
             if (!outcomeClass) throw err;

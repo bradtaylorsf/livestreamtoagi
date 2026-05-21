@@ -85,6 +85,172 @@ def test_good_run_computes_per_agent_metrics_and_verified_examples(tmp_path: Pat
     assert len(alpha["examples"]["verified_successes"]) == 2
 
 
+def test_mindcraft_log_groups_executions_and_ignores_stale_generated_commands(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "mindcraft-run"
+    _write_bot_log(
+        run_dir,
+        "vera",
+        [
+            "Awaiting LM Studio response from model local/test",
+            'Generated response: !move("stale", "east", 3)',
+            "Vera received new message while generating, discarding old response.",
+            'Vera full response to Rex: """"',
+            "no response",
+            "Awaiting LM Studio response from model local/test",
+            'Generated response: !placeHere("oak_log")',
+            'Vera full response to Rex: ""!placeHere("oak_log")""',
+            "parsed command: { commandName: '!placeHere', args: [ 'oak_log' ] }",
+            "executing code...",
+            "Agent executed: !placeHere and got: Action output:",
+            "torch in the way at (-2, 64, 0).",
+            "Broke torch at x:-1.5, y:64.0, z:0.5.",
+            "Placed oak_log at (-2, 64, 0).",
+            "Saved memory to: ./bots/Vera/memory.json",
+            "Awaiting LM Studio response from model local/test",
+            'Generated response: !move("survey", "east", 2)',
+            'Vera full response to Rex: ""!move("survey", "east", 2)""',
+            "parsed command: { commandName: '!move', args: [ 'survey', 'east', 2 ] }",
+            "executing code...",
+            (
+                "Agent executed: !move and got: move survey reached: "
+                "distance_to_target=0.140 blocks; delta=3.014 blocks"
+            ),
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0.6,
+            "min_parse_success": 0.8,
+            "min_execution_rate": 0.7,
+            "min_verified_success": 0.5,
+            "min_intents": 1,
+        },
+    )
+
+    vera = data["agents"]["vera"]
+    assert data["acceptable"] is True
+    assert vera["counts"]["generated_commands"] == 3
+    assert vera["counts"]["discarded_commands"] == 1
+    assert vera["counts"]["stale_generations"] == 1
+    assert vera["counts"]["emitted_commands"] == 2
+    assert vera["counts"]["command_executions"] == 2
+    assert vera["counts"]["execution_successes"] == 2
+    assert vera["counts"]["verified_actions"] == 2
+    assert vera["metrics"]["command_execution_rate"] == 1.0
+    assert vera["metrics"]["verified_success_rate"] == 1.0
+
+
+def test_mindcraft_failures_are_classified_from_execution_blocks(tmp_path: Path) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "mindcraft-failures"
+    _write_bot_log(
+        run_dir,
+        "rex",
+        [
+            'Rex full response to Vera: ""!placeHere("cobblestone")""',
+            "Agent executed: !placeHere and got: Action output:",
+            "Failed to place cobblestone at (1, 65, 2).",
+            "Saved memory to: ./bots/Rex/memory.json",
+            'Rex full response to Vera: ""!craftable("oak planks")""',
+            "Agent executed: !craftable and got: Command !craftable was given 1 args, but requires 0 args.",
+            'Rex full response to Vera: ""!placeHere("oak_log")""',
+            "Agent executed: !placeHere and got: undefined",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 1,
+        },
+    )
+
+    rex = data["agents"]["rex"]
+    classes = {
+        item["class"]: item["count"] for item in rex["execution_failure_classes"]
+    }
+    assert rex["counts"]["emitted_commands"] == 3
+    assert rex["counts"]["execution_failures"] == 3
+    assert classes["placement_blocked"] == 1
+    assert classes["wrong_args"] == 1
+    assert classes["undefined_result"] == 1
+
+
+def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "collect-run"
+    _write_bot_log(
+        run_dir,
+        "sentinel",
+        [
+            "Awaiting LM Studio response from model local/test",
+            'Generated response: !collectBlocks("cobblestone", 10)',
+            'Sentinel full response to Pixel: ""!collectBlocks("cobblestone", 10)""',
+            "parsed command: { commandName: '!collectBlocks', args: [ 'cobblestone', 10 ] }",
+            "executing code...",
+            "Agent executed: !collectBlocks and got: Action output:",
+            "Collected 10 cobblestone.",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 1,
+        },
+    )
+
+    sentinel = data["agents"]["sentinel"]
+    assert sentinel["counts"]["emitted_commands"] == 1
+    assert sentinel["counts"]["command_executions"] == 1
+    assert sentinel["counts"]["execution_successes"] == 1
+    assert sentinel["counts"]["verified_actions"] == 1
+    assert sentinel["metrics"]["verified_success_rate"] == 1.0
+
+
+def test_same_command_name_with_different_args_counts_distinct_accepts(tmp_path: Path) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "multi-command"
+    _write_bot_log(
+        run_dir,
+        "pixel",
+        [
+            'Pixel full response to Vera: ""!placeHere("oak_log") !placeHere("cobblestone")""',
+            "Agent executed: !placeHere and got: Action output: Placed oak_log at (1, 64, 1).",
+            "Agent executed: !placeHere and got: Action output: Placed cobblestone at (2, 64, 1).",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 1,
+        },
+    )
+
+    pixel = data["agents"]["pixel"]
+    assert pixel["counts"]["emitted_commands"] == 2
+    assert pixel["counts"]["command_executions"] == 2
+    assert pixel["counts"]["verified_actions"] == 2
+
+
 def test_cli_writes_artifacts_and_fails_on_parser_failure_thresholds(tmp_path: Path) -> None:
     run_dir = tmp_path / "parse-failure-run"
     _write_bot_log(

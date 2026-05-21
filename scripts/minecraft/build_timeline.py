@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _minecraft_log_patterns import (
@@ -29,7 +31,6 @@ from _minecraft_log_patterns import (
     CRASH_ERROR_RE,
     EXECUTION_FAILURE_RE,
     EXECUTION_SUCCESS_RE,
-    INSTRUCTION_RE,
     LIFECYCLE_RE,
     POSITION_RE,
     TRACE_RE,
@@ -39,11 +40,14 @@ from analyze_action_reliability import (
     classify_execution,
     classify_parser_failure,
     excerpt,
-    is_intent_without_command,
 )
+from bot_log_parser import ParsedCommand, parse_bot_log_lines
 
 EVENT_TYPES = frozenset(
     {
+        "behavior.event",
+        "bridge.action.start",
+        "bridge.action.result",
         "chat.public",
         "llm.request",
         "llm.response",
@@ -58,6 +62,13 @@ EVENT_TYPES = frozenset(
         "error",
         "lifecycle",
     }
+)
+BEHAVIOR_STATUS_RE = re.compile(r"\[(?P<kind>behavior-status|mode-status)\]\s*(?P<message>.*)")
+SETUP_NOISE_RE = re.compile(
+    r"Skipping this -> .*kicked with 'not whitelisted'"
+    r"|^Error getting server: TypeError: Cannot read properties of null \(reading 'version'\)"
+    r"|^Attempting to connect anyway"
+    r"|^Timeout pinging server\b"
 )
 
 DEFAULT_STATE_SAMPLE_INTERVAL_SECONDS = 30
@@ -134,6 +145,31 @@ def parse_iso_ts(value: str) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def local_log_timezone() -> Any:
+    configured = os.environ.get("SOAK_LOCAL_TIMEZONE") or os.environ.get("TZ")
+    if configured:
+        try:
+            return ZoneInfo(configured)
+        except ZoneInfoNotFoundError:
+            pass
+    return datetime.now().astimezone().tzinfo or UTC
+
+
+def parse_local_time_only(parsed_time: time, *, base_date: datetime) -> datetime:
+    local_tz = local_log_timezone()
+    local_base = base_date.astimezone(local_tz)
+    candidate = datetime.combine(
+        local_base.date(),
+        parsed_time.replace(tzinfo=None),
+        tzinfo=local_tz,
+    ).astimezone(UTC)
+    while candidate < base_date - timedelta(hours=1):
+        candidate += timedelta(days=1)
+    while candidate > base_date + timedelta(hours=36):
+        candidate -= timedelta(days=1)
+    return candidate
+
+
 def parse_metadata_start(run_dir: Path) -> datetime:
     metadata = run_dir / "metadata.env"
     if not metadata.exists():
@@ -144,7 +180,13 @@ def parse_metadata_start(run_dir: Path) -> datetime:
     return DEFAULT_BASE_TS
 
 
-def parse_line_ts(line: str, *, base_date: datetime, fallback_seq: int) -> datetime:
+def parse_line_ts(
+    line: str,
+    *,
+    base_date: datetime,
+    fallback_seq: int,
+    fallback_ts: datetime | None = None,
+) -> datetime:
     match = ISO_TS_RE.search(line)
     if match:
         parsed = parse_iso_ts(match.group("ts"))
@@ -157,11 +199,10 @@ def parse_line_ts(line: str, *, base_date: datetime, fallback_seq: int) -> datet
             int(time_match.group("h")),
             int(time_match.group("m")),
             int(time_match.group("s")),
-            tzinfo=UTC,
         )
-        return datetime.combine(base_date.date(), parsed_time, tzinfo=UTC)
+        return parse_local_time_only(parsed_time, base_date=base_date)
 
-    return base_date + timedelta(milliseconds=fallback_seq)
+    return fallback_ts or base_date + timedelta(milliseconds=fallback_seq)
 
 
 def rel_source(path: Path, run_dir: Path) -> str:
@@ -289,6 +330,15 @@ def commands_from_line(line: str) -> list[dict[str, str]]:
     return commands
 
 
+def command_payload(command: ParsedCommand) -> dict[str, str]:
+    return {
+        "name": command.name.lstrip("!"),
+        "text": command.text,
+        "args": command.args,
+        "source": command.source,
+    }
+
+
 def parse_kv_line(line: str) -> dict[str, str]:
     return {match.group("key"): match.group("value") for match in KEY_VALUE_RE.finditer(line)}
 
@@ -301,7 +351,7 @@ def bridge_event_type(fields: dict[str, str]) -> str:
     if ok == "false":
         return "error"
     if service == "action" and method == "result":
-        return "action.start" if phase == "start" else "action.result"
+        return "bridge.action.start" if phase == "start" else "bridge.action.result"
     if service == "perception" and method == "report":
         return "state.sample"
     return "lifecycle"
@@ -327,7 +377,7 @@ def event_from_bridge_line(
         if inbound_type.endswith("BRIDGE_ACTION_RESULT") or inbound_type.endswith(
             "bridge_action_result"
         ):
-            event_type = "action.result"
+            event_type = "bridge.action.result"
         elif inbound_type.endswith("BRIDGE_PERCEPTION") or inbound_type.endswith(
             "bridge_perception"
         ):
@@ -470,22 +520,146 @@ def parse_bot_log(
     start_seq: int,
     *,
     state_sample_interval_seconds: int,
+    infer_llm_from_bot_log: bool = True,
 ) -> list[TimelineEvent]:
     events: list[TimelineEvent] = []
     source = rel_source(path, run_dir)
     agent = path.stem.lower()
     last_state_ts: datetime | None = None
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    file_mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    interpolate_fallback = file_mtime > base_ts and len(lines) > 1
+
+    def fallback_ts(line_no: int, seq: int) -> datetime:
+        if interpolate_fallback:
+            ratio = (line_no - 1) / max(1, len(lines) - 1)
+            elapsed_seconds = (file_mtime - base_ts).total_seconds()
+            return base_ts + timedelta(seconds=elapsed_seconds * ratio)
+        return base_ts + timedelta(milliseconds=seq)
+
+    parsed_bot_log = parse_bot_log_lines(lines)
+    generations_by_line = {generation.line: generation for generation in parsed_bot_log.generations}
+    llm_requests_by_line: dict[int, list[Any]] = defaultdict(list)
+    trace_by_generation_line = {
+        generation.line: f"trace-llm-{agent}-{generation.line}"
+        for generation in parsed_bot_log.generations
+    }
+    for generation in parsed_bot_log.generations:
+        if generation.request_line is not None:
+            llm_requests_by_line[generation.request_line].append(generation)
+    commands_by_line: dict[int, list[ParsedCommand]] = defaultdict(list)
+    for command in parsed_bot_log.accepted_commands:
+        commands_by_line[command.line].append(command)
+    executions_by_line = {execution.line: execution for execution in parsed_bot_log.executions}
+    execution_lines = {
+        line_no
+        for execution in parsed_bot_log.executions
+        for line_no in range(execution.line, execution.end_line + 1)
+    }
     for line_no, line in enumerate(lines, start=1):
         seq = start_seq + line_no
-        ts = parse_line_ts(line, base_date=base_ts, fallback_seq=seq)
+        ts = parse_line_ts(
+            line,
+            base_date=base_ts,
+            fallback_seq=seq,
+            fallback_ts=fallback_ts(line_no, seq),
+        )
         trace_id = trace_from_text(line)
+        line_trace_id = trace_id
 
         bridge = event_from_bridge_line(
             line=line, ts=ts, seq=seq, source=source, default_agent=agent
         )
         if bridge is not None:
             events.append(bridge)
+
+        if infer_llm_from_bot_log:
+            for generation in llm_requests_by_line.get(line_no, []):
+                inferred_trace_id = trace_by_generation_line[generation.line]
+                events.append(
+                    TimelineEvent(
+                        ts=ts,
+                        seq=seq,
+                        event_type="llm.request",
+                        agent=agent,
+                        trace_id=inferred_trace_id,
+                        source=source,
+                        payload={
+                            "line": line_no,
+                            "model": generation.model,
+                            "purpose": "mindcraft_chat",
+                            "reason": "bot_log_inferred",
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0,
+                            "estimated": True,
+                            "usage_source": "bot_log_inferred",
+                            "outcome": "started",
+                            "prompt_unavailable": True,
+                        },
+                    )
+                )
+
+            generation = generations_by_line.get(line_no)
+            if generation:
+                response_text = generation.response_text
+                inferred_trace_id = trace_by_generation_line[generation.line]
+                request_ts = None
+                if generation.request_line is not None:
+                    request_seq = start_seq + generation.request_line
+                    request_ts = parse_line_ts(
+                        lines[generation.request_line - 1],
+                        base_date=base_ts,
+                        fallback_seq=request_seq,
+                        fallback_ts=fallback_ts(generation.request_line, request_seq),
+                    )
+                latency_ms = None
+                if isinstance(request_ts, datetime):
+                    latency_ms = max(0, int((ts - request_ts).total_seconds() * 1000))
+                completion_tokens = estimate_tokens(response_text)
+                line_trace_id = inferred_trace_id
+                accepted_command_count = sum(
+                    1
+                    for command in parsed_bot_log.accepted_commands
+                    if command.generation_line == generation.line
+                )
+                events.append(
+                    TimelineEvent(
+                        ts=ts,
+                        seq=seq,
+                        event_type="llm.response",
+                        agent=agent,
+                        trace_id=inferred_trace_id,
+                        source=source,
+                        payload={
+                            "line": line_no,
+                            "model": generation.model,
+                            "purpose": "mindcraft_chat",
+                            "reason": "bot_log_inferred",
+                            "latency_ms": latency_ms,
+                            "latency_estimated": True,
+                            "prompt_tokens": 0,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": completion_tokens,
+                            "estimated": True,
+                            "usage_source": "bot_log_inferred",
+                            "outcome": (
+                                "discarded_stale"
+                                if generation.stale
+                                else ("ok" if response_text else "blank")
+                            ),
+                            "response_text": response_text,
+                            "completion": response_text,
+                            "prompt_unavailable": True,
+                            "contains_command": generation.command_count > 0,
+                            "generated_commands": generation.command_count,
+                            "discarded_commands": generation.command_count
+                            if generation.stale
+                            else 0,
+                            "accepted_commands": accepted_command_count,
+                        },
+                    )
+                )
 
         parser_failure = classify_parser_failure(line)
         if parser_failure:
@@ -495,7 +669,7 @@ def parse_bot_log(
                     seq=seq,
                     event_type="error",
                     agent=agent,
-                    trace_id=trace_id,
+                    trace_id=line_trace_id,
                     source=source,
                     payload={
                         "class": parser_failure,
@@ -506,43 +680,33 @@ def parse_bot_log(
             )
             continue
 
-        commands = [] if INSTRUCTION_RE.search(line) else commands_from_line(line)
+        accepted_commands = commands_by_line.get(line_no, [])
+        commands = [command_payload(command) for command in accepted_commands]
         if commands:
+            command_trace_id = line_trace_id
+            generation_line = accepted_commands[0].generation_line
+            if generation_line is not None:
+                command_trace_id = trace_by_generation_line.get(generation_line, command_trace_id)
             events.append(
                 TimelineEvent(
                     ts=ts,
                     seq=seq,
                     event_type="action.intent",
                     agent=agent,
-                    trace_id=trace_id,
+                    trace_id=command_trace_id,
                     source=source,
                     payload={
                         "line": line_no,
                         "text": excerpt(line),
                         "commands": commands,
+                        "accepted": True,
                     },
                 )
             )
-        elif is_intent_without_command(line):
-            events.append(
-                TimelineEvent(
-                    ts=ts,
-                    seq=seq,
-                    event_type="action.intent",
-                    agent=agent,
-                    trace_id=trace_id,
-                    source=source,
-                    payload={
-                        "line": line_no,
-                        "text": excerpt(line),
-                        "natural_language": True,
-                    },
-                )
-            )
-
         action_match = ACTION_TRACE_RE.search(line)
         if (
             action_match
+            and line_no not in execution_lines
             and not EXECUTION_SUCCESS_RE.search(line)
             and not EXECUTION_FAILURE_RE.search(line)
         ):
@@ -562,15 +726,11 @@ def parse_bot_log(
                 )
             )
 
-        execution_kind, verified = classify_execution(line)
-        if execution_kind:
-            event_trace = trace_id
-            action_name = None
-            detail = line
-            if action_match:
-                event_trace = action_match.group("trace_id")
-                action_name = action_match.group("action")
-                detail = action_match.group("detail")
+        execution = executions_by_line.get(line_no)
+        if execution:
+            event_trace = line_trace_id
+            if execution.generation_line is not None:
+                event_trace = trace_by_generation_line.get(execution.generation_line, event_trace)
             events.append(
                 TimelineEvent(
                     ts=ts,
@@ -581,13 +741,41 @@ def parse_bot_log(
                     source=source,
                     payload={
                         "line": line_no,
-                        "action": action_name,
-                        "outcome": execution_kind,
-                        "verified": verified,
-                        "detail": excerpt(detail),
+                        "action": execution.action,
+                        "outcome": execution.outcome,
+                        "outcome_class": execution.outcome_class,
+                        "verified": execution.verified,
+                        "detail": excerpt(execution.detail),
                     },
                 )
             )
+        elif not parsed_bot_log.executions:
+            execution_kind, verified = classify_execution(line)
+            if execution_kind:
+                event_trace = line_trace_id
+                action_name = None
+                detail = line
+                if action_match:
+                    event_trace = action_match.group("trace_id")
+                    action_name = action_match.group("action")
+                    detail = action_match.group("detail")
+                events.append(
+                    TimelineEvent(
+                        ts=ts,
+                        seq=seq,
+                        event_type="action.result",
+                        agent=agent,
+                        trace_id=event_trace,
+                        source=source,
+                        payload={
+                            "line": line_no,
+                            "action": action_name,
+                            "outcome": execution_kind,
+                            "verified": verified,
+                            "detail": excerpt(detail),
+                        },
+                    )
+                )
 
         position = parse_position(line)
         if position is not None:
@@ -602,7 +790,7 @@ def parse_bot_log(
                         seq=seq,
                         event_type="state.sample",
                         agent=agent,
-                        trace_id=trace_id,
+                        trace_id=line_trace_id,
                         source=source,
                         payload={
                             "line": line_no,
@@ -623,32 +811,51 @@ def parse_bot_log(
                         seq=seq,
                         event_type="chat.public",
                         agent=agent,
-                        trace_id=trace_id,
+                        trace_id=line_trace_id,
                         source=source,
                         payload={"line": line_no, "speaker": speaker, "message": message},
                     )
                 )
 
-        if LIFECYCLE_RE.search(line):
+        setup_noise = SETUP_NOISE_RE.search(line) is not None
+        generated_response_line = line.strip().startswith("Generated response:")
+        if LIFECYCLE_RE.search(line) and not setup_noise and not generated_response_line:
             events.append(
                 TimelineEvent(
                     ts=ts,
                     seq=seq,
                     event_type="lifecycle",
                     agent=agent,
-                    trace_id=trace_id,
+                    trace_id=line_trace_id,
                     source=source,
                     payload={"line": line_no, "text": excerpt(line)},
                 )
             )
-        elif CRASH_ERROR_RE.search(line) and not ACTION_CONTEXT_RE.search(line):
+        behavior_match = BEHAVIOR_STATUS_RE.search(line)
+        if behavior_match:
+            events.append(
+                TimelineEvent(
+                    ts=ts,
+                    seq=seq,
+                    event_type="behavior.event",
+                    agent=agent,
+                    trace_id=line_trace_id,
+                    source=source,
+                    payload={
+                        "line": line_no,
+                        "kind": behavior_match.group("kind"),
+                        "text": excerpt(behavior_match.group("message")),
+                    },
+                )
+            )
+        elif CRASH_ERROR_RE.search(line) and not ACTION_CONTEXT_RE.search(line) and not setup_noise:
             events.append(
                 TimelineEvent(
                     ts=ts,
                     seq=seq,
                     event_type="error",
                     agent=agent,
-                    trace_id=trace_id,
+                    trace_id=line_trace_id,
                     source=source,
                     payload={"class": "runtime_error", "line": line_no, "text": excerpt(line)},
                 )
@@ -720,6 +927,17 @@ def raw_timeline_paths(run_dir: Path) -> list[Path]:
         for path in dict.fromkeys(candidates)
         if path.name not in {"timeline.ndjson"} and path.is_file()
     ]
+
+
+def has_raw_llm_events(run_dir: Path) -> bool:
+    for path in raw_timeline_paths(run_dir):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if '"llm.request"' in text or '"llm.response"' in text:
+            return True
+    return False
 
 
 def correlate_events(events: list[TimelineEvent]) -> list[TimelineEvent]:
@@ -865,6 +1083,7 @@ def build_timeline(
     base_ts = parse_metadata_start(run_dir)
     events: list[TimelineEvent] = []
     seq_base = 0
+    infer_llm_from_bot_log = not has_raw_llm_events(run_dir)
 
     for path in sorted((run_dir / "bots").glob("*.log")) if (run_dir / "bots").is_dir() else []:
         parsed = parse_bot_log(
@@ -873,6 +1092,7 @@ def build_timeline(
             base_ts,
             seq_base,
             state_sample_interval_seconds=state_sample_interval_seconds,
+            infer_llm_from_bot_log=infer_llm_from_bot_log,
         )
         events.extend(parsed)
         seq_base += max(100000, len(parsed) + 1000)

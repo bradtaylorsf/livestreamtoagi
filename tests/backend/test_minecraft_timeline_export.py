@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
@@ -161,6 +163,169 @@ def test_missing_lmstudio_usage_is_estimated_and_marked(tmp_path: Path) -> None:
     assert event.payload["completion_tokens"] > 0
     assert result.totals["token_totals"]["estimated"]["requests"] == 1
     assert result.totals["tokens"]["estimated"] == result.totals["tokens"]["total"]
+
+
+def test_bot_log_lmstudio_calls_are_inferred_without_raw_telemetry(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    (run_dir / "bots").mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    (run_dir / "bots" / "vera.log").write_text(
+        "\n".join(
+            [
+                "2026-05-20T22:00:01Z Awaiting LM Studio response from model local/test",
+                "2026-05-20T22:00:03Z Generated response: I will mark the base. !placeHere(\"oak_log\")",
+                '2026-05-20T22:00:04Z Vera full response to Rex: ""I will mark the base. !placeHere("oak_log")""',
+                "2026-05-20T22:00:05Z parsed command: { commandName: '!placeHere', args: [ 'oak_log' ] }",
+                "2026-05-20T22:00:06Z Agent executed: !placeHere and got: Action output:",
+                "2026-05-20T22:00:07Z Placed oak_log at (1, 64, 1).",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+
+    llm_request = next(event for event in result.events if event.event_type == "llm.request")
+    llm_response = next(event for event in result.events if event.event_type == "llm.response")
+    intent = next(event for event in result.events if event.event_type == "action.intent")
+    assert llm_request.trace_id == llm_response.trace_id == intent.trace_id
+    assert llm_request.payload["usage_source"] == "bot_log_inferred"
+    assert llm_response.payload["usage_source"] == "bot_log_inferred"
+    assert llm_response.payload["response_text"] == 'I will mark the base. !placeHere("oak_log")'
+    assert llm_response.payload["completion_tokens"] > 0
+    assert llm_response.payload["outcome"] == "ok"
+    assert llm_response.payload["accepted_commands"] == 1
+    assert intent.payload["commands"][0]["text"] == '!placeHere("oak_log")'
+    result_event = next(event for event in result.events if event.event_type == "action.result")
+    assert result_event.payload["outcome"] == "success"
+    assert result_event.payload["verified"] is True
+    assert result.totals["counts_by_event_type"]["llm.response"] == 1
+    assert result.totals["counts_by_event_type"]["action.result"] == 1
+    assert result.totals["tokens"]["estimated"] == result.totals["tokens"]["total"]
+
+
+def test_stale_generated_commands_do_not_become_action_intents(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    (run_dir / "bots").mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    (run_dir / "bots" / "fork.log").write_text(
+        "\n".join(
+            [
+                "2026-05-20T22:00:01Z Awaiting LM Studio response from model local/test",
+                '2026-05-20T22:00:03Z Generated response: !move("stale", "east", 3)',
+                "2026-05-20T22:00:04Z Fork received new message while generating, discarding old response.",
+                '2026-05-20T22:00:05Z Fork full response to Vera: """"',
+                "2026-05-20T22:00:06Z no response",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+
+    responses = [event for event in result.events if event.event_type == "llm.response"]
+    intents = [event for event in result.events if event.event_type == "action.intent"]
+    assert len(responses) == 1
+    assert responses[0].payload["outcome"] == "discarded_stale"
+    assert responses[0].payload["discarded_commands"] == 1
+    assert intents == []
+
+
+def test_bot_log_narration_without_accepted_command_is_not_action_intent(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    (run_dir / "bots").mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    (run_dir / "bots" / "vera.log").write_text(
+        "\n".join(
+            [
+                "2026-05-20T22:00:01Z Vera: I will build the west wall now.",
+                "2026-05-20T22:00:02Z Memory updated to: Vera wants a wall.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+
+    assert not any(event.event_type == "action.intent" for event in result.events)
+
+
+def test_no_timestamp_bot_logs_interpolate_to_file_mtime(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    bots_dir = run_dir / "bots"
+    bots_dir.mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    log_path = bots_dir / "vera.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "Awaiting LM Studio response from model local/test",
+                'Generated response: !placeHere("oak_log")',
+                'Vera full response to Rex: ""!placeHere("oak_log")""',
+                "Agent executed: !placeHere and got: Action output: Placed oak_log at (1, 64, 1).",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.utime(log_path, (1_779_315_000, 1_779_315_000))
+
+    result = builder.build_timeline(run_dir)
+
+    latest = max(event.ts for event in result.events if event.agent == "vera")
+    assert latest.isoformat().startswith("2026-05-20T22:10:00")
+
+
+def test_time_only_logs_use_local_timezone_before_z_export(monkeypatch) -> None:
+    builder = _load_builder()
+    monkeypatch.setenv("SOAK_LOCAL_TIMEZONE", "America/Los_Angeles")
+
+    ts = builder.parse_line_ts(
+        "[22:26:16 INFO]: <Aurora> Keep building out this strong stone wall!",
+        base_date=datetime(2026, 5, 21, 4, 45, 19, tzinfo=UTC),
+        fallback_seq=1,
+    )
+
+    assert ts.isoformat() == "2026-05-21T05:26:16+00:00"
+
+
+def test_bridge_settle_and_behavior_status_are_telemetry_not_action_results(
+    tmp_path: Path,
+) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    (run_dir / "bots").mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    (run_dir / "bots" / "alpha.log").write_text(
+        "\n".join(
+            [
+                "2026-05-20T22:00:01Z [behavior-status] Exiting.",
+                "2026-05-20T22:00:02Z bridge_event trace_id=trace-1 request_id=bridge-1 "
+                "direction=outbound service=action method=result phase=settle ok=true "
+                "outcome=ok latency_ms=2",
+                "2026-05-20T22:00:03Z Agent executed: !placeHere and got: Action output:",
+                "2026-05-20T22:00:04Z Placed oak_log at (1, 64, 1).",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+
+    event_types = [event.event_type for event in result.events]
+    assert "behavior.event" in event_types
+    assert "bridge.action.result" in event_types
+    assert result.totals["counts_by_event_type"]["action.result"] == 1
+    assert result.totals["counts_by_event_type"]["bridge.action.result"] == 1
+    assert not any(event.event_type == "chat.public" for event in result.events)
 
 
 def test_heartbeat_events_are_preserved_and_counted(tmp_path: Path) -> None:

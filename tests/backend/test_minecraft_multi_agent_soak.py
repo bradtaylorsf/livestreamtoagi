@@ -580,8 +580,17 @@ def test_easy_spawn_script_builds_safe_starter_arena() -> None:
     assert "/gamerule spawnRadius 0" in text
     assert "/gamerule drowningDamage false" in text
     assert "/gamerule fallDamage false" in text
+    assert "/fill -24 64 -24 0 96 0 minecraft:air replace" in text
+    assert "/fill 1 64 1 24 96 24 minecraft:air replace" in text
+    assert "/fill -22 58 -22 22 62 22 minecraft:dirt replace" in text
     assert "/fill -23 64 -23 23 68 -23 minecraft:glass replace" in text
-    assert "/spawnpoint @a 0 64 0" in text
+    assert "/fill -10 63 -5 10 63 1 minecraft:grass_block replace" in text
+    assert "/fill -10 64 -5 10 68 1 minecraft:air replace" in text
+    assert "/spawnpoint @a 0 64 -4" in text
+    assert "[-8, 64, -4]" in text
+    assert "[8, 64, -4]" in text
+    assert "[6, 64, 0]" in text
+    assert "[0, 64, 2]" not in text
     assert "EASY_SETUP_OBSERVERS" in text
     assert "EASY_SETUP_OPERATORS" in text
     assert "EASY_SETUP_SPECTATORS" in text

@@ -36,12 +36,15 @@ Each `timeline.ndjson` line is one JSON object:
 
 | Type | Meaning |
 | --- | --- |
+| `behavior.event` | Non-chat bot behavior/status telemetry such as gated clean-exit or unstuck messages. |
+| `bridge.action.start` | Bridge action-result request start telemetry. This is not counted as an executed Minecraft action. |
+| `bridge.action.result` | Bridge action-result settle telemetry. This is not counted as an executed Minecraft action. |
 | `chat.public` | Public Minecraft chat from Paper or bot logs. Payload includes `speaker` and `message`. |
 | `llm.request` | Local LM Studio request started. Payload includes `model`, `purpose`, `reason`, and prompt token count. |
-| `llm.response` | Local LM Studio response or failure. Payload includes `model`, `latency_ms`, `outcome`, prompt/completion/total tokens, and usage source. |
-| `action.intent` | High-level intended action from model output or command text. This is not emitted for every tick or pathfinder step. |
+| `llm.response` | Local LM Studio response or failure. Payload includes `model`, `latency_ms`, `outcome`, prompt/completion/total tokens, usage source, and command-discard counters when inferred from bot logs. |
+| `action.intent` | Accepted executable command from parsed/full-response command paths. Stale generated commands do not emit this event. |
 | `action.start` | A discrete bridge/action start, usually tied to a trace id. |
-| `action.result` | Terminal action result such as placed, reached, blocked, failed, invalid, or timed out. |
+| `action.result` | Terminal grouped `Agent executed:` result such as placed, reached, blocked, failed, invalid, interrupted, or timed out. |
 | `heartbeat.fired` | Autonomous idle/stall heartbeat prompt was sent. Payload includes reason, idle window, action state, cooldown, and prompt excerpt. |
 | `heartbeat.skipped` | Heartbeat considered an idle/stall check but did not prompt, such as active action, cooldown, disabled, or max no-command state. |
 | `heartbeat.outcome` | Result of a heartbeat prompt. Payload includes command detection, no-command streak, response excerpt, and error status when applicable. |
@@ -88,6 +91,12 @@ uses a deterministic fallback per agent:
 
 This fallback only fills missing trace ids; it does not merge or delete events.
 Every event still has a stable `event_id` and monotonic `seq`.
+
+For bot-log inference, the exporter uses the same parser as
+`analyze_action_reliability.py`. `Generated response:` text becomes
+`llm.response`; stale generations set `outcome: "discarded_stale"` and expose
+`discarded_commands`; only accepted commands become `action.intent`; and each
+multi-line `Agent executed:` block becomes one `action.result`.
 
 ## Sources
 

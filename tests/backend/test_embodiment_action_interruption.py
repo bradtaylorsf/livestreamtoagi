@@ -303,6 +303,38 @@ process.stdout.write(JSON.stringify({{ status: 'ok', result }}) + '\\n');
     assert PATH_STOPPED in action_call["payload"]["detail"]
 
 
+@requires_node
+def test_place_here_guard_flags_repeated_failed_target(tmp_path: Path) -> None:
+    root = tmp_path / "fork-src" / "agent"
+    commands = root / "commands"
+    skills = root / "skills"
+    commands.mkdir(parents=True)
+    skills.mkdir(parents=True)
+    shutil.copy2(PLACE_HERE_GUARD, commands / "place_here_guard.js")
+    shutil.copy2(ACTION_INTERRUPTION, skills / "action_interruption.js")
+    _stage_stub_bridge(root)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(commands / "place_here_guard.js"))}).href);
+const guarded = mod.wrapPlaceHere(async () => 'Action output:\\nFailed to place cobblestone at (1, 65, 2).');
+const agent = {{ name: 'rex', bot: {{ username: 'Rex' }} }};
+const first = await guarded(agent, 'cobblestone');
+const second = await guarded(agent, 'cobblestone');
+process.stdout.write(JSON.stringify({{ first, second }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"BRIDGE_CALLS_PATH": str(tmp_path / "bridge_calls.jsonl"), "LTAG_AGENT_ID": "rex"},
+    )
+
+    assert "repeated_failure" not in result["first"]
+    assert "repeated_failure" in result["second"]
+    assert "choose a different target" in result["second"]
+
+
 def test_launchers_stage_interruption_guard_and_clean_exit_gate() -> None:
     for script in (CONNECT_BRIDGE_SCRIPT, CONNECT_ALPHA_SCRIPT, CONNECT_COHORT_SCRIPT):
         src = script.read_text(encoding="utf-8")
@@ -310,8 +342,22 @@ def test_launchers_stage_interruption_guard_and_clean_exit_gate() -> None:
         assert "PLACE_HERE_GUARD_REL" in src
         assert "wrapInterruptedActions" in src
         assert "LTAG E8-14 action interruption guard" in src
+        assert "const actionName = actionObj && typeof actionObj.name === 'string'" in src
+        assert "interrupted before completion" in src
         assert "MINECRAFT_CLEAN_EXIT" in src
+        assert "this.bot.chat(code > 1 ? 'Restarting.': 'Exiting.')" in src
         assert "clean exit chat gate" in src
+        assert "MODES_UNSTUCK_PATCH_MARKER" in src
+        assert "effectiveMaxStuckTime" in src
+        assert "/action:(placeHere|collectBlocks|followPlayer)/" in src
+        assert "unstuck timed out before recovery" in src
+        assert "interrupted: unstuck-failed: timed out before recovery" in src
+        assert "Promise.race([skills.moveAway(bot, 5), unstuckTimeout])" in src
+        assert "ACTION_MANAGER_NO_KILL_PATCH_MARKER" in src
+        assert "action-stop-timeout" in src
+        assert "forcing idle without process exit" in src
+        assert "action-manager no-kill patch" in src
+        assert "[behavior-status]" in src
 
 
 def test_package_json_exposes_action_interruption_verifier() -> None:

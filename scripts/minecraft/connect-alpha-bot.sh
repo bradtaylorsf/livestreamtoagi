@@ -65,8 +65,12 @@ ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
+MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
+ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
 
 AGENT_REL="src/agent/agent.js"
+MODES_REL="src/agent/modes.js"
+ACTION_MANAGER_REL="src/agent/action_manager.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
 TIMELINE_EMITTER_REL="src/agent/bridge/timeline_emitter.js"
 MANAGEMENT_REVIEW_REL="src/agent/bridge/management_review.js"
@@ -98,6 +102,10 @@ ACTIONS_BACKUP=""
 ACTIONS_PATH=""
 AGENT_BACKUP=""
 AGENT_PATH=""
+MODES_BACKUP=""
+MODES_PATH=""
+ACTION_MANAGER_BACKUP=""
+ACTION_MANAGER_PATH=""
 STAGED_DESTS=()
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -159,6 +167,14 @@ restore_clone_patches() {
     if [ -n "${AGENT_BACKUP:-}" ] && [ -f "$AGENT_BACKUP" ] && [ -n "${AGENT_PATH:-}" ]; then
         cp "$AGENT_BACKUP" "$AGENT_PATH" 2> /dev/null || true
         rm -f "$AGENT_BACKUP"
+    fi
+    if [ -n "${MODES_BACKUP:-}" ] && [ -f "$MODES_BACKUP" ] && [ -n "${MODES_PATH:-}" ]; then
+        cp "$MODES_BACKUP" "$MODES_PATH" 2> /dev/null || true
+        rm -f "$MODES_BACKUP"
+    fi
+    if [ -n "${ACTION_MANAGER_BACKUP:-}" ] && [ -f "$ACTION_MANAGER_BACKUP" ] && [ -n "${ACTION_MANAGER_PATH:-}" ]; then
+        cp "$ACTION_MANAGER_BACKUP" "$ACTION_MANAGER_PATH" 2> /dev/null || true
+        rm -f "$ACTION_MANAGER_BACKUP"
     fi
     local staged
     for staged in "${STAGED_DESTS[@]:-}"; do
@@ -514,6 +530,11 @@ if (methodStart === -1 || methodEnd === -1) {
 }
 
 const replacement = `    async openChat(message) { // ${marker}
+        const statusMessage = String(message || '').trim();
+        if (/^(I'm stuck!|I'm free\\.|Exiting\\.|Restarting\\.)$/.test(statusMessage)) {
+            console.log('[behavior-status]', this.name + ':', statusMessage);
+            return;
+        }
         let to_translate = message;
         let remaining = '';
         let command_name = containsCommand(message);
@@ -561,6 +582,15 @@ for (const pattern of cleanExitPatterns) {
             `${indent}if (process.env.MINECRAFT_CLEAN_EXIT === '1') ${statement} // ${cleanExitMarker}`,
     );
 }
+const cleanExitTernaryNeedle = "        this.bot.chat(code > 1 ? 'Restarting.': 'Exiting.');";
+if (source.includes(cleanExitTernaryNeedle)) {
+    source = source.replace(
+        cleanExitTernaryNeedle,
+        `        if (process.env.MINECRAFT_CLEAN_EXIT === '1') this.bot.chat(code > 1 ? 'Restarting.': 'Exiting.'); // ${cleanExitMarker}`,
+    );
+} else if (!source.includes("MINECRAFT_CLEAN_EXIT === '1') this.bot.chat(code > 1")) {
+    throw new Error('cleanKill chat anchor not found');
+}
 
 const heartbeatCallNeedle = `installHeartbeat(this); // ${heartbeatMarker}`;
 if (!source.includes(heartbeatCallNeedle)) {
@@ -582,6 +612,124 @@ then
     exit 1
 fi
 ok "Applied Management chat gate to $AGENT_REL"
+
+MODES_PATH="$MINDCRAFT_DIR_ABS/$MODES_REL"
+if [ ! -f "$MODES_PATH" ]; then
+    fail "Mindcraft source file missing: $MODES_PATH"
+    exit 1
+fi
+if grep -q "$MODES_UNSTUCK_PATCH_MARKER" "$MODES_PATH"; then
+    info "Found a previous unstuck no-kill patch in $MODES_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$MODES_REL" > "$MODES_PATH"; then
+        fail "Could not restore pinned $MODES_REL before patching."
+        exit 1
+    fi
+fi
+MODES_BACKUP="$(mktemp -t mindcraft-modes.XXXXXX)"
+cp "$MODES_PATH" "$MODES_BACKUP"
+if ! MODES_PATH="$MODES_PATH" \
+    MODES_UNSTUCK_PATCH_MARKER="$MODES_UNSTUCK_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.MODES_PATH;
+const marker = process.env.MODES_UNSTUCK_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+const stuckNeedle = `if (this.stuck_time > max_stuck_time) {`;
+const stuckPatch = `const activeActionLabel = agent.actions?.currentActionLabel || ''; // ${marker}
+            const effectiveMaxStuckTime = /action:(placeHere|collectBlocks|followPlayer)/.test(activeActionLabel) ? max_stuck_time * 3 : max_stuck_time;
+            if (this.stuck_time > effectiveMaxStuckTime) {`;
+if (source.includes(stuckNeedle)) {
+    source = source.replace(stuckNeedle, stuckPatch);
+} else if (!source.includes('effectiveMaxStuckTime')) {
+    throw new Error('unstuck stuck-time anchor not found');
+}
+const needle = `const crashTimeout = setTimeout(() => { agent.cleanKill("Got stuck and couldn't get unstuck") }, 10000);
+                    await skills.moveAway(bot, 5);
+                    clearTimeout(crashTimeout);
+                    say(agent, 'I\\'m free.');`;
+const patch = `let unstuckTimedOut = false; // ${marker}
+                    const unstuckTimeout = new Promise((resolve) => setTimeout(() => {
+                        unstuckTimedOut = true;
+                        console.warn('[mode-status]', agent.name + ':', "unstuck timed out before recovery");
+                        bot.output += "interrupted: unstuck-failed: timed out before recovery\\n";
+                        resolve();
+                    }, 10000));
+                    await Promise.race([skills.moveAway(bot, 5), unstuckTimeout]);
+                    if (!unstuckTimedOut) say(agent, 'I\\'m free.');
+                    else agent.bot.emit('idle');`;
+if (source.includes(needle)) {
+    source = source.replace(needle, patch);
+} else if (!source.includes(marker)) {
+    throw new Error('unstuck cleanKill anchor not found');
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply unstuck no-kill patch to $MODES_REL"
+    exit 1
+fi
+ok "Applied unstuck no-kill patch to $MODES_REL"
+
+ACTION_MANAGER_PATH="$MINDCRAFT_DIR_ABS/$ACTION_MANAGER_REL"
+if [ ! -f "$ACTION_MANAGER_PATH" ]; then
+    fail "Mindcraft source file missing: $ACTION_MANAGER_PATH"
+    exit 1
+fi
+if grep -q "$ACTION_MANAGER_NO_KILL_PATCH_MARKER" "$ACTION_MANAGER_PATH"; then
+    info "Found a previous action-manager no-kill patch in $ACTION_MANAGER_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTION_MANAGER_REL" > "$ACTION_MANAGER_PATH"; then
+        fail "Could not restore pinned $ACTION_MANAGER_REL before patching."
+        exit 1
+    fi
+fi
+ACTION_MANAGER_BACKUP="$(mktemp -t mindcraft-action-manager.XXXXXX)"
+cp "$ACTION_MANAGER_PATH" "$ACTION_MANAGER_BACKUP"
+if ! ACTION_MANAGER_PATH="$ACTION_MANAGER_PATH" \
+    ACTION_MANAGER_NO_KILL_PATCH_MARKER="$ACTION_MANAGER_NO_KILL_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.ACTION_MANAGER_PATH;
+const marker = process.env.ACTION_MANAGER_NO_KILL_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+const needle = `const timeout = setTimeout(() => {
+            this.agent.cleanKill('Code execution refused stop after 10 seconds. Killing process.');
+        }, 10000);
+        while (this.executing) {
+            this.agent.requestInterrupt();
+            console.log('waiting for code to finish executing...');
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        clearTimeout(timeout);`;
+const patch = `const deadline = Date.now() + 10000; // ${marker}
+        while (this.executing && Date.now() < deadline) {
+            this.agent.requestInterrupt();
+            console.log('waiting for code to finish executing...');
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        if (this.executing) {
+            console.warn('[action-status]', \`action \${this.currentActionLabel || 'unknown'} refused stop; forcing idle without process exit\`);
+            this.agent.bot.output = (this.agent.bot.output || '') + 'interrupted: action-stop-timeout: action refused stop before completion\\n';
+            this.agent.bot.interrupt_code = true;
+            this.executing = false;
+            this.currentActionLabel = '';
+            this.currentActionFn = null;
+            this.cancelResume();
+            this.agent.bot.emit('idle');
+        }`;
+if (source.includes(needle)) {
+    source = source.replace(needle, patch);
+} else if (!source.includes(marker)) {
+    throw new Error('action-manager stop cleanKill anchor not found');
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply action-manager no-kill patch to $ACTION_MANAGER_REL"
+    exit 1
+fi
+ok "Applied action-manager no-kill patch to $ACTION_MANAGER_REL"
 
 ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
 if [ ! -f "$ACTIONS_PATH" ]; then
@@ -634,6 +782,29 @@ if (!source.includes(anchor)) {
 const guardMarker = process.env.ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER;
 const guardImportLine = `import { wrapInterruptedActions } from './place_here_guard.js'; // ${guardMarker}\n`;
 const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}\n`;
+const runAsActionLabelNeedle = `const actionObj = actionsList.find(a => a.perform === wrappedAction);
+            actionLabel = actionObj.name.substring(1); // Remove the ! prefix`;
+const runAsActionLabelPatch = `const actionObj = actionsList.find(a => a.perform === wrappedAction) || this;
+            const actionName = actionObj && typeof actionObj.name === 'string' ? actionObj.name : '!action';
+            actionLabel = actionName.substring(1); // Remove the ! prefix`;
+if (source.includes(runAsActionLabelNeedle)) {
+    source = source.replace(runAsActionLabelNeedle, runAsActionLabelPatch);
+} else if (!source.includes('const actionName = actionObj && typeof actionObj.name')) {
+    throw new Error('runAsAction label anchor not found');
+}
+const runAsActionInterruptedNeedle = `if (code_return.interrupted && !code_return.timedout)
+            return;
+        return code_return.message;`;
+const runAsActionInterruptedPatch = `if (code_return.interrupted && !code_return.timedout) {
+            const detail = code_return.message || \`\${actionLabel || 'action'} interrupted before completion\`;
+            return detail.startsWith('interrupted:') ? detail : \`interrupted: \${detail}\`;
+        }
+        return code_return.message || '';`;
+if (source.includes(runAsActionInterruptedNeedle)) {
+    source = source.replace(runAsActionInterruptedNeedle, runAsActionInterruptedPatch);
+} else if (!source.includes("interrupted before completion")) {
+    throw new Error('runAsAction interrupted-return anchor not found');
+}
 
 const actions = [
     ['bridgePingAction', './bridge_ping_action.js', process.env.ACTIONS_PATCH_MARKER],

@@ -6,9 +6,8 @@ Issue: #706 E8-10 - Action-command reliability gate for local LLM Minecraft sims
 
 The E8 soak must prove that local LM Studio output becomes executable Minecraft
 actions, not just stable processes. The reliability gate analyzes per-bot
-Mindcraft logs after a local run and marks the run not acceptable when agents
-announce intended actions but malformed, empty, or unparsed LLM responses stop
-commands from executing.
+Mindcraft logs after a local run and marks the run not acceptable when accepted
+commands fail to execute or successful executions lack world-state evidence.
 
 Artifacts are written next to the soak evidence:
 
@@ -19,9 +18,10 @@ Artifacts are written next to the soak evidence:
 
 ## Methodology
 
-The analyzer is `scripts/minecraft/analyze_action_reliability.py`. It scans
-`<run-dir>/bots/*.log`, treats each log file as one agent, and uses conservative
-stdout/stderr heuristics because Mindcraft log text is not a versioned contract.
+The analyzer is `scripts/minecraft/analyze_action_reliability.py`. It shares
+`scripts/minecraft/bot_log_parser.py` with the timeline exporter so
+`action-reliability.md`, `timeline.ndjson`, and `monitor.html` use the same
+definition of generated text, accepted commands, and grouped execution results.
 
 ### Intent Detection
 
@@ -40,19 +40,20 @@ Instruction/configuration lines such as init prompts, profiles, settings,
 available-command examples, and command syntax help are ignored so launch
 prompts do not inflate the metric.
 
-### Command Emission
+### Generated, Discarded, And Accepted Commands
 
-The emitted-command counter uses this command surface marker:
+The parser separates three command-bearing stages:
 
-```text
-!\w+\s*\(
-```
+- `generated_commands`: command-shaped text in a model response.
+- `discarded_commands`: commands in stale responses, such as responses dropped
+  after `received new message while generating`.
+- `emitted_commands`: accepted commands from parsed/full-response execution
+  paths.
 
-Examples: `!place(`, `!placeHere(`, `!move(`, `!nearbyBlocks(`. The
-`intent_to_command_ratio` is capped at `1.0` and compares emitted commands to
-same-agent intended-action utterances. This allows an agent to say what it is
-about to do and then emit a command on the next line, while still failing when
-the bot repeatedly promises action with no command output.
+Only accepted commands become `action.intent` events or enter the execution
+denominator. Command examples, memory summaries, raw `Generated response:`
+lines, and stale discarded responses do not count as emitted executable
+commands.
 
 ### Parse Results
 
@@ -72,13 +73,12 @@ therefore lower parse success even when no command marker was emitted.
 
 ### Execution Results
 
-The analyzer counts execution success/failure from action-result-like lines,
-`action.result.outcome_class` values, verified action trace lines, and Mindcraft command output. Success markers
-include `Code output`, `Successfully`, `status=success`, `placed`, `removed`,
-`reached`, `moved`, and `broke`. Failure markers include `Action failed`,
-`failed`, `error`, `status=failure`, `status=partial`, `blocked`,
-`interrupted`, `aborted`, `invalid`, `protected`, `PathStopped`, `timed-out`,
-`timeout`, and `unreachable`.
+The analyzer groups each `Agent executed:` block until the next log boundary and
+classifies the whole block. Success markers include `Placed ...`, `Broke ...`,
+`You have reached`, `reached: distance_to_target`, `Found ...`,
+`NEARBY_BLOCKS`, `CRAFTABLE_ITEMS`, and inventory observations. Failure classes
+include `placement_blocked`, `missing_inventory`, `wrong_args`, `interrupted`,
+`undefined_result`, `timeout`, `unreachable`, and `blocked`.
 
 `command_execution_rate` is command executions divided by emitted commands.
 Failures still count as executed commands because they prove the command reached
@@ -86,20 +86,22 @@ the action surface.
 
 ### Verification Results
 
-A verified action is an execution-success line with corroborating world-state
-evidence. Current accepted evidence includes:
+A verified action is a successful grouped execution with corroborating
+world-state evidence. Current accepted evidence includes:
 
 - Block state deltas such as `before=air; after=oak_log`.
 - Movement deltas such as `distance_to_target=...; delta=...`.
 - Build/errand counters such as `steps_verified=1` or `verified=1`.
-- Verified action classifications such as `placed: position=...`,
-  `removed: position=...`, or `reached: distance=...`.
+- Direct Mindcraft outcomes such as `Placed oak_log at (...)`,
+  `Broke cobblestone at (...)`, `Found oak_log at (...)`, or `You have reached`.
 
 Expected safety interruptions are terminal failures, not process crashes.
 Examples include `interrupted: PathStopped: Path was stopped before it could be
 completed` when `mode:unstuck` stops an in-flight placement or pathfinder goal.
 These lines count as executed commands with failure outcomes, while the
 verified-success denominator remains limited to successful world-state changes.
+The current launchers patch interrupted non-timeout actions to return a
+structured `interrupted: ...` result instead of `undefined`.
 
 `verified_success_rate` is verified successful actions divided by execution
 successes. A command can execute and still fail this gate if the log only says
@@ -196,4 +198,4 @@ Paste this into the issue or PR with the completed local LM Studio evidence:
 | Top parser failure classes |  |
 | Representative failed parses |  |
 | Representative verified successes |  |
-| Evidence artifacts | `action-reliability.json`, `action-reliability.md`, `summary.txt` |
+| Evidence artifacts | `action-reliability.json`, `action-reliability.md`, `timeline.ndjson`, `timeline-totals.json`, `monitor.html`, `summary.txt` |

@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import tempfile
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -242,6 +243,8 @@ def event_category(event_type: str) -> str:
         return "action"
     if event_type == "state.sample":
         return "movement"
+    if event_type.startswith("bridge.") or event_type == "behavior.event":
+        return "lifecycle"
     if event_type == "error":
         return "error"
     if event_type == "lifecycle":
@@ -352,7 +355,7 @@ def command_signature(event: dict[str, Any]) -> str | None:
     commands = event_payload.get("commands")
     if isinstance(commands, list) and commands:
         return " | ".join(
-            normalize_command(command) for command in commands if str(command).strip()
+            normalize_command(command) for command in commands if command_text(command)
         )
     if isinstance(commands, str) and commands.strip():
         return normalize_command(commands)
@@ -366,8 +369,23 @@ def command_signature(event: dict[str, Any]) -> str | None:
     return None
 
 
+def command_text(value: Any) -> str:
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("command")
+        if text:
+            return str(text)
+        name = value.get("name")
+        args = value.get("args")
+        if name:
+            prefix = str(name)
+            if not prefix.startswith("!"):
+                prefix = f"!{prefix}"
+            return f"{prefix}({args})" if args not in (None, "") else prefix
+    return str(value).strip()
+
+
 def normalize_command(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value).strip())
+    return re.sub(r"\s+", " ", command_text(value))
 
 
 def is_blank_llm_response(event: dict[str, Any]) -> bool:
@@ -446,7 +464,9 @@ def event_summary(event: dict[str, Any]) -> str:
         latency = event_payload.get("latency_ms")
         tokens = event_payload.get("total_tokens") or 0
         latency_text = f"; {latency}ms" if latency not in (None, "") else ""
-        return clip(f"{model} {outcome}{latency_text}; {tokens} tokens")
+        output = event_payload.get("response_text") or event_payload.get("completion") or ""
+        output_text = f"; {output}" if output else ""
+        return clip(f"{model} {outcome}{latency_text}; {tokens} tokens{output_text}")
     if event_type == "state.sample":
         return format_position(event_payload)
     if event_type == "error":
@@ -455,6 +475,14 @@ def event_summary(event: dict[str, Any]) -> str:
         )
     if event_type == "lifecycle":
         return clip(event_payload.get("text") or event_payload.get("status") or "lifecycle")
+    if event_type == "behavior.event":
+        kind = event_payload.get("kind") or "behavior"
+        return clip(f"{kind}: {event_payload.get('text') or ''}")
+    if event_type.startswith("bridge."):
+        bridge = event_payload.get("bridge") if isinstance(event_payload.get("bridge"), dict) else {}
+        return clip(
+            f"{event_type} {bridge.get('phase') or ''} ok={bridge.get('ok') or ''}"
+        )
     return clip(event_payload)
 
 
@@ -481,12 +509,17 @@ def warning(code: str, label: str, detail: str) -> dict[str, str]:
 def build_llm_feed(events: list[dict[str, Any]], feed_limit: int) -> list[dict[str, Any]]:
     requests: dict[str, dict[str, Any]] = {}
     responses: dict[str, dict[str, Any]] = {}
+    actions_by_trace: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
         event_type = str(event.get("event_type") or "")
-        if not event_type.startswith("llm."):
-            continue
         agent = event_agent(event) or "unknown"
         key = f"{agent}:{event.get('trace_id') or event.get('event_id') or event_sort_key(event)}"
+        if event_type in {"action.intent", "action.start", "action.result"} and event.get(
+            "trace_id"
+        ):
+            actions_by_trace[key].append(event)
+        if not event_type.startswith("llm."):
+            continue
         if event_type == "llm.request":
             requests[key] = event
         elif event_type == "llm.response":
@@ -504,6 +537,16 @@ def build_llm_feed(events: list[dict[str, Any]], feed_limit: int) -> list[dict[s
         response_payload = payload(response or {})
         source_payload = payload(source)
         ts = event_ts(source)
+        linked_actions = actions_by_trace.get(key, [])
+        latest_intent = latest_event(linked_actions, "action.intent")
+        latest_result = latest_event(linked_actions, "action.result")
+        effect_parts: list[str] = []
+        if latest_intent:
+            effect_parts.append(command_signature(latest_intent) or event_summary(latest_intent))
+        if latest_result:
+            effect_parts.append(event_summary(latest_result))
+        elif latest_intent:
+            effect_parts.append("pending")
         rows.append(
             {
                 "ts": isoformat_z(ts) if ts else "",
@@ -528,10 +571,70 @@ def build_llm_feed(events: list[dict[str, Any]], feed_limit: int) -> list[dict[s
                 "outcome": str(
                     response_payload.get("outcome") or request_payload.get("outcome") or "started"
                 ),
+                "output": clip(
+                    response_payload.get("response_text")
+                    or response_payload.get("completion")
+                    or response_payload.get("output")
+                    or "",
+                    limit=260,
+                ),
+                "effect": clip(" -> ".join(effect_parts), limit=260),
                 "category": "llm",
             }
         )
     return sorted(rows, key=lambda row: row.get("ts") or "", reverse=True)[:feed_limit]
+
+
+def command_count(event: dict[str, Any]) -> int:
+    commands = payload(event).get("commands")
+    if isinstance(commands, list):
+        return len([command for command in commands if command_text(command)])
+    if isinstance(commands, str) and commands.strip():
+        return 1
+    return 0
+
+
+def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    llm_responses = [event for event in events if event.get("event_type") == "llm.response"]
+    action_intents = [event for event in events if event.get("event_type") == "action.intent"]
+    action_results = [event for event in events if event.get("event_type") == "action.result"]
+    discarded_responses = [
+        event
+        for event in llm_responses
+        if str(payload(event).get("outcome") or "") == "discarded_stale"
+    ]
+    outcome_classes: dict[str, int] = defaultdict(int)
+    for event in action_results:
+        event_payload = payload(event)
+        key = str(
+            event_payload.get("outcome_class")
+            or event_payload.get("outcome")
+            or "unknown"
+        )
+        outcome_classes[key] += 1
+
+    accepted_commands = sum(command_count(event) for event in action_intents)
+    executed_actions = len(action_results)
+    verified_actions = sum(1 for event in action_results if payload(event).get("verified"))
+    return {
+        "llm_requests": sum(1 for event in events if event.get("event_type") == "llm.request"),
+        "llm_responses": len(llm_responses),
+        "discarded_stale_responses": len(discarded_responses),
+        "discarded_commands": sum(
+            int(payload(event).get("discarded_commands") or 0)
+            for event in discarded_responses
+        ),
+        "accepted_commands": accepted_commands,
+        "executed_actions": executed_actions,
+        "verified_actions": verified_actions,
+        "execution_rate": round(executed_actions / accepted_commands, 4)
+        if accepted_commands
+        else 1.0,
+        "verified_rate": round(verified_actions / executed_actions, 4)
+        if executed_actions
+        else 1.0,
+        "outcome_classes": dict(sorted(outcome_classes.items())),
+    }
 
 
 def row_from_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -618,10 +721,15 @@ def build_monitor_model(
         llm_responses: list[dict[str, Any]] = []
         action_intents: list[dict[str, Any]] = []
         action_results: list[dict[str, Any]] = []
+        discarded_command_count = 0
+        interrupted_count = 0
+        undefined_count = 0
+        verified_count = 0
 
         for event in agent_events:
             event_type = str(event.get("event_type") or "")
             ts = event_ts(event)
+            event_payload = payload(event)
             if event_type in ACTIVE_EVENT_TYPES and ts:
                 last_activity = ts
             if event_type.startswith("llm.") and ts:
@@ -629,10 +737,19 @@ def build_monitor_model(
                 latest_llm_event = event
             if event_type == "llm.response":
                 llm_responses.append(event)
+                if str(event_payload.get("outcome") or "") == "discarded_stale":
+                    discarded_command_count += int(event_payload.get("discarded_commands") or 0)
             elif event_type == "action.intent":
                 action_intents.append(event)
             elif event_type == "action.result":
                 action_results.append(event)
+                outcome_class = str(event_payload.get("outcome_class") or "")
+                if event_payload.get("verified"):
+                    verified_count += 1
+                if outcome_class == "interrupted":
+                    interrupted_count += 1
+                if outcome_class == "undefined_result":
+                    undefined_count += 1
             elif event_type == "error":
                 error_count += 1
             if is_restart_lifecycle(event):
@@ -696,6 +813,24 @@ def build_monitor_model(
             detail = f"{len(restart_events)} lifecycle disconnect/restart event(s)"
             agent_warnings.append(warning("crash_restart", label, detail))
 
+        if undefined_count:
+            agent_warnings.append(
+                warning(
+                    "undefined_action_result",
+                    "Undefined result",
+                    f"{undefined_count} action execution(s) returned undefined",
+                )
+            )
+
+        if interrupted_count >= thresholds.stuck_loop_count:
+            agent_warnings.append(
+                warning(
+                    "interrupted_actions",
+                    "Interrupted actions",
+                    f"{interrupted_count} interrupted action result(s)",
+                )
+            )
+
         stuck_count = count_consecutive(action_results, is_stuck_action_result)
         if stuck_count >= thresholds.stuck_loop_count:
             agent_warnings.append(
@@ -744,6 +879,11 @@ def build_monitor_model(
                 "idle": human_duration(idle_seconds),
                 "restart_count": len(restart_events),
                 "error_count": error_count,
+                "discarded_commands": discarded_command_count,
+                "interrupted_count": interrupted_count,
+                "undefined_count": undefined_count,
+                "verified_count": verified_count,
+                "executed_count": len(action_results),
                 "tokens": token_totals,
             }
         )
@@ -771,6 +911,7 @@ def build_monitor_model(
             "agent_count": len(cards),
             "warning_count": total_warnings,
         },
+        "pipeline": build_pipeline_summary(sorted_events),
         "thresholds": thresholds.__dict__,
         "agents": cards,
         "feeds": {
@@ -825,11 +966,33 @@ def render_agent_cards(agents: list[dict[str, Any]]) -> str:
                 <div><strong>{agent["restart_count"]}</strong><span>restarts</span></div>
                 <div><strong>{agent["error_count"]}</strong><span>errors</span></div>
                 <div><strong>{tokens["total_tokens"]}</strong><span>tokens</span></div>
+                <div><strong>{agent["executed_count"]}</strong><span>executed</span></div>
+                <div><strong>{agent["verified_count"]}</strong><span>verified</span></div>
+                <div><strong>{agent["interrupted_count"]}</strong><span>interrupted</span></div>
+                <div><strong>{agent["discarded_commands"]}</strong><span>discarded</span></div>
               </div>
             </article>
             """
         )
     return "\n".join(cards)
+
+
+def render_pipeline(pipeline: dict[str, Any]) -> str:
+    labels = [
+        ("llm_requests", "LLM requests"),
+        ("llm_responses", "LLM responses"),
+        ("discarded_stale_responses", "Discarded stale"),
+        ("discarded_commands", "Discarded commands"),
+        ("accepted_commands", "Accepted commands"),
+        ("executed_actions", "Executed actions"),
+        ("verified_actions", "Verified actions"),
+        ("execution_rate", "Execution rate"),
+        ("verified_rate", "Verified rate"),
+    ]
+    return "\n".join(
+        f'<div><strong>{esc(pipeline.get(key))}</strong><span>{esc(label)}</span></div>'
+        for key, label in labels
+    )
 
 
 def render_feed_rows(
@@ -840,7 +1003,17 @@ def render_feed_rows(
     html_rows: list[str] = []
     for row in rows:
         category = row.get("category") or "lifecycle"
-        if columns == ("ts", "agent", "model", "purpose", "latency_ms", "tokens", "outcome"):
+        if columns == (
+            "ts",
+            "agent",
+            "model",
+            "purpose",
+            "latency_ms",
+            "tokens",
+            "outcome",
+            "output",
+            "effect",
+        ):
             latency = "" if row.get("latency_ms") in (None, "") else f"{row.get('latency_ms')}ms"
             html_rows.append(
                 f"""
@@ -852,6 +1025,8 @@ def render_feed_rows(
                   <td>{esc(latency)}</td>
                   <td>{esc(row.get("tokens"))}</td>
                   <td>{esc(row.get("outcome"))}</td>
+                  <td>{esc(row.get("output"))}</td>
+                  <td>{esc(row.get("effect"))}</td>
                 </tr>
                 """
             )
@@ -985,6 +1160,11 @@ def render_monitor_html(model: dict[str, Any]) -> str:
       gap: 8px;
       margin-top: 12px;
     }}
+    .pipeline-metrics {{
+      margin-top: 0;
+      padding: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }}
     .metrics div {{
       background: #f3f5f8;
       border-radius: 7px;
@@ -1054,6 +1234,15 @@ def render_monitor_html(model: dict[str, Any]) -> str:
   </header>
   <main>
     <section>
+      <div class="section-head"><h2>Action Pipeline</h2></div>
+      <article class="feed-panel">
+        <div class="metrics pipeline-metrics">
+          {render_pipeline(model["pipeline"])}
+        </div>
+      </article>
+    </section>
+
+    <section>
       <div class="section-head"><h2>Agents</h2></div>
       <div class="agent-grid">
         {render_agent_cards(model["agents"])}
@@ -1093,8 +1282,8 @@ def render_monitor_html(model: dict[str, Any]) -> str:
           <h3>LLM Requests</h3>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>Time</th><th>Agent</th><th>Model</th><th>Purpose</th><th>Latency</th><th>Tokens</th><th>Outcome</th></tr></thead>
-              <tbody>{render_feed_rows(model["feeds"]["llm"], columns=("ts", "agent", "model", "purpose", "latency_ms", "tokens", "outcome"))}</tbody>
+              <thead><tr><th>Time</th><th>Agent</th><th>Model</th><th>Purpose</th><th>Latency</th><th>Tokens</th><th>Outcome</th><th>Output</th><th>Game effect</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["llm"], columns=("ts", "agent", "model", "purpose", "latency_ms", "tokens", "outcome", "output", "effect"))}</tbody>
             </table>
           </div>
         </article>

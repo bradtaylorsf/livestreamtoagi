@@ -31,6 +31,7 @@ from _minecraft_log_patterns import (
     UTTERANCE_RE,
     VERIFICATION_RE,
 )
+from bot_log_parser import ParsedExecution, parse_bot_log_file
 
 DEFAULT_MIN_INTENT_TO_COMMAND = 0.6
 DEFAULT_MIN_PARSE_SUCCESS = 0.8
@@ -59,13 +60,19 @@ class AgentStats:
     log_file: str
     intent_utterances: int = 0
     emitted_commands: int = 0
+    generated_commands: int = 0
+    discarded_commands: int = 0
+    stale_generations: int = 0
     parser_failures: Counter[str] = field(default_factory=Counter)
     execution_successes: int = 0
     execution_failures: int = 0
+    execution_unknowns: int = 0
     verified_actions: int = 0
+    execution_failure_classes: Counter[str] = field(default_factory=Counter)
     failed_parse_examples: list[Example] = field(default_factory=list)
     verified_success_examples: list[Example] = field(default_factory=list)
     intent_examples: list[Example] = field(default_factory=list)
+    execution_failure_examples: list[Example] = field(default_factory=list)
 
     @property
     def parse_failures(self) -> int:
@@ -77,7 +84,7 @@ class AgentStats:
 
     @property
     def command_executions(self) -> int:
-        return self.execution_successes + self.execution_failures
+        return self.execution_successes + self.execution_failures + self.execution_unknowns
 
     @property
     def parse_successes(self) -> int:
@@ -117,6 +124,9 @@ class AgentStats:
     def counts(self) -> dict[str, int]:
         return {
             "intent_utterances": self.intent_utterances,
+            "generated_commands": self.generated_commands,
+            "discarded_commands": self.discarded_commands,
+            "stale_generations": self.stale_generations,
             "emitted_commands": self.emitted_commands,
             "intended_action_events": self.intended_action_events,
             "parse_successes": self.parse_successes,
@@ -124,6 +134,7 @@ class AgentStats:
             "command_executions": self.command_executions,
             "execution_successes": self.execution_successes,
             "execution_failures": self.execution_failures,
+            "execution_unknowns": self.execution_unknowns,
             "verified_actions": self.verified_actions,
         }
 
@@ -136,12 +147,19 @@ class AgentStats:
                 {"class": klass, "count": count}
                 for klass, count in self.parser_failures.most_common(top_n)
             ],
+            "execution_failure_classes": [
+                {"class": klass, "count": count}
+                for klass, count in self.execution_failure_classes.most_common(top_n)
+            ],
             "examples": {
                 "failed_parses": [example.to_json() for example in self.failed_parse_examples[:top_n]],
                 "verified_successes": [
                     example.to_json() for example in self.verified_success_examples[:top_n]
                 ],
                 "intent_without_command": [example.to_json() for example in self.intent_examples[:top_n]],
+                "execution_failures": [
+                    example.to_json() for example in self.execution_failure_examples[:top_n]
+                ],
             },
         }
 
@@ -201,17 +219,47 @@ def classify_execution(line: str) -> tuple[str | None, bool]:
     return None, False
 
 
+def add_execution(stats: AgentStats, execution: ParsedExecution, top_n: int) -> None:
+    if execution.outcome == "success":
+        stats.execution_successes += 1
+        if execution.verified:
+            stats.verified_actions += 1
+            if len(stats.verified_success_examples) < top_n:
+                stats.verified_success_examples.append(
+                    Example(line=execution.line, text=excerpt(execution.detail))
+                )
+        return
+
+    if execution.outcome == "failure":
+        stats.execution_failures += 1
+        stats.execution_failure_classes[execution.outcome_class] += 1
+        if len(stats.execution_failure_examples) < top_n:
+            stats.execution_failure_examples.append(
+                Example(
+                    line=execution.line,
+                    klass=execution.outcome_class,
+                    text=excerpt(execution.detail),
+                )
+            )
+        return
+
+    stats.execution_unknowns += 1
+    stats.execution_failure_classes[execution.outcome_class] += 1
+
+
 def analyze_log(path: Path, top_n: int) -> AgentStats:
     stats = AgentStats(agent=path.stem, log_file=str(path))
+    parsed_log = parse_bot_log_file(path)
+    stats.generated_commands = parsed_log.generated_commands
+    stats.discarded_commands = parsed_log.discarded_commands
+    stats.stale_generations = sum(1 for generation in parsed_log.generations if generation.stale)
+    stats.emitted_commands = len(parsed_log.accepted_commands)
+    for execution in parsed_log.executions:
+        add_execution(stats, execution, top_n)
+
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line_no, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip("\n")
-            if INSTRUCTION_RE.search(line):
-                command_count = 0
-            else:
-                command_count = len(COMMAND_RE.findall(line))
-            stats.emitted_commands += command_count
-
             parser_failure = classify_parser_failure(line)
             if parser_failure:
                 stats.parser_failures[parser_failure] += 1
@@ -226,15 +274,24 @@ def analyze_log(path: Path, top_n: int) -> AgentStats:
                 if len(stats.intent_examples) < top_n:
                     stats.intent_examples.append(Example(line=line_no, text=excerpt(line)))
 
+            if parsed_log.executions:
+                continue
+
+            if INSTRUCTION_RE.search(line):
+                continue
+
             execution_kind, verified = classify_execution(line)
             if execution_kind == "success":
                 stats.execution_successes += 1
                 if verified:
                     stats.verified_actions += 1
                     if len(stats.verified_success_examples) < top_n:
-                        stats.verified_success_examples.append(Example(line=line_no, text=excerpt(line)))
+                        stats.verified_success_examples.append(
+                            Example(line=line_no, text=excerpt(line))
+                        )
             elif execution_kind == "failure":
                 stats.execution_failures += 1
+                stats.execution_failure_classes["line_failure"] += 1
 
     return stats
 
@@ -276,10 +333,15 @@ def aggregate_stats(agent_stats: list[AgentStats]) -> AgentStats:
     for stats in agent_stats:
         aggregate.intent_utterances += stats.intent_utterances
         aggregate.emitted_commands += stats.emitted_commands
+        aggregate.generated_commands += stats.generated_commands
+        aggregate.discarded_commands += stats.discarded_commands
+        aggregate.stale_generations += stats.stale_generations
         aggregate.parser_failures.update(stats.parser_failures)
         aggregate.execution_successes += stats.execution_successes
         aggregate.execution_failures += stats.execution_failures
+        aggregate.execution_unknowns += stats.execution_unknowns
         aggregate.verified_actions += stats.verified_actions
+        aggregate.execution_failure_classes.update(stats.execution_failure_classes)
     return aggregate
 
 
@@ -318,6 +380,10 @@ def analyze_run(
             "parser_failure_classes": [
                 {"class": klass, "count": count}
                 for klass, count in aggregate.parser_failures.most_common(top_n)
+            ],
+            "execution_failure_classes": [
+                {"class": klass, "count": count}
+                for klass, count in aggregate.execution_failure_classes.most_common(top_n)
             ],
         },
         "threshold_violations": violations,
@@ -389,6 +455,18 @@ def render_markdown(data: dict[str, Any]) -> str:
     else:
         lines.append("none captured")
 
+    lines.extend(["", "## Top Execution Failure Classes", ""])
+    execution_classes = data["aggregate"].get("execution_failure_classes", [])
+    if execution_classes:
+        lines.append(
+            markdown_table(
+                ["Class", "Count"],
+                [[item["class"], item["count"]] for item in execution_classes],
+            )
+        )
+    else:
+        lines.append("none captured")
+
     lines.extend(["", "## Threshold Violations", ""])
     if data["threshold_violations"]:
         lines.append(
@@ -424,6 +502,8 @@ def render_markdown(data: dict[str, Any]) -> str:
         lines.extend(render_examples("Failed Parse Examples", stats["examples"]["failed_parses"]))
         lines.append("")
         lines.extend(render_examples("Verified Success Examples", stats["examples"]["verified_successes"]))
+        lines.append("")
+        lines.extend(render_examples("Execution Failure Examples", stats["examples"]["execution_failures"]))
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

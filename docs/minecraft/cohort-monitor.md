@@ -4,8 +4,9 @@ Issue: #719 E8-13
 
 The cohort monitor is a local-only HTML dashboard over the structured soak
 timeline from E8-12. It is meant for Brad during a local embodied soak: one
-page shows run status, each agent's latest public chat/action/LLM state, idle
-time, restart count, errors, token totals, and recent feeds.
+page shows run status, the action pipeline, each agent's latest public
+chat/action/LLM state, idle time, restart count, errors, token totals, and
+recent feeds.
 
 ## Open After A Soak
 
@@ -29,6 +30,19 @@ changed and the canonical `timeline.ndjson` should be regenerated first.
 
 The generated file is self-contained. It has inline CSS/JS, embeds the monitor
 data as JSON, and does not fetch assets from a production website or CDN.
+
+## Action Pipeline
+
+The headline reliability view is a pipeline, not a single ambiguous completion
+percentage:
+
+`LLM requests -> generated responses -> discarded stale responses -> accepted commands -> executed actions -> verified successes`
+
+Discarded stale responses are shown separately from action failures. If a stale
+response contained a command, it increments `discarded_commands` but does not
+create an `action.intent`. Bridge settle telemetry is displayed as lifecycle
+telemetry, while `action.result` is reserved for grouped `Agent executed:`
+blocks from the bot logs.
 
 ## Watch An In-Progress Soak
 
@@ -65,6 +79,8 @@ Binding to a non-loopback host is refused unless `--allow-remote` is passed.
 | `Repeated command` | 3 consecutive identical action intents. | `SOAK_MONITOR_REPEAT_COMMAND_COUNT` |
 | `Crash/restart` | Any lifecycle disconnect, reconnect, restart, exit, kick, shutdown, or crash event. | n/a |
 | `Recent restart` | Restart-class lifecycle event within 300 seconds of the monitor reference time. | `SOAK_MONITOR_RESTART_RECENT_SECONDS` |
+| `Undefined result` | One or more action executions returned `undefined`. | n/a |
+| `Interrupted` | Five or more interrupted action results for one agent. | n/a |
 | `Stuck loop` | 3 consecutive blocked, unreachable, stuck, or timed-out action results. | `SOAK_MONITOR_STUCK_LOOP_COUNT` |
 | `No recent LLM` | No LLM request or response for 120 seconds. | `SOAK_MONITOR_LLM_IDLE_SECONDS` |
 

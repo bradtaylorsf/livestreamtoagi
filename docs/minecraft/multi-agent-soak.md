@@ -122,13 +122,15 @@ inputs from `scripts/minecraft/world-easy.config`. This avoids disturbing the
 normal `minecraft-server/` world on `25565`. `SOAK_EASY_SPAWN=1` runs
 `scripts/minecraft/setup-easy-spawn.mjs` before and after bot launch: it writes
 access files for a temporary op setup bot, sets peaceful/daylight rules, creates
-a flat grass starter meadow with visible resource piles and work blocks, then
-teleports online bots into the meadow with a small starter kit. The easy arena
-also pins spawn radius to zero, disables drowning/fall/freeze damage for local
-validation, and wraps the starter meadow in a glass boundary so agents have a
-small safe place to learn before exploring. Set `MC_SIM_EASY_MODE=0` to use the
-normal Minecraft target instead, or set `MC_SIM_MC_PORT=<port>` if `25566` is
-busy. In easy mode, `MC_SIM_KEEP_SERVER_RUNNING=1` by default so the Paper
+a flat grass starter meadow with visible resource piles and work blocks, resets
+the above-ground build volume plus the top soil layers, then teleports online
+bots onto a cleared staging strip with separated spawn offsets and a small
+starter kit. The easy arena also pins spawn radius to zero, disables
+drowning/fall/freeze damage for local validation, and wraps the starter meadow
+in a glass boundary so agents have a small safe place to learn before exploring.
+Set `MC_SIM_EASY_MODE=0` to use the normal Minecraft target instead, or set
+`MC_SIM_MC_PORT=<port>` if `25566` is busy. In easy mode,
+`MC_SIM_KEEP_SERVER_RUNNING=1` by default so the Paper
 server remains available after the timed bot run for manual inspection; set it
 to `0` when you want the runner to stop its auto-started server. Local sims
 also choose a high run-specific MindServer base port by default to avoid stale
@@ -250,8 +252,8 @@ The timeline normalizes:
 
 | Source | Timeline coverage |
 | --- | --- |
-| `bots/*.log` | Mindcraft chat, command intents, parser errors, action traces, lifecycle, and sampled position. |
-| `logs/*.log` | Paper public chat, bridge `bridge_event` / `bridge_inbound_event` lines, server errors. |
+| `bots/*.log` | Mindcraft chat, accepted command intents, grouped `Agent executed:` results, parser errors, behavior/status telemetry, lifecycle, and sampled position. |
+| `logs/*.log` | Paper public chat, bridge `bridge_event` / `bridge_inbound_event` telemetry, server errors. |
 | `timeline-raw/*.ndjson` | Best-effort Node events from the staged timeline emitter and LM Studio usage shim. |
 | `*lmstudio*.ndjson` | Explicit LM Studio request/response traces when an operator captures them separately. |
 
@@ -260,6 +262,12 @@ tokens, total tokens, outcome, and whether usage is provider-reported or a
 deterministic local estimate. High-frequency position logs are collapsed into
 interval `state.sample` events; low-level pathfinding chatter is not treated as
 an LLM decision.
+
+Stale command-bearing generations are exported as `llm.response` events with
+`outcome=discarded_stale` and `discarded_commands`; they do not create
+`action.intent` events. Bridge action-result settle lines are exported as
+`bridge.action.*` telemetry so the executed-action count remains aligned to
+grouped bot execution blocks.
 
 Schema details and payload examples live in
 [`timeline-schema.md`](timeline-schema.md).
@@ -305,9 +313,9 @@ prints `heartbeat_counts` from `timeline-totals.json`.
 ## Live Cohort Monitor
 
 Every embodied soak also renders `monitor.html` in the evidence directory after
-the timeline export. Open it locally for a cohort-level view of run status,
-per-agent latest chat/action/LLM activity, idle time, restart count, errors,
-tokens, warning badges, and recent feeds:
+the timeline export. Open it locally for a cohort-level view of run status, the
+LLM-to-action pipeline, per-agent latest chat/action/LLM activity, idle time,
+restart count, errors, tokens, warning badges, and recent feeds:
 
 ```bash
 open logs/soak/<UTC timestamp>/monitor.html
@@ -336,12 +344,12 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `logs/paper-latest.log` | Paper `latest.log` when present. |
 | `cost-ledger.tsv` | Per-agent token/USD totals, max hourly USD, cap, and pass/fail. |
 | `early-exits.tsv` | Any bot process that exited before the planned end. |
-| `action-reliability.json` | Per-agent intent, parse, execution, verification metrics and threshold violations. |
-| `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
+| `action-reliability.json` | Per-agent generated/discarded/accepted command, execution, verification, and threshold metrics. |
+| `action-reliability.md` | Human-readable reliability report with discarded-command counters, execution failure classes, and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
 | `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, and `behavior_gate_status`. |
 | `heartbeat-halts.tsv` | Bots whose autonomous heartbeat halted after repeated blank/no-command outcomes. |
-| `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, action, state, error, and lifecycle events. |
+| `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, accepted action, bridge telemetry, behavior/status, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
 | `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
 | `monitor.html` | Self-contained local cohort monitor rendered from `timeline.ndjson` and `timeline-totals.json`. |

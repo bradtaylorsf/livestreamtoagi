@@ -163,6 +163,131 @@ def test_warning_rules_fire_on_representative_events(tmp_path: Path) -> None:
     assert agent["tokens"]["total_tokens"] == 15
 
 
+def test_llm_feed_renders_response_output(tmp_path: Path) -> None:
+    monitor = _load_monitor()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    events = [
+        {
+            "ts": "2026-05-20T22:00:01Z",
+            "event_type": "llm.request",
+            "agent": "vera",
+            "trace_id": "trace-llm-1",
+            "payload": {
+                "model": "local/test",
+                "purpose": "mindcraft_chat",
+                "prompt_tokens": 0,
+                "total_tokens": 0,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:03Z",
+            "event_type": "llm.response",
+            "agent": "vera",
+            "trace_id": "trace-llm-1",
+            "payload": {
+                "model": "local/test",
+                "latency_ms": 2000,
+                "completion_tokens": 6,
+                "total_tokens": 6,
+                "outcome": "ok",
+                "response_text": "I will scout the ridge.",
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:04Z",
+            "event_type": "action.intent",
+            "agent": "vera",
+            "trace_id": "trace-llm-1",
+            "payload": {
+                "commands": [{"name": "placeHere", "args": '"oak_log"', "text": '!placeHere("oak_log")'}]
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:05Z",
+            "event_type": "action.result",
+            "agent": "vera",
+            "trace_id": "trace-llm-1",
+            "payload": {
+                "action": "placeHere",
+                "outcome": "success",
+                "verified": True,
+                "detail": "placed oak_log",
+            },
+        },
+    ]
+
+    model = monitor.build_monitor_model(
+        run_dir,
+        events,
+        metadata={"start_utc": "2026-05-20T22:00:00Z", "cost_agents": "vera"},
+        now=monitor.parse_iso_ts("2026-05-20T22:00:05Z"),
+    )
+    html = monitor.render_monitor_html(model)
+
+    assert model["pipeline"]["llm_requests"] == 1
+    assert model["pipeline"]["accepted_commands"] == 1
+    assert model["pipeline"]["executed_actions"] == 1
+    assert model["pipeline"]["verified_actions"] == 1
+    assert "Action Pipeline" in html
+    assert "Accepted commands" in html
+    assert "<th>Output</th>" in html
+    assert "<th>Game effect</th>" in html
+    assert "I will scout the ridge." in html
+    assert '!placeHere(&quot;oak_log&quot;)' in html
+    assert "placeHere: success placed oak_log" in html
+
+
+def test_monitor_separates_stale_discards_from_action_failures(tmp_path: Path) -> None:
+    monitor = _load_monitor()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    events = [
+        {
+            "ts": "2026-05-20T22:00:01Z",
+            "event_type": "llm.response",
+            "agent": "fork",
+            "trace_id": "trace-stale-1",
+            "payload": {
+                "model": "local/test",
+                "outcome": "discarded_stale",
+                "response_text": '!move("stale", "east", 3)',
+                "discarded_commands": 1,
+                "total_tokens": 7,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:02Z",
+            "event_type": "action.result",
+            "agent": "fork",
+            "trace_id": "trace-action-1",
+            "payload": {
+                "action": "placeHere",
+                "outcome": "failure",
+                "outcome_class": "placement_blocked",
+                "verified": False,
+                "detail": "Failed to place cobblestone at (1, 65, 2).",
+            },
+        },
+    ]
+
+    model = monitor.build_monitor_model(
+        run_dir,
+        events,
+        metadata={"start_utc": "2026-05-20T22:00:00Z", "cost_agents": "fork"},
+        now=monitor.parse_iso_ts("2026-05-20T22:00:02Z"),
+    )
+    html = monitor.render_monitor_html(model)
+
+    assert model["pipeline"]["discarded_stale_responses"] == 1
+    assert model["pipeline"]["discarded_commands"] == 1
+    assert model["pipeline"]["accepted_commands"] == 0
+    assert model["pipeline"]["executed_actions"] == 1
+    assert model["pipeline"]["outcome_classes"]["placement_blocked"] == 1
+    assert "discarded_stale" in html
+    assert "Discarded commands" in html
+
+
 def test_cli_writes_monitor_html(tmp_path: Path) -> None:
     run_dir = _copy_fixture(tmp_path)
 

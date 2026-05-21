@@ -194,9 +194,12 @@ async function main() {
         '/difficulty peaceful',
         '/time set day',
         '/weather clear',
-        '/setworldspawn 0 64 0',
-        '/fill -24 64 -24 24 84 24 minecraft:air replace',
-        '/fill -24 62 -24 24 62 24 minecraft:dirt replace',
+        '/setworldspawn 0 64 -4',
+        '/fill -24 64 -24 0 96 0 minecraft:air replace',
+        '/fill 1 64 -24 24 96 0 minecraft:air replace',
+        '/fill -24 64 1 0 96 24 minecraft:air replace',
+        '/fill 1 64 1 24 96 24 minecraft:air replace',
+        '/fill -22 58 -22 22 62 22 minecraft:dirt replace',
         '/fill -22 63 -22 22 63 22 minecraft:grass_block replace',
         '/fill -23 64 -23 23 68 -23 minecraft:glass replace',
         '/fill -23 64 23 23 68 23 minecraft:glass replace',
@@ -213,8 +216,10 @@ async function main() {
         '/setblock 0 64 2 minecraft:crafting_table replace',
         '/setblock 1 64 2 minecraft:furnace replace',
         '/setblock -1 64 2 minecraft:chest replace',
-        '/setblock 2 64 0 minecraft:torch replace',
-        '/setblock -2 64 0 minecraft:torch replace',
+        '/setblock 2 64 4 minecraft:torch replace',
+        '/setblock -2 64 4 minecraft:torch replace',
+        '/fill -10 63 -5 10 63 1 minecraft:grass_block replace',
+        '/fill -10 64 -5 10 68 1 minecraft:air replace',
     ];
     for (const body of terrainCommands) {
         await command(body);
@@ -223,18 +228,18 @@ async function main() {
     if (!terrainOnly) {
         if (onlineDelayMs > 0) await delay(onlineDelayMs);
         const offsets = [
-            [0, 64, 0],
-            [2, 64, 0],
+            [-8, 64, -4],
+            [-4, 64, -4],
+            [0, 64, -4],
+            [4, 64, -4],
+            [8, 64, -4],
+            [-6, 64, 0],
             [-2, 64, 0],
-            [0, 64, 2],
-            [0, 64, -2],
-            [3, 64, 3],
-            [-3, 64, 3],
-            [3, 64, -3],
-            [-3, 64, -3],
+            [2, 64, 0],
+            [6, 64, 0],
         ];
         const kitCommands = [
-            '/spawnpoint @a 0 64 0',
+            '/spawnpoint @a 0 64 -4',
             ...operators.map((name) => `/op ${name}`),
             ...players.map((name, index) => {
                 const [x, y, z] = offsets[index % offsets.length];
@@ -242,7 +247,7 @@ async function main() {
             }),
             ...observers.map((name) => `/tp ${name} 0 72 0`),
             ...spectators.map((name) => `/gamemode spectator ${name}`),
-            '/spawnpoint @a 0 64 0',
+            '/spawnpoint @a 0 64 -4',
             '/give @a minecraft:bread 16',
             '/give @a minecraft:oak_log 32',
             '/give @a minecraft:dirt 32',
