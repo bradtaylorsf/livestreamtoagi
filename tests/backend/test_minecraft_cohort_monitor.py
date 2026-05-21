@@ -14,6 +14,7 @@ SCRIPT_DIR = REPO_ROOT / "scripts" / "minecraft"
 MONITOR = SCRIPT_DIR / "build_monitor.py"
 SOAK = SCRIPT_DIR / "soak.sh"
 FIXTURE = REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_timeline"
+GITIGNORE = REPO_ROOT / ".gitignore"
 
 
 def _load_monitor() -> ModuleType:
@@ -175,6 +176,11 @@ def test_cli_writes_monitor_html(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (run_dir / "monitor.html").is_file()
     assert "monitor rendered" in proc.stdout
+
+
+def test_fixture_monitor_html_is_ignored_generated_output() -> None:
+    text = GITIGNORE.read_text(encoding="utf-8")
+    assert "/tests/backend/fixtures/minecraft_timeline/monitor.html" in text
 
 
 def test_soak_script_wires_monitor_as_nonfatal_artifact() -> None:

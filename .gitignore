@@ -44,6 +44,10 @@ playwright-report/
 test-results/
 .playwright-cli/
 
+# Generated when the Minecraft cohort monitor smoke check is run against the
+# committed timeline fixture.
+/tests/backend/fixtures/minecraft_timeline/monitor.html
+
 # Docker
 docker/data/
 
