@@ -8,6 +8,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
 from core.event_bus import EventType
+from core.redis_keys import KILL_SWITCH_KEY
 
 from .base import BaseTool
 
@@ -23,10 +24,6 @@ ALPHA_MODEL = "deepseek/deepseek-v3.2"
 
 # Hard timeout for Alpha tasks
 ALPHA_TIMEOUT_SECONDS = 60
-
-# Global Redis key used by the admin kill-switch routes. This is deliberately
-# not simulation-scoped; see core/redis_keys.py.
-KILL_SWITCH_KEY = "kill_switch"
 
 # System prompt constraining Alpha's capabilities
 ALPHA_SYSTEM_PROMPT = (

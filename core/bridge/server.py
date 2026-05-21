@@ -76,6 +76,7 @@ from core.bridge.errand_queue import Errand, errand_queue
 from core.bridge.handlers.code_execution import handle_code_execute
 from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
+from core.redis_keys import KILL_SWITCH_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,6 @@ UNKNOWN_REQUEST_ID = "unknown"
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
-KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
