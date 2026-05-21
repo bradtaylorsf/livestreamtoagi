@@ -1,0 +1,12 @@
+{
+  "error": null,
+  "ok": true,
+  "payload": {
+    "active": true,
+    "reason": "kill_switch_active",
+    "ttl_seconds": 3600
+  },
+  "request_id": "req-kill-status-0001",
+  "retryable": false,
+  "trace_id": "trace-kill-status-0001"
+}

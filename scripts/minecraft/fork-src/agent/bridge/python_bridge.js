@@ -67,10 +67,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.7 is the E8.5-4 (#753) minor bump:
-// `director.gate` lets Director V2 bound Mindcraft prompt fanout. The server
-// only gates on the major, so this stays wire-compatible with earlier 1.x peers.
-export const PROTOCOL_VERSION = '1.7';
+// contract.PROTOCOL_VERSION (ADR §3). 1.8 carries the additive `director.gate`
+// and `kill.status` verbs. The server only gates on the major, so this stays
+// wire-compatible with earlier 1.x peers.
+export const PROTOCOL_VERSION = '1.8';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';
@@ -83,11 +83,13 @@ export const BRIDGE_MAX_INFLIGHT_ENV = 'MINECRAFT_BRIDGE_MAX_INFLIGHT';
 export const BRIDGE_RECONNECT_BASE_MS_ENV = 'MINECRAFT_BRIDGE_RECONNECT_BASE_MS';
 export const BRIDGE_RECONNECT_MAX_MS_ENV = 'MINECRAFT_BRIDGE_RECONNECT_MAX_MS';
 export const BRIDGE_CIRCUIT_THRESHOLD_ENV = 'MINECRAFT_BRIDGE_CIRCUIT_THRESHOLD';
+export const BRIDGE_KILL_POLL_MS_ENV = 'MINECRAFT_BRIDGE_KILL_POLL_MS';
 
 const DEFAULT_MAX_INFLIGHT = 8;
 const DEFAULT_RECONNECT_BASE_MS = 500;
 const DEFAULT_RECONNECT_MAX_MS = 30000;
 const DEFAULT_CIRCUIT_THRESHOLD = 3;
+const DEFAULT_KILL_POLL_MS = 2000;
 // Fixed exponential factor — not env-tunable (base/cap/threshold are the knobs
 // operators actually reach for; a custom multiplier is needless rope).
 const BACKOFF_MULTIPLIER = 2;
@@ -112,6 +114,7 @@ function _config() {
         reconnectBaseMs: _posIntEnv(BRIDGE_RECONNECT_BASE_MS_ENV, DEFAULT_RECONNECT_BASE_MS),
         reconnectMaxMs: _posIntEnv(BRIDGE_RECONNECT_MAX_MS_ENV, DEFAULT_RECONNECT_MAX_MS),
         circuitThreshold: _posIntEnv(BRIDGE_CIRCUIT_THRESHOLD_ENV, DEFAULT_CIRCUIT_THRESHOLD),
+        killPollMs: _posIntEnv(BRIDGE_KILL_POLL_MS_ENV, DEFAULT_KILL_POLL_MS),
     };
 }
 
@@ -290,6 +293,128 @@ export class BridgeClientError extends Error {
 // through untouched and never trip the breaker (counting them would mask the
 // real cause).
 const CONNECT_CLASS_CODES = new Set(['bridge_connect_failed', 'bridge_timeout']);
+const KILL_GATED_VERBS = new Set([
+    'perception.report',
+    'action.result',
+    'code.execute',
+    'errand.poll',
+    'errand.complete',
+]);
+
+const _killState = {
+    active: false,
+    ttlSeconds: null,
+    reason: null,
+    fetchedAt: 0,
+    pollTimer: null,
+    pollInFlight: false,
+};
+
+function _isKillGatedVerb(verb) {
+    return KILL_GATED_VERBS.has(verb);
+}
+
+function _markKillActive(reason = 'kill_switch_active') {
+    _killState.active = true;
+    _killState.ttlSeconds = null;
+    _killState.reason = reason;
+    _killState.fetchedAt = Date.now();
+}
+
+function _applyKillStatus(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    _killState.active = payload.active === true;
+    _killState.ttlSeconds =
+        Number.isInteger(payload.ttl_seconds) && payload.ttl_seconds >= 0
+            ? payload.ttl_seconds
+            : null;
+    _killState.reason =
+        typeof payload.reason === 'string' && payload.reason ? payload.reason : null;
+    _killState.fetchedAt = Date.now();
+}
+
+function _makeKillSwitchActiveError() {
+    return new BridgeClientError(
+        'kill_switch_active',
+        `kill switch active${_killState.reason ? ` (${_killState.reason})` : ''}; safe-idle`,
+        { retryable: true },
+    );
+}
+
+async function _pollKillStatus() {
+    if (_killState.pollInFlight) return;
+    _killState.pollInFlight = true;
+    const { killPollMs } = _config();
+    try {
+        await callBridge({
+            service: 'kill',
+            method: 'status',
+            payload: {},
+            deadlineMs: Math.max(250, Math.min(DEFAULT_DEADLINE_MS, killPollMs)),
+            agentId: 'bridge-kill-watch',
+            costContext: {
+                agent_tier: 'filter',
+                budget_bucket: 'bridge',
+                estimated_cost_usd: 0.0,
+            },
+        });
+    } catch (err) {
+        if (err instanceof BridgeClientError && err.code === 'kill_switch_active') {
+            _markKillActive();
+        }
+        // Other poll failures leave the current cache untouched. A sticky
+        // active cache stays active until a successful kill.status says false.
+    } finally {
+        _killState.pollInFlight = false;
+    }
+}
+
+/** Start the background kill-switch poller. Safe to call repeatedly. */
+export function startKillSwitchWatch() {
+    if (_killState.pollTimer) return _pollKillStatus();
+    const { killPollMs } = _config();
+    const tick = () => {
+        void _pollKillStatus();
+    };
+    _killState.pollTimer = setInterval(tick, killPollMs);
+    if (typeof _killState.pollTimer.unref === 'function') _killState.pollTimer.unref();
+    return _pollKillStatus();
+}
+
+/** Stop the background kill-switch poller (test/process shutdown helper). */
+export function stopKillSwitchWatch() {
+    if (_killState.pollTimer) {
+        clearInterval(_killState.pollTimer);
+        _killState.pollTimer = null;
+    }
+}
+
+/** True when the last kill.status cache says bots must safe-idle. */
+export function bridgeIsKillActive() {
+    return _killState.active === true;
+}
+
+/** Kill-switch cache snapshot for tests/diagnostics. */
+export function bridgeKillStatus() {
+    return {
+        active: _killState.active,
+        ttlSeconds: _killState.ttlSeconds,
+        reason: _killState.reason,
+        fetchedAt: _killState.fetchedAt,
+        polling: _killState.pollTimer !== null,
+        pollInFlight: _killState.pollInFlight,
+    };
+}
+
+/** Reset kill-switch cache/timer (test isolation; not used in production). */
+export function resetBridgeKillState() {
+    stopKillSwitchWatch();
+    _killState.active = false;
+    _killState.ttlSeconds = null;
+    _killState.reason = null;
+    _killState.fetchedAt = 0;
+    _killState.pollInFlight = false;
+}
 
 // ── WebSocket implementation resolution (ws → global fallback) ──────────────
 
@@ -809,6 +934,14 @@ export async function callBridge(opts = {}) {
         return err;
     };
 
+    // 0. Local kill-switch cache: do not even open a socket for world/action
+    // verbs while the operator kill switch is active. bridge.ping and
+    // kill.status are intentionally outside KILL_GATED_VERBS so health/state
+    // probes can still run and clear the cache when the switch is released.
+    if (_killState.active && _isKillGatedVerb(verb)) {
+        throw settleError(_makeKillSwitchActiveError());
+    }
+
     // 1. Fail fast while the circuit is open — do NOT pay the deadline or open
     //    a doomed socket. A disconnected bridge is a closed gate (ADR §5): the
     //    caller degrades to safe-idle, never an unsafe action.
@@ -836,6 +969,9 @@ export async function callBridge(opts = {}) {
     _inflight += 1;
     try {
         const response = await _callBridgeOnce({ ...opts, traceId });
+        if (verb === 'kill.status') {
+            _applyKillStatus(response && response.payload);
+        }
         _recordSuccess();
         const latencyMs = Date.now() - startedAt;
         _recordCall({ verb, ok: true, latencyMs });
@@ -857,6 +993,9 @@ export async function callBridge(opts = {}) {
         return response;
     } catch (err) {
         const code = err instanceof BridgeClientError ? err.code : undefined;
+        if (code === 'kill_switch_active') {
+            _markKillActive();
+        }
         if (code && CONNECT_CLASS_CODES.has(code)) {
             _recordConnectFailure();
         }
@@ -870,8 +1009,13 @@ export default {
     callBridge,
     bridgeStatus,
     bridgeIsReachable,
+    bridgeIsKillActive,
+    bridgeKillStatus,
+    startKillSwitchWatch,
+    stopKillSwitchWatch,
     bridgeMetrics,
     resetBridgeMetrics,
+    resetBridgeKillState,
     BridgeClientError,
     PROTOCOL_VERSION,
     DEFAULT_BRIDGE_URL,

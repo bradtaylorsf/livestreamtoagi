@@ -6,7 +6,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 import { navigateAction } from './navigate_action.js';
 import { placeAction } from './place_action.js';
 import { deriveOverallStatus, parseErrandPlan } from '../skills/errand_plan.js';
@@ -35,7 +40,11 @@ function bridgeErrorLine(prefix, err) {
 
 function isBridgeUnavailable(err) {
     const code = bridgeCode(err);
-    return code === 'bridge_unreachable' || code === 'bridge_overloaded';
+    return (
+        code === 'bridge_unreachable' ||
+        code === 'bridge_overloaded' ||
+        code === 'kill_switch_active'
+    );
 }
 
 function alphaOnly(agent) {
@@ -176,6 +185,12 @@ export const runErrandAction = {
     params: {},
     perform: async function (agent) {
         const traceId = `trace-${randomUUID()}`;
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const idle = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(traceId, idle, true);
+            return idle;
+        }
         let pending;
         try {
             pending = await pollErrand(traceId);
@@ -219,6 +234,16 @@ export const runErrandAction = {
         const stepResults = [];
         let bridgeAbort = false;
         for (const step of parsed.steps) {
+            if (bridgeIsKillActive()) {
+                bridgeAbort = true;
+                stepResults.push({
+                    action_id: step.action_id,
+                    status: 'failure',
+                    detail: 'kill switch active, safe-idling [kill_switch_active]',
+                    bridge_unavailable: true,
+                });
+                break;
+            }
             try {
                 const line = await performStep(actor, step);
                 const result = classifyStepResult(step, line);
