@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 class CostLimitExceededError(Exception):
-    """Raised when simulation spending exceeds --max-cost."""
+    """Raised when simulation spending exceeds a configured cost limit."""
 
 
 def parse_duration(value: str) -> timedelta:
@@ -83,6 +83,8 @@ class SimulationConfig:
         seed_file: str | None = None,
         agents: list[str],
         max_cost: float = 10.0,
+        max_cost_rolling: float | Decimal | None = None,
+        rolling_window: timedelta | str | None = None,
         speed: str = "fast",
         speed_multiplier: float = 0,
         duration: timedelta | None = None,
@@ -109,6 +111,18 @@ class SimulationConfig:
         self.seed_file = seed_file
         self.agents = agents
         self.max_cost = Decimal(str(max_cost))
+        self.max_cost_rolling = (
+            Decimal(str(max_cost_rolling)) if max_cost_rolling is not None else None
+        )
+        if self.max_cost_rolling is not None and self.max_cost_rolling < 0:
+            raise ValueError("max_cost_rolling cannot be negative")
+        self.rolling_window = (
+            parse_duration(rolling_window) if isinstance(rolling_window, str) else rolling_window
+        )
+        if (self.max_cost_rolling is None) != (self.rolling_window is None):
+            raise ValueError("max_cost_rolling and rolling_window must be set together")
+        if self.rolling_window is not None and self.rolling_window.total_seconds() <= 0:
+            raise ValueError("rolling_window must be greater than zero")
         self.speed = speed
         self.speed_multiplier = speed_multiplier
         self.duration = duration
@@ -228,6 +242,10 @@ class SimulationConfig:
         }
         if self.duration is not None:
             d["duration_seconds"] = self.duration.total_seconds()
+        if self.max_cost_rolling is not None:
+            d["max_cost_rolling"] = str(self.max_cost_rolling)
+        if self.rolling_window is not None:
+            d["rolling_window_seconds"] = self.rolling_window.total_seconds()
         if self.phases:
             d["phase_count"] = len(self.phases)
             d["phase_names"] = [p.name for p in self.phases]
@@ -1155,6 +1173,19 @@ class SimulationOrchestrator:
             raise CostLimitExceededError(
                 f"Total cost ${self._total_cost} exceeds limit ${self._config.max_cost}"
             )
+        if (
+            self._config.max_cost_rolling is not None
+            and self._config.rolling_window is not None
+        ):
+            rolling_cost = await self._sim_repo.get_rolling_cost_from_events(
+                self._simulation_id,
+                self._config.rolling_window,
+            )
+            if rolling_cost > self._config.max_cost_rolling:
+                raise CostLimitExceededError(
+                    f"Rolling spend ${rolling_cost} over {self._config.rolling_window} "
+                    f"exceeds limit ${self._config.max_cost_rolling}"
+                )
 
     async def _on_simulation_error(self, event: dict[str, Any]) -> None:
         """Collect runtime errors emitted via SIMULATION_ERROR events."""

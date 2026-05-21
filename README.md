@@ -240,6 +240,9 @@ python scripts/run_simulation.py \
   --max-cost 0.01 \
   --verbose
 
+# Persistent/autonomous runs can also enforce a rolling spend ceiling:
+#   --max-cost-rolling 0.01 --rolling-window 1h
+
 python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
 ```
 
