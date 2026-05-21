@@ -172,6 +172,12 @@ REDIS_URL=redis://localhost:6379
 KILL_SWITCH_API_KEY=
 ```
 
+Optional runtime safety knobs:
+```
+AGENT_HOURLY_CAP_USD=2.00
+AGENT_HOURLY_CAP_USD_VERA=0.50
+```
+
 ## Specs Reference
 
 All design specifications are in `specs/` — treat as read-only reference:

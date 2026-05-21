@@ -74,6 +74,26 @@ class CostRepo:
         )
         return Decimal(str(val))
 
+    async def get_agent_spend_since(
+        self,
+        agent_id: str,
+        since: datetime,
+        simulation_id: uuid.UUID | None = None,
+    ) -> Decimal:
+        """Return total spend for one agent since a rolling-window boundary."""
+        clauses = ["agent_id = $1", "created_at >= $2"]
+        params: list[object] = [agent_id, since]
+        if simulation_id is not None:
+            clauses.append("simulation_id = $3")
+            params.append(simulation_id)
+
+        where = " AND ".join(clauses)
+        val = await self.db.fetchval(
+            f"SELECT COALESCE(SUM(amount), 0) FROM cost_events WHERE {where}",  # noqa: S608
+            *params,
+        )
+        return Decimal(str(val))
+
     async def get_costs_by_agent(
         self,
         agent_id: str,

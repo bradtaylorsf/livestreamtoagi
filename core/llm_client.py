@@ -19,12 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from core.exceptions import AgentCostCapExceeded
 from core.models import CostEventCreate, LLMResponse, StreamChunk, ToolCall
 
 if TYPE_CHECKING:
     import uuid
     from collections.abc import AsyncGenerator
 
+    from core.cost_governor import CostGovernor
     from core.repos.cost_repo import CostRepo
 
 logger = logging.getLogger(__name__)
@@ -267,6 +269,7 @@ class OpenRouterClient:
         local_model: str | None = None,
         local_model_building: str | None = None,
         passthrough_model: bool = False,
+        cost_governor: CostGovernor | None = None,
     ) -> None:
         self._provider = _normalize_provider(provider)
         if self._provider == "openrouter":
@@ -290,6 +293,7 @@ class OpenRouterClient:
         )
         self._passthrough_model = passthrough_model
         self._cost_repo = cost_repo
+        self._cost_governor = cost_governor
         self._langfuse = langfuse_client
         self._lost_cost_events: int = 0
         self._last_cost_failure_ts: float | None = None
@@ -435,10 +439,12 @@ class OpenRouterClient:
             simulation_id=simulation_id,
         )
         max_attempts = 4  # 1 initial + 3 retries
+        recorded = False
         for attempt in range(max_attempts):
             try:
                 await self._cost_repo.add_cost(event)
-                return
+                recorded = True
+                break
             except Exception:
                 if attempt < max_attempts - 1:
                     logger.debug(
@@ -459,6 +465,16 @@ class OpenRouterClient:
                         model,
                         agent_id,
                     )
+
+        if recorded and self._cost_governor is not None and agent_id is not None:
+            await self._cost_governor.record_and_check(agent_id, cost)
+
+    async def _raise_if_agent_capped(self, agent_id: str | None) -> None:
+        if self._cost_governor is None or agent_id is None:
+            return
+        allowed, spend, cap = await self._cost_governor.is_allowed(agent_id)
+        if not allowed:
+            raise AgentCostCapExceeded(agent_id, spend, cap)
 
     def diagnostics(self) -> dict[str, Any]:
         """Return cost tracking diagnostics."""
@@ -573,6 +589,7 @@ class OpenRouterClient:
         model_config = self._resolve_model(model)
         runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        await self._raise_if_agent_capped(effective_agent_id)
         payload: dict[str, Any] = {
             "model": runtime_model,
             "messages": messages,
@@ -680,6 +697,7 @@ class OpenRouterClient:
         model_config = self._resolve_model(model)
         runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        await self._raise_if_agent_capped(effective_agent_id)
         payload: dict[str, Any] = {
             "model": runtime_model,
             "messages": messages,
