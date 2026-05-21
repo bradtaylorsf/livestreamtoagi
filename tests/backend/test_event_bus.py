@@ -329,7 +329,7 @@ class TestEventTypeEnum:
             "task_delegated", "task_completed",
             "agent_spawn", "agent_despawn",
             "simulation_error",
-            "bridge_perception", "bridge_action_result",
+            "bridge_perception", "bridge_action_result", "bridge_scene_update",
         }
         actual = {e.value for e in EventType}
         assert actual == expected
