@@ -8,6 +8,8 @@ export const BUILD_CLASSES = Object.freeze([
     'placed',
     'removed',
     'blocked',
+    'interrupted',
+    'aborted',
     'protected',
     'invalid',
     'tool-missing',

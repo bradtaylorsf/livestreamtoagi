@@ -34,6 +34,12 @@
 #   MC_SIM_ALLOW_NEW_ACTION=0
 #   MC_SIM_SUPPRESS_ACTION_CHAT=1
 #   MC_SIM_SAFE_TERRAIN_ACTIONS=1
+#   MC_SIM_HEARTBEAT_ENABLED=1
+#   MC_SIM_HEARTBEAT_TICK_SEC=5
+#   MC_SIM_HEARTBEAT_IDLE_SEC=90
+#   MC_SIM_HEARTBEAT_COOLDOWN_SEC=45
+#   MC_SIM_HEARTBEAT_STALE_ACTION_SEC=180
+#   MC_SIM_HEARTBEAT_MAX_NO_COMMAND=3
 #   MC_SIM_EASY_MODE=1
 #   MC_SIM_MC_PORT=25566
 #   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
@@ -47,6 +53,11 @@
 #   MC_SIM_MIN_EXECUTION_RATE=0.7
 #   MC_SIM_MIN_VERIFIED_SUCCESS=0.5
 #   MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS=10000
+#
+# Outputs:
+#   logs/soak/<UTC timestamp>/timeline.ndjson
+#   logs/soak/<UTC timestamp>/timeline-totals.json
+#   logs/soak/<UTC timestamp>/monitor.html
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -137,6 +148,13 @@ arg_value_after() {
     return 1
 }
 
+seconds_to_ms() {
+    awk -v seconds="$1" 'BEGIN {
+        if (seconds !~ /^[0-9]+([.][0-9]+)?$/) exit 1;
+        printf "%d\n", seconds * 1000;
+    }'
+}
+
 case "${1:-}" in
     --help|-h)
         awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next}{exit}' "$0"
@@ -224,6 +242,26 @@ if [ -z "${SOAK_MIN_VERIFIED_SUCCESS+x}" ] && [ -n "${MC_SIM_MIN_VERIFIED_SUCCES
     SOAK_MIN_VERIFIED_SUCCESS="$MC_SIM_MIN_VERIFIED_SUCCESS"
 fi
 export SOAK_MIN_INTENT_TO_COMMAND_RATIO SOAK_MIN_PARSE_SUCCESS SOAK_MIN_EXECUTION_RATE SOAK_MIN_VERIFIED_SUCCESS
+
+MC_SIM_HEARTBEAT_ENABLED="${MC_SIM_HEARTBEAT_ENABLED:-1}"
+MC_SIM_HEARTBEAT_TICK_SEC="${MC_SIM_HEARTBEAT_TICK_SEC:-5}"
+MC_SIM_HEARTBEAT_IDLE_SEC="${MC_SIM_HEARTBEAT_IDLE_SEC:-90}"
+MC_SIM_HEARTBEAT_COOLDOWN_SEC="${MC_SIM_HEARTBEAT_COOLDOWN_SEC:-45}"
+MC_SIM_HEARTBEAT_STALE_ACTION_SEC="${MC_SIM_HEARTBEAT_STALE_ACTION_SEC:-180}"
+MC_SIM_HEARTBEAT_MAX_NO_COMMAND="${MC_SIM_HEARTBEAT_MAX_NO_COMMAND:-3}"
+MC_HEARTBEAT_ENABLED="$MC_SIM_HEARTBEAT_ENABLED"
+MC_HEARTBEAT_TICK_MS="$(seconds_to_ms "$MC_SIM_HEARTBEAT_TICK_SEC" 2> /dev/null || true)"
+MC_HEARTBEAT_IDLE_MS="$(seconds_to_ms "$MC_SIM_HEARTBEAT_IDLE_SEC" 2> /dev/null || true)"
+MC_HEARTBEAT_COOLDOWN_MS="$(seconds_to_ms "$MC_SIM_HEARTBEAT_COOLDOWN_SEC" 2> /dev/null || true)"
+MC_HEARTBEAT_STALE_ACTION_MS="$(seconds_to_ms "$MC_SIM_HEARTBEAT_STALE_ACTION_SEC" 2> /dev/null || true)"
+if [ -z "$MC_HEARTBEAT_TICK_MS" ] || [ -z "$MC_HEARTBEAT_IDLE_MS" ] || \
+   [ -z "$MC_HEARTBEAT_COOLDOWN_MS" ] || [ -z "$MC_HEARTBEAT_STALE_ACTION_MS" ]; then
+    fail "MC_SIM_HEARTBEAT_*_SEC values must be positive numbers."
+    exit 2
+fi
+MC_HEARTBEAT_MAX_NO_COMMAND="$MC_SIM_HEARTBEAT_MAX_NO_COMMAND"
+export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
+export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
 
 MC_SIM_EASY_MODE="${MC_SIM_EASY_MODE:-1}"
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
@@ -332,6 +370,7 @@ info "private bot conversations: ${SOAK_BLOCK_PRIVATE_CONVERSATIONS}"
 info "slow sim actions: ${SOAK_BLOCK_SLOW_SIM_ACTIONS}"
 info "suppress action chat: ${MINECRAFT_SUPPRESS_ACTION_CHAT}"
 info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
+info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
 info "easy mode: ${MC_SIM_EASY_MODE}"
 info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"
@@ -339,6 +378,7 @@ info "server dir: ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
 info "world config: ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
 info "MindServer base port: ${SOAK_MINDSERVER_BASE_PORT}"
 info "reliability thresholds: intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO:-0.6} parse>=${SOAK_MIN_PARSE_SUCCESS:-0.8} execution>=${SOAK_MIN_EXECUTION_RATE:-0.7} verified>=${SOAK_MIN_VERIFIED_SUCCESS:-0.5}"
+info "timeline artifacts: timeline.ndjson, timeline-totals.json, monitor.html"
 if [ -n "${EASY_SETUP_OBSERVERS:-}${EASY_SETUP_OPERATORS:-}${EASY_SETUP_SPECTATORS:-}" ]; then
     info "human observers: players='${EASY_SETUP_OBSERVERS:-}' ops='${EASY_SETUP_OPERATORS:-}' spectators='${EASY_SETUP_SPECTATORS:-}'"
 fi

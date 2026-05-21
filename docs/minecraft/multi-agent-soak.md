@@ -207,6 +207,7 @@ plus agent-tagged bridge/server logs:
 | `build` | Build/place commands such as `!place`, `!placeHere`, `!placeBlock`, `!build`, or `!buildFromPlan`. |
 | `deaths` / `drownings` | Death, respawn, and drowning terms in the agent log stream. |
 | `stuck` / `dig_holes` | Stuck, path-failure, unreachable, trapped, or hole-digging phrases. |
+| `restart_count` | Recoverability-risk signatures such as `Exiting.`, nonzero process exits, reconnect/rejoin lines, bot disconnects, or supervisor restarts. |
 | `shared_artifact_count` | Cohort-wide shared-work evidence from shared/together camp-marker-wall-chest-shelter-fire language, nearby place coordinates by multiple agents, or at least two distinct agents emitting place/build commands. |
 
 The default behavioral thresholds are env-overridable:
@@ -216,6 +217,7 @@ The default behavioral thresholds are env-overridable:
 | `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. |
 | `SOAK_MAX_DEATHS_PER_AGENT` | `2` | Any agent above this death/respawn count fails. |
 | `SOAK_MAX_STUCK_PER_AGENT` | `5` | Any agent above this stuck/path-failure count fails. |
+| `SOAK_MAX_RESTARTS_PER_AGENT` | `1` | Any agent above this restart/disconnect/exit signature count fails. |
 | `SOAK_MIN_PUBLIC_CHAT_COHORT` | `10` | The cohort must emit at least this many public chat lines. |
 | `SOAK_MIN_GATHER_OR_BUILD_COHORT` | `3` | Gather plus build attempts across the cohort must meet this count. |
 | `SOAK_MIN_SHARED_ARTIFACTS` | `1` | The run must show at least one visible shared improvement or shared work artifact. |
@@ -227,6 +229,98 @@ of stability, cost, process-health, or action-reliability results.
 soft-pass evidence bundle; the `summary.txt` block still records
 `behavior_gate_status=fail`, and `docs/minecraft/cohort-report.md` must explain
 why the deviation was accepted.
+
+`behavior.tsv` also includes `restart_count` per agent. The parser counts
+recoverability-risk signatures such as `Exiting.`, `process exited with code
+1`, `rejoining`, `bot disconnected`, and supervisor restart lines. Two restart
+signatures for the same agent within 300 seconds always fail the gate, even if
+`SOAK_MAX_RESTARTS_PER_AGENT` is raised for exploratory runs. Totals are written
+as `total_restarts` and `total_restart_recurrences` in
+`behavior-totals.env` and the summary.
+
+## Structured Timeline
+
+Every embodied soak exports a canonical timeline after the reliability and
+behavior gates run. The exporter writes `timeline.ndjson` and
+`timeline-totals.json` under the evidence directory and appends a `Timeline`
+block to `summary.txt` with totals by event type, agent, model, and token
+source.
+
+The timeline normalizes:
+
+| Source | Timeline coverage |
+| --- | --- |
+| `bots/*.log` | Mindcraft chat, command intents, parser errors, action traces, lifecycle, and sampled position. |
+| `logs/*.log` | Paper public chat, bridge `bridge_event` / `bridge_inbound_event` lines, server errors. |
+| `timeline-raw/*.ndjson` | Best-effort Node events from the staged timeline emitter and LM Studio usage shim. |
+| `*lmstudio*.ndjson` | Explicit LM Studio request/response traces when an operator captures them separately. |
+
+LLM events include model, purpose/reason, latency, prompt tokens, completion
+tokens, total tokens, outcome, and whether usage is provider-reported or a
+deterministic local estimate. High-frequency position logs are collapsed into
+interval `state.sample` events; low-level pathfinding chatter is not treated as
+an LLM decision.
+
+Schema details and payload examples live in
+[`timeline-schema.md`](timeline-schema.md).
+
+## Heartbeat & Idle Recovery
+
+Embodied bot launchers stage `scripts/minecraft/fork-src/agent/skills/heartbeat.js`
+and patch Mindcraft `agent.js` to call `installHeartbeat(this)` when bot events
+start. The heartbeat is bounded and coarse: it asks for one high-level visible
+next action after an idle/stall window, not per-tick movement.
+
+Configuration:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MC_HEARTBEAT_ENABLED` | `1` | Set `0`/`false`/`off` to disable autonomous prompts. |
+| `MC_HEARTBEAT_TICK_MS` | `5000` | How often the heartbeat checks each agent. |
+| `MC_HEARTBEAT_IDLE_MS` | `90000` | Idle window before a next-action prompt can fire. |
+| `MC_HEARTBEAT_COOLDOWN_MS` | `45000` | Minimum time between heartbeat prompts for one agent. |
+| `MC_HEARTBEAT_STALE_ACTION_MS` | `180000` | Active action age that permits a stale-action heartbeat. |
+| `MC_HEARTBEAT_MAX_NO_COMMAND` | `3` | Consecutive blank/no-command heartbeat outcomes before halt. |
+
+`scripts/minecraft/run-local-sim.sh` exposes the same knobs as seconds-based
+`.env` values: `MC_SIM_HEARTBEAT_ENABLED`, `MC_SIM_HEARTBEAT_TICK_SEC`,
+`MC_SIM_HEARTBEAT_IDLE_SEC`, `MC_SIM_HEARTBEAT_COOLDOWN_SEC`,
+`MC_SIM_HEARTBEAT_STALE_ACTION_SEC`, and
+`MC_SIM_HEARTBEAT_MAX_NO_COMMAND`.
+
+Expected timeline events:
+
+| Event | When it appears |
+| --- | --- |
+| `heartbeat.fired` | Idle/stale threshold and cooldown allow a prompt. |
+| `heartbeat.skipped` | Prompt was suppressed because the heartbeat is disabled, cooling down, or the agent is still in an active non-stale action. |
+| `heartbeat.outcome` | A fired prompt finished, with command/no-command detection and response excerpt. |
+| `heartbeat.halted` | Repeated blank/no-command outcomes hit `MC_HEARTBEAT_MAX_NO_COMMAND`. |
+
+`heartbeat.halted` is a failure condition. `soak.sh` records it in
+`heartbeat-halts.tsv`, stops the affected bot process for supervisor visibility,
+counts the line in restart/stability checks, and fails the soak. The summary also
+prints `heartbeat_counts` from `timeline-totals.json`.
+
+## Live Cohort Monitor
+
+Every embodied soak also renders `monitor.html` in the evidence directory after
+the timeline export. Open it locally for a cohort-level view of run status,
+per-agent latest chat/action/LLM activity, idle time, restart count, errors,
+tokens, warning badges, and recent feeds:
+
+```bash
+open logs/soak/<UTC timestamp>/monitor.html
+```
+
+For an in-progress run, serve a periodically refreshed local view on loopback:
+
+```bash
+python3 scripts/minecraft/serve_monitor.py --run-dir logs/soak/<UTC timestamp>
+```
+
+The server binds to `127.0.0.1` by default. Full usage, thresholds, and filter
+details live in [`cohort-monitor.md`](cohort-monitor.md).
 
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 
@@ -245,7 +339,13 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `action-reliability.json` | Per-agent intent, parse, execution, verification metrics and threshold violations. |
 | `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
-| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, and behavioral acceptance. |
+| `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, and `behavior_gate_status`. |
+| `heartbeat-halts.tsv` | Bots whose autonomous heartbeat halted after repeated blank/no-command outcomes. |
+| `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, action, state, error, and lifecycle events. |
+| `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
+| `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
+| `monitor.html` | Self-contained local cohort monitor rendered from `timeline.ndjson` and `timeline-totals.json`. |
+| `summary.txt` | Crash candidates, heartbeat halts, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, behavioral acceptance, and timeline totals. |
 
 ## Failure Classes Monitored
 
@@ -254,7 +354,9 @@ The soak captures the canonical failure classes from
 
 | Class | Soak evidence |
 | --- | --- |
-| `blocked` | Bot/action logs and `action.result` traces. |
+| `blocked` | Bot/action logs and `action.result` `outcome_class`/detail traces. |
+| `interrupted` | Recoverable pathfinder/action interruptions such as `PathStopped` during `mode:unstuck`, reported through `action.result.outcome_class`. |
+| `aborted` | Bot/action logs for caller-aborted work that safely returned an action result with `outcome_class=aborted`. |
 | `timeout` | Bot logs, bridge logs, Paper/supervisor logs. |
 | `invalid` | Bridge contract errors and bot stderr. |
 | `unreachable` | Movement/action logs. |
@@ -272,6 +374,12 @@ Additional stability counters:
 | Decentralized respond-vs-ignore ratio | Rough `respond`/`ignore` counts from bot logs. |
 | Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 | Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
+| Heartbeat halts / idle recovery | `heartbeat.fired` / `heartbeat.outcome` / `heartbeat.halted` timeline events and `heartbeat-halts.tsv`. |
+
+For E8-14 interruption recovery, `PathStopped: Path was stopped before it could
+be completed` must appear as an `interrupted` action failure and must not be
+paired with public `Exiting.` chat from the bot. Repeated `Exiting.` or process
+exit lines are counted through `restart_count`.
 
 ## Cost Cap Accounting
 
@@ -288,6 +396,41 @@ separate cap table in a later branch, this script should be pointed at that
 table, but it must keep using `cost_events` as the spend ledger.
 
 ## Evidence From This Codex Run
+
+### E8-14 Interruption-Recovery Smoke Attempt
+
+The local live Minecraft smoke for Alpha interruption recovery was not run in
+this Codex sandbox because both local prerequisites were unavailable:
+
+```bash
+pnpm llm:local --list-only
+```
+
+Result: **failed**.
+
+```text
+FAIL: could not reach http://localhost:1234/v1/models
+      All connection attempts failed
+```
+
+```bash
+scripts/minecraft/health.sh --quiet
+```
+
+Result: **failed**.
+
+The no-server regression evidence for this branch is the focused
+`PathStopped` fixture suite:
+
+```bash
+.venv/bin/pytest tests/backend/test_embodiment_action_interruption.py -v
+```
+
+Result: **passed**. The fixture drives `!move`, `!navigate`, `!place`, and the
+upstream `!placeHere` guard against `PathStopped: Path was stopped before it
+could be completed`, and asserts the Node process stays alive while
+`action.result` records `status=failure`, `outcome_class=interrupted`, and
+details containing `interrupted`.
 
 ### Post-Loop Manual Live Startup Smoke
 
@@ -468,6 +611,9 @@ Append the completed live run here before advancing E8-9:
 | Top parser failure classes |  |
 | Failed parse examples |  |
 | Verified action examples |  |
+| Timeline result | PASS / MISSING |
+| Timeline event totals |  |
+| Timeline token totals | provider-reported / estimated |
 | Spawn safety (per agent) |  |
 | Movement distance / count |  |
 | Public chat lines (cohort) |  |

@@ -11,16 +11,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
-type FailureClass = Literal["blocked", "timeout", "invalid", "unreachable", "bridge-down"]
+type FailureClass = Literal[
+    "blocked", "interrupted", "timeout", "invalid", "unreachable", "bridge-down"
+]
 type SafeFailPolicy = Literal["idle", "retry-bounded", "abandon"]
 type SafeFailAction = Literal["idle", "retry", "abandon"]
 
 FAILURE_CLASSES: frozenset[FailureClass] = frozenset(
-    {"blocked", "timeout", "invalid", "unreachable", "bridge-down"}
+    {"blocked", "interrupted", "timeout", "invalid", "unreachable", "bridge-down"}
 )
 
 SAFE_FAIL_POLICY: dict[FailureClass, SafeFailPolicy] = {
     "blocked": "idle",
+    "interrupted": "idle",
     "timeout": "retry-bounded",
     "invalid": "abandon",
     "unreachable": "idle",
@@ -31,6 +34,11 @@ NON_FAILURE_CLASSES = frozenset({"reached", "placed", "removed", "success", "par
 
 _ALIASES: dict[str, FailureClass] = {
     "blocked": "blocked",
+    "interrupted": "interrupted",
+    "aborted": "interrupted",
+    "path-stopped": "interrupted",
+    "pathstopped": "interrupted",
+    "mode-interrupted": "interrupted",
     "timed-out": "timeout",
     "time-out": "timeout",
     "timeout": "timeout",

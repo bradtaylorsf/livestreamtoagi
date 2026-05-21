@@ -5,6 +5,7 @@
 
 export const FAILURE_CLASSES = Object.freeze([
     'blocked',
+    'interrupted',
     'timeout',
     'invalid',
     'unreachable',
@@ -13,6 +14,7 @@ export const FAILURE_CLASSES = Object.freeze([
 
 export const SAFE_FAIL_POLICY = Object.freeze({
     blocked: 'idle',
+    interrupted: 'idle',
     timeout: 'retry-bounded',
     invalid: 'abandon',
     unreachable: 'idle',
@@ -30,6 +32,11 @@ const NON_FAILURE_CLASSES = new Set(['reached', 'placed', 'removed', 'success', 
 
 const ALIASES = new Map([
     ['blocked', 'blocked'],
+    ['interrupted', 'interrupted'],
+    ['aborted', 'interrupted'],
+    ['path-stopped', 'interrupted'],
+    ['pathstopped', 'interrupted'],
+    ['mode-interrupted', 'interrupted'],
     ['timed-out', 'timeout'],
     ['time-out', 'timeout'],
     ['timeout', 'timeout'],

@@ -34,6 +34,8 @@
 #                               Default: 2.
 #   SOAK_MAX_STUCK_PER_AGENT    Maximum stuck/path-failure lines per tracked
 #                               agent. Default: 5.
+#   SOAK_MAX_RESTARTS_PER_AGENT Maximum restart/disconnect/exit signatures per
+#                               tracked agent. Default: 1.
 #   SOAK_MIN_PUBLIC_CHAT_COHORT Minimum public chat lines across the cohort.
 #                               Default: 10.
 #   SOAK_MIN_GATHER_OR_BUILD_COHORT
@@ -72,6 +74,17 @@
 #                               disable auto elbow-room/item pickup/torch modes
 #                               and refuse destructive pathfinding.
 #                               Default: 0.
+#   MC_HEARTBEAT_ENABLED        Enable autonomous idle/stall heartbeat prompts.
+#                               Default: 1.
+#   MC_HEARTBEAT_IDLE_MS        Idle window before a high-level next-action
+#                               prompt. Default: 90000.
+#   MC_HEARTBEAT_COOLDOWN_MS    Minimum gap between heartbeat prompts.
+#                               Default: 45000.
+#   MC_HEARTBEAT_STALE_ACTION_MS
+#                               Active-action age before the heartbeat treats it
+#                               as stale. Default: 180000.
+#   MC_HEARTBEAT_MAX_NO_COMMAND Repeated blank/no-command heartbeat outcomes
+#                               before `heartbeat.halted`. Default: 3.
 #   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
 #                               bootstrap: a side Paper server, peaceful rules,
 #                               a flat grass starter meadow, resource piles,
@@ -95,6 +108,16 @@
 #   SOAK_RELIABILITY_FAIL_ON_VIOLATION
 #                               Exit nonzero when the reliability gate reports
 #                               threshold violations. Default: 1.
+#   timeline.ndjson             Structured run timeline emitted under the
+#                               evidence directory, with timeline-totals.json
+#                               and a Timeline block in summary.txt.
+#   monitor.html                Self-contained cohort monitor rendered under
+#                               the evidence directory from timeline.ndjson.
+#   SOAK_MONITOR_STALL_SECONDS  Idle seconds before a monitor stalled badge.
+#                               Default: 120.
+#   SOAK_MONITOR_LLM_IDLE_SECONDS
+#                               Seconds before a monitor no-recent-LLM badge.
+#                               Default: 120.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -118,6 +141,7 @@ SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_MIN_MOVEMENT_PER_AGENT="${SOAK_MIN_MOVEMENT_PER_AGENT:-5}"
 SOAK_MAX_DEATHS_PER_AGENT="${SOAK_MAX_DEATHS_PER_AGENT:-2}"
 SOAK_MAX_STUCK_PER_AGENT="${SOAK_MAX_STUCK_PER_AGENT:-5}"
+SOAK_MAX_RESTARTS_PER_AGENT="${SOAK_MAX_RESTARTS_PER_AGENT:-1}"
 SOAK_MIN_PUBLIC_CHAT_COHORT="${SOAK_MIN_PUBLIC_CHAT_COHORT:-10}"
 SOAK_MIN_GATHER_OR_BUILD_COHORT="${SOAK_MIN_GATHER_OR_BUILD_COHORT:-3}"
 SOAK_MIN_SHARED_ARTIFACTS="${SOAK_MIN_SHARED_ARTIFACTS:-1}"
@@ -141,7 +165,15 @@ SOAK_MIN_EXECUTION_RATE="${SOAK_MIN_EXECUTION_RATE:-0.7}"
 SOAK_MIN_VERIFIED_SUCCESS="${SOAK_MIN_VERIFIED_SUCCESS:-0.5}"
 SOAK_RELIABILITY_MIN_INTENTS="${SOAK_RELIABILITY_MIN_INTENTS:-5}"
 SOAK_RELIABILITY_FAIL_ON_VIOLATION="${SOAK_RELIABILITY_FAIL_ON_VIOLATION:-1}"
+SOAK_MONITOR_STALL_SECONDS="${SOAK_MONITOR_STALL_SECONDS:-120}"
+SOAK_MONITOR_LLM_IDLE_SECONDS="${SOAK_MONITOR_LLM_IDLE_SECONDS:-120}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
+MC_HEARTBEAT_ENABLED="${MC_HEARTBEAT_ENABLED:-1}"
+MC_HEARTBEAT_TICK_MS="${MC_HEARTBEAT_TICK_MS:-5000}"
+MC_HEARTBEAT_IDLE_MS="${MC_HEARTBEAT_IDLE_MS:-90000}"
+MC_HEARTBEAT_COOLDOWN_MS="${MC_HEARTBEAT_COOLDOWN_MS:-45000}"
+MC_HEARTBEAT_STALE_ACTION_MS="${MC_HEARTBEAT_STALE_ACTION_MS:-180000}"
+MC_HEARTBEAT_MAX_NO_COMMAND="${MC_HEARTBEAT_MAX_NO_COMMAND:-3}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -294,6 +326,9 @@ verify_static() {
     [ -x "$SCRIPT_DIR/start-server.sh" ] || { fail "missing executable: $SCRIPT_DIR/start-server.sh"; problems=1; }
     [ -x "$SCRIPT_DIR/setup-easy-spawn.mjs" ] || { fail "missing executable: $SCRIPT_DIR/setup-easy-spawn.mjs"; problems=1; }
     [ -x "$SCRIPT_DIR/analyze_action_reliability.py" ] || { fail "missing executable: $SCRIPT_DIR/analyze_action_reliability.py"; problems=1; }
+    [ -x "$SCRIPT_DIR/build_timeline.py" ] || { fail "missing executable: $SCRIPT_DIR/build_timeline.py"; problems=1; }
+    [ -x "$SCRIPT_DIR/build_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/build_monitor.py"; problems=1; }
+    [ -x "$SCRIPT_DIR/serve_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/serve_monitor.py"; problems=1; }
     [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
     grep -q 'CHECK_MINECRAFT=1 bash scripts/check-services.sh' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
@@ -314,6 +349,34 @@ verify_static() {
     }
     grep -q 'behavior.tsv' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document behavior.tsv"
+        problems=1
+    }
+    grep -q 'restart_count' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document restart_count"
+        problems=1
+    }
+    grep -q 'timeline.ndjson' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document timeline.ndjson"
+        problems=1
+    }
+    grep -q 'monitor.html' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document monitor.html"
+        problems=1
+    }
+    grep -q 'Heartbeat & Idle Recovery' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document autonomous heartbeat idle recovery"
+        problems=1
+    }
+    [ -s "$REPO_ROOT/docs/minecraft/timeline-schema.md" ] || {
+        fail "timeline schema doc is missing"
+        problems=1
+    }
+    [ -s "$REPO_ROOT/docs/minecraft/cohort-monitor.md" ] || {
+        fail "cohort monitor doc is missing"
+        problems=1
+    }
+    grep -q 'llm.request' "$REPO_ROOT/docs/minecraft/timeline-schema.md" 2> /dev/null || {
+        fail "timeline schema doc must document LLM events"
         problems=1
     }
     grep -q 'Intent Detection' "$REPO_ROOT/docs/minecraft/action-command-reliability.md" 2> /dev/null || {
@@ -352,8 +415,11 @@ print_plan() {
     info "server dir:     ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
     info "world config:   ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
-    info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
+    info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; restarts<=${SOAK_MAX_RESTARTS_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
+    info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
+    info "timeline:       timeline.ndjson + timeline-totals.json"
+    info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -469,6 +535,7 @@ import math
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -494,6 +561,7 @@ agent_set = set(agents)
 min_movement = int_env("SOAK_MIN_MOVEMENT_PER_AGENT", 5)
 max_deaths = int_env("SOAK_MAX_DEATHS_PER_AGENT", 2)
 max_stuck = int_env("SOAK_MAX_STUCK_PER_AGENT", 5)
+max_restarts = int_env("SOAK_MAX_RESTARTS_PER_AGENT", 1)
 min_public_chat = int_env("SOAK_MIN_PUBLIC_CHAT_COHORT", 10)
 min_gather_or_build = int_env("SOAK_MIN_GATHER_OR_BUILD_COHORT", 3)
 min_shared_artifacts = int_env("SOAK_MIN_SHARED_ARTIFACTS", 1)
@@ -502,6 +570,14 @@ movement_re = re.compile(r"!(move|goToPlayer|goToCoordinates|searchForBlock|sear
 death_re = re.compile(r"(died|death|respawn(ed)?)", re.IGNORECASE)
 drowning_re = re.compile(r"drown(ed|ing)?", re.IGNORECASE)
 stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
+restart_re = re.compile(
+    r"(Exiting\.|\bprocess exited with code\s+[1-9]\d*\b|\brejoining\b|\bbot disconnected\b|"
+    r"\bsupervisor.*restart\b|\brestart(?:ed|ing)?\b|heartbeat\.halted|heartbeat.*max-no-command)",
+    re.IGNORECASE,
+)
+timestamp_re = re.compile(
+    r"(?P<ts>\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)"
+)
 dig_hole_re = re.compile(r"(dig.?hole|stuck in (a )?hole|trapped)", re.IGNORECASE)
 gather_re = re.compile(r"!(collectBlocks|collectAllBlocks|consume|equip|smeltItem)\b", re.IGNORECASE)
 build_re = re.compile(r"!(place|placeHere|placeBlock|build|buildFromPlan)\b", re.IGNORECASE)
@@ -586,7 +662,45 @@ totals = {
     "total_drownings": 0,
     "total_stuck": 0,
     "total_dig_holes": 0,
+    "total_restarts": 0,
+    "total_restart_recurrences": 0,
 }
+
+
+def timestamp_epoch(line: str) -> float | None:
+    match = timestamp_re.search(line)
+    if not match:
+        return None
+    raw = match.group("ts").replace(" ", "T")
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    if re.search(r"[+-]\d{4}$", raw):
+        raw = raw[:-2] + ":" + raw[-2:]
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def restart_epochs(lines: list[str]) -> list[float]:
+    epochs = []
+    for line in lines:
+        if restart_re.search(line):
+            epoch = timestamp_epoch(line)
+            if epoch is not None:
+                epochs.append(epoch)
+    return sorted(epochs)
+
+
+def has_recurrent_restart(lines: list[str], window_seconds: int = 300) -> bool:
+    epochs = restart_epochs(lines)
+    for previous, current in zip(epochs, epochs[1:]):
+        if current - previous <= window_seconds:
+            return True
+    return False
 
 for agent in agents:
     own_lines = read_lines(run_dir / "bots" / f"{agent}.log")
@@ -602,6 +716,8 @@ for agent in agents:
     deaths = count_regex(counter_lines, death_re)
     drownings = count_regex(counter_lines, drowning_re)
     stuck = count_regex(counter_lines, stuck_re)
+    restart_count = count_regex(counter_lines, restart_re)
+    recurrent_restarts = 1 if has_recurrent_restart(counter_lines) else 0
     dig_holes = count_regex(counter_lines, dig_hole_re)
     inter_agent_chat = sum(
         1
@@ -619,6 +735,12 @@ for agent in agents:
         agent_unmet.append(f"agent {agent} deaths expected <= {max_deaths} got {deaths}")
     if stuck > max_stuck:
         agent_unmet.append(f"agent {agent} stuck expected <= {max_stuck} got {stuck}")
+    if restart_count > max_restarts:
+        agent_unmet.append(
+            f"agent {agent} restarts expected <= {max_restarts} got {restart_count}"
+        )
+    if recurrent_restarts:
+        agent_unmet.append(f"agent {agent} repeated restarts within 300s")
     unmet.extend(agent_unmet)
 
     row = {
@@ -633,6 +755,7 @@ for agent in agents:
         "drownings": drownings,
         "stuck": stuck,
         "dig_holes": dig_holes,
+        "restart_count": restart_count,
         "behavior_status": "fail" if agent_unmet else "pass",
     }
     rows.append(row)
@@ -646,6 +769,8 @@ for agent in agents:
     totals["total_drownings"] += drownings
     totals["total_stuck"] += stuck
     totals["total_dig_holes"] += dig_holes
+    totals["total_restarts"] += restart_count
+    totals["total_restart_recurrences"] += recurrent_restarts
 
 
 place_agents: set[str] = set()
@@ -695,6 +820,7 @@ header = [
     "drownings",
     "stuck",
     "dig_holes",
+    "restart_count",
     "behavior_status",
 ]
 with (run_dir / "behavior.tsv").open("w", encoding="utf-8") as handle:
@@ -743,6 +869,8 @@ append_behavior_summary() {
         echo "total_drownings: $(behavior_metric "$run_dir" total_drownings)"
         echo "total_stuck: $(behavior_metric "$run_dir" total_stuck)"
         echo "total_dig_holes: $(behavior_metric "$run_dir" total_dig_holes)"
+        echo "total_restarts: $(behavior_metric "$run_dir" total_restarts)"
+        echo "total_restart_recurrences: $(behavior_metric "$run_dir" total_restart_recurrences)"
         echo "shared_artifact_count: $(behavior_metric "$run_dir" shared_artifact_count)"
         echo
         echo "behavior_gate_status=$(behavior_metric "$run_dir" behavior_gate_status)"
@@ -854,14 +982,16 @@ RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
 SOAK_WORK_ROOT="${SOAK_WORK_ROOT:-${TMPDIR:-/tmp}/livestreamtoagi-soak-worktrees/$RUN_ID}"
 mkdir -p "$SOAK_WORK_ROOT"
 SOAK_WORK_ROOT="$(cd -- "$SOAK_WORK_ROOT" && pwd)"
-mkdir -p "$RUN_DIR"/{bots,preflight,logs}
+mkdir -p "$RUN_DIR"/{bots,preflight,logs,timeline-raw}
 printf '%s\n' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"
 PID_FILE="$RUN_DIR/pids.tsv"
 TAIL_PID_FILE="$RUN_DIR/tail-pids.txt"
 EARLY_EXIT_FILE="$RUN_DIR/early-exits.tsv"
+HEARTBEAT_HALT_FILE="$RUN_DIR/heartbeat-halts.tsv"
 : > "$PID_FILE"
 : > "$TAIL_PID_FILE"
 : > "$EARLY_EXIT_FILE"
+: > "$HEARTBEAT_HALT_FILE"
 
 SOAK_START_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 SOAK_START_EPOCH="$(date '+%s')"
@@ -904,6 +1034,7 @@ write_metadata() {
         echo "min_movement_per_agent=$SOAK_MIN_MOVEMENT_PER_AGENT"
         echo "max_deaths_per_agent=$SOAK_MAX_DEATHS_PER_AGENT"
         echo "max_stuck_per_agent=$SOAK_MAX_STUCK_PER_AGENT"
+        echo "max_restarts_per_agent=$SOAK_MAX_RESTARTS_PER_AGENT"
         echo "min_public_chat_cohort=$SOAK_MIN_PUBLIC_CHAT_COHORT"
         echo "min_gather_or_build_cohort=$SOAK_MIN_GATHER_OR_BUILD_COHORT"
         echo "min_shared_artifacts=$SOAK_MIN_SHARED_ARTIFACTS"
@@ -924,7 +1055,15 @@ write_metadata() {
         echo "min_verified_success=$SOAK_MIN_VERIFIED_SUCCESS"
         echo "reliability_min_intents=$SOAK_RELIABILITY_MIN_INTENTS"
         echo "reliability_fail_on_violation=$SOAK_RELIABILITY_FAIL_ON_VIOLATION"
+        echo "monitor_stall_seconds=$SOAK_MONITOR_STALL_SECONDS"
+        echo "monitor_llm_idle_seconds=$SOAK_MONITOR_LLM_IDLE_SECONDS"
         echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
+        echo "heartbeat_enabled=$MC_HEARTBEAT_ENABLED"
+        echo "heartbeat_tick_ms=$MC_HEARTBEAT_TICK_MS"
+        echo "heartbeat_idle_ms=$MC_HEARTBEAT_IDLE_MS"
+        echo "heartbeat_cooldown_ms=$MC_HEARTBEAT_COOLDOWN_MS"
+        echo "heartbeat_stale_action_ms=$MC_HEARTBEAT_STALE_ACTION_MS"
+        echo "heartbeat_max_no_command=$MC_HEARTBEAT_MAX_NO_COMMAND"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
         echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
@@ -1132,9 +1271,14 @@ launch_bot() {
         export MINDSERVER_PORT="$mindserver_port"
         export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
+        export MC_RUN_DIR="$RUN_DIR"
+        export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
+        export LTAG_RUN_ID="$RUN_ID"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
+        export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"
         if [ -n "$bot_settings_json" ]; then
             exec env SETTINGS_JSON="$bot_settings_json" "$script"
@@ -1228,6 +1372,14 @@ monitor_bots() {
         [ "$now" -lt "$SOAK_END_EPOCH" ] || break
         while IFS="$(printf '\t')" read -r bot pid script worktree log; do
             [ -n "${pid:-}" ] || continue
+            if grep -q '"event_type":"heartbeat.halted"' "$RUN_DIR/timeline-raw/$bot.ndjson" 2> /dev/null; then
+                if ! grep -q "^${bot}[[:space:]]" "$HEARTBEAT_HALT_FILE" 2> /dev/null; then
+                    printf '%s\t%s\t%s\n' "$bot" "$pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$HEARTBEAT_HALT_FILE"
+                    fail "$bot heartbeat halted; stopping bot process for supervisor visibility"
+                    signal_process_tree "$pid" TERM
+                    had_early_exit=1
+                fi
+            fi
             if ! kill -0 "$pid" 2> /dev/null; then
                 if ! grep -q "^${bot}[[:space:]]" "$EARLY_EXIT_FILE" 2> /dev/null; then
                     printf '%s\t%s\t%s\n' "$bot" "$pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$EARLY_EXIT_FILE"
@@ -1335,11 +1487,12 @@ count_matches() {
 }
 
 write_summary() {
-    local end_iso="$1" early_count bridge_drops management_events crash_lines runaway_lines
+    local end_iso="$1" early_count heartbeat_halt_count bridge_drops management_events crash_lines runaway_lines
     early_count="$(wc -l < "$EARLY_EXIT_FILE" | tr -d ' ')"
+    heartbeat_halt_count="$(wc -l < "$HEARTBEAT_HALT_FILE" | tr -d ' ')"
     bridge_drops="$(count_matches 'bridge[-_ ]down|bridge_(connect_failed|send_failed)|bridge unavailable|WebSocket.*(closed|disconnect)|ECONN' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
     management_events="$(count_matches 'management_review_event|Management|intervene|shadow' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
-    crash_lines="$(count_matches 'uncaught|unhandled|fatal|segmentation|crash|exception' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
+    crash_lines="$(count_matches 'uncaught|unhandled|fatal|segmentation|crash|exception|heartbeat\.halted|max-no-command' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log "$RUN_DIR"/timeline-raw/*.ndjson)"
     runaway_lines="$(find "$RUN_DIR/bots" -name '*.log' -type f -exec wc -l {} \; | awk -v max="$SOAK_MAX_LOG_LINES_PER_BOT" '$1 > max {print $0}')"
     {
         echo "E8-8 multi-agent soak summary"
@@ -1351,6 +1504,7 @@ write_summary() {
         echo
         echo "Counters"
         echo "early_bot_exits: $early_count"
+        echo "heartbeat_halts: $heartbeat_halt_count"
         echo "bridge_drop_lines: $bridge_drops"
         echo "management_event_lines: $management_events"
         echo "crash_candidate_lines: $crash_lines"
@@ -1369,6 +1523,13 @@ write_summary() {
         echo "Early exits"
         if [ -s "$EARLY_EXIT_FILE" ]; then
             cat "$EARLY_EXIT_FILE"
+        else
+            echo "none"
+        fi
+        echo
+        echo "Heartbeat halts"
+        if [ -s "$HEARTBEAT_HALT_FILE" ]; then
+            cat "$HEARTBEAT_HALT_FILE"
         else
             echo "none"
         fi
@@ -1452,6 +1613,87 @@ PY
     } >> "$RUN_DIR/summary.txt"
 }
 
+run_timeline_export() {
+    "${PYTHON:-python3}" "$SCRIPT_DIR/build_timeline.py" --run-dir "$RUN_DIR"
+}
+
+run_monitor_render() {
+    SOAK_MONITOR_STALL_SECONDS="$SOAK_MONITOR_STALL_SECONDS" \
+        SOAK_MONITOR_LLM_IDLE_SECONDS="$SOAK_MONITOR_LLM_IDLE_SECONDS" \
+        "${PYTHON:-python3}" "$SCRIPT_DIR/build_monitor.py" --run-dir "$RUN_DIR"
+}
+
+append_timeline_summary() {
+    {
+        echo
+        echo "Timeline"
+        echo "timeline: $RUN_DIR/timeline.ndjson"
+        echo "totals: $RUN_DIR/timeline-totals.json"
+        if [ -s "$RUN_DIR/timeline-totals.json" ]; then
+            TIMELINE_TOTALS_JSON="$RUN_DIR/timeline-totals.json" "${PYTHON:-python3}" <<'PY' || echo "unable to render timeline totals"
+import json
+import os
+
+path = os.environ["TIMELINE_TOTALS_JSON"]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+
+print(f"events_total: {data.get('event_count', 0)}")
+print("events_by_type:")
+for key, value in sorted(data.get("counts_by_event_type", {}).items()):
+    print(f"- {key}: {value}")
+
+heartbeat = data.get("counts_by_event_type", {})
+print("heartbeat_counts:")
+for key in ("heartbeat.fired", "heartbeat.skipped", "heartbeat.outcome", "heartbeat.halted"):
+    print(f"- {key}: {heartbeat.get(key, 0)}")
+
+print("events_by_agent:")
+for key, value in sorted(data.get("counts_by_agent", {}).items()):
+    print(f"- {key}: {value}")
+
+print("events_by_model:")
+models = data.get("counts_by_model", {})
+if models:
+    for key, value in sorted(models.items()):
+        print(f"- {key}: {value}")
+else:
+    print("- none")
+
+tokens = data.get("token_totals", {})
+print("token_totals:")
+print(f"- requests: {tokens.get('requests', 0)}")
+print(f"- prompt_tokens: {tokens.get('prompt_tokens', 0)}")
+print(f"- completion_tokens: {tokens.get('completion_tokens', 0)}")
+print(f"- total_tokens: {tokens.get('total_tokens', 0)}")
+reported = tokens.get("provider_reported", {})
+estimated = tokens.get("estimated", {})
+print(f"- provider_reported_requests: {reported.get('requests', 0)}")
+print(f"- estimated_requests: {estimated.get('requests', 0)}")
+PY
+        else
+            echo "not available"
+        fi
+    } >> "$RUN_DIR/summary.txt"
+}
+
+append_monitor_summary() {
+    local status="$1"
+    {
+        echo
+        echo "Cohort monitor"
+        if [ "$status" = "available" ]; then
+            echo "monitor: $RUN_DIR/monitor.html"
+            echo "live_server: python3 scripts/minecraft/serve_monitor.py --run-dir $RUN_DIR"
+        else
+            echo "monitor: not available"
+            echo "live_server: python3 scripts/minecraft/serve_monitor.py --run-dir $RUN_DIR"
+        fi
+        echo "stall_seconds: $SOAK_MONITOR_STALL_SECONDS"
+        echo "llm_idle_seconds: $SOAK_MONITOR_LLM_IDLE_SECONDS"
+    } >> "$RUN_DIR/summary.txt"
+}
+
 print_plan
 write_metadata
 
@@ -1493,9 +1735,21 @@ RELIABILITY_STATUS=0
 run_action_reliability || RELIABILITY_STATUS=$?
 append_action_reliability_summary "$RELIABILITY_STATUS"
 run_behavior_gate "$RUN_DIR"
+run_timeline_export
+append_timeline_summary
+if run_monitor_render; then
+    append_monitor_summary "available"
+else
+    fail "Monitor render failed; continuing. Re-run with: python3 scripts/minecraft/build_monitor.py --run-dir $RUN_DIR"
+    append_monitor_summary "unavailable"
+fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
+if [ -s "$HEARTBEAT_HALT_FILE" ]; then
+    fail "Soak failed: at least one bot heartbeat halted. See $HEARTBEAT_HALT_FILE"
+    exit 1
+fi
 if [ "$MONITOR_STATUS" -ne 0 ]; then
     fail "Soak failed: at least one bot exited before the planned end. See $EARLY_EXIT_FILE"
     exit 1

@@ -16,6 +16,8 @@ BUILD_CLASSES = {
     "placed",
     "removed",
     "blocked",
+    "interrupted",
+    "aborted",
     "protected",
     "invalid",
     "tool-missing",
