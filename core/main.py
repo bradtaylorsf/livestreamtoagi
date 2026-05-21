@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
     from tools.journal_image_tool import JournalImageGenerator
 
     tts_pipeline = TTSPipeline()
+    tts_stream_bridge: Any | None = None
     idle_behavior: IdleBehaviorSystem | None = None
     svc: Services | None = None
     memory_consumer_registered = False
@@ -56,6 +57,18 @@ async def lifespan(app: FastAPI):
         # TTSPipeline is created before bootstrap (to get its audio_dir for
         # the static mount), so the registry must be injected afterward.
         tts_pipeline._agent_registry = svc.agent_registry
+
+        from core.streaming.tts_stream_bridge import TTSStreamBridge, TTSStreamBridgeConfig
+
+        tts_stream_config = TTSStreamBridgeConfig.from_env()
+        if tts_stream_config.enabled:
+            tts_stream_bridge = TTSStreamBridge(
+                event_bus=svc.event_bus,
+                audio_dir=tts_pipeline.audio_dir,
+                config=tts_stream_config,
+            )
+            await tts_stream_bridge.start()
+            app.state.tts_stream_bridge = tts_stream_bridge
 
         # Initialize core memory for all agents at startup
         if svc.core_memory:
@@ -116,6 +129,8 @@ async def lifespan(app: FastAPI):
             )
             await asyncio.gather(*_background_tasks, return_exceptions=True)
 
+        if tts_stream_bridge is not None:
+            await tts_stream_bridge.stop()
         await tts_pipeline.shutdown()
         if svc is not None:
             await svc.config_loader.stop_watching()

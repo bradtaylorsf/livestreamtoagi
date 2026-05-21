@@ -172,6 +172,16 @@ REDIS_URL=redis://localhost:6379
 KILL_SWITCH_API_KEY=
 ```
 
+Optional livestream audio:
+```
+TTS_STREAM_ENABLED=0
+TTS_STREAM_FIFO=/tmp/livestream_tts.fifo
+TTS_STREAM_SAMPLE_RATE=44100
+TTS_STREAM_CHANNELS=2
+TTS_AUDIO_FIFO=/tmp/livestream_tts.fifo
+TTS_AUDIO_VOLUME=1.0
+```
+
 ## Specs Reference
 
 All design specifications are in `specs/` — treat as read-only reference:
