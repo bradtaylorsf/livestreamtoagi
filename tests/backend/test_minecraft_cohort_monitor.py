@@ -46,6 +46,7 @@ def test_fixture_monitor_renders_self_contained_html(tmp_path: Path) -> None:
 
     html = output.read_text(encoding="utf-8")
     assert output == run_dir / "monitor.html"
+    assert 'class="cohort-monitor"' in html
     assert '<script id="data" type="application/json">' in html
     assert 'src="http' not in html
     assert 'href="http' not in html

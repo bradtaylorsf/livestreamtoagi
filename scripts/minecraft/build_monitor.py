@@ -1038,7 +1038,7 @@ def render_monitor_html(model: dict[str, Any]) -> str:
     }}
   </style>
 </head>
-<body>
+<body class="cohort-monitor">
   <header>
     <h1>Minecraft Cohort Monitor</h1>
     <div class="run-meta">
