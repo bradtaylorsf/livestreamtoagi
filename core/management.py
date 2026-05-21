@@ -18,6 +18,7 @@ import yaml
 
 from core.event_bus import EventType
 from core.models import ContentReviewResult
+from core.redis_keys import KILL_SWITCH_KEY
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -51,8 +52,10 @@ class Management:
         shadow_mode: bool = False,
         db: Database | None = None,
         simulation_id: UUID | None = None,
+        global_redis_client: RedisClient | None = None,
     ) -> None:
         self._redis = redis_client
+        self._global_redis = global_redis_client or redis_client
         self._llm = llm_client
         self._event_bus = event_bus
         self._shadow_mode = shadow_mode
@@ -210,7 +213,7 @@ class Management:
             )
         else:  # severity 5
             await self.mute(agent_id)
-            await self._redis.set("kill_switch", "active", ex=14400)  # 4-hour TTL
+            await self._global_redis.set(KILL_SWITCH_KEY, "active", ex=14400)
             await self._event_bus.emit(
                 EventType.MANAGEMENT_INTERVENTION.value,
                 {

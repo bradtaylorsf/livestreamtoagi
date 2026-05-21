@@ -18,6 +18,7 @@ from core.bridge.handlers.management import handle_management_review
 from core.event_bus import EventType
 from core.management import CONTENT_RULES_PATH, Management
 from core.models import ContentReviewResult, LLMResponse
+from core.redis_keys import KILL_SWITCH_KEY
 
 # -- Fixtures -----------------------------------------------------------
 
@@ -349,9 +350,7 @@ async def test_management_review_bridge_handler_severity_5_triggers_kill_switch(
 # -- Layer 2: LLM review (clean content) -------------------------------
 
 
-async def test_clean_content_passes_review(
-    management: Management, mock_llm: MagicMock
-) -> None:
+async def test_clean_content_passes_review(management: Management, mock_llm: MagicMock) -> None:
     """Clean content passes Layer 1 and LLM returns approved."""
     result = await management.review("vera", "Let's discuss the project architecture")
     assert result.approved is True
@@ -360,9 +359,7 @@ async def test_clean_content_passes_review(
     mock_llm.complete.assert_called_once()
 
 
-async def test_llm_review_blocks_content(
-    management: Management, mock_llm: MagicMock
-) -> None:
+async def test_llm_review_blocks_content(management: Management, mock_llm: MagicMock) -> None:
     """LLM review can block content with appropriate severity."""
     mock_llm.complete.return_value = LLMResponse(
         content='{"approved": false, "reason": "Targeted harassment detected", "severity": 3}',
@@ -379,9 +376,7 @@ async def test_llm_review_blocks_content(
     assert "harassment" in result.reason.lower()
 
 
-async def test_llm_failure_defaults_to_blocked(
-    management: Management, mock_llm: MagicMock
-) -> None:
+async def test_llm_failure_defaults_to_blocked(management: Management, mock_llm: MagicMock) -> None:
     """If LLM call fails, default to blocked to prevent unreviewed content."""
     mock_llm.complete.side_effect = Exception("API timeout")
     result = await management.review("rex", "Normal conversation content")
@@ -442,9 +437,7 @@ async def test_generate_replacement_fallback_on_llm_failure(
 # -- Mute system --------------------------------------------------------
 
 
-async def test_mute_sets_redis_key_with_ttl(
-    management: Management, mock_redis: MagicMock
-) -> None:
+async def test_mute_sets_redis_key_with_ttl(management: Management, mock_redis: MagicMock) -> None:
     """mute() sets a Redis key with TTL."""
     await management.mute("grok", duration_seconds=600)
     mock_redis.set.assert_called_once_with("mute:grok", "muted", ex=600)
@@ -466,9 +459,7 @@ async def test_is_muted_returns_false_for_unmuted_agent(
     assert await management.is_muted("vera") is False
 
 
-async def test_unmute_deletes_redis_key(
-    management: Management, mock_redis: MagicMock
-) -> None:
+async def test_unmute_deletes_redis_key(management: Management, mock_redis: MagicMock) -> None:
     """unmute() deletes the Redis mute key."""
     await management.unmute("grok")
     mock_redis.delete.assert_called_once_with("mute:grok")
@@ -562,7 +553,7 @@ async def test_intervene_severity_5_mutes_and_sets_kill_switch(
     """Severity 5 mutes agent, sets kill switch, emits intervention."""
     await management.intervene(5, "grok", "self-harm content")
     # Kill switch set with TTL
-    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)
+    mock_redis.set.assert_any_call(KILL_SWITCH_KEY, "active", ex=14400)
     # Agent muted
     mock_redis.set.assert_any_call("mute:grok", "muted", ex=300)
     # Event emitted
@@ -570,6 +561,33 @@ async def test_intervene_severity_5_mutes_and_sets_kill_switch(
     assert call_args[0][0] == EventType.MANAGEMENT_INTERVENTION.value
     assert call_args[0][1]["kill_switch"] is True
     assert call_args[0][1]["severity"] == 5
+
+
+async def test_intervene_severity_5_uses_raw_redis_for_global_kill_switch(
+    mock_llm: MagicMock,
+    mock_event_bus: MagicMock,
+) -> None:
+    """Severity 5 keeps mutes scoped but writes the global kill key raw."""
+    scoped_redis = MagicMock()
+    scoped_redis.set = AsyncMock(return_value=True)
+    scoped_redis.get = AsyncMock(return_value=None)
+    scoped_redis.delete = AsyncMock(return_value=1)
+    raw_redis = MagicMock()
+    raw_redis.set = AsyncMock(return_value=True)
+
+    management = Management(
+        redis_client=scoped_redis,
+        global_redis_client=raw_redis,
+        llm_client=mock_llm,
+        event_bus=mock_event_bus,
+        rules_path=CONTENT_RULES_PATH,
+    )
+
+    await management.intervene(5, "grok", "emergency stop")
+
+    scoped_redis.set.assert_any_call("mute:grok", "muted", ex=300)
+    assert all(call.args[0] != KILL_SWITCH_KEY for call in scoped_redis.set.call_args_list)
+    raw_redis.set.assert_awaited_once_with(KILL_SWITCH_KEY, "active", ex=14400)
 
 
 # -- Content rules loading ----------------------------------------------
@@ -706,7 +724,9 @@ async def test_shadow_mode_logs_llm_rejection(
     )
     conv_id = uuid.uuid4()
     result = await shadow_management.review(
-        "fork", "Some harassing content", conversation_id=conv_id,
+        "fork",
+        "Some harassing content",
+        conversation_id=conv_id,
     )
     # Still approved in shadow mode
     assert result.approved is True
@@ -766,7 +786,9 @@ async def test_shadow_mode_without_db_still_emits_events(
         db=None,
     )
     result = await mgmt.review(
-        "grok", "Let me show you graphic violence", conversation_id=uuid.uuid4(),
+        "grok",
+        "Let me show you graphic violence",
+        conversation_id=uuid.uuid4(),
     )
     assert result.approved is True
     mock_event_bus.emit.assert_called()
@@ -820,9 +842,7 @@ def test_audience_safety_still_present(management: Management) -> None:
 
 
 @pytest.mark.integration
-async def test_end_to_end_review_with_llm(
-    mock_redis: MagicMock, mock_event_bus: MagicMock
-) -> None:
+async def test_end_to_end_review_with_llm(mock_redis: MagicMock, mock_event_bus: MagicMock) -> None:
     """End-to-end review using a real LLM call. Requires OPENROUTER_API_KEY."""
     import os
 
@@ -910,4 +930,4 @@ async def test_kill_switch_has_ttl(
 ) -> None:
     """Severity 5 intervention sets kill switch with a 4-hour TTL."""
     await management.intervene(5, "grok", "extreme content")
-    mock_redis.set.assert_any_call("kill_switch", "active", ex=14400)
+    mock_redis.set.assert_any_call(KILL_SWITCH_KEY, "active", ex=14400)

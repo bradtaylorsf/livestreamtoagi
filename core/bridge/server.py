@@ -81,6 +81,7 @@ from core.bridge.handlers.director import handle_director_gate
 from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.management import handle_management_review
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
+from core.redis_keys import KILL_SWITCH_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,6 @@ ERR_MANAGEMENT_SERVICE_UNAVAILABLE = "management_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 ERR_DIRECTOR_GATE_UNAVAILABLE = "director_gate_unavailable"
 ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
-KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 MANAGEMENT_REVIEW_VERBS = frozenset({"management.review"})

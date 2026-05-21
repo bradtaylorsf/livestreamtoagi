@@ -18,6 +18,8 @@ from core.constants import LIVE_SIMULATION_ID
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
 
+KILL_SWITCH_KEY = "kill_switch"
+
 
 class ScopedRedis:
     """Wraps a RedisClient, auto-prefixing all keys with simulation scope.

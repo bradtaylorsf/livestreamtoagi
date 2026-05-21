@@ -384,6 +384,7 @@ async def bootstrap_services(
 
     management = Management(
         redis_client=scoped_redis,
+        global_redis_client=redis_client,
         llm_client=llm_client,
         event_bus=_module_event_bus,
     )
