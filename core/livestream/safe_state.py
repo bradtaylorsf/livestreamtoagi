@@ -41,11 +41,11 @@ def load_safe_state_config(
     """Load safe-state settings from environment variables."""
 
     env = environ if environ is not None else os.environ
-    mode = env.get("LIVESTREAM_KILL_MODE", "holding_card").strip().lower()
+    mode = env.get("LIVESTREAM_KILL_MODE", "").strip().lower() or "holding_card"
     if mode not in {"holding_card", "cut"}:
         raise ValueError("LIVESTREAM_KILL_MODE must be either 'holding_card' or 'cut'")
 
-    raw_transition = env.get("LIVESTREAM_SAFE_TRANSITION_SECONDS", "0").strip()
+    raw_transition = env.get("LIVESTREAM_SAFE_TRANSITION_SECONDS", "").strip() or "0"
     try:
         transition_seconds = float(raw_transition)
     except ValueError as exc:
