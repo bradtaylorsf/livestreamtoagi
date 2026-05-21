@@ -1,16 +1,16 @@
 # Session Summary: session/epic-510-epic-e8-all-agents-embodied-decentralized-conversation
 
 ## Overview
-All 4 issues in epic E8 (all-agents embodied + decentralized conversation) completed successfully across 144 minutes, with only one retry needed (issue 720). Work centered on operator-facing Minecraft soak evidence — timeline export, cohort monitor UI, failure classification alignment, and bounded autonomous heartbeat behavior.
+Four Minecraft/Mindcraft-focused epic-510 issues were processed end-to-end with no test-fix retries and a 100% success rate. Work spanned command-parser schema fixes, reliability log parsing, opt-in OpenRouter routing for `planAndBuild`, and a build-plan governor with dedupe/cooldown/call-limit behavior. All changes maintained local-first defaults while adding testable guardrails around agent action execution.
 
 ## Recurring Patterns
-- Stable trace IDs threaded through LLM request → response → command intent → action start → result enable coherent operator diagnosis.
+- Centralize cross-cutting agent behavior (build ownership, dedupe, cooldowns, call caps) in a single governor so it can be exercised uniformly across action exec, monitoring, and soak replay.
 
 ## Recurring Anti-Patterns
-- Treating raw bot logs or static wiring verification as sufficient evidence for connected-agent runtime acceptance criteria.
+- Declaring `type: "object"` (or other non-primitive types) in Mindcraft command params, which breaks the parser layer before handlers run.
 
 ## Recommendations
-- Update `r11/alpha-loop-runner/SKILL.md` to require Minecraft soak evidence bundles include `timeline.ndjson`, totals JSON, summary links, and LM Studio validation evidence — not raw bot logs alone.
+- Update `r11/alpha-loop-runner/SKILL.md` to require, for Mindcraft command-parser issues, both schema-level evidence (primitive-only params) and harness regression evidence distinguishing parser-layer crashes from perform-layer guard tests.
 
 ## Metrics
 | Metric | Value |

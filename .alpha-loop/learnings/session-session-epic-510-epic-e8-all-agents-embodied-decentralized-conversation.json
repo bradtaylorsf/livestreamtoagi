@@ -1,47 +1,47 @@
 {
   "name": "session/epic-510-epic-e8-all-agents-embodied-decentralized-conversation",
   "branch": "session/epic-510-epic-e8-all-agents-embodied-decentralized-conversation",
-  "completed": "2026-05-21T02:54:57.215Z",
+  "completed": "2026-05-21T16:49:15.860Z",
   "results": [
     {
-      "issueNum": 718,
-      "title": "E8-12 — Structured timeline and LLM/token telemetry for embodied Minecraft runs",
+      "issueNum": 743,
+      "title": "E8-16 — Harden Mindcraft command parsing for object args and malformed action calls",
       "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/722",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/747",
       "testsPassing": true,
       "verifyPassing": true,
-      "duration": 2285,
-      "filesChanged": 6
+      "duration": 1091,
+      "filesChanged": 4
     },
     {
-      "issueNum": 719,
-      "title": "E8-13 — Live cohort monitor UI for embodied Minecraft soak evidence",
+      "issueNum": 744,
+      "title": "E8-17 — Fix action reliability parsing false positives and grouped execution metrics",
       "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/723",
-      "testsPassing": true,
-      "verifyPassing": false,
-      "duration": 2026,
-      "filesChanged": 6
-    },
-    {
-      "issueNum": 720,
-      "title": "E8-14 — Harden Mindcraft action interruption and PathStopped crash recovery",
-      "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/724",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/747",
       "testsPassing": true,
       "verifyPassing": true,
-      "duration": 2462,
-      "filesChanged": 6
+      "duration": 1091,
+      "filesChanged": 4
     },
     {
-      "issueNum": 721,
-      "title": "E8-15 — Add autonomous heartbeat and idle-stall recovery for embodied agents",
+      "issueNum": 745,
+      "title": "E8-18 — Route build-plan generation to OpenRouter with explicit budgets and local fallback",
       "status": "success",
-      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/725",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/748",
       "testsPassing": true,
       "verifyPassing": true,
-      "duration": 1878,
-      "filesChanged": 6
+      "duration": 1217,
+      "filesChanged": 4
+    },
+    {
+      "issueNum": 746,
+      "title": "E8-19 — Enforce one active build plan per agent with dedupe and cooldowns",
+      "status": "success",
+      "prUrl": "https://github.com/bradtaylorsf/livestreamtoagi/pull/748",
+      "testsPassing": true,
+      "verifyPassing": true,
+      "duration": 1217,
+      "filesChanged": 4
     }
   ],
   "stages": [
@@ -1094,6 +1094,90 @@
       "stage_success": true,
       "started_at": "2026-05-21T02:42:07.411Z",
       "issue_num": 721
+    },
+    {
+      "stage": "batch-plan",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 49,
+      "tokens_out": 14412,
+      "cost_usd": 2.982964,
+      "wall_time_s": 292.555,
+      "tool_calls": 43,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-21T15:22:36.885Z",
+      "issue_num": 743
+    },
+    {
+      "stage": "batch-implement",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 3281975,
+      "tokens_out": 2524596,
+      "cost_usd": 0,
+      "wall_time_s": 1449.852,
+      "tool_calls": 0,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-21T15:27:29.450Z",
+      "issue_num": 743
+    },
+    {
+      "stage": "batch-review",
+      "model": "opus",
+      "endpoint": "default",
+      "tokens_in": 48,
+      "tokens_out": 17139,
+      "cost_usd": 3.165192,
+      "wall_time_s": 307.696,
+      "tool_calls": 42,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-21T15:53:20.625Z",
+      "issue_num": 743
+    },
+    {
+      "stage": "batch-plan",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 44,
+      "tokens_out": 14678,
+      "cost_usd": 2.796442,
+      "wall_time_s": 279.808,
+      "tool_calls": 38,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-21T16:00:18.372Z",
+      "issue_num": 745
+    },
+    {
+      "stage": "batch-implement",
+      "model": "",
+      "endpoint": "default",
+      "tokens_in": 8151203,
+      "tokens_out": 6270156,
+      "cost_usd": 0,
+      "wall_time_s": 1766.851,
+      "tool_calls": 0,
+      "tool_errors": 0,
+      "stage_success": true,
+      "started_at": "2026-05-21T16:04:58.198Z",
+      "issue_num": 745
+    },
+    {
+      "stage": "batch-review",
+      "model": "opus",
+      "endpoint": "default",
+      "tokens_in": 45,
+      "tokens_out": 14677,
+      "cost_usd": 3.077497,
+      "wall_time_s": 251.966,
+      "tool_calls": 39,
+      "tool_errors": 1,
+      "stage_success": true,
+      "started_at": "2026-05-21T16:36:10.119Z",
+      "issue_num": 745
     }
   ]
 }
