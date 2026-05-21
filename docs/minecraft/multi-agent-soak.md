@@ -254,6 +254,26 @@ an LLM decision.
 Schema details and payload examples live in
 [`timeline-schema.md`](timeline-schema.md).
 
+## Live Cohort Monitor
+
+Every embodied soak also renders `monitor.html` in the evidence directory after
+the timeline export. Open it locally for a cohort-level view of run status,
+per-agent latest chat/action/LLM activity, idle time, restart count, errors,
+tokens, warning badges, and recent feeds:
+
+```bash
+open logs/soak/<UTC timestamp>/monitor.html
+```
+
+For an in-progress run, serve a periodically refreshed local view on loopback:
+
+```bash
+python3 scripts/minecraft/serve_monitor.py --run-dir logs/soak/<UTC timestamp>
+```
+
+The server binds to `127.0.0.1` by default. Full usage, thresholds, and filter
+details live in [`cohort-monitor.md`](cohort-monitor.md).
+
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 
 | File | Contents |
@@ -274,6 +294,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, action, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
 | `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
+| `monitor.html` | Self-contained local cohort monitor rendered from `timeline.ndjson` and `timeline-totals.json`. |
 | `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, behavioral acceptance, and timeline totals. |
 
 ## Failure Classes Monitored

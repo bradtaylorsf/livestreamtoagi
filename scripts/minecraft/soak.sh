@@ -98,6 +98,13 @@
 #   timeline.ndjson             Structured run timeline emitted under the
 #                               evidence directory, with timeline-totals.json
 #                               and a Timeline block in summary.txt.
+#   monitor.html                Self-contained cohort monitor rendered under
+#                               the evidence directory from timeline.ndjson.
+#   SOAK_MONITOR_STALL_SECONDS  Idle seconds before a monitor stalled badge.
+#                               Default: 120.
+#   SOAK_MONITOR_LLM_IDLE_SECONDS
+#                               Seconds before a monitor no-recent-LLM badge.
+#                               Default: 120.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -144,6 +151,8 @@ SOAK_MIN_EXECUTION_RATE="${SOAK_MIN_EXECUTION_RATE:-0.7}"
 SOAK_MIN_VERIFIED_SUCCESS="${SOAK_MIN_VERIFIED_SUCCESS:-0.5}"
 SOAK_RELIABILITY_MIN_INTENTS="${SOAK_RELIABILITY_MIN_INTENTS:-5}"
 SOAK_RELIABILITY_FAIL_ON_VIOLATION="${SOAK_RELIABILITY_FAIL_ON_VIOLATION:-1}"
+SOAK_MONITOR_STALL_SECONDS="${SOAK_MONITOR_STALL_SECONDS:-120}"
+SOAK_MONITOR_LLM_IDLE_SECONDS="${SOAK_MONITOR_LLM_IDLE_SECONDS:-120}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
@@ -298,6 +307,8 @@ verify_static() {
     [ -x "$SCRIPT_DIR/setup-easy-spawn.mjs" ] || { fail "missing executable: $SCRIPT_DIR/setup-easy-spawn.mjs"; problems=1; }
     [ -x "$SCRIPT_DIR/analyze_action_reliability.py" ] || { fail "missing executable: $SCRIPT_DIR/analyze_action_reliability.py"; problems=1; }
     [ -x "$SCRIPT_DIR/build_timeline.py" ] || { fail "missing executable: $SCRIPT_DIR/build_timeline.py"; problems=1; }
+    [ -x "$SCRIPT_DIR/build_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/build_monitor.py"; problems=1; }
+    [ -x "$SCRIPT_DIR/serve_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/serve_monitor.py"; problems=1; }
     [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
     grep -q 'CHECK_MINECRAFT=1 bash scripts/check-services.sh' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
@@ -324,8 +335,16 @@ verify_static() {
         fail "multi-agent soak doc must document timeline.ndjson"
         problems=1
     }
+    grep -q 'monitor.html' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document monitor.html"
+        problems=1
+    }
     [ -s "$REPO_ROOT/docs/minecraft/timeline-schema.md" ] || {
         fail "timeline schema doc is missing"
+        problems=1
+    }
+    [ -s "$REPO_ROOT/docs/minecraft/cohort-monitor.md" ] || {
+        fail "cohort monitor doc is missing"
         problems=1
     }
     grep -q 'llm.request' "$REPO_ROOT/docs/minecraft/timeline-schema.md" 2> /dev/null || {
@@ -371,6 +390,7 @@ print_plan() {
     info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
+    info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -941,6 +961,8 @@ write_metadata() {
         echo "min_verified_success=$SOAK_MIN_VERIFIED_SUCCESS"
         echo "reliability_min_intents=$SOAK_RELIABILITY_MIN_INTENTS"
         echo "reliability_fail_on_violation=$SOAK_RELIABILITY_FAIL_ON_VIOLATION"
+        echo "monitor_stall_seconds=$SOAK_MONITOR_STALL_SECONDS"
+        echo "monitor_llm_idle_seconds=$SOAK_MONITOR_LLM_IDLE_SECONDS"
         echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
@@ -1476,6 +1498,12 @@ run_timeline_export() {
     "${PYTHON:-python3}" "$SCRIPT_DIR/build_timeline.py" --run-dir "$RUN_DIR"
 }
 
+run_monitor_render() {
+    SOAK_MONITOR_STALL_SECONDS="$SOAK_MONITOR_STALL_SECONDS" \
+        SOAK_MONITOR_LLM_IDLE_SECONDS="$SOAK_MONITOR_LLM_IDLE_SECONDS" \
+        "${PYTHON:-python3}" "$SCRIPT_DIR/build_monitor.py" --run-dir "$RUN_DIR"
+}
+
 append_timeline_summary() {
     {
         echo
@@ -1525,6 +1553,23 @@ PY
     } >> "$RUN_DIR/summary.txt"
 }
 
+append_monitor_summary() {
+    local status="$1"
+    {
+        echo
+        echo "Cohort monitor"
+        if [ "$status" = "available" ]; then
+            echo "monitor: $RUN_DIR/monitor.html"
+            echo "live_server: python3 scripts/minecraft/serve_monitor.py --run-dir $RUN_DIR"
+        else
+            echo "monitor: not available"
+            echo "live_server: python3 scripts/minecraft/serve_monitor.py --run-dir $RUN_DIR"
+        fi
+        echo "stall_seconds: $SOAK_MONITOR_STALL_SECONDS"
+        echo "llm_idle_seconds: $SOAK_MONITOR_LLM_IDLE_SECONDS"
+    } >> "$RUN_DIR/summary.txt"
+}
+
 print_plan
 write_metadata
 
@@ -1568,6 +1613,12 @@ append_action_reliability_summary "$RELIABILITY_STATUS"
 run_behavior_gate "$RUN_DIR"
 run_timeline_export
 append_timeline_summary
+if run_monitor_render; then
+    append_monitor_summary "available"
+else
+    fail "Monitor render failed; continuing. Re-run with: python3 scripts/minecraft/build_monitor.py --run-dir $RUN_DIR"
+    append_monitor_summary "unavailable"
+fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
