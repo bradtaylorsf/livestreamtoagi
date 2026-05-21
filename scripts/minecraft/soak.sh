@@ -1245,11 +1245,21 @@ start_lm_queue_proxy() {
     LOCAL_LLM_BASE_URL="$proxy_url"
     export LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL MINECRAFT_LLM_CONCURRENCY
 
+    local proxy_pid
+    proxy_pid="$(cat "$LLM_PROXY_PID_FILE" 2> /dev/null || true)"
     local waited=0
     while [ "$waited" -lt 20 ]; do
-        if curl -fsS "${proxy_url%/v1}/healthz" > "$RUN_DIR/preflight/lmstudio-queue-health.json" 2> /dev/null; then
+        if [ -n "$proxy_pid" ] && ! kill -0 "$proxy_pid" 2> /dev/null; then
+            fail "LM Studio queue proxy exited before becoming ready; see $RUN_DIR/logs/lmstudio-queue-proxy.log"
+            return 1
+        fi
+        if curl --connect-timeout 1 --max-time 2 -fsS "${proxy_url%/v1}/healthz" > "$RUN_DIR/preflight/lmstudio-queue-health.json" 2> /dev/null; then
             ok "LM Studio queue proxy ready"
             return 0
+        fi
+        if [ -n "$proxy_pid" ] && ! kill -0 "$proxy_pid" 2> /dev/null; then
+            fail "LM Studio queue proxy exited before becoming ready; see $RUN_DIR/logs/lmstudio-queue-proxy.log"
+            return 1
         fi
         sleep 0.25
         waited=$((waited + 1))
