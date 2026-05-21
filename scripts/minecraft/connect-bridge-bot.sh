@@ -84,6 +84,7 @@ ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
+TIMELINE_EMITTER_REL="src/agent/bridge/timeline_emitter.js"
 MANAGEMENT_REVIEW_REL="src/agent/bridge/management_review.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_REL="src/agent/commands/move_action.js"
@@ -98,6 +99,7 @@ BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
+LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -107,6 +109,7 @@ ACTIONS_PATH=""
 AGENT_BACKUP=""
 AGENT_PATH=""
 BRIDGE_CLIENT_DEST=""
+TIMELINE_EMITTER_DEST=""
 MANAGEMENT_REVIEW_DEST=""
 BRIDGE_ACTION_DEST=""
 MOVE_ACTION_DEST=""
@@ -121,6 +124,7 @@ BUILDING_SKILL_DEST=""
 BUILD_PLAN_SKILL_DEST=""
 PERCEPTION_SKILL_DEST=""
 SAFE_FAIL_SKILL_DEST=""
+LMSTUDIO_USAGE_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
 # cwd) so the reviewed copies are used no matter where it is invoked.
@@ -129,6 +133,7 @@ SETTINGS_TEMPLATE="$SCRIPT_DIR/mindcraft-settings.js"
 PROFILE_TEMPLATE="$SCRIPT_DIR/profiles/bridge-bot.json"
 FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
 BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
+TIMELINE_EMITTER_SRC="$FORK_SRC_DIR/agent/bridge/timeline_emitter.js"
 MANAGEMENT_REVIEW_SRC="$FORK_SRC_DIR/agent/bridge/management_review.js"
 BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/move_action.js"
@@ -143,6 +148,7 @@ BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
+LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 
 MODE="run"
 case "${1:-}" in
@@ -180,6 +186,7 @@ restore_clone_patches() {
         rm -f "$AGENT_BACKUP"
     fi
     [ -n "${BRIDGE_CLIENT_DEST:-}" ] && rm -f "$BRIDGE_CLIENT_DEST" 2> /dev/null || true
+    [ -n "${TIMELINE_EMITTER_DEST:-}" ] && rm -f "$TIMELINE_EMITTER_DEST" 2> /dev/null || true
     [ -n "${MANAGEMENT_REVIEW_DEST:-}" ] && rm -f "$MANAGEMENT_REVIEW_DEST" 2> /dev/null || true
     [ -n "${BRIDGE_ACTION_DEST:-}" ] && rm -f "$BRIDGE_ACTION_DEST" 2> /dev/null || true
     [ -n "${MOVE_ACTION_DEST:-}" ] && rm -f "$MOVE_ACTION_DEST" 2> /dev/null || true
@@ -194,6 +201,7 @@ restore_clone_patches() {
     [ -n "${BUILD_PLAN_SKILL_DEST:-}" ] && rm -f "$BUILD_PLAN_SKILL_DEST" 2> /dev/null || true
     [ -n "${PERCEPTION_SKILL_DEST:-}" ] && rm -f "$PERCEPTION_SKILL_DEST" 2> /dev/null || true
     [ -n "${SAFE_FAIL_SKILL_DEST:-}" ] && rm -f "$SAFE_FAIL_SKILL_DEST" 2> /dev/null || true
+    [ -n "${LMSTUDIO_USAGE_SKILL_DEST:-}" ] && rm -f "$LMSTUDIO_USAGE_SKILL_DEST" 2> /dev/null || true
 }
 
 # ── Node / npm check (identical posture to connect-stock-bot.sh) ──
@@ -268,6 +276,22 @@ verify_committed_assets() {
         if grep -q 'openrouter' "$BRIDGE_CLIENT_SRC"; then
             fail "bridge client must NOT reference openrouter"; problems=1
         fi
+    fi
+
+    if [ ! -s "$TIMELINE_EMITTER_SRC" ]; then
+        fail "Timeline emitter missing or empty: $TIMELINE_EMITTER_SRC"; problems=1
+    else
+        grep -q 'MC_TIMELINE_NDJSON' "$TIMELINE_EMITTER_SRC" || { fail "timeline emitter does not read MC_TIMELINE_NDJSON"; problems=1; }
+        grep -q 'MC_RUN_DIR' "$TIMELINE_EMITTER_SRC" || { fail "timeline emitter does not fall back to MC_RUN_DIR"; problems=1; }
+        grep -q 'appendFileSync' "$TIMELINE_EMITTER_SRC" || { fail "timeline emitter does not write NDJSON"; problems=1; }
+    fi
+
+    if [ ! -s "$LMSTUDIO_USAGE_SKILL_SRC" ]; then
+        fail "LM Studio usage shim missing or empty: $LMSTUDIO_USAGE_SKILL_SRC"; problems=1
+    else
+        grep -q 'llm.request' "$LMSTUDIO_USAGE_SKILL_SRC" || { fail "LM Studio shim does not emit llm.request"; problems=1; }
+        grep -q 'llm.response' "$LMSTUDIO_USAGE_SKILL_SRC" || { fail "LM Studio shim does not emit llm.response"; problems=1; }
+        grep -q 'deterministicTokenEstimate' "$LMSTUDIO_USAGE_SKILL_SRC" || { fail "LM Studio shim missing deterministic estimator"; problems=1; }
     fi
 
     if [ ! -s "$MANAGEMENT_REVIEW_SRC" ]; then
@@ -501,6 +525,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would stage:  $SETTINGS_TEMPLATE → $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $PROFILE_TEMPLATE  → $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
     info "Would copy:   fork-src/ → $MINDCRAFT_DIR/$BRIDGE_CLIENT_REL +"
+    info "              $TIMELINE_EMITTER_REL + $LMSTUDIO_USAGE_SKILL_REL +"
     info "              $BRIDGE_ACTION_REL + $MOVE_ACTION_REL + $NAVIGATE_ACTION_REL +"
     info "              $PLACE_ACTION_REL + $BREAK_ACTION_REL + $BUILD_FROM_PLAN_ACTION_REL +"
     info "              $EXECUTE_CODE_ACTION_REL + $OBSERVE_ACTION_REL +"
@@ -569,6 +594,17 @@ if ! sed -E \
     exit 1
 fi
 ok "Staged settings.js → $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profile=${MINDCRAFT_PROFILE})"
+SETTINGS_PATH="$DEST_SETTINGS" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.SETTINGS_PATH;
+const importLine = "import './src/agent/skills/lmstudio_usage.js'; // LTAG E8-12 timeline telemetry\n";
+let source = readFileSync(path, 'utf8');
+if (!source.includes('lmstudio_usage.js')) {
+    writeFileSync(path, importLine + source);
+}
+NODE
+ok "Enabled LM Studio timeline telemetry in settings.js"
 
 # (e) Stage the profile with the LM Studio model ids substituted in.
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
@@ -604,6 +640,7 @@ info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 
 # (f) Copy the committed bridge client + movement/building/code/perception actions verbatim into the
 #     clone (the decision 0005 extension points). Removed again on exit.
 BRIDGE_CLIENT_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_CLIENT_REL"
+TIMELINE_EMITTER_DEST="$MINDCRAFT_DIR_ABS/$TIMELINE_EMITTER_REL"
 MANAGEMENT_REVIEW_DEST="$MINDCRAFT_DIR_ABS/$MANAGEMENT_REVIEW_REL"
 BRIDGE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BRIDGE_ACTION_REL"
 MOVE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$MOVE_ACTION_REL"
@@ -618,8 +655,10 @@ BUILDING_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILDING_SKILL_REL"
 BUILD_PLAN_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILD_PLAN_SKILL_REL"
 PERCEPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$PERCEPTION_SKILL_REL"
 SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
+LMSTUDIO_USAGE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$LMSTUDIO_USAGE_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
+    "$(dirname -- "$TIMELINE_EMITTER_DEST")" \
     "$(dirname -- "$MANAGEMENT_REVIEW_DEST")" \
     "$(dirname -- "$BRIDGE_ACTION_DEST")" \
     "$(dirname -- "$MOVE_ACTION_DEST")" \
@@ -633,8 +672,10 @@ mkdir -p \
     "$(dirname -- "$BUILDING_SKILL_DEST")" \
     "$(dirname -- "$BUILD_PLAN_SKILL_DEST")" \
     "$(dirname -- "$PERCEPTION_SKILL_DEST")" \
-    "$(dirname -- "$SAFE_FAIL_SKILL_DEST")"
+    "$(dirname -- "$SAFE_FAIL_SKILL_DEST")" \
+    "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
+cp "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_DEST"
 cp "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_DEST"
 cp "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_DEST"
 cp "$MOVE_ACTION_SRC" "$MOVE_ACTION_DEST"
@@ -649,7 +690,9 @@ cp "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_DEST"
 cp "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_DEST"
 cp "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_DEST"
 cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
+cp "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
+ok "Copied timeline emitter → $TIMELINE_EMITTER_REL"
 ok "Copied Management review helper → $MANAGEMENT_REVIEW_REL"
 ok "Copied bridge action → $BRIDGE_ACTION_REL"
 ok "Copied move action → $MOVE_ACTION_REL"
@@ -664,6 +707,7 @@ ok "Copied building helpers → $BUILDING_SKILL_REL"
 ok "Copied build-plan helpers → $BUILD_PLAN_SKILL_REL"
 ok "Copied perception helpers → $PERCEPTION_SKILL_REL"
 ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
+ok "Copied LM Studio usage shim → $LMSTUDIO_USAGE_SKILL_REL"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
 if [ ! -f "$AGENT_PATH" ]; then

@@ -95,6 +95,9 @@
 #   SOAK_RELIABILITY_FAIL_ON_VIOLATION
 #                               Exit nonzero when the reliability gate reports
 #                               threshold violations. Default: 1.
+#   timeline.ndjson             Structured run timeline emitted under the
+#                               evidence directory, with timeline-totals.json
+#                               and a Timeline block in summary.txt.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -294,6 +297,7 @@ verify_static() {
     [ -x "$SCRIPT_DIR/start-server.sh" ] || { fail "missing executable: $SCRIPT_DIR/start-server.sh"; problems=1; }
     [ -x "$SCRIPT_DIR/setup-easy-spawn.mjs" ] || { fail "missing executable: $SCRIPT_DIR/setup-easy-spawn.mjs"; problems=1; }
     [ -x "$SCRIPT_DIR/analyze_action_reliability.py" ] || { fail "missing executable: $SCRIPT_DIR/analyze_action_reliability.py"; problems=1; }
+    [ -x "$SCRIPT_DIR/build_timeline.py" ] || { fail "missing executable: $SCRIPT_DIR/build_timeline.py"; problems=1; }
     [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
     grep -q 'CHECK_MINECRAFT=1 bash scripts/check-services.sh' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
@@ -314,6 +318,18 @@ verify_static() {
     }
     grep -q 'behavior.tsv' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document behavior.tsv"
+        problems=1
+    }
+    grep -q 'timeline.ndjson' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document timeline.ndjson"
+        problems=1
+    }
+    [ -s "$REPO_ROOT/docs/minecraft/timeline-schema.md" ] || {
+        fail "timeline schema doc is missing"
+        problems=1
+    }
+    grep -q 'llm.request' "$REPO_ROOT/docs/minecraft/timeline-schema.md" 2> /dev/null || {
+        fail "timeline schema doc must document LLM events"
         problems=1
     }
     grep -q 'Intent Detection' "$REPO_ROOT/docs/minecraft/action-command-reliability.md" 2> /dev/null || {
@@ -354,6 +370,7 @@ print_plan() {
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
     info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
+    info "timeline:       timeline.ndjson + timeline-totals.json"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -854,7 +871,7 @@ RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
 SOAK_WORK_ROOT="${SOAK_WORK_ROOT:-${TMPDIR:-/tmp}/livestreamtoagi-soak-worktrees/$RUN_ID}"
 mkdir -p "$SOAK_WORK_ROOT"
 SOAK_WORK_ROOT="$(cd -- "$SOAK_WORK_ROOT" && pwd)"
-mkdir -p "$RUN_DIR"/{bots,preflight,logs}
+mkdir -p "$RUN_DIR"/{bots,preflight,logs,timeline-raw}
 printf '%s\n' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"
 PID_FILE="$RUN_DIR/pids.tsv"
 TAIL_PID_FILE="$RUN_DIR/tail-pids.txt"
@@ -1132,7 +1149,10 @@ launch_bot() {
         export MINDSERVER_PORT="$mindserver_port"
         export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
+        export MC_RUN_DIR="$RUN_DIR"
+        export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
+        export LTAG_RUN_ID="$RUN_ID"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"
@@ -1452,6 +1472,59 @@ PY
     } >> "$RUN_DIR/summary.txt"
 }
 
+run_timeline_export() {
+    "${PYTHON:-python3}" "$SCRIPT_DIR/build_timeline.py" --run-dir "$RUN_DIR"
+}
+
+append_timeline_summary() {
+    {
+        echo
+        echo "Timeline"
+        echo "timeline: $RUN_DIR/timeline.ndjson"
+        echo "totals: $RUN_DIR/timeline-totals.json"
+        if [ -s "$RUN_DIR/timeline-totals.json" ]; then
+            TIMELINE_TOTALS_JSON="$RUN_DIR/timeline-totals.json" "${PYTHON:-python3}" <<'PY' || echo "unable to render timeline totals"
+import json
+import os
+
+path = os.environ["TIMELINE_TOTALS_JSON"]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+
+print(f"events_total: {data.get('event_count', 0)}")
+print("events_by_type:")
+for key, value in sorted(data.get("counts_by_event_type", {}).items()):
+    print(f"- {key}: {value}")
+
+print("events_by_agent:")
+for key, value in sorted(data.get("counts_by_agent", {}).items()):
+    print(f"- {key}: {value}")
+
+print("events_by_model:")
+models = data.get("counts_by_model", {})
+if models:
+    for key, value in sorted(models.items()):
+        print(f"- {key}: {value}")
+else:
+    print("- none")
+
+tokens = data.get("token_totals", {})
+print("token_totals:")
+print(f"- requests: {tokens.get('requests', 0)}")
+print(f"- prompt_tokens: {tokens.get('prompt_tokens', 0)}")
+print(f"- completion_tokens: {tokens.get('completion_tokens', 0)}")
+print(f"- total_tokens: {tokens.get('total_tokens', 0)}")
+reported = tokens.get("provider_reported", {})
+estimated = tokens.get("estimated", {})
+print(f"- provider_reported_requests: {reported.get('requests', 0)}")
+print(f"- estimated_requests: {estimated.get('requests', 0)}")
+PY
+        else
+            echo "not available"
+        fi
+    } >> "$RUN_DIR/summary.txt"
+}
+
 print_plan
 write_metadata
 
@@ -1493,6 +1566,8 @@ RELIABILITY_STATUS=0
 run_action_reliability || RELIABILITY_STATUS=$?
 append_action_reliability_summary "$RELIABILITY_STATUS"
 run_behavior_gate "$RUN_DIR"
+run_timeline_export
+append_timeline_summary
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
