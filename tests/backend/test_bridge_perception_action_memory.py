@@ -252,10 +252,7 @@ async def test_action_result_event_compacts_to_existing_memory_path() -> None:
         {
             "agent_id": "rex",
             "interaction": (
-                "Action result:\n"
-                "- action_id: act-7\n"
-                "- status: success\n"
-                "- detail: placed 10 blocks"
+                "Action result:\n- action_id: act-7\n- status: success\n- detail: placed 10 blocks"
             ),
             "event_type": "bridge_action_result",
             "participants": ["rex"],
@@ -305,6 +302,27 @@ async def test_action_result_event_creates_retrievable_recall_with_embedding() -
 
     assert "[bridge_action_result]" in formatted
     assert "placed 10 blocks" in formatted
+
+
+async def test_director_v2_skips_legacy_per_event_compaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONVERSATION_MODE", "director_v2")
+    compactor = FakeCompactor()
+    register_memory_consumer(event_bus, compactor)
+
+    await event_bus.emit(
+        EventType.BRIDGE_ACTION_RESULT,
+        {
+            "agent_id": "rex",
+            "action_id": "act-director-v2",
+            "status": "success",
+            "detail": "movement event should be handled by scene memory",
+        },
+    )
+
+    await asyncio.sleep(0)
+    assert compactor.calls == []
 
 
 async def test_empty_perception_observations_are_noop() -> None:

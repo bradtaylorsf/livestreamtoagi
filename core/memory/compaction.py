@@ -10,7 +10,7 @@ After every event (conversation, building session, challenge), the compactor:
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from core.memory.embeddings import generate_embedding
 
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from core.models import RecallMemory, Transcript
 
 EmbeddingFn = Callable[[str], Coroutine[object, object, list[float]]]
+SummaryStyle = Literal["default", "scene"]
 
 # Cheap model for summary generation (~$0.001 per call)
 SUMMARY_MODEL = "anthropic/claude-haiku-4.5"
@@ -38,6 +39,13 @@ SUMMARY_SYSTEM_PROMPT = (
     "You are {agent_id}. Summarize this interaction from your perspective "
     "in 100-300 tokens. Include: what happened (2-3 sentences), key decisions "
     "made, your emotional tone, anything surprising."
+)
+
+SCENE_SUMMARY_SYSTEM_PROMPT = (
+    "You are {agent_id}. Summarize this Minecraft scene from your perspective "
+    "in 100-300 tokens. Surface continuity that matters next: commitments or "
+    "promises, discovered constraints, repeated failures, help requests, build "
+    "progress, tool outcomes, and the next practical thing to try. Stay concise."
 )
 
 
@@ -79,6 +87,7 @@ class MemoryCompactor:
         event_type: str,
         participants: list[str] | None = None,
         conversation_id: object | None = None,
+        summary_style: SummaryStyle = "default",
     ) -> CompactionResult | None:
         """Compact a full interaction into Tier 3 transcript + Tier 2 recall memory.
 
@@ -99,7 +108,12 @@ class MemoryCompactor:
         )
 
         # Step 2: Generate summary via cheap LLM
-        summary = await self._generate_summary(agent_id, interaction, event_type)
+        summary = await self._generate_summary(
+            agent_id,
+            interaction,
+            event_type,
+            summary_style=summary_style,
+        )
 
         # Step 3: Generate embedding from summary
         embedding = await self._generate_embedding(summary)
@@ -124,6 +138,7 @@ class MemoryCompactor:
         event_type: str,
         transcript_id: int,
         participants: list[str] | None = None,
+        summary_style: SummaryStyle = "default",
     ) -> RecallMemory | None:
         """Create per-agent recall memory without storing a duplicate transcript.
 
@@ -136,7 +151,12 @@ class MemoryCompactor:
         if participants is None:
             participants = [agent_id]
 
-        summary = await self._generate_summary(agent_id, interaction, event_type)
+        summary = await self._generate_summary(
+            agent_id,
+            interaction,
+            event_type,
+            summary_style=summary_style,
+        )
         embedding = await self._generate_embedding(summary)
 
         return await self._recall.store_recall_memory(
@@ -147,6 +167,24 @@ class MemoryCompactor:
             event_type=event_type,
             participants=participants,
             simulation_id=self._simulation_id,
+        )
+
+    async def compact_scene(
+        self,
+        agent_id: str,
+        interaction: str,
+        participants: list[str],
+        conversation_id: object | None,
+    ) -> CompactionResult | None:
+        """Compact a Minecraft scene with the scene-continuity summary prompt."""
+
+        return await self.compact_interaction(
+            agent_id=agent_id,
+            interaction=interaction,
+            event_type="minecraft_scene",
+            participants=participants,
+            conversation_id=conversation_id,
+            summary_style="scene",
         )
 
     async def manage_conversation_buffer(
@@ -179,9 +217,12 @@ class MemoryCompactor:
         agent_id: str,
         interaction: str,
         event_type: str,
+        *,
+        summary_style: SummaryStyle = "default",
     ) -> str:
         """Generate a summary of the interaction from the agent's perspective."""
-        system_msg = SUMMARY_SYSTEM_PROMPT.format(agent_id=agent_id)
+        prompt = SCENE_SUMMARY_SYSTEM_PROMPT if summary_style == "scene" else SUMMARY_SYSTEM_PROMPT
+        system_msg = prompt.format(agent_id=agent_id)
         user_msg = f"Agent: {agent_id}\nEvent type: {event_type}\n\nFull transcript:\n{interaction}"
 
         response = await self._llm.complete(

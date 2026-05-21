@@ -51,6 +51,7 @@ class EventType(str, Enum):
     BRIDGE_PERCEPTION = "bridge_perception"
     BRIDGE_ACTION_RESULT = "bridge_action_result"
     BRIDGE_SCENE_UPDATE = "bridge_scene_update"
+    BRIDGE_SCENE_DIGEST = "bridge_scene_digest"
 
 
 # Custom JSON encoder for Decimal, datetime, UUID

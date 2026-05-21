@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.event_bus import EventBus, EventType, HISTORY_BUFFER_SIZE
-
+from core.event_bus import HISTORY_BUFFER_SIZE, EventBus, EventType
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -104,7 +102,9 @@ class TestOnCallback:
 
         bus.on("agent_action", bad_handler)
         # Should not raise
-        event = await bus.emit("agent_action", {"agent_id": "pixel", "action": "dance", "details": {}})
+        event = await bus.emit(
+            "agent_action", {"agent_id": "pixel", "action": "dance", "details": {}}
+        )
         assert event["event_type"] == "agent_action"
 
 
@@ -133,11 +133,17 @@ class TestJsonSerialization:
         [
             ("agent_speak", {"agent_id": "rex", "message": "Ship it.", "emotion": "neutral"}),
             ("agent_move", {"agent_id": "aurora", "target": "park", "x": 100, "y": 200}),
-            ("agent_action", {"agent_id": "pixel", "action": "research", "details": {"query": "AI"}}),
+            (
+                "agent_action",
+                {"agent_id": "pixel", "action": "research", "details": {"query": "AI"}},
+            ),
             ("alpha_dispatch", {"from": "vera", "task": "fetch docs", "status": "pending"}),
             ("alpha_return", {"result": "done", "status": "success"}),
             ("management_warning", {"type": "language", "message": "watch it", "severity": 2}),
-            ("management_intervention", {"type": "block", "message": "blocked", "agent_id": "grok"}),
+            (
+                "management_intervention",
+                {"type": "block", "message": "blocked", "agent_id": "grok"},
+            ),
             ("world_expansion", {"chunk_id": "c1", "name": "Town Square", "built_by": "aurora"}),
             ("poll_created", {"poll_id": "p1", "title": "What next?", "options": ["A", "B"]}),
             ("poll_result", {"poll_id": "p1", "winner": "A", "votes": {"A": 10, "B": 5}}),
@@ -160,11 +166,14 @@ class TestJsonSerialization:
     async def test_decimal_serialization(self) -> None:
         bus = EventBus()
         _, ws = await _connect_mock_client(bus)
-        await bus.emit("budget_update", {
-            "daily_spend": Decimal("3.14"),
-            "daily_limit": Decimal("10.00"),
-            "per_agent": {},
-        })
+        await bus.emit(
+            "budget_update",
+            {
+                "daily_spend": Decimal("3.14"),
+                "daily_limit": Decimal("10.00"),
+                "per_agent": {},
+            },
+        )
 
         sent = json.loads(ws.send_text.call_args[0][0])
         assert sent["data"]["daily_spend"] == 3.14
@@ -173,11 +182,14 @@ class TestJsonSerialization:
         bus = EventBus()
         _, ws = await _connect_mock_client(bus)
         dt = datetime(2026, 1, 15, 12, 0, 0)
-        await bus.emit("agent_action", {
-            "agent_id": "rex",
-            "action": "build",
-            "details": {"started_at": dt},
-        })
+        await bus.emit(
+            "agent_action",
+            {
+                "agent_id": "rex",
+                "action": "build",
+                "details": {"started_at": dt},
+            },
+        )
 
         sent = json.loads(ws.send_text.call_args[0][0])
         assert sent["data"]["details"]["started_at"] == "2026-01-15T12:00:00"
@@ -186,11 +198,14 @@ class TestJsonSerialization:
         bus = EventBus()
         _, ws = await _connect_mock_client(bus)
         uid = uuid.UUID("12345678-1234-5678-1234-567812345678")
-        await bus.emit("poll_created", {
-            "poll_id": uid,
-            "title": "Test",
-            "options": ["A"],
-        })
+        await bus.emit(
+            "poll_created",
+            {
+                "poll_id": uid,
+                "title": "Test",
+                "options": ["A"],
+            },
+        )
 
         sent = json.loads(ws.send_text.call_args[0][0])
         assert sent["data"]["poll_id"] == "12345678-1234-5678-1234-567812345678"
@@ -316,20 +331,34 @@ class TestEventTypeEnum:
 
     def test_all_event_types_present(self) -> None:
         expected = {
-            "agent_speak", "agent_move", "agent_action",
-            "alpha_dispatch", "alpha_return",
-            "management_warning", "management_intervention", "management_shadow",
+            "agent_speak",
+            "agent_move",
+            "agent_action",
+            "alpha_dispatch",
+            "alpha_return",
+            "management_warning",
+            "management_intervention",
+            "management_shadow",
             "world_expansion",
-            "poll_created", "poll_result",
-            "budget_update", "viewer_count",
-            "tts_play", "tool_executed", "config_reloaded",
+            "poll_created",
+            "poll_result",
+            "budget_update",
+            "viewer_count",
+            "tts_play",
+            "tool_executed",
+            "config_reloaded",
             "artifact_created",
             "conversation_productivity",
             "agi_progress",
-            "task_delegated", "task_completed",
-            "agent_spawn", "agent_despawn",
+            "task_delegated",
+            "task_completed",
+            "agent_spawn",
+            "agent_despawn",
             "simulation_error",
-            "bridge_perception", "bridge_action_result", "bridge_scene_update",
+            "bridge_perception",
+            "bridge_action_result",
+            "bridge_scene_update",
+            "bridge_scene_digest",
         }
         actual = {e.value for e in EventType}
         assert actual == expected
@@ -340,19 +369,19 @@ class TestEventTypeEnum:
 
 def _make_test_app() -> tuple:
     """Create a minimal FastAPI app with WebSocket endpoint and its own EventBus."""
-    from fastapi import WebSocketDisconnect as _WSD
+    from fastapi import WebSocketDisconnect
     from starlette.applications import Starlette
     from starlette.routing import WebSocketRoute
-    from starlette.websockets import WebSocket as _WS
+    from starlette.websockets import WebSocket
 
     bus = EventBus()
 
-    async def ws_endpoint(websocket: _WS) -> None:
+    async def ws_endpoint(websocket: WebSocket) -> None:
         client_id = await bus.connect(websocket)
         try:
             while True:
                 await websocket.receive_text()
-        except _WSD:
+        except WebSocketDisconnect:
             pass
         finally:
             await bus.disconnect(client_id)
@@ -378,7 +407,8 @@ class TestWebSocketIntegration:
             with client.websocket_connect("/ws") as ws_conn:
                 # Use the TestClient's internal portal to emit on the server's loop
                 client.portal.call(
-                    bus.emit, "agent_speak",
+                    bus.emit,
+                    "agent_speak",
                     {"agent_id": "rex", "message": "test", "emotion": "neutral"},
                 )
 
@@ -490,7 +520,7 @@ async def test_failed_send_removes_client():
     ws.headers = MagicMock()
     ws.headers.get = MagicMock(return_value=None)
 
-    client_id = await bus.connect(ws)
+    await bus.connect(ws)
     assert bus.connected_count == 1
 
     # Emit should trigger send which fails — client should be cleaned up
