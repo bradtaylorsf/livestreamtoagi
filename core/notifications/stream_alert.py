@@ -78,9 +78,7 @@ async def send_stream_alert(
     The function never raises for provider failures; callers get a structured
     result so the health monitor can keep polling during an outage.
     """
-    to = (
-        recipient if recipient is not None else os.environ.get("STREAM_ALERT_EMAIL", "")
-    ).strip()
+    to = (recipient if recipient is not None else os.environ.get("STREAM_ALERT_EMAIL", "")).strip()
     if not to:
         logger.info("[notify] skip stream alert type=%s reason=no_recipient", event.type)
         return NotificationSendResult(sent=False, skipped_reason="no_recipient")
