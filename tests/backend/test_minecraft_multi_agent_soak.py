@@ -112,6 +112,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "timeline-totals.json" in proc.stdout
     assert "SOAK_MIN_MOVEMENT_PER_AGENT" in proc.stdout
     assert "SOAK_REQUIRE_BEHAVIOR_GATE" in proc.stdout
+    assert "SOAK_MAX_RESTARTS_PER_AGENT" in proc.stdout
     assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
@@ -601,6 +602,7 @@ def test_script_defines_behavioral_acceptance_gate_contract() -> None:
         "SOAK_MIN_MOVEMENT_PER_AGENT",
         "SOAK_MAX_DEATHS_PER_AGENT",
         "SOAK_MAX_STUCK_PER_AGENT",
+        "SOAK_MAX_RESTARTS_PER_AGENT",
         "SOAK_MIN_PUBLIC_CHAT_COHORT",
         "SOAK_MIN_GATHER_OR_BUILD_COHORT",
         "SOAK_MIN_SHARED_ARTIFACTS",
@@ -611,6 +613,8 @@ def test_script_defines_behavioral_acceptance_gate_contract() -> None:
         '"agent",\n    "spawn_safe",\n    "movement",\n    "public_chat",\n    "inter_agent_chat",'
         in text
     )
+    assert '"restart_count",' in text
+    assert "total_restarts" in text
     assert "behavior_gate_status" in text
     assert "Behavioral acceptance gate failed" in text
     assert "behavior.tsv" in text
@@ -661,15 +665,71 @@ def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
     assert (
         "agent\tspawn_safe\tmovement\tpublic_chat\tinter_agent_chat\tgather\tbuild\tdeaths\t"
-        "drownings\tstuck\tdig_holes\tbehavior_status"
+        "drownings\tstuck\tdig_holes\trestart_count\tbehavior_status"
     ) in behavior_tsv
-    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\tfail" in behavior_tsv
-    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\t0\tfail" in behavior_tsv
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
     summary = (run_dir / "summary.txt").read_text(encoding="utf-8")
     assert "Behavioral acceptance" in summary
     assert "behavior_gate_status=fail" in summary
     assert "agent alpha movement expected >= 5 got 1" in summary
+
+
+def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(5))
+        if agent_id in {"vera", "rex"}:
+            lines.append('!place("stone", {"x": 1, "y": 64, "z": 1}, "up")')
+        if agent_id == "alpha":
+            lines.extend(
+                [
+                    "2026-05-20T10:00:00Z Alpha PathStopped: Path was stopped before it could be completed",
+                    "2026-05-20T10:00:01Z Alpha Exiting.",
+                    "2026-05-20T10:00:30Z Alpha process exited with code 1",
+                ]
+            )
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MAX_RESTARTS_PER_AGENT": "1",
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 1
+    assert "agent alpha restarts expected <= 1 got 2" in proc.stderr
+    assert "agent alpha repeated restarts within 300s" in proc.stderr
+
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "restart_count" in behavior_tsv
+    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t2\tfail" in behavior_tsv
+
+    totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
+    assert "total_restarts=2" in totals
+    assert "total_restart_recurrences=1" in totals
 
 
 def test_package_json_exposes_soak_commands() -> None:
@@ -738,6 +798,8 @@ def test_report_names_failure_classes_and_observed_counters() -> None:
     text = DOC.read_text(encoding="utf-8")
     for failure_class in ("blocked", "timeout", "invalid", "unreachable", "bridge-down"):
         assert f"`{failure_class}`" in text
+    for failure_class in ("interrupted", "aborted"):
+        assert f"`{failure_class}`" in text
     for counter in (
         "Crashes / unrecovered exits",
         "Supervisor restarts",
@@ -761,6 +823,7 @@ def test_behavior_gate_docs_are_complete() -> None:
         "SOAK_MIN_MOVEMENT_PER_AGENT",
         "SOAK_MAX_DEATHS_PER_AGENT",
         "SOAK_MAX_STUCK_PER_AGENT",
+        "SOAK_MAX_RESTARTS_PER_AGENT",
         "SOAK_MIN_PUBLIC_CHAT_COHORT",
         "SOAK_MIN_GATHER_OR_BUILD_COHORT",
         "SOAK_MIN_SHARED_ARTIFACTS",

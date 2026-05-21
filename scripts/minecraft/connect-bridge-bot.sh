@@ -81,7 +81,9 @@ ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
+ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
+AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
 TIMELINE_EMITTER_REL="src/agent/bridge/timeline_emitter.js"
@@ -94,11 +96,13 @@ BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
+PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
+ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 
 MINDCRAFT_DIR_ABS=""
@@ -119,11 +123,13 @@ BREAK_ACTION_DEST=""
 BUILD_FROM_PLAN_ACTION_DEST=""
 EXECUTE_CODE_ACTION_DEST=""
 OBSERVE_ACTION_DEST=""
+PLACE_HERE_GUARD_DEST=""
 MOVEMENT_SKILL_DEST=""
 BUILDING_SKILL_DEST=""
 BUILD_PLAN_SKILL_DEST=""
 PERCEPTION_SKILL_DEST=""
 SAFE_FAIL_SKILL_DEST=""
+ACTION_INTERRUPTION_SKILL_DEST=""
 LMSTUDIO_USAGE_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
@@ -143,11 +149,13 @@ BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
+PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
+ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 
 MODE="run"
@@ -196,11 +204,13 @@ restore_clone_patches() {
     [ -n "${BUILD_FROM_PLAN_ACTION_DEST:-}" ] && rm -f "$BUILD_FROM_PLAN_ACTION_DEST" 2> /dev/null || true
     [ -n "${EXECUTE_CODE_ACTION_DEST:-}" ] && rm -f "$EXECUTE_CODE_ACTION_DEST" 2> /dev/null || true
     [ -n "${OBSERVE_ACTION_DEST:-}" ] && rm -f "$OBSERVE_ACTION_DEST" 2> /dev/null || true
+    [ -n "${PLACE_HERE_GUARD_DEST:-}" ] && rm -f "$PLACE_HERE_GUARD_DEST" 2> /dev/null || true
     [ -n "${MOVEMENT_SKILL_DEST:-}" ] && rm -f "$MOVEMENT_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILDING_SKILL_DEST:-}" ] && rm -f "$BUILDING_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILD_PLAN_SKILL_DEST:-}" ] && rm -f "$BUILD_PLAN_SKILL_DEST" 2> /dev/null || true
     [ -n "${PERCEPTION_SKILL_DEST:-}" ] && rm -f "$PERCEPTION_SKILL_DEST" 2> /dev/null || true
     [ -n "${SAFE_FAIL_SKILL_DEST:-}" ] && rm -f "$SAFE_FAIL_SKILL_DEST" 2> /dev/null || true
+    [ -n "${ACTION_INTERRUPTION_SKILL_DEST:-}" ] && rm -f "$ACTION_INTERRUPTION_SKILL_DEST" 2> /dev/null || true
     [ -n "${LMSTUDIO_USAGE_SKILL_DEST:-}" ] && rm -f "$LMSTUDIO_USAGE_SKILL_DEST" 2> /dev/null || true
 }
 
@@ -369,6 +379,25 @@ verify_committed_assets() {
         fi
     fi
 
+    if [ ! -s "$ACTION_INTERRUPTION_SKILL_SRC" ]; then
+        fail "Action interruption helpers missing or empty: $ACTION_INTERRUPTION_SKILL_SRC"; problems=1
+    else
+        grep -q 'classifyInterruption' "$ACTION_INTERRUPTION_SKILL_SRC" || { fail "action interruption helpers missing classifyInterruption"; problems=1; }
+        grep -q 'PathStopped' "$ACTION_INTERRUPTION_SKILL_SRC" || { fail "action interruption helpers missing PathStopped classification"; problems=1; }
+        if grep -q 'callBridge' "$ACTION_INTERRUPTION_SKILL_SRC"; then
+            fail "action interruption helpers must stay pure (no bridge calls)"; problems=1
+        fi
+    fi
+
+    if [ ! -s "$PLACE_HERE_GUARD_SRC" ]; then
+        fail "Place-here guard missing or empty: $PLACE_HERE_GUARD_SRC"; problems=1
+    else
+        grep -q 'wrapPlaceHere' "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard missing wrapPlaceHere"; problems=1; }
+        grep -q 'wrapInterruptedActions' "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard missing action-list wrapper"; problems=1; }
+        grep -q "service: 'action'" "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard does not emit action.result"; problems=1; }
+        grep -q 'classifyInterruption' "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard does not classify interruptions"; problems=1; }
+    fi
+
     if [ ! -s "$MOVE_ACTION_SRC" ]; then
         fail "Move action missing or empty: $MOVE_ACTION_SRC"; problems=1
     else
@@ -531,7 +560,8 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $EXECUTE_CODE_ACTION_REL + $OBSERVE_ACTION_REL +"
     info "              $MOVEMENT_SKILL_REL + $BUILDING_SKILL_REL +"
     info "              $BUILD_PLAN_SKILL_REL + $PERCEPTION_SKILL_REL +"
-    info "              $SAFE_FAIL_SKILL_REL"
+    info "              $SAFE_FAIL_SKILL_REL + $ACTION_INTERRUPTION_SKILL_REL +"
+    info "              $PLACE_HERE_GUARD_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
     info "              placeAction, breakAction, buildFromPlanAction, executeCodeAction"
     info "              and observeAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
@@ -650,11 +680,13 @@ BREAK_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BREAK_ACTION_REL"
 BUILD_FROM_PLAN_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BUILD_FROM_PLAN_ACTION_REL"
 EXECUTE_CODE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$EXECUTE_CODE_ACTION_REL"
 OBSERVE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$OBSERVE_ACTION_REL"
+PLACE_HERE_GUARD_DEST="$MINDCRAFT_DIR_ABS/$PLACE_HERE_GUARD_REL"
 MOVEMENT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$MOVEMENT_SKILL_REL"
 BUILDING_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILDING_SKILL_REL"
 BUILD_PLAN_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILD_PLAN_SKILL_REL"
 PERCEPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$PERCEPTION_SKILL_REL"
 SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
+ACTION_INTERRUPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_INTERRUPTION_SKILL_REL"
 LMSTUDIO_USAGE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$LMSTUDIO_USAGE_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
@@ -668,11 +700,13 @@ mkdir -p \
     "$(dirname -- "$BUILD_FROM_PLAN_ACTION_DEST")" \
     "$(dirname -- "$EXECUTE_CODE_ACTION_DEST")" \
     "$(dirname -- "$OBSERVE_ACTION_DEST")" \
+    "$(dirname -- "$PLACE_HERE_GUARD_DEST")" \
     "$(dirname -- "$MOVEMENT_SKILL_DEST")" \
     "$(dirname -- "$BUILDING_SKILL_DEST")" \
     "$(dirname -- "$BUILD_PLAN_SKILL_DEST")" \
     "$(dirname -- "$PERCEPTION_SKILL_DEST")" \
     "$(dirname -- "$SAFE_FAIL_SKILL_DEST")" \
+    "$(dirname -- "$ACTION_INTERRUPTION_SKILL_DEST")" \
     "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
 cp "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_DEST"
@@ -685,11 +719,13 @@ cp "$BREAK_ACTION_SRC" "$BREAK_ACTION_DEST"
 cp "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_DEST"
 cp "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_DEST"
 cp "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_DEST"
+cp "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_DEST"
 cp "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_DEST"
 cp "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_DEST"
 cp "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_DEST"
 cp "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_DEST"
 cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
+cp "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_DEST"
 cp "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
 ok "Copied timeline emitter → $TIMELINE_EMITTER_REL"
@@ -702,11 +738,13 @@ ok "Copied break action → $BREAK_ACTION_REL"
 ok "Copied build-from-plan action → $BUILD_FROM_PLAN_ACTION_REL"
 ok "Copied execute-code action → $EXECUTE_CODE_ACTION_REL"
 ok "Copied observe action → $OBSERVE_ACTION_REL"
+ok "Copied action interruption guard → $PLACE_HERE_GUARD_REL"
 ok "Copied movement helpers → $MOVEMENT_SKILL_REL"
 ok "Copied building helpers → $BUILDING_SKILL_REL"
 ok "Copied build-plan helpers → $BUILD_PLAN_SKILL_REL"
 ok "Copied perception helpers → $PERCEPTION_SKILL_REL"
 ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
+ok "Copied action interruption helpers → $ACTION_INTERRUPTION_SKILL_REL"
 ok "Copied LM Studio usage shim → $LMSTUDIO_USAGE_SKILL_REL"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
@@ -714,7 +752,8 @@ if [ ! -f "$AGENT_PATH" ]; then
     fail "Mindcraft source file missing: $AGENT_PATH"
     exit 1
 fi
-if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH"; then
+if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
         fail "Could not restore pinned $AGENT_REL before patching."
@@ -725,11 +764,13 @@ AGENT_BACKUP="$(mktemp -t mindcraft-agent.XXXXXX)"
 cp "$AGENT_PATH" "$AGENT_BACKUP"
 if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
+    AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = process.env.AGENT_PATH;
 const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
+const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 const importAnchor = "import { speak } from './speak.js';\n";
@@ -784,6 +825,19 @@ const replacement = `    async openChat(message) { // ${marker}
     }
 `;
 source = source.slice(0, methodStart) + replacement + source.slice(methodEnd);
+
+const cleanExitPatterns = [
+    /(^[ \t]*)((?:await\s+)?this\.openChat\((['"])Exiting\.\3\);)/gm,
+    /(^[ \t]*)((?:await\s+)?this\.bot\.chat\((['"])Exiting\.\3\);)/gm,
+    /(^[ \t]*)((?:await\s+)?bot\.chat\((['"])Exiting\.\3\);)/gm,
+];
+for (const pattern of cleanExitPatterns) {
+    source = source.replace(
+        pattern,
+        (_match, indent, statement) =>
+            `${indent}if (process.env.MINECRAFT_CLEAN_EXIT === '1') ${statement} // ${cleanExitMarker}`,
+    );
+}
 writeFileSync(path, source);
 NODE
 then
@@ -807,7 +861,8 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
-   grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH"; then
+   grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -828,6 +883,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
+    ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -840,6 +896,7 @@ const breakMarker = process.env.ACTIONS_BREAK_PATCH_MARKER;
 const buildFromPlanMarker = process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER;
 const executeCodeMarker = process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER;
 const observeMarker = process.env.ACTIONS_OBSERVE_PATCH_MARKER;
+const guardMarker = process.env.ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 // Anchor on the exact array opener at the pinned commit
@@ -848,6 +905,8 @@ const anchor = 'export const actionsList = [';
 if (!source.includes(anchor)) {
     throw new Error('actionsList anchor not found — pinned fork shape changed');
 }
+const guardImportLine = `import { wrapInterruptedActions } from './place_here_guard.js'; // ${guardMarker}\n`;
+const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}\n`;
 
 const actions = [
     {
@@ -896,8 +955,11 @@ const missing = actions.filter((a) => !source.includes(a.marker));
 if (missing.length > 0) {
     source = missing.map((a) => a.importLine).join('') + source;
     source = source.replace(anchor, `${anchor}\n${missing.map((a) => a.itemLine).join('\n')}`);
-    writeFileSync(path, source);
 }
+if (!source.includes(guardMarker)) {
+    source = guardImportLine + source + guardCallLine;
+}
+writeFileSync(path, source);
 NODE
 then
     fail "Failed to inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/executeCodeAction/observeAction into $ACTIONS_REL"

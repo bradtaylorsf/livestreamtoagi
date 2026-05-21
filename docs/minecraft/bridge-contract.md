@@ -74,7 +74,7 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `management.review` | Node→Python | `{agent_id, text, context}` → `{verdict, reason, sanitized_text}` |
 | `cost.gate` | Node→Python | `{agent_id, action, estimated_cost_usd}` → `{allowed, reason, remaining_budget_usd}` |
 | `perception.report` | Node→Python | `{observations[]}` → `{accepted}`; observations may include a typed `PerceptionSnapshot` |
-| `action.result` | Node→Python | `{action_id, status, detail}` → `{accepted}` |
+| `action.result` | Node→Python | `{action_id, status, outcome_class?, detail}` → `{accepted}` |
 | `errand.poll` | Node→Python | `{agent_id}` → `{task_id?, task?, from_agent?, dispatched_at_ms?, urgency?}` |
 | `errand.complete` | Node→Python | `{task_id, status, symbol, detail, step_results[]}` → `{accepted}` |
 | `code.execute` | Node→Python | `{language, code, timeout?}` → `{status, stdout?, stderr?, reason?, exit_code?, execution_time_ms?}` |

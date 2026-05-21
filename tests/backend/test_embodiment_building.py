@@ -26,6 +26,7 @@ from core.event_bus import EventType, event_bus
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
 BUILDING_HELPERS = FORK_SRC / "agent" / "skills" / "building.js"
+ACTION_INTERRUPTION = FORK_SRC / "agent" / "skills" / "action_interruption.js"
 PLACE_ACTION = FORK_SRC / "agent" / "commands" / "place_action.js"
 BREAK_ACTION = FORK_SRC / "agent" / "commands" / "break_action.js"
 CONNECT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-bridge-bot.sh"
@@ -64,6 +65,7 @@ def _stage_action_with_stub_bridge(
     bridge.mkdir(parents=True)
     shutil.copy2(action_src, commands / action_filename)
     shutil.copy2(BUILDING_HELPERS, skills / "building.js")
+    shutil.copy2(ACTION_INTERRUPTION, skills / "action_interruption.js")
     calls_path = tmp_path / "bridge_calls.jsonl"
     (bridge / "python_bridge.js").write_text(
         """

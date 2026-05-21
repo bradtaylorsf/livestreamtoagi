@@ -26,6 +26,7 @@ PLACE_ACTION = FORK_SRC / "agent" / "commands" / "place_action.js"
 ERRAND_PLAN = FORK_SRC / "agent" / "skills" / "errand_plan.js"
 MOVEMENT_HELPERS = FORK_SRC / "agent" / "skills" / "movement.js"
 BUILDING_HELPERS = FORK_SRC / "agent" / "skills" / "building.js"
+ACTION_INTERRUPTION = FORK_SRC / "agent" / "skills" / "action_interruption.js"
 BRIDGE_CLIENT = FORK_SRC / "agent" / "bridge" / "python_bridge.js"
 CONNECT_ALPHA = REPO_ROOT / "scripts" / "minecraft" / "connect-alpha-bot.sh"
 PACKAGE_JSON = REPO_ROOT / "package.json"
@@ -62,7 +63,7 @@ def _stage_run_errand_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
 
     for src in (RUN_ERRAND_ACTION, NAVIGATE_ACTION, PLACE_ACTION):
         shutil.copy2(src, commands / src.name)
-    for src in (ERRAND_PLAN, MOVEMENT_HELPERS, BUILDING_HELPERS):
+    for src in (ERRAND_PLAN, MOVEMENT_HELPERS, BUILDING_HELPERS, ACTION_INTERRUPTION):
         shutil.copy2(src, skills / src.name)
 
     calls_path = tmp_path / "bridge_calls.jsonl"

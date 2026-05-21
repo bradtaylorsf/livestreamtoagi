@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import { classifyInterruption, messageFromError } from '../skills/action_interruption.js';
 import {
     blockObservation,
     classifyPlace,
@@ -128,8 +129,8 @@ async function equipBlock(bot, blockType, sourceSlot) {
         await bot.equip(item, 'hand');
         return { failureClass: null, detail: `equipped ${normalizeBlockType(item)}` };
     } catch (err) {
-        const message = err && err.message ? err.message : String(err);
-        return { failureClass: classifyError(message), detail: message };
+        const message = messageFromError(err);
+        return { failureClass: classifyInterruption(err) || classifyError(message), detail: message };
     }
 }
 
@@ -186,8 +187,8 @@ async function placeBlockAt(bot, target, face, timeoutMs) {
         await withTimeout(bot.placeBlock(referenceBlock, await makeVec3(faceVector)), timeoutMs);
         return { failureClass: null, detail: `placed against ${normalizeBlockType(referenceBlock)}` };
     } catch (err) {
-        const message = err && err.message ? err.message : String(err);
-        return { failureClass: classifyError(message), detail: message };
+        const message = messageFromError(err);
+        return { failureClass: classifyInterruption(err) || classifyError(message), detail: message };
     }
 }
 
@@ -237,6 +238,7 @@ async function emitPlaceOutcome({
         payload: {
             action_id: actionId,
             status: statusForBuildClass(outcomeClass),
+            outcome_class: outcomeClass,
             detail,
         },
         deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,

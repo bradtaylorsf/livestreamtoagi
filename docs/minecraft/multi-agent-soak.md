@@ -207,6 +207,7 @@ plus agent-tagged bridge/server logs:
 | `build` | Build/place commands such as `!place`, `!placeHere`, `!placeBlock`, `!build`, or `!buildFromPlan`. |
 | `deaths` / `drownings` | Death, respawn, and drowning terms in the agent log stream. |
 | `stuck` / `dig_holes` | Stuck, path-failure, unreachable, trapped, or hole-digging phrases. |
+| `restart_count` | Recoverability-risk signatures such as `Exiting.`, nonzero process exits, reconnect/rejoin lines, bot disconnects, or supervisor restarts. |
 | `shared_artifact_count` | Cohort-wide shared-work evidence from shared/together camp-marker-wall-chest-shelter-fire language, nearby place coordinates by multiple agents, or at least two distinct agents emitting place/build commands. |
 
 The default behavioral thresholds are env-overridable:
@@ -216,6 +217,7 @@ The default behavioral thresholds are env-overridable:
 | `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. |
 | `SOAK_MAX_DEATHS_PER_AGENT` | `2` | Any agent above this death/respawn count fails. |
 | `SOAK_MAX_STUCK_PER_AGENT` | `5` | Any agent above this stuck/path-failure count fails. |
+| `SOAK_MAX_RESTARTS_PER_AGENT` | `1` | Any agent above this restart/disconnect/exit signature count fails. |
 | `SOAK_MIN_PUBLIC_CHAT_COHORT` | `10` | The cohort must emit at least this many public chat lines. |
 | `SOAK_MIN_GATHER_OR_BUILD_COHORT` | `3` | Gather plus build attempts across the cohort must meet this count. |
 | `SOAK_MIN_SHARED_ARTIFACTS` | `1` | The run must show at least one visible shared improvement or shared work artifact. |
@@ -227,6 +229,14 @@ of stability, cost, process-health, or action-reliability results.
 soft-pass evidence bundle; the `summary.txt` block still records
 `behavior_gate_status=fail`, and `docs/minecraft/cohort-report.md` must explain
 why the deviation was accepted.
+
+`behavior.tsv` also includes `restart_count` per agent. The parser counts
+recoverability-risk signatures such as `Exiting.`, `process exited with code
+1`, `rejoining`, `bot disconnected`, and supervisor restart lines. Two restart
+signatures for the same agent within 300 seconds always fail the gate, even if
+`SOAK_MAX_RESTARTS_PER_AGENT` is raised for exploratory runs. Totals are written
+as `total_restarts` and `total_restart_recurrences` in
+`behavior-totals.env` and the summary.
 
 ## Structured Timeline
 
@@ -291,6 +301,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `action-reliability.json` | Per-agent intent, parse, execution, verification metrics and threshold violations. |
 | `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
+| `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, and `behavior_gate_status`. |
 | `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, action, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
 | `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
@@ -304,7 +315,9 @@ The soak captures the canonical failure classes from
 
 | Class | Soak evidence |
 | --- | --- |
-| `blocked` | Bot/action logs and `action.result` traces. |
+| `blocked` | Bot/action logs and `action.result` `outcome_class`/detail traces. |
+| `interrupted` | Recoverable pathfinder/action interruptions such as `PathStopped` during `mode:unstuck`, reported through `action.result.outcome_class`. |
+| `aborted` | Bot/action logs for caller-aborted work that safely returned an action result with `outcome_class=aborted`. |
 | `timeout` | Bot logs, bridge logs, Paper/supervisor logs. |
 | `invalid` | Bridge contract errors and bot stderr. |
 | `unreachable` | Movement/action logs. |
@@ -323,6 +336,11 @@ Additional stability counters:
 | Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 | Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
 
+For E8-14 interruption recovery, `PathStopped: Path was stopped before it could
+be completed` must appear as an `interrupted` action failure and must not be
+paired with public `Exiting.` chat from the bot. Repeated `Exiting.` or process
+exit lines are counted through `restart_count`.
+
 ## Cost Cap Accounting
 
 `scripts/minecraft/soak.sh` queries the authoritative `cost_events` ledger for
@@ -338,6 +356,41 @@ separate cap table in a later branch, this script should be pointed at that
 table, but it must keep using `cost_events` as the spend ledger.
 
 ## Evidence From This Codex Run
+
+### E8-14 Interruption-Recovery Smoke Attempt
+
+The local live Minecraft smoke for Alpha interruption recovery was not run in
+this Codex sandbox because both local prerequisites were unavailable:
+
+```bash
+pnpm llm:local --list-only
+```
+
+Result: **failed**.
+
+```text
+FAIL: could not reach http://localhost:1234/v1/models
+      All connection attempts failed
+```
+
+```bash
+scripts/minecraft/health.sh --quiet
+```
+
+Result: **failed**.
+
+The no-server regression evidence for this branch is the focused
+`PathStopped` fixture suite:
+
+```bash
+.venv/bin/pytest tests/backend/test_embodiment_action_interruption.py -v
+```
+
+Result: **passed**. The fixture drives `!move`, `!navigate`, `!place`, and the
+upstream `!placeHere` guard against `PathStopped: Path was stopped before it
+could be completed`, and asserts the Node process stays alive while
+`action.result` records `status=failure`, `outcome_class=interrupted`, and
+details containing `interrupted`.
 
 ### Post-Loop Manual Live Startup Smoke
 
