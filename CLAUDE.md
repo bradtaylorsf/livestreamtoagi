@@ -172,6 +172,14 @@ REDIS_URL=redis://localhost:6379
 KILL_SWITCH_API_KEY=
 ```
 
+Optional livestream kill-path variables:
+```
+LIVESTREAM_ENABLED=false
+LIVESTREAM_KILL_MODE=holding_card
+LIVESTREAM_HOLDING_CARD=
+LIVESTREAM_SAFE_TRANSITION_SECONDS=0
+```
+
 ## Specs Reference
 
 All design specifications are in `specs/` — treat as read-only reference:

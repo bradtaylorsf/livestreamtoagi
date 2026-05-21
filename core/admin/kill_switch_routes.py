@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from core.admin.dependencies import get_redis
+from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
@@ -43,7 +44,7 @@ async def activate_kill_switch(
     ttl: int = DEFAULT_KILL_SWITCH_TTL,
 ) -> dict[str, str | int]:
     """Activate the kill switch with a configurable TTL (default 4 hours)."""
-    await redis.set("kill_switch", "active", ex=ttl)
+    await redis.set(KILL_SWITCH_KEY, KILL_SWITCH_ACTIVE_VALUE, ex=ttl)
     return {"status": "active", "ttl_seconds": ttl}
 
 
@@ -53,5 +54,5 @@ async def deactivate_kill_switch(
     _key: str = Depends(_validate_kill_switch_key),
 ) -> dict[str, str]:
     """Deactivate the kill switch."""
-    await redis.delete("kill_switch")
+    await redis.delete(KILL_SWITCH_KEY)
     return {"status": "deactivated"}

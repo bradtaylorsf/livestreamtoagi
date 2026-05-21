@@ -3,7 +3,7 @@ import logging
 import os
 import time as _time
 import uuid as _uuid_mod
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
     idle_behavior: IdleBehaviorSystem | None = None
     svc: Services | None = None
     memory_consumer_registered = False
+    livestream_monitor_task: asyncio.Task[None] | None = None
 
     svc = None
     try:
@@ -79,6 +80,32 @@ async def lifespan(app: FastAPI):
 
         await svc.config_loader.start_watching()
 
+        from core.livestream.kill_switch_monitor import KillSwitchMonitor
+        from core.livestream.safe_state import (
+            livestream_enabled_from_env,
+            load_safe_state_config,
+        )
+        from core.livestream.stream_controller import NullStreamController
+
+        if livestream_enabled_from_env():
+            if svc.redis is None:
+                logger.warning(
+                    "livestream.kill_switch.monitor_unavailable",
+                    extra={
+                        "event": "livestream.kill_switch.monitor_unavailable",
+                        "reason": "redis_unavailable",
+                    },
+                )
+            else:
+                livestream_controller = NullStreamController(load_safe_state_config())
+                livestream_monitor = KillSwitchMonitor(svc.redis, livestream_controller)
+                app.state.livestream_controller = livestream_controller
+                app.state.livestream_kill_switch_monitor = livestream_monitor
+                livestream_monitor_task = asyncio.create_task(
+                    livestream_monitor.run(),
+                    name="livestream-kill-switch-monitor",
+                )
+
         journal_image_gen = JournalImageGenerator(cost_repo=svc.cost_repo)
 
         reflection_mgr = ReflectionManager(
@@ -105,6 +132,10 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
+        if livestream_monitor_task is not None:
+            livestream_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await livestream_monitor_task
         if idle_behavior is not None:
             idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from core.event_bus import EventType
+from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.models import ContentReviewResult
 
 if TYPE_CHECKING:
@@ -203,7 +204,7 @@ class Management:
             )
         else:  # severity 5
             await self.mute(agent_id)
-            await self._redis.set("kill_switch", "active", ex=14400)  # 4-hour TTL
+            await self._redis.set(KILL_SWITCH_KEY, KILL_SWITCH_ACTIVE_VALUE, ex=14400)
             await self._event_bus.emit(
                 EventType.MANAGEMENT_INTERVENTION.value,
                 {
