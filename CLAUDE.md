@@ -193,6 +193,14 @@ TTS_AUDIO_FIFO=/tmp/livestream_tts.fifo
 TTS_AUDIO_VOLUME=1.0
 ```
 
+Optional livestream kill-path variables:
+```
+LIVESTREAM_ENABLED=false
+LIVESTREAM_KILL_MODE=holding_card
+LIVESTREAM_HOLDING_CARD=
+LIVESTREAM_SAFE_TRANSITION_SECONDS=0
+```
+
 ## Specs Reference
 
 All design specifications are in `specs/` — treat as read-only reference:

@@ -81,7 +81,7 @@ from core.bridge.handlers.director import handle_director_gate
 from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.management import handle_management_review
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
-from core.redis_keys import KILL_SWITCH_KEY
+from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +342,7 @@ async def _kill_switch_active(services: Any | None) -> bool:
         return False
     try:
         raw = await redis.get(KILL_SWITCH_KEY)
-        return raw == "active" or raw == b"active"
+        return raw == KILL_SWITCH_ACTIVE_VALUE or raw == KILL_SWITCH_ACTIVE_VALUE.encode()
     except Exception:
         logger.warning(
             "Bridge kill-switch lookup failed; treating world action gate as active",

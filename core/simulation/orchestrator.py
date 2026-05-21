@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from core.event_bus import EventType
+from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import FactionConfig, MemorySeedConfig, SimulationCreate, SimulationStatus
-from core.redis_keys import KILL_SWITCH_KEY
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
@@ -1107,7 +1107,7 @@ class SimulationOrchestrator:
         # Redis kill switch (accessible from Brad's phone)
         if self._redis:
             kill = await self._redis.get(KILL_SWITCH_KEY)
-            if kill == "active":
+            if kill == KILL_SWITCH_ACTIVE_VALUE:
                 logger.info("Kill switch activated — stopping simulation")
                 return True
         return False
