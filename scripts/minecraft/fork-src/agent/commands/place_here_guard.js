@@ -9,6 +9,16 @@ import { classifyInterruption, interruptionDetail } from '../skills/action_inter
 
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
 const recentPlaceFailures = new Map();
+const serializedActionNames = new Set([
+    '!move',
+    '!navigate',
+    '!place',
+    '!break',
+    '!buildFromPlan',
+    '!planAndBuild',
+    '!executeCode',
+    '!runErrand',
+]);
 
 function getBot(agent) {
     return agent && agent.bot ? agent.bot : agent;
@@ -28,6 +38,12 @@ function cleanActionName(actionName) {
 
 function actionNameFrom(action, fallback = '!action') {
     return (action && action.name) || fallback;
+}
+
+function timeoutForAction(actionName) {
+    if (actionName === '!buildFromPlan' || actionName === '!planAndBuild') return 5;
+    if (actionName === '!executeCode') return Number(process.env.MINECRAFT_EXECUTE_CODE_TIMEOUT_MINS || 2);
+    return 1;
 }
 
 function bridgeErrorLine(prefix, err) {
@@ -107,6 +123,28 @@ export function wrapInterruptedAction(action) {
     const originalPerform = action.perform;
     action.perform = async function guardedInterruptedAction(agent, ...args) {
         try {
+            if (
+                serializedActionNames.has(actionName) &&
+                agent &&
+                agent.actions &&
+                typeof agent.actions.runAction === 'function'
+            ) {
+                let actionResult = '';
+                const codeReturn = await agent.actions.runAction(
+                    `action:${cleanActionName(actionName)}`,
+                    async () => {
+                        actionResult = await originalPerform.apply(this, [agent, ...args]);
+                        if (actionResult && agent.bot) {
+                            agent.bot.output = `${agent.bot.output || ''}${String(actionResult)}\n`;
+                        }
+                    },
+                    { timeout: timeoutForAction(actionName) },
+                );
+                if (codeReturn && codeReturn.interrupted && !codeReturn.timedout) {
+                    return codeReturn.message || `interrupted: ${actionName} interrupted before completion`;
+                }
+                return actionResult || (codeReturn && codeReturn.message) || '';
+            }
             return await originalPerform.apply(this, [agent, ...args]);
         } catch (err) {
             const outcomeClass = classifyInterruption(err);

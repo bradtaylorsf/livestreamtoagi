@@ -51,9 +51,27 @@ EVENT_TYPES = frozenset(
         "chat.public",
         "llm.request",
         "llm.response",
+        "llm.queue.enqueued",
+        "llm.queue.started",
+        "llm.queue.completed",
+        "llm.queue.failed",
         "action.intent",
         "action.start",
+        "action.queued",
+        "action.started",
+        "action.completed",
+        "action.rejected_busy",
         "action.result",
+        "inbox.queued",
+        "inbox.turn_started",
+        "inbox.turn_completed",
+        "inbox.telemetry_ignored",
+        "inbox.immediate_command",
+        "build_plan.generation.started",
+        "build_plan.generation.completed",
+        "build_plan.generation.rejected",
+        "build_plan.execution.started",
+        "build_plan.execution.completed",
         "heartbeat.fired",
         "heartbeat.skipped",
         "heartbeat.outcome",
@@ -489,9 +507,12 @@ def parse_raw_timeline_file(
                 "payload",
             }:
                 payload.setdefault(key, value)
-        if event_type.startswith("llm."):
+        if event_type in {"llm.request", "llm.response"}:
             payload = normalize_usage(payload, event_type=event_type)
-        agent = data.get("agent") or data.get("agent_id") or payload.get("agent") or default_agent
+        if event_type.startswith("llm.queue."):
+            agent = data.get("agent") or data.get("agent_id") or payload.get("agent")
+        else:
+            agent = data.get("agent") or data.get("agent_id") or payload.get("agent") or default_agent
         trace_id = (
             data.get("trace_id")
             or data.get("traceId")
@@ -990,12 +1011,12 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
     by_model = Counter(
         str(event.payload.get("model"))
         for event in events
-        if event.event_type.startswith("llm.") and event.payload.get("model")
+        if event.event_type in {"llm.request", "llm.response"} and event.payload.get("model")
     )
 
     usage_by_request: dict[str, dict[str, Any]] = {}
     for event in events:
-        if not event.event_type.startswith("llm."):
+        if event.event_type not in {"llm.request", "llm.response"}:
             continue
         key = f"{event.agent or 'unknown'}:{event.trace_id or event.event_id}"
         if event.event_type == "llm.response" or key not in usage_by_request:

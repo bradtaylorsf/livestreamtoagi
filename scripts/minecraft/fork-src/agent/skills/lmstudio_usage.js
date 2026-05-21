@@ -52,18 +52,67 @@ function parseBody(body) {
     }
 }
 
-function isLmStudioCompletion(url) {
+function isLmStudioApi(url) {
     if (!url) return false;
     try {
         const parsed = new URL(url);
         return (
             /(^|\.)localhost$|^127\.0\.0\.1$/.test(parsed.hostname) &&
             (parsed.pathname.endsWith('/chat/completions') ||
-                parsed.pathname.endsWith('/completions'))
+                parsed.pathname.endsWith('/completions') ||
+                parsed.pathname.endsWith('/embeddings') ||
+                parsed.pathname.endsWith('/models'))
         );
     } catch {
-        return url.includes('/v1/chat/completions') || url.includes('/v1/completions');
+        return (
+            url.includes('/v1/chat/completions') ||
+            url.includes('/v1/completions') ||
+            url.includes('/v1/embeddings') ||
+            url.includes('/v1/models')
+        );
     }
+}
+
+function isLmStudioCompletion(url) {
+    return (
+        isLmStudioApi(url) &&
+        (url.includes('/chat/completions') || url.includes('/completions'))
+    );
+}
+
+function redirectUrl(url) {
+    const base = process.env.LOCAL_LLM_BASE_URL;
+    if (!base || base === 'http://localhost:1234/v1' || base === 'http://127.0.0.1:1234/v1') {
+        return url;
+    }
+    try {
+        const parsedUrl = new URL(url);
+        const parsedBase = new URL(base);
+        const suffix = parsedUrl.pathname.includes('/v1/')
+            ? parsedUrl.pathname.slice(parsedUrl.pathname.indexOf('/v1/') + 4)
+            : parsedUrl.pathname.replace(/^\/+/, '');
+        const basePath = parsedBase.pathname.replace(/\/$/, '');
+        parsedBase.pathname = `${basePath}/${suffix}`.replace(/\/+/g, '/');
+        parsedBase.search = parsedUrl.search;
+        return parsedBase.toString();
+    } catch {
+        return url;
+    }
+}
+
+function redirectInput(input, init, url) {
+    const redirected = redirectUrl(url);
+    if (redirected === url) return { input, init, url };
+    try {
+        if (typeof input === 'string') return { input: redirected, init, url: redirected };
+        if (input instanceof URL) return { input: new URL(redirected), init, url: redirected };
+        if (typeof Request !== 'undefined' && input instanceof Request) {
+            return { input: new Request(redirected, input), init, url: redirected };
+        }
+    } catch {
+        return { input, init, url };
+    }
+    return { input, init, url };
 }
 
 function responseText(json) {
@@ -142,7 +191,14 @@ export function installLmstudioUsageCapture() {
         globalThis[PATCH_FLAG] = true;
 
         globalThis.fetch = async function ltagTimelineFetch(input, init) {
-            const url = requestUrl(input);
+            let url = requestUrl(input);
+            if (!isLmStudioApi(url)) {
+                return originalFetch(input, init);
+            }
+            const redirected = redirectInput(input, init, url);
+            input = redirected.input;
+            init = redirected.init;
+            url = redirected.url;
             if (!isLmStudioCompletion(url)) {
                 return originalFetch(input, init);
             }

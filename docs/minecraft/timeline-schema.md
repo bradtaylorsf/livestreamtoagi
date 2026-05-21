@@ -42,9 +42,27 @@ Each `timeline.ndjson` line is one JSON object:
 | `chat.public` | Public Minecraft chat from Paper or bot logs. Payload includes `speaker` and `message`. |
 | `llm.request` | Local LM Studio request started. Payload includes `model`, `purpose`, `reason`, and prompt token count. |
 | `llm.response` | Local LM Studio response or failure. Payload includes `model`, `latency_ms`, `outcome`, prompt/completion/total tokens, usage source, and command-discard counters when inferred from bot logs. |
+| `llm.queue.enqueued` | Local FIFO LM Studio proxy accepted a request. Payload includes `queued`, `concurrency`, `path`, and `model` when available. |
+| `llm.queue.started` | Proxy worker started forwarding a queued request. Payload includes `wait_ms`, `queued`, `running`, and `model`. |
+| `llm.queue.completed` | Proxy received an upstream response. Payload includes `wait_ms`, `latency_ms`, HTTP `status`, `model`, and nested provider `tokens` when available. |
+| `llm.queue.failed` | Proxy forwarding failed and returned a local 502 response. Payload includes `wait_ms`, `latency_ms`, `error`, and `model` when available. |
 | `action.intent` | Accepted executable command from parsed/full-response command paths. Stale generated commands do not emit this event. |
 | `action.start` | A discrete bridge/action start, usually tied to a trace id. |
+| `action.queued` | Per-agent action queue deferred a new embodied action behind the active slot. Payload includes `action`, `queue_depth`, and `queued_behind`. |
+| `action.started` | Serialized action queue started a direct or queued action. Payload includes `action`, `source`, and queue depth. |
+| `action.completed` | Serialized action queue finished a direct or queued action. Payload includes `action`, success/interrupted/timed-out flags, and queue depth. |
+| `action.rejected_busy` | Serialized action queue rejected an action because the per-agent queue was full. |
 | `action.result` | Terminal grouped `Agent executed:` result such as placed, reached, blocked, failed, invalid, interrupted, or timed out. |
+| `inbox.queued` | Per-agent inbox accepted a chat message for a future batched turn. Payload includes `source`, `message_preview`, queue depth, and whether generation was already running. |
+| `inbox.turn_started` | Inbox debounce fired and a compact message batch was sent to the stock conversation handler. |
+| `inbox.turn_completed` | Batched conversation turn finished, including outcome and remaining queue depth. |
+| `inbox.telemetry_ignored` | Lifecycle/status chatter was recorded but intentionally not sent to the LLM. |
+| `inbox.immediate_command` | Direct user command such as `!stop` bypassed the debounce path. |
+| `build_plan.generation.started` | `!planAndBuild` began a builder-model planning request. |
+| `build_plan.generation.completed` | A validated plan is ready. Payload includes `source`, `plan`, `plan_json`, origin, and max steps. |
+| `build_plan.generation.rejected` | Builder-model JSON failed schema/material/bounds validation before fallback. |
+| `build_plan.execution.started` | The validated plan began execution through `!buildFromPlan`. |
+| `build_plan.execution.completed` | Plan execution finished with the terminal build result string. |
 | `heartbeat.fired` | Autonomous idle/stall heartbeat prompt was sent. Payload includes reason, idle window, action state, cooldown, and prompt excerpt. |
 | `heartbeat.skipped` | Heartbeat considered an idle/stall check but did not prompt, such as active action, cooldown, disabled, or max no-command state. |
 | `heartbeat.outcome` | Result of a heartbeat prompt. Payload includes command detection, no-command streak, response excerpt, and error status when applicable. |
@@ -55,7 +73,7 @@ Each `timeline.ndjson` line is one JSON object:
 
 ## Token Usage
 
-LLM events prefer provider-reported LM Studio usage metadata:
+LLM request/response events prefer provider-reported LM Studio usage metadata:
 
 - `prompt_tokens`
 - `completion_tokens`
@@ -69,6 +87,10 @@ rounded up. Estimated records set:
 
 - `usage_source: "estimated"`
 - `estimated: true`
+
+Queue proxy events (`llm.queue.*`) are operational telemetry, not model-spend
+records. They may carry nested upstream token metadata on completion, but token
+totals are de-duplicated from `llm.request` / `llm.response` only.
 
 `timeline-totals.json` aggregates counts by event type, agent, model, and token
 source. It includes a top-level `tokens` quick summary with `total`,
@@ -105,14 +127,18 @@ The exporter reads these inputs from a soak evidence directory:
 - `bots/*.log` for Mindcraft stdout/stderr, command text, action traces, parser errors, lifecycle, and sampled position.
 - `logs/*.log` for Paper chat, bridge structured logs, and server errors.
 - `timeline-raw/*.ndjson` for Node-side timeline events from `timeline_emitter.js`.
+- `timeline-raw/llm-queue.ndjson` for FIFO proxy wait/running/completed/failed telemetry.
 - `*lmstudio*.ndjson` for explicit LM Studio request/response traces when present.
 
 The committed Mindcraft overlay stages:
 
 - `scripts/minecraft/fork-src/agent/bridge/timeline_emitter.js`
 - `scripts/minecraft/fork-src/agent/skills/lmstudio_usage.js`
+- `scripts/minecraft/fork-src/agent/skills/inbox_queue.js`
+- `scripts/minecraft/fork-src/agent/skills/action_queue.js`
 - `scripts/minecraft/fork-src/agent/skills/heartbeat.js`
+- `scripts/minecraft/fork-src/agent/commands/plan_and_build_action.js`
 
 Launchers inject the usage shim into staged `settings.js` and patch `agent.js`
-to install the heartbeat, so the git-ignored Mindcraft clone does not need a
-committed edit.
+to install the inbox, action queue, and heartbeat wrappers, so the git-ignored
+Mindcraft clone does not need a committed edit.

@@ -165,6 +165,62 @@ def test_missing_lmstudio_usage_is_estimated_and_marked(tmp_path: Path) -> None:
     assert result.totals["tokens"]["estimated"] == result.totals["tokens"]["total"]
 
 
+def test_lm_queue_events_are_counted_but_not_token_usage(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    raw_dir = run_dir / "timeline-raw"
+    raw_dir.mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    (raw_dir / "llm-queue.ndjson").write_text(
+        "\n".join(
+            json.dumps(event)
+            for event in [
+                {
+                    "ts": "2026-05-20T22:00:01Z",
+                    "event_type": "llm.queue.enqueued",
+                    "trace_id": "queue-1",
+                    "payload": {"model": "local/test", "queued": 1},
+                },
+                {
+                    "ts": "2026-05-20T22:00:02Z",
+                    "event_type": "llm.queue.completed",
+                    "trace_id": "queue-1",
+                    "payload": {
+                        "model": "local/test",
+                        "wait_ms": 50,
+                        "latency_ms": 100,
+                        "status": 200,
+                        "tokens": {"total_tokens": 999},
+                    },
+                },
+                {
+                    "ts": "2026-05-20T22:00:03Z",
+                    "event_type": "llm.response",
+                    "agent": "vera",
+                    "trace_id": "trace-response-1",
+                    "payload": {
+                        "model": "local/test",
+                        "prompt_tokens": 4,
+                        "completion_tokens": 6,
+                        "total_tokens": 10,
+                        "estimated": False,
+                    },
+                },
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+
+    assert result.totals["counts_by_event_type"]["llm.queue.enqueued"] == 1
+    assert result.totals["counts_by_event_type"]["llm.queue.completed"] == 1
+    assert result.totals["counts_by_model"]["local/test"] == 1
+    assert result.totals["tokens"]["total"] == 10
+    assert result.totals["token_totals"]["requests"] == 1
+
+
 def test_bot_log_lmstudio_calls_are_inferred_without_raw_telemetry(tmp_path: Path) -> None:
     builder = _load_builder()
     run_dir = tmp_path / "run"

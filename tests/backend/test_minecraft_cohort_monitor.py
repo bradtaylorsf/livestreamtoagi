@@ -238,6 +238,110 @@ def test_llm_feed_renders_response_output(tmp_path: Path) -> None:
     assert "placeHere: success placed oak_log" in html
 
 
+def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) -> None:
+    monitor = _load_monitor()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    events = [
+        {
+            "ts": "2026-05-20T22:00:01Z",
+            "event_type": "inbox.queued",
+            "agent": "rex",
+            "payload": {
+                "source": "Vera",
+                "message_preview": "Can you help with the cabin?",
+                "queue_depth": 2,
+                "running": True,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:02Z",
+            "event_type": "inbox.turn_completed",
+            "agent": "rex",
+            "payload": {"batch_size": 2, "remaining_depth": 1, "outcome": "ok"},
+        },
+        {
+            "ts": "2026-05-20T22:00:03Z",
+            "event_type": "llm.queue.enqueued",
+            "trace_id": "queue-1",
+            "payload": {"model": "local/test", "queued": 3, "running": 1},
+        },
+        {
+            "ts": "2026-05-20T22:00:04Z",
+            "event_type": "llm.queue.started",
+            "trace_id": "queue-1",
+            "payload": {"model": "local/test", "wait_ms": 420, "queued": 2, "running": 1},
+        },
+        {
+            "ts": "2026-05-20T22:00:05Z",
+            "event_type": "llm.queue.completed",
+            "trace_id": "queue-1",
+            "payload": {
+                "model": "local/test",
+                "wait_ms": 420,
+                "latency_ms": 800,
+                "status": 200,
+                "running": 0,
+                "tokens": {"total_tokens": 17},
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:06Z",
+            "event_type": "action.queued",
+            "agent": "rex",
+            "payload": {"action": "action:placeHere", "queue_depth": 1},
+        },
+        {
+            "ts": "2026-05-20T22:00:07Z",
+            "event_type": "action.rejected_busy",
+            "agent": "rex",
+            "payload": {"action": "action:move", "queue_depth": 16, "reason": "queue_full"},
+        },
+        {
+            "ts": "2026-05-20T22:00:08Z",
+            "event_type": "build_plan.generation.completed",
+            "agent": "rex",
+            "payload": {
+                "source": "builder_model",
+                "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "oak_log"}]},
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:09Z",
+            "event_type": "build_plan.execution.completed",
+            "agent": "rex",
+            "payload": {"action_id": "plan-build-1", "result": "success"},
+        },
+    ]
+
+    model = monitor.build_monitor_model(
+        run_dir,
+        events,
+        metadata={"start_utc": "2026-05-20T22:00:00Z", "cost_agents": "rex"},
+        now=monitor.parse_iso_ts("2026-05-20T22:00:09Z"),
+    )
+    html = monitor.render_monitor_html(model)
+
+    assert model["pipeline"]["llm_queue_enqueued"] == 1
+    assert model["pipeline"]["llm_queue_completed"] == 1
+    assert model["pipeline"]["llm_queue_wait_ms_max"] == 420
+    assert model["pipeline"]["inbox_queued_messages"] == 1
+    assert model["pipeline"]["inbox_queue_depth_max"] == 2
+    assert model["pipeline"]["actions_queued"] == 1
+    assert model["pipeline"]["actions_rejected_busy"] == 1
+    assert model["pipeline"]["action_queue_depth_max"] == 16
+    assert model["pipeline"]["build_plans_generated"] == 1
+    assert model["pipeline"]["build_plans_executed"] == 1
+    assert model["agents"][0]["inbox_queued_count"] == 1
+    assert model["agents"][0]["action_rejected_count"] == 1
+    assert model["agents"][0]["build_plan_count"] == 1
+    assert "Queues" in html
+    assert "Build Plans" in html
+    assert "LLM queue done" in html
+    assert "Max action depth" in html
+    assert "builder_model" in html
+
+
 def test_monitor_separates_stale_discards_from_action_failures(tmp_path: Path) -> None:
     monitor = _load_monitor()
     run_dir = tmp_path / "run"

@@ -5,8 +5,8 @@ Issue: #719 E8-13
 The cohort monitor is a local-only HTML dashboard over the structured soak
 timeline from E8-12. It is meant for Brad during a local embodied soak: one
 page shows run status, the action pipeline, each agent's latest public
-chat/action/LLM state, idle time, restart count, errors, token totals, and
-recent feeds.
+chat/action/LLM state, queue depths, build-plan progress, idle time, restart
+count, errors, token totals, and recent feeds.
 
 ## Open After A Soak
 
@@ -36,13 +36,20 @@ data as JSON, and does not fetch assets from a production website or CDN.
 The headline reliability view is a pipeline, not a single ambiguous completion
 percentage:
 
-`LLM requests -> generated responses -> discarded stale responses -> accepted commands -> executed actions -> verified successes`
+`LLM requests -> generated responses -> inbox queues -> LM queue waits -> action queues -> accepted commands -> executed actions -> verified successes -> build-plan progress`
 
 Discarded stale responses are shown separately from action failures. If a stale
 response contained a command, it increments `discarded_commands` but does not
 create an `action.intent`. Bridge settle telemetry is displayed as lifecycle
 telemetry, while `action.result` is reserved for grouped `Agent executed:`
 blocks from the bot logs.
+
+Queue rows summarize the new multi-agent runtime:
+
+- `inbox.*` shows batched chat turns and messages deferred during generation.
+- `llm.queue.*` shows FIFO proxy wait time, running count, completions, and failures.
+- `action.queued` / `action.rejected_busy` show per-agent embodied-action backpressure.
+- `build_plan.*` separates builder-model plan generation from block execution.
 
 ## Watch An In-Progress Soak
 
@@ -93,7 +100,9 @@ The feed filters toggle visible rows for:
 
 - chat
 - LLM
+- inbox
 - action
+- build
 - movement
 - error
 - lifecycle

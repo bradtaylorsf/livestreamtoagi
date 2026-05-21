@@ -100,6 +100,9 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "--duration-hours" in proc.stdout
     assert "--log-dir" in proc.stdout
     assert "LOCAL_LLM_MODEL" in proc.stdout
+    assert "LOCAL_LLM_UPSTREAM_URL" in proc.stdout
+    assert "MINECRAFT_LLM_QUEUE_PROXY" in proc.stdout
+    assert "MINECRAFT_LLM_CONCURRENCY" in proc.stdout
     assert "SOAK_AGENT_HOURLY_CAP_USD" in proc.stdout
     assert "SOAK_START_MINECRAFT_IF_DOWN" in proc.stdout
     assert "SOAK_EASY_SPAWN" in proc.stdout
@@ -135,6 +138,8 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "Required in .env" in wrapper.stdout
     assert "MINECRAFT_BRIDGE_TOKEN" in wrapper.stdout
     assert "MC_SIM_EASY_MODE" in wrapper.stdout
+    assert "MC_SIM_BUILD_MODE" in wrapper.stdout
+    assert "MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS" in wrapper.stdout
     assert "MC_SIM_MIN_INTENT_TO_COMMAND_RATIO" in wrapper.stdout
     assert "MC_SIM_MIN_PARSE_SUCCESS" in wrapper.stdout
     assert "MC_SIM_MIN_EXECUTION_RATE" in wrapper.stdout
@@ -165,7 +170,9 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "temp local clones" in proc.stdout
     assert "work root:      <per-run temp>" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
+    assert "LM queue:       enabled concurrency=1 upstream=http://localhost:1234/v1" in proc.stdout
     assert "behavior:       require=1; movement>=5/agent" in proc.stdout
+    assert "execute code:   allowed" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
     assert "keep MC alive:  0" in proc.stdout
     assert "easy spawn:     disabled" in proc.stdout
@@ -207,8 +214,10 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "chat model:     google/gemma-4-e4b" in proc.stdout
     assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
     assert "management review: disabled" in proc.stdout
+    assert "build mode: single" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
     assert "slow sim actions: 1" in proc.stdout
+    assert "execute code actions: 1" in proc.stdout
     assert "suppress action chat: 1" in proc.stdout
     assert "safe terrain actions: 1" in proc.stdout
     assert "heartbeat: enabled=1 idle=12s cooldown=7s stale_action=30s max_no_command=2" in proc.stdout
@@ -221,7 +230,8 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "reliability thresholds: intent>=0.6 parse>=0.8 execution>=0.7 verified>=0.5" in proc.stdout
     assert "reliability:    intent>=0.6 parse>=0.8 exec>=0.7 verified>=0.5 min_intents=5 fail=1" in proc.stdout
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
-    assert "slow actions:   blocked (!newAction/!observe/!navigate/plan/code)" in proc.stdout
+    assert "slow actions:   blocked (!newAction/!observe/!navigate/plan actions)" in proc.stdout
+    assert "execute code:   blocked (!executeCode)" in proc.stdout
     assert "safe terrain:   enabled" in proc.stdout
     assert "heartbeat:      enabled=1 idle=12000ms cooldown=7000ms stale_action=30000ms max_no_command=2" in proc.stdout
     assert "easy spawn:     enabled" in proc.stdout
@@ -230,6 +240,44 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert SOAK_BOTS_LINE not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
+
+
+def test_local_sim_plan_mode_enables_plan_building_but_keeps_execute_code_blocked(
+    tmp_path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_BASE_URL=http://localhost:1234/v1",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "LOCAL_LLM_MODEL_BUILDING=google/gemma-4-26b-a4b",
+                "EMBEDDING_PROVIDER=deterministic",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_BUILD_MODE=plan",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "build mode: plan" in proc.stdout
+    assert "slow sim actions: 0" in proc.stdout
+    assert "execute code actions: 1" in proc.stdout
+    assert "slow actions:   allowed" in proc.stdout
+    assert "execute code:   blocked (!executeCode)" in proc.stdout
+    assert "!planAndBuild(\"small shared cabin\")" in proc.stdout
+    assert "init prompt:    set (" in proc.stdout
 
 
 def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
@@ -503,6 +551,10 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "SOAK_INIT_MESSAGE" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
     assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
+    assert "SOAK_BLOCK_EXECUTE_CODE_ACTIONS" in text
+    assert "MINECRAFT_LLM_QUEUE_PROXY" in text
+    assert "MINECRAFT_LLM_CONCURRENCY" in text
+    assert "lmstudio_queue_proxy.py" in text
     assert "settings_json_for_bot" in text
     assert "settings.init_message = ''" in text
     assert "settings.num_examples = 0" in text
@@ -537,6 +589,8 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "!newAction" in text
     assert "!observe" in text
     assert "!buildFromPlan" in text
+    assert "!planAndBuild" in text
+    assert "!executeCode" in text
     assert "'!place'," not in text
     assert "'!break'," not in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
@@ -841,6 +895,11 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "GO / NO-GO" in text
     assert "Action-Command Reliability Gate" in text
     assert "Structured Timeline" in text
+    assert "Multi-Agent Runtime Queues" in text
+    assert "Builder-Plan Mode" in text
+    assert "MINECRAFT_LLM_CONCURRENCY" in text
+    assert "MC_SIM_BUILD_MODE=plan" in text
+    assert "!planAndBuild" in text
     assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
     assert "Action reliability result" in text
     assert "Behavioral gate result" in text
@@ -863,9 +922,22 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
         "chat.public",
         "llm.request",
         "llm.response",
+        "llm.queue.enqueued",
+        "llm.queue.started",
+        "llm.queue.completed",
+        "llm.queue.failed",
         "action.intent",
         "action.start",
+        "action.queued",
+        "action.started",
+        "action.completed",
+        "action.rejected_busy",
         "action.result",
+        "inbox.queued",
+        "inbox.turn_started",
+        "inbox.turn_completed",
+        "build_plan.generation.completed",
+        "build_plan.execution.completed",
         "heartbeat.fired",
         "heartbeat.skipped",
         "heartbeat.outcome",

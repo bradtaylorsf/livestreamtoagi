@@ -31,7 +31,9 @@
 #   MC_SIM_DISABLE_MANAGEMENT=1
 #   MC_SIM_INCLUDE_BRIDGE_BOT=0
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
+#   MC_SIM_BUILD_MODE=single          # set to plan for !planAndBuild mode
 #   MC_SIM_ALLOW_NEW_ACTION=0
+#   MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS=1
 #   MC_SIM_SUPPRESS_ACTION_CHAT=1
 #   MC_SIM_SAFE_TERRAIN_ACTIONS=1
 #   MC_SIM_HEARTBEAT_ENABLED=1
@@ -196,6 +198,8 @@ export PATH
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-}}"
 export LOCAL_LLM_BASE_URL LOCAL_LLM_MODEL_BUILDING
+MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
+export MC_SIM_BUILD_MODE
 MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS="${MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS:-10000}"
 export MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
 MC_SIM_DISABLE_MANAGEMENT="${MC_SIM_DISABLE_MANAGEMENT:-1}"
@@ -216,13 +220,16 @@ fi
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-${MC_SIM_BLOCK_PRIVATE_CONVERSATIONS:-1}}"
 MC_SIM_ALLOW_NEW_ACTION="${MC_SIM_ALLOW_NEW_ACTION:-0}"
 if [ -z "${SOAK_BLOCK_SLOW_SIM_ACTIONS+x}" ]; then
-    if [ "$MC_SIM_ALLOW_NEW_ACTION" = "1" ]; then
+    if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+        SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
+    elif [ "$MC_SIM_ALLOW_NEW_ACTION" = "1" ]; then
         SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
     else
         SOAK_BLOCK_SLOW_SIM_ACTIONS="1"
     fi
 fi
-export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS SOAK_BLOCK_SLOW_SIM_ACTIONS
+SOAK_BLOCK_EXECUTE_CODE_ACTIONS="${SOAK_BLOCK_EXECUTE_CODE_ACTIONS:-${MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS:-1}}"
+export SOAK_BOTS SOAK_BLOCK_PRIVATE_CONVERSATIONS SOAK_BLOCK_SLOW_SIM_ACTIONS SOAK_BLOCK_EXECUTE_CODE_ACTIONS
 MC_SIM_SUPPRESS_ACTION_CHAT="${MC_SIM_SUPPRESS_ACTION_CHAT:-1}"
 MINECRAFT_SUPPRESS_ACTION_CHAT="$MC_SIM_SUPPRESS_ACTION_CHAT"
 MC_SIM_SAFE_TERRAIN_ACTIONS="${MC_SIM_SAFE_TERRAIN_ACTIONS:-1}"
@@ -291,6 +298,9 @@ fi
 export EASY_SETUP_OBSERVERS EASY_SETUP_OPERATORS EASY_SETUP_SPECTATORS
 
 DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation in an easy starter meadow with nearby surface resources and a starter kit already in your inventory. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: inspect the meadow, pick a shared camp spot, place blocks, add torches, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Good early commands are !inventory, !nearbyBlocks, !searchForBlock(\"crafting_table\", 16), !move(\"scout_1\", \"forward\", 2), !placeHere(\"oak_log\"), !placeHere(\"cobblestone\"), and !place(\"camp-1\", \"oak_log\", {\"x\": 0, \"y\": 64, \"z\": 4}, \"up\"). After one nearby/inventory check, stop looping on gathering and place visible camp blocks. Avoid digging down, avoid underground targets, and only collect blocks that are reachable on the surface or already in the starter meadow. Keep actions safe, use public chat every few actions, and continue until the run ends."
+if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+    DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft plan-build simulation in an easy starter meadow. Coordinate in ordinary public chat, choose one compact shared structure, and use !planAndBuild(\"small shared cabin\") or another concise !planAndBuild request to generate a bounded JSON plan with the builder model and execute it through !buildFromPlan. Good starter requests are \"marker camp\", \"3x3 hut\", \"simple wall\", and \"torch-lit storage corner\". Keep arbitrary code execution out of the run; !executeCode remains blocked. After a plan starts, let the build finish before issuing another embodied action."
+fi
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
 if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
@@ -313,6 +323,14 @@ if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
         *"Use movement and inspection before collection"*|*"Use movement and exploration before collection"*) ;;
         *)
             SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Use movement and inspection before collection: good early commands are !inventory, !nearbyBlocks, !searchForBlock(\"oak_log\", 32), !searchForBlock(\"crafting_table\", 16), !move(\"scout_1\", \"forward\", 2), !placeHere(\"oak_log\"), and !placeHere(\"cobblestone\"). Avoid digging down and avoid underground targets. Do not repeatedly collect or search for a block that was reported missing, unreachable, buried, or tool-locked."
+            ;;
+    esac
+fi
+if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+    case "$SOAK_INIT_MESSAGE" in
+        *"!planAndBuild"*|*"plan-build simulation"*) ;;
+        *)
+            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Build mode is plan: prefer !planAndBuild(\"small shared cabin\") and let buildFromPlan finish before issuing another embodied action."
             ;;
     esac
 fi
@@ -365,9 +383,11 @@ info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"
+info "build mode: ${MC_SIM_BUILD_MODE}"
 info "sim bots: ${SOAK_BOTS}"
 info "private bot conversations: ${SOAK_BLOCK_PRIVATE_CONVERSATIONS}"
 info "slow sim actions: ${SOAK_BLOCK_SLOW_SIM_ACTIONS}"
+info "execute code actions: ${SOAK_BLOCK_EXECUTE_CODE_ACTIONS}"
 info "suppress action chat: ${MINECRAFT_SUPPRESS_ACTION_CHAT}"
 info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
 info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"

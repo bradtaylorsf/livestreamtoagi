@@ -96,6 +96,12 @@ export MINECRAFT_BRIDGE_TOKEN=<same-secret-as-backend>
 scripts/minecraft/soak.sh --duration-hours 2 --log-dir logs/soak
 ```
 
+By default the soak starts `scripts/minecraft/lmstudio_queue_proxy.py` and
+points `LOCAL_LLM_BASE_URL` at the proxy, while
+`LOCAL_LLM_UPSTREAM_URL` keeps the real LM Studio endpoint. Set
+`MINECRAFT_LLM_QUEUE_PROXY=0` to bypass it, or raise
+`MINECRAFT_LLM_CONCURRENCY` from `1` to `2` for a slightly wider local queue.
+
 If you want the soak to fail instead of auto-starting Paper:
 
 ```bash
@@ -149,7 +155,10 @@ by default, while leaving simple `!place`, `!placeHere`, and `!break` available
 so the agents can make visible camp markers during short runs. In this local
 public-chat mode the wrapper also hides command syntax from in-game chat, so one
 character's command does not get rebroadcast as a forced command for every other
-isolated MindServer instance. Low-level bridge action result chatter is
+isolated MindServer instance. Set `MC_SIM_BUILD_MODE=plan` to unblock
+`!buildFromPlan` / `!planAndBuild` for builder-model plan execution while
+keeping arbitrary `!executeCode` blocked by
+`MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS=1`. Low-level bridge action result chatter is
 suppressed by default with `MC_SIM_SUPPRESS_ACTION_CHAT=1`; the action still
 logs to each bot log and still reports over the Python bridge, but it does not
 interrupt the other local models mid-turn. Safe terrain behavior is also on by
@@ -159,6 +168,48 @@ disables automatic elbow-room/item-pickup/torch modes in the disposable
 Mindcraft clones and refuses pathfinder routes that require digging or
 one-block towers. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
 want the local model to spend extra time synthesizing custom action code.
+
+## Multi-Agent Runtime Queues
+
+The staged Mindcraft overlay now treats each character as a queued actor:
+
+| Layer | Behavior | Evidence |
+| --- | --- | --- |
+| Per-agent inbox | `handleMessage` appends incoming chat to a pending inbox, debounces for `MINECRAFT_TURN_DEBOUNCE_MS` (default `2000`), batches recent messages, and saves messages that arrive during generation for the next turn. Lifecycle chatter such as `I'm stuck` stays telemetry-only. | `inbox.queued`, `inbox.turn_started`, `inbox.turn_completed`, `inbox.telemetry_ignored`, `inbox.immediate_command`. |
+| LM Studio queue | `lmstudio_queue_proxy.py` serializes OpenAI-compatible requests to LM Studio with `MINECRAFT_LLM_CONCURRENCY` workers and emits wait/latency telemetry. | `timeline-raw/llm-queue.ndjson`, plus `llm.queue.enqueued`, `llm.queue.started`, `llm.queue.completed`, `llm.queue.failed`. |
+| Per-agent action queue | `ActionManager._executeAction` keeps one active action slot per agent. New embodied actions are queued instead of interrupting `placeHere`, `move`, or plan builds; queue overflow emits a busy rejection. | `action.queued`, `action.started`, `action.completed`, `action.rejected_busy`. |
+
+Useful knobs:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MINECRAFT_TURN_DEBOUNCE_MS` | `2000` | Inbox debounce before one batched conversation turn. |
+| `MINECRAFT_TURN_BATCH_MAX` | `12` | Max inbox messages sent to one prompt. |
+| `MINECRAFT_ACTION_QUEUE_MAX` | `16` | Max deferred embodied actions per agent. |
+| `MINECRAFT_LLM_QUEUE_PROXY` | `1` | Start the local FIFO proxy and route bot LLM traffic through it. |
+| `MINECRAFT_LLM_CONCURRENCY` | `1` | Active upstream LM Studio requests allowed by the proxy. |
+| `LOCAL_LLM_UPSTREAM_URL` | `$LOCAL_LLM_BASE_URL` | Real LM Studio upstream when the proxy is enabled. |
+
+## Builder-Plan Mode
+
+Plan mode is for visible shared construction instead of one-block-at-a-time
+chat loops:
+
+```bash
+MC_SIM_BUILD_MODE=plan pnpm mc:sim:smoke
+```
+
+In this mode the local wrapper lets agents call
+`!planAndBuild("small shared cabin")`. The action asks the profile
+`code_model` (the `LOCAL_LLM_MODEL_BUILDING` tier) for strict JSON, validates
+allowed materials, bounds, and max steps, logs the plan as JSON evidence, and
+executes it through the verified `!buildFromPlan` path. Invalid model plans are
+rejected and replaced with a starter blueprint such as marker camp, 3x3 hut,
+simple wall, or torch-lit storage corner.
+
+Plan evidence appears as `build_plan.generation.*` and
+`build_plan.execution.*` events. `!executeCode` remains separately gated by
+`SOAK_BLOCK_EXECUTE_CODE_ACTIONS` / `MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS`.
 
 ## Action-Command Reliability Gate
 
@@ -206,7 +257,7 @@ plus agent-tagged bridge/server logs:
 | `public_chat` | Public chat emits like `<Agent> message`, `Agent: message`, or `chat ... msg=...`, excluding `[action]`, management review lines, and command-only messages. |
 | `inter_agent_chat` | Public chat lines that mention another tracked agent by name. |
 | `gather` | Gather/equipment commands such as `!collectBlocks`, `!collectAllBlocks`, `!consume`, `!equip`, or `!smeltItem`. |
-| `build` | Build/place commands such as `!place`, `!placeHere`, `!placeBlock`, `!build`, or `!buildFromPlan`. |
+| `build` | Build/place commands such as `!place`, `!placeHere`, `!placeBlock`, `!build`, `!buildFromPlan`, or `!planAndBuild`. |
 | `deaths` / `drownings` | Death, respawn, and drowning terms in the agent log stream. |
 | `stuck` / `dig_holes` | Stuck, path-failure, unreachable, trapped, or hole-digging phrases. |
 | `restart_count` | Recoverability-risk signatures such as `Exiting.`, nonzero process exits, reconnect/rejoin lines, bot disconnects, or supervisor restarts. |
@@ -263,6 +314,11 @@ deterministic local estimate. High-frequency position logs are collapsed into
 interval `state.sample` events; low-level pathfinding chatter is not treated as
 an LLM decision.
 
+Queue proxy events are timeline evidence but are not token-spend events. Token
+totals count `llm.request` / `llm.response`; queue events report wait time,
+active request count, upstream latency, status, and provider token metadata when
+LM Studio returns it.
+
 Stale command-bearing generations are exported as `llm.response` events with
 `outcome=discarded_stale` and `discarded_commands`; they do not create
 `action.intent` events. Bridge action-result settle lines are exported as
@@ -315,7 +371,8 @@ prints `heartbeat_counts` from `timeline-totals.json`.
 Every embodied soak also renders `monitor.html` in the evidence directory after
 the timeline export. Open it locally for a cohort-level view of run status, the
 LLM-to-action pipeline, per-agent latest chat/action/LLM activity, idle time,
-restart count, errors, tokens, warning badges, and recent feeds:
+restart count, errors, tokens, queue depths, build-plan progress, warning
+badges, and recent feeds:
 
 ```bash
 open logs/soak/<UTC timestamp>/monitor.html
@@ -352,6 +409,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, accepted action, bridge telemetry, behavior/status, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
 | `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
+| `timeline-raw/llm-queue.ndjson` | FIFO proxy wait/running/completed/failed telemetry. |
 | `monitor.html` | Self-contained local cohort monitor rendered from `timeline.ndjson` and `timeline-totals.json`. |
 | `summary.txt` | Crash candidates, heartbeat halts, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, behavioral acceptance, and timeline totals. |
 
@@ -383,6 +441,8 @@ Additional stability counters:
 | Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 | Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
 | Heartbeat halts / idle recovery | `heartbeat.fired` / `heartbeat.outcome` / `heartbeat.halted` timeline events and `heartbeat-halts.tsv`. |
+| Queue health | `inbox.*`, `llm.queue.*`, and action queue timeline events in `monitor.html`. |
+| Build-plan progress | `build_plan.generation.*` / `build_plan.execution.*` timeline events and the logged plan JSON. |
 
 For E8-14 interruption recovery, `PathStopped: Path was stopped before it could
 be completed` must appear as an `interrupted` action failure and must not be
@@ -604,6 +664,7 @@ Append the completed live run here before advancing E8-9:
 | LM Studio base URL | `http://localhost:1234/v1` |
 | `LOCAL_LLM_MODEL` |  |
 | `LOCAL_LLM_MODEL_BUILDING` |  |
+| LM queue concurrency / max wait |  |
 | Soak command |  |
 | Evidence directory | `logs/soak/<timestamp>/` |
 | Bot exits |  |
@@ -622,6 +683,8 @@ Append the completed live run here before advancing E8-9:
 | Timeline result | PASS / MISSING |
 | Timeline event totals |  |
 | Timeline token totals | provider-reported / estimated |
+| Inbox/action queue max depths |  |
+| Build-plan evidence | PASS / MISSING |
 | Spawn safety (per agent) |  |
 | Movement distance / count |  |
 | Public chat lines (cohort) |  |

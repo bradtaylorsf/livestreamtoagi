@@ -32,9 +32,24 @@ ACTIVE_EVENT_TYPES = {
     "chat.public",
     "llm.request",
     "llm.response",
+    "llm.queue.enqueued",
+    "llm.queue.started",
+    "llm.queue.completed",
+    "llm.queue.failed",
+    "inbox.queued",
+    "inbox.turn_started",
+    "inbox.turn_completed",
     "action.intent",
     "action.start",
+    "action.queued",
+    "action.started",
+    "action.completed",
+    "action.rejected_busy",
     "action.result",
+    "build_plan.generation.started",
+    "build_plan.generation.completed",
+    "build_plan.execution.started",
+    "build_plan.execution.completed",
 }
 COMMAND_RE = re.compile(r"!\w+\s*(?:\([^)]*\))?", re.DOTALL)
 RESTART_RE = re.compile(
@@ -239,8 +254,12 @@ def event_category(event_type: str) -> str:
         return "chat"
     if event_type.startswith("llm."):
         return "llm"
+    if event_type.startswith("inbox."):
+        return "inbox"
     if event_type.startswith("action."):
         return "action"
+    if event_type.startswith("build_plan."):
+        return "build"
     if event_type == "state.sample":
         return "movement"
     if event_type.startswith("bridge.") or event_type == "behavior.event":
@@ -277,6 +296,22 @@ def human_duration(seconds: float | int | None) -> str:
     if minutes:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def payload_int(event: dict[str, Any], key: str, default: int = 0) -> int:
+    value = payload(event).get(key)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value.strip()))
+        except ValueError:
+            return default
+    return default
 
 
 def parse_duration_seconds(
@@ -323,7 +358,7 @@ def tokens_from_events(events: list[dict[str, Any]]) -> dict[str, dict[str, int]
     by_request: dict[str, dict[str, Any]] = {}
     for event in events:
         event_type = str(event.get("event_type") or "")
-        if not event_type.startswith("llm."):
+        if event_type not in {"llm.request", "llm.response"}:
             continue
         agent = event_agent(event) or "unknown"
         event_payload = payload(event)
@@ -449,10 +484,52 @@ def event_summary(event: dict[str, Any]) -> str:
         return clip(
             f"{event_payload.get('action') or 'action'} started {event_payload.get('detail') or ''}"
         )
+    if event_type == "action.queued":
+        return clip(
+            f"{event_payload.get('action') or 'action'} queued; depth {event_payload.get('queue_depth', 0)}"
+        )
+    if event_type == "action.started":
+        source = event_payload.get("source") or "direct"
+        return clip(
+            f"{event_payload.get('action') or 'action'} started from {source}; depth {event_payload.get('queue_depth', 0)}"
+        )
+    if event_type == "action.completed":
+        outcome = "success" if event_payload.get("success") else "done"
+        if event_payload.get("interrupted"):
+            outcome = "interrupted"
+        if event_payload.get("timedout"):
+            outcome = "timed out"
+        return clip(
+            f"{event_payload.get('action') or 'action'} {outcome}; depth {event_payload.get('queue_depth', 0)}"
+        )
+    if event_type == "action.rejected_busy":
+        return clip(
+            f"{event_payload.get('action') or 'action'} rejected busy: {event_payload.get('reason') or 'busy'}"
+        )
     if event_type == "action.result":
         outcome = event_payload.get("outcome") or event_payload.get("status") or "result"
         action = event_payload.get("action") or "action"
         return clip(f"{action}: {outcome} {event_payload.get('detail') or ''}")
+    if event_type == "inbox.queued":
+        source = event_payload.get("source") or "unknown"
+        preview = event_payload.get("message_preview") or ""
+        return clip(
+            f"{source} queued; depth {event_payload.get('queue_depth', 0)}; {preview}"
+        )
+    if event_type == "inbox.turn_started":
+        return clip(
+            f"turn started with {event_payload.get('batch_size', 0)} message(s) from {event_payload.get('source') or 'batch'}"
+        )
+    if event_type == "inbox.turn_completed":
+        return clip(
+            f"turn {event_payload.get('outcome') or 'completed'}; batch {event_payload.get('batch_size', 0)}; remaining {event_payload.get('remaining_depth', 0)}"
+        )
+    if event_type == "inbox.telemetry_ignored":
+        return clip(f"telemetry ignored from {event_payload.get('source')}: {event_payload.get('message')}")
+    if event_type == "inbox.immediate_command":
+        return clip(
+            f"immediate command from {event_payload.get('source')}: {event_payload.get('command')}"
+        )
     if event_type == "llm.request":
         model = event_payload.get("model") or "unknown model"
         purpose = event_payload.get("purpose") or event_payload.get("reason") or "request"
@@ -467,6 +544,46 @@ def event_summary(event: dict[str, Any]) -> str:
         output = event_payload.get("response_text") or event_payload.get("completion") or ""
         output_text = f"; {output}" if output else ""
         return clip(f"{model} {outcome}{latency_text}; {tokens} tokens{output_text}")
+    if event_type == "llm.queue.enqueued":
+        return clip(
+            f"{event_payload.get('model') or 'unknown model'} enqueued; depth {event_payload.get('queued', 0)}"
+        )
+    if event_type == "llm.queue.started":
+        return clip(
+            f"{event_payload.get('model') or 'unknown model'} running; waited {event_payload.get('wait_ms', 0)}ms; active {event_payload.get('running', 0)}"
+        )
+    if event_type == "llm.queue.completed":
+        tokens = event_payload.get("tokens") if isinstance(event_payload.get("tokens"), dict) else {}
+        total = tokens.get("total_tokens") if isinstance(tokens, dict) else None
+        token_text = f"; {total} tokens" if total is not None else ""
+        return clip(
+            f"{event_payload.get('model') or 'unknown model'} completed {event_payload.get('status') or ''}; wait {event_payload.get('wait_ms', 0)}ms; latency {event_payload.get('latency_ms', 0)}ms{token_text}"
+        )
+    if event_type == "llm.queue.failed":
+        return clip(
+            f"{event_payload.get('model') or 'unknown model'} failed after {event_payload.get('wait_ms', 0)}ms wait: {event_payload.get('error') or ''}"
+        )
+    if event_type == "build_plan.generation.started":
+        return clip(
+            f"planning {event_payload.get('description') or 'build'} at {event_payload.get('origin')}; max {event_payload.get('max_steps')} steps"
+        )
+    if event_type == "build_plan.generation.completed":
+        plan = event_payload.get("plan")
+        blocks = len(plan.get("blocks") or []) if isinstance(plan, dict) else 0
+        clear = len(plan.get("clear") or []) if isinstance(plan, dict) else 0
+        return clip(
+            f"plan generated from {event_payload.get('source') or 'builder'}; {blocks + clear} step(s)"
+        )
+    if event_type == "build_plan.generation.rejected":
+        return clip(f"plan rejected: {event_payload.get('error') or 'invalid plan'}")
+    if event_type == "build_plan.execution.started":
+        return clip(
+            f"build {event_payload.get('action_id') or ''} started; {event_payload.get('step_count', 0)} step(s)"
+        )
+    if event_type == "build_plan.execution.completed":
+        return clip(
+            f"build {event_payload.get('action_id') or ''} completed: {event_payload.get('result') or ''}"
+        )
     if event_type == "state.sample":
         return format_position(event_payload)
     if event_type == "error":
@@ -596,8 +713,20 @@ def command_count(event: dict[str, Any]) -> int:
 
 def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     llm_responses = [event for event in events if event.get("event_type") == "llm.response"]
+    llm_queue_events = [
+        event for event in events if str(event.get("event_type") or "").startswith("llm.queue.")
+    ]
     action_intents = [event for event in events if event.get("event_type") == "action.intent"]
     action_results = [event for event in events if event.get("event_type") == "action.result"]
+    action_queue_events = [
+        event
+        for event in events
+        if event.get("event_type")
+        in {"action.queued", "action.started", "action.completed", "action.rejected_busy"}
+    ]
+    inbox_events = [
+        event for event in events if str(event.get("event_type") or "").startswith("inbox.")
+    ]
     discarded_responses = [
         event
         for event in llm_responses
@@ -616,17 +745,65 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     accepted_commands = sum(command_count(event) for event in action_intents)
     executed_actions = len(action_results)
     verified_actions = sum(1 for event in action_results if payload(event).get("verified"))
+    llm_waits = [
+        payload_int(event, "wait_ms")
+        for event in llm_queue_events
+        if event.get("event_type") in {"llm.queue.started", "llm.queue.completed", "llm.queue.failed"}
+    ]
+    latest_lm_queue = llm_queue_events[-1] if llm_queue_events else {}
+    action_depths = [
+        max(payload_int(event, "queue_depth"), payload_int(event, "remaining_depth"))
+        for event in action_queue_events
+    ]
+    inbox_depths = [
+        max(payload_int(event, "queue_depth"), payload_int(event, "remaining_depth"))
+        for event in inbox_events
+    ]
     return {
         "llm_requests": sum(1 for event in events if event.get("event_type") == "llm.request"),
         "llm_responses": len(llm_responses),
+        "llm_queue_enqueued": sum(
+            1 for event in events if event.get("event_type") == "llm.queue.enqueued"
+        ),
+        "llm_queue_running": payload_int(latest_lm_queue, "running"),
+        "llm_queue_completed": sum(
+            1 for event in events if event.get("event_type") == "llm.queue.completed"
+        ),
+        "llm_queue_failed": sum(
+            1 for event in events if event.get("event_type") == "llm.queue.failed"
+        ),
+        "llm_queue_wait_ms_max": max(llm_waits or [0]),
         "discarded_stale_responses": len(discarded_responses),
         "discarded_commands": sum(
             int(payload(event).get("discarded_commands") or 0)
             for event in discarded_responses
         ),
+        "inbox_queued_messages": sum(
+            1 for event in events if event.get("event_type") == "inbox.queued"
+        ),
+        "inbox_turns": sum(
+            1 for event in events if event.get("event_type") == "inbox.turn_completed"
+        ),
+        "inbox_queue_depth_max": max(inbox_depths or [0]),
         "accepted_commands": accepted_commands,
         "executed_actions": executed_actions,
         "verified_actions": verified_actions,
+        "actions_queued": sum(
+            1 for event in events if event.get("event_type") == "action.queued"
+        ),
+        "actions_rejected_busy": sum(
+            1 for event in events if event.get("event_type") == "action.rejected_busy"
+        ),
+        "action_queue_depth_max": max(action_depths or [0]),
+        "build_plans_generated": sum(
+            1 for event in events if event.get("event_type") == "build_plan.generation.completed"
+        ),
+        "build_plans_rejected": sum(
+            1 for event in events if event.get("event_type") == "build_plan.generation.rejected"
+        ),
+        "build_plans_executed": sum(
+            1 for event in events if event.get("event_type") == "build_plan.execution.completed"
+        ),
         "execution_rate": round(executed_actions / accepted_commands, 4)
         if accepted_commands
         else 1.0,
@@ -715,6 +892,22 @@ def build_monitor_model(
         latest_result = latest_event(agent_events, "action.result")
         latest_intent = latest_event(agent_events, "action.intent")
         latest_action = latest_result or latest_intent
+        latest_inbox_event = next(
+            (
+                event
+                for event in reversed(agent_events)
+                if str(event.get("event_type") or "").startswith("inbox.")
+            ),
+            None,
+        )
+        latest_build_event = next(
+            (
+                event
+                for event in reversed(agent_events)
+                if str(event.get("event_type") or "").startswith("build_plan.")
+            ),
+            None,
+        )
         latest_llm_event: dict[str, Any] | None = None
         restart_events: list[dict[str, Any]] = []
         error_count = 0
@@ -725,6 +918,12 @@ def build_monitor_model(
         interrupted_count = 0
         undefined_count = 0
         verified_count = 0
+        inbox_queued_count = 0
+        inbox_depth_latest = 0
+        action_queued_count = 0
+        action_rejected_count = 0
+        action_depth_latest = 0
+        build_plan_count = 0
 
         for event in agent_events:
             event_type = str(event.get("event_type") or "")
@@ -732,7 +931,7 @@ def build_monitor_model(
             event_payload = payload(event)
             if event_type in ACTIVE_EVENT_TYPES and ts:
                 last_activity = ts
-            if event_type.startswith("llm.") and ts:
+            if event_type in {"llm.request", "llm.response"} and ts:
                 last_llm = ts
                 latest_llm_event = event
             if event_type == "llm.response":
@@ -750,8 +949,26 @@ def build_monitor_model(
                     interrupted_count += 1
                 if outcome_class == "undefined_result":
                     undefined_count += 1
+            elif event_type == "inbox.queued":
+                inbox_queued_count += 1
+            elif event_type == "action.queued":
+                action_queued_count += 1
+            elif event_type == "action.rejected_busy":
+                action_rejected_count += 1
+            elif event_type == "build_plan.generation.completed":
+                build_plan_count += 1
             elif event_type == "error":
                 error_count += 1
+            if event_type.startswith("inbox."):
+                inbox_depth_latest = max(
+                    payload_int(event, "queue_depth"),
+                    payload_int(event, "remaining_depth"),
+                )
+            if event_type in {"action.queued", "action.started", "action.completed", "action.rejected_busy"}:
+                action_depth_latest = max(
+                    payload_int(event, "queue_depth"),
+                    payload_int(event, "remaining_depth"),
+                )
             if is_restart_lifecycle(event):
                 restart_events.append(event)
 
@@ -874,6 +1091,8 @@ def build_monitor_model(
                 "latest_chat": row_from_event(latest_chat) if latest_chat else None,
                 "latest_action": row_from_event(latest_action) if latest_action else None,
                 "latest_llm": row_from_event(latest_llm_event) if latest_llm_event else None,
+                "latest_inbox": row_from_event(latest_inbox_event) if latest_inbox_event else None,
+                "latest_build": row_from_event(latest_build_event) if latest_build_event else None,
                 "current_state": row_from_event(latest_state) if latest_state else None,
                 "idle_seconds": idle_seconds,
                 "idle": human_duration(idle_seconds),
@@ -884,6 +1103,12 @@ def build_monitor_model(
                 "undefined_count": undefined_count,
                 "verified_count": verified_count,
                 "executed_count": len(action_results),
+                "inbox_queued_count": inbox_queued_count,
+                "inbox_depth_latest": inbox_depth_latest,
+                "action_queued_count": action_queued_count,
+                "action_rejected_count": action_rejected_count,
+                "action_depth_latest": action_depth_latest,
+                "build_plan_count": build_plan_count,
                 "tokens": token_totals,
             }
         )
@@ -891,6 +1116,14 @@ def build_monitor_model(
     all_rows = [row_from_event(event) for event in sorted_events]
     chat_feed = [row for row in all_rows if row["event_type"] == "chat.public"][-feed_limit:]
     action_feed = [row for row in all_rows if row["category"] == "action"][-feed_limit:]
+    queue_feed = [
+        row
+        for row in all_rows
+        if row["category"] == "inbox"
+        or row["event_type"].startswith("llm.queue.")
+        or row["event_type"] in {"action.queued", "action.rejected_busy"}
+    ][-feed_limit:]
+    build_feed = [row for row in all_rows if row["category"] == "build"][-feed_limit:]
     timeline_feed = all_rows[-feed_limit:]
 
     status = "completed" if actual_end else "in progress"
@@ -918,6 +1151,8 @@ def build_monitor_model(
             "chat": list(reversed(chat_feed)),
             "action": list(reversed(action_feed)),
             "llm": build_llm_feed(sorted_events, feed_limit),
+            "queue": list(reversed(queue_feed)),
+            "build": list(reversed(build_feed)),
             "timeline": list(reversed(timeline_feed)),
         },
     }
@@ -959,6 +1194,8 @@ def render_agent_cards(agents: list[dict[str, Any]]) -> str:
                 {render_card_line("Latest chat", agent["latest_chat"], "No public chat")}
                 {render_card_line("Latest action", agent["latest_action"], "No action result")}
                 {render_card_line("Latest LLM", agent["latest_llm"], "No LLM activity")}
+                {render_card_line("Inbox", agent["latest_inbox"], "No inbox telemetry")}
+                {render_card_line("Build plan", agent["latest_build"], "No build plan")}
                 {render_card_line("State", agent["current_state"], "No state sample")}
               </dl>
               <div class="metrics">
@@ -970,6 +1207,12 @@ def render_agent_cards(agents: list[dict[str, Any]]) -> str:
                 <div><strong>{agent["verified_count"]}</strong><span>verified</span></div>
                 <div><strong>{agent["interrupted_count"]}</strong><span>interrupted</span></div>
                 <div><strong>{agent["discarded_commands"]}</strong><span>discarded</span></div>
+                <div><strong>{agent["inbox_queued_count"]}</strong><span>inbox queued</span></div>
+                <div><strong>{agent["inbox_depth_latest"]}</strong><span>inbox depth</span></div>
+                <div><strong>{agent["action_queued_count"]}</strong><span>action queued</span></div>
+                <div><strong>{agent["action_depth_latest"]}</strong><span>action depth</span></div>
+                <div><strong>{agent["action_rejected_count"]}</strong><span>busy rejects</span></div>
+                <div><strong>{agent["build_plan_count"]}</strong><span>plans</span></div>
               </div>
             </article>
             """
@@ -981,11 +1224,25 @@ def render_pipeline(pipeline: dict[str, Any]) -> str:
     labels = [
         ("llm_requests", "LLM requests"),
         ("llm_responses", "LLM responses"),
+        ("llm_queue_enqueued", "LLM queued"),
+        ("llm_queue_running", "LLM running"),
+        ("llm_queue_completed", "LLM queue done"),
+        ("llm_queue_failed", "LLM queue failed"),
+        ("llm_queue_wait_ms_max", "Max LLM wait ms"),
         ("discarded_stale_responses", "Discarded stale"),
         ("discarded_commands", "Discarded commands"),
+        ("inbox_queued_messages", "Inbox queued"),
+        ("inbox_turns", "Inbox turns"),
+        ("inbox_queue_depth_max", "Max inbox depth"),
         ("accepted_commands", "Accepted commands"),
         ("executed_actions", "Executed actions"),
         ("verified_actions", "Verified actions"),
+        ("actions_queued", "Actions queued"),
+        ("actions_rejected_busy", "Busy rejects"),
+        ("action_queue_depth_max", "Max action depth"),
+        ("build_plans_generated", "Plans generated"),
+        ("build_plans_rejected", "Plans rejected"),
+        ("build_plans_executed", "Plans executed"),
         ("execution_rate", "Execution rate"),
         ("verified_rate", "Verified rate"),
     ]
@@ -1254,7 +1511,9 @@ def render_monitor_html(model: dict[str, Any]) -> str:
       <div class="filterbar" aria-label="Timeline filters">
         <label><input type="checkbox" data-filter="chat" checked>Chat</label>
         <label><input type="checkbox" data-filter="llm" checked>LLM</label>
+        <label><input type="checkbox" data-filter="inbox" checked>Inbox</label>
         <label><input type="checkbox" data-filter="action" checked>Action</label>
+        <label><input type="checkbox" data-filter="build" checked>Build</label>
         <label><input type="checkbox" data-filter="movement" checked>Movement</label>
         <label><input type="checkbox" data-filter="error" checked>Error</label>
         <label><input type="checkbox" data-filter="lifecycle" checked>Lifecycle</label>
@@ -1275,6 +1534,24 @@ def render_monitor_html(model: dict[str, Any]) -> str:
             <table>
               <thead><tr><th>Time</th><th>Agent</th><th>Result</th></tr></thead>
               <tbody>{render_feed_rows(model["feeds"]["action"])}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Queues</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Agent</th><th>Status</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["queue"])}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Build Plans</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Agent</th><th>Progress</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["build"])}</tbody>
             </table>
           </div>
         </article>

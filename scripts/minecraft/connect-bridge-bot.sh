@@ -79,12 +79,15 @@ ACTIONS_NAVIGATE_PATCH_MARKER="LTAG E6-2 navigate action"
 ACTIONS_PLACE_PATCH_MARKER="LTAG E6-3 place action"
 ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
+ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="LTAG E9-1 plan-and-build action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
+AGENT_INBOX_PATCH_MARKER="LTAG E9-1 inbox queue"
+AGENT_ACTION_QUEUE_PATCH_MARKER="LTAG E9-1 action queue"
 MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
 ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
 AGENT_REL="src/agent/agent.js"
@@ -99,6 +102,7 @@ NAVIGATE_ACTION_REL="src/agent/commands/navigate_action.js"
 PLACE_ACTION_REL="src/agent/commands/place_action.js"
 BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
+PLAN_AND_BUILD_ACTION_REL="src/agent/commands/plan_and_build_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
 PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
@@ -110,6 +114,8 @@ SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
+INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
+ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -131,6 +137,7 @@ NAVIGATE_ACTION_DEST=""
 PLACE_ACTION_DEST=""
 BREAK_ACTION_DEST=""
 BUILD_FROM_PLAN_ACTION_DEST=""
+PLAN_AND_BUILD_ACTION_DEST=""
 EXECUTE_CODE_ACTION_DEST=""
 OBSERVE_ACTION_DEST=""
 PLACE_HERE_GUARD_DEST=""
@@ -142,6 +149,8 @@ SAFE_FAIL_SKILL_DEST=""
 ACTION_INTERRUPTION_SKILL_DEST=""
 LMSTUDIO_USAGE_SKILL_DEST=""
 HEARTBEAT_SKILL_DEST=""
+INBOX_QUEUE_SKILL_DEST=""
+ACTION_QUEUE_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
 # cwd) so the reviewed copies are used no matter where it is invoked.
@@ -158,6 +167,7 @@ NAVIGATE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/navigate_action.js"
 PLACE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/place_action.js"
 BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
+PLAN_AND_BUILD_ACTION_SRC="$FORK_SRC_DIR/agent/commands/plan_and_build_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
 PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
@@ -169,6 +179,8 @@ SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
+INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
+ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
 
 MODE="run"
 case "${1:-}" in
@@ -334,6 +346,22 @@ verify_committed_assets() {
         grep -q 'MC_HEARTBEAT_IDLE_MS' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill missing idle env"; problems=1; }
     fi
 
+    if [ ! -s "$INBOX_QUEUE_SKILL_SRC" ]; then
+        fail "Inbox queue skill missing or empty: $INBOX_QUEUE_SKILL_SRC"; problems=1
+    else
+        grep -q 'MINECRAFT_TURN_DEBOUNCE_MS' "$INBOX_QUEUE_SKILL_SRC" || { fail "inbox queue missing debounce env"; problems=1; }
+        grep -q 'inbox.queued' "$INBOX_QUEUE_SKILL_SRC" || { fail "inbox queue missing telemetry"; problems=1; }
+        grep -q 'installInboxQueue' "$INBOX_QUEUE_SKILL_SRC" || { fail "inbox queue missing installer"; problems=1; }
+    fi
+
+    if [ ! -s "$ACTION_QUEUE_SKILL_SRC" ]; then
+        fail "Action queue skill missing or empty: $ACTION_QUEUE_SKILL_SRC"; problems=1
+    else
+        grep -q 'MINECRAFT_ACTION_QUEUE_MAX' "$ACTION_QUEUE_SKILL_SRC" || { fail "action queue missing max env"; problems=1; }
+        grep -q 'action.queued' "$ACTION_QUEUE_SKILL_SRC" || { fail "action queue missing queued telemetry"; problems=1; }
+        grep -q 'installActionQueue' "$ACTION_QUEUE_SKILL_SRC" || { fail "action queue missing installer"; problems=1; }
+    fi
+
     if [ ! -s "$MANAGEMENT_REVIEW_SRC" ]; then
         fail "Management review helper missing or empty: $MANAGEMENT_REVIEW_SRC"; problems=1
     else
@@ -493,6 +521,14 @@ verify_committed_assets() {
         fi
     fi
 
+    if [ ! -s "$PLAN_AND_BUILD_ACTION_SRC" ]; then
+        fail "Plan-and-build action missing or empty: $PLAN_AND_BUILD_ACTION_SRC"; problems=1
+    else
+        grep -q "'!planAndBuild'" "$PLAN_AND_BUILD_ACTION_SRC" || { fail "plan-and-build action name is not !planAndBuild"; problems=1; }
+        grep -q 'build_plan.generation.completed' "$PLAN_AND_BUILD_ACTION_SRC" || { fail "plan-and-build action missing plan telemetry"; problems=1; }
+        grep -q 'performBuildFromPlan' "$PLAN_AND_BUILD_ACTION_SRC" || { fail "plan-and-build action does not execute buildFromPlan"; problems=1; }
+    fi
+
     if [ ! -s "$EXECUTE_CODE_ACTION_SRC" ]; then
         fail "Execute-code action missing or empty: $EXECUTE_CODE_ACTION_SRC"; problems=1
     else
@@ -534,7 +570,7 @@ info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
 info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
 info "client:    staged → $BRIDGE_CLIENT_REL  (from fork-src/)"
 info "actions:   !bridgePing, !move, !navigate, !place, !break, !buildFromPlan,"
-info "           !executeCode, !observe injected into $ACTIONS_REL"
+info "           !planAndBuild, !executeCode, !observe injected into $ACTIONS_REL"
 info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (local only, decision 0003)"
 
 # ── --verify: static, CI/network-safe checks only ──
@@ -544,7 +580,7 @@ if [ "$MODE" = "verify" ]; then
         info "local-only (lmstudio/), python_bridge.js carries the envelope fields,"
         info "bearer auth, bridge endpoint, a deadline timeout and a structured"
         info "error type, and !bridgePing/!move/!navigate/!place/!break/!buildFromPlan/"
-        info "!executeCode/!observe are wrapped so failures never crash and embodied outcomes"
+        info "!planAndBuild/!executeCode/!observe are wrapped so failures never crash and embodied outcomes"
         info "or snapshots report through the E4-6 channel."
         info "(No clone, no network, no Node, no launch — drop --verify to connect.)"
         exit 0
@@ -587,13 +623,15 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $TIMELINE_EMITTER_REL + $LMSTUDIO_USAGE_SKILL_REL +"
     info "              $BRIDGE_ACTION_REL + $MOVE_ACTION_REL + $NAVIGATE_ACTION_REL +"
     info "              $PLACE_ACTION_REL + $BREAK_ACTION_REL + $BUILD_FROM_PLAN_ACTION_REL +"
+    info "              $PLAN_AND_BUILD_ACTION_REL +"
     info "              $EXECUTE_CODE_ACTION_REL + $OBSERVE_ACTION_REL +"
     info "              $MOVEMENT_SKILL_REL + $BUILDING_SKILL_REL +"
     info "              $BUILD_PLAN_SKILL_REL + $PERCEPTION_SKILL_REL +"
     info "              $SAFE_FAIL_SKILL_REL + $ACTION_INTERRUPTION_SKILL_REL +"
-    info "              $PLACE_HERE_GUARD_REL + $HEARTBEAT_SKILL_REL"
+    info "              $PLACE_HERE_GUARD_REL + $HEARTBEAT_SKILL_REL +"
+    info "              $INBOX_QUEUE_SKILL_REL + $ACTION_QUEUE_SKILL_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
-    info "              placeAction, breakAction, buildFromPlanAction, executeCodeAction"
+    info "              placeAction, breakAction, buildFromPlanAction, planAndBuildAction, executeCodeAction"
     info "              and observeAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL (restored on exit)"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
@@ -708,6 +746,7 @@ NAVIGATE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$NAVIGATE_ACTION_REL"
 PLACE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$PLACE_ACTION_REL"
 BREAK_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BREAK_ACTION_REL"
 BUILD_FROM_PLAN_ACTION_DEST="$MINDCRAFT_DIR_ABS/$BUILD_FROM_PLAN_ACTION_REL"
+PLAN_AND_BUILD_ACTION_DEST="$MINDCRAFT_DIR_ABS/$PLAN_AND_BUILD_ACTION_REL"
 EXECUTE_CODE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$EXECUTE_CODE_ACTION_REL"
 OBSERVE_ACTION_DEST="$MINDCRAFT_DIR_ABS/$OBSERVE_ACTION_REL"
 PLACE_HERE_GUARD_DEST="$MINDCRAFT_DIR_ABS/$PLACE_HERE_GUARD_REL"
@@ -719,6 +758,8 @@ SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
 ACTION_INTERRUPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_INTERRUPTION_SKILL_REL"
 LMSTUDIO_USAGE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$LMSTUDIO_USAGE_SKILL_REL"
 HEARTBEAT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$HEARTBEAT_SKILL_REL"
+INBOX_QUEUE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$INBOX_QUEUE_SKILL_REL"
+ACTION_QUEUE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_QUEUE_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
     "$(dirname -- "$TIMELINE_EMITTER_DEST")" \
@@ -729,6 +770,7 @@ mkdir -p \
     "$(dirname -- "$PLACE_ACTION_DEST")" \
     "$(dirname -- "$BREAK_ACTION_DEST")" \
     "$(dirname -- "$BUILD_FROM_PLAN_ACTION_DEST")" \
+    "$(dirname -- "$PLAN_AND_BUILD_ACTION_DEST")" \
     "$(dirname -- "$EXECUTE_CODE_ACTION_DEST")" \
     "$(dirname -- "$OBSERVE_ACTION_DEST")" \
     "$(dirname -- "$PLACE_HERE_GUARD_DEST")" \
@@ -739,7 +781,9 @@ mkdir -p \
     "$(dirname -- "$SAFE_FAIL_SKILL_DEST")" \
     "$(dirname -- "$ACTION_INTERRUPTION_SKILL_DEST")" \
     "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")" \
-    "$(dirname -- "$HEARTBEAT_SKILL_DEST")"
+    "$(dirname -- "$HEARTBEAT_SKILL_DEST")" \
+    "$(dirname -- "$INBOX_QUEUE_SKILL_DEST")" \
+    "$(dirname -- "$ACTION_QUEUE_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
 cp "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_DEST"
 cp "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_DEST"
@@ -749,6 +793,7 @@ cp "$NAVIGATE_ACTION_SRC" "$NAVIGATE_ACTION_DEST"
 cp "$PLACE_ACTION_SRC" "$PLACE_ACTION_DEST"
 cp "$BREAK_ACTION_SRC" "$BREAK_ACTION_DEST"
 cp "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_DEST"
+cp "$PLAN_AND_BUILD_ACTION_SRC" "$PLAN_AND_BUILD_ACTION_DEST"
 cp "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_DEST"
 cp "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_DEST"
 cp "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_DEST"
@@ -760,6 +805,8 @@ cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
 cp "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_DEST"
 cp "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_DEST"
 cp "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_DEST"
+cp "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_DEST"
+cp "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
 ok "Copied timeline emitter → $TIMELINE_EMITTER_REL"
 ok "Copied Management review helper → $MANAGEMENT_REVIEW_REL"
@@ -769,6 +816,7 @@ ok "Copied navigate action → $NAVIGATE_ACTION_REL"
 ok "Copied place action → $PLACE_ACTION_REL"
 ok "Copied break action → $BREAK_ACTION_REL"
 ok "Copied build-from-plan action → $BUILD_FROM_PLAN_ACTION_REL"
+ok "Copied plan-and-build action → $PLAN_AND_BUILD_ACTION_REL"
 ok "Copied execute-code action → $EXECUTE_CODE_ACTION_REL"
 ok "Copied observe action → $OBSERVE_ACTION_REL"
 ok "Copied action interruption guard → $PLACE_HERE_GUARD_REL"
@@ -780,6 +828,8 @@ ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
 ok "Copied action interruption helpers → $ACTION_INTERRUPTION_SKILL_REL"
 ok "Copied LM Studio usage shim → $LMSTUDIO_USAGE_SKILL_REL"
 ok "Copied autonomous heartbeat skill → $HEARTBEAT_SKILL_REL"
+ok "Copied inbox queue skill → $INBOX_QUEUE_SKILL_REL"
+ok "Copied action queue skill → $ACTION_QUEUE_SKILL_REL"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
 if [ ! -f "$AGENT_PATH" ]; then
@@ -788,7 +838,9 @@ if [ ! -f "$AGENT_PATH" ]; then
 fi
 if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH" || \
-   grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH"; then
+   grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_INBOX_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
         fail "Could not restore pinned $AGENT_REL before patching."
@@ -801,6 +853,8 @@ if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
     AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
     AGENT_HEARTBEAT_PATCH_MARKER="$AGENT_HEARTBEAT_PATCH_MARKER" \
+    AGENT_INBOX_PATCH_MARKER="$AGENT_INBOX_PATCH_MARKER" \
+    AGENT_ACTION_QUEUE_PATCH_MARKER="$AGENT_ACTION_QUEUE_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -808,11 +862,15 @@ const path = process.env.AGENT_PATH;
 const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
 const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
 const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
+const inboxMarker = process.env.AGENT_INBOX_PATCH_MARKER;
+const actionQueueMarker = process.env.AGENT_ACTION_QUEUE_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 const importAnchor = "import { speak } from './speak.js';\n";
 const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
 const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbeat.js'; // ${heartbeatMarker}\n`;
+const inboxImportLine = `import { installInboxQueue } from './skills/inbox_queue.js'; // ${inboxMarker}\n`;
+const actionQueueImportLine = `import { installActionQueue } from './skills/action_queue.js'; // ${actionQueueMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
         throw new Error('speak import anchor not found while applying Management chat gate');
@@ -824,6 +882,26 @@ if (!source.includes(heartbeatImportLine)) {
         throw new Error('speak import anchor not found while applying autonomous heartbeat');
     }
     source = source.replace(importAnchor, importAnchor + heartbeatImportLine);
+}
+for (const [line, label] of [
+    [inboxImportLine, 'inbox queue'],
+    [actionQueueImportLine, 'action queue'],
+]) {
+    if (!source.includes(line)) {
+        if (!source.includes(importAnchor)) {
+            throw new Error(`speak import anchor not found while applying ${label}`);
+        }
+        source = source.replace(importAnchor, importAnchor + line);
+    }
+}
+
+const actionQueueCallNeedle = `installActionQueue(this.actions); // ${actionQueueMarker}`;
+if (!source.includes(actionQueueCallNeedle)) {
+    const actionsNeedle = '        this.actions = new ActionManager(this);\n';
+    if (!source.includes(actionsNeedle)) {
+        throw new Error('ActionManager construction anchor not found while applying action queue');
+    }
+    source = source.replace(actionsNeedle, actionsNeedle + `        ${actionQueueCallNeedle}\n`);
 }
 
 let methodStart = source.indexOf('    async openChat(message) {');
@@ -910,6 +988,14 @@ if (!source.includes(heartbeatCallNeedle)) {
     }
     source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
 }
+const inboxCallNeedle = `installInboxQueue(this); // ${inboxMarker}`;
+if (!source.includes(inboxCallNeedle)) {
+    const setupNeedle = '    async _setupEventHandlers(save_data, init_message) {\n';
+    if (!source.includes(setupNeedle)) {
+        throw new Error('_setupEventHandlers anchor not found while applying inbox queue');
+    }
+    source = source.replace(setupNeedle, setupNeedle + `        ${inboxCallNeedle}\n`);
+}
 writeFileSync(path, source);
 NODE
 then
@@ -942,7 +1028,7 @@ const marker = process.env.MODES_UNSTUCK_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 const stuckNeedle = `if (this.stuck_time > max_stuck_time) {`;
 const stuckPatch = `const activeActionLabel = agent.actions?.currentActionLabel || ''; // ${marker}
-            const effectiveMaxStuckTime = /action:(placeHere|collectBlocks|followPlayer)/.test(activeActionLabel) ? max_stuck_time * 3 : max_stuck_time;
+            const effectiveMaxStuckTime = /action:(placeHere|place|buildFromPlan|planAndBuild|collectBlocks|followPlayer)/.test(activeActionLabel) ? max_stuck_time * 3 : max_stuck_time;
             if (this.stuck_time > effectiveMaxStuckTime) {`;
 if (source.includes(stuckNeedle)) {
     source = source.replace(stuckNeedle, stuckPatch);
@@ -1050,6 +1136,7 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PLACE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
@@ -1071,6 +1158,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_PLACE_PATCH_MARKER="$ACTIONS_PLACE_PATCH_MARKER" \
     ACTIONS_BREAK_PATCH_MARKER="$ACTIONS_BREAK_PATCH_MARKER" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
+    ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
     ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
@@ -1084,6 +1172,7 @@ const navigateMarker = process.env.ACTIONS_NAVIGATE_PATCH_MARKER;
 const placeMarker = process.env.ACTIONS_PLACE_PATCH_MARKER;
 const breakMarker = process.env.ACTIONS_BREAK_PATCH_MARKER;
 const buildFromPlanMarker = process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER;
+const planAndBuildMarker = process.env.ACTIONS_PLAN_AND_BUILD_PATCH_MARKER;
 const executeCodeMarker = process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER;
 const observeMarker = process.env.ACTIONS_OBSERVE_PATCH_MARKER;
 const guardMarker = process.env.ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER;
@@ -1153,6 +1242,11 @@ const actions = [
         itemLine: `    buildFromPlanAction, // ${buildFromPlanMarker}`,
     },
     {
+        marker: planAndBuildMarker,
+        importLine: `import { planAndBuildAction } from './plan_and_build_action.js'; // ${planAndBuildMarker}\n`,
+        itemLine: `    planAndBuildAction, // ${planAndBuildMarker}`,
+    },
+    {
         marker: executeCodeMarker,
         importLine: `import { executeCodeAction } from './execute_code_action.js'; // ${executeCodeMarker}\n`,
         itemLine: `    executeCodeAction, // ${executeCodeMarker}`,
@@ -1175,10 +1269,10 @@ if (!source.includes(guardMarker)) {
 writeFileSync(path, source);
 NODE
 then
-    fail "Failed to inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/executeCodeAction/observeAction into $ACTIONS_REL"
+    fail "Failed to inject bridgePingAction/moveAction/navigateAction/placeAction/breakAction/buildFromPlanAction/planAndBuildAction/executeCodeAction/observeAction into $ACTIONS_REL"
     exit 1
 fi
-ok "Injected !bridgePing, !move, !navigate, !place, !break, !buildFromPlan, !executeCode, !observe into $ACTIONS_REL"
+ok "Injected !bridgePing, !move, !navigate, !place, !break, !buildFromPlan, !planAndBuild, !executeCode, !observe into $ACTIONS_REL"
 info "  Restores $ACTIONS_REL automatically when this launch exits."
 
 # (h) Runtime-version shim (identical to connect-stock-bot.sh — same marker /
@@ -1244,6 +1338,7 @@ info "Movement smoke:          ${BRIDGE_BOT_NAME} !move(\"act-1\", \"north\", 1,
 info "Building smoke:          ${BRIDGE_BOT_NAME} !place(\"act-2\", \"dirt\", {\"x\":0,\"y\":65,\"z\":0})"
 info "                         ${BRIDGE_BOT_NAME} !break(\"act-3\", {\"x\":0,\"y\":65,\"z\":0}, \"dirt\")"
 info "Build-plan smoke:        ${BRIDGE_BOT_NAME} !buildFromPlan(\"act-4\", {\"x\":0,\"y\":65,\"z\":0}, {\"blocks\":[{\"dx\":0,\"dy\":0,\"dz\":0,\"block_type\":\"dirt\"}]})"
+info "Plan-build smoke:        ${BRIDGE_BOT_NAME} !planAndBuild(\"small shared cabin\")"
 info "Code smoke:              ${BRIDGE_BOT_NAME} !executeCode(\"python\", \"print(2 + 2)\", 5)"
 info "Perception smoke:        ${BRIDGE_BOT_NAME} !observe(6, \"all\", false)"
 info "Success: the bot logs 'bridge pong: hello'; the Python bridge logs the"
