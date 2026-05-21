@@ -25,6 +25,8 @@ Store real keys only in a private `.env` or host secret store. Leave
 | `TWITCH_RTMP_URL` | no | `rtmp://live.twitch.tv/app` | Override only for alternate ingest. |
 | `YOUTUBE_RTMP_URL` | no | `rtmp://a.rtmp.youtube.com/live2` | Override only for alternate ingest. |
 | `RTMP_SMOKE_URL` | no | none | Optional local/test RTMP endpoint for `--smoke`. |
+| `TTS_AUDIO_FIFO` | `--with-tts` | `/tmp/livestream_tts.fifo` | PCM FIFO produced by the TTS stream bridge. |
+| `TTS_AUDIO_VOLUME` | no | `1.0` | Volume multiplier for mixed live TTS audio. |
 
 Useful capture/encode overrides:
 
@@ -90,6 +92,16 @@ RTMP_SMOKE_URL=rtmp://127.0.0.1/live/test \
   scripts/livestream/stream-push.sh --smoke --duration 10
 ```
 
+Mix live agent voices into the stream:
+
+```bash
+TTS_AUDIO_FIFO=/tmp/livestream_tts.fifo \
+  scripts/livestream/stream-push.sh --with-tts --duration 60
+```
+
+The TTS FIFO is created and fed by the backend bridge documented in
+[audio-tts.md](audio-tts.md).
+
 ## Acceptance Procedure
 
 1. Start the E2 Minecraft server:
@@ -149,7 +161,9 @@ reachable on the local Mac server. No model ID is passed to
   so target selection can be reviewed without leaking secrets.
 - `--smoke` uses `testsrc2` video and `sine` audio. If `RTMP_SMOKE_URL` is not
   set, the script only validates and prints the command.
+- `--with-tts` mixes live PCM from `TTS_AUDIO_FIFO` into the AAC output. See
+  [audio-tts.md](audio-tts.md) for the `tts_play` -> FIFO -> `ffmpeg` path.
 - Missing selected stream keys exit `2`; an `ffmpeg` capture/encode/push failure
   exits `3`.
-- Audio/TTS, overlays, resilience, kill-switch integration, and stream health
-  monitoring are handled by later E13 issues.
+- Overlays, resilience, kill-switch integration, and stream health monitoring
+  are handled by later E13 issues.

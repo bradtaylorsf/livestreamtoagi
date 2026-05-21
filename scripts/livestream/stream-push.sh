@@ -13,6 +13,7 @@
 #   scripts/livestream/stream-push.sh --youtube-only --duration 60
 #   scripts/livestream/stream-push.sh --dry-run
 #   scripts/livestream/stream-push.sh --smoke --dry-run
+#   scripts/livestream/stream-push.sh --with-tts --dry-run
 #   RTMP_SMOKE_URL=rtmp://127.0.0.1/live/test scripts/livestream/stream-push.sh --smoke
 #
 # Required environment for real platform pushes:
@@ -28,6 +29,9 @@
 #   CAPTURE_FPS            Output frame rate (default: 30)
 #   STREAM_VIDEO_BITRATE   libx264 target bitrate (default: 4500k)
 #   STREAM_AUDIO_BITRATE   AAC target bitrate (default: 160k)
+#   STREAM_AUDIO_SAMPLE_RATE Audio sample rate in Hz (default: 44100)
+#   TTS_AUDIO_FIFO         PCM FIFO path for --with-tts (default: $TTS_STREAM_FIFO or /tmp/livestream_tts.fifo)
+#   TTS_AUDIO_VOLUME       Volume multiplier for TTS audio (default: 1.0)
 #   AVFOUNDATION_INPUT     macOS display input (default: Capture screen 0:none)
 #   STREAM_X11_DISPLAY     Linux X11 display input (default: $DISPLAY)
 #   MC_HOST                E2 Minecraft server host for capture preflight (default: 127.0.0.1)
@@ -38,6 +42,7 @@ set -euo pipefail
 DURATION="60"
 MODE="run"
 SMOKE="0"
+WITH_TTS="0"
 TARGET_TWITCH="1"
 TARGET_YOUTUBE="1"
 TARGET_OPTION=""
@@ -62,6 +67,8 @@ VIDEO_MAXRATE="${STREAM_VIDEO_MAXRATE:-${VIDEO_BITRATE}}"
 VIDEO_BUFSIZE="${STREAM_VIDEO_BUFSIZE:-9000k}"
 AUDIO_BITRATE="${STREAM_AUDIO_BITRATE:-160k}"
 AUDIO_SAMPLE_RATE="${STREAM_AUDIO_SAMPLE_RATE:-44100}"
+TTS_AUDIO_FIFO="${TTS_AUDIO_FIFO:-${TTS_STREAM_FIFO:-/tmp/livestream_tts.fifo}}"
+TTS_AUDIO_VOLUME="${TTS_AUDIO_VOLUME:-1.0}"
 X264_PRESET="${STREAM_X264_PRESET:-veryfast}"
 AVFOUNDATION_INPUT="${AVFOUNDATION_INPUT:-Capture screen 0:none}"
 STREAM_X11_DISPLAY="${STREAM_X11_DISPLAY:-${DISPLAY:-}}"
@@ -108,6 +115,10 @@ while [ "$#" -gt 0 ]; do
             SMOKE="1"
             shift
             ;;
+        --with-tts)
+            WITH_TTS="1"
+            shift
+            ;;
         --dry-run)
             MODE="dry-run"
             shift
@@ -133,6 +144,9 @@ fi
 [[ "$AUDIO_SAMPLE_RATE" =~ ^[0-9]+$ ]] || usage_error "STREAM_AUDIO_SAMPLE_RATE must be an integer"
 if [ "$FPS" -lt 1 ] || [ "$VIDEO_WIDTH" -lt 1 ] || [ "$VIDEO_HEIGHT" -lt 1 ]; then
     usage_error "CAPTURE_FPS, CAPTURE_WIDTH, and CAPTURE_HEIGHT must be positive"
+fi
+if [ "$WITH_TTS" = "1" ] && [ ! -p "$TTS_AUDIO_FIFO" ]; then
+    usage_error "--with-tts requires TTS_AUDIO_FIFO to exist as a FIFO: ${TTS_AUDIO_FIFO}"
 fi
 GOP="$((FPS * 2))"
 
@@ -253,6 +267,8 @@ build_outputs() {
 build_ffmpeg_cmd() {
     local tee_outputs="$1"
     local backend="$2"
+    local audio_map_args=()
+    local filter_complex=""
     FFMPEG_CMD=(ffmpeg -hide_banner -loglevel info -y)
 
     if [ "$SMOKE" = "1" ]; then
@@ -282,8 +298,22 @@ build_ffmpeg_cmd() {
         esac
     fi
 
+    if [ "$WITH_TTS" = "1" ]; then
+        FFMPEG_CMD+=(
+            -thread_queue_size 1024
+            -f s16le
+            -ar "$AUDIO_SAMPLE_RATE"
+            -ac 2
+            -i "$TTS_AUDIO_FIFO"
+        )
+        filter_complex="[1:a]volume=0.001[bed];[2:a]volume=${TTS_AUDIO_VOLUME},aresample=async=1[tts];[bed][tts]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+        audio_map_args=(-filter_complex "$filter_complex" -map 0:v:0 -map "[aout]")
+    else
+        audio_map_args=(-map 0:v:0 -map 1:a:0)
+    fi
+
     FFMPEG_CMD+=(
-        -map 0:v:0 -map 1:a:0
+        "${audio_map_args[@]}"
         -vf "scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT},fps=${FPS}"
         -c:v libx264
         -preset "$X264_PRESET"
@@ -318,6 +348,11 @@ ok "E13-2 encoder + RTMP push"
 info "duration: ${DURATION}s"
 info "video:    ${VIDEO_SIZE}@${FPS}fps ${VIDEO_BITRATE} libx264/${X264_PRESET}, GOP=${GOP}"
 info "audio:    aac ${AUDIO_BITRATE} ${AUDIO_SAMPLE_RATE}Hz"
+if [ "$WITH_TTS" = "1" ]; then
+    info "tts:      fifo=${TTS_AUDIO_FIFO} volume=${TTS_AUDIO_VOLUME}"
+else
+    info "tts:      disabled"
+fi
 if [ "$SMOKE" = "1" ]; then
     info "source:   ffmpeg lavfi testsrc2 + sine"
     if [ -z "$RTMP_SMOKE_URL" ]; then

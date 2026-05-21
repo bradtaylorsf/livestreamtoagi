@@ -40,6 +40,7 @@
     "verify:memory-bridge-perf": ".venv/bin/pytest tests/backend/test_memory_bridge_perf.py -v -m \"not integration\"",
     "verify:livestream-rtmp": ".venv/bin/pytest tests/backend/test_livestream_stream_push.py -v",
     "verify:livestream-overlay": ".venv/bin/pytest tests/backend/test_livestream_stream_overlay.py -v",
+    "verify:livestream-tts": ".venv/bin/pytest tests/backend/test_tts_stream_bridge.py tests/backend/test_livestream_stream_push.py -v && scripts/livestream/verify_tts_audio.sh",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",
