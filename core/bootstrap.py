@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -30,7 +31,12 @@ from core.cost_governor import CostGovernor
 from core.database import Database
 from core.event_bus import EventBus
 from core.events.event_generator import EventGenerator
-from core.llm_client import LOCAL_LLM_BASE_URL, OpenRouterClient, refresh_pricing
+from core.llm_client import (
+    LOCAL_LLM_BASE_URL,
+    OfflineTestLLMClient,
+    OpenRouterClient,
+    refresh_pricing,
+)
 from core.management import Management
 from core.memory.archival_memory import ArchivalMemoryManager
 from core.memory.backend import MemoryBackend, select_memory_backend
@@ -197,6 +203,15 @@ def make_llm_client(
     provider_key = provider.strip().lower()
     if provider_key == "openrouter":
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not api_key.strip() and _allow_offline_test_llm():
+            logger.warning(
+                "OPENROUTER_API_KEY is unset during integration tests; "
+                "using deterministic offline LLM client"
+            )
+            return OfflineTestLLMClient(
+                cost_repo=cost_repo,
+                cost_governor=cost_governor,
+            )
         return OpenRouterClient(
             api_key=api_key,
             cost_repo=cost_repo,
@@ -230,6 +245,17 @@ def make_llm_client(
         local_model_building=local_model_building,
         passthrough_model=passthrough,
         cost_governor=cost_governor,
+    )
+
+
+def _allow_offline_test_llm() -> bool:
+    if os.environ.get("ENV", "development").strip().lower() == "production":
+        return False
+    if os.environ.get("ALLOW_OFFLINE_TEST_LLM", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
+    return "tests/integration/" in current_test or (
+        "pytest" in sys.modules and os.environ.get("PYTEST_INTEGRATION_OFFLINE_LLM") == "1"
     )
 
 
@@ -317,7 +343,7 @@ async def bootstrap_services(
     http_client = httpx.AsyncClient()
 
     provider = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
-    if provider == "openrouter":
+    if provider == "openrouter" and (api_key.strip() or not _allow_offline_test_llm()):
         await refresh_pricing(http_client)
 
     from core.event_bus import event_bus as _module_event_bus
