@@ -114,6 +114,20 @@ def test_safe_state_config_loads_holding_card_defaults() -> None:
     assert config.transition_seconds == 0.25
 
 
+def test_safe_state_config_blank_optional_values_use_defaults() -> None:
+    config = load_safe_state_config(
+        {
+            "LIVESTREAM_KILL_MODE": "",
+            "LIVESTREAM_HOLDING_CARD": "",
+            "LIVESTREAM_SAFE_TRANSITION_SECONDS": "",
+        }
+    )
+
+    assert config.kill_mode == "holding_card"
+    assert config.holding_card_path is None
+    assert config.transition_seconds == 0.0
+
+
 def test_safe_state_config_rejects_invalid_mode() -> None:
     with pytest.raises(ValueError, match="LIVESTREAM_KILL_MODE"):
         load_safe_state_config({"LIVESTREAM_KILL_MODE": "panic"})
