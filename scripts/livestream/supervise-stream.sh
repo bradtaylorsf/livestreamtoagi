@@ -33,8 +33,8 @@
 #   CRASH_LOOP_LIMIT  Max failed launches per window    (default: 5)
 #   CRASH_LOOP_WINDOW Crash-loop window, seconds        (default: 60)
 #   SUPERVISOR_LOG    Retained supervisor log file      (default: $LOG_DIR/livestream-supervisor.log)
-#   CHILD_LOG         Retained stream stdout/stderr log (default: $LOG_DIR/livestream-child.log)
-#   CHILD_PID_FILE    Live child PID file               (default: $LOG_DIR/supervise-stream-child.pid)
+#   CHILD_LOG         Retained stream stdout/stderr log (default: beside SUPERVISOR_LOG)
+#   CHILD_PID_FILE    Live child PID file               (default: beside SUPERVISOR_LOG)
 #
 # --self-test requires STREAM_CMD to point at a fast fake command so restart
 # behaviour can be verified without ffmpeg, Twitch/YouTube, or network.
@@ -78,8 +78,9 @@ else
 fi
 CRASH_LOOP_LIMIT="${CRASH_LOOP_LIMIT:-5}"
 SUPERVISOR_LOG="${SUPERVISOR_LOG:-$LOG_DIR/livestream-supervisor.log}"
-CHILD_LOG="${CHILD_LOG:-$LOG_DIR/livestream-child.log}"
-CHILD_PID_FILE="${CHILD_PID_FILE:-$LOG_DIR/supervise-stream-child.pid}"
+SUPERVISOR_LOG_DIR="$(dirname -- "$SUPERVISOR_LOG")"
+CHILD_LOG="${CHILD_LOG:-$SUPERVISOR_LOG_DIR/livestream-child.log}"
+CHILD_PID_FILE="${CHILD_PID_FILE:-$SUPERVISOR_LOG_DIR/supervise-stream-child.pid}"
 
 require_uint() {
     local name="$1"
@@ -145,7 +146,7 @@ trap on_signal INT TERM
 trap on_exit EXIT
 
 log "supervisor-started mode=${MODE} stream_cmd=${STREAM_CMD}"
-log "supervisor-config restart_delay=${RESTART_DELAY} crash_loop_limit=${CRASH_LOOP_LIMIT} crash_loop_window=${CRASH_LOOP_WINDOW} log=${SUPERVISOR_LOG} child_log=${CHILD_LOG}"
+log "supervisor-config restart_delay=${RESTART_DELAY} crash_loop_limit=${CRASH_LOOP_LIMIT} crash_loop_window=${CRASH_LOOP_WINDOW} log=${SUPERVISOR_LOG} child_log=${CHILD_LOG} child_pid_file=${CHILD_PID_FILE}"
 
 failure_count=0
 window_start=$(date +%s)
