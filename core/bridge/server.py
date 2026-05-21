@@ -50,6 +50,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -62,6 +63,7 @@ from core.bridge.contract import (
     ERR_UNSUPPORTED_SERVICE,
     BridgeRequest,
     BridgeResponse,
+    CostGateRequest,
     ErrandCompleteRequest,
     ErrandPollRequest,
     MemoryRecallRequest,
@@ -122,6 +124,7 @@ DIRECTOR_GATE_VERBS = frozenset({"director.gate"})
 ERRAND_POLL_VERBS = frozenset({"errand.poll"})
 ERRAND_COMPLETE_VERBS = frozenset({"errand.complete"})
 ERRAND_VERBS = ERRAND_POLL_VERBS | ERRAND_COMPLETE_VERBS
+COST_GATE_VERBS = frozenset({"cost.gate"})
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -378,6 +381,36 @@ def _handle_errand_complete(env: BridgeRequest) -> dict[str, Any]:
     return {"accepted": True}
 
 
+async def _handle_cost_gate(env: BridgeRequest, services: Any | None) -> dict[str, Any]:
+    payload = CostGateRequest.model_validate(env.payload)
+    governor = getattr(services, "cost_governor", None) if services is not None else None
+    if governor is None:
+        logger.warning("Bridge cost.gate served by stub because CostGovernor is unavailable")
+        return STUB_HANDLERS["cost.gate"](env)
+
+    try:
+        allowed, spend, cap = await governor.is_allowed(payload.agent_id)
+    except Exception:
+        logger.warning(
+            "Bridge cost.gate failed closed for agent=%s action=%s",
+            payload.agent_id,
+            payload.action,
+            exc_info=True,
+        )
+        return {
+            "allowed": False,
+            "reason": "cost_governor_error",
+            "remaining_budget_usd": 0.0,
+        }
+
+    remaining = max(cap - spend, Decimal("0"))
+    return {
+        "allowed": allowed,
+        "reason": "ok" if allowed else "agent_hourly_cap_exceeded",
+        "remaining_budget_usd": float(remaining),
+    }
+
+
 def _errand_poll_targets_alpha(env: BridgeRequest) -> bool:
     payload = ErrandPollRequest.model_validate(env.payload)
     return env.agent_id == "alpha" or payload.agent_id == "alpha"
@@ -479,6 +512,8 @@ async def build_bridge_response_with_services(
 
     if key in DIRECTOR_GATE_VERBS:
         return _success_response(env, await handle_director_gate(env, services))
+    if key in COST_GATE_VERBS:
+        return _success_response(env, await _handle_cost_gate(env, services))
 
     if key in ERRAND_POLL_VERBS:
         if _errand_poll_targets_alpha(env) and await _kill_switch_active(services):
