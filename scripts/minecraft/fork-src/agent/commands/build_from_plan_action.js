@@ -6,7 +6,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 import {
     blockObservation,
     classifyBreak,
@@ -490,6 +495,12 @@ export const buildFromPlanAction = {
         const bot = getBot(agent);
         const timeout = positiveNumber(timeout_ms, DEFAULT_BUILD_TIMEOUT_MS);
         const deadline = Date.now() + timeout;
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const line = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(agent, traceId, line, true);
+            return line;
+        }
 
         try {
             await ensureBridge(agent, traceId);
@@ -539,6 +550,11 @@ export const buildFromPlanAction = {
         let failureClass = null;
 
         for (const step of normalized.steps) {
+            if (bridgeIsKillActive()) {
+                const line = 'kill switch active, safe-idling [kill_switch_active]';
+                announce(agent, traceId, line, true);
+                return line;
+            }
             if (executedSteps.length >= stepLimit) {
                 failureClass = 'partial';
                 break;

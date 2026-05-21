@@ -6,7 +6,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 import {
     blockObservation,
     classifyBreak,
@@ -237,6 +242,12 @@ export const breakAction = {
         const bot = getBot(agent);
         const target = positionFrom(position);
         const requestedBlockType = normalizeBlockType(expected_block_type);
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const line = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(agent, traceId, line, true);
+            return line;
+        }
 
         try {
             await ensureBridge(agent, traceId);

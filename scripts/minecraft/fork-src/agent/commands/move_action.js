@@ -7,7 +7,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 import {
     classifyMovement,
     DEFAULT_ARRIVAL_TOLERANCE_BLOCKS,
@@ -221,6 +226,12 @@ export const moveAction = {
                 : String(action_id);
         const timeout = positiveNumber(timeout_ms, DEFAULT_MOVE_TIMEOUT_MS);
         const before = readPose(agent);
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const line = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(agent, traceId, line, true);
+            return line;
+        }
 
         try {
             await ensureBridge(agent, traceId);

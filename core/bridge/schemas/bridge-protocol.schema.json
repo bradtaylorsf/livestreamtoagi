@@ -841,6 +841,55 @@
       "title": "InventoryObservation",
       "type": "object"
     },
+    "KillStatusRequest": {
+      "additionalProperties": false,
+      "description": "``kill.status`` \u2014 query the global operator kill switch.",
+      "properties": {},
+      "title": "KillStatusRequest",
+      "type": "object"
+    },
+    "KillStatusResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "active": {
+          "description": "Whether the global kill switch is active.",
+          "title": "Active",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stable reason string when active or when status had to fail safe.",
+          "title": "Reason"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis TTL for the kill switch key, or null when absent/unknown.",
+          "title": "Ttl Seconds"
+        }
+      },
+      "required": [
+        "active"
+      ],
+      "title": "KillStatusResponse",
+      "type": "object"
+    },
     "ManagementReviewRequest": {
       "additionalProperties": false,
       "description": "``management.review`` \u2014 content-filter gate before broadcast (ADR \u00a75).",
@@ -1268,7 +1317,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.6",
+  "protocolVersion": "1.7",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -1293,6 +1342,10 @@
     "errand.poll": {
       "request": "#/$defs/ErrandPollRequest",
       "response": "#/$defs/ErrandPollResponse"
+    },
+    "kill.status": {
+      "request": "#/$defs/KillStatusRequest",
+      "response": "#/$defs/KillStatusResponse"
     },
     "management.review": {
       "request": "#/$defs/ManagementReviewRequest",

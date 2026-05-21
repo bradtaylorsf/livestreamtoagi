@@ -42,7 +42,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.bridge_harness import copy_bridge_client_with_header_ws
+from tests.integration.bridge_harness import (
+    FakePythonBridgeServer,
+    copy_bridge_client_with_header_ws,
+)
 
 
 def _strip_js_comments(src: str) -> str:
@@ -118,9 +121,9 @@ def test_client_carries_the_full_request_envelope() -> None:
     assert "agent_tier" in src and "conversation" in src
     assert "budget_bucket" in src and "'bridge'" in src
     assert "estimated_cost_usd" in src
-    # 1.6: E7-3 (#567) added errand.complete — a minor
-    # bump (ADR §3), still wire-compatible with earlier 1.x peers.
-    assert "PROTOCOL_VERSION = '1.6'" in src, "protocol version must be 1.6"
+    # 1.7: E11-5 (#598) added kill.status — a minor bump (ADR §3), still
+    # wire-compatible with earlier 1.x peers.
+    assert "PROTOCOL_VERSION = '1.7'" in src, "protocol version must be 1.7"
 
 
 def test_client_uses_bearer_auth_and_the_bridge_endpoint() -> None:
@@ -509,6 +512,103 @@ def test_server_ok_false_passes_through_the_typed_error(harness: Path, tmp_path:
     assert result["code"] == "unsupported_service", result
 
 
+_KILL_CACHE_HARNESS = r"""
+import { pathToFileURL } from 'node:url';
+
+process.on('uncaughtException', (e) => {
+    process.stdout.write(JSON.stringify({ status: 'crash', where: 'uncaught', message: String((e && e.message) || e) }) + '\n');
+    process.exit(3);
+});
+process.on('unhandledRejection', (e) => {
+    process.stdout.write(JSON.stringify({ status: 'crash', where: 'unhandledRejection', message: String((e && e.message) || e) }) + '\n');
+    process.exit(3);
+});
+
+const mod = await import(pathToFileURL(process.env.BRIDGE_MODULE).href);
+const {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+    stopKillSwitchWatch,
+} = mod;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const started = Date.now();
+startKillSwitchWatch();
+while (!bridgeIsKillActive() && Date.now() - started < 5000) {
+    await sleep(10);
+}
+
+delete process.env.MINECRAFT_BRIDGE_TOKEN;
+
+let action;
+try {
+    await callBridge({
+        service: 'action',
+        method: 'result',
+        payload: { action_id: 'cached-kill', status: 'success', detail: 'must not send' },
+        deadlineMs: 1000,
+        agentId: 'kill-cache-bot',
+    });
+    action = { status: 'ok' };
+} catch (err) {
+    action = {
+        status: 'error',
+        isBridgeClientError: err instanceof BridgeClientError,
+        code: err && err.code,
+        retryable: !!(err && err.retryable),
+    };
+}
+
+stopKillSwitchWatch();
+process.stdout.write(JSON.stringify({
+    status: 'done',
+    killActive: bridgeIsKillActive(),
+    action,
+}) + '\n');
+"""
+
+
+@requires_node
+def test_kill_status_cache_gates_action_verbs_before_socket(tmp_path: Path) -> None:
+    """Once kill.status flips the local cache, action verbs fail before token/socket use."""
+
+    bridge_module = copy_bridge_client_with_header_ws(tmp_path)
+    harness = tmp_path / "kill_cache_harness.mjs"
+    harness.write_text(_KILL_CACHE_HARNESS)
+
+    with FakePythonBridgeServer(kill_switch_active=True) as server:
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "BRIDGE_MODULE": str(bridge_module),
+            "MINECRAFT_BRIDGE_KILL_POLL_MS": "100",
+            **server.node_env(),
+        }
+        proc = subprocess.run(
+            [NODE, str(harness)],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            timeout=30,
+        )
+
+    assert proc.returncode == 0, (
+        f"node exited {proc.returncode} (kill cache gate must never crash)\n"
+        f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    )
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result["status"] == "done", result
+    assert result["killActive"] is True, result
+    assert result["action"] == {
+        "status": "error",
+        "isBridgeClientError": True,
+        "code": "kill_switch_active",
+        "retryable": True,
+    }
+
+
 @requires_node
 def test_deadline_timeout_is_structured(harness: Path, tmp_path: Path) -> None:
     """A server that accepts TCP but never completes the handshake must hit the
@@ -592,6 +692,7 @@ def test_client_declares_the_e4_5_resilience_layer() -> None:
         "MINECRAFT_BRIDGE_RECONNECT_BASE_MS",
         "MINECRAFT_BRIDGE_RECONNECT_MAX_MS",
         "MINECRAFT_BRIDGE_CIRCUIT_THRESHOLD",
+        "MINECRAFT_BRIDGE_KILL_POLL_MS",
     ):
         assert env in code, f"missing tuning env constant {env!r}"
 
@@ -607,6 +708,9 @@ def test_client_declares_the_e4_5_resilience_layer() -> None:
     # Public reachability accessor so the action layer can choose to safe-idle.
     assert "export function bridgeStatus" in code
     assert "export function bridgeIsReachable" in code
+    assert "export function bridgeIsKillActive" in code
+    assert "export function startKillSwitchWatch" in code
+    assert "export function stopKillSwitchWatch" in code
 
     # Still reference-only schema / local-only / no new dep. The ONLY top-level
     # import stays node:crypto — backoff/jitter/semaphore are hand-rolled.

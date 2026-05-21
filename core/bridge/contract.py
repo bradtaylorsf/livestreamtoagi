@@ -42,12 +42,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.6 is a
-# minor bump: E7-3 (#567) adds the `errand.complete` bridge verb so Alpha can
-# tie a verified in-world errand outcome back to its dispatcher with ✓/✗/?
-# semantics. Earlier 1.x peers remain wire-compatible because
-# `is_supported_version` gates only on the major.
-PROTOCOL_VERSION = "1.6"
+# additive-compatible within a major and fail-closed across majors. 1.7 is a
+# minor bump: E11-5 (#598) adds the `kill.status` bridge verb so Node bots can
+# poll the global kill switch and safe-idle locally. Earlier 1.x peers remain
+# wire-compatible because `is_supported_version` gates only on the major.
+PROTOCOL_VERSION = "1.7"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -327,6 +326,26 @@ class CostGateResponse(BaseModel):
     )
 
 
+class KillStatusRequest(BaseModel):
+    """``kill.status`` — query the global operator kill switch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class KillStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active: bool = Field(description="Whether the global kill switch is active.")
+    ttl_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        description="Redis TTL for the kill switch key, or null when absent/unknown.",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Stable reason string when active or when status had to fail safe.",
+    )
+
+
 class Vec3(BaseModel):
     """3D coordinate in world space or a block cell."""
 
@@ -542,16 +561,16 @@ class CodeExecuteResponse(BaseModel):
 # This is the *closed* dispatch set: anything not here is rejected with a typed
 # unsupported_service error. Keys are ADR §6 names, plus bridge.ping for the
 # ADR's first-proof round-trip and errand.* for the E7 Alpha dispatch slice.
-# Other ADR §6 services (cost.reserve, journal.event, kill.status) are
-# intentionally out of E4-2's scope — their schemas land with their owning
-# issues; the frozen #541 initial verbs remain tracked separately in
-# INITIAL_VERBS.
+# Other ADR §6 services (cost.reserve, journal.event) are intentionally out of
+# E4-2's scope — their schemas land with their owning issues; the frozen #541
+# initial verbs remain tracked separately in INITIAL_VERBS.
 SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "bridge.ping": (BridgePingRequest, BridgePingResponse),
     "memory.recall": (MemoryRecallRequest, MemoryRecallResponse),
     "memory.write": (MemoryWriteRequest, MemoryWriteResponse),
     "management.review": (ManagementReviewRequest, ManagementReviewResponse),
     "cost.gate": (CostGateRequest, CostGateResponse),
+    "kill.status": (KillStatusRequest, KillStatusResponse),
     "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
     "action.result": (ActionResultRequest, ActionResultResponse),
     "errand.poll": (ErrandPollRequest, ErrandPollResponse),
@@ -669,6 +688,8 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     ManagementReviewResponse,
     CostGateRequest,
     CostGateResponse,
+    KillStatusRequest,
+    KillStatusResponse,
     Vec3,
     PoseObservation,
     BlockObservation,

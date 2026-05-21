@@ -77,6 +77,11 @@ export class BridgeClientError extends Error {
     }
 }
 
+export function startKillSwitchWatch() {}
+export function bridgeIsKillActive() {
+    return process.env.BRIDGE_KILL_ACTIVE === '1';
+}
+
 export async function callBridge(opts = {}) {
     appendFileSync(process.env.BRIDGE_CALLS_PATH, JSON.stringify(opts) + '\\n');
     return {

@@ -395,15 +395,15 @@ def test_perception_snapshot_models_are_exported_and_report_is_backward_compatib
 
 
 def test_protocol_version_is_self_consistent() -> None:
-    # 1.6: E7-3 (#567) added errand.complete — an
+    # 1.7: E11-5 (#598) added kill.status — an
     # additive minor bump (ADR §3), same major as earlier 1.x peers.
-    assert c.PROTOCOL_VERSION == "1.6"
+    assert c.PROTOCOL_VERSION == "1.7"
     assert c.is_supported_version(c.PROTOCOL_VERSION)
-    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 6, 0)
+    assert c.parse_version(c.PROTOCOL_VERSION) == (1, 7, 0)
 
 
 @pytest.mark.parametrize(
-    "version", ["1.0", "1.3", "1.4", "1.5", "1.6", "1.0.9", "1.99.99"]
+    "version", ["1.0", "1.3", "1.4", "1.5", "1.6", "1.7", "1.0.9", "1.99.99"]
 )
 def test_additive_same_major_versions_supported(version: str) -> None:
     """ADR §3: new optional fields/verbs are minor/patch and must not break a

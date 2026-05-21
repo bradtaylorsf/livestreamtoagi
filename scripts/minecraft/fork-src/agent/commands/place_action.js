@@ -7,7 +7,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 import {
     blockObservation,
     classifyPlace,
@@ -281,6 +286,12 @@ export const placeAction = {
         const target = positionFrom(position);
         const expectedBlockType = normalizeBlockType(block_type);
         const timeout = DEFAULT_PLACE_TIMEOUT_MS;
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const line = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(agent, traceId, line, true);
+            return line;
+        }
 
         try {
             await ensureBridge(agent, traceId);

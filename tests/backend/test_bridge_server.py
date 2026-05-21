@@ -51,10 +51,13 @@ from core.bridge.server import (
     ERRAND_COMPLETE_VERBS,
     ERRAND_POLL_VERBS,
     ERRAND_VERBS,
+    KILL_STATUS_VERBS,
     MEMORY_HANDLER_VERBS,
     MEMORY_WRITE_VERBS,
     STUB_HANDLERS,
     UNKNOWN_REQUEST_ID,
+    WORLD_ACTION_ERROR_VERBS,
+    WORLD_ACTION_SAFE_IDLE_VERBS,
     build_bridge_response,
     build_bridge_response_with_services,
 )
@@ -82,9 +85,10 @@ def _fixture(verb: str, name: str) -> dict[str, Any]:
 
 
 class _KillSwitchServices:
-    def __init__(self, value: str | None) -> None:
+    def __init__(self, value: str | None, ttl: int = -2) -> None:
         self.redis = AsyncMock()
         self.redis.get = AsyncMock(return_value=value)
+        self.redis.ttl = AsyncMock(return_value=ttl)
 
 
 @pytest.fixture
@@ -292,6 +296,98 @@ async def test_alpha_errand_complete_returns_kill_switch_error() -> None:
         errand_queue.clear()
 
 
+async def test_kill_status_reports_active_state_and_ttl() -> None:
+    services = _KillSwitchServices("active", ttl=123)
+
+    response = await build_bridge_response_with_services(
+        _fixture("kill.status", "request.valid.json"),
+        services,
+    )
+
+    assert response.ok is True
+    assert response.payload == {
+        "active": True,
+        "ttl_seconds": 123,
+        "reason": "kill_switch_active",
+    }
+    services.redis.get.assert_awaited_once_with("kill_switch")
+    services.redis.ttl.assert_awaited_once_with("kill_switch")
+    c.validate_response(response, service="kill", method="status")
+
+
+async def test_kill_status_reports_inactive_without_services() -> None:
+    response = await build_bridge_response_with_services(
+        _fixture("kill.status", "request.valid.json"),
+        services=None,
+    )
+
+    assert response.ok is True
+    assert response.payload == {
+        "active": False,
+        "ttl_seconds": None,
+        "reason": None,
+    }
+    c.validate_response(response, service="kill", method="status")
+
+
+@pytest.mark.parametrize("verb", sorted(WORLD_ACTION_ERROR_VERBS))
+async def test_kill_switch_rejects_world_action_error_verbs(verb: str) -> None:
+    services = _KillSwitchServices("active", ttl=60)
+    response = await build_bridge_response_with_services(
+        _fixture(verb, "request.valid.json"),
+        services,
+    )
+
+    service, method = verb.split(".", 1)
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_KILL_SWITCH_ACTIVE
+    assert response.retryable is True
+    services.redis.get.assert_awaited_once_with("kill_switch")
+    c.validate_response(response, service=service, method=method)
+
+
+@pytest.mark.parametrize("verb", sorted(WORLD_ACTION_SAFE_IDLE_VERBS))
+async def test_kill_switch_safe_idles_poll_and_readonly_world_verbs(verb: str) -> None:
+    errand_queue.clear()
+    try:
+        if verb == "errand.poll":
+            assert errand_queue.enqueue(
+                "alpha",
+                "task-kill-switch-world-gate",
+                "inspect the farm",
+                "vera",
+                "now",
+            )
+
+        services = _KillSwitchServices("active", ttl=60)
+        response = await build_bridge_response_with_services(
+            _fixture(verb, "request.valid.json"),
+            services,
+        )
+
+        service, method = verb.split(".", 1)
+        assert response.ok is True
+        if verb == "perception.report":
+            assert response.payload == {"accepted": True}
+        else:
+            assert response.payload == {
+                "task_id": None,
+                "task": None,
+                "from_agent": None,
+                "dispatched_at_ms": None,
+                "urgency": None,
+            }
+            queued = errand_queue.poll("alpha")
+            assert queued is not None
+            assert queued.task_id == "task-kill-switch-world-gate"
+        services.redis.get.assert_awaited_once_with("kill_switch")
+        c.validate_response(response, service=service, method=method)
+    finally:
+        errand_queue.clear()
+
+
 def test_query_param_token_rejected_by_default(token_env: str, client: TestClient) -> None:
     """Bearer-in-URL auth is disabled by default to avoid token leakage."""
     with pytest.raises(WebSocketDisconnect) as exc:
@@ -438,6 +534,18 @@ def test_build_bridge_response_returns_typed_error_for_code_path() -> None:
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
+def test_build_bridge_response_handles_kill_status_without_services() -> None:
+    request = _fixture("kill.status", "request.valid.json")
+    response = build_bridge_response(request)
+    assert response.ok is True
+    assert response.payload == {
+        "active": False,
+        "ttl_seconds": None,
+        "reason": None,
+    }
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
 def test_build_bridge_response_rejects_bad_envelope() -> None:
     response = build_bridge_response("definitely not an envelope")
     assert response.ok is False
@@ -458,12 +566,14 @@ def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.recall"} == MEMORY_HANDLER_VERBS
     assert {"memory.write"} == MEMORY_WRITE_VERBS
     assert {"code.execute"} == CODE_EXECUTE_VERBS
+    assert {"kill.status"} == KILL_STATUS_VERBS
     assert {"errand.poll"} == ERRAND_POLL_VERBS
     assert {"errand.complete"} == ERRAND_COMPLETE_VERBS
     assert {"errand.poll", "errand.complete"} == ERRAND_VERBS
     assert "memory.recall" not in STUB_HANDLERS
     assert "memory.write" not in STUB_HANDLERS
     assert "code.execute" not in STUB_HANDLERS
+    assert "kill.status" not in STUB_HANDLERS
     assert "errand.poll" not in STUB_HANDLERS
     assert "errand.complete" not in STUB_HANDLERS
     handled = (
@@ -471,6 +581,7 @@ def test_handlers_match_closed_registry_exactly() -> None:
         | set(MEMORY_HANDLER_VERBS)
         | set(MEMORY_WRITE_VERBS)
         | set(CODE_EXECUTE_VERBS)
+        | set(KILL_STATUS_VERBS)
         | set(ERRAND_VERBS)
     )
     assert handled == set(c.SERVICE_REGISTRY)
