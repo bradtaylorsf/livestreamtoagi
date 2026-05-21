@@ -4,13 +4,36 @@ import asyncio
 import logging
 import os
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import redis.asyncio as aioredis
+from redis.exceptions import AuthenticationError
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_REDIS_URL = "redis://localhost:6381"
+DEFAULT_REDIS_PASSWORD = "devpassword"
+
+
+def _url_has_password(url: str) -> bool:
+    return urlparse(url).password is not None
+
+
+def _url_with_password(url: str, password: str) -> str:
+    parsed = urlparse(url)
+    if not password or parsed.password is not None:
+        return url
+
+    hostname = parsed.hostname or ""
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    if parsed.port:
+        hostname = f"{hostname}:{parsed.port}"
+
+    username = quote(parsed.username or "", safe="")
+    quoted_password = quote(password, safe="")
+    credentials = f"{username}:{quoted_password}" if username else f":{quoted_password}"
+    return urlunparse(parsed._replace(netloc=f"{credentials}@{hostname}"))
 
 
 class RedisClient:
@@ -28,7 +51,8 @@ class RedisClient:
 
     async def connect(self, *, retries: int = 3, delay: float = 2.0) -> None:
         """Connect to Redis with retry logic."""
-        for attempt in range(1, retries + 1):
+        attempt = 1
+        while attempt <= retries:
             try:
                 self._client = aioredis.from_url(
                     self.url,
@@ -41,6 +65,25 @@ class RedisClient:
                 safe_url = urlunparse(parsed._replace(netloc=netloc))
                 logger.info("Redis connected at %s", safe_url)
                 return
+            except AuthenticationError as exc:
+                fallback_password = os.environ.get("REDIS_PASSWORD") or DEFAULT_REDIS_PASSWORD
+                if not _url_has_password(self.url):
+                    self.url = _url_with_password(self.url, fallback_password)
+                    if self._client is not None:
+                        await self._client.aclose()
+                        self._client = None
+                    logger.warning(
+                        "Redis requested authentication; retrying with REDIS_PASSWORD because "
+                        "REDIS_URL has no credentials"
+                    )
+                    continue
+                if attempt == retries:
+                    raise ConnectionError(
+                        f"Failed to connect to Redis after {retries} attempts: {exc}"
+                    ) from exc
+                logger.warning("Redis connect attempt %d/%d failed: %s", attempt, retries, exc)
+                await asyncio.sleep(delay)
+                attempt += 1
             except (OSError, aioredis.RedisError) as exc:
                 if attempt == retries:
                     raise ConnectionError(
@@ -48,6 +91,7 @@ class RedisClient:
                     ) from exc
                 logger.warning("Redis connect attempt %d/%d failed: %s", attempt, retries, exc)
                 await asyncio.sleep(delay)
+                attempt += 1
 
     async def disconnect(self) -> None:
         """Close the Redis connection."""
