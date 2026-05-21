@@ -32,6 +32,8 @@ def _load_builder() -> ModuleType:
 def _copy_fixture(tmp_path: Path) -> Path:
     run_dir = tmp_path / "run"
     shutil.copytree(FIXTURE, run_dir)
+    for artifact in ("timeline.ndjson", "timeline-totals.json", "monitor.html"):
+        (run_dir / artifact).unlink(missing_ok=True)
     return run_dir
 
 

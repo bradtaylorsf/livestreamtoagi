@@ -1,0 +1,1207 @@
+#!/usr/bin/env python3
+"""Render a local cohort monitor for embodied Minecraft soak evidence."""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import os
+import re
+import sys
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+DEFAULT_STALL_SECONDS = 120
+DEFAULT_REPEAT_BLANK_COUNT = 3
+DEFAULT_REPEAT_COMMAND_COUNT = 3
+DEFAULT_RESTART_RECENT_SECONDS = 300
+DEFAULT_STUCK_LOOP_COUNT = 3
+DEFAULT_LLM_IDLE_SECONDS = 120
+DEFAULT_FEED_LIMIT = 80
+
+ACTIVE_EVENT_TYPES = {
+    "chat.public",
+    "llm.request",
+    "llm.response",
+    "action.intent",
+    "action.start",
+    "action.result",
+}
+COMMAND_RE = re.compile(r"!\w+\s*(?:\([^)]*\))?", re.DOTALL)
+RESTART_RE = re.compile(
+    r"\b(?:restart(?:ed|ing)?|reconnect(?:ed|ing)?|disconnect(?:ed)?|exited|"
+    r"shutdown|kicked|crash(?:ed)?|terminated)\b",
+    re.IGNORECASE,
+)
+STUCK_RE = re.compile(
+    r"\b(?:blocked|unreachable|stuck|path(?:finding)? failed|path not found|timeout|timed out)\b",
+    re.IGNORECASE,
+)
+BLANK_RE = re.compile(r"\b(?:blank|empty)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class WarningThresholds:
+    stall_seconds: int = DEFAULT_STALL_SECONDS
+    repeated_blank_count: int = DEFAULT_REPEAT_BLANK_COUNT
+    repeated_command_count: int = DEFAULT_REPEAT_COMMAND_COUNT
+    restart_recent_seconds: int = DEFAULT_RESTART_RECENT_SECONDS
+    stuck_loop_count: int = DEFAULT_STUCK_LOOP_COUNT
+    llm_idle_seconds: int = DEFAULT_LLM_IDLE_SECONDS
+
+
+def isoformat_z(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso_ts(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw.replace(" ", "T"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def parse_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(1, value)
+
+
+def thresholds_from_env() -> WarningThresholds:
+    return WarningThresholds(
+        stall_seconds=parse_int_env("SOAK_MONITOR_STALL_SECONDS", DEFAULT_STALL_SECONDS),
+        repeated_blank_count=parse_int_env(
+            "SOAK_MONITOR_REPEAT_BLANK_COUNT", DEFAULT_REPEAT_BLANK_COUNT
+        ),
+        repeated_command_count=parse_int_env(
+            "SOAK_MONITOR_REPEAT_COMMAND_COUNT", DEFAULT_REPEAT_COMMAND_COUNT
+        ),
+        restart_recent_seconds=parse_int_env(
+            "SOAK_MONITOR_RESTART_RECENT_SECONDS", DEFAULT_RESTART_RECENT_SECONDS
+        ),
+        stuck_loop_count=parse_int_env("SOAK_MONITOR_STUCK_LOOP_COUNT", DEFAULT_STUCK_LOOP_COUNT),
+        llm_idle_seconds=parse_int_env("SOAK_MONITOR_LLM_IDLE_SECONDS", DEFAULT_LLM_IDLE_SECONDS),
+    )
+
+
+def read_ndjson(path: Path) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    if not path.exists():
+        return events
+    for line_no, line in enumerate(
+        path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            events.append(
+                {
+                    "ts": None,
+                    "seq": line_no,
+                    "event_type": "error",
+                    "agent": None,
+                    "source": str(path),
+                    "payload": {
+                        "class": "malformed_monitor_input",
+                        "line": line_no,
+                        "text": clip(line),
+                    },
+                }
+            )
+            continue
+        if isinstance(data, dict):
+            events.append(data)
+    return events
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def parse_metadata_env(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    metadata: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        metadata[key.strip()] = value.strip()
+    return metadata
+
+
+def parse_summary_fields(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    fields: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if ":" not in raw_line:
+            continue
+        key, value = raw_line.split(":", 1)
+        key = key.strip()
+        if key in {"start_utc", "end_utc", "planned_duration_hours"}:
+            fields[key] = value.strip()
+    return fields
+
+
+def ensure_timeline_artifacts(run_dir: Path, *, rebuild: bool = False) -> tuple[Path, Path]:
+    timeline_path = run_dir / "timeline.ndjson"
+    totals_path = run_dir / "timeline-totals.json"
+    if timeline_path.exists() and not rebuild:
+        return timeline_path, totals_path
+
+    has_sources = any((run_dir / name).is_dir() for name in ("bots", "logs", "timeline-raw"))
+    if not has_sources:
+        if timeline_path.exists():
+            return timeline_path, totals_path
+        raise FileNotFoundError(
+            f"{timeline_path} does not exist and no raw soak evidence is present"
+        )
+
+    import build_timeline
+
+    result = build_timeline.build_timeline(run_dir)
+    return build_timeline.write_artifacts(run_dir, result)
+
+
+def event_ts(event: dict[str, Any]) -> datetime | None:
+    return parse_iso_ts(event.get("ts") or event.get("timestamp"))
+
+
+def event_agent(event: dict[str, Any]) -> str | None:
+    raw = event.get("agent") or event.get("agent_id")
+    if raw is None:
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            raw = payload.get("agent") or payload.get("agent_id")
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    return text or None
+
+
+def payload(event: dict[str, Any]) -> dict[str, Any]:
+    value = event.get("payload")
+    return value if isinstance(value, dict) else {}
+
+
+def event_category(event_type: str) -> str:
+    if event_type == "chat.public":
+        return "chat"
+    if event_type.startswith("llm."):
+        return "llm"
+    if event_type.startswith("action."):
+        return "action"
+    if event_type == "state.sample":
+        return "movement"
+    if event_type == "error":
+        return "error"
+    if event_type == "lifecycle":
+        return "lifecycle"
+    return "lifecycle"
+
+
+def display_agent(agent: str | None) -> str:
+    if not agent:
+        return "Cohort"
+    return "-".join(part.capitalize() for part in agent.split("-"))
+
+
+def clip(value: Any, limit: int = 180) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
+
+
+def human_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "n/a"
+    remaining = max(0, int(seconds))
+    hours, remaining = divmod(remaining, 3600)
+    minutes, secs = divmod(remaining, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def parse_duration_seconds(
+    metadata: dict[str, str], start: datetime | None, planned_end: datetime | None
+) -> int | None:
+    raw_seconds = metadata.get("duration_seconds")
+    if raw_seconds:
+        try:
+            return int(float(raw_seconds))
+        except ValueError:
+            pass
+    raw_hours = metadata.get("duration_hours") or metadata.get("planned_duration_hours")
+    if raw_hours:
+        try:
+            return int(float(raw_hours) * 3600)
+        except ValueError:
+            pass
+    if start and planned_end:
+        return max(0, int((planned_end - start).total_seconds()))
+    return None
+
+
+def event_sort_key(event: dict[str, Any]) -> tuple[datetime, int, str]:
+    ts = event_ts(event) or datetime(1970, 1, 1, tzinfo=UTC)
+    seq = event.get("seq")
+    try:
+        seq_value = int(seq)
+    except (TypeError, ValueError):
+        seq_value = 0
+    return ts, seq_value, str(event.get("event_id") or "")
+
+
+def token_bucket(value: Any) -> dict[str, int]:
+    source = value if isinstance(value, dict) else {}
+    return {
+        "requests": int(source.get("requests") or 0),
+        "prompt_tokens": int(source.get("prompt_tokens") or 0),
+        "completion_tokens": int(source.get("completion_tokens") or 0),
+        "total_tokens": int(source.get("total_tokens") or source.get("total") or 0),
+    }
+
+
+def tokens_from_events(events: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    by_request: dict[str, dict[str, Any]] = {}
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        if not event_type.startswith("llm."):
+            continue
+        agent = event_agent(event) or "unknown"
+        event_payload = payload(event)
+        key = f"{agent}:{event.get('trace_id') or event.get('event_id') or event_sort_key(event)}"
+        if event_type == "llm.response" or key not in by_request:
+            by_request[key] = {
+                "agent": agent,
+                "prompt_tokens": int(event_payload.get("prompt_tokens") or 0),
+                "completion_tokens": int(event_payload.get("completion_tokens") or 0),
+                "total_tokens": int(event_payload.get("total_tokens") or 0),
+            }
+
+    totals: dict[str, dict[str, int]] = {}
+    for usage in by_request.values():
+        agent = str(usage["agent"])
+        target = totals.setdefault(
+            agent,
+            {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        )
+        target["requests"] += 1
+        target["prompt_tokens"] += int(usage["prompt_tokens"])
+        target["completion_tokens"] += int(usage["completion_tokens"])
+        target["total_tokens"] += int(usage["total_tokens"])
+    return totals
+
+
+def command_signature(event: dict[str, Any]) -> str | None:
+    event_payload = payload(event)
+    commands = event_payload.get("commands")
+    if isinstance(commands, list) and commands:
+        return " | ".join(
+            normalize_command(command) for command in commands if str(command).strip()
+        )
+    if isinstance(commands, str) and commands.strip():
+        return normalize_command(commands)
+    for key in ("command", "text", "detail"):
+        value = event_payload.get(key)
+        if not isinstance(value, str):
+            continue
+        matches = COMMAND_RE.findall(value)
+        if matches:
+            return " | ".join(normalize_command(match) for match in matches)
+    return None
+
+
+def normalize_command(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value).strip())
+
+
+def is_blank_llm_response(event: dict[str, Any]) -> bool:
+    event_payload = payload(event)
+    outcome_text = " ".join(
+        str(event_payload.get(key) or "") for key in ("outcome", "class", "error", "reason")
+    )
+    if BLANK_RE.search(outcome_text):
+        return True
+
+    response_keys = [
+        key
+        for key in ("completion", "response", "response_text", "output", "text", "message")
+        if key in event_payload
+    ]
+    if response_keys:
+        return all(not str(event_payload.get(key) or "").strip() for key in response_keys)
+    return False
+
+
+def is_restart_lifecycle(event: dict[str, Any]) -> bool:
+    if str(event.get("event_type") or "") != "lifecycle":
+        return False
+    return RESTART_RE.search(json.dumps(payload(event), sort_keys=True, default=str)) is not None
+
+
+def is_stuck_action_result(event: dict[str, Any]) -> bool:
+    if str(event.get("event_type") or "") != "action.result":
+        return False
+    event_payload = payload(event)
+    text = " ".join(
+        str(event_payload.get(key) or "")
+        for key in ("outcome", "status", "class", "detail", "text")
+    )
+    return STUCK_RE.search(text) is not None
+
+
+def format_position(event_payload: dict[str, Any]) -> str:
+    position = (
+        event_payload.get("position") or event_payload.get("pos") or event_payload.get("location")
+    )
+    if isinstance(position, dict):
+        x = position.get("x")
+        y = position.get("y")
+        z = position.get("z")
+        if x is not None and y is not None and z is not None:
+            return f"x={x}, y={y}, z={z}"
+    return clip(position or event_payload.get("text") or "state sample")
+
+
+def event_summary(event: dict[str, Any]) -> str:
+    event_type = str(event.get("event_type") or "")
+    event_payload = payload(event)
+    if event_type == "chat.public":
+        speaker = event_payload.get("speaker") or event_agent(event)
+        return clip(f"{speaker}: {event_payload.get('message', '')}")
+    if event_type == "action.intent":
+        signature = command_signature(event)
+        return clip(signature or event_payload.get("text") or "intended action")
+    if event_type == "action.start":
+        return clip(
+            f"{event_payload.get('action') or 'action'} started {event_payload.get('detail') or ''}"
+        )
+    if event_type == "action.result":
+        outcome = event_payload.get("outcome") or event_payload.get("status") or "result"
+        action = event_payload.get("action") or "action"
+        return clip(f"{action}: {outcome} {event_payload.get('detail') or ''}")
+    if event_type == "llm.request":
+        model = event_payload.get("model") or "unknown model"
+        purpose = event_payload.get("purpose") or event_payload.get("reason") or "request"
+        tokens = event_payload.get("prompt_tokens") or event_payload.get("total_tokens") or 0
+        return clip(f"{model} {purpose}; prompt tokens {tokens}")
+    if event_type == "llm.response":
+        model = event_payload.get("model") or "unknown model"
+        outcome = event_payload.get("outcome") or "response"
+        latency = event_payload.get("latency_ms")
+        tokens = event_payload.get("total_tokens") or 0
+        latency_text = f"; {latency}ms" if latency not in (None, "") else ""
+        return clip(f"{model} {outcome}{latency_text}; {tokens} tokens")
+    if event_type == "state.sample":
+        return format_position(event_payload)
+    if event_type == "error":
+        return clip(
+            f"{event_payload.get('class') or 'error'}: {event_payload.get('text') or event_payload.get('message') or ''}"
+        )
+    if event_type == "lifecycle":
+        return clip(event_payload.get("text") or event_payload.get("status") or "lifecycle")
+    return clip(event_payload)
+
+
+def latest_event(events: list[dict[str, Any]], event_type: str) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if event.get("event_type") == event_type:
+            return event
+    return None
+
+
+def count_consecutive(items: list[Any], predicate) -> int:  # type: ignore[no-untyped-def]
+    count = 0
+    for item in reversed(items):
+        if not predicate(item):
+            break
+        count += 1
+    return count
+
+
+def warning(code: str, label: str, detail: str) -> dict[str, str]:
+    return {"code": code, "label": label, "detail": detail}
+
+
+def build_llm_feed(events: list[dict[str, Any]], feed_limit: int) -> list[dict[str, Any]]:
+    requests: dict[str, dict[str, Any]] = {}
+    responses: dict[str, dict[str, Any]] = {}
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        if not event_type.startswith("llm."):
+            continue
+        agent = event_agent(event) or "unknown"
+        key = f"{agent}:{event.get('trace_id') or event.get('event_id') or event_sort_key(event)}"
+        if event_type == "llm.request":
+            requests[key] = event
+        elif event_type == "llm.response":
+            responses[key] = event
+
+    keys = set(requests) | set(responses)
+    rows: list[dict[str, Any]] = []
+    for key in keys:
+        request = requests.get(key)
+        response = responses.get(key)
+        source = response or request
+        if source is None:
+            continue
+        request_payload = payload(request or {})
+        response_payload = payload(response or {})
+        source_payload = payload(source)
+        ts = event_ts(source)
+        rows.append(
+            {
+                "ts": isoformat_z(ts) if ts else "",
+                "agent": display_agent(event_agent(source)),
+                "model": str(
+                    response_payload.get("model") or request_payload.get("model") or "unknown"
+                ),
+                "purpose": str(
+                    request_payload.get("purpose")
+                    or request_payload.get("reason")
+                    or response_payload.get("purpose")
+                    or response_payload.get("reason")
+                    or "request"
+                ),
+                "latency_ms": response_payload.get("latency_ms"),
+                "tokens": int(
+                    response_payload.get("total_tokens")
+                    or source_payload.get("total_tokens")
+                    or request_payload.get("prompt_tokens")
+                    or 0
+                ),
+                "outcome": str(
+                    response_payload.get("outcome") or request_payload.get("outcome") or "started"
+                ),
+                "category": "llm",
+            }
+        )
+    return sorted(rows, key=lambda row: row.get("ts") or "", reverse=True)[:feed_limit]
+
+
+def row_from_event(event: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(event.get("event_type") or "unknown")
+    ts = event_ts(event)
+    return {
+        "ts": isoformat_z(ts) if ts else "",
+        "agent": display_agent(event_agent(event)),
+        "event_type": event_type,
+        "category": event_category(event_type),
+        "summary": event_summary(event),
+    }
+
+
+def build_monitor_model(
+    run_dir: Path,
+    events: list[dict[str, Any]],
+    totals: dict[str, Any] | None = None,
+    metadata: dict[str, str] | None = None,
+    *,
+    now: datetime | None = None,
+    thresholds: WarningThresholds | None = None,
+    feed_limit: int = DEFAULT_FEED_LIMIT,
+) -> dict[str, Any]:
+    totals = totals or {}
+    metadata = metadata or {}
+    thresholds = thresholds or thresholds_from_env()
+    now = (now or datetime.now(UTC)).astimezone(UTC)
+    sorted_events = sorted(events, key=event_sort_key)
+
+    summary_fields = parse_summary_fields(run_dir / "summary.txt")
+    start = parse_iso_ts(metadata.get("start_utc") or summary_fields.get("start_utc"))
+    planned_end = parse_iso_ts(metadata.get("planned_end_utc"))
+    actual_end = parse_iso_ts(metadata.get("end_utc") or summary_fields.get("end_utc"))
+    planned_seconds = parse_duration_seconds({**summary_fields, **metadata}, start, planned_end)
+    reference_time = actual_end or now
+    elapsed_seconds = int((reference_time - start).total_seconds()) if start else None
+
+    tokens_by_agent = {
+        str(agent).lower(): token_bucket(bucket)
+        for agent, bucket in (
+            totals.get("tokens_by_agent") if isinstance(totals.get("tokens_by_agent"), dict) else {}
+        ).items()
+    }
+    event_tokens_by_agent = tokens_from_events(sorted_events)
+    for agent, bucket in event_tokens_by_agent.items():
+        if bucket["total_tokens"] > tokens_by_agent.get(agent, {}).get("total_tokens", -1):
+            tokens_by_agent[agent] = bucket
+
+    metadata_agents = [
+        item.strip().lower()
+        for item in (metadata.get("cost_agents") or metadata.get("bots") or "").split()
+        if item.strip()
+    ]
+    agents = sorted(
+        {
+            *(agent for agent in metadata_agents if agent != "bridge"),
+            *(agent for agent in (event_agent(event) for event in sorted_events) if agent),
+            *(agent for agent in tokens_by_agent if agent and agent != "unknown"),
+        }
+    )
+
+    per_agent_events: dict[str, list[dict[str, Any]]] = {agent: [] for agent in agents}
+    for event in sorted_events:
+        agent = event_agent(event)
+        if agent:
+            per_agent_events.setdefault(agent, []).append(event)
+    agents = sorted(per_agent_events)
+
+    cards: list[dict[str, Any]] = []
+    total_warnings = 0
+    for agent in agents:
+        agent_events = per_agent_events[agent]
+        last_activity: datetime | None = None
+        last_llm: datetime | None = None
+        latest_chat = latest_event(agent_events, "chat.public")
+        latest_state = latest_event(agent_events, "state.sample")
+        latest_result = latest_event(agent_events, "action.result")
+        latest_intent = latest_event(agent_events, "action.intent")
+        latest_action = latest_result or latest_intent
+        latest_llm_event: dict[str, Any] | None = None
+        restart_events: list[dict[str, Any]] = []
+        error_count = 0
+        llm_responses: list[dict[str, Any]] = []
+        action_intents: list[dict[str, Any]] = []
+        action_results: list[dict[str, Any]] = []
+
+        for event in agent_events:
+            event_type = str(event.get("event_type") or "")
+            ts = event_ts(event)
+            if event_type in ACTIVE_EVENT_TYPES and ts:
+                last_activity = ts
+            if event_type.startswith("llm.") and ts:
+                last_llm = ts
+                latest_llm_event = event
+            if event_type == "llm.response":
+                llm_responses.append(event)
+            elif event_type == "action.intent":
+                action_intents.append(event)
+            elif event_type == "action.result":
+                action_results.append(event)
+            elif event_type == "error":
+                error_count += 1
+            if is_restart_lifecycle(event):
+                restart_events.append(event)
+
+        idle_seconds: int | None = None
+        if last_activity:
+            idle_seconds = int((reference_time - last_activity).total_seconds())
+        elif start:
+            idle_seconds = int((reference_time - start).total_seconds())
+
+        agent_warnings: list[dict[str, str]] = []
+        if idle_seconds is not None and idle_seconds > thresholds.stall_seconds:
+            agent_warnings.append(
+                warning(
+                    "stalled",
+                    "Stalled",
+                    f"No chat, action, or LLM activity for {human_duration(idle_seconds)}",
+                )
+            )
+
+        blank_count = count_consecutive(llm_responses, is_blank_llm_response)
+        if blank_count >= thresholds.repeated_blank_count:
+            agent_warnings.append(
+                warning(
+                    "repeated_blank_response",
+                    "Blank responses",
+                    f"{blank_count} consecutive blank LLM responses",
+                )
+            )
+
+        signatures = [
+            signature
+            for signature in (command_signature(event) for event in action_intents)
+            if signature
+        ]
+        repeated_command_count = 0
+        if signatures:
+            last_signature = signatures[-1]
+            for signature in reversed(signatures):
+                if signature != last_signature:
+                    break
+                repeated_command_count += 1
+        if repeated_command_count >= thresholds.repeated_command_count:
+            agent_warnings.append(
+                warning(
+                    "repeated_command",
+                    "Repeated command",
+                    f"{repeated_command_count} consecutive {clip(signatures[-1], 80)} intents",
+                )
+            )
+
+        recent_restart = any(
+            event_ts(event)
+            and (reference_time - event_ts(event)).total_seconds()
+            <= thresholds.restart_recent_seconds
+            for event in restart_events
+        )
+        if restart_events:
+            label = "Crash/restart" if not recent_restart else "Recent restart"
+            detail = f"{len(restart_events)} lifecycle disconnect/restart event(s)"
+            agent_warnings.append(warning("crash_restart", label, detail))
+
+        stuck_count = count_consecutive(action_results, is_stuck_action_result)
+        if stuck_count >= thresholds.stuck_loop_count:
+            agent_warnings.append(
+                warning(
+                    "stuck_loop",
+                    "Stuck loop",
+                    f"{stuck_count} consecutive blocked or unreachable action results",
+                )
+            )
+
+        if last_llm is None:
+            if (
+                start
+                and elapsed_seconds is not None
+                and elapsed_seconds > thresholds.llm_idle_seconds
+            ):
+                agent_warnings.append(
+                    warning("no_recent_llm", "No recent LLM", "No LLM request or response seen")
+                )
+        elif (reference_time - last_llm).total_seconds() > thresholds.llm_idle_seconds:
+            agent_warnings.append(
+                warning(
+                    "no_recent_llm",
+                    "No recent LLM",
+                    f"Last LLM activity {human_duration((reference_time - last_llm).total_seconds())} ago",
+                )
+            )
+
+        total_warnings += len(agent_warnings)
+        token_totals = tokens_by_agent.get(
+            agent,
+            {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        )
+
+        cards.append(
+            {
+                "agent": agent,
+                "name": display_agent(agent),
+                "status": "warn" if agent_warnings else "ok",
+                "warnings": agent_warnings,
+                "latest_chat": row_from_event(latest_chat) if latest_chat else None,
+                "latest_action": row_from_event(latest_action) if latest_action else None,
+                "latest_llm": row_from_event(latest_llm_event) if latest_llm_event else None,
+                "current_state": row_from_event(latest_state) if latest_state else None,
+                "idle_seconds": idle_seconds,
+                "idle": human_duration(idle_seconds),
+                "restart_count": len(restart_events),
+                "error_count": error_count,
+                "tokens": token_totals,
+            }
+        )
+
+    all_rows = [row_from_event(event) for event in sorted_events]
+    chat_feed = [row for row in all_rows if row["event_type"] == "chat.public"][-feed_limit:]
+    action_feed = [row for row in all_rows if row["category"] == "action"][-feed_limit:]
+    timeline_feed = all_rows[-feed_limit:]
+
+    status = "completed" if actual_end else "in progress"
+    if not actual_end and planned_end and now > planned_end:
+        status = "past planned end"
+
+    return {
+        "run": {
+            "run_dir": str(run_dir),
+            "status": status,
+            "generated_at_utc": isoformat_z(now),
+            "start_utc": isoformat_z(start) if start else "",
+            "planned_end_utc": isoformat_z(planned_end) if planned_end else "",
+            "end_utc": isoformat_z(actual_end) if actual_end else "",
+            "elapsed": human_duration(elapsed_seconds),
+            "planned": human_duration(planned_seconds),
+            "event_count": len(sorted_events),
+            "agent_count": len(cards),
+            "warning_count": total_warnings,
+        },
+        "thresholds": thresholds.__dict__,
+        "agents": cards,
+        "feeds": {
+            "chat": list(reversed(chat_feed)),
+            "action": list(reversed(action_feed)),
+            "llm": build_llm_feed(sorted_events, feed_limit),
+            "timeline": list(reversed(timeline_feed)),
+        },
+    }
+
+
+def esc(value: Any) -> str:
+    return html.escape(str(value or ""), quote=True)
+
+
+def render_badges(warnings: list[dict[str, str]]) -> str:
+    if not warnings:
+        return '<span class="badge badge-ok">Clear</span>'
+    return "".join(
+        f'<span class="badge badge-warn" data-warning="{esc(item["code"])}" title="{esc(item["detail"])}">{esc(item["label"])}</span>'
+        for item in warnings
+    )
+
+
+def render_card_line(label: str, item: dict[str, Any] | None, empty: str) -> str:
+    value = item["summary"] if item else empty
+    return f'<div class="card-line"><dt>{esc(label)}</dt><dd>{esc(value)}</dd></div>'
+
+
+def render_agent_cards(agents: list[dict[str, Any]]) -> str:
+    if not agents:
+        return '<p class="empty">No agent events found in the timeline.</p>'
+    cards: list[str] = []
+    for agent in agents:
+        tokens = agent["tokens"]
+        cards.append(
+            f"""
+            <article class="agent-card status-{esc(agent["status"])}">
+              <div class="agent-card-head">
+                <h2>{esc(agent["name"])}</h2>
+                <span class="status-pill">{esc(agent["status"])}</span>
+              </div>
+              <div class="badges">{render_badges(agent["warnings"])}</div>
+              <dl>
+                {render_card_line("Latest chat", agent["latest_chat"], "No public chat")}
+                {render_card_line("Latest action", agent["latest_action"], "No action result")}
+                {render_card_line("Latest LLM", agent["latest_llm"], "No LLM activity")}
+                {render_card_line("State", agent["current_state"], "No state sample")}
+              </dl>
+              <div class="metrics">
+                <div><strong>{esc(agent["idle"])}</strong><span>idle</span></div>
+                <div><strong>{agent["restart_count"]}</strong><span>restarts</span></div>
+                <div><strong>{agent["error_count"]}</strong><span>errors</span></div>
+                <div><strong>{tokens["total_tokens"]}</strong><span>tokens</span></div>
+              </div>
+            </article>
+            """
+        )
+    return "\n".join(cards)
+
+
+def render_feed_rows(
+    rows: list[dict[str, Any]], *, columns: tuple[str, ...] = ("ts", "agent", "summary")
+) -> str:
+    if not rows:
+        return '<tr><td class="empty-row" colspan="4">No events</td></tr>'
+    html_rows: list[str] = []
+    for row in rows:
+        category = row.get("category") or "lifecycle"
+        if columns == ("ts", "agent", "model", "purpose", "latency_ms", "tokens", "outcome"):
+            latency = "" if row.get("latency_ms") in (None, "") else f"{row.get('latency_ms')}ms"
+            html_rows.append(
+                f"""
+                <tr data-category="{esc(category)}">
+                  <td>{esc(row.get("ts"))}</td>
+                  <td>{esc(row.get("agent"))}</td>
+                  <td>{esc(row.get("model"))}</td>
+                  <td>{esc(row.get("purpose"))}</td>
+                  <td>{esc(latency)}</td>
+                  <td>{esc(row.get("tokens"))}</td>
+                  <td>{esc(row.get("outcome"))}</td>
+                </tr>
+                """
+            )
+        elif columns == ("ts", "category", "agent", "event_type", "summary"):
+            html_rows.append(
+                f"""
+                <tr data-category="{esc(category)}">
+                  <td>{esc(row.get("ts"))}</td>
+                  <td><span class="category-tag">{esc(category)}</span></td>
+                  <td>{esc(row.get("agent"))}</td>
+                  <td>{esc(row.get("event_type"))}</td>
+                  <td>{esc(row.get("summary"))}</td>
+                </tr>
+                """
+            )
+        else:
+            html_rows.append(
+                f"""
+                <tr data-category="{esc(category)}">
+                  <td>{esc(row.get("ts"))}</td>
+                  <td>{esc(row.get("agent"))}</td>
+                  <td>{esc(row.get("summary"))}</td>
+                </tr>
+                """
+            )
+    return "\n".join(html_rows)
+
+
+def render_monitor_html(model: dict[str, Any]) -> str:
+    run = model["run"]
+    data_blob = json.dumps(model, sort_keys=True, separators=(",", ":")).replace("</", "<\\/")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minecraft Cohort Monitor</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #1d2430;
+      --muted: #617085;
+      --line: #d7dde6;
+      --ok: #1b7f4c;
+      --warn: #b04700;
+      --warn-bg: #fff0df;
+      --ok-bg: #e8f6ef;
+      --accent: #255ea8;
+      --accent-bg: #e8f0fb;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+    }}
+    header {{
+      padding: 24px clamp(16px, 4vw, 44px) 18px;
+      background: #172033;
+      color: #ffffff;
+    }}
+    h1, h2, h3 {{ margin: 0; letter-spacing: 0; }}
+    h1 {{ font-size: clamp(28px, 4vw, 42px); font-weight: 760; }}
+    h2 {{ font-size: 20px; }}
+    h3 {{ font-size: 17px; }}
+    main {{ padding: 22px clamp(16px, 4vw, 44px) 44px; }}
+    .run-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+      color: #d9e3f4;
+    }}
+    .run-meta span, .filterbar label, .badge, .status-pill, .category-tag {{
+      border-radius: 999px;
+      padding: 5px 9px;
+      white-space: nowrap;
+    }}
+    .run-meta span {{ background: rgba(255,255,255,.12); }}
+    .run-path {{ margin-top: 12px; color: #c8d4e5; word-break: break-all; }}
+    .section-head {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin: 26px 0 12px;
+    }}
+    .agent-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }}
+    .agent-card, .feed-panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(20, 31, 48, .05);
+    }}
+    .agent-card {{ padding: 16px; }}
+    .status-warn {{ border-color: #e7b37f; }}
+    .agent-card-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+    .status-pill {{ background: var(--accent-bg); color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 12px; }}
+    .status-warn .status-pill {{ background: var(--warn-bg); color: var(--warn); }}
+    .badges {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; min-height: 27px; }}
+    .badge {{ font-size: 12px; font-weight: 700; }}
+    .badge-ok {{ background: var(--ok-bg); color: var(--ok); }}
+    .badge-warn {{ background: var(--warn-bg); color: var(--warn); }}
+    dl {{ margin: 0; }}
+    .card-line {{
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 10px;
+      padding: 7px 0;
+      border-top: 1px solid #edf0f4;
+    }}
+    .card-line dt {{ color: var(--muted); }}
+    .card-line dd {{ margin: 0; overflow-wrap: anywhere; }}
+    .metrics {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }}
+    .metrics div {{
+      background: #f3f5f8;
+      border-radius: 7px;
+      padding: 8px;
+      min-width: 0;
+    }}
+    .metrics strong {{ display: block; font-size: 16px; overflow-wrap: anywhere; }}
+    .metrics span {{ color: var(--muted); font-size: 12px; }}
+    .filterbar {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 14px;
+    }}
+    .filterbar label {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--text);
+      cursor: pointer;
+    }}
+    .filterbar input {{ margin-right: 6px; }}
+    .feed-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+      gap: 14px;
+    }}
+    .feed-panel {{ overflow: hidden; }}
+    .feed-panel h3 {{ padding: 13px 14px; border-bottom: 1px solid var(--line); }}
+    .table-scroll {{ overflow-x: auto; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 520px;
+    }}
+    th, td {{
+      text-align: left;
+      vertical-align: top;
+      padding: 9px 12px;
+      border-bottom: 1px solid #edf0f4;
+    }}
+    th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; background: #fafbfc; }}
+    td {{ overflow-wrap: anywhere; }}
+    .category-tag {{ background: #edf4ef; color: #286243; font-size: 12px; font-weight: 700; }}
+    .timeline-panel {{ margin-top: 14px; }}
+    .empty, .empty-row {{ color: var(--muted); }}
+    [hidden] {{ display: none !important; }}
+    @media (max-width: 640px) {{
+      .card-line {{ grid-template-columns: 1fr; gap: 2px; }}
+      .metrics {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      table {{ min-width: 620px; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Minecraft Cohort Monitor</h1>
+    <div class="run-meta">
+      <span>Status: {esc(run["status"])}</span>
+      <span>Elapsed: {esc(run["elapsed"])}</span>
+      <span>Planned: {esc(run["planned"])}</span>
+      <span>Agents: {esc(run["agent_count"])}</span>
+      <span>Events: {esc(run["event_count"])}</span>
+      <span>Warnings: {esc(run["warning_count"])}</span>
+      <span>Generated: {esc(run["generated_at_utc"])}</span>
+    </div>
+    <div class="run-path">{esc(run["run_dir"])}</div>
+  </header>
+  <main>
+    <section>
+      <div class="section-head"><h2>Agents</h2></div>
+      <div class="agent-grid">
+        {render_agent_cards(model["agents"])}
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Feeds</h2></div>
+      <div class="filterbar" aria-label="Timeline filters">
+        <label><input type="checkbox" data-filter="chat" checked>Chat</label>
+        <label><input type="checkbox" data-filter="llm" checked>LLM</label>
+        <label><input type="checkbox" data-filter="action" checked>Action</label>
+        <label><input type="checkbox" data-filter="movement" checked>Movement</label>
+        <label><input type="checkbox" data-filter="error" checked>Error</label>
+        <label><input type="checkbox" data-filter="lifecycle" checked>Lifecycle</label>
+      </div>
+      <div class="feed-grid">
+        <article class="feed-panel">
+          <h3>Public Chat</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Agent</th><th>Message</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["chat"])}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Actions</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Agent</th><th>Result</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["action"])}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>LLM Requests</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Agent</th><th>Model</th><th>Purpose</th><th>Latency</th><th>Tokens</th><th>Outcome</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["llm"], columns=("ts", "agent", "model", "purpose", "latency_ms", "tokens", "outcome"))}</tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+      <article class="feed-panel timeline-panel">
+        <h3>Filtered Timeline</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Time</th><th>Kind</th><th>Agent</th><th>Event</th><th>Summary</th></tr></thead>
+            <tbody>{render_feed_rows(model["feeds"]["timeline"], columns=("ts", "category", "agent", "event_type", "summary"))}</tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script id="data" type="application/json">{data_blob}</script>
+  <script>
+    (() => {{
+      const boxes = Array.from(document.querySelectorAll("[data-filter]"));
+      const apply = () => {{
+        const active = new Set(boxes.filter((box) => box.checked).map((box) => box.dataset.filter));
+        document.querySelectorAll("[data-category]").forEach((row) => {{
+          row.hidden = !active.has(row.dataset.category);
+        }});
+      }};
+      boxes.forEach((box) => box.addEventListener("change", apply));
+      apply();
+    }})();
+  </script>
+</body>
+</html>
+"""
+
+
+def build(
+    run_dir: Path,
+    *,
+    output: Path | None = None,
+    now: datetime | None = None,
+    thresholds: WarningThresholds | None = None,
+    feed_limit: int = DEFAULT_FEED_LIMIT,
+    rebuild_timeline: bool = False,
+) -> Path:
+    run_dir = run_dir.resolve()
+    timeline_path, totals_path = ensure_timeline_artifacts(run_dir, rebuild=rebuild_timeline)
+    events = read_ndjson(timeline_path)
+    totals = load_json(totals_path)
+    metadata = parse_metadata_env(run_dir / "metadata.env")
+    model = build_monitor_model(
+        run_dir,
+        events,
+        totals,
+        metadata,
+        now=now,
+        thresholds=thresholds,
+        feed_limit=max(1, feed_limit),
+    )
+    output_path = output or run_dir / "monitor.html"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_monitor_html(model), encoding="utf-8")
+    return output_path
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Render a self-contained local HTML monitor for Minecraft soak timeline evidence."
+    )
+    parser.add_argument("--run-dir", required=True, type=Path, help="Soak evidence directory")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="HTML output path. Default: <run-dir>/monitor.html",
+    )
+    parser.add_argument(
+        "--feed-limit",
+        type=int,
+        default=parse_int_env("SOAK_MONITOR_FEED_LIMIT", DEFAULT_FEED_LIMIT),
+        help=f"Maximum rows per feed. Default: {DEFAULT_FEED_LIMIT}",
+    )
+    parser.add_argument(
+        "--rebuild-timeline",
+        action="store_true",
+        help="Rebuild timeline.ndjson from raw soak evidence before rendering.",
+    )
+    parser.add_argument(
+        "--stall-seconds",
+        type=int,
+        default=None,
+        help=f"Seconds without chat/action/LLM before the stalled badge. Default: {DEFAULT_STALL_SECONDS}",
+    )
+    parser.add_argument(
+        "--llm-idle-seconds",
+        type=int,
+        default=None,
+        help=f"Seconds without LLM activity before the no-recent-LLM badge. Default: {DEFAULT_LLM_IDLE_SECONDS}",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    thresholds = thresholds_from_env()
+    if args.stall_seconds is not None or args.llm_idle_seconds is not None:
+        thresholds = WarningThresholds(
+            stall_seconds=max(1, args.stall_seconds or thresholds.stall_seconds),
+            repeated_blank_count=thresholds.repeated_blank_count,
+            repeated_command_count=thresholds.repeated_command_count,
+            restart_recent_seconds=thresholds.restart_recent_seconds,
+            stuck_loop_count=thresholds.stuck_loop_count,
+            llm_idle_seconds=max(1, args.llm_idle_seconds or thresholds.llm_idle_seconds),
+        )
+    try:
+        output_path = build(
+            args.run_dir,
+            output=args.output,
+            thresholds=thresholds,
+            feed_limit=args.feed_limit,
+            rebuild_timeline=args.rebuild_timeline,
+        )
+    except Exception as exc:
+        print(f"monitor render failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"ok monitor rendered {output_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

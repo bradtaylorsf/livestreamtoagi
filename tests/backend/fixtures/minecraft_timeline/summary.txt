@@ -1,0 +1,6 @@
+E8-8 multi-agent soak summary
+run_id: fixture-run
+start_utc: 2026-05-20T22:00:00Z
+end_utc: 2026-05-20T22:10:00Z
+planned_duration_hours: 0.1667
+bots: alpha vera

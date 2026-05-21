@@ -51,6 +51,7 @@
 # Outputs:
 #   logs/soak/<UTC timestamp>/timeline.ndjson
 #   logs/soak/<UTC timestamp>/timeline-totals.json
+#   logs/soak/<UTC timestamp>/monitor.html
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -343,7 +344,7 @@ info "server dir: ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
 info "world config: ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
 info "MindServer base port: ${SOAK_MINDSERVER_BASE_PORT}"
 info "reliability thresholds: intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO:-0.6} parse>=${SOAK_MIN_PARSE_SUCCESS:-0.8} execution>=${SOAK_MIN_EXECUTION_RATE:-0.7} verified>=${SOAK_MIN_VERIFIED_SUCCESS:-0.5}"
-info "timeline artifacts: timeline.ndjson, timeline-totals.json"
+info "timeline artifacts: timeline.ndjson, timeline-totals.json, monitor.html"
 if [ -n "${EASY_SETUP_OBSERVERS:-}${EASY_SETUP_OPERATORS:-}${EASY_SETUP_SPECTATORS:-}" ]; then
     info "human observers: players='${EASY_SETUP_OBSERVERS:-}' ops='${EASY_SETUP_OPERATORS:-}' spectators='${EASY_SETUP_SPECTATORS:-}'"
 fi
