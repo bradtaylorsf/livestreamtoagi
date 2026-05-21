@@ -74,6 +74,17 @@
 #                               disable auto elbow-room/item pickup/torch modes
 #                               and refuse destructive pathfinding.
 #                               Default: 0.
+#   MC_HEARTBEAT_ENABLED        Enable autonomous idle/stall heartbeat prompts.
+#                               Default: 1.
+#   MC_HEARTBEAT_IDLE_MS        Idle window before a high-level next-action
+#                               prompt. Default: 90000.
+#   MC_HEARTBEAT_COOLDOWN_MS    Minimum gap between heartbeat prompts.
+#                               Default: 45000.
+#   MC_HEARTBEAT_STALE_ACTION_MS
+#                               Active-action age before the heartbeat treats it
+#                               as stale. Default: 180000.
+#   MC_HEARTBEAT_MAX_NO_COMMAND Repeated blank/no-command heartbeat outcomes
+#                               before `heartbeat.halted`. Default: 3.
 #   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
 #                               bootstrap: a side Paper server, peaceful rules,
 #                               a flat grass starter meadow, resource piles,
@@ -157,6 +168,12 @@ SOAK_RELIABILITY_FAIL_ON_VIOLATION="${SOAK_RELIABILITY_FAIL_ON_VIOLATION:-1}"
 SOAK_MONITOR_STALL_SECONDS="${SOAK_MONITOR_STALL_SECONDS:-120}"
 SOAK_MONITOR_LLM_IDLE_SECONDS="${SOAK_MONITOR_LLM_IDLE_SECONDS:-120}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
+MC_HEARTBEAT_ENABLED="${MC_HEARTBEAT_ENABLED:-1}"
+MC_HEARTBEAT_TICK_MS="${MC_HEARTBEAT_TICK_MS:-5000}"
+MC_HEARTBEAT_IDLE_MS="${MC_HEARTBEAT_IDLE_MS:-90000}"
+MC_HEARTBEAT_COOLDOWN_MS="${MC_HEARTBEAT_COOLDOWN_MS:-45000}"
+MC_HEARTBEAT_STALE_ACTION_MS="${MC_HEARTBEAT_STALE_ACTION_MS:-180000}"
+MC_HEARTBEAT_MAX_NO_COMMAND="${MC_HEARTBEAT_MAX_NO_COMMAND:-3}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -346,6 +363,10 @@ verify_static() {
         fail "multi-agent soak doc must document monitor.html"
         problems=1
     }
+    grep -q 'Heartbeat & Idle Recovery' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document autonomous heartbeat idle recovery"
+        problems=1
+    }
     [ -s "$REPO_ROOT/docs/minecraft/timeline-schema.md" ] || {
         fail "timeline schema doc is missing"
         problems=1
@@ -396,6 +417,7 @@ print_plan() {
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
     info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; restarts<=${SOAK_MAX_RESTARTS_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
+    info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
@@ -550,7 +572,7 @@ drowning_re = re.compile(r"drown(ed|ing)?", re.IGNORECASE)
 stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
 restart_re = re.compile(
     r"(Exiting\.|\bprocess exited with code\s+[1-9]\d*\b|\brejoining\b|\bbot disconnected\b|"
-    r"\bsupervisor.*restart\b|\brestart(?:ed|ing)?\b)",
+    r"\bsupervisor.*restart\b|\brestart(?:ed|ing)?\b|heartbeat\.halted|heartbeat.*max-no-command)",
     re.IGNORECASE,
 )
 timestamp_re = re.compile(
@@ -965,9 +987,11 @@ printf '%s\n' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"
 PID_FILE="$RUN_DIR/pids.tsv"
 TAIL_PID_FILE="$RUN_DIR/tail-pids.txt"
 EARLY_EXIT_FILE="$RUN_DIR/early-exits.tsv"
+HEARTBEAT_HALT_FILE="$RUN_DIR/heartbeat-halts.tsv"
 : > "$PID_FILE"
 : > "$TAIL_PID_FILE"
 : > "$EARLY_EXIT_FILE"
+: > "$HEARTBEAT_HALT_FILE"
 
 SOAK_START_ISO="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 SOAK_START_EPOCH="$(date '+%s')"
@@ -1034,6 +1058,12 @@ write_metadata() {
         echo "monitor_stall_seconds=$SOAK_MONITOR_STALL_SECONDS"
         echo "monitor_llm_idle_seconds=$SOAK_MONITOR_LLM_IDLE_SECONDS"
         echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
+        echo "heartbeat_enabled=$MC_HEARTBEAT_ENABLED"
+        echo "heartbeat_tick_ms=$MC_HEARTBEAT_TICK_MS"
+        echo "heartbeat_idle_ms=$MC_HEARTBEAT_IDLE_MS"
+        echo "heartbeat_cooldown_ms=$MC_HEARTBEAT_COOLDOWN_MS"
+        echo "heartbeat_stale_action_ms=$MC_HEARTBEAT_STALE_ACTION_MS"
+        echo "heartbeat_max_no_command=$MC_HEARTBEAT_MAX_NO_COMMAND"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
         echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
@@ -1247,6 +1277,8 @@ launch_bot() {
         export LTAG_RUN_ID="$RUN_ID"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
+        export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"
         if [ -n "$bot_settings_json" ]; then
             exec env SETTINGS_JSON="$bot_settings_json" "$script"
@@ -1340,6 +1372,14 @@ monitor_bots() {
         [ "$now" -lt "$SOAK_END_EPOCH" ] || break
         while IFS="$(printf '\t')" read -r bot pid script worktree log; do
             [ -n "${pid:-}" ] || continue
+            if grep -q '"event_type":"heartbeat.halted"' "$RUN_DIR/timeline-raw/$bot.ndjson" 2> /dev/null; then
+                if ! grep -q "^${bot}[[:space:]]" "$HEARTBEAT_HALT_FILE" 2> /dev/null; then
+                    printf '%s\t%s\t%s\n' "$bot" "$pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$HEARTBEAT_HALT_FILE"
+                    fail "$bot heartbeat halted; stopping bot process for supervisor visibility"
+                    signal_process_tree "$pid" TERM
+                    had_early_exit=1
+                fi
+            fi
             if ! kill -0 "$pid" 2> /dev/null; then
                 if ! grep -q "^${bot}[[:space:]]" "$EARLY_EXIT_FILE" 2> /dev/null; then
                     printf '%s\t%s\t%s\n' "$bot" "$pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$EARLY_EXIT_FILE"
@@ -1447,11 +1487,12 @@ count_matches() {
 }
 
 write_summary() {
-    local end_iso="$1" early_count bridge_drops management_events crash_lines runaway_lines
+    local end_iso="$1" early_count heartbeat_halt_count bridge_drops management_events crash_lines runaway_lines
     early_count="$(wc -l < "$EARLY_EXIT_FILE" | tr -d ' ')"
+    heartbeat_halt_count="$(wc -l < "$HEARTBEAT_HALT_FILE" | tr -d ' ')"
     bridge_drops="$(count_matches 'bridge[-_ ]down|bridge_(connect_failed|send_failed)|bridge unavailable|WebSocket.*(closed|disconnect)|ECONN' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
     management_events="$(count_matches 'management_review_event|Management|intervene|shadow' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
-    crash_lines="$(count_matches 'uncaught|unhandled|fatal|segmentation|crash|exception' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
+    crash_lines="$(count_matches 'uncaught|unhandled|fatal|segmentation|crash|exception|heartbeat\.halted|max-no-command' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log "$RUN_DIR"/timeline-raw/*.ndjson)"
     runaway_lines="$(find "$RUN_DIR/bots" -name '*.log' -type f -exec wc -l {} \; | awk -v max="$SOAK_MAX_LOG_LINES_PER_BOT" '$1 > max {print $0}')"
     {
         echo "E8-8 multi-agent soak summary"
@@ -1463,6 +1504,7 @@ write_summary() {
         echo
         echo "Counters"
         echo "early_bot_exits: $early_count"
+        echo "heartbeat_halts: $heartbeat_halt_count"
         echo "bridge_drop_lines: $bridge_drops"
         echo "management_event_lines: $management_events"
         echo "crash_candidate_lines: $crash_lines"
@@ -1481,6 +1523,13 @@ write_summary() {
         echo "Early exits"
         if [ -s "$EARLY_EXIT_FILE" ]; then
             cat "$EARLY_EXIT_FILE"
+        else
+            echo "none"
+        fi
+        echo
+        echo "Heartbeat halts"
+        if [ -s "$HEARTBEAT_HALT_FILE" ]; then
+            cat "$HEARTBEAT_HALT_FILE"
         else
             echo "none"
         fi
@@ -1594,6 +1643,11 @@ print("events_by_type:")
 for key, value in sorted(data.get("counts_by_event_type", {}).items()):
     print(f"- {key}: {value}")
 
+heartbeat = data.get("counts_by_event_type", {})
+print("heartbeat_counts:")
+for key in ("heartbeat.fired", "heartbeat.skipped", "heartbeat.outcome", "heartbeat.halted"):
+    print(f"- {key}: {heartbeat.get(key, 0)}")
+
 print("events_by_agent:")
 for key, value in sorted(data.get("counts_by_agent", {}).items()):
     print(f"- {key}: {value}")
@@ -1692,6 +1746,10 @@ fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
+if [ -s "$HEARTBEAT_HALT_FILE" ]; then
+    fail "Soak failed: at least one bot heartbeat halted. See $HEARTBEAT_HALT_FILE"
+    exit 1
+fi
 if [ "$MONITOR_STATUS" -ne 0 ]; then
     fail "Soak failed: at least one bot exited before the planned end. See $EARLY_EXIT_FILE"
     exit 1

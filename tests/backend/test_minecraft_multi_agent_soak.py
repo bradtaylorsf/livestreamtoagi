@@ -43,7 +43,7 @@ _MINECRAFT_ENV_KEYS = {
     "WHITELIST",
     "WORLD_CONFIG",
 }
-_MINECRAFT_ENV_PREFIXES = ("LOCAL_LLM", "MC_SIM", "MINECRAFT_", "SOAK_")
+_MINECRAFT_ENV_PREFIXES = ("LOCAL_LLM", "MC_HEARTBEAT", "MC_SIM", "MINECRAFT_", "SOAK_")
 
 
 def _clean_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
@@ -113,6 +113,11 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "SOAK_MIN_MOVEMENT_PER_AGENT" in proc.stdout
     assert "SOAK_REQUIRE_BEHAVIOR_GATE" in proc.stdout
     assert "SOAK_MAX_RESTARTS_PER_AGENT" in proc.stdout
+    assert "MC_HEARTBEAT_ENABLED" in proc.stdout
+    assert "MC_HEARTBEAT_IDLE_MS" in proc.stdout
+    assert "MC_HEARTBEAT_COOLDOWN_MS" in proc.stdout
+    assert "MC_HEARTBEAT_STALE_ACTION_MS" in proc.stdout
+    assert "MC_HEARTBEAT_MAX_NO_COMMAND" in proc.stdout
     assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
@@ -134,6 +139,8 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_MIN_PARSE_SUCCESS" in wrapper.stdout
     assert "MC_SIM_MIN_EXECUTION_RATE" in wrapper.stdout
     assert "MC_SIM_MIN_VERIFIED_SUCCESS" in wrapper.stdout
+    assert "MC_SIM_HEARTBEAT_IDLE_SEC" in wrapper.stdout
+    assert "MC_SIM_HEARTBEAT_MAX_NO_COMMAND" in wrapper.stdout
     assert "timeline.ndjson" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
@@ -177,6 +184,10 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
                 "EMBEDDING_PROVIDER=deterministic",
                 "CONVERSATION_MODE=embodied",
                 "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_HEARTBEAT_IDLE_SEC=12",
+                "MC_SIM_HEARTBEAT_COOLDOWN_SEC=7",
+                "MC_SIM_HEARTBEAT_STALE_ACTION_SEC=30",
+                "MC_SIM_HEARTBEAT_MAX_NO_COMMAND=2",
             ]
         ),
         encoding="utf-8",
@@ -200,6 +211,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "slow sim actions: 1" in proc.stdout
     assert "suppress action chat: 1" in proc.stdout
     assert "safe terrain actions: 1" in proc.stdout
+    assert "heartbeat: enabled=1 idle=12s cooldown=7s stale_action=30s max_no_command=2" in proc.stdout
     assert "easy mode: 1" in proc.stdout
     assert "keep MC server running: 1" in proc.stdout
     assert "minecraft: 127.0.0.1:25566" in proc.stdout
@@ -211,6 +223,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
     assert "slow actions:   blocked (!newAction/!observe/!navigate/plan/code)" in proc.stdout
     assert "safe terrain:   enabled" in proc.stdout
+    assert "heartbeat:      enabled=1 idle=12000ms cooldown=7000ms stale_action=30000ms max_no_command=2" in proc.stdout
     assert "easy spawn:     enabled" in proc.stdout
     assert "keep MC alive:  1" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
@@ -503,6 +516,12 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "action-reliability.md" in text
     assert "timeline.ndjson" in text
     assert "timeline-totals.json" in text
+    assert "MC_HEARTBEAT_IDLE_MS" in text
+    assert "MC_HEARTBEAT_MAX_NO_COMMAND" in text
+    assert "heartbeat-halts.tsv" in text
+    assert "heartbeat_counts" in text
+    assert "heartbeat.halted" in text
+    assert "max-no-command" in text
     assert "MC_TIMELINE_NDJSON" in text
     assert "MC_RUN_DIR" in text
     assert "setup-easy-spawn.mjs" in text
@@ -732,6 +751,59 @@ def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(t
     assert "total_restart_recurrences=1" in totals
 
 
+def test_behavior_gate_counts_heartbeat_halts_as_restart_failures(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+            "!move north 0",
+            "!move north 1",
+            "!move north 2",
+            "!move north 3",
+            "!move north 4",
+        ]
+        if agent_id in {"vera", "rex"}:
+            lines.append('!place("stone", {"x": 1, "y": 64, "z": 1}, "up")')
+        if agent_id == "alpha":
+            lines.append(
+                "2026-05-20T10:00:00Z heartbeat.halted reason=max-no-command no_command_streak=3"
+            )
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MAX_RESTARTS_PER_AGENT": "0",
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 1
+    assert "agent alpha restarts expected <= 0 got 1" in proc.stderr
+
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t1\tfail" in behavior_tsv
+
+    totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
+    assert "total_restarts=1" in totals
+
+
 def test_package_json_exposes_soak_commands() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
     scripts = package["scripts"]
@@ -785,6 +857,10 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
         "action.intent",
         "action.start",
         "action.result",
+        "heartbeat.fired",
+        "heartbeat.skipped",
+        "heartbeat.outcome",
+        "heartbeat.halted",
         "state.sample",
         "error",
         "lifecycle",
@@ -809,6 +885,7 @@ def test_report_names_failure_classes_and_observed_counters() -> None:
         "Decentralized respond-vs-ignore ratio",
         "Action-command reliability",
         "Behavioral acceptance",
+        "Heartbeat halts",
     ):
         assert counter in text
 

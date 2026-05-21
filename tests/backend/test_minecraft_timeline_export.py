@@ -16,6 +16,7 @@ BUILDER = SCRIPT_DIR / "build_timeline.py"
 FIXTURE = REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_timeline"
 TIMELINE_EMITTER = SCRIPT_DIR / "fork-src" / "agent" / "bridge" / "timeline_emitter.js"
 LMSTUDIO_USAGE = SCRIPT_DIR / "fork-src" / "agent" / "skills" / "lmstudio_usage.js"
+HEARTBEAT = SCRIPT_DIR / "fork-src" / "agent" / "skills" / "heartbeat.js"
 
 
 def _load_builder() -> ModuleType:
@@ -34,6 +35,19 @@ def _copy_fixture(tmp_path: Path) -> Path:
     shutil.copytree(FIXTURE, run_dir)
     for artifact in ("timeline.ndjson", "timeline-totals.json", "monitor.html"):
         (run_dir / artifact).unlink(missing_ok=True)
+    bots_dir = run_dir / "bots"
+    bots_dir.mkdir(exist_ok=True)
+    (bots_dir / "alpha.log").write_text(
+        "\n".join(
+            [
+                "2026-05-20T22:00:04Z Alpha position x=0 y=64 z=0",
+                "2026-05-20T22:00:10Z Alpha position x=1 y=64 z=0",
+                "2026-05-20T22:00:35Z Alpha position x=2 y=64 z=0",
+                "2026-05-20T22:01:00Z Alpha disconnected after local transport restart",
+            ]
+        ),
+        encoding="utf-8",
+    )
     return run_dir
 
 
@@ -149,6 +163,56 @@ def test_missing_lmstudio_usage_is_estimated_and_marked(tmp_path: Path) -> None:
     assert result.totals["tokens"]["estimated"] == result.totals["tokens"]["total"]
 
 
+def test_heartbeat_events_are_preserved_and_counted(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    raw_dir = run_dir / "timeline-raw"
+    raw_dir.mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    events = [
+        {
+            "ts": "2026-05-20T22:00:01Z",
+            "event_type": "heartbeat.fired",
+            "agent": "vera",
+            "trace_id": "trace-heartbeat-1",
+            "payload": {"reason": "idle", "idle_ms": 91000, "in_action": False},
+        },
+        {
+            "ts": "2026-05-20T22:00:02Z",
+            "event_type": "heartbeat.outcome",
+            "agent": "vera",
+            "trace_id": "trace-heartbeat-1",
+            "payload": {"had_command": True, "no_command_streak": 0},
+        },
+        {
+            "ts": "2026-05-20T22:00:03Z",
+            "event_type": "heartbeat.halted",
+            "agent": "rex",
+            "trace_id": "trace-heartbeat-2",
+            "payload": {"reason": "max-no-command", "no_command_streak": 3},
+        },
+    ]
+    (raw_dir / "vera.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+    builder.write_artifacts(run_dir, result)
+
+    exported = _events(run_dir / "timeline.ndjson")
+    assert [event["event_type"] for event in exported] == [
+        "heartbeat.fired",
+        "heartbeat.outcome",
+        "heartbeat.halted",
+    ]
+    assert exported[0]["payload"]["reason"] == "idle"
+    totals = json.loads((run_dir / "timeline-totals.json").read_text(encoding="utf-8"))
+    assert totals["counts_by_event_type"]["heartbeat.fired"] == 1
+    assert totals["counts_by_event_type"]["heartbeat.outcome"] == 1
+    assert totals["counts_by_event_type"]["heartbeat.halted"] == 1
+
+
 def test_trace_id_correlates_intent_start_and_result_chain(tmp_path: Path) -> None:
     builder = _load_builder()
     run_dir = _copy_fixture(tmp_path)
@@ -215,6 +279,7 @@ def test_malformed_lines_do_not_crash_cli(tmp_path: Path) -> None:
 def test_node_timeline_shims_are_dependency_free_and_emit_expected_events() -> None:
     emitter = TIMELINE_EMITTER.read_text(encoding="utf-8")
     usage = LMSTUDIO_USAGE.read_text(encoding="utf-8")
+    heartbeat = HEARTBEAT.read_text(encoding="utf-8")
 
     assert "MC_TIMELINE_NDJSON" in emitter
     assert "MC_RUN_DIR" in emitter
@@ -226,3 +291,7 @@ def test_node_timeline_shims_are_dependency_free_and_emit_expected_events() -> N
     assert "Math.ceil(text.length / 4)" in usage
     assert "from 'node:" in usage
     assert "from '../bridge/timeline_emitter.js'" in usage
+    assert "heartbeat.fired" in heartbeat
+    assert "heartbeat.outcome" in heartbeat
+    assert "MC_HEARTBEAT_IDLE_MS" in heartbeat
+    assert "from '../bridge/timeline_emitter.js'" in heartbeat

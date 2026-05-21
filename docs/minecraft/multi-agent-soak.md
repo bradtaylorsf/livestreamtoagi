@@ -264,6 +264,44 @@ an LLM decision.
 Schema details and payload examples live in
 [`timeline-schema.md`](timeline-schema.md).
 
+## Heartbeat & Idle Recovery
+
+Embodied bot launchers stage `scripts/minecraft/fork-src/agent/skills/heartbeat.js`
+and patch Mindcraft `agent.js` to call `installHeartbeat(this)` when bot events
+start. The heartbeat is bounded and coarse: it asks for one high-level visible
+next action after an idle/stall window, not per-tick movement.
+
+Configuration:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MC_HEARTBEAT_ENABLED` | `1` | Set `0`/`false`/`off` to disable autonomous prompts. |
+| `MC_HEARTBEAT_TICK_MS` | `5000` | How often the heartbeat checks each agent. |
+| `MC_HEARTBEAT_IDLE_MS` | `90000` | Idle window before a next-action prompt can fire. |
+| `MC_HEARTBEAT_COOLDOWN_MS` | `45000` | Minimum time between heartbeat prompts for one agent. |
+| `MC_HEARTBEAT_STALE_ACTION_MS` | `180000` | Active action age that permits a stale-action heartbeat. |
+| `MC_HEARTBEAT_MAX_NO_COMMAND` | `3` | Consecutive blank/no-command heartbeat outcomes before halt. |
+
+`scripts/minecraft/run-local-sim.sh` exposes the same knobs as seconds-based
+`.env` values: `MC_SIM_HEARTBEAT_ENABLED`, `MC_SIM_HEARTBEAT_TICK_SEC`,
+`MC_SIM_HEARTBEAT_IDLE_SEC`, `MC_SIM_HEARTBEAT_COOLDOWN_SEC`,
+`MC_SIM_HEARTBEAT_STALE_ACTION_SEC`, and
+`MC_SIM_HEARTBEAT_MAX_NO_COMMAND`.
+
+Expected timeline events:
+
+| Event | When it appears |
+| --- | --- |
+| `heartbeat.fired` | Idle/stale threshold and cooldown allow a prompt. |
+| `heartbeat.skipped` | Prompt was suppressed because the heartbeat is disabled, cooling down, or the agent is still in an active non-stale action. |
+| `heartbeat.outcome` | A fired prompt finished, with command/no-command detection and response excerpt. |
+| `heartbeat.halted` | Repeated blank/no-command outcomes hit `MC_HEARTBEAT_MAX_NO_COMMAND`. |
+
+`heartbeat.halted` is a failure condition. `soak.sh` records it in
+`heartbeat-halts.tsv`, stops the affected bot process for supervisor visibility,
+counts the line in restart/stability checks, and fails the soak. The summary also
+prints `heartbeat_counts` from `timeline-totals.json`.
+
 ## Live Cohort Monitor
 
 Every embodied soak also renders `monitor.html` in the evidence directory after
@@ -302,11 +340,12 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
 | `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, and `behavior_gate_status`. |
+| `heartbeat-halts.tsv` | Bots whose autonomous heartbeat halted after repeated blank/no-command outcomes. |
 | `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, action, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
 | `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
 | `monitor.html` | Self-contained local cohort monitor rendered from `timeline.ndjson` and `timeline-totals.json`. |
-| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, behavioral acceptance, and timeline totals. |
+| `summary.txt` | Crash candidates, heartbeat halts, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, behavioral acceptance, and timeline totals. |
 
 ## Failure Classes Monitored
 
@@ -335,6 +374,7 @@ Additional stability counters:
 | Decentralized respond-vs-ignore ratio | Rough `respond`/`ignore` counts from bot logs. |
 | Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 | Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
+| Heartbeat halts / idle recovery | `heartbeat.fired` / `heartbeat.outcome` / `heartbeat.halted` timeline events and `heartbeat-halts.tsv`. |
 
 For E8-14 interruption recovery, `PathStopped: Path was stopped before it could
 be completed` must appear as an `interrupted` action failure and must not be

@@ -84,6 +84,7 @@ ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
+AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
 AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
 TIMELINE_EMITTER_REL="src/agent/bridge/timeline_emitter.js"
@@ -104,6 +105,7 @@ PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
+HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -131,6 +133,7 @@ PERCEPTION_SKILL_DEST=""
 SAFE_FAIL_SKILL_DEST=""
 ACTION_INTERRUPTION_SKILL_DEST=""
 LMSTUDIO_USAGE_SKILL_DEST=""
+HEARTBEAT_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
 # cwd) so the reviewed copies are used no matter where it is invoked.
@@ -157,6 +160,7 @@ PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
+HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
 
 MODE="run"
 case "${1:-}" in
@@ -212,6 +216,7 @@ restore_clone_patches() {
     [ -n "${SAFE_FAIL_SKILL_DEST:-}" ] && rm -f "$SAFE_FAIL_SKILL_DEST" 2> /dev/null || true
     [ -n "${ACTION_INTERRUPTION_SKILL_DEST:-}" ] && rm -f "$ACTION_INTERRUPTION_SKILL_DEST" 2> /dev/null || true
     [ -n "${LMSTUDIO_USAGE_SKILL_DEST:-}" ] && rm -f "$LMSTUDIO_USAGE_SKILL_DEST" 2> /dev/null || true
+    [ -n "${HEARTBEAT_SKILL_DEST:-}" ] && rm -f "$HEARTBEAT_SKILL_DEST" 2> /dev/null || true
 }
 
 # ── Node / npm check (identical posture to connect-stock-bot.sh) ──
@@ -302,6 +307,15 @@ verify_committed_assets() {
         grep -q 'llm.request' "$LMSTUDIO_USAGE_SKILL_SRC" || { fail "LM Studio shim does not emit llm.request"; problems=1; }
         grep -q 'llm.response' "$LMSTUDIO_USAGE_SKILL_SRC" || { fail "LM Studio shim does not emit llm.response"; problems=1; }
         grep -q 'deterministicTokenEstimate' "$LMSTUDIO_USAGE_SKILL_SRC" || { fail "LM Studio shim missing deterministic estimator"; problems=1; }
+    fi
+
+    if [ ! -s "$HEARTBEAT_SKILL_SRC" ]; then
+        fail "Heartbeat skill missing or empty: $HEARTBEAT_SKILL_SRC"; problems=1
+    else
+        grep -q 'heartbeat.fired' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill does not emit heartbeat.fired"; problems=1; }
+        grep -q 'heartbeat.outcome' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill does not emit heartbeat.outcome"; problems=1; }
+        grep -q 'heartbeat.halted' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill does not emit heartbeat.halted"; problems=1; }
+        grep -q 'MC_HEARTBEAT_IDLE_MS' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill missing idle env"; problems=1; }
     fi
 
     if [ ! -s "$MANAGEMENT_REVIEW_SRC" ]; then
@@ -561,7 +575,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $MOVEMENT_SKILL_REL + $BUILDING_SKILL_REL +"
     info "              $BUILD_PLAN_SKILL_REL + $PERCEPTION_SKILL_REL +"
     info "              $SAFE_FAIL_SKILL_REL + $ACTION_INTERRUPTION_SKILL_REL +"
-    info "              $PLACE_HERE_GUARD_REL"
+    info "              $PLACE_HERE_GUARD_REL + $HEARTBEAT_SKILL_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
     info "              placeAction, breakAction, buildFromPlanAction, executeCodeAction"
     info "              and observeAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
@@ -688,6 +702,7 @@ PERCEPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$PERCEPTION_SKILL_REL"
 SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
 ACTION_INTERRUPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_INTERRUPTION_SKILL_REL"
 LMSTUDIO_USAGE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$LMSTUDIO_USAGE_SKILL_REL"
+HEARTBEAT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$HEARTBEAT_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
     "$(dirname -- "$TIMELINE_EMITTER_DEST")" \
@@ -707,7 +722,8 @@ mkdir -p \
     "$(dirname -- "$PERCEPTION_SKILL_DEST")" \
     "$(dirname -- "$SAFE_FAIL_SKILL_DEST")" \
     "$(dirname -- "$ACTION_INTERRUPTION_SKILL_DEST")" \
-    "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")"
+    "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")" \
+    "$(dirname -- "$HEARTBEAT_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
 cp "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_DEST"
 cp "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_DEST"
@@ -727,6 +743,7 @@ cp "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_DEST"
 cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
 cp "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_DEST"
 cp "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_DEST"
+cp "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
 ok "Copied timeline emitter → $TIMELINE_EMITTER_REL"
 ok "Copied Management review helper → $MANAGEMENT_REVIEW_REL"
@@ -746,6 +763,7 @@ ok "Copied perception helpers → $PERCEPTION_SKILL_REL"
 ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
 ok "Copied action interruption helpers → $ACTION_INTERRUPTION_SKILL_REL"
 ok "Copied LM Studio usage shim → $LMSTUDIO_USAGE_SKILL_REL"
+ok "Copied autonomous heartbeat skill → $HEARTBEAT_SKILL_REL"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
 if [ ! -f "$AGENT_PATH" ]; then
@@ -753,7 +771,8 @@ if [ ! -f "$AGENT_PATH" ]; then
     exit 1
 fi
 if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
-   grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH"; then
+   grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
         fail "Could not restore pinned $AGENT_REL before patching."
@@ -765,21 +784,30 @@ cp "$AGENT_PATH" "$AGENT_BACKUP"
 if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
     AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
+    AGENT_HEARTBEAT_PATCH_MARKER="$AGENT_HEARTBEAT_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = process.env.AGENT_PATH;
 const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
 const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
+const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 const importAnchor = "import { speak } from './speak.js';\n";
 const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
+const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbeat.js'; // ${heartbeatMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
         throw new Error('speak import anchor not found while applying Management chat gate');
     }
     source = source.replace(importAnchor, importAnchor + importLine);
+}
+if (!source.includes(heartbeatImportLine)) {
+    if (!source.includes(importAnchor)) {
+        throw new Error('speak import anchor not found while applying autonomous heartbeat');
+    }
+    source = source.replace(importAnchor, importAnchor + heartbeatImportLine);
 }
 
 let methodStart = source.indexOf('    async openChat(message) {');
@@ -837,6 +865,20 @@ for (const pattern of cleanExitPatterns) {
         (_match, indent, statement) =>
             `${indent}if (process.env.MINECRAFT_CLEAN_EXIT === '1') ${statement} // ${cleanExitMarker}`,
     );
+}
+
+const heartbeatCallNeedle = `installHeartbeat(this); // ${heartbeatMarker}`;
+if (!source.includes(heartbeatCallNeedle)) {
+    let startEventsNeedle = '    startEvents() {\n';
+    let heartbeatCall = `        ${heartbeatCallNeedle}\n`;
+    if (!source.includes(startEventsNeedle)) {
+        startEventsNeedle = '        startEvents() {\n';
+        heartbeatCall = `            ${heartbeatCallNeedle}\n`;
+    }
+    if (!source.includes(startEventsNeedle)) {
+        throw new Error('startEvents method shape changed while applying autonomous heartbeat');
+    }
+    source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
 }
 writeFileSync(path, source);
 NODE

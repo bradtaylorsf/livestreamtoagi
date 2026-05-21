@@ -42,6 +42,10 @@ Each `timeline.ndjson` line is one JSON object:
 | `action.intent` | High-level intended action from model output or command text. This is not emitted for every tick or pathfinder step. |
 | `action.start` | A discrete bridge/action start, usually tied to a trace id. |
 | `action.result` | Terminal action result such as placed, reached, blocked, failed, invalid, or timed out. |
+| `heartbeat.fired` | Autonomous idle/stall heartbeat prompt was sent. Payload includes reason, idle window, action state, cooldown, and prompt excerpt. |
+| `heartbeat.skipped` | Heartbeat considered an idle/stall check but did not prompt, such as active action, cooldown, disabled, or max no-command state. |
+| `heartbeat.outcome` | Result of a heartbeat prompt. Payload includes command detection, no-command streak, response excerpt, and error status when applicable. |
+| `heartbeat.halted` | Heartbeat stopped itself after repeated blank/no-command outcomes. The soak treats this as a failure/restart signal. |
 | `state.sample` | Sampled world state or perception, including position when available. High-frequency position lines are interval-collapsed. |
 | `error` | Parser, bridge, runtime, malformed NDJSON, or model-call error. |
 | `lifecycle` | Bot, bridge, server, connection, circuit, spawn, join, disconnect, or shutdown lifecycle event. |
@@ -98,6 +102,8 @@ The committed Mindcraft overlay stages:
 
 - `scripts/minecraft/fork-src/agent/bridge/timeline_emitter.js`
 - `scripts/minecraft/fork-src/agent/skills/lmstudio_usage.js`
+- `scripts/minecraft/fork-src/agent/skills/heartbeat.js`
 
-Launchers inject the usage shim into staged `settings.js`, so the git-ignored
-Mindcraft clone does not need a committed edit.
+Launchers inject the usage shim into staged `settings.js` and patch `agent.js`
+to install the heartbeat, so the git-ignored Mindcraft clone does not need a
+committed edit.

@@ -64,6 +64,7 @@ ACTIONS_RUN_ERRAND_PATCH_MARKER="LTAG E7-3 run errand action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
+AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
 
 AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
@@ -88,6 +89,7 @@ SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 ERRAND_PLAN_SKILL_REL="src/agent/skills/errand_plan.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
+HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -124,6 +126,7 @@ SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 ERRAND_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/errand_plan.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
+HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
 
 MODE="run"
 case "${1:-}" in
@@ -222,7 +225,7 @@ verify_committed_assets() {
 
     for required in \
         "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
-        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" \
+        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" \
         "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$PLACE_HERE_GUARD_SRC" "$POLL_ERRAND_ACTION_SRC" \
@@ -327,6 +330,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would copy:   fork-src/ bridge client, actions, and helper skills"
     info "Would wrap:   upstream action interruptions via $PLACE_HERE_GUARD_REL"
     info "Would copy:   fork-src/ timeline telemetry and LM Studio usage shim"
+    info "Would copy:   fork-src/ autonomous heartbeat skill"
     info "Would inject: !pollErrand and !runErrand for Alpha errands"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
@@ -453,6 +457,7 @@ stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
 stage_file "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_REL"
 stage_file "$ERRAND_PLAN_SKILL_SRC" "$ERRAND_PLAN_SKILL_REL"
 stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
+stage_file "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_REL"
 ok "Copied bridge client, timeline telemetry, actions, and helper skills from fork-src"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
@@ -461,7 +466,8 @@ if [ ! -f "$AGENT_PATH" ]; then
     exit 1
 fi
 if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
-   grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH"; then
+   grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
         fail "Could not restore pinned $AGENT_REL before patching."
@@ -473,21 +479,30 @@ cp "$AGENT_PATH" "$AGENT_BACKUP"
 if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
     AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
+    AGENT_HEARTBEAT_PATCH_MARKER="$AGENT_HEARTBEAT_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = process.env.AGENT_PATH;
 const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
 const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
+const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 const importAnchor = "import { speak } from './speak.js';\n";
 const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
+const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbeat.js'; // ${heartbeatMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
         throw new Error('speak import anchor not found while applying Management chat gate');
     }
     source = source.replace(importAnchor, importAnchor + importLine);
+}
+if (!source.includes(heartbeatImportLine)) {
+    if (!source.includes(importAnchor)) {
+        throw new Error('speak import anchor not found while applying autonomous heartbeat');
+    }
+    source = source.replace(importAnchor, importAnchor + heartbeatImportLine);
 }
 
 let methodStart = source.indexOf('    async openChat(message) {');
@@ -545,6 +560,20 @@ for (const pattern of cleanExitPatterns) {
         (_match, indent, statement) =>
             `${indent}if (process.env.MINECRAFT_CLEAN_EXIT === '1') ${statement} // ${cleanExitMarker}`,
     );
+}
+
+const heartbeatCallNeedle = `installHeartbeat(this); // ${heartbeatMarker}`;
+if (!source.includes(heartbeatCallNeedle)) {
+    let startEventsNeedle = '    startEvents() {\n';
+    let heartbeatCall = `        ${heartbeatCallNeedle}\n`;
+    if (!source.includes(startEventsNeedle)) {
+        startEventsNeedle = '        startEvents() {\n';
+        heartbeatCall = `            ${heartbeatCallNeedle}\n`;
+    }
+    if (!source.includes(startEventsNeedle)) {
+        throw new Error('startEvents method shape changed while applying autonomous heartbeat');
+    }
+    source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
 }
 writeFileSync(path, source);
 NODE
