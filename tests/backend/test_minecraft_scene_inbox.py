@@ -154,9 +154,7 @@ async def test_health_danger_always_opens_new_scene_inside_existing_window() -> 
     _seed_poses(inbox, [("vera", 0), ("rex", 3), ("aurora", 20)])
 
     first = await inbox.ingest(_event("build_action", event_id="build-start", timestamp_ms=1_000))
-    danger = await inbox.ingest(
-        _event("health_danger", event_id="lava-hit", timestamp_ms=2_000)
-    )
+    danger = await inbox.ingest(_event("health_danger", event_id="lava-hit", timestamp_ms=2_000))
 
     assert first.scene_id != danger.scene_id
     assert danger.is_new_scene is True

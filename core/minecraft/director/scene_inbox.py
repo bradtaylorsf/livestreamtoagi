@@ -219,9 +219,10 @@ class SceneInbox:
         )
 
         hearing_radius = self.hearing.config.hearing_radius_for(event.type.value)
-        automatic_candidates = set(
-            self.hearing.agents_within(event.origin, event.dimension, hearing_radius)
-        ) - required
+        automatic_candidates = (
+            set(self.hearing.agents_within(event.origin, event.dimension, hearing_radius))
+            - required
+        )
         capped_candidates = automatic_candidates - set(participants)
         if capped_candidates:
             return participants, observers, "participant_cap"
@@ -468,9 +469,11 @@ class SceneInbox:
         *,
         default_type: SceneEventType | None = None,
     ) -> SceneEvent | None:
-        event_type = _scene_event_type(data.get("type")) or _scene_event_type(
-            data.get("event_type")
-        ) or default_type
+        event_type = (
+            _scene_event_type(data.get("type"))
+            or _scene_event_type(data.get("event_type"))
+            or default_type
+        )
         if event_type is None:
             return None
 

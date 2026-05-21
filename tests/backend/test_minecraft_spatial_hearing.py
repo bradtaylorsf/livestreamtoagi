@@ -73,4 +73,3 @@ def test_unknown_direct_addressee_is_still_required_participant() -> None:
 
     assert participants == ["sentinel"]
     assert observers == []
-

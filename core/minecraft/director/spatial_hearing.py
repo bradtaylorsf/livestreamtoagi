@@ -147,4 +147,3 @@ class SpatialHearingAdapter:
 
 def _canonical_agent_id(agent_id: str) -> str:
     return agent_id.strip().lower()
-
