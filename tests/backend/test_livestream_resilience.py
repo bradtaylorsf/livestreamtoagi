@@ -81,9 +81,10 @@ def _env_for(
     restart_delay: int = 1,
     crash_loop_limit: int = 5,
     crash_loop_window: int = 30,
-) -> tuple[dict[str, str], Path, Path]:
+) -> tuple[dict[str, str], Path, Path, Path]:
     log_dir = tmp_path / "logs"
     supervisor_log = log_dir / "livestream-supervisor.log"
+    child_log = log_dir / "livestream-child.log"
     pid_file = log_dir / "child.pid"
     env = {
         **os.environ,
@@ -93,9 +94,10 @@ def _env_for(
         "CRASH_LOOP_LIMIT": str(crash_loop_limit),
         "CRASH_LOOP_WINDOW": str(crash_loop_window),
         "SUPERVISOR_LOG": str(supervisor_log),
+        "CHILD_LOG": str(child_log),
         "CHILD_PID_FILE": str(pid_file),
     }
-    return env, supervisor_log, pid_file
+    return env, supervisor_log, pid_file, child_log
 
 
 def _start_supervisor(env: dict[str, str]) -> subprocess.Popen[str]:
@@ -206,7 +208,7 @@ def test_self_test_requires_stream_cmd() -> None:
 def test_supervise_help_does_not_run_child(tmp_path: Path) -> None:
     launches = tmp_path / "launches.txt"
     fake = _write_running_fake(tmp_path / "fake-stream.sh", launches)
-    env, _supervisor_log, pid_file = _env_for(tmp_path, fake)
+    env, _supervisor_log, pid_file, _child_log = _env_for(tmp_path, fake)
 
     proc = subprocess.run(
         ["bash", str(SCRIPT), "--help"],
@@ -229,7 +231,7 @@ def test_supervisor_restarts_child_after_crash(tmp_path: Path) -> None:
     launches = tmp_path / "launches.txt"
     fake = _write_running_fake(tmp_path / "fake-stream.sh", launches)
     restart_delay = 1
-    env, supervisor_log, pid_file = _env_for(
+    env, supervisor_log, pid_file, _child_log = _env_for(
         tmp_path, fake, restart_delay=restart_delay
     )
     proc = _start_supervisor(env)
@@ -273,7 +275,7 @@ def test_supervisor_logs_downtime_gap(tmp_path: Path) -> None:
     launches = tmp_path / "launches.txt"
     fake = _write_exiting_fake(tmp_path / "fake-stream.sh", launches)
     restart_delay = 1
-    env, supervisor_log, pid_file = _env_for(
+    env, supervisor_log, pid_file, _child_log = _env_for(
         tmp_path, fake, restart_delay=restart_delay
     )
     proc = _start_supervisor(env)
@@ -295,7 +297,7 @@ def test_supervisor_logs_downtime_gap(tmp_path: Path) -> None:
 def test_supervisor_crash_loop_guard_aborts(tmp_path: Path) -> None:
     launches = tmp_path / "launches.txt"
     fake = _write_exiting_fake(tmp_path / "fake-stream.sh", launches)
-    env, supervisor_log, _pid_file = _env_for(
+    env, supervisor_log, _pid_file, _child_log = _env_for(
         tmp_path,
         fake,
         restart_delay=0,
@@ -313,16 +315,60 @@ def test_supervisor_crash_loop_guard_aborts(tmp_path: Path) -> None:
     )
 
     assert proc.returncode == 1
-    assert _launch_count(launches) == 3
+    assert _launch_count(launches) == 2
     log_text = supervisor_log.read_text()
-    assert log_text.count("restarting attempt=") == 2
-    assert "crash-loop-abort restarts=2 window_seconds=30 limit=2" in log_text
+    assert log_text.count("restarting attempt=") == 1
+    assert (
+        "crash-loop-abort restarts=2 window_seconds=30 limit=2 "
+        "failed_launches=2"
+    ) in log_text
+
+
+def test_supervisor_captures_child_output_without_leaking_to_terminal(
+    tmp_path: Path,
+) -> None:
+    launches = tmp_path / "launches.txt"
+    fake = tmp_path / "fake-stream.sh"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$$" >> "{launches}"\n'
+        "echo fake-stream-up\n"
+        "exit 1\n"
+    )
+    fake.chmod(0o755)
+    env, supervisor_log, _pid_file, child_log = _env_for(
+        tmp_path,
+        fake,
+        restart_delay=0,
+        crash_loop_limit=3,
+        crash_loop_window=30,
+    )
+
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--self-test"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+        timeout=10,
+    )
+
+    assert proc.returncode == 1
+    assert "fake-stream-up" not in proc.stdout
+    assert "fake-stream-up" not in proc.stderr
+    assert child_log.read_text().splitlines() == [
+        "fake-stream-up",
+        "fake-stream-up",
+        "fake-stream-up",
+    ]
+    assert _launch_count(launches) == 3
+    assert "starting-child attempt=4" not in supervisor_log.read_text()
 
 
 def test_supervisor_clean_stop_does_not_restart(tmp_path: Path) -> None:
     launches = tmp_path / "launches.txt"
     fake = _write_running_fake(tmp_path / "fake-stream.sh", launches)
-    env, supervisor_log, pid_file = _env_for(tmp_path, fake)
+    env, supervisor_log, pid_file, _child_log = _env_for(tmp_path, fake)
     proc = _start_supervisor(env)
 
     _wait_until(

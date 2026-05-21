@@ -30,9 +30,10 @@
 #   LOG_DIR           Livestream log directory          (default: ./logs/livestream)
 #   STREAM_CMD        Executable command to supervise   (default: <script dir>/stream-push.sh)
 #   RESTART_DELAY     Seconds to wait before restart    (default: 10)
-#   CRASH_LOOP_LIMIT  Max restarts allowed per window   (default: 5)
+#   CRASH_LOOP_LIMIT  Max failed launches per window    (default: 5)
 #   CRASH_LOOP_WINDOW Crash-loop window, seconds        (default: 60)
 #   SUPERVISOR_LOG    Retained supervisor log file      (default: $LOG_DIR/livestream-supervisor.log)
+#   CHILD_LOG         Retained stream stdout/stderr log (default: $LOG_DIR/livestream-child.log)
 #   CHILD_PID_FILE    Live child PID file               (default: $LOG_DIR/supervise-stream-child.pid)
 #
 # --self-test requires STREAM_CMD to point at a fast fake command so restart
@@ -77,6 +78,7 @@ else
 fi
 CRASH_LOOP_LIMIT="${CRASH_LOOP_LIMIT:-5}"
 SUPERVISOR_LOG="${SUPERVISOR_LOG:-$LOG_DIR/livestream-supervisor.log}"
+CHILD_LOG="${CHILD_LOG:-$LOG_DIR/livestream-child.log}"
 CHILD_PID_FILE="${CHILD_PID_FILE:-$LOG_DIR/supervise-stream-child.pid}"
 
 require_uint() {
@@ -100,7 +102,10 @@ if [ ! -x "$STREAM_CMD" ]; then
     exit 2
 fi
 
-mkdir -p "$(dirname -- "$SUPERVISOR_LOG")" "$(dirname -- "$CHILD_PID_FILE")"
+mkdir -p \
+    "$(dirname -- "$SUPERVISOR_LOG")" \
+    "$(dirname -- "$CHILD_LOG")" \
+    "$(dirname -- "$CHILD_PID_FILE")"
 
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" \
@@ -140,9 +145,9 @@ trap on_signal INT TERM
 trap on_exit EXIT
 
 log "supervisor-started mode=${MODE} stream_cmd=${STREAM_CMD}"
-log "supervisor-config restart_delay=${RESTART_DELAY} crash_loop_limit=${CRASH_LOOP_LIMIT} crash_loop_window=${CRASH_LOOP_WINDOW} log=${SUPERVISOR_LOG}"
+log "supervisor-config restart_delay=${RESTART_DELAY} crash_loop_limit=${CRASH_LOOP_LIMIT} crash_loop_window=${CRASH_LOOP_WINDOW} log=${SUPERVISOR_LOG} child_log=${CHILD_LOG}"
 
-restart_count=0
+failure_count=0
 window_start=$(date +%s)
 attempt=1
 
@@ -150,7 +155,7 @@ while :; do
     log "starting-child attempt=${attempt}"
 
     child_started_at=$(date +%s)
-    "$STREAM_CMD" &
+    "$STREAM_CMD" >> "$CHILD_LOG" 2>&1 &
     CHILD_PID=$!
     printf '%s\n' "$CHILD_PID" > "$CHILD_PID_FILE"
 
@@ -181,15 +186,15 @@ while :; do
     now="$child_exited_at"
     if [ $((now - window_start)) -gt "$CRASH_LOOP_WINDOW" ]; then
         window_start="$now"
-        restart_count=0
+        failure_count=0
     fi
 
-    if [ "$restart_count" -ge "$CRASH_LOOP_LIMIT" ]; then
-        log "crash-loop-abort restarts=${restart_count} window_seconds=${CRASH_LOOP_WINDOW} limit=${CRASH_LOOP_LIMIT}"
+    failure_count=$((failure_count + 1))
+    if [ "$failure_count" -ge "$CRASH_LOOP_LIMIT" ]; then
+        log "crash-loop-abort restarts=${failure_count} window_seconds=${CRASH_LOOP_WINDOW} limit=${CRASH_LOOP_LIMIT} failed_launches=${failure_count}"
         exit 1
     fi
 
-    restart_count=$((restart_count + 1))
     down_started_at="$child_exited_at"
 
     sleep "$RESTART_DELAY" &

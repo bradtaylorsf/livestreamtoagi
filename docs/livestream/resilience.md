@@ -47,14 +47,14 @@ small delay avoids hammering the host or stream platform during a bad config.
 
 Crash-loop guards stop endless restart churn when the stream is misconfigured.
 
-- systemd: `StartLimitBurst=5` inside `StartLimitIntervalSec=300`.
-- `supervise-stream.sh`: `CRASH_LOOP_LIMIT=5` restarts inside
+- systemd: `StartLimitBurst=5` starts inside `StartLimitIntervalSec=300`.
+- `supervise-stream.sh`: `CRASH_LOOP_LIMIT=5` failed launches inside
   `CRASH_LOOP_WINDOW=60`.
 
 When the guard trips, inspect the stream logs, fix the bad capture/encoder/key
 configuration, then restart the supervisor.
 
-## Gap log
+## Logs
 
 The portable supervisor appends timestamped lines to `SUPERVISOR_LOG`, default:
 
@@ -83,6 +83,16 @@ The current child PID is written to `CHILD_PID_FILE`, default:
 
 That file exists only while the child is live. It is intended for kill/restart
 probes and manual acceptance checks.
+
+The stream command's stdout/stderr are appended to `CHILD_LOG`, default:
+
+```text
+./logs/livestream/livestream-child.log
+```
+
+Keeping child output out of the supervisor's terminal stream makes live
+verification and future alerting read the structured supervisor events without
+being polluted by ffmpeg or fake-command output.
 
 ## systemd path
 
