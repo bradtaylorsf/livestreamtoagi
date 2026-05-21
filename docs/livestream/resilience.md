@@ -81,6 +81,9 @@ The current child PID is written to `CHILD_PID_FILE`, default:
 ./logs/livestream/supervise-stream-child.pid
 ```
 
+If `SUPERVISOR_LOG` is overridden without `CHILD_PID_FILE`, the PID file is
+placed beside the supervisor log.
+
 That file exists only while the child is live. It is intended for kill/restart
 probes and manual acceptance checks.
 
@@ -89,6 +92,10 @@ The stream command's stdout/stderr are appended to `CHILD_LOG`, default:
 ```text
 ./logs/livestream/livestream-child.log
 ```
+
+If `SUPERVISOR_LOG` is overridden without `CHILD_LOG`, the child log is placed
+beside the supervisor log. That keeps self-tests and verifier runs contained in
+their temp directory.
 
 Keeping child output out of the supervisor's terminal stream makes live
 verification and future alerting read the structured supervisor events without

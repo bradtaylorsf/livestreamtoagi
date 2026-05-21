@@ -365,6 +365,52 @@ def test_supervisor_captures_child_output_without_leaking_to_terminal(
     assert "starting-child attempt=4" not in supervisor_log.read_text()
 
 
+def test_supervisor_defaults_companion_files_beside_supervisor_log(
+    tmp_path: Path,
+) -> None:
+    launches = tmp_path / "launches.txt"
+    fake = tmp_path / "fake-stream.sh"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$$" >> "{launches}"\n'
+        "echo fake-stream-up\n"
+        "exit 1\n"
+    )
+    fake.chmod(0o755)
+    supervisor_log = tmp_path / "sup.log"
+    child_log = tmp_path / "livestream-child.log"
+    pid_file = tmp_path / "supervise-stream-child.pid"
+    env = {
+        **os.environ,
+        "STREAM_CMD": str(fake),
+        "SUPERVISOR_LOG": str(supervisor_log),
+        "RESTART_DELAY": "0",
+        "CRASH_LOOP_LIMIT": "1",
+        "CRASH_LOOP_WINDOW": "30",
+    }
+    for key in ("LOG_DIR", "CHILD_LOG", "CHILD_PID_FILE"):
+        env.pop(key, None)
+
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--self-test"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+        timeout=10,
+    )
+
+    assert proc.returncode == 1
+    assert "fake-stream-up" not in proc.stdout
+    assert "fake-stream-up" not in proc.stderr
+    assert child_log.read_text().splitlines() == ["fake-stream-up"]
+    assert not pid_file.exists()
+    log_text = supervisor_log.read_text()
+    assert f"child_log={child_log}" in log_text
+    assert f"child_pid_file={pid_file}" in log_text
+    assert "child_log=./logs/livestream" not in log_text
+
+
 def test_supervisor_clean_stop_does_not_restart(tmp_path: Path) -> None:
     launches = tmp_path / "launches.txt"
     fake = _write_running_fake(tmp_path / "fake-stream.sh", launches)
