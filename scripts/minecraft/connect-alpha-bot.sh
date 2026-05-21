@@ -63,6 +63,7 @@ ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_POLL_ERRAND_PATCH_MARKER="LTAG E7-2 poll errand action"
 ACTIONS_RUN_ERRAND_PATCH_MARKER="LTAG E7-3 run errand action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
+ACTIONS_PARSE_GUARD_PATCH_MARKER="LTAG E8-16 command parse guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
@@ -795,7 +796,8 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_POLL_ERRAND_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_RUN_ERRAND_PATCH_MARKER" "$ACTIONS_PATH" || \
-   grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
+   grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_PARSE_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -820,6 +822,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_POLL_ERRAND_PATCH_MARKER="$ACTIONS_POLL_ERRAND_PATCH_MARKER" \
     ACTIONS_RUN_ERRAND_PATCH_MARKER="$ACTIONS_RUN_ERRAND_PATCH_MARKER" \
     ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
+    ACTIONS_PARSE_GUARD_PATCH_MARKER="$ACTIONS_PARSE_GUARD_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -830,8 +833,9 @@ if (!source.includes(anchor)) {
     throw new Error('actionsList anchor not found');
 }
 const guardMarker = process.env.ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER;
+const parseGuardMarker = process.env.ACTIONS_PARSE_GUARD_PATCH_MARKER;
 const guardImportLine = `import { wrapInterruptedActions } from './place_here_guard.js'; // ${guardMarker}\n`;
-const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}\n`;
+const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}; ${parseGuardMarker}\n`;
 const runAsActionLabelNeedle = `const actionObj = actionsList.find(a => a.perform === wrappedAction);
             actionLabel = actionObj.name.substring(1); // Remove the ! prefix`;
 const runAsActionLabelPatch = `const actionObj = actionsList.find(a => a.perform === wrappedAction) || this;

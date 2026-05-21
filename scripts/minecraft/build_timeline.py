@@ -40,6 +40,7 @@ from analyze_action_reliability import (
     classify_execution,
     classify_parser_failure,
     excerpt,
+    should_count_parser_failure,
 )
 from bot_log_parser import ParsedCommand, parse_bot_log_lines
 
@@ -682,7 +683,11 @@ def parse_bot_log(
                     )
                 )
 
-        parser_failure = classify_parser_failure(line)
+        parser_failure = (
+            classify_parser_failure(line)
+            if line_no not in execution_lines and should_count_parser_failure(line)
+            else None
+        )
         if parser_failure:
             events.append(
                 TimelineEvent(

@@ -310,7 +310,10 @@ def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) ->
             "ts": "2026-05-20T22:00:09Z",
             "event_type": "build_plan.execution.completed",
             "agent": "rex",
-            "payload": {"action_id": "plan-build-1", "result": "success"},
+            "payload": {
+                "action_id": "plan-build-1",
+                "result": "success: intended=1; present=1; missing=0; verified=1; completion=1.000",
+            },
         },
     ]
 
@@ -332,14 +335,22 @@ def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) ->
     assert model["pipeline"]["action_queue_depth_max"] == 16
     assert model["pipeline"]["build_plans_generated"] == 1
     assert model["pipeline"]["build_plans_executed"] == 1
+    assert model["pipeline"]["builder_plan_unique"] == 1
+    assert model["pipeline"]["builder_plan_intended_blocks"] == 1
+    assert model["pipeline"]["builder_plan_verified_blocks"] == 1
+    assert model["pipeline"]["builder_plan_completion_rate"] == 1.0
     assert model["agents"][0]["inbox_queued_count"] == 1
     assert model["agents"][0]["action_rejected_count"] == 1
     assert model["agents"][0]["build_plan_count"] == 1
+    assert model["agents"][0]["build_plan_intended_blocks"] == 1
+    assert model["agents"][0]["build_plan_verified_blocks"] == 1
     assert "Queues" in html
     assert "Build Plans" in html
     assert "LLM queue done" in html
     assert "Max action depth" in html
     assert "builder_model" in html
+    assert "Intended blocks" in html
+    assert "Verified blocks" in html
 
 
 def test_monitor_separates_stale_discards_from_action_failures(tmp_path: Path) -> None:

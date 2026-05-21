@@ -64,6 +64,7 @@ class AgentStats:
     discarded_commands: int = 0
     stale_generations: int = 0
     parser_failures: Counter[str] = field(default_factory=Counter)
+    command_buckets: dict[str, Counter[str]] = field(default_factory=dict)
     execution_successes: int = 0
     execution_failures: int = 0
     execution_unknowns: int = 0
@@ -73,6 +74,12 @@ class AgentStats:
     verified_success_examples: list[Example] = field(default_factory=list)
     intent_examples: list[Example] = field(default_factory=list)
     execution_failure_examples: list[Example] = field(default_factory=list)
+    builder_plan_generated: int = 0
+    builder_plan_unique_ids: set[str] = field(default_factory=set)
+    builder_plan_skipped_dedupe: int = 0
+    builder_plan_intended_blocks: int = 0
+    builder_plan_verified_blocks: int = 0
+    build_plan_event_keys: set[str] = field(default_factory=set, repr=False)
 
     @property
     def parse_failures(self) -> int:
@@ -89,6 +96,16 @@ class AgentStats:
     @property
     def parse_successes(self) -> int:
         return max(0, self.emitted_commands - self.parse_failures)
+
+    @property
+    def builder_plan_unique(self) -> int:
+        return len(self.builder_plan_unique_ids)
+
+    @property
+    def builder_plan_completion_rate(self) -> float:
+        if self.builder_plan_intended_blocks <= 0:
+            return 1.0 if self.builder_plan_generated == 0 else 0.0
+        return round(self.builder_plan_verified_blocks / self.builder_plan_intended_blocks, 4)
 
     def metrics(self) -> dict[str, float]:
         if self.intent_utterances > 0:
@@ -121,21 +138,29 @@ class AgentStats:
             "verified_success_rate": round(verified_success_rate, 4),
         }
 
-    def counts(self) -> dict[str, int]:
+    def counts(self) -> dict[str, int | float]:
         return {
             "intent_utterances": self.intent_utterances,
             "generated_commands": self.generated_commands,
             "discarded_commands": self.discarded_commands,
+            "discarded_stale": self.stale_generations,
             "stale_generations": self.stale_generations,
             "emitted_commands": self.emitted_commands,
             "intended_action_events": self.intended_action_events,
             "parse_successes": self.parse_successes,
             "parse_failures": self.parse_failures,
+            "malformed_accepted": self.parse_failures,
             "command_executions": self.command_executions,
             "execution_successes": self.execution_successes,
             "execution_failures": self.execution_failures,
             "execution_unknowns": self.execution_unknowns,
             "verified_actions": self.verified_actions,
+            "builder_plan_generated": self.builder_plan_generated,
+            "builder_plan_unique": self.builder_plan_unique,
+            "builder_plan_skipped_dedupe": self.builder_plan_skipped_dedupe,
+            "builder_plan_intended_blocks": self.builder_plan_intended_blocks,
+            "builder_plan_verified_blocks": self.builder_plan_verified_blocks,
+            "builder_plan_completion_rate": self.builder_plan_completion_rate,
         }
 
     def to_json(self, top_n: int) -> dict[str, Any]:
@@ -151,6 +176,18 @@ class AgentStats:
                 {"class": klass, "count": count}
                 for klass, count in self.execution_failure_classes.most_common(top_n)
             ],
+            "command_buckets": {
+                bucket: dict(counts)
+                for bucket, counts in sorted(self.command_buckets.items())
+            },
+            "builder_plan_metrics": {
+                "builder_plan_generated": self.builder_plan_generated,
+                "builder_plan_unique": self.builder_plan_unique,
+                "builder_plan_skipped_dedupe": self.builder_plan_skipped_dedupe,
+                "builder_plan_intended_blocks": self.builder_plan_intended_blocks,
+                "builder_plan_verified_blocks": self.builder_plan_verified_blocks,
+                "builder_plan_completion_rate": self.builder_plan_completion_rate,
+            },
             "examples": {
                 "failed_parses": [example.to_json() for example in self.failed_parse_examples[:top_n]],
                 "verified_successes": [
@@ -178,8 +215,208 @@ def classify_parser_failure(line: str) -> str | None:
     return None
 
 
+def is_incoming_chat_or_memory(line: str) -> bool:
+    lower = line.lower()
+    if "received message from" in lower:
+        return True
+    stripped = line.strip()
+    skipped_prefixes = (
+        "Saved memory to:",
+        "Memory updated to:",
+        "Storing memories",
+        "selected examples:",
+    )
+    return stripped.startswith(skipped_prefixes)
+
+
+def should_count_parser_failure(line: str) -> bool:
+    if not classify_parser_failure(line):
+        return False
+    if INSTRUCTION_RE.search(line):
+        return False
+    if is_incoming_chat_or_memory(line):
+        return False
+    lower = line.lower()
+    if "agent executed:" in lower or "action.result" in lower or "perception.report" in lower:
+        return False
+    if "full response" in lower and "error parsing" not in lower and "could not parse" not in lower:
+        return False
+    diagnostic_markers = (
+        "empty parsed response",
+        "blank llm response",
+        "no commands found",
+        "no command",
+        "does not exist",
+        "unknown command",
+        "could not parse",
+        "error parsing",
+        "parse error",
+        "invalid command syntax",
+        "malformed command",
+        "expected",
+        "too many",
+        "too few",
+    )
+    return any(marker in lower for marker in diagnostic_markers)
+
+
+def command_bucket(command_name: str) -> str:
+    name = str(command_name or "").lstrip("!").lower()
+    if name in {"place", "placehere", "placeblock"}:
+        return "placement"
+    if name == "buildfromplan":
+        return "buildFromPlan"
+    if name == "planandbuild":
+        return "planAndBuild"
+    return "other"
+
+
+def bucket_counts(stats: AgentStats, bucket: str) -> Counter[str]:
+    if bucket not in stats.command_buckets:
+        stats.command_buckets[bucket] = Counter()
+    return stats.command_buckets[bucket]
+
+
+def record_accepted_command(stats: AgentStats, command_name: str) -> None:
+    bucket_counts(stats, command_bucket(command_name))["accepted"] += 1
+
+
+def plan_block_count(plan: Any) -> int:
+    if not isinstance(plan, dict):
+        return 0
+    blocks = plan.get("blocks")
+    return len(blocks) if isinstance(blocks, list) else 0
+
+
+def first_int(*values: Any) -> int | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed >= 0:
+            return parsed
+    return None
+
+
+def verified_blocks_from_payload(payload: dict[str, Any]) -> int:
+    metric = payload.get("metric")
+    if isinstance(metric, dict):
+        parsed = first_int(metric.get("steps_verified"), metric.get("blocks_present"))
+        if parsed is not None:
+            return parsed
+    parsed = first_int(payload.get("verified_blocks"), payload.get("blocks_verified"))
+    if parsed is not None:
+        return parsed
+    result = str(payload.get("result") or payload.get("detail") or "")
+    match = re.search(r"\bverified=(?P<count>\d+)\b", result)
+    if match:
+        return int(match.group("count"))
+    return 0
+
+
+def extract_json_event(line: str) -> dict[str, Any] | None:
+    start = line.find("{")
+    end = line.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = json.loads(line[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def is_dedupe_plan_event(event_type: str, payload: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(payload.get(key) or "")
+        for key in ("reason", "error", "status", "source", "detail")
+    ).lower()
+    return (
+        "dedupe" in text
+        or "duplicate" in text
+        or "cache" in text
+        or bool(payload.get("deduped"))
+        or bool(payload.get("cache_hit"))
+        or event_type.endswith(".skipped")
+    )
+
+
+def apply_build_plan_event(
+    stats: AgentStats,
+    event: dict[str, Any],
+    *,
+    source: str,
+) -> None:
+    event_type = str(event.get("event_type") or event.get("type") or "")
+    if not event_type.startswith("build_plan."):
+        return
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    action_id = str(payload.get("action_id") or event.get("trace_id") or source)
+    key = "|".join(
+        [
+            event_type,
+            action_id,
+            str(event.get("ts") or ""),
+            str(event.get("seq") or ""),
+            source,
+        ]
+    )
+    if key in stats.build_plan_event_keys:
+        return
+    stats.build_plan_event_keys.add(key)
+
+    if event_type == "build_plan.generation.completed":
+        stats.builder_plan_generated += 1
+        stats.builder_plan_unique_ids.add(action_id)
+        stats.builder_plan_intended_blocks += plan_block_count(payload.get("plan"))
+    elif event_type in {"build_plan.generation.rejected", "build_plan.generation.skipped"}:
+        if is_dedupe_plan_event(event_type, payload):
+            stats.builder_plan_skipped_dedupe += 1
+    elif event_type == "build_plan.execution.completed":
+        stats.builder_plan_unique_ids.add(action_id)
+        stats.builder_plan_verified_blocks += verified_blocks_from_payload(payload)
+
+
+def apply_build_plan_events_from_line(stats: AgentStats, line: str, *, source: str) -> None:
+    event = extract_json_event(line)
+    if event:
+        apply_build_plan_event(stats, event, source=source)
+
+
+def apply_build_plan_events_from_timeline(
+    run_dir: Path,
+    stats_by_agent: dict[str, AgentStats],
+) -> None:
+    raw_dir = run_dir / "timeline-raw"
+    paths = sorted(raw_dir.glob("*.ndjson")) if raw_dir.is_dir() else []
+    if not paths and (run_dir / "timeline.ndjson").is_file():
+        paths = [run_dir / "timeline.ndjson"]
+
+    for path in paths:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line_no, raw_line in enumerate(handle, start=1):
+                event = extract_json_event(raw_line)
+                if not event:
+                    continue
+                event_type = str(event.get("event_type") or event.get("type") or "")
+                if not event_type.startswith("build_plan."):
+                    continue
+                agent = str(event.get("agent") or path.stem).strip().lower()
+                stats = stats_by_agent.get(agent)
+                if stats is None:
+                    continue
+                apply_build_plan_event(stats, event, source=f"{path}:{line_no}")
+
+
 def is_potential_utterance(line: str) -> bool:
     if INSTRUCTION_RE.search(line):
+        return False
+    if is_incoming_chat_or_memory(line):
         return False
     lower = line.lower()
     blocked_fragments = (
@@ -220,10 +457,13 @@ def classify_execution(line: str) -> tuple[str | None, bool]:
 
 
 def add_execution(stats: AgentStats, execution: ParsedExecution, top_n: int) -> None:
+    bucket = bucket_counts(stats, command_bucket(execution.name))
     if execution.outcome == "success":
         stats.execution_successes += 1
+        bucket["success"] += 1
         if execution.verified:
             stats.verified_actions += 1
+            bucket["verified"] += 1
             if len(stats.verified_success_examples) < top_n:
                 stats.verified_success_examples.append(
                     Example(line=execution.line, text=excerpt(execution.detail))
@@ -232,6 +472,7 @@ def add_execution(stats: AgentStats, execution: ParsedExecution, top_n: int) -> 
 
     if execution.outcome == "failure":
         stats.execution_failures += 1
+        bucket["failure"] += 1
         stats.execution_failure_classes[execution.outcome_class] += 1
         if len(stats.execution_failure_examples) < top_n:
             stats.execution_failure_examples.append(
@@ -244,6 +485,7 @@ def add_execution(stats: AgentStats, execution: ParsedExecution, top_n: int) -> 
         return
 
     stats.execution_unknowns += 1
+    bucket["unknown"] += 1
     stats.execution_failure_classes[execution.outcome_class] += 1
 
 
@@ -254,13 +496,25 @@ def analyze_log(path: Path, top_n: int) -> AgentStats:
     stats.discarded_commands = parsed_log.discarded_commands
     stats.stale_generations = sum(1 for generation in parsed_log.generations if generation.stale)
     stats.emitted_commands = len(parsed_log.accepted_commands)
+    for command in parsed_log.accepted_commands:
+        record_accepted_command(stats, command.name)
     for execution in parsed_log.executions:
         add_execution(stats, execution, top_n)
+    execution_lines = {
+        line_no
+        for execution in parsed_log.executions
+        for line_no in range(execution.line, execution.end_line + 1)
+    }
 
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line_no, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip("\n")
-            parser_failure = classify_parser_failure(line)
+            apply_build_plan_events_from_line(stats, line, source=f"{path}:{line_no}")
+            parser_failure = (
+                classify_parser_failure(line)
+                if line_no not in execution_lines and should_count_parser_failure(line)
+                else None
+            )
             if parser_failure:
                 stats.parser_failures[parser_failure] += 1
                 if len(stats.failed_parse_examples) < top_n:
@@ -337,11 +591,18 @@ def aggregate_stats(agent_stats: list[AgentStats]) -> AgentStats:
         aggregate.discarded_commands += stats.discarded_commands
         aggregate.stale_generations += stats.stale_generations
         aggregate.parser_failures.update(stats.parser_failures)
+        for bucket, counts in stats.command_buckets.items():
+            bucket_counts(aggregate, bucket).update(counts)
         aggregate.execution_successes += stats.execution_successes
         aggregate.execution_failures += stats.execution_failures
         aggregate.execution_unknowns += stats.execution_unknowns
         aggregate.verified_actions += stats.verified_actions
         aggregate.execution_failure_classes.update(stats.execution_failure_classes)
+        aggregate.builder_plan_generated += stats.builder_plan_generated
+        aggregate.builder_plan_unique_ids.update(stats.builder_plan_unique_ids)
+        aggregate.builder_plan_skipped_dedupe += stats.builder_plan_skipped_dedupe
+        aggregate.builder_plan_intended_blocks += stats.builder_plan_intended_blocks
+        aggregate.builder_plan_verified_blocks += stats.builder_plan_verified_blocks
     return aggregate
 
 
@@ -358,6 +619,10 @@ def analyze_run(
         raise FileNotFoundError(f"no bot logs found in {bots_dir}")
 
     agent_stats = [analyze_log(path, top_n=top_n) for path in log_paths]
+    apply_build_plan_events_from_timeline(
+        run_dir,
+        {stats.agent: stats for stats in agent_stats},
+    )
     aggregate = aggregate_stats(agent_stats)
     violations: list[dict[str, Any]] = []
     agents: dict[str, Any] = {}
@@ -385,6 +650,18 @@ def analyze_run(
                 {"class": klass, "count": count}
                 for klass, count in aggregate.execution_failure_classes.most_common(top_n)
             ],
+            "command_buckets": {
+                bucket: dict(counts)
+                for bucket, counts in sorted(aggregate.command_buckets.items())
+            },
+            "builder_plan_metrics": {
+                "builder_plan_generated": aggregate.builder_plan_generated,
+                "builder_plan_unique": aggregate.builder_plan_unique,
+                "builder_plan_skipped_dedupe": aggregate.builder_plan_skipped_dedupe,
+                "builder_plan_intended_blocks": aggregate.builder_plan_intended_blocks,
+                "builder_plan_verified_blocks": aggregate.builder_plan_verified_blocks,
+                "builder_plan_completion_rate": aggregate.builder_plan_completion_rate,
+            },
         },
         "threshold_violations": violations,
     }
@@ -467,6 +744,42 @@ def render_markdown(data: dict[str, Any]) -> str:
     else:
         lines.append("none captured")
 
+    lines.extend(["", "## Command Buckets", ""])
+    command_buckets = data["aggregate"].get("command_buckets", {})
+    if command_buckets:
+        rows = []
+        for bucket, counts in sorted(command_buckets.items()):
+            rows.append(
+                [
+                    bucket,
+                    counts.get("accepted", 0),
+                    counts.get("success", 0),
+                    counts.get("failure", 0),
+                    counts.get("unknown", 0),
+                    counts.get("verified", 0),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                ["Bucket", "Accepted", "Success", "Failure", "Unknown", "Verified"],
+                rows,
+            )
+        )
+    else:
+        lines.append("none captured")
+
+    lines.extend(["", "## Builder Plan Metrics", ""])
+    builder_metrics = data["aggregate"].get("builder_plan_metrics", {})
+    if builder_metrics:
+        lines.append(
+            markdown_table(
+                ["Metric", "Value"],
+                [[name, value] for name, value in builder_metrics.items()],
+            )
+        )
+    else:
+        lines.append("none captured")
+
     lines.extend(["", "## Threshold Violations", ""])
     if data["threshold_violations"]:
         lines.append(
@@ -499,6 +812,24 @@ def render_markdown(data: dict[str, Any]) -> str:
                 "",
             ]
         )
+        if stats.get("command_buckets"):
+            lines.append(
+                markdown_table(
+                    ["Bucket", "Accepted", "Success", "Failure", "Unknown", "Verified"],
+                    [
+                        [
+                            bucket,
+                            counts.get("accepted", 0),
+                            counts.get("success", 0),
+                            counts.get("failure", 0),
+                            counts.get("unknown", 0),
+                            counts.get("verified", 0),
+                        ]
+                        for bucket, counts in sorted(stats["command_buckets"].items())
+                    ],
+                )
+            )
+            lines.append("")
         lines.extend(render_examples("Failed Parse Examples", stats["examples"]["failed_parses"]))
         lines.append("")
         lines.extend(render_examples("Verified Success Examples", stats["examples"]["verified_successes"]))

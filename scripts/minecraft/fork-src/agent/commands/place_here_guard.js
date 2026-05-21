@@ -8,6 +8,7 @@ import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
 import { classifyInterruption, interruptionDetail } from '../skills/action_interruption.js';
 
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
+const COMMAND_PARSE_GUARD_MARKER = 'LTAG E8-16 command parse guard';
 const recentPlaceFailures = new Map();
 const serializedActionNames = new Set([
     '!move',
@@ -50,6 +51,28 @@ function bridgeErrorLine(prefix, err) {
     const code = err instanceof BridgeClientError ? err.code : 'bridge_unknown';
     const detail = err && err.message ? err.message : String(err);
     return `${prefix} [${code}]: ${detail}`;
+}
+
+function messageFromUnknown(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    return value && value.message ? String(value.message) : String(value);
+}
+
+function classifyCommandFailure(value) {
+    const message = messageFromUnknown(value);
+    if (/unknown\s+type|unsupported[_ -]?arg|unsupported\s+.*type|type:\s*object/i.test(message)) {
+        return 'unsupported_arg_type';
+    }
+    if (/was given\b|requires\s+\d+\s+args?\b|wrong[_ -]?args?|too (few|many)|missing .*arg/i.test(message)) {
+        return 'wrong_args';
+    }
+    return 'invalid_args';
+}
+
+function commandFailureDetail(outcomeClass, value) {
+    const message = messageFromUnknown(value);
+    return message ? `${outcomeClass}: ${message}` : `${outcomeClass}: invalid action arguments`;
 }
 
 function rememberPlaceHereResult(agent, blockType, result) {
@@ -101,6 +124,36 @@ async function emitInterruptedActionResult(agent, actionName, outcomeClass, err)
     return `${actionName} ${actionId} ${detail}`;
 }
 
+async function emitCommandFailureResult(agent, actionName, err) {
+    const outcomeClass = classifyCommandFailure(err);
+    const actionId = `${cleanActionName(actionName)}-parse-${randomUUID()}`;
+    const traceId = `trace-${randomUUID()}`;
+    const detail = commandFailureDetail(outcomeClass, err);
+    try {
+        await callBridge({
+            service: 'action',
+            method: 'result',
+            payload: {
+                action_id: actionId,
+                status: 'failure',
+                outcome_class: outcomeClass,
+                detail,
+            },
+            deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
+            agentId: agentId(agent),
+            traceId,
+        });
+    } catch (bridgeErr) {
+        const line = bridgeErrorLine(`${actionName} ${detail}; action.result failed`, bridgeErr);
+        console.error(`[command-parse-guard trace=${traceId}] ${line}`);
+        return line;
+    }
+    console.warn(
+        `[command-parse-guard trace=${traceId}] ${COMMAND_PARSE_GUARD_MARKER}: ${actionName} ${actionId} ${detail}`,
+    );
+    return `${actionName} ${actionId} ${detail}`;
+}
+
 export function wrapPlaceHere(originalPerform, actionName = '!placeHere') {
     if (typeof originalPerform !== 'function') return originalPerform;
     return async function guardedPlaceHere(agent, ...args) {
@@ -109,8 +162,9 @@ export function wrapPlaceHere(originalPerform, actionName = '!placeHere') {
             return rememberPlaceHereResult(agent, args[0], result);
         } catch (err) {
             const outcomeClass = classifyInterruption(err);
-            if (!outcomeClass) throw err;
-            return emitInterruptedActionResult(agent, actionName, outcomeClass, err);
+            return outcomeClass
+                ? emitInterruptedActionResult(agent, actionName, outcomeClass, err)
+                : emitCommandFailureResult(agent, actionName, err);
         }
     };
 }
@@ -148,8 +202,9 @@ export function wrapInterruptedAction(action) {
             return await originalPerform.apply(this, [agent, ...args]);
         } catch (err) {
             const outcomeClass = classifyInterruption(err);
-            if (!outcomeClass) throw err;
-            return emitInterruptedActionResult(agent, actionName, outcomeClass, err);
+            return outcomeClass
+                ? emitInterruptedActionResult(agent, actionName, outcomeClass, err)
+                : emitCommandFailureResult(agent, actionName, err);
         }
     };
     Object.defineProperty(action, '__ltagInterruptionWrapped', {

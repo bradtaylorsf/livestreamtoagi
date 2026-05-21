@@ -312,6 +312,31 @@ def test_bot_log_narration_without_accepted_command_is_not_action_intent(tmp_pat
     assert not any(event.event_type == "action.intent" for event in result.events)
 
 
+def test_incoming_chat_command_examples_do_not_become_action_intents_or_errors(
+    tmp_path: Path,
+) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    (run_dir / "bots").mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    (run_dir / "bots" / "sentinel.log").write_text(
+        "\n".join(
+            [
+                "2026-05-20T22:00:01Z Sentinel received message from Vera: "
+                "please provide exact coordinates before using !place(\"act\", \"dirt\", {\"x\":1,\"y\":64,\"z\":1})",
+                "2026-05-20T22:00:02Z Memory updated to: Sentinel should ask for coordinates.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+
+    assert not any(event.event_type == "action.intent" for event in result.events)
+    assert not any(event.event_type == "error" for event in result.events)
+
+
 def test_no_timestamp_bot_logs_interpolate_to_file_mtime(tmp_path: Path) -> None:
     builder = _load_builder()
     run_dir = tmp_path / "run"
