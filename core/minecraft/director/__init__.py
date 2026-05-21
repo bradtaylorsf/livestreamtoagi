@@ -7,7 +7,9 @@ from core.minecraft.director.prompt_gate import (
     reset_prompt_gates,
 )
 from core.minecraft.director.scene_inbox import (
+    ClosedScene,
     Scene,
+    SceneBufferEntry,
     SceneEvent,
     SceneEventType,
     SceneInbox,
@@ -31,10 +33,12 @@ from core.minecraft.director.turn_scheduler import (
 
 __all__ = [
     "AgentPose",
+    "ClosedScene",
     "DirectorPromptGate",
     "DirectorTurnScheduler",
     "PromptDecision",
     "Scene",
+    "SceneBufferEntry",
     "SceneEvent",
     "SceneEventType",
     "SceneInbox",

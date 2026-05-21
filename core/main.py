@@ -21,7 +21,13 @@ from core.admin import admin_router, auth_api, kill_switch_api
 from core.auth import user_auth_api
 from core.bootstrap import Services, bootstrap_services, init_core_memories, shutdown_services
 from core.bridge import bridge_router
-from core.bridge.consumers import register_memory_consumer, unregister_memory_consumer
+from core.bridge.consumers import (
+    register_memory_consumer,
+    register_scene_memory_consumer,
+    unregister_memory_consumer,
+    unregister_scene_memory_consumer,
+)
+from core.conversation_mode import is_director_v2_run
 from core.event_bus import event_bus
 from core.public_routes import router as public_router
 from core.scheduler import start_scheduler, stop_scheduler
@@ -42,6 +48,7 @@ async def lifespan(app: FastAPI):
     idle_behavior: IdleBehaviorSystem | None = None
     svc: Services | None = None
     memory_consumer_registered = False
+    scene_memory_consumer_registered = False
 
     svc = None
     try:
@@ -51,6 +58,9 @@ async def lifespan(app: FastAPI):
         if svc.event_bus and svc.compactor:
             register_memory_consumer(svc.event_bus, svc.compactor)
             memory_consumer_registered = True
+            if is_director_v2_run():
+                register_scene_memory_consumer(svc.event_bus, svc.compactor)
+                scene_memory_consumer_registered = True
 
         # Wire agent registry into TTS pipeline so voice IDs can be resolved.
         # TTSPipeline is created before bootstrap (to get its audio_dir for
@@ -122,6 +132,8 @@ async def lifespan(app: FastAPI):
         stop_scheduler()
         if svc is not None and memory_consumer_registered:
             unregister_memory_consumer(svc.event_bus)
+        if svc is not None and scene_memory_consumer_registered:
+            unregister_scene_memory_consumer(svc.event_bus)
         await event_bus.shutdown()
         if svc is not None:
             await shutdown_services(svc)

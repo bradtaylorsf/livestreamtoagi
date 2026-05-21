@@ -8,6 +8,7 @@ bridge, and #753 will decide where to register it in the Director V2 path.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections import OrderedDict
@@ -70,6 +71,31 @@ class Scene(BaseModel):
     last_event_at_ms: int
 
 
+class SceneBufferEntry(BaseModel):
+    """Rendered evidence line retained until a scene is compacted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    event_type: SceneEventType
+    category: str
+    source_agent_id: str
+    timestamp_ms: int
+    text: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ClosedScene(BaseModel):
+    """A scene plus its buffered evidence after the inbox closes it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scene: Scene
+    buffered_events: list[SceneBufferEntry]
+    closed_at_ms: int
+    close_reason: str
+
+
 class SceneUpdate(BaseModel):
     """Result returned by ``SceneInbox.ingest``."""
 
@@ -111,6 +137,30 @@ class SceneInboxConfig:
             }
         )
     )
+    major_outcome_event_types: frozenset[SceneEventType] = field(
+        default_factory=lambda: frozenset(
+            {
+                SceneEventType.HEALTH_DANGER,
+                SceneEventType.STUCK,
+            }
+        )
+    )
+    terminal_build_statuses: frozenset[str] = field(
+        default_factory=lambda: frozenset(
+            {
+                "blocked",
+                "cancelled",
+                "complete",
+                "completed",
+                "done",
+                "failed",
+                "failure",
+                "finished",
+                "success",
+                "succeeded",
+            }
+        )
+    )
 
 
 class SceneInbox:
@@ -129,6 +179,8 @@ class SceneInbox:
         self._scenes: OrderedDict[str, Scene] = OrderedDict()
         self._active_scenes: dict[tuple[str, str], str] = {}
         self._dedupe_seen: dict[str, tuple[int, str]] = {}
+        self._event_buffers: dict[str, OrderedDict[str, SceneBufferEntry]] = {}
+        self._closed_queue: list[ClosedScene] = []
 
     @property
     def scenes(self) -> Mapping[str, Scene]:
@@ -136,6 +188,27 @@ class SceneInbox:
 
     def get_scene(self, scene_id: str) -> Scene | None:
         return self._scenes.get(scene_id)
+
+    def detect_closures(self, now_ms: int) -> list[ClosedScene]:
+        """Close scenes that reached a quiet window or meaningful outcome."""
+
+        for scene_id, scene in list(self._scenes.items()):
+            close_reason = self._closure_reason(scene, now_ms)
+            if close_reason is None:
+                continue
+            self._close_scene(
+                scene_id,
+                close_reason=close_reason,
+                closed_at_ms=max(now_ms, scene.last_event_at_ms),
+            )
+        return self.drain_closed_scenes()
+
+    def drain_closed_scenes(self) -> list[ClosedScene]:
+        """Return scenes forced closed by trim or prior closure detection."""
+
+        closed = self._closed_queue
+        self._closed_queue = []
+        return closed
 
     async def ingest(self, raw_event: Mapping[str, Any]) -> SceneUpdate:
         """Translate and group one raw Minecraft/bridge event."""
@@ -252,6 +325,7 @@ class SceneInbox:
             self._scenes[scene.scene_id] = scene
             self._active_scenes[active_key] = scene.scene_id
             self._remember_dedupe(event, scene.scene_id)
+            self._append_scene_event(scene.scene_id, event)
             self._trim_recent_scenes()
             return scene, True, participants, scene.observers
 
@@ -283,6 +357,7 @@ class SceneInbox:
         self._scenes[updated.scene_id] = updated
         self._active_scenes[active_key] = updated.scene_id
         self._remember_dedupe(event, updated.scene_id)
+        self._append_scene_event(updated.scene_id, event)
         return updated, False, participants_added, observers_added
 
     def _active_scene_for(
@@ -306,12 +381,64 @@ class SceneInbox:
 
     def _trim_recent_scenes(self) -> None:
         while len(self._scenes) > self.config.max_recent_scenes:
-            scene_id, _scene = self._scenes.popitem(last=False)
-            self._active_scenes = {
-                key: active_scene_id
-                for key, active_scene_id in self._active_scenes.items()
-                if active_scene_id != scene_id
-            }
+            scene_id = next(iter(self._scenes))
+            self._close_scene(
+                scene_id,
+                close_reason="trimmed",
+                closed_at_ms=self._scenes[scene_id].last_event_at_ms,
+            )
+
+    def _append_scene_event(self, scene_id: str, event: SceneEvent) -> None:
+        buffer = self._event_buffers.setdefault(scene_id, OrderedDict())
+        buffer[event.event_id] = SceneBufferEntry(
+            event_id=event.event_id,
+            event_type=event.type,
+            category=_scene_event_category(event),
+            source_agent_id=event.source_agent_id,
+            timestamp_ms=event.timestamp_ms,
+            text=_render_scene_event(event),
+            payload=dict(event.payload),
+        )
+
+    def _close_scene(
+        self,
+        scene_id: str,
+        *,
+        close_reason: str,
+        closed_at_ms: int,
+    ) -> ClosedScene | None:
+        scene = self._scenes.pop(scene_id, None)
+        if scene is None:
+            return None
+
+        self._active_scenes = {
+            key: active_scene_id
+            for key, active_scene_id in self._active_scenes.items()
+            if active_scene_id != scene_id
+        }
+        buffer = list(self._event_buffers.pop(scene_id, OrderedDict()).values())
+        closed = ClosedScene(
+            scene=scene,
+            buffered_events=buffer,
+            closed_at_ms=closed_at_ms,
+            close_reason=close_reason,
+        )
+        self._closed_queue.append(closed)
+        return closed
+
+    def _closure_reason(self, scene: Scene, now_ms: int) -> str | None:
+        latest_event = _latest_scene_event(self._event_buffers.get(scene.scene_id))
+        if latest_event is not None:
+            if latest_event.event_type in self.config.major_outcome_event_types:
+                return f"{latest_event.event_type.value}_outcome"
+            if latest_event.event_type == SceneEventType.BUILD_ACTION and _is_terminal_build(
+                latest_event.payload,
+                self.config.terminal_build_statuses,
+            ):
+                return "build_outcome"
+        if now_ms - scene.last_event_at_ms >= self.config.scene_window_ms:
+            return "time_window"
+        return None
 
     def _scene_id(self, event: SceneEvent) -> str:
         window_start = (event.timestamp_ms // self.config.scene_window_ms) * (
@@ -558,6 +685,116 @@ def register(bus: EventBus, inbox: SceneInbox | None = None) -> SceneInbox:
     bus.on(EventType.BRIDGE_ACTION_RESULT, on_scene_source)
     bus.on(EventType.AGENT_SPEAK, on_scene_source)
     return scene_inbox
+
+
+def _latest_scene_event(
+    buffer: OrderedDict[str, SceneBufferEntry] | None,
+) -> SceneBufferEntry | None:
+    if not buffer:
+        return None
+    return next(reversed(buffer.values()))
+
+
+def _is_terminal_build(payload: Mapping[str, Any], terminal_statuses: frozenset[str]) -> bool:
+    for field_name in ("status", "outcome", "outcome_class", "result", "phase", "state"):
+        text = _text(payload.get(field_name))
+        if text is not None and text.lower() in terminal_statuses:
+            return True
+    return False
+
+
+def _scene_event_category(event: SceneEvent) -> str:
+    if _is_help_request(event.payload):
+        return "Help requests"
+    if event.type == SceneEventType.CHAT:
+        return "Chat"
+    if event.type in {SceneEventType.BUILD_ACTION, SceneEventType.BLOCK_INTERACTION}:
+        return "Build progress"
+    if event.type == SceneEventType.TOOL_RESULT:
+        return "Tool results"
+    if event.type in {SceneEventType.STUCK, SceneEventType.UNSTUCK}:
+        return "Stuck-Unstuck"
+    if event.type == SceneEventType.HEALTH_DANGER:
+        return "Health danger"
+    if event.type in {SceneEventType.INVENTORY_CHANGE, SceneEventType.RESOURCE_CHANGE}:
+        return "Inventory changes"
+    return "Actions"
+
+
+def _is_help_request(payload: Mapping[str, Any]) -> bool:
+    text = _payload_text(payload, "message", "text", "utterance", "detail").lower()
+    return bool(
+        re.search(
+            r"\b(help|assist|support|need a hand|can someone|could someone|please)\b",
+            text,
+        )
+    )
+
+
+def _render_scene_event(event: SceneEvent) -> str:
+    payload = event.payload
+    source = event.source_agent_id or "unknown"
+    detail = _scene_event_detail(event.type, payload)
+    if not detail:
+        detail = _payload_excerpt(payload)
+    return f"[{event.timestamp_ms}] {source}: {detail or event.type.value}"
+
+
+def _scene_event_detail(event_type: SceneEventType, payload: Mapping[str, Any]) -> str:
+    if event_type == SceneEventType.CHAT:
+        return _payload_text(payload, "message", "text", "utterance", "dialogue", "content")
+    if event_type in {SceneEventType.BUILD_ACTION, SceneEventType.BLOCK_INTERACTION}:
+        return _field_summary(
+            payload,
+            "action_id",
+            "action_type",
+            "status",
+            "outcome_class",
+            "detail",
+            "message",
+        )
+    if event_type == SceneEventType.TOOL_RESULT:
+        return _field_summary(
+            payload,
+            "tool_name",
+            "tool",
+            "action_id",
+            "status",
+            "result",
+            "detail",
+            "message",
+        )
+    if event_type in {SceneEventType.STUCK, SceneEventType.UNSTUCK, SceneEventType.HEALTH_DANGER}:
+        return _field_summary(payload, "status", "detail", "message", "reason", "blocker")
+    if event_type in {SceneEventType.INVENTORY_CHANGE, SceneEventType.RESOURCE_CHANGE}:
+        return _field_summary(payload, "item", "resource", "delta", "count", "detail", "message")
+    return _field_summary(payload, "status", "detail", "message", "class")
+
+
+def _field_summary(payload: Mapping[str, Any], *field_names: str) -> str:
+    fields = []
+    for field_name in field_names:
+        value = _text(payload.get(field_name))
+        if value is None:
+            continue
+        fields.append(f"{field_name}={value}")
+    return "; ".join(fields)
+
+
+def _payload_text(payload: Mapping[str, Any], *field_names: str) -> str:
+    values = []
+    for field_name in field_names:
+        value = _text(payload.get(field_name))
+        if value is not None:
+            values.append(value)
+    return " ".join(values)
+
+
+def _payload_excerpt(payload: Mapping[str, Any]) -> str:
+    try:
+        return json.dumps(payload, sort_keys=True, default=str)[:600]
+    except (TypeError, ValueError):
+        return str(dict(payload))[:600]
 
 
 def _canonical_agent_id(value: Any) -> str:

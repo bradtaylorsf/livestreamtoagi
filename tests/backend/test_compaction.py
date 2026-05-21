@@ -413,6 +413,34 @@ class TestSummaryFormat:
         assert "building_session" in user_msg
         assert "Aurora designed a new logo." in user_msg
 
+    @pytest.mark.asyncio
+    async def test_scene_summary_prompt_preserves_continuity_fields(
+        self,
+        compactor: MemoryCompactor,
+        llm_mock: AsyncMock,
+    ) -> None:
+        """Scene summaries ask for commitments, failures, tool outcomes, and next steps."""
+        with patch(
+            "core.memory.compaction.generate_embedding",
+            return_value=_fake_embedding(),
+        ):
+            await compactor.compact_interaction(
+                agent_id="rex",
+                interaction="Vera: I'll build the bridge.\nTool: inspect succeeded.",
+                event_type="minecraft_scene",
+                summary_style="scene",
+            )
+
+        messages = llm_mock.complete.call_args.kwargs["messages"]
+        system = messages[0]["content"].lower()
+        assert "commitments" in system
+        assert "discovered constraints" in system
+        assert "repeated failures" in system
+        assert "help requests" in system
+        assert "build progress" in system
+        assert "tool outcomes" in system
+        assert "next practical thing" in system
+
 
 # ── compact_recall_only tests ──────────────────────────────────
 
