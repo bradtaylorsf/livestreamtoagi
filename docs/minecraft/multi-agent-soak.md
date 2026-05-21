@@ -228,6 +228,32 @@ soft-pass evidence bundle; the `summary.txt` block still records
 `behavior_gate_status=fail`, and `docs/minecraft/cohort-report.md` must explain
 why the deviation was accepted.
 
+## Structured Timeline
+
+Every embodied soak exports a canonical timeline after the reliability and
+behavior gates run. The exporter writes `timeline.ndjson` and
+`timeline-totals.json` under the evidence directory and appends a `Timeline`
+block to `summary.txt` with totals by event type, agent, model, and token
+source.
+
+The timeline normalizes:
+
+| Source | Timeline coverage |
+| --- | --- |
+| `bots/*.log` | Mindcraft chat, command intents, parser errors, action traces, lifecycle, and sampled position. |
+| `logs/*.log` | Paper public chat, bridge `bridge_event` / `bridge_inbound_event` lines, server errors. |
+| `timeline-raw/*.ndjson` | Best-effort Node events from the staged timeline emitter and LM Studio usage shim. |
+| `*lmstudio*.ndjson` | Explicit LM Studio request/response traces when an operator captures them separately. |
+
+LLM events include model, purpose/reason, latency, prompt tokens, completion
+tokens, total tokens, outcome, and whether usage is provider-reported or a
+deterministic local estimate. High-frequency position logs are collapsed into
+interval `state.sample` events; low-level pathfinding chatter is not treated as
+an LLM decision.
+
+Schema details and payload examples live in
+[`timeline-schema.md`](timeline-schema.md).
+
 Outputs are written to `logs/soak/<UTC timestamp>/`:
 
 | File | Contents |
@@ -245,7 +271,10 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `action-reliability.json` | Per-agent intent, parse, execution, verification metrics and threshold violations. |
 | `action-reliability.md` | Human-readable reliability report with failed-parse and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
-| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, and behavioral acceptance. |
+| `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, action, state, error, and lifecycle events. |
+| `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
+| `timeline-raw/*.ndjson` | Raw best-effort per-agent timeline events emitted by the staged Mindcraft overlay. |
+| `summary.txt` | Crash candidates, bridge drops, Management event lines, rough respond/ignore counts, cost table, action reliability, behavioral acceptance, and timeline totals. |
 
 ## Failure Classes Monitored
 
@@ -468,6 +497,9 @@ Append the completed live run here before advancing E8-9:
 | Top parser failure classes |  |
 | Failed parse examples |  |
 | Verified action examples |  |
+| Timeline result | PASS / MISSING |
+| Timeline event totals |  |
+| Timeline token totals | provider-reported / estimated |
 | Spawn safety (per agent) |  |
 | Movement distance / count |  |
 | Public chat lines (cohort) |  |

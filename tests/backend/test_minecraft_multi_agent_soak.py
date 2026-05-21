@@ -22,6 +22,7 @@ RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 EASY_SETUP_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "setup-easy-spawn.mjs"
 DOC = REPO_ROOT / "docs" / "minecraft" / "multi-agent-soak.md"
 ACTION_DOC = REPO_ROOT / "docs" / "minecraft" / "action-command-reliability.md"
+TIMELINE_DOC = REPO_ROOT / "docs" / "minecraft" / "timeline-schema.md"
 COHORT_REPORT = REPO_ROOT / "docs" / "minecraft" / "cohort-report.md"
 PACKAGE = REPO_ROOT / "package.json"
 
@@ -107,6 +108,8 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "SOAK_MIN_EXECUTION_RATE" in proc.stdout
     assert "SOAK_MIN_VERIFIED_SUCCESS" in proc.stdout
     assert "SOAK_RELIABILITY_FAIL_ON_VIOLATION" in proc.stdout
+    assert "timeline.ndjson" in proc.stdout
+    assert "timeline-totals.json" in proc.stdout
     assert "SOAK_MIN_MOVEMENT_PER_AGENT" in proc.stdout
     assert "SOAK_REQUIRE_BEHAVIOR_GATE" in proc.stdout
     assert "--verify-behavior" in proc.stdout
@@ -130,6 +133,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_MIN_PARSE_SUCCESS" in wrapper.stdout
     assert "MC_SIM_MIN_EXECUTION_RATE" in wrapper.stdout
     assert "MC_SIM_MIN_VERIFIED_SUCCESS" in wrapper.stdout
+    assert "timeline.ndjson" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
 
@@ -494,7 +498,12 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
     assert "SOAK_RELIABILITY_FAIL_ON_VIOLATION" in text
     assert "analyze_action_reliability.py" in text
+    assert "build_timeline.py" in text
     assert "action-reliability.md" in text
+    assert "timeline.ndjson" in text
+    assert "timeline-totals.json" in text
+    assert "MC_TIMELINE_NDJSON" in text
+    assert "MC_RUN_DIR" in text
     assert "setup-easy-spawn.mjs" in text
     assert "world-easy.config" in text
     assert "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS" in text
@@ -690,9 +699,13 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "Live Run Addendum Template" in text
     assert "GO / NO-GO" in text
     assert "Action-Command Reliability Gate" in text
+    assert "Structured Timeline" in text
     assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
     assert "Action reliability result" in text
     assert "Behavioral gate result" in text
+    assert "timeline.ndjson" in text
+    assert "timeline-totals.json" in text
+    assert "timeline-schema.md" in text
 
     assert ACTION_DOC.is_file()
     action_text = ACTION_DOC.read_text(encoding="utf-8")
@@ -702,6 +715,23 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "### Execution Results" in action_text
     assert "### Verification Results" in action_text
     assert "## Live Run Evidence Template" in action_text
+
+    assert TIMELINE_DOC.is_file()
+    timeline_text = TIMELINE_DOC.read_text(encoding="utf-8")
+    for event_type in (
+        "chat.public",
+        "llm.request",
+        "llm.response",
+        "action.intent",
+        "action.start",
+        "action.result",
+        "state.sample",
+        "error",
+        "lifecycle",
+    ):
+        assert event_type in timeline_text
+    assert "provider_reported" in timeline_text
+    assert "estimated" in timeline_text
 
 
 def test_report_names_failure_classes_and_observed_counters() -> None:

@@ -67,6 +67,7 @@ AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 
 AGENT_REL="src/agent/agent.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
+TIMELINE_EMITTER_REL="src/agent/bridge/timeline_emitter.js"
 MANAGEMENT_REVIEW_REL="src/agent/bridge/management_review.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_REL="src/agent/commands/move_action.js"
@@ -81,6 +82,7 @@ BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
+LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
@@ -94,6 +96,7 @@ STAGED_DESTS=()
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
 BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
+TIMELINE_EMITTER_SRC="$FORK_SRC_DIR/agent/bridge/timeline_emitter.js"
 MANAGEMENT_REVIEW_SRC="$FORK_SRC_DIR/agent/bridge/management_review.js"
 BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/move_action.js"
@@ -108,6 +111,7 @@ BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
+LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 
 print_help() {
     cat <<EOF
@@ -228,6 +232,7 @@ verify_committed_assets() {
 
     for required in \
         "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
+        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" \
         "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" \
@@ -302,6 +307,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would stage:  $COHORT_SETTINGS_TEMPLATE -> $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $COHORT_PROFILE_TEMPLATE  -> $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
     info "Would copy:   fork-src/ bridge client, action handlers, and helper skills"
+    info "Would copy:   fork-src/ timeline telemetry and LM Studio usage shim"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
@@ -353,6 +359,17 @@ if ! sed -E \
     exit 1
 fi
 ok "Staged settings.js -> $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profile=${MINDCRAFT_PROFILE})"
+SETTINGS_PATH="$DEST_SETTINGS" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.SETTINGS_PATH;
+const importLine = "import './src/agent/skills/lmstudio_usage.js'; // LTAG E8-12 timeline telemetry\n";
+let source = readFileSync(path, 'utf8');
+if (!source.includes('lmstudio_usage.js')) {
+    writeFileSync(path, importLine + source);
+}
+NODE
+ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
@@ -400,6 +417,7 @@ trap 'restore_clone_patches; exit 130' INT
 trap 'restore_clone_patches; exit 143' TERM
 
 stage_file "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_REL"
+stage_file "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_REL"
 stage_file "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_REL"
 stage_file "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_REL"
 stage_file "$MOVE_ACTION_SRC" "$MOVE_ACTION_REL"
@@ -414,7 +432,8 @@ stage_file "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_REL"
 stage_file "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_REL"
 stage_file "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_REL"
 stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
-ok "Copied bridge client, action handlers, and helper skills from fork-src"
+stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
+ok "Copied bridge client, timeline telemetry, action handlers, and helper skills from fork-src"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
 if [ ! -f "$AGENT_PATH" ]; then
