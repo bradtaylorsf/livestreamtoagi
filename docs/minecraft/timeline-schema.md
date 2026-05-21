@@ -58,6 +58,9 @@ Each `timeline.ndjson` line is one JSON object:
 | `inbox.turn_completed` | Batched conversation turn finished, including outcome and remaining queue depth. |
 | `inbox.telemetry_ignored` | Lifecycle/status chatter was recorded but intentionally not sent to the LLM. |
 | `inbox.immediate_command` | Direct user command such as `!stop` bypassed the debounce path. |
+| `director_gate.selected` | Director V2 allowed this compacted inbox batch to enter the Mindcraft prompt path. Payload includes `scene_id`, `turn_kind`, `reason`, and `queue_depth`. |
+| `director_gate.suppressed` | Director V2 suppressed this compacted inbox batch before `shouldRespond`. Payload includes `scene_id`, `suppression_reason`, `queue_depth`, and suppressed-agent count. |
+| `director_gate.stale_discarded` | A Director V2 verdict arrived after a newer gate request superseded it, so the old prompt was discarded. |
 | `build_plan.generation.started` | `!planAndBuild` began a builder-model planning request. |
 | `build_plan.generation.completed` | A validated plan is ready. Payload includes `source`, `provider`, `builder_model`, paid/local counts, token usage when available, estimated USD, `plan`, `plan_json`, origin, and max steps. |
 | `build_plan.generation.rejected` | Builder-model JSON failed schema/material/bounds validation before fallback. |
@@ -141,10 +144,11 @@ The committed Mindcraft overlay stages:
 - `scripts/minecraft/fork-src/agent/bridge/timeline_emitter.js`
 - `scripts/minecraft/fork-src/agent/skills/lmstudio_usage.js`
 - `scripts/minecraft/fork-src/agent/skills/inbox_queue.js`
+- `scripts/minecraft/fork-src/agent/skills/director_gate.js`
 - `scripts/minecraft/fork-src/agent/skills/action_queue.js`
 - `scripts/minecraft/fork-src/agent/skills/heartbeat.js`
 - `scripts/minecraft/fork-src/agent/commands/plan_and_build_action.js`
 
 Launchers inject the usage shim into staged `settings.js` and patch `agent.js`
-to install the inbox, action queue, and heartbeat wrappers, so the git-ignored
+to install the inbox, Director gate, action queue, and heartbeat wrappers, so the git-ignored
 Mindcraft clone does not need a committed edit.

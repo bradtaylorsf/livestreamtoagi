@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "payload": {
+    "granted_tools": [],
+    "local_observations": {},
+    "queue_depth": -1,
+    "reason": "direct_address",
+    "role": "builder",
+    "scene_digest": "invalid queue depth",
+    "scene_id": "mcscene-1000-test",
+    "selected": true,
+    "suppression_reason": null,
+    "suppressed_agents": [],
+    "turn_kind": "speaker"
+  },
+  "request_id": "req-director-gate-0001",
+  "retryable": false
+}

@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "payload": {
+    "granted_tools": [
+      "!inventory",
+      "!placeHere"
+    ],
+    "local_observations": {
+      "dimension": "overworld"
+    },
+    "queue_depth": 1,
+    "reason": "direct_address",
+    "role": "builder",
+    "scene_digest": "chat from viewer: Rex, can you help place the first camp marker?",
+    "scene_id": "mcscene-1000-test",
+    "selected": true,
+    "suppression_reason": null,
+    "suppressed_agents": [
+      "vera"
+    ],
+    "turn_kind": "speaker"
+  },
+  "request_id": "req-director-gate-0001",
+  "retryable": false
+}

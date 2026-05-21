@@ -75,6 +75,7 @@ from core.bridge.contract import (
 )
 from core.bridge.errand_queue import Errand, errand_queue
 from core.bridge.handlers.code_execution import handle_code_execute
+from core.bridge.handlers.director import handle_director_gate
 from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.management import handle_management_review
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
@@ -110,12 +111,14 @@ UNKNOWN_REQUEST_ID = "unknown"
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
 ERR_MANAGEMENT_SERVICE_UNAVAILABLE = "management_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
+ERR_DIRECTOR_GATE_UNAVAILABLE = "director_gate_unavailable"
 ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
 KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 MANAGEMENT_REVIEW_VERBS = frozenset({"management.review"})
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
+DIRECTOR_GATE_VERBS = frozenset({"director.gate"})
 ERRAND_POLL_VERBS = frozenset({"errand.poll"})
 ERRAND_COMPLETE_VERBS = frozenset({"errand.complete"})
 ERRAND_VERBS = ERRAND_POLL_VERBS | ERRAND_COMPLETE_VERBS
@@ -420,6 +423,13 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             f"{key} requires initialized code execution services",
             retryable=True,
         )
+    if key in DIRECTOR_GATE_VERBS:
+        return make_error_response(
+            env.request_id,
+            ERR_DIRECTOR_GATE_UNAVAILABLE,
+            f"{key} requires the async bridge dispatcher",
+            retryable=True,
+        )
     if key in ERRAND_POLL_VERBS:
         return _success_response(env, _handle_errand_poll(env))
     if key in ERRAND_COMPLETE_VERBS:
@@ -466,6 +476,9 @@ async def build_bridge_response_with_services(
         if unavailable is not None:
             return unavailable
         return _success_response(env, await handle_code_execute(env, services))
+
+    if key in DIRECTOR_GATE_VERBS:
+        return _success_response(env, await handle_director_gate(env, services))
 
     if key in ERRAND_POLL_VERBS:
         if _errand_poll_targets_alpha(env) and await _kill_switch_active(services):
@@ -614,6 +627,7 @@ def _assert_handlers_cover_registry() -> None:
         | MEMORY_WRITE_VERBS
         | MANAGEMENT_REVIEW_VERBS
         | CODE_EXECUTE_VERBS
+        | DIRECTOR_GATE_VERBS
         | ERRAND_VERBS
     )
     missing = set(SERVICE_REGISTRY) - handled
