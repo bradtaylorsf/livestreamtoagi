@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +25,7 @@ DEFAULT_RESTART_RECENT_SECONDS = 300
 DEFAULT_STUCK_LOOP_COUNT = 3
 DEFAULT_LLM_IDLE_SECONDS = 120
 DEFAULT_FEED_LIMIT = 80
+FIXTURE_PATH_SUFFIX = ("tests", "backend", "fixtures", "minecraft_timeline")
 
 ACTIVE_EVENT_TYPES = {
     "chat.public",
@@ -191,6 +194,22 @@ def ensure_timeline_artifacts(run_dir: Path, *, rebuild: bool = False) -> tuple[
 
     result = build_timeline.build_timeline(run_dir)
     return build_timeline.write_artifacts(run_dir, result)
+
+
+def is_committed_fixture_run_dir(run_dir: Path) -> bool:
+    return tuple(run_dir.resolve().parts[-len(FIXTURE_PATH_SUFFIX) :]) == FIXTURE_PATH_SUFFIX
+
+
+def default_output_path(run_dir: Path) -> Path:
+    if is_committed_fixture_run_dir(run_dir):
+        digest = hashlib.sha1(str(run_dir.resolve()).encode("utf-8")).hexdigest()[:12]
+        return (
+            Path(tempfile.gettempdir())
+            / "minecraft-cohort-monitor-fixtures"
+            / digest
+            / "monitor.html"
+        )
+    return run_dir / "monitor.html"
 
 
 def event_ts(event: dict[str, Any]) -> datetime | None:
@@ -1133,7 +1152,7 @@ def build(
         thresholds=thresholds,
         feed_limit=max(1, feed_limit),
     )
-    output_path = output or run_dir / "monitor.html"
+    output_path = output or default_output_path(run_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_monitor_html(model), encoding="utf-8")
     return output_path
@@ -1148,7 +1167,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="HTML output path. Default: <run-dir>/monitor.html",
+        help=(
+            "HTML output path. Default: <run-dir>/monitor.html, except the committed "
+            "test fixture renders to a temp file to avoid dirtying the repo."
+        ),
     )
     parser.add_argument(
         "--feed-limit",

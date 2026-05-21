@@ -178,6 +178,23 @@ def test_cli_writes_monitor_html(tmp_path: Path) -> None:
     assert "monitor rendered" in proc.stdout
 
 
+def test_cli_uses_temp_output_for_committed_fixture_path(tmp_path: Path) -> None:
+    run_dir = tmp_path / "tests" / "backend" / "fixtures" / "minecraft_timeline"
+    shutil.copytree(FIXTURE, run_dir)
+
+    proc = subprocess.run(
+        [sys.executable, str(MONITOR), "--run-dir", str(run_dir)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert not (run_dir / "monitor.html").exists()
+    assert "minecraft-cohort-monitor-fixtures" in proc.stdout
+
+
 def test_fixture_monitor_html_is_ignored_generated_output() -> None:
     text = GITIGNORE.read_text(encoding="utf-8")
     assert "/tests/backend/fixtures/minecraft_timeline/monitor.html" in text
