@@ -45,7 +45,9 @@ from core.bridge.server import (
     BRIDGE_TOKEN_ENV,
     BRIDGE_WS_PATH,
     CODE_EXECUTE_VERBS,
+    DIRECTOR_GATE_VERBS,
     ERR_CODE_SERVICE_UNAVAILABLE,
+    ERR_DIRECTOR_GATE_UNAVAILABLE,
     ERR_KILL_SWITCH_ACTIVE,
     ERR_MANAGEMENT_SERVICE_UNAVAILABLE,
     ERR_MEMORY_SERVICE_UNAVAILABLE,
@@ -494,6 +496,16 @@ def test_build_bridge_response_returns_typed_error_for_code_path() -> None:
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
+def test_build_bridge_response_returns_typed_error_for_director_gate_sync_path() -> None:
+    request = _fixture("director.gate", "request.valid.json")
+    response = build_bridge_response(request)
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == ERR_DIRECTOR_GATE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
 def test_build_bridge_response_rejects_bad_envelope() -> None:
     response = build_bridge_response("definitely not an envelope")
     assert response.ok is False
@@ -515,6 +527,7 @@ def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.write"} == MEMORY_WRITE_VERBS
     assert {"management.review"} == MANAGEMENT_REVIEW_VERBS
     assert {"code.execute"} == CODE_EXECUTE_VERBS
+    assert {"director.gate"} == DIRECTOR_GATE_VERBS
     assert {"errand.poll"} == ERRAND_POLL_VERBS
     assert {"errand.complete"} == ERRAND_COMPLETE_VERBS
     assert {"errand.poll", "errand.complete"} == ERRAND_VERBS
@@ -522,6 +535,7 @@ def test_handlers_match_closed_registry_exactly() -> None:
     assert "memory.write" not in STUB_HANDLERS
     assert "management.review" not in STUB_HANDLERS
     assert "code.execute" not in STUB_HANDLERS
+    assert "director.gate" not in STUB_HANDLERS
     assert "errand.poll" not in STUB_HANDLERS
     assert "errand.complete" not in STUB_HANDLERS
     handled = (
@@ -530,6 +544,7 @@ def test_handlers_match_closed_registry_exactly() -> None:
         | set(MEMORY_WRITE_VERBS)
         | set(MANAGEMENT_REVIEW_VERBS)
         | set(CODE_EXECUTE_VERBS)
+        | set(DIRECTOR_GATE_VERBS)
         | set(ERRAND_VERBS)
     )
     assert handled == set(c.SERVICE_REGISTRY)

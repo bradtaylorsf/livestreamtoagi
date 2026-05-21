@@ -24,7 +24,7 @@
 #   LOCAL_LLM_MODEL=<model-id-from-LM-Studio>
 #   LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 #   EMBEDDING_PROVIDER=deterministic
-#   CONVERSATION_MODE=embodied
+#   CONVERSATION_MODE=embodied          # or director_v2 for Director V2 prompt gating
 #   MINECRAFT_BRIDGE_TOKEN=<same secret the backend reads>
 #
 # Optional in .env:
@@ -393,11 +393,20 @@ if [ "${LLM_PROVIDER:-}" != "lmstudio" ]; then
     info "  Add to .env: LLM_PROVIDER=lmstudio"
     exit 1
 fi
-if [ "${CONVERSATION_MODE:-}" != "embodied" ]; then
-    fail "CONVERSATION_MODE must be embodied for the Minecraft sim."
-    info "  Add to .env: CONVERSATION_MODE=embodied"
-    exit 1
+case "${CONVERSATION_MODE:-}" in
+    embodied|director_v2) ;;
+    *)
+        fail "CONVERSATION_MODE must be embodied or director_v2 for the Minecraft sim."
+        info "  Add to .env: CONVERSATION_MODE=embodied"
+        info "  Or use Director V2 prompt gating: CONVERSATION_MODE=director_v2"
+        exit 1
+        ;;
+esac
+if [ "${CONVERSATION_MODE:-}" = "director_v2" ]; then
+    DIRECTOR_V2_GATE=1
 fi
+DIRECTOR_V2_GATE="${DIRECTOR_V2_GATE:-0}"
+export CONVERSATION_MODE DIRECTOR_V2_GATE
 if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
     fail "LOCAL_LLM_MODEL is missing."
     info "  Run: pnpm llm:local --list-only"
@@ -434,6 +443,8 @@ info "mode: ${mode}"
 info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
+info "conversation mode: ${CONVERSATION_MODE}"
+info "Director V2 gate: ${DIRECTOR_V2_GATE}"
 info "builder route: provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
 info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"

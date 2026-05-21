@@ -23,15 +23,13 @@ def test_env_example_has_no_real_values():
         if not line or line.startswith("#"):
             continue
         key, _, value = line.partition("=")
-        if key == "CONVERSATION_MODE" and value in {"director", "embodied"}:
+        if key == "CONVERSATION_MODE" and value in {"director", "embodied", "director_v2"}:
             continue
         # Allow placeholder defaults (localhost URLs, 'devpassword', 'dev-*')
         if value and not any(
             p in value for p in ["localhost", "devpassword", "dev-", "development", "ws://"]
         ):
-            raise AssertionError(
-                f".env.example has a suspicious real value for {key}: {value!r}"
-            )
+            raise AssertionError(f".env.example has a suspicious real value for {key}: {value!r}")
 
 
 def test_env_example_documents_required_vars():

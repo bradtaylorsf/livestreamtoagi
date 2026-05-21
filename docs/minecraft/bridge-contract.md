@@ -46,12 +46,12 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.6"` (E4-7 added the optional `trace_id`, E5-1 added
+`PROTOCOL_VERSION = "1.7"` (E4-7 added the optional `trace_id`, E5-1 added
 optional core-memory fields, E6-5 added `code.execute`, E6-6 added typed
 perception snapshot definitions, E7-2 added `errand.poll`, and E7-3 added
-`errand.complete`; all are additive minor bumps). Same-major versions are
-wire-compatible in either direction (new fields/verbs are additive). An unknown
-*major* — or any
+`errand.complete`, and E8.5-4 added `director.gate`; all are additive minor
+bumps). Same-major versions are wire-compatible in either direction (new
+fields/verbs are additive). An unknown *major* — or any
 unparseable version — is **not
 supported**; the server replies with the exact ADR §3 shape
 (`unsupported_version_response`): `ok=false`,
@@ -78,6 +78,7 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `errand.poll` | Node→Python | `{agent_id}` → `{task_id?, task?, from_agent?, dispatched_at_ms?, urgency?}` |
 | `errand.complete` | Node→Python | `{task_id, status, symbol, detail, step_results[]}` → `{accepted}` |
 | `code.execute` | Node→Python | `{language, code, timeout?}` → `{status, stdout?, stderr?, reason?, exit_code?, execution_time_ms?}` |
+| `director.gate` | Node→Python | `{agent_id, event_kind, event_text, source_agent?, mentions[], position?, scene_hint?, available_tools[]}` → `{selected, turn_kind?, reason, suppression_reason?, scene_id, scene_digest, role, local_observations, granted_tools[], queue_depth, suppressed_agents[]}` |
 
 **Naming reconciliation:** issue #541's scope text says `memory.read`; ADR §6
 (authoritative) calls the same verb `memory.recall`. The contract uses

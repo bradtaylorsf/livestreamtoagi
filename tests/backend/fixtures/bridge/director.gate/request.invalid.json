@@ -1,0 +1,20 @@
+{
+  "agent_id": "vera",
+  "cost_context": {
+    "agent_tier": "conversation",
+    "budget_bucket": "director-gate",
+    "estimated_cost_usd": 0.0
+  },
+  "deadline_ms": 1500,
+  "method": "gate",
+  "payload": {
+    "agent_id": "vera",
+    "event_kind": "respond_maybe",
+    "event_text": "invalid gate kind"
+  },
+  "request_id": "req-director-gate-0002",
+  "run_id": "run-0001",
+  "service": "director",
+  "simulation_id": "11111111-1111-1111-1111-111111111111",
+  "version": "1.7"
+}

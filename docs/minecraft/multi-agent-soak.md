@@ -93,6 +93,7 @@ export LOCAL_LLM_BASE_URL=http://localhost:1234/v1
 export LOCAL_LLM_MODEL=<model-id-from-LM-Studio>
 export LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 export EMBEDDING_PROVIDER=deterministic
+export CONVERSATION_MODE=embodied
 export MINECRAFT_BRIDGE_TOKEN=<same-secret-as-backend>
 
 scripts/minecraft/soak.sh --duration-hours 2 --log-dir logs/soak
@@ -178,6 +179,7 @@ The staged Mindcraft overlay now treats each character as a queued actor:
 | Layer | Behavior | Evidence |
 | --- | --- | --- |
 | Per-agent inbox | `handleMessage` appends incoming chat to a pending inbox, debounces for `MINECRAFT_TURN_DEBOUNCE_MS` (default `2000`), batches recent messages, and saves messages that arrive during generation for the next turn. Lifecycle chatter such as `I'm stuck` stays telemetry-only. | `inbox.queued`, `inbox.turn_started`, `inbox.turn_completed`, `inbox.telemetry_ignored`, `inbox.immediate_command`. |
+| Director V2 gate | When `CONVERSATION_MODE=director_v2`, each compacted inbox batch calls `director.gate` before Mindcraft can enqueue `shouldRespond`. Selected agents receive scene context and affordances; unselected agents resolve the inbox turn without an LLM call. | `director_gate.selected`, `director_gate.suppressed`, `director_gate.stale_discarded`. |
 | LM Studio queue | `lmstudio_queue_proxy.py` serializes OpenAI-compatible requests to LM Studio with `MINECRAFT_LLM_CONCURRENCY` workers and emits wait/latency telemetry. | `timeline-raw/llm-queue.ndjson`, plus `llm.queue.enqueued`, `llm.queue.started`, `llm.queue.completed`, `llm.queue.failed`. |
 | Per-agent action queue | `ActionManager._executeAction` keeps one active action slot per agent. New embodied actions are queued instead of interrupting `placeHere`, `move`, or plan builds; queue overflow emits a busy rejection. | `action.queued`, `action.started`, `action.completed`, `action.rejected_busy`. |
 
@@ -187,6 +189,8 @@ Useful knobs:
 | --- | --- | --- |
 | `MINECRAFT_TURN_DEBOUNCE_MS` | `2000` | Inbox debounce before one batched conversation turn. |
 | `MINECRAFT_TURN_BATCH_MAX` | `12` | Max inbox messages sent to one prompt. |
+| `CONVERSATION_MODE` | `embodied` | `embodied` preserves the #510 decentralized prompt mode; `director_v2` enables Director V2 prompt gating. |
+| `DIRECTOR_V2_GATE` | `0` | Automatically set to `1` by the wrappers when `CONVERSATION_MODE=director_v2`. |
 | `MINECRAFT_ACTION_QUEUE_MAX` | `16` | Max deferred embodied actions per agent. |
 | `MINECRAFT_LLM_QUEUE_PROXY` | `1` | Start the local FIFO proxy and route bot LLM traffic through it. |
 | `MINECRAFT_LLM_CONCURRENCY` | `1` | Active upstream LM Studio requests allowed by the proxy. |

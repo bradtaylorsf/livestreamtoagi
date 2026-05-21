@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
 ACTION_QUEUE = FORK_SRC / "agent" / "skills" / "action_queue.js"
 INBOX_QUEUE = FORK_SRC / "agent" / "skills" / "inbox_queue.js"
+DIRECTOR_GATE = FORK_SRC / "agent" / "skills" / "director_gate.js"
 
 NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
@@ -183,7 +184,9 @@ process.stdout.write(JSON.stringify({{
 
     assert len(result["calls"]) == 3
     assert result["batchResults"] == ["handled-1", "handled-1"]
-    assert "Incoming message batch since your last turn (2 messages):" in result["calls"][0]["message"]
+    assert (
+        "Incoming message batch since your last turn (2 messages):" in result["calls"][0]["message"]
+    )
     assert "first batch message" in result["calls"][0]["message"]
     assert "second batch message" in result["calls"][0]["message"]
     assert result["deferredResults"] == ["handled-2", "handled-3"]
@@ -191,8 +194,119 @@ process.stdout.write(JSON.stringify({{
     assert result["calls"][2]["message"] == "message while model is generating"
     event_types = [event["type"] for event in result["events"]]
     running_queue_events = [
-        event for event in result["events"] if event["type"] == "inbox.queued" and event["payload"].get("running")
+        event
+        for event in result["events"]
+        if event["type"] == "inbox.queued" and event["payload"].get("running")
     ]
     assert event_types.count("inbox.turn_started") == 3
     assert event_types.count("inbox.turn_completed") == 3
     assert running_queue_events
+
+
+@requires_node
+def test_director_gate_suppresses_unselected_inbox_turns_before_llm(
+    tmp_path: Path,
+) -> None:
+    inbox_queue = _stage_skill_tree(tmp_path, INBOX_QUEUE)
+    skills = inbox_queue.parent
+    shutil.copy2(DIRECTOR_GATE, skills / DIRECTOR_GATE.name)
+    bridge = skills.parent / "bridge"
+    (bridge / "python_bridge.js").write_text(
+        """
+export async function callBridge(opts = {}) {
+    globalThis.__bridgeCalls = globalThis.__bridgeCalls || [];
+    globalThis.__bridgeCalls.push(opts);
+    const verdict = globalThis.__directorVerdicts.shift();
+    return { ok: true, payload: verdict };
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const inbox = await import(pathToFileURL({json.dumps(str(inbox_queue))}).href);
+const gate = await import(pathToFileURL({json.dumps(str(skills / DIRECTOR_GATE.name))}).href);
+globalThis.__timelineEvents = [];
+globalThis.__bridgeCalls = [];
+globalThis.__directorVerdicts = [
+    {{
+        selected: true,
+        turn_kind: 'speaker',
+        reason: 'weighted_scene_fit',
+        scene_id: 'scene-1',
+        scene_digest: 'viewer asked for one camp marker',
+        role: 'host facilitator',
+        local_observations: {{ scene_participants: ['vera', 'rex'] }},
+        granted_tools: ['!placeHere'],
+        queue_depth: 1,
+        suppressed_agents: ['rex'],
+    }},
+    {{
+        selected: false,
+        turn_kind: null,
+        reason: 'suppressed',
+        suppression_reason: 'fanout_capped',
+        scene_id: 'scene-1',
+        scene_digest: 'viewer asked for one camp marker',
+        role: 'builder',
+        local_observations: {{}},
+        granted_tools: [],
+        queue_depth: 1,
+        suppressed_agents: ['rex'],
+    }},
+];
+
+const calls = [];
+function makeAgent(name) {{
+    return {{
+        name,
+        bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+        async handleMessage(source, message, maxResponses = null) {{
+            calls.push({{ agent: name, source, message, maxResponses }});
+            return `${{name}}-handled`;
+        }},
+    }};
+}}
+
+const vera = makeAgent('vera');
+const rex = makeAgent('rex');
+for (const agent of [vera, rex]) {{
+    inbox.installInboxQueue(agent, {{ debounceMs: 5, maxBatch: 4 }});
+    gate.installDirectorGate(agent, {{ enabled: true, deadlineMs: 100 }});
+}}
+
+const results = await Promise.all([
+    vera.handleMessage('Viewer', 'Please place one shared camp marker.'),
+    rex.handleMessage('Viewer', 'Please place one shared camp marker.'),
+]);
+
+process.stdout.write(JSON.stringify({{
+    results,
+    calls,
+    bridgeCalls: globalThis.__bridgeCalls,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        agent: event.agent,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["results"] == ["vera-handled", False]
+    assert len(result["calls"]) == 1
+    assert result["calls"][0]["agent"] == "vera"
+    assert "[Director V2 context]" in result["calls"][0]["message"]
+    assert len(result["bridgeCalls"]) == 2
+    assert {call["service"] for call in result["bridgeCalls"]} == {"director"}
+    assert {call["method"] for call in result["bridgeCalls"]} == {"gate"}
+    event_types = [event["type"] for event in result["events"]]
+    assert "director_gate.selected" in event_types
+    assert "director_gate.suppressed" in event_types
+    assert {
+        event["payload"].get("outcome")
+        for event in result["events"]
+        if event["type"] == "inbox.turn_completed"
+    } >= {"ok", "director_suppressed"}

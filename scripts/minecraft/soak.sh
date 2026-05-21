@@ -63,6 +63,12 @@
 #                               Default: 180.
 #   SOAK_INIT_MESSAGE           Optional initial objective sent to each
 #                               Mindcraft bot through settings.init_message.
+#   CONVERSATION_MODE           embodied (legacy #510 decentralized mode) or
+#                               director_v2 (Director V2 prompt gate).
+#                               Default: embodied.
+#   DIRECTOR_V2_GATE            Set to 1 to gate Mindcraft prompt batches
+#                               through director.gate. Automatically enabled
+#                               when CONVERSATION_MODE=director_v2.
 #   SOAK_BLOCK_PRIVATE_CONVERSATIONS
 #                               Set to 1 to disable Mindcraft's private
 #                               bot-to-bot conversation commands and force
@@ -169,6 +175,19 @@ MINECRAFT_LLM_PROXY_HOST="${MINECRAFT_LLM_PROXY_HOST:-127.0.0.1}"
 MINECRAFT_LLM_PROXY_PORT="${MINECRAFT_LLM_PROXY_PORT:-1235}"
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
 BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8010/api/health}"
+CONVERSATION_MODE="${CONVERSATION_MODE:-embodied}"
+case "$CONVERSATION_MODE" in
+    embodied|director_v2) ;;
+    *)
+        echo "x CONVERSATION_MODE must be embodied or director_v2." >&2
+        exit 2
+        ;;
+esac
+if [ "$CONVERSATION_MODE" = "director_v2" ]; then
+    DIRECTOR_V2_GATE=1
+fi
+DIRECTOR_V2_GATE="${DIRECTOR_V2_GATE:-0}"
+export CONVERSATION_MODE DIRECTOR_V2_GATE
 SOAK_DURATION_HOURS="${SOAK_DURATION_HOURS:-2}"
 SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_MIN_MOVEMENT_PER_AGENT="${SOAK_MIN_MOVEMENT_PER_AGENT:-5}"
@@ -475,6 +494,7 @@ print_plan() {
     info "log root:       $SOAK_LOG_ROOT"
     info "work root:      ${SOAK_WORK_ROOT:-<per-run temp>}"
     info "bridge:         $MINECRAFT_BRIDGE_URL"
+    info "conversation:   mode=${CONVERSATION_MODE} director_gate=${DIRECTOR_V2_GATE}"
     info "backend health: $BACKEND_HEALTH_URL"
     info "LM Studio:      $LOCAL_LLM_BASE_URL"
     if [ "$MINECRAFT_LLM_QUEUE_PROXY" = "1" ]; then
@@ -1136,6 +1156,8 @@ write_metadata() {
         echo "build_cache_ttl_sec=$MC_SIM_BUILD_CACHE_TTL_SEC"
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
+        echo "conversation_mode=$CONVERSATION_MODE"
+        echo "director_v2_gate=$DIRECTOR_V2_GATE"
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
         echo "min_movement_per_agent=$SOAK_MIN_MOVEMENT_PER_AGENT"
         echo "max_deaths_per_agent=$SOAK_MAX_DEATHS_PER_AGENT"

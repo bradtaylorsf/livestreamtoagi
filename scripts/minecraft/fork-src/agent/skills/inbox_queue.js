@@ -103,9 +103,9 @@ async function runTurnQueue(agent, originalHandleMessage, options) {
     try {
         while (state.pending.length > 0) {
             const batch = state.pending.splice(0, options.maxBatch);
-            const source = batchSource(batch);
-            const message = compactBatchMessage(batch, options);
-            const maxResponses = batchMaxResponses(batch);
+            let source = batchSource(batch);
+            let message = compactBatchMessage(batch, options);
+            let maxResponses = batchMaxResponses(batch);
             emit(agent, 'inbox.turn_started', {
                 batch_size: batch.length,
                 source,
@@ -113,6 +113,31 @@ async function runTurnQueue(agent, originalHandleMessage, options) {
             });
             let result;
             try {
+                const gate = state && typeof state.beforeTurn === 'function' ? state.beforeTurn : null;
+                if (gate) {
+                    const verdict = await gate.call(agent, {
+                        batch,
+                        source,
+                        message,
+                        maxResponses,
+                        queueDepth: state.pending.length,
+                    });
+                    if (verdict && verdict.selected === false) {
+                        result = verdict.result ?? false;
+                        for (const entry of batch) entry.resolve(result);
+                        emit(agent, 'inbox.turn_completed', {
+                            batch_size: batch.length,
+                            outcome: verdict.outcome || 'director_suppressed',
+                            remaining_depth: state.pending.length,
+                        });
+                        continue;
+                    }
+                    if (verdict && typeof verdict.source === 'string') source = verdict.source;
+                    if (verdict && typeof verdict.message === 'string') message = verdict.message;
+                    if (verdict && Object.hasOwn(verdict, 'maxResponses')) {
+                        maxResponses = verdict.maxResponses;
+                    }
+                }
                 result = await originalHandleMessage.call(agent, source, message, maxResponses);
                 for (const entry of batch) entry.resolve(result);
                 emit(agent, 'inbox.turn_completed', {
@@ -163,6 +188,7 @@ export function installInboxQueue(agent, options = {}) {
         pending: [],
         running: false,
         timer: null,
+        beforeTurn: null,
     };
     agent.__ltagIsOtherAgent =
         options.isOtherAgent ||

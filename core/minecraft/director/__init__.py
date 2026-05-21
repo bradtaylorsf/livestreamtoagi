@@ -1,5 +1,11 @@
 """Opt-in Minecraft Director V2 input, scheduling, and evidence modules."""
 
+from core.minecraft.director.prompt_gate import (
+    DirectorPromptGate,
+    PromptDecision,
+    get_prompt_gate,
+    reset_prompt_gates,
+)
 from core.minecraft.director.scene_inbox import (
     Scene,
     SceneEvent,
@@ -25,7 +31,9 @@ from core.minecraft.director.turn_scheduler import (
 
 __all__ = [
     "AgentPose",
+    "DirectorPromptGate",
     "DirectorTurnScheduler",
+    "PromptDecision",
     "Scene",
     "SceneEvent",
     "SceneEventType",
@@ -38,6 +46,8 @@ __all__ = [
     "SchedulerTurn",
     "SpatialHearingAdapter",
     "SpatialHearingConfig",
+    "get_prompt_gate",
     "register",
+    "reset_prompt_gates",
     "score_candidate",
 ]
