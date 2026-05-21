@@ -43,7 +43,7 @@ The goal is a local evidence clip, not a production streaming service.
 | Node 20 or newer | Runs the Mineflayer camera bot. | `node -v` shows `v20...` or newer. |
 | Native build tools for `canvas` | Prismarine Viewer imports `canvas` at startup. | macOS: Xcode Command Line Tools. Debian/Ubuntu: `build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev`. |
 | `ffmpeg` and `ffprobe` | Records and validates the MP4. | `ffmpeg -version` and `ffprobe -version`. |
-| Playwright Chromium | Opens the viewer page for display capture. | `make render-install`. |
+| Browser launcher | Opens the viewer page for display capture. | Preferred: `make render-install` for Playwright Chromium. Fallback: macOS `open` or Linux `xdg-open`. |
 | macOS screen recording permission, or Linux X11 display | Lets `ffmpeg` capture the browser window. | macOS: grant Terminal screen recording permission if prompted. Linux: `DISPLAY` must be set. |
 
 ## Run it

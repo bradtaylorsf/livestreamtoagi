@@ -215,23 +215,16 @@ display_backend() {
     esac
 }
 
-check_playwright() {
+can_import_playwright() {
     if [ ! -x "$PYTHON_BIN" ]; then
         PYTHON_BIN="$(command -v python3 || true)"
     fi
     if [ -z "${PYTHON_BIN:-}" ]; then
-        fail "python3 not found; Playwright browser launch cannot run."
         return 1
     fi
-    if ! "$PYTHON_BIN" - <<'PY' > /dev/null 2>&1
+    "$PYTHON_BIN" - <<'PY' > /dev/null 2>&1
 import playwright.async_api
 PY
-    then
-        fail "Playwright is not importable from $PYTHON_BIN."
-        info "  Install the render extra and Chromium:"
-        info "    make render-install"
-        return 1
-    fi
 }
 
 start_camera_bot() {
@@ -267,7 +260,7 @@ wait_for_camera_ready() {
     return 1
 }
 
-start_viewer_browser() {
+start_viewer_browser_with_playwright() {
     BROWSER_LOG="$(mktemp -t livestream-viewer-browser.XXXXXX.log)"
     "$PYTHON_BIN" - "$VIEWER_URL" "$DURATION" "$VIDEO_WIDTH" "$VIDEO_HEIGHT" > "$BROWSER_LOG" 2>&1 <<'PY' &
 import asyncio
@@ -295,6 +288,44 @@ asyncio.run(main())
 PY
     BROWSER_PID=$!
     info "Viewer browser pid: $BROWSER_PID (log: $BROWSER_LOG)"
+}
+
+start_viewer_browser_with_system_open() {
+    case "$(uname -s)" in
+        Darwin)
+            if command -v open > /dev/null 2>&1; then
+                open "$VIEWER_URL"
+                sleep 5
+                ok "Opened viewer with macOS open: $VIEWER_URL"
+                return 0
+            fi
+            ;;
+        Linux)
+            if command -v xdg-open > /dev/null 2>&1; then
+                xdg-open "$VIEWER_URL" > /dev/null 2>&1 &
+                BROWSER_PID=$!
+                sleep 5
+                ok "Opened viewer with xdg-open: $VIEWER_URL"
+                return 0
+            fi
+            ;;
+    esac
+
+    fail "No browser launcher available for $VIEWER_URL."
+    info "  Install Playwright Chromium with: make render-install"
+    info "  Or open the viewer URL manually before rerunning capture."
+    return 1
+}
+
+start_viewer_browser() {
+    if can_import_playwright; then
+        start_viewer_browser_with_playwright
+        wait_for_browser_ready
+        return $?
+    fi
+
+    info "Playwright is not importable from ${PYTHON_BIN:-python3}; falling back to the system browser opener."
+    start_viewer_browser_with_system_open
 }
 
 wait_for_browser_ready() {
@@ -390,7 +421,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would assert: Node ${REQUIRED_NODE_MAJOR}+, ffmpeg, ffprobe, and ${MC_HOST}:${MC_PORT} reachability"
     info "Would install: npm install --prefix scripts/livestream --no-package-lock (only if node_modules missing)"
     info "Would launch:  node scripts/livestream/camera-bot.mjs --viewer-port ${VIEWER_PORT}"
-    info "Would open:    $VIEWER_URL in Chromium via Playwright"
+    info "Would open:    $VIEWER_URL in Playwright Chromium, macOS open, or xdg-open"
     info "Would record:  ffmpeg display capture to $OUT, then validate with ffprobe"
     exit 0
 fi
@@ -411,9 +442,7 @@ if [ "$BACKEND" = "lavfi" ]; then
     exit 3
 fi
 
-check_playwright || exit 2
-start_viewer_browser
-wait_for_browser_ready || exit 2
+start_viewer_browser || exit 2
 
 if ! run_display_capture "$BACKEND"; then
     fail "Display capture failed for backend ${BACKEND}."
