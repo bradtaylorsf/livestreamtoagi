@@ -120,7 +120,7 @@ Routing output should distinguish:
 
 ### Memory Digesting
 
-`core/minecraft/director/memory_digest.py` batches scene memory work. The target
+`core/bridge/consumers/scene_memory.py` batches scene memory work. The target
 shape mirrors the old conversation close:
 
 - Archival transcript for the scene.
