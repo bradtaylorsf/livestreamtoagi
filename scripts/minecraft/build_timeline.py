@@ -64,7 +64,9 @@ ISO_TS_RE = re.compile(
 )
 TIME_ONLY_RE = re.compile(r"^\[?(?P<h>\d{2}):(?P<m>\d{2}):(?P<s>\d{2})\b")
 KEY_VALUE_RE = re.compile(r"(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)=(?P<value>[^ ]*)")
-PAPER_CHAT_RE = re.compile(r"(?:\[[^\]]+\]\s*)?(?:\[[^\]]+\]:\s*)?<(?P<agent>[^>]+)>\s*(?P<message>.+)")
+PAPER_CHAT_RE = re.compile(
+    r"(?:\[[^\]]+\]\s*)?(?:\[[^\]]+\]:\s*)?<(?P<agent>[^>]+)>\s*(?P<message>.+)"
+)
 BRIDGE_EMIT_JSON_RE = re.compile(r"bridge_emit_event\s+(?P<body>\{.*\})")
 
 
@@ -318,9 +320,13 @@ def event_from_bridge_line(
 
     inbound_type = fields.get("event_type", "")
     if "bridge_inbound_event " in line:
-        if inbound_type.endswith("BRIDGE_ACTION_RESULT") or inbound_type.endswith("bridge_action_result"):
+        if inbound_type.endswith("BRIDGE_ACTION_RESULT") or inbound_type.endswith(
+            "bridge_action_result"
+        ):
             event_type = "action.result"
-        elif inbound_type.endswith("BRIDGE_PERCEPTION") or inbound_type.endswith("bridge_perception"):
+        elif inbound_type.endswith("BRIDGE_PERCEPTION") or inbound_type.endswith(
+            "bridge_perception"
+        ):
             event_type = "state.sample"
         else:
             event_type = "lifecycle"
@@ -377,11 +383,15 @@ def event_from_bridge_emit_json(
     )
 
 
-def parse_raw_timeline_file(path: Path, run_dir: Path, base_ts: datetime, start_seq: int) -> list[TimelineEvent]:
+def parse_raw_timeline_file(
+    path: Path, run_dir: Path, base_ts: datetime, start_seq: int
+) -> list[TimelineEvent]:
     events: list[TimelineEvent] = []
     source = rel_source(path, run_dir)
     default_agent = path.stem.lower() if path.stem else None
-    for line_no, raw_line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+    for line_no, raw_line in enumerate(
+        path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+    ):
         if not raw_line.strip():
             continue
         data = read_json_line(raw_line)
@@ -395,7 +405,11 @@ def parse_raw_timeline_file(path: Path, run_dir: Path, base_ts: datetime, start_
                     agent=default_agent,
                     trace_id=None,
                     source=source,
-                    payload={"class": "malformed_ndjson", "line": line_no, "text": excerpt(raw_line)},
+                    payload={
+                        "class": "malformed_ndjson",
+                        "line": line_no,
+                        "text": excerpt(raw_line),
+                    },
                 )
             )
             continue
@@ -406,15 +420,34 @@ def parse_raw_timeline_file(path: Path, run_dir: Path, base_ts: datetime, start_
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
         payload = {**payload}
         for key, value in data.items():
-            if key not in {"event_id", "seq", "ts", "timestamp", "event_type", "type", "agent", "agent_id", "trace_id", "traceId", "source", "payload"}:
+            if key not in {
+                "event_id",
+                "seq",
+                "ts",
+                "timestamp",
+                "event_type",
+                "type",
+                "agent",
+                "agent_id",
+                "trace_id",
+                "traceId",
+                "source",
+                "payload",
+            }:
                 payload.setdefault(key, value)
         if event_type.startswith("llm."):
             payload = normalize_usage(payload, event_type=event_type)
         agent = data.get("agent") or data.get("agent_id") or payload.get("agent") or default_agent
-        trace_id = data.get("trace_id") or data.get("traceId") or payload.get("trace_id") or payload.get("traceId")
+        trace_id = (
+            data.get("trace_id")
+            or data.get("traceId")
+            or payload.get("trace_id")
+            or payload.get("traceId")
+        )
         events.append(
             TimelineEvent(
-                ts=parse_iso_ts(str(data.get("ts") or data.get("timestamp") or "")) or base_ts + timedelta(milliseconds=seq),
+                ts=parse_iso_ts(str(data.get("ts") or data.get("timestamp") or ""))
+                or base_ts + timedelta(milliseconds=seq),
                 seq=seq,
                 event_type=event_type,
                 agent=str(agent).lower() if agent else None,
@@ -444,7 +477,9 @@ def parse_bot_log(
         ts = parse_line_ts(line, base_date=base_ts, fallback_seq=seq)
         trace_id = trace_from_text(line)
 
-        bridge = event_from_bridge_line(line=line, ts=ts, seq=seq, source=source, default_agent=agent)
+        bridge = event_from_bridge_line(
+            line=line, ts=ts, seq=seq, source=source, default_agent=agent
+        )
         if bridge is not None:
             events.append(bridge)
 
@@ -502,7 +537,11 @@ def parse_bot_log(
             )
 
         action_match = ACTION_TRACE_RE.search(line)
-        if action_match and not EXECUTION_SUCCESS_RE.search(line) and not EXECUTION_FAILURE_RE.search(line):
+        if (
+            action_match
+            and not EXECUTION_SUCCESS_RE.search(line)
+            and not EXECUTION_FAILURE_RE.search(line)
+        ):
             events.append(
                 TimelineEvent(
                     ts=ts,
@@ -548,7 +587,10 @@ def parse_bot_log(
 
         position = parse_position(line)
         if position is not None:
-            if last_state_ts is None or (ts - last_state_ts).total_seconds() >= state_sample_interval_seconds:
+            if (
+                last_state_ts is None
+                or (ts - last_state_ts).total_seconds() >= state_sample_interval_seconds
+            ):
                 last_state_ts = ts
                 events.append(
                     TimelineEvent(
@@ -610,7 +652,9 @@ def parse_bot_log(
     return events
 
 
-def parse_log_file(path: Path, run_dir: Path, base_ts: datetime, start_seq: int) -> list[TimelineEvent]:
+def parse_log_file(
+    path: Path, run_dir: Path, base_ts: datetime, start_seq: int
+) -> list[TimelineEvent]:
     events: list[TimelineEvent] = []
     source = rel_source(path, run_dir)
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -620,7 +664,9 @@ def parse_log_file(path: Path, run_dir: Path, base_ts: datetime, start_seq: int)
 
         for maybe in (
             event_from_bridge_line(line=line, ts=ts, seq=seq, source=source, default_agent=None),
-            event_from_bridge_emit_json(line=line, ts=ts, seq=seq, source=source, default_agent=None),
+            event_from_bridge_emit_json(
+                line=line, ts=ts, seq=seq, source=source, default_agent=None
+            ),
         ):
             if maybe is not None:
                 events.append(maybe)
@@ -673,7 +719,9 @@ def raw_timeline_paths(run_dir: Path) -> list[Path]:
 
 
 def correlate_events(events: list[TimelineEvent]) -> list[TimelineEvent]:
-    ordered = sorted(events, key=lambda event: (event.ts, event.seq, event.source, event.event_type))
+    ordered = sorted(
+        events, key=lambda event: (event.ts, event.seq, event.source, event.event_type)
+    )
     last_llm_trace: dict[str, str] = {}
     last_intent_trace: dict[str, str] = {}
     last_action_trace: dict[str, str] = {}
@@ -834,7 +882,9 @@ def write_artifacts(run_dir: Path, result: TimelineResult) -> None:
     with timeline_path.open("w", encoding="utf-8") as handle:
         for event in result.events:
             handle.write(json.dumps(event.to_json(), sort_keys=True, separators=(",", ":")) + "\n")
-    totals_path.write_text(json.dumps(result.totals, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    totals_path.write_text(
+        json.dumps(result.totals, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
