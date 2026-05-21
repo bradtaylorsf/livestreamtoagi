@@ -186,7 +186,9 @@ check_minecraft_server() {
 }
 
 ensure_node_deps() {
-    if [ -d "$SCRIPT_DIR/node_modules/mineflayer" ] && [ -d "$SCRIPT_DIR/node_modules/prismarine-viewer" ]; then
+    if [ -d "$SCRIPT_DIR/node_modules/mineflayer" ] \
+        && [ -d "$SCRIPT_DIR/node_modules/prismarine-viewer" ] \
+        && [ -d "$SCRIPT_DIR/node_modules/canvas" ]; then
         ok "Prototype Node dependencies already installed"
         return 0
     fi

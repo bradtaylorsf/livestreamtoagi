@@ -106,6 +106,7 @@ def test_capture_script_contains_real_run_guards() -> None:
     assert "npm install --prefix" in src
     assert "--no-package-lock" in src
     assert "node_modules/mineflayer" in src
+    assert "node_modules/canvas" in src
     assert '"event":"READY"' in src
     assert "avfoundation" in src
     assert "x11grab" in src
@@ -134,6 +135,7 @@ def test_prototype_package_is_isolated_and_pins_viewer_deps() -> None:
     assert data["private"] is True
     assert data["type"] == "module"
     assert data["engines"]["node"] == ">=20"
+    assert data["dependencies"]["canvas"] == "^3.1.0"
     assert data["dependencies"]["mineflayer"] == "^4.33.0"
     assert data["dependencies"]["prismarine-viewer"] == "^1.32.0"
     assert data["scripts"]["start"].startswith("node camera-bot.mjs")
