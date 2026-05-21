@@ -10,7 +10,7 @@ A 24/7 livestreamed AI reality show featuring 9 AI agents living in a pixel art 
 Python Backend (FastAPI + CrewAI)
   ↕ WebSocket
 TypeScript Frontend (Phaser.js — pixel art world renderer)
-  ↕ OBS/ffmpeg → Restream.io → Twitch + YouTube
+  ↕ OBS/ffmpeg → Twitch + YouTube
 
 TypeScript Website (Next.js on Vercel)
   ← FastAPI REST API
@@ -163,7 +163,12 @@ OPENROUTER_API_KEY=
 TWITCH_CLIENT_ID=
 TWITCH_CLIENT_SECRET=
 TWITCH_BOT_TOKEN=
+TWITCH_STREAM_KEY=
+TWITCH_RTMP_URL=
 YOUTUBE_API_KEY=
+YOUTUBE_STREAM_KEY=
+YOUTUBE_RTMP_URL=
+RTMP_SMOKE_URL=
 PIXELLAB_API_KEY=
 LANGFUSE_SECRET_KEY=
 LANGFUSE_PUBLIC_KEY=

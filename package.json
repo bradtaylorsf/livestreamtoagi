@@ -38,6 +38,7 @@
     "verify:embodiment-action-interruption": ".venv/bin/pytest tests/backend/test_embodiment_action_interruption.py -v",
     "verify:embodiment-integration": ".venv/bin/pytest tests/integration/test_embodiment_skills.py -v",
     "verify:memory-bridge-perf": ".venv/bin/pytest tests/backend/test_memory_bridge_perf.py -v -m \"not integration\"",
+    "verify:livestream-rtmp": ".venv/bin/pytest tests/backend/test_livestream_stream_push.py -v",
     "chat": ".venv/bin/python scripts/chat.py",
     "sim": ".venv/bin/python scripts/chat.py sim",
     "sim:awakening": ".venv/bin/python scripts/chat.py sim awakening",
