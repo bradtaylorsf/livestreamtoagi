@@ -29,7 +29,7 @@ from core.constants import LIVE_SIMULATION_ID
 from core.context_assembly import ContextAssembler
 from core.cost_governor import CostGovernor
 from core.database import Database
-from core.event_bus import EventBus
+from core.event_bus import EventBus, EventType
 from core.events.event_generator import EventGenerator
 from core.llm_client import (
     LOCAL_LLM_BASE_URL,
@@ -45,6 +45,7 @@ from core.memory.core_memory import CoreMemoryManager
 from core.memory.dreams import DreamManager
 from core.memory.recall_memory import RecallMemoryManager
 from core.memory.token_counter import TokenCounter
+from core.notifications.spend_kill_alerts import SpendAlertNotifier
 from core.redis_client import RedisClient
 from core.redis_keys import ScopedRedis
 from core.repos.alliance_repo import AllianceRepo
@@ -129,6 +130,7 @@ class Services:
     transcript_repo: TranscriptRepo | None
     event_bus: EventBus
     management: Management | None
+    spend_alert_notifier: SpendAlertNotifier | None
     cost_repo: CostRepo | None
     cost_governor: CostGovernor | None
     artifact_repo: ArtifactRepo | None
@@ -388,6 +390,8 @@ async def bootstrap_services(
         llm_client=llm_client,
         event_bus=_module_event_bus,
     )
+    spend_alert_notifier = SpendAlertNotifier(redis_client=scoped_redis)
+    _module_event_bus.on(EventType.BUDGET_UPDATE, spend_alert_notifier.on_budget_update)
 
     # Inject config_version_repo into config_loader for DB-backed config
     config_loader._config_repo = config_version_repo
@@ -491,6 +495,7 @@ async def bootstrap_services(
         transcript_repo=transcript_repo,
         event_bus=_module_event_bus,
         management=management,
+        spend_alert_notifier=spend_alert_notifier,
         cost_repo=cost_repo,
         cost_governor=cost_governor,
         artifact_repo=artifact_repo,
@@ -564,6 +569,7 @@ async def _bootstrap_dry_run(
         transcript_repo=None,
         event_bus=EventBus(),
         management=None,
+        spend_alert_notifier=None,
         cost_repo=None,
         cost_governor=None,
         artifact_repo=None,
@@ -586,6 +592,11 @@ async def _bootstrap_dry_run(
 
 async def shutdown_services(services: Services) -> None:
     """Gracefully shut down all connected services."""
+    if services.spend_alert_notifier:
+        services.event_bus.off(
+            EventType.BUDGET_UPDATE,
+            services.spend_alert_notifier.on_budget_update,
+        )
     if services.llm_client:
         await services.llm_client.close()
     if services.http_client:

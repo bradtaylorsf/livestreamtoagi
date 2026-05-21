@@ -52,7 +52,16 @@ class ScopedRedis:
     async def get(self, key: str) -> str | None:
         return await self._redis.get(self._key(key))
 
-    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        if nx:
+            return await self._redis.set(self._key(key), value, ex=ex, nx=True)
         return await self._redis.set(self._key(key), value, ex=ex)
 
     async def delete(self, *keys: str) -> int:
