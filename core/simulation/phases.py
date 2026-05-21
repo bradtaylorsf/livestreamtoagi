@@ -175,6 +175,7 @@ class PhaseRunner:
         debug_prompts: bool = False,
         prompt_log_repo: object | None = None,
         factions: list[Any] | None = None,
+        conversation_mode: str | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -199,6 +200,7 @@ class PhaseRunner:
         self._debug_prompts = debug_prompts
         self._prompt_log_repo = prompt_log_repo
         self._factions = list(factions or [])
+        self._conversation_mode = conversation_mode
 
         # Cross-phase conversation context to prevent repetition (#271)
         from core.models import ConversationRecord
@@ -551,10 +553,22 @@ class PhaseRunner:
 
     async def _run_conversation(self, trigger: dict[str, Any], phase: Phase) -> None:
         """Run a single conversation via ConversationEngine and collect stats."""
-        from core.conversation_engine import ConversationEngine
 
         if self._dry_run:
             logger.info("[DRY RUN] Would run conversation: %s", trigger)
+            return
+        if self._conversation_mode is None:
+            from core.conversation_mode import is_embodied_run
+
+            embodied_run = is_embodied_run()
+        else:
+            embodied_run = self._conversation_mode == "embodied"
+
+        if embodied_run:
+            logger.info(
+                "E8-6: conversation director gated off for embodied run; "
+                "relying on Mindcraft decentralized respond/ignore"
+            )
             return
         if not self._agent_ids:
             logger.warning("No active agents configured; skipping conversation")
@@ -647,6 +661,7 @@ class PhaseRunner:
 
         try:
             from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+            from core.conversation_engine import ConversationEngine
 
             engine = ConversationEngine(
                 infra=InfraServices(

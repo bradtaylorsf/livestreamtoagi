@@ -1,15 +1,84 @@
 <!-- managed by alpha-loop -->
-`AGENTS.md` updated. Summary of what changed:
 
-**Preserved** — the 9-agent roster, the special `management`/`alpha` rules, the 5-section structure, all repo/admin/public-route/scenario/eval counts that verified correct (48 migrations, 19 repos, 9 admin modules / 66 endpoints, ~54 public routes, 18 scenarios, 12 eval prompts + `_analyzer.yaml`, 32 tool classes), and the existing port/model-sync non-negotiables.
+# Livestream to AGI — Agent Instructions
 
-**Added (major)** — the **Minecraft pivot**, which the old file omitted entirely and is the biggest current reality in the tree:
-- `core/bridge/` Python↔Node bridge (wired into `core/main.py`: `bridge_router`, `/api/minecraft/bridge/ws`, fail-closed auth, versioned contract, memory consumers)
-- `mindcraft/` vendored/forked Mindcraft (Node 20, Mineflayer, Paper 1.21.6)
-- `docs/` ADRs (`docs/decisions/` 0000–0010, binding) + `docs/MINECRAFT-PIVOT-ISSUE-PLAN.md` + `docs/minecraft/` runbooks
-- `scripts/minecraft/` pivot tooling; LM Studio local-LLM acceptance path
-- New non-negotiables: ADRs are binding, the bridge contract is single-source-of-truth, no hardcoding unverified Minecraft facts
+## Overview
 
-**Corrected stale counts/facts** — models `~108` → `~107` (verified `class .*(BaseModel)` = 107); event types `~24` → `~26`; the wrong claim that `tests/` contains `frontend/` and `website/` subdirs (it only holds `backend/` + `integration/`, ~148 Python files; frontend vitest lives under `frontend/src/`, website vitest+Playwright under `website/`); reframed the Phaser `frontend/` as the legacy renderer during the pivot.
+A 24/7 livestreamed AI reality show: nine AI agents with distinct personalities live in a pixel-art world, build real projects, manage a real budget, and interact with audiences on Twitch and YouTube. The system is a Python backend (FastAPI + CrewAI) driving a Phaser.js world renderer, with a Next.js public website. Agents have three-tier memory (core/recall/archival), pass through a Management content filter before TTS, and are constrained by a cost governor with a kill switch.
 
-**Removed** — the stray second `<!-- managed by alpha-loop -->` annotation block ("The file is accurate except four counts…"); its corrections are now folded directly into the prose. The marker remains the very first line, and the file is ~150 lines with no testing/git/review/security procedures (those stay in skills).
+See `specs/` for design references and `research/PAPER-INDEX.md` for prior art when working on any subsystem.
+
+## Tech Stack
+
+**Backend (Python 3.13, pinned in `.python-version`)**
+- FastAPI (async web + WebSocket), CrewAI (agent orchestration)
+- OpenRouter (multi-model: Claude, Gemini, GPT, DeepSeek, Grok) — all LLM calls route through `core/llm_client.py`
+- PostgreSQL 16 + pgvector (memory, world state, transcripts), Redis 7 (shared state, kill switches)
+- Edge TTS (free, 300+ voices), Langfuse (self-hosted observability)
+- Docker + gVisor (sandboxed code execution)
+- Tooling: `uv` for env/deps, `ruff` for lint/format, `pytest` + `pytest-asyncio` for tests
+- Optional video render pipeline: Playwright + Chromium + ffmpeg (see `core/video/`, `make render-*` targets)
+
+**Frontend (`frontend/`)** — Phaser.js 3 pixel-art renderer, Vite, Vitest
+
+**Website (`website/`)** — Next.js on Vercel, Vitest + Playwright E2E
+
+**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration)
+
+**Python 3.14+ is NOT supported** — native deps (pydantic-core, etc.) don't build against it.
+
+## Directory Structure
+
+```
+agents/           Per-agent YAML personality configs (vera, rex, aurora, pixel, fork, sentinel, grok, management, alpha, template)
+core/             Python backend — orchestrator, conversation engine, memory, bridge, embodiment, video, simulation, world, social, youtube, eval, admin, auth, reporting, notifications, scheduler, tts, llm_client, management
+tools/            Agent tool implementations (alpha_dispatch, audience_tools, character_tools, code_execution, economy_tools, memory_tools, messaging, social_tools, web_tools, world_state, tilemap_gen, revenue_tools, self_modification, journal_image_tool, task_management)
+frontend/         Phaser.js world renderer (TS)
+website/          Next.js public-facing site (TS)
+mindcraft/        Minecraft embodiment bridge
+minecraft-server/        Full Minecraft world server
+minecraft-server-easy/   Simplified baseline Minecraft world
+tests/            tests/backend/ (pytest) and tests/integration/
+specs/            Read-only design specs (engineering, character sheets, conversation engine, memory, tools, human checklist)
+research/         Academic literature index + analysis; consult PAPER-INDEX.md when touching any subsystem
+scripts/          Setup, deployment, service checks (e.g. check-services.sh)
+docker/           Service Dockerfiles
+db/               Schemas / migrations
+docs/             Project documentation
+evals/, scenarios/, snapshots/   Eval harness inputs/outputs
+config/           Runtime configuration
+sandbox/          gVisor sandbox runtime
+logs/, videos/    Generated artifacts (gitignored)
+.alpha-loop/      Alpha-loop session state, vision, templates (managed)
+```
+
+Backend entrypoint: `uvicorn core.main:app --reload --port 8010`.
+
+## Code Style
+
+**Python**
+- Python 3.13, type hints everywhere
+- `async`/`await` for all I/O
+- `ruff check` + `ruff format` (config in `ruff.toml`); imports ordered stdlib → third-party → local
+- `snake_case` functions/variables, `PascalCase` classes
+- Pydantic models for all API request/response schemas
+- Default to no comments; only write one when the WHY is non-obvious
+
+**TypeScript**
+- Strict mode, ESM modules
+- `const` by default; `let` only when mutation is needed
+- Prefer named exports
+
+## Non-Negotiables
+
+- **Never commit `.env` or secrets.** Required env vars: `OPENROUTER_API_KEY`, `TWITCH_*`, `YOUTUBE_API_KEY`, `PIXELLAB_API_KEY`, `LANGFUSE_*`, `DATABASE_URL`, `REDIS_URL`, `KILL_SWITCH_API_KEY`.
+- **Default ports are non-standard** to avoid local conflicts: Redis 6381 (`REDIS_PORT`), PostgreSQL 5434 (`POSTGRES_PORT`), Langfuse 3100 (`LANGFUSE_PORT`). Don't hardcode the standard ports.
+- **Check services before integration work:** `docker compose up -d && bash scripts/check-services.sh` — all 5 checks (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse) must pass.
+- **Every agent utterance** flows through `core/management.py` content filter before TTS — never bypass it. There is a 3-second intervention window by design.
+- **Cost governor + kill switch are load-bearing.** All LLM calls go through `core/llm_client.py` (OpenRouter routing) so Langfuse and the governor see them. Don't call provider SDKs directly.
+- **Memory is 3-tier**, not a single store: Core (always in prompt, ~2–3K tokens), Recall (pgvector semantic search), Archival (full transcripts, never deleted). Respect tier boundaries when adding memory features.
+- **Conversation engine** uses weighted speaker selection — see `core/conversation_engine.py` and `specs/CONVERSATION-ENGINE.md`. Don't change weights without updating both.
+- **All external comms** (social posts, emails, public PRs from agents) require human approval for the first 3 months — keep the approval gate in place.
+- **`specs/` is read-only reference.** Don't edit specs to match code; update code or open a separate discussion.
+- **Makefile targets pin `.venv/bin/...`** so they work under `/bin/sh` without venv activation (e.g. `make test-backend`, `make render-verify`). Use them in automation rather than bare `pytest` / `playwright`.
+- **Agent model assignments** (conversation vs. building model per agent) are defined in `agents/<name>/` configs and `specs/CHARACTER-SHEETS.md`. Don't reassign models ad-hoc — personality is tied to model choice.

@@ -1,0 +1,9 @@
+{"ts":"2026-05-20T22:00:00Z","event_type":"llm.request","agent":"alpha","trace_id":"trace-llm-1","payload":{"model":"local/test-chat","purpose":"conversation","reason":"respond_to_chat","prompt_tokens":10,"completion_tokens":0,"total_tokens":10,"estimated":false,"usage_source":"provider_reported","outcome":"started"}}
+{"ts":"2026-05-20T22:00:02Z","event_type":"llm.response","agent":"alpha","trace_id":"trace-llm-1","payload":{"model":"local/test-chat","latency_ms":321,"prompt_tokens":10,"completion_tokens":7,"total_tokens":17,"estimated":false,"usage_source":"provider_reported","outcome":"ok"}}
+{"ts":"2026-05-20T22:00:03Z","event_type":"chat.public","agent":"alpha","trace_id":"trace-chat-1","payload":{"speaker":"Alpha","message":"I can scout the ridge and mark a safe path."}}
+{"ts":"2026-05-20T22:00:04Z","event_type":"action.intent","agent":"alpha","trace_id":"trace-action-1","payload":{"commands":["!move(\"scout_1\", \"forward\", 2)"],"text":"!move(\"scout_1\", \"forward\", 2)"}}
+{"ts":"2026-05-20T22:00:05Z","event_type":"action.start","agent":"alpha","trace_id":"trace-action-1","payload":{"action":"move","detail":"starting forward move"}}
+{"ts":"2026-05-20T22:00:06Z","event_type":"action.start","agent":"alpha","trace_id":"trace-action-1","payload":{"action":"move","detail":"pathfinder accepted route"}}
+{"ts":"2026-05-20T22:00:07Z","event_type":"action.result","agent":"alpha","trace_id":"trace-action-1","payload":{"action":"move","outcome":"success","verified":true,"detail":"moved forward before=(0,64,0) after=(1,64,0)"}}
+{"ts":"2026-05-20T22:00:08Z","event_type":"action.result","agent":"alpha","trace_id":"trace-action-1","payload":{"action":"move","outcome":"success","verified":true,"detail":"reached: distance_to_target=0 delta=1"}}
+{"ts":"2026-05-20T22:00:09Z","event_type":"error","agent":"alpha","trace_id":"trace-parse-1","payload":{"class":"parse_error","text":"malformed command was ignored"}}

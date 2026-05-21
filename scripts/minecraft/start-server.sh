@@ -25,6 +25,7 @@
 #   MEM           JVM heap (-Xms/-Xmx)              (default: 2G)
 #   ONLINE_MODE   Verify accounts with Mojang?      (default: false   — E1-R2)
 #   WHITELIST     Reject players not on the list?   (default: true)
+#   SERVER_PORT   TCP listen port                   (default: 25565)
 #   SMOKE_TIMEOUT Seconds to wait for boot in smoke (default: 180)
 #   WORLD_CONFIG  World-gen config file             (default: <script dir>/world.config)
 #
@@ -42,6 +43,7 @@ SERVER_DIR="${SERVER_DIR:-./minecraft-server}"
 MEM="${MEM:-2G}"
 ONLINE_MODE="${ONLINE_MODE:-false}"
 WHITELIST="${WHITELIST:-true}"
+SERVER_PORT="${SERVER_PORT:-${MC_PORT:-25565}}"
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-180}"
 
 # ── World-generation config (issue #527 / E2-2) ──
@@ -71,6 +73,13 @@ esac
 ok()   { echo "✓ $*"; }
 info() { echo "  $*"; }
 fail() { echo "✗ $*" >&2; }
+
+case "$SERVER_PORT" in
+    ""|*[!0-9]*)
+        fail "Invalid SERVER_PORT: '${SERVER_PORT}' (must be a number)"
+        exit 2
+        ;;
+esac
 
 # read_world_key KEY → value of the last "KEY=value" line in WORLD_CONFIG
 # (or empty). This is a fixed allow-list reader: the file is parsed with sed,
@@ -118,7 +127,7 @@ mkdir -p "$SERVER_DIR"
 ok "Server directory: $SERVER_DIR"
 info "Paper jar:    $JAR (Minecraft ${MC_VERSION}, build ${PAPER_BUILD})"
 info "Memory:       $MEM"
-info "online-mode:  $ONLINE_MODE   white-list: $WHITELIST"
+info "online-mode:  $ONLINE_MODE   white-list: $WHITELIST   port: $SERVER_PORT"
 
 # ── Resolve world generation from WORLD_CONFIG (issue #527 / E2-2) ──
 # Missing file or missing key → fall back to the same safe defaults the
@@ -164,6 +173,7 @@ online-mode=${ONLINE_MODE}
 white-list=${WHITELIST}
 difficulty=normal
 max-players=20
+server-port=${SERVER_PORT}
 view-distance=10
 spawn-protection=${SPAWN_PROTECTION}
 # ── World generation (issue #527 / E2-2) ──

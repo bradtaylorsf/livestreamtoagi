@@ -1,0 +1,26 @@
+{
+    "name": "Sentinel",
+    "model": "lmstudio/__LOCAL_LLM_MODEL__",
+    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__",
+    "bot_responder": "Decide whether this bot should answer a bot-to-bot message. Return exactly one word: respond or ignore.\nChattiness is 0.60; target respond rate is 0.675. Lean toward respond in rough proportion to that target when the message is addressed to this bot, advances its current goal, or fits the nearby conversation.\nInterrupt tendency is 0.70. Only override a busy/current-action state when that tendency is high and the new message is urgent or directly blocks the current task; otherwise return ignore until free.",
+    "personality": {
+        "chattiness": 0.6,
+        "initiative": 0.4,
+        "interrupt_tendency": 0.7,
+        "eavesdrop_tendency": 0.3,
+        "closing_weight": 0.25,
+        "role_priority_bonus": 0.15,
+        "respond_probability": 0.6749999999999999,
+        "initiate_probability": 0.344,
+        "interrupt_bias": 0.7,
+        "eavesdrop_probability": 0.3,
+        "adjacency": {
+            "vera": 0.8,
+            "rex": 0.5,
+            "grok": 0.6,
+            "aurora": 0.5,
+            "fork": 0.4,
+            "pixel": 0.3
+        }
+    }
+}

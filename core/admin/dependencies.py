@@ -17,6 +17,8 @@ import jwt
 from fastapi import Cookie, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from core.auth.jwt_secrets import get_hs256_secret
+
 if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
     from core.database import Database
@@ -83,7 +85,7 @@ def _validate_password(provided: str) -> bool:
 
 def _validate_jwt_cookie(token: str) -> bool:
     """Validate a JWT admin session cookie."""
-    secret = os.environ.get("ADMIN_JWT_SECRET", "")
+    secret = get_hs256_secret("ADMIN_JWT_SECRET")
     if not secret:
         return False
     try:

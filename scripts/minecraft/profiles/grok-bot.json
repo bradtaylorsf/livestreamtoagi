@@ -1,0 +1,26 @@
+{
+    "name": "Grok",
+    "model": "lmstudio/__LOCAL_LLM_MODEL__",
+    "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__",
+    "bot_responder": "Decide whether this bot should answer a bot-to-bot message. Return exactly one word: respond or ignore.\nChattiness is 0.80; target respond rate is 0.830. Lean toward respond in rough proportion to that target when the message is addressed to this bot, advances its current goal, or fits the nearby conversation.\nInterrupt tendency is 0.80. Only override a busy/current-action state when that tendency is high and the new message is urgent or directly blocks the current task; otherwise return ignore until free.",
+    "personality": {
+        "chattiness": 0.8,
+        "initiative": 0.6,
+        "interrupt_tendency": 0.8,
+        "eavesdrop_tendency": 0.8,
+        "closing_weight": 0.05,
+        "role_priority_bonus": 0.0,
+        "respond_probability": 0.83,
+        "initiate_probability": 0.49799999999999994,
+        "interrupt_bias": 0.8,
+        "eavesdrop_probability": 0.8,
+        "adjacency": {
+            "fork": 0.7,
+            "aurora": 0.6,
+            "vera": 0.5,
+            "pixel": 0.6,
+            "rex": 0.4,
+            "sentinel": 0.5
+        }
+    }
+}

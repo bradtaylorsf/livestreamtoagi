@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -28,8 +30,14 @@ EMBEDDING_DIMENSION = 8
 
 
 class FakeCompactor:
-    def __init__(self, *, raise_on_compact: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        raise_on_compact: bool = False,
+        release_event: asyncio.Event | None = None,
+    ) -> None:
         self.raise_on_compact = raise_on_compact
+        self.release_event = release_event
         self.calls: list[dict[str, Any]] = []
 
     async def compact_interaction(
@@ -49,6 +57,8 @@ class FakeCompactor:
                 "conversation_id": conversation_id,
             }
         )
+        if self.release_event is not None:
+            await self.release_event.wait()
         if self.raise_on_compact:
             raise RuntimeError("memory unavailable")
         return object()
@@ -134,6 +144,15 @@ async def deterministic_embedding(text: str) -> list[float]:
     return generate_deterministic_embedding(text, EMBEDDING_DIMENSION)
 
 
+async def _wait_for(predicate: Callable[[], bool], *, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("timed out waiting for background memory consumer")
+
+
 @pytest.fixture(autouse=True)
 def cleanup_consumer() -> Iterator[None]:
     unregister_memory_consumer(event_bus)
@@ -174,6 +193,7 @@ async def test_perception_event_compacts_to_existing_memory_path() -> None:
         },
     )
 
+    await _wait_for(lambda: len(compactor.calls) == 1)
     assert compactor.calls == [
         {
             "agent_id": "vera",
@@ -186,6 +206,27 @@ async def test_perception_event_compacts_to_existing_memory_path() -> None:
             "conversation_id": None,
         }
     ]
+
+
+async def test_capitalized_agent_id_is_compacted_lowercase() -> None:
+    compactor = FakeCompactor()
+    register_memory_consumer(event_bus, compactor)
+
+    await event_bus.emit(
+        EventType.BRIDGE_PERCEPTION,
+        {
+            "trace_id": "trace-1",
+            "request_id": "req-1",
+            "agent_id": "Alpha",
+            "run_id": "run-1",
+            "simulation_id": "sim-1",
+            "observations": [{"type": "block", "x": 1, "y": 64, "z": 1}],
+        },
+    )
+
+    await _wait_for(lambda: len(compactor.calls) == 1)
+    assert compactor.calls[0]["agent_id"] == "alpha"
+    assert compactor.calls[0]["participants"] == ["alpha"]
 
 
 async def test_action_result_event_compacts_to_existing_memory_path() -> None:
@@ -206,6 +247,7 @@ async def test_action_result_event_compacts_to_existing_memory_path() -> None:
         },
     )
 
+    await _wait_for(lambda: len(compactor.calls) == 1)
     assert compactor.calls == [
         {
             "agent_id": "rex",
@@ -247,6 +289,7 @@ async def test_action_result_event_creates_retrievable_recall_with_embedding() -
         },
     )
 
+    await _wait_for(lambda: len(recall_repo.memories) == 1)
     assert len(transcript_repo.transcripts) == 1
     assert len(recall_repo.memories) == 1
     memory = recall_repo.memories[0]
@@ -273,6 +316,7 @@ async def test_empty_perception_observations_are_noop() -> None:
         {"agent_id": "vera", "observations": []},
     )
 
+    await asyncio.sleep(0)
     assert compactor.calls == []
 
 
@@ -292,6 +336,7 @@ async def test_missing_agent_id_is_noop(event_type: EventType, data: dict[str, A
 
     await event_bus.emit(event_type, data)
 
+    await asyncio.sleep(0)
     assert compactor.calls == []
 
 
@@ -320,12 +365,35 @@ async def test_compactor_exceptions_are_logged_and_swallowed(
                     "detail": "path blocked",
                 },
             )
+            await _wait_for(lambda: len(compactor.calls) == 1)
     finally:
         event_bus.off(EventType.SIMULATION_ERROR, on_simulation_error)
 
     assert len(compactor.calls) == 1
     assert simulation_errors == []
     assert "Failed to compact bridge_action_result memory" in caplog.text
+
+
+async def test_registered_consumer_does_not_block_bridge_ack() -> None:
+    release = asyncio.Event()
+    compactor = FakeCompactor(release_event=release)
+    register_memory_consumer(event_bus, compactor)
+
+    started = time.monotonic()
+    await event_bus.emit(
+        EventType.BRIDGE_ACTION_RESULT,
+        {
+            "agent_id": "grok",
+            "action_id": "act-fast-ack",
+            "status": "success",
+            "detail": "moved before memory finished",
+        },
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.2
+    await _wait_for(lambda: len(compactor.calls) == 1)
+    release.set()
 
 
 async def test_unregister_memory_consumer_removes_callbacks() -> None:

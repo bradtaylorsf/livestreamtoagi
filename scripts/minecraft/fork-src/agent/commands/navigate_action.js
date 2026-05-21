@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import { classifyInterruption, messageFromError } from '../skills/action_interruption.js';
 import {
     classifyMovement,
     DEFAULT_ARRIVAL_TOLERANCE_BLOCKS,
@@ -56,12 +57,15 @@ function bridgeErrorLine(prefix, err) {
     return `${prefix} [${code}]: ${detail}`;
 }
 
-function parseTarget(rawTarget) {
-    if (typeof rawTarget !== 'string') return rawTarget;
+function parseJsonArgument(value, label) {
+    if (typeof value !== 'string') return { value, error: null };
+    const text = value.trim();
+    if (!text) return { value: null, error: `${label} is required` };
     try {
-        return JSON.parse(rawTarget);
-    } catch {
-        return null;
+        return { value: JSON.parse(text), error: null };
+    } catch (err) {
+        const detail = err && err.message ? err.message : String(err);
+        return { value: null, error: `invalid_args: ${label} must be JSON: ${detail}` };
     }
 }
 
@@ -99,7 +103,9 @@ function entityPosition(bot, target) {
 }
 
 function resolveTarget(agent, rawTarget) {
-    const target = parseTarget(rawTarget);
+    const parsed = parseJsonArgument(rawTarget, 'target');
+    if (parsed.error) return { failureClass: 'invalid_args', detail: parsed.error };
+    const target = parsed.value;
     const coordinateTarget = poseFrom(target);
     if (coordinateTarget) return { position: coordinateTarget, detail: 'coordinate target' };
     if (target === null || target === undefined || typeof target !== 'object') {
@@ -147,14 +153,49 @@ async function ensurePathfinder(bot) {
     return !!(bot && bot.pathfinder && typeof bot.pathfinder.goto === 'function');
 }
 
+function destructivePathsAllowed() {
+    const raw = String(process.env.MINECRAFT_ALLOW_DESTRUCTIVE_PATHS || '1').trim().toLowerCase();
+    return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+async function configureMovementSafety(bot) {
+    if (destructivePathsAllowed()) return;
+    try {
+        const mod = await import('mineflayer-pathfinder');
+        const Movements = (mod && mod.Movements) || (mod && mod.default && mod.default.Movements);
+        if (Movements && bot && bot.pathfinder && typeof bot.pathfinder.setMovements === 'function') {
+            const movements = new Movements(bot);
+            movements.canDig = false;
+            movements.allow1by1towers = false;
+            bot.pathfinder.setMovements(movements);
+        }
+    } catch {
+        /* If safety setup is unavailable, normal pathfinder failure handling still applies. */
+    }
+}
+
 async function pathfindTo(agent, target, tolerance, timeoutMs) {
     const bot = getBot(agent);
     if (!(await ensurePathfinder(bot))) {
         return { failureClass: 'unreachable', detail: 'pathfinder unavailable' };
     }
+    await configureMovementSafety(bot);
 
     const goal = await makeGoalNear(target, tolerance);
     let timer;
+    let pathfinderStopObserved = false;
+    let restoreStop = null;
+    let originalStop = null;
+    if (typeof bot.pathfinder.stop === 'function') {
+        originalStop = bot.pathfinder.stop.bind(bot.pathfinder);
+        bot.pathfinder.stop = (...args) => {
+            pathfinderStopObserved = true;
+            return originalStop(...args);
+        };
+        restoreStop = () => {
+            bot.pathfinder.stop = originalStop;
+        };
+    }
     try {
         await Promise.race([
             bot.pathfinder.goto(goal),
@@ -167,20 +208,33 @@ async function pathfindTo(agent, target, tolerance, timeoutMs) {
         ]);
         return { failureClass: null, detail: '' };
     } catch (err) {
+        const message = messageFromError(err);
+        const interruptionClass = classifyInterruption(err);
+        let result;
+        if (interruptionClass) {
+            result = { failureClass: interruptionClass, detail: message };
+        } else {
+            const lower = message.toLowerCase();
+            if (lower.includes('timed out')) {
+                result = { failureClass: 'timed-out', detail: message };
+            } else if (lower.includes('unreachable') || lower.includes('no path')) {
+                result = { failureClass: 'unreachable', detail: message };
+            } else if (pathfinderStopObserved) {
+                result = { failureClass: 'interrupted', detail: message || 'pathfinder stopped' };
+            } else {
+                result = { failureClass: 'blocked', detail: message };
+            }
+        }
         try {
-            if (bot.pathfinder && typeof bot.pathfinder.stop === 'function') bot.pathfinder.stop();
+            if (originalStop) originalStop();
+            else if (bot.pathfinder && typeof bot.pathfinder.stop === 'function') bot.pathfinder.stop();
         } catch {
             /* stopping pathfinder is best-effort */
         }
-        const message = err && err.message ? err.message : String(err);
-        const lower = message.toLowerCase();
-        if (lower.includes('timed out')) return { failureClass: 'timed-out', detail: message };
-        if (lower.includes('unreachable') || lower.includes('no path')) {
-            return { failureClass: 'unreachable', detail: message };
-        }
-        return { failureClass: 'blocked', detail: message };
+        return result;
     } finally {
         if (timer) clearTimeout(timer);
+        if (restoreStop) restoreStop();
     }
 }
 
@@ -228,6 +282,7 @@ async function emitNavigationOutcome({
         payload: {
             action_id: actionId,
             status: statusForMovementClass(outcomeClass),
+            outcome_class: outcomeClass,
             detail,
         },
         deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
@@ -247,15 +302,15 @@ export const navigateAction = {
             description: 'Caller-provided action id echoed in action.result.',
         },
         target: {
-            type: 'object',
-            description: 'Coordinates {x,y,z}, a block target, or an entity_id target.',
+            type: 'string',
+            description: 'JSON coordinates {x,y,z}, a block target, or an entity_id target.',
         },
         arrive_within_blocks: {
-            type: 'number',
+            type: 'float',
             description: 'Arrival tolerance in blocks.',
         },
         timeout_ms: {
-            type: 'number',
+            type: 'float',
             description: 'Navigation deadline in milliseconds.',
         },
     },
@@ -292,7 +347,7 @@ export const navigateAction = {
                     after: before,
                     target: resolved.position,
                     tolerance,
-                    outcomeClass: missingActionId ? 'invalid' : resolved.failureClass || 'invalid',
+                    outcomeClass: missingActionId ? 'wrong_args' : resolved.failureClass || 'invalid',
                     extraDetail: missingActionId ? 'missing action_id' : resolved.detail,
                 });
                 announce(agent, traceId, `navigate ${actionId} ${detail}`, true);

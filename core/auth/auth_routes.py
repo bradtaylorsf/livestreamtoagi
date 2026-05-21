@@ -22,6 +22,7 @@ from core.auth.dependencies import (
     is_valid_email,
 )
 from core.auth.email import EmailSendError, send_email
+from core.auth.jwt_secrets import get_hs256_secret, hs256_secret_error
 from core.models import User
 from core.repos.user_repo import MagicLinkTokenRepo, UserRepo
 
@@ -142,11 +143,11 @@ async def verify_magic_link(
 
     # Check signing secret BEFORE consuming the token. Otherwise a
     # misconfigured deploy burns the user's magic link on every click.
-    secret = os.environ.get("AUTH_JWT_SECRET", "")
+    secret = get_hs256_secret("AUTH_JWT_SECRET")
     if not secret:
         raise HTTPException(
             status_code=503,
-            detail="AUTH_JWT_SECRET not configured — cannot issue session cookie",
+            detail=f"{hs256_secret_error('AUTH_JWT_SECRET')} — cannot issue session cookie",
         )
 
     services = request.app.state.services

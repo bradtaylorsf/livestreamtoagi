@@ -61,7 +61,7 @@ export const executeCodeAction = {
             description: 'Source code to execute in the sandbox.',
         },
         timeout: {
-            type: 'number',
+            type: 'int',
             description: 'Optional sandbox timeout in seconds.',
         },
     },

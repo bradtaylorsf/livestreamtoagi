@@ -226,6 +226,19 @@ async def test_handle_perception_report_emits_validated_event(
     assert captured["perception"][0]["observations"] == env.payload["observations"]
 
 
+async def test_handle_perception_report_canonicalizes_agent_id(
+    captured: dict[str, list[dict[str, Any]]],
+) -> None:
+    env = _envelope("perception.report")
+    env.agent_id = "Alpha"
+
+    ack = await inbound.handle_perception_report(env)
+
+    assert ack == {"accepted": True}
+    assert len(captured["perception"]) == 1
+    assert captured["perception"][0]["agent_id"] == "alpha"
+
+
 async def test_handle_action_result_emits_validated_event(
     captured: dict[str, list[dict[str, Any]]],
 ) -> None:

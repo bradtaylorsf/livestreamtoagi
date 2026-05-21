@@ -95,7 +95,7 @@ EPICS = {
 
 # Each issue: key -> dict(epic, title, context, scope_in, scope_out,
 #   acceptance, files, deps[list of keys], track('P'|'S'), labels[list])
-def I(epic, title, context, scope_in, scope_out, acceptance, files, deps, track, labels):
+def I(epic, title, context, scope_in, scope_out, acceptance, files, deps, track, labels):  # noqa: E743,N802
     return dict(epic=epic, title=title, context=context, scope_in=scope_in,
                 scope_out=scope_out, acceptance=acceptance, files=files,
                 deps=deps, track=track, labels=labels)
@@ -1033,7 +1033,7 @@ def main() -> None:
             print(f"  {k} -> #{existing} (existing)")
             save_state(state)
             continue
-        labels = ["minecraft" if False else l for l in ISSUES[k]["labels"]]
+        labels = list(ISSUES[k]["labels"])
         args = ["gh", "issue", "create", "--title", child_title(k),
                 "--body", child_body(k, numbers)]
         for lb in labels:

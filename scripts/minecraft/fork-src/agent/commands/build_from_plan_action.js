@@ -54,6 +54,27 @@ function bridgeErrorLine(prefix, err) {
     return `${prefix} [${code}]: ${detail}`;
 }
 
+function parseJsonArgument(value, label) {
+    if (value === undefined || value === null || value === '') {
+        return { value: null, error: `wrong_args: ${label} is required`, outcomeClass: 'wrong_args' };
+    }
+    if (typeof value !== 'string') return { value, error: null, outcomeClass: null };
+    const text = value.trim();
+    if (!text) {
+        return { value: null, error: `wrong_args: ${label} is required`, outcomeClass: 'wrong_args' };
+    }
+    try {
+        return { value: JSON.parse(text), error: null, outcomeClass: null };
+    } catch (err) {
+        const detail = err && err.message ? err.message : String(err);
+        return {
+            value: null,
+            error: `invalid_args: ${label} must be JSON: ${detail}`,
+            outcomeClass: 'invalid_args',
+        };
+    }
+}
+
 async function ensureBridge(agent, traceId) {
     await callBridge({
         service: 'bridge',
@@ -288,6 +309,7 @@ async function emitBlockStepOutcome({
         payload: {
             action_id: actionId,
             status: statusForBuildClass(outcomeClass),
+            outcome_class: outcomeClass,
             detail,
         },
         deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
@@ -297,16 +319,26 @@ async function emitBlockStepOutcome({
     return detail;
 }
 
-function finalDetail(outcomeClass, metric) {
+function finalDetail(outcomeClass, metric, extraDetail = '') {
+    const suffix = extraDetail ? `; ${extraDetail}` : '';
     return (
         `${outcomeClass}: intended=${metric.intended_count}; present=${metric.blocks_present}; ` +
         `missing=${metric.blocks_missing}; unexpected=${metric.blocks_unexpected}; ` +
         `verified=${metric.steps_verified}; abandoned=${metric.steps_abandoned}; ` +
-        `completion=${metric.completion_ratio.toFixed(3)}`
+        `completion=${metric.completion_ratio.toFixed(3)}${suffix}`
     );
 }
 
-async function emitStructureOutcome({ agent, traceId, actionId, origin, steps, metric, outcomeClass }) {
+async function emitStructureOutcome({
+    agent,
+    traceId,
+    actionId,
+    origin,
+    steps,
+    metric,
+    outcomeClass,
+    extraDetail,
+}) {
     const observation = structureObservation({
         action: 'build-from-plan',
         actionId,
@@ -315,7 +347,7 @@ async function emitStructureOutcome({ agent, traceId, actionId, origin, steps, m
         metric,
         outcomeClass,
     });
-    const detail = finalDetail(outcomeClass, metric);
+    const detail = finalDetail(outcomeClass, metric, extraDetail);
     await callBridge({
         service: 'perception',
         method: 'report',
@@ -330,6 +362,7 @@ async function emitStructureOutcome({ agent, traceId, actionId, origin, steps, m
         payload: {
             action_id: actionId,
             status: statusForPlanClass(outcomeClass),
+            outcome_class: outcomeClass,
             detail,
         },
         deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
@@ -454,6 +487,154 @@ function attachFinalBlocks(steps, finalBlocks) {
     });
 }
 
+export async function performBuildFromPlan(agent, action_id, origin, plan, max_steps, timeout_ms) {
+    const traceId = `trace-${randomUUID()}`;
+    const actionId =
+        action_id === undefined || action_id === null || action_id === ''
+            ? `build-plan-${randomUUID()}`
+            : String(action_id);
+    const bot = getBot(agent);
+    const timeout = positiveNumber(timeout_ms, DEFAULT_BUILD_TIMEOUT_MS);
+    const deadline = Date.now() + timeout;
+
+    try {
+        await ensureBridge(agent, traceId);
+    } catch (err) {
+        const line = bridgeErrorLine('bridge unavailable, safe-idling', err);
+        announce(agent, traceId, line, true);
+        return line;
+    }
+
+    const missingActionId = action_id === undefined || action_id === null || action_id === '';
+    let normalized;
+    let invalidDetail = '';
+    let invalidOutcomeClass = 'invalid_args';
+    const parsedOrigin = parseJsonArgument(origin, 'origin');
+    const parsedPlan = parseJsonArgument(plan, 'plan');
+    try {
+        if (parsedOrigin.error || parsedPlan.error) {
+            invalidDetail = [parsedOrigin.error, parsedPlan.error].filter(Boolean).join('; ');
+            invalidOutcomeClass =
+                parsedOrigin.outcomeClass === 'wrong_args' || parsedPlan.outcomeClass === 'wrong_args'
+                    ? 'wrong_args'
+                    : 'invalid_args';
+        } else {
+            normalized = normalizePlan({ origin: parsedOrigin.value, plan: parsedPlan.value });
+        }
+    } catch (err) {
+        invalidDetail = err && err.message ? err.message : String(err);
+    }
+
+    if (missingActionId || !normalized) {
+        const metric = completionMetric({ steps: [], finalBlocks: [] });
+        const extra = missingActionId ? 'wrong_args: missing action_id' : invalidDetail;
+        const outcomeClass = missingActionId ? 'wrong_args' : invalidOutcomeClass;
+        try {
+            const detail = await emitStructureOutcome({
+                agent,
+                traceId,
+                actionId,
+                origin: parsedOrigin.value,
+                steps: [],
+                metric,
+                outcomeClass,
+                extraDetail: extra,
+            });
+            const line = `build-from-plan ${actionId} ${detail}; ${extra}`;
+            announce(agent, traceId, line, true);
+            return line;
+        } catch (err) {
+            const line = bridgeErrorLine(
+                `build-from-plan ${actionId} invalid but report failed`,
+                err,
+            );
+            announce(agent, traceId, line, true);
+            return line;
+        }
+    }
+
+    const stepLimit = maxStepsFrom(max_steps, normalized.steps.length);
+    const executedSteps = [];
+    let failureClass = null;
+
+    for (const step of normalized.steps) {
+        if (executedSteps.length >= stepLimit) {
+            failureClass = 'partial';
+            break;
+        }
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            failureClass = 'timed-out';
+            break;
+        }
+        const stepTimeout = Math.max(1, Math.min(DEFAULT_STEP_TIMEOUT_MS, remaining));
+        const stepActionId = `${actionId}#${step.index + 1}`;
+        const result =
+            step.action === 'break'
+                ? await performBreakStep(bot, step, stepTimeout)
+                : await performPlaceStep(bot, step, stepTimeout);
+        executedSteps.push(result);
+
+        try {
+            await emitBlockStepOutcome({
+                agent,
+                traceId,
+                actionId: stepActionId,
+                step: result,
+                beforeBlock: result.before_block,
+                afterBlock: result.after_block,
+                expectedBlockType: result.expected_block_type || result.block_type,
+                outcomeClass: result.class,
+                extraDetail: result.detail,
+            });
+        } catch (err) {
+            const line = bridgeErrorLine(
+                `build-from-plan ${actionId} step report failed, safe-idling`,
+                err,
+            );
+            announce(agent, traceId, line, true);
+            return line;
+        }
+
+        if (result.class !== 'placed' && result.class !== 'removed') {
+            failureClass = planFailureClass(result.class);
+        }
+    }
+
+    const abandonedSteps = normalized.steps.slice(executedSteps.length).map((step) => ({
+        ...step,
+        abandoned: true,
+        class: failureClass === 'timed-out' ? 'timed-out' : 'blocked',
+    }));
+    const allSteps = [...executedSteps, ...abandonedSteps];
+    const finalBlocks = await readFinalBlocks(bot, allSteps);
+    const finalSteps = attachFinalBlocks(allSteps, finalBlocks);
+    const metric = completionMetric({ steps: finalSteps, finalBlocks });
+    const outcomeClass = classifyPlan({ metric, failureClass });
+
+    try {
+        const detail = await emitStructureOutcome({
+            agent,
+            traceId,
+            actionId,
+            origin: normalized.origin,
+            steps: finalSteps,
+            metric,
+            outcomeClass,
+        });
+        const line = `build-from-plan ${actionId} ${detail}`;
+        announce(agent, traceId, line, outcomeClass !== 'success');
+        return line;
+    } catch (err) {
+        const line = bridgeErrorLine(
+            `build-from-plan ${actionId} completed but report failed`,
+            err,
+        );
+        announce(agent, traceId, line, true);
+        return line;
+    }
+}
+
 export const buildFromPlanAction = {
     name: '!buildFromPlan',
     description:
@@ -464,157 +645,24 @@ export const buildFromPlanAction = {
             description: 'Caller-provided action id echoed in the final action.result.',
         },
         origin: {
-            type: 'object',
-            description: 'Absolute origin block cell with x/y/z coordinates.',
+            type: 'string',
+            description: 'Absolute origin block cell as JSON with x/y/z coordinates.',
         },
         plan: {
-            type: 'object',
+            type: 'string',
             description:
-                'Structured plan with blocks[{dx,dy,dz,block_type}], optional palette, and optional clear[].',
+                'JSON plan with blocks[{dx,dy,dz,block_type}], optional palette, and optional clear[].',
         },
         max_steps: {
-            type: 'number',
+            type: 'int',
             description: 'Optional cap on attempted expanded steps.',
         },
         timeout_ms: {
-            type: 'number',
+            type: 'float',
             description: 'Optional total build deadline in milliseconds.',
         },
     },
-    perform: async function (agent, action_id, origin, plan, max_steps, timeout_ms) {
-        const traceId = `trace-${randomUUID()}`;
-        const actionId =
-            action_id === undefined || action_id === null || action_id === ''
-                ? `build-plan-${randomUUID()}`
-                : String(action_id);
-        const bot = getBot(agent);
-        const timeout = positiveNumber(timeout_ms, DEFAULT_BUILD_TIMEOUT_MS);
-        const deadline = Date.now() + timeout;
-
-        try {
-            await ensureBridge(agent, traceId);
-        } catch (err) {
-            const line = bridgeErrorLine('bridge unavailable, safe-idling', err);
-            announce(agent, traceId, line, true);
-            return line;
-        }
-
-        const missingActionId = action_id === undefined || action_id === null || action_id === '';
-        let normalized;
-        let invalidDetail = '';
-        try {
-            normalized = normalizePlan({ origin, plan });
-        } catch (err) {
-            invalidDetail = err && err.message ? err.message : String(err);
-        }
-
-        if (missingActionId || !normalized) {
-            const metric = completionMetric({ steps: [], finalBlocks: [] });
-            try {
-                const detail = await emitStructureOutcome({
-                    agent,
-                    traceId,
-                    actionId,
-                    origin,
-                    steps: [],
-                    metric,
-                    outcomeClass: 'invalid',
-                });
-                const extra = missingActionId ? 'missing action_id' : invalidDetail;
-                const line = `build-from-plan ${actionId} ${detail}; ${extra}`;
-                announce(agent, traceId, line, true);
-                return line;
-            } catch (err) {
-                const line = bridgeErrorLine(
-                    `build-from-plan ${actionId} invalid but report failed`,
-                    err,
-                );
-                announce(agent, traceId, line, true);
-                return line;
-            }
-        }
-
-        const stepLimit = maxStepsFrom(max_steps, normalized.steps.length);
-        const executedSteps = [];
-        let failureClass = null;
-
-        for (const step of normalized.steps) {
-            if (executedSteps.length >= stepLimit) {
-                failureClass = 'partial';
-                break;
-            }
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) {
-                failureClass = 'timed-out';
-                break;
-            }
-            const stepTimeout = Math.max(1, Math.min(DEFAULT_STEP_TIMEOUT_MS, remaining));
-            const stepActionId = `${actionId}#${step.index + 1}`;
-            const result =
-                step.action === 'break'
-                    ? await performBreakStep(bot, step, stepTimeout)
-                    : await performPlaceStep(bot, step, stepTimeout);
-            executedSteps.push(result);
-
-            try {
-                await emitBlockStepOutcome({
-                    agent,
-                    traceId,
-                    actionId: stepActionId,
-                    step: result,
-                    beforeBlock: result.before_block,
-                    afterBlock: result.after_block,
-                    expectedBlockType: result.expected_block_type || result.block_type,
-                    outcomeClass: result.class,
-                    extraDetail: result.detail,
-                });
-            } catch (err) {
-                const line = bridgeErrorLine(
-                    `build-from-plan ${actionId} step report failed, safe-idling`,
-                    err,
-                );
-                announce(agent, traceId, line, true);
-                return line;
-            }
-
-            if (result.class !== 'placed' && result.class !== 'removed') {
-                failureClass = planFailureClass(result.class);
-            }
-        }
-
-        const abandonedSteps = normalized.steps.slice(executedSteps.length).map((step) => ({
-            ...step,
-            abandoned: true,
-            class: failureClass === 'timed-out' ? 'timed-out' : 'blocked',
-        }));
-        const allSteps = [...executedSteps, ...abandonedSteps];
-        const finalBlocks = await readFinalBlocks(bot, allSteps);
-        const finalSteps = attachFinalBlocks(allSteps, finalBlocks);
-        const metric = completionMetric({ steps: finalSteps, finalBlocks });
-        const outcomeClass = classifyPlan({ metric, failureClass });
-
-        try {
-            const detail = await emitStructureOutcome({
-                agent,
-                traceId,
-                actionId,
-                origin: normalized.origin,
-                steps: finalSteps,
-                metric,
-                outcomeClass,
-            });
-            const line = `build-from-plan ${actionId} ${detail}`;
-            announce(agent, traceId, line, outcomeClass !== 'success');
-            return line;
-        } catch (err) {
-            const line = bridgeErrorLine(
-                `build-from-plan ${actionId} completed but report failed`,
-                err,
-            );
-            announce(agent, traceId, line, true);
-            return line;
-        }
-    },
+    perform: performBuildFromPlan,
 };
 
 export default buildFromPlanAction;

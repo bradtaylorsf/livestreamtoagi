@@ -47,10 +47,12 @@ from core.bridge.server import (
     CODE_EXECUTE_VERBS,
     ERR_CODE_SERVICE_UNAVAILABLE,
     ERR_KILL_SWITCH_ACTIVE,
+    ERR_MANAGEMENT_SERVICE_UNAVAILABLE,
     ERR_MEMORY_SERVICE_UNAVAILABLE,
     ERRAND_COMPLETE_VERBS,
     ERRAND_POLL_VERBS,
     ERRAND_VERBS,
+    MANAGEMENT_REVIEW_VERBS,
     MEMORY_HANDLER_VERBS,
     MEMORY_WRITE_VERBS,
     STUB_HANDLERS,
@@ -59,6 +61,7 @@ from core.bridge.server import (
     build_bridge_response_with_services,
 )
 from core.main import app
+from core.models import ContentReviewResult
 
 TOKEN = "test-bridge-secret"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -68,7 +71,6 @@ FIXTURES = REPO_ROOT / "tests" / "backend" / "fixtures" / "bridge"
 # request_id/message come from the committed request.valid.json fixtures.
 _EXPECTED_STUB_PAYLOAD: dict[str, dict[str, Any]] = {
     "bridge.ping": {"pong": "hello"},
-    "management.review": {"verdict": "allow", "reason": "stub", "sanitized_text": None},
     "cost.gate": {"allowed": True, "reason": "stub", "remaining_budget_usd": 0.0},
     "perception.report": {"accepted": True},
     "action.result": {"accepted": True},
@@ -85,6 +87,14 @@ class _KillSwitchServices:
     def __init__(self, value: str | None) -> None:
         self.redis = AsyncMock()
         self.redis.get = AsyncMock(return_value=value)
+
+
+class _ManagementServices:
+    def __init__(self, review: ContentReviewResult) -> None:
+        self.management = AsyncMock()
+        self.management.review = AsyncMock(return_value=review)
+        self.management.intervene = AsyncMock()
+        self.management.generate_replacement = AsyncMock(return_value="replacement")
 
 
 @pytest.fixture
@@ -216,6 +226,25 @@ def test_memory_write_without_services_returns_retryable_typed_error(
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
+def test_management_review_without_services_returns_retryable_typed_error(
+    token_env: str, client: TestClient
+) -> None:
+    request = _fixture("management.review", "request.valid.json")
+    with client.websocket_connect(
+        BRIDGE_WS_PATH, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as ws:
+        ws.send_json(request)
+        raw_response = ws.receive_json()
+
+    response = c.BridgeResponse.model_validate(raw_response)
+    assert response.ok is False
+    assert response.payload is None
+    assert response.error is not None
+    assert response.error.code == ERR_MANAGEMENT_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
 def test_code_execute_without_services_returns_retryable_typed_error(
     token_env: str, client: TestClient
 ) -> None:
@@ -290,6 +319,23 @@ async def test_alpha_errand_complete_returns_kill_switch_error() -> None:
         assert errand_queue.get_completion("alpha-task-1") is None
     finally:
         errand_queue.clear()
+
+
+async def test_management_review_routes_to_service_handler() -> None:
+    services = _ManagementServices(ContentReviewResult(approved=True, reason="clean", severity=1))
+    request = _fixture("management.review", "request.valid.json")
+
+    response = await build_bridge_response_with_services(request, services)
+
+    assert response.ok is True
+    assert response.payload == {"verdict": "allow", "reason": "clean", "sanitized_text": None}
+    services.management.review.assert_awaited_once_with(
+        agent_id="grok",
+        content="I think we should ship it",
+        simulation_id="11111111-1111-1111-1111-111111111111",
+    )
+    services.management.intervene.assert_not_awaited()
+    c.validate_response(response, service="management", method="review")
 
 
 def test_query_param_token_rejected_by_default(token_env: str, client: TestClient) -> None:
@@ -428,6 +474,16 @@ def test_build_bridge_response_returns_typed_error_for_async_memory_paths(verb: 
     c.validate_response(response, service=request["service"], method=request["method"])
 
 
+def test_build_bridge_response_returns_typed_error_for_management_path() -> None:
+    request = _fixture("management.review", "request.valid.json")
+    response = build_bridge_response(request)
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == ERR_MANAGEMENT_SERVICE_UNAVAILABLE
+    assert response.retryable is True
+    c.validate_response(response, service=request["service"], method=request["method"])
+
+
 def test_build_bridge_response_returns_typed_error_for_code_path() -> None:
     request = _fixture("code.execute", "request.valid.json")
     response = build_bridge_response(request)
@@ -457,12 +513,14 @@ def test_bridge_route_is_mounted_on_app() -> None:
 def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.recall"} == MEMORY_HANDLER_VERBS
     assert {"memory.write"} == MEMORY_WRITE_VERBS
+    assert {"management.review"} == MANAGEMENT_REVIEW_VERBS
     assert {"code.execute"} == CODE_EXECUTE_VERBS
     assert {"errand.poll"} == ERRAND_POLL_VERBS
     assert {"errand.complete"} == ERRAND_COMPLETE_VERBS
     assert {"errand.poll", "errand.complete"} == ERRAND_VERBS
     assert "memory.recall" not in STUB_HANDLERS
     assert "memory.write" not in STUB_HANDLERS
+    assert "management.review" not in STUB_HANDLERS
     assert "code.execute" not in STUB_HANDLERS
     assert "errand.poll" not in STUB_HANDLERS
     assert "errand.complete" not in STUB_HANDLERS
@@ -470,6 +528,7 @@ def test_handlers_match_closed_registry_exactly() -> None:
         set(STUB_HANDLERS)
         | set(MEMORY_HANDLER_VERBS)
         | set(MEMORY_WRITE_VERBS)
+        | set(MANAGEMENT_REVIEW_VERBS)
         | set(CODE_EXECUTE_VERBS)
         | set(ERRAND_VERBS)
     )

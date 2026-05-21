@@ -46,9 +46,17 @@ def _run_node_harness(tmp_path: Path, source: str) -> dict:
 
 
 def test_taxonomy_and_policy_are_exact() -> None:
-    assert {"blocked", "timeout", "invalid", "unreachable", "bridge-down"} == FAILURE_CLASSES
+    assert {
+        "blocked",
+        "interrupted",
+        "timeout",
+        "invalid",
+        "unreachable",
+        "bridge-down",
+    } == FAILURE_CLASSES
     assert SAFE_FAIL_POLICY == {
         "blocked": "idle",
+        "interrupted": "idle",
         "timeout": "retry-bounded",
         "invalid": "abandon",
         "unreachable": "idle",
@@ -60,6 +68,7 @@ def test_taxonomy_and_policy_are_exact() -> None:
     ("failure_class", "expected_policy", "expected_action", "expected_retryable"),
     [
         ("blocked", "idle", "idle", False),
+        ("interrupted", "idle", "idle", False),
         ("timeout", "retry-bounded", "retry", True),
         ("invalid", "abandon", "abandon", False),
         ("unreachable", "idle", "idle", False),
@@ -116,6 +125,10 @@ def test_retry_budget_uses_capped_exponential_backoff_defaults() -> None:
     ("raw", "expected"),
     [
         ("blocked", "blocked"),
+        ("interrupted", "interrupted"),
+        ("aborted", "interrupted"),
+        ("path-stopped", "interrupted"),
+        ("mode-interrupted", "interrupted"),
         ("timed-out", "timeout"),
         ("timeout", "timeout"),
         ("protected", "invalid"),
@@ -176,6 +189,7 @@ process.stdout.write(JSON.stringify({{
     classes: mod.FAILURE_CLASSES,
     policies: mod.SAFE_FAIL_POLICY,
     blocked: mod.decideSafeFail('blocked', 1),
+    interrupted: mod.decideSafeFail('path_stopped', 1),
     invalid: mod.decideSafeFail('protected', 1),
     unreachable: mod.decideSafeFail('bridge_unreachable', 1),
     bridgeDown: mod.decideSafeFail('bridge_connect_failed', 1),
@@ -186,15 +200,24 @@ process.stdout.write(JSON.stringify({{
 """
     result = _run_node_harness(tmp_path, source)
 
-    assert result["classes"] == ["blocked", "timeout", "invalid", "unreachable", "bridge-down"]
+    assert result["classes"] == [
+        "blocked",
+        "interrupted",
+        "timeout",
+        "invalid",
+        "unreachable",
+        "bridge-down",
+    ]
     assert result["policies"] == {
         "blocked": "idle",
+        "interrupted": "idle",
         "timeout": "retry-bounded",
         "invalid": "abandon",
         "unreachable": "idle",
         "bridge-down": "abandon",
     }
     assert result["blocked"]["action"] == "idle"
+    assert result["interrupted"]["action"] == "idle"
     assert result["invalid"]["action"] == "abandon"
     assert result["unreachable"]["action"] == "idle"
     assert result["bridgeDown"]["action"] == "abandon"

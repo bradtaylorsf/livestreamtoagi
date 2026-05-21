@@ -1,18 +1,20 @@
-"""Tests for the Mindcraft profile generator (issue #536, epic E3-4).
+"""Tests for the Mindcraft profile generator (issues #536 and #572).
 
 `scripts/minecraft/gen_profiles.py` turns the single source of truth
 (`agents/<id>/config.yaml`) into a Mindcraft profile. These tests prove:
 
 * (a) vera's generated openrouter profile mirrors `agents/vera/config.yaml`
   exactly — the acceptance criterion, with **no hardcoded model strings**;
-* (b) the profile is valid JSON of the minimal `{name,model,code_model}` shape;
+* (b) the profile is valid JSON with required `{name,model,code_model}` routing
+  keys plus E8 `{bot_responder,personality}` conversation metadata;
 * (c) vera's raw config values resolve through `core.llm_client`
   (same drift guard as `test_mc_model_routing._resolve_canonical`);
 * (d) the lmstudio local-dev form is `lmstudio/`-only — zero external spend;
 * (e) the CLI prints a valid profile to stdout;
 * (f) every real agent (not `template`, not refused `management`) generates a
   valid profile — E8 readiness — and Management is explicitly refused while
-  Alpha (the E7-1 vertical-slice agent) generates fine.
+  Alpha (the E7-1 vertical-slice agent) generates fine;
+* (g) E8-1 batch mode discovers and emits all conversational agents from config.
 
 `scripts/` is not a Python package, so the module is loaded from its file path
 via importlib.
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +39,31 @@ GEN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "gen_profiles.py"
 AGENTS_DIR = REPO_ROOT / "agents"
 VERA_CONFIG = AGENTS_DIR / "vera" / "config.yaml"
 
-PROFILE_KEYS = {"name", "model", "code_model"}
+PROFILE_REQUIRED_KEYS = {"name", "model", "code_model"}
+PROFILE_KEYS = PROFILE_REQUIRED_KEYS | {"bot_responder", "personality"}
+PERSONALITY_KEYS = {
+    "chattiness",
+    "initiative",
+    "interrupt_tendency",
+    "eavesdrop_tendency",
+    "closing_weight",
+    "role_priority_bonus",
+    "respond_probability",
+    "initiate_probability",
+    "interrupt_bias",
+    "eavesdrop_probability",
+    "adjacency",
+}
+EXPECTED_CONVERSATIONAL_AGENT_IDS = [
+    "alpha",
+    "aurora",
+    "fork",
+    "grok",
+    "pixel",
+    "rex",
+    "sentinel",
+    "vera",
+]
 
 
 def _load_gen_module():
@@ -71,6 +98,27 @@ def _real_agent_ids() -> list[str]:
     return ids
 
 
+def _assert_profile_shape(profile: dict[str, object]) -> None:
+    assert set(profile) == PROFILE_KEYS
+    for key in PROFILE_REQUIRED_KEYS:
+        assert isinstance(profile[key], str) and profile[key]
+    assert isinstance(profile["bot_responder"], str) and profile["bot_responder"]
+    assert isinstance(profile["personality"], dict)
+    assert set(profile["personality"]) == PERSONALITY_KEYS
+
+
+def _assert_openrouter_profile_matches_config(agent_id: str, profile: dict[str, object]) -> None:
+    cfg = yaml.safe_load((AGENTS_DIR / agent_id / "config.yaml").read_text())
+    _assert_profile_shape(profile)
+    assert profile["name"] == gen._bot_name(agent_id)
+    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
+    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
+    assert profile["personality"]["adjacency"] == {
+        str(key): float(value) for key, value in (cfg.get("adjacency") or {}).items()
+    }
+    assert json.loads(json.dumps(profile)) == profile
+
+
 # ── (a) acceptance: vera's openrouter profile mirrors its config ────────────
 
 
@@ -82,7 +130,7 @@ def test_vera_openrouter_profile_matches_config():
     assert profile["name"] == "Vera"
     assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
     assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
-    assert set(profile) == PROFILE_KEYS, "profile must be exactly 3 keys"
+    _assert_profile_shape(profile)
 
 
 # ── (b) valid JSON of the minimal shape ─────────────────────────────────────
@@ -92,8 +140,7 @@ def test_profile_is_valid_json():
     profile = gen.build_profile("vera")
     round_tripped = json.loads(json.dumps(profile, indent=4))
     assert round_tripped == profile
-    assert set(round_tripped) == PROFILE_KEYS
-    assert all(isinstance(v, str) and v for v in round_tripped.values())
+    _assert_profile_shape(round_tripped)
 
 
 # ── (c) vera's config resolves through core/llm_client (drift guard) ────────
@@ -129,11 +176,10 @@ def test_local_dev_profile_is_lmstudio_only():
         local_chat="qwen3-8b",
         local_code="qwen3-30b",
     )
-    assert profile == {
-        "name": "Vera",
-        "model": "lmstudio/qwen3-8b",
-        "code_model": "lmstudio/qwen3-30b",
-    }
+    _assert_profile_shape(profile)
+    assert profile["name"] == "Vera"
+    assert profile["model"] == "lmstudio/qwen3-8b"
+    assert profile["code_model"] == "lmstudio/qwen3-30b"
     assert "openrouter/" not in json.dumps(profile)
 
 
@@ -171,11 +217,10 @@ def test_cli_stdout_emits_valid_profile():
     assert proc.returncode == 0, proc.stderr
     profile = json.loads(proc.stdout)
     cfg = yaml.safe_load(VERA_CONFIG.read_text())
-    assert profile == {
-        "name": "Vera",
-        "model": f"openrouter/{cfg['model_conversation']}",
-        "code_model": f"openrouter/{cfg['model_building']}",
-    }
+    _assert_profile_shape(profile)
+    assert profile["name"] == "Vera"
+    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
+    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
 
 
 def test_cli_lmstudio_stdout():
@@ -195,11 +240,37 @@ def test_cli_lmstudio_stdout():
     )
     assert proc.returncode == 0, proc.stderr
     profile = json.loads(proc.stdout)
-    assert profile == {
-        "name": "Alpha",
-        "model": "lmstudio/qwen3-8b",
-        "code_model": "lmstudio/qwen3-8b",
-    }
+    _assert_profile_shape(profile)
+    assert profile["name"] == "Alpha"
+    assert profile["model"] == "lmstudio/qwen3-8b"
+    assert profile["code_model"] == "lmstudio/qwen3-8b"
+
+
+def test_cli_bootstraps_repo_venv_when_site_packages_are_missing():
+    """Direct script execution should recover from an initial interpreter without PyYAML."""
+    env = {**os.environ}
+    env.pop("LTAG_GEN_PROFILES_BOOTSTRAPPED", None)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            str(GEN_SCRIPT),
+            "alpha",
+            "--provider",
+            "lmstudio",
+            "--local-chat",
+            "qwen3-8b",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    profile = json.loads(proc.stdout)
+    assert profile["name"] == "Alpha"
+    assert profile["model"] == "lmstudio/qwen3-8b"
 
 
 def test_cli_writes_out_file(tmp_path):
@@ -213,7 +284,99 @@ def test_cli_writes_out_file(tmp_path):
     assert proc.returncode == 0, proc.stderr
     written = json.loads(out.read_text())
     assert written["name"] == "Vera"
-    assert set(written) == PROFILE_KEYS
+    _assert_profile_shape(written)
+
+
+def test_discover_agent_ids_excludes_template_and_management():
+    assert gen.discover_agent_ids() == EXPECTED_CONVERSATIONAL_AGENT_IDS
+
+
+def test_build_all_profiles_emits_all_eight():
+    profiles = gen.build_all_profiles()
+
+    assert list(profiles) == EXPECTED_CONVERSATIONAL_AGENT_IDS
+    assert "management" not in profiles
+    assert len(profiles) == 8
+    for agent_id, profile in profiles.items():
+        _assert_openrouter_profile_matches_config(agent_id, profile)
+
+
+def test_cli_all_writes_directory(tmp_path):
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all", "--out", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    expected_files = {
+        f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS
+    }
+    assert {path.name for path in tmp_path.iterdir()} == expected_files
+
+    for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS:
+        profile = json.loads((tmp_path / f"{agent_id}-bot.json").read_text())
+        _assert_openrouter_profile_matches_config(agent_id, profile)
+
+
+def test_cli_all_creates_directory_output_without_trailing_slash(tmp_path):
+    out_dir = tmp_path / "issue572-profiles"
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all", "--out", str(out_dir)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert out_dir.is_dir()
+    assert sorted(path.name for path in out_dir.iterdir()) == [
+        f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS
+    ]
+
+
+def test_cli_all_stdout_emits_combined_json():
+    proc = subprocess.run(
+        [sys.executable, str(GEN_SCRIPT), "--all"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    profiles = json.loads(proc.stdout)
+    assert list(profiles) == EXPECTED_CONVERSATIONAL_AGENT_IDS
+    for agent_id, profile in profiles.items():
+        _assert_openrouter_profile_matches_config(agent_id, profile)
+
+
+def test_cli_all_with_lmstudio():
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GEN_SCRIPT),
+            "--all",
+            "--provider",
+            "lmstudio",
+            "--local-chat",
+            "qwen3-8b",
+            "--local-code",
+            "qwen3-30b",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    profiles = json.loads(proc.stdout)
+    assert list(profiles) == EXPECTED_CONVERSATIONAL_AGENT_IDS
+    assert "openrouter/" not in json.dumps(profiles)
+    for profile in profiles.values():
+        _assert_profile_shape(profile)
+        assert profile["model"] == "lmstudio/qwen3-8b"
+        assert profile["code_model"] == "lmstudio/qwen3-30b"
 
 
 def test_cli_unknown_agent_exits_nonzero():
@@ -246,14 +409,7 @@ def test_bot_name_normalizes_agent_ids_to_pascal_case(agent_id, expected):
 def test_every_real_agent_generates_valid_json(agent_id):
     """Every real agent emits a valid 3-key profile from its own config."""
     profile = gen.build_profile(agent_id)
-    cfg = yaml.safe_load((AGENTS_DIR / agent_id / "config.yaml").read_text())
-
-    assert set(profile) == PROFILE_KEYS
-    assert profile["name"] == gen._bot_name(agent_id)
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
-    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
-    # Round-trips as JSON with all-string values.
-    assert json.loads(json.dumps(profile)) == profile
+    _assert_openrouter_profile_matches_config(agent_id, profile)
 
 
 def test_management_profile_is_refused():

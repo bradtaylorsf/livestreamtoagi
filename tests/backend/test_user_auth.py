@@ -24,6 +24,8 @@ from core.auth.dependencies import (
 )
 from core.models import User
 
+TEST_USER_JWT_SECRET = "u" * 32
+
 # ── Helpers ───────────────────────────────────────────────────
 
 
@@ -61,7 +63,7 @@ def auth_app():
     app.state.services = mock_services
 
     env = {
-        "AUTH_JWT_SECRET": "test-user-jwt-secret",
+        "AUTH_JWT_SECRET": TEST_USER_JWT_SECRET,
         "EMAIL_PROVIDER": "console",
         "EMAIL_FROM": "no-reply@test.dev",
         "PUBLIC_BASE_URL": "http://localhost:8000",
@@ -94,7 +96,7 @@ class TestEmailValidation:
 
 class TestUserJWT:
     def test_valid(self) -> None:
-        secret = "test-secret"
+        secret = TEST_USER_JWT_SECRET
         uid = str(uuid.uuid4())
         token = jwt.encode(
             {"sub": uid, "exp": datetime.now(UTC) + timedelta(hours=1)},
@@ -105,7 +107,7 @@ class TestUserJWT:
             assert _validate_user_jwt(token) == uid
 
     def test_expired(self) -> None:
-        secret = "test-secret"
+        secret = TEST_USER_JWT_SECRET
         token = jwt.encode(
             {"sub": "u", "exp": datetime.now(UTC) - timedelta(hours=1)},
             secret,
@@ -113,6 +115,10 @@ class TestUserJWT:
         )
         with patch.dict(os.environ, {"AUTH_JWT_SECRET": secret}):
             assert _validate_user_jwt(token) is None
+
+    def test_short_secret_rejected(self) -> None:
+        with patch.dict(os.environ, {"AUTH_JWT_SECRET": "short"}):
+            assert _validate_user_jwt("not-a-jwt") is None
 
     def test_no_secret(self) -> None:
         with patch.dict(os.environ, {"AUTH_JWT_SECRET": ""}):
@@ -158,9 +164,7 @@ class TestMagicLinkRequest:
     def test_happy_path_creates_token(self, auth_app) -> None:
         client, mock_db, mock_redis = auth_app
         # console provider is the default — no actual email sent
-        resp = client.post(
-            "/api/auth/magic-link", json={"email": "alice@example.com"}
-        )
+        resp = client.post("/api/auth/magic-link", json={"email": "alice@example.com"})
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
         # Token row inserted
@@ -179,9 +183,7 @@ class TestMagicLinkRequest:
         client, _, mock_redis = auth_app
         # Simulate 6th request in window
         mock_redis.incr = AsyncMock(return_value=6)
-        resp = client.post(
-            "/api/auth/magic-link", json={"email": "alice@example.com"}
-        )
+        resp = client.post("/api/auth/magic-link", json={"email": "alice@example.com"})
         assert resp.status_code == 429
 
     def test_console_provider_writes_jsonl(self, auth_app, tmp_path) -> None:
@@ -196,9 +198,7 @@ class TestMagicLinkRequest:
         # Don't set EMAIL_CONSOLE_REDIS_STREAM -- we don't want this test
         # to depend on a running Redis.
         with patch.dict(os.environ, {"EMAIL_CONSOLE_LOG": str(log_path)}):
-            resp = client.post(
-                "/api/auth/magic-link", json={"email": "alice@example.com"}
-            )
+            resp = client.post("/api/auth/magic-link", json={"email": "alice@example.com"})
         assert resp.status_code == 200
         assert log_path.exists(), "console log file was not created"
         lines = log_path.read_text(encoding="utf-8").strip().splitlines()
@@ -230,16 +230,12 @@ class TestMagicLinkRequest:
         fake_default = tmp_path / "fallback.jsonl"
         monkeypatch.setattr(email_mod, "DEFAULT_CONSOLE_LOG_PATH", str(fake_default))
         with patch.dict(os.environ, {"EMAIL_CONSOLE_LOG": ""}):
-            resp = client.post(
-                "/api/auth/magic-link", json={"email": "alice@example.com"}
-            )
+            resp = client.post("/api/auth/magic-link", json={"email": "alice@example.com"})
         assert resp.status_code == 200
         assert fake_default.exists(), (
             "blank EMAIL_CONSOLE_LOG should fall back to DEFAULT_CONSOLE_LOG_PATH"
         )
-        assert fake_default.read_text(encoding="utf-8").strip(), (
-            "fallback log file is empty"
-        )
+        assert fake_default.read_text(encoding="utf-8").strip(), "fallback log file is empty"
 
     def test_safe_next_path_is_included_in_email_link(self, auth_app) -> None:
         client, *_ = auth_app
@@ -278,7 +274,10 @@ class TestSafeRelativeRedirect:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("/simulations/new?scenario=lab_rivals.yaml", "/simulations/new?scenario=lab_rivals.yaml"),
+            (
+                "/simulations/new?scenario=lab_rivals.yaml",
+                "/simulations/new?scenario=lab_rivals.yaml",
+            ),
             ("/simulations#draft", "/simulations#draft"),
             ("https://evil.test/phish", None),
             ("//evil.test/phish", None),
@@ -465,7 +464,7 @@ class TestLogoutAndMe:
         )
         token = jwt.encode(
             {"sub": str(user.id), "exp": datetime.now(UTC) + timedelta(days=30)},
-            "test-user-jwt-secret",
+            TEST_USER_JWT_SECRET,
             algorithm="HS256",
         )
         resp = client.get(
@@ -481,7 +480,7 @@ class TestLogoutAndMe:
         client, *_ = auth_app
         token = jwt.encode(
             {"sub": str(uuid.uuid4()), "exp": datetime.now(UTC) - timedelta(hours=1)},
-            "test-user-jwt-secret",
+            TEST_USER_JWT_SECRET,
             algorithm="HS256",
         )
         resp = client.get(

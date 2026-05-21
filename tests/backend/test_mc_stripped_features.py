@@ -49,6 +49,7 @@ STOCK_BOT_NAME = "StockBot"
 MC_HOST = "127.0.0.1"
 MC_PORT = "25565"
 MC_VERSION = "1.21.6"
+_MODEL_ENV_KEYS = ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_MODEL_BUILDING")
 
 # The complete, intentional set of value deltas vs. the E3-2 stock template.
 # (stock value -> stripped value). The test below asserts the parsed settings
@@ -71,6 +72,8 @@ E2_CONTRACT = {
 
 def _run(args, cwd: Path, extra_env: dict | None = None):
     env = {**os.environ}
+    for key in _MODEL_ENV_KEYS:
+        env.pop(key, None)
     if extra_env:
         env.update(extra_env)
     return subprocess.run(

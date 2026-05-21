@@ -8,6 +8,8 @@
 export const MOVEMENT_CLASSES = Object.freeze([
     'reached',
     'blocked',
+    'interrupted',
+    'aborted',
     'timed-out',
     'unreachable',
     'invalid',

@@ -57,34 +57,64 @@ ACTIONS_NAVIGATE_PATCH_MARKER="LTAG E6-2 navigate action"
 ACTIONS_PLACE_PATCH_MARKER="LTAG E6-3 place action"
 ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
+ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="LTAG E9-1 plan-and-build action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_POLL_ERRAND_PATCH_MARKER="LTAG E7-2 poll errand action"
 ACTIONS_RUN_ERRAND_PATCH_MARKER="LTAG E7-3 run errand action"
+ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
+ACTIONS_PARSE_GUARD_PATCH_MARKER="LTAG E8-16 command parse guard"
+AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
+AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
+AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
+AGENT_INBOX_PATCH_MARKER="LTAG E9-1 inbox queue"
+AGENT_ACTION_QUEUE_PATCH_MARKER="LTAG E9-1 action queue"
+MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
+ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
 
+AGENT_REL="src/agent/agent.js"
+MODES_REL="src/agent/modes.js"
+ACTION_MANAGER_REL="src/agent/action_manager.js"
 BRIDGE_CLIENT_REL="src/agent/bridge/python_bridge.js"
+TIMELINE_EMITTER_REL="src/agent/bridge/timeline_emitter.js"
+MANAGEMENT_REVIEW_REL="src/agent/bridge/management_review.js"
 BRIDGE_ACTION_REL="src/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_REL="src/agent/commands/move_action.js"
 NAVIGATE_ACTION_REL="src/agent/commands/navigate_action.js"
 PLACE_ACTION_REL="src/agent/commands/place_action.js"
 BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
+PLAN_AND_BUILD_ACTION_REL="src/agent/commands/plan_and_build_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
+PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
 POLL_ERRAND_ACTION_REL="src/agent/commands/poll_errand_action.js"
 RUN_ERRAND_ACTION_REL="src/agent/commands/run_errand_action.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
+BUILDER_PROVIDER_SKILL_REL="src/agent/skills/builder_provider.js"
+BUILD_PLAN_GOVERNOR_SKILL_REL="src/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
+ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 ERRAND_PLAN_SKILL_REL="src/agent/skills/errand_plan.js"
+LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
+HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
+INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
+ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
 
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
 MCDATA_PATH=""
 ACTIONS_BACKUP=""
 ACTIONS_PATH=""
+AGENT_BACKUP=""
+AGENT_PATH=""
+MODES_BACKUP=""
+MODES_PATH=""
+ACTION_MANAGER_BACKUP=""
+ACTION_MANAGER_PATH=""
 STAGED_DESTS=()
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,22 +122,33 @@ SETTINGS_TEMPLATE="$SCRIPT_DIR/mindcraft-settings-alpha.js"
 PROFILE_TEMPLATE="$SCRIPT_DIR/profiles/alpha-bot.json"
 FORK_SRC_DIR="$SCRIPT_DIR/fork-src"
 BRIDGE_CLIENT_SRC="$FORK_SRC_DIR/agent/bridge/python_bridge.js"
+TIMELINE_EMITTER_SRC="$FORK_SRC_DIR/agent/bridge/timeline_emitter.js"
+MANAGEMENT_REVIEW_SRC="$FORK_SRC_DIR/agent/bridge/management_review.js"
 BRIDGE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/bridge_ping_action.js"
 MOVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/move_action.js"
 NAVIGATE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/navigate_action.js"
 PLACE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/place_action.js"
 BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
+PLAN_AND_BUILD_ACTION_SRC="$FORK_SRC_DIR/agent/commands/plan_and_build_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
+PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
 POLL_ERRAND_ACTION_SRC="$FORK_SRC_DIR/agent/commands/poll_errand_action.js"
 RUN_ERRAND_ACTION_SRC="$FORK_SRC_DIR/agent/commands/run_errand_action.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
+BUILDER_PROVIDER_SKILL_SRC="$FORK_SRC_DIR/agent/skills/builder_provider.js"
+BUILD_PLAN_GOVERNOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
+ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 ERRAND_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/errand_plan.js"
+LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
+HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
+INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
+ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
 
 MODE="run"
 case "${1:-}" in
@@ -136,6 +177,18 @@ restore_clone_patches() {
     if [ -n "${ACTIONS_BACKUP:-}" ] && [ -f "$ACTIONS_BACKUP" ] && [ -n "${ACTIONS_PATH:-}" ]; then
         cp "$ACTIONS_BACKUP" "$ACTIONS_PATH" 2> /dev/null || true
         rm -f "$ACTIONS_BACKUP"
+    fi
+    if [ -n "${AGENT_BACKUP:-}" ] && [ -f "$AGENT_BACKUP" ] && [ -n "${AGENT_PATH:-}" ]; then
+        cp "$AGENT_BACKUP" "$AGENT_PATH" 2> /dev/null || true
+        rm -f "$AGENT_BACKUP"
+    fi
+    if [ -n "${MODES_BACKUP:-}" ] && [ -f "$MODES_BACKUP" ] && [ -n "${MODES_PATH:-}" ]; then
+        cp "$MODES_BACKUP" "$MODES_PATH" 2> /dev/null || true
+        rm -f "$MODES_BACKUP"
+    fi
+    if [ -n "${ACTION_MANAGER_BACKUP:-}" ] && [ -f "$ACTION_MANAGER_BACKUP" ] && [ -n "${ACTION_MANAGER_PATH:-}" ]; then
+        cp "$ACTION_MANAGER_BACKUP" "$ACTION_MANAGER_PATH" 2> /dev/null || true
+        rm -f "$ACTION_MANAGER_BACKUP"
     fi
     local staged
     for staged in "${STAGED_DESTS[@]:-}"; do
@@ -201,12 +254,14 @@ verify_committed_assets() {
     fi
 
     for required in \
-        "$BRIDGE_CLIENT_SRC" "$BRIDGE_ACTION_SRC" "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
+        "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
+        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" \
+        "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
-        "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$POLL_ERRAND_ACTION_SRC" \
+        "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$PLACE_HERE_GUARD_SRC" "$POLL_ERRAND_ACTION_SRC" \
         "$RUN_ERRAND_ACTION_SRC" \
-        "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" \
-        "$PERCEPTION_SKILL_SRC" "$SAFE_FAIL_SKILL_SRC" "$ERRAND_PLAN_SKILL_SRC"
+        "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_SRC" \
+        "$PERCEPTION_SKILL_SRC" "$SAFE_FAIL_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_SRC" "$ERRAND_PLAN_SKILL_SRC"
     do
         if [ ! -s "$required" ]; then
             fail "Committed bridge asset missing or empty: $required"; problems=1
@@ -303,6 +358,9 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would stage:  $SETTINGS_TEMPLATE -> $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $PROFILE_TEMPLATE  -> $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
     info "Would copy:   fork-src/ bridge client, actions, and helper skills"
+    info "Would wrap:   upstream action interruptions via $PLACE_HERE_GUARD_REL"
+    info "Would copy:   fork-src/ timeline telemetry and LM Studio usage shim"
+    info "Would copy:   fork-src/ autonomous heartbeat skill"
     info "Would inject: !pollErrand and !runErrand for Alpha errands"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
@@ -355,6 +413,17 @@ if ! sed -E \
     exit 1
 fi
 ok "Staged settings.js -> $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profile=${MINDCRAFT_PROFILE})"
+SETTINGS_PATH="$DEST_SETTINGS" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.SETTINGS_PATH;
+const importLine = "import './src/agent/skills/lmstudio_usage.js'; // LTAG E8-12 timeline telemetry\n";
+let source = readFileSync(path, 'utf8');
+if (!source.includes('lmstudio_usage.js')) {
+    writeFileSync(path, importLine + source);
+}
+NODE
+ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
@@ -397,23 +466,325 @@ stage_file() {
 }
 
 stage_file "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_REL"
+stage_file "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_REL"
+stage_file "$MANAGEMENT_REVIEW_SRC" "$MANAGEMENT_REVIEW_REL"
 stage_file "$BRIDGE_ACTION_SRC" "$BRIDGE_ACTION_REL"
 stage_file "$MOVE_ACTION_SRC" "$MOVE_ACTION_REL"
 stage_file "$NAVIGATE_ACTION_SRC" "$NAVIGATE_ACTION_REL"
 stage_file "$PLACE_ACTION_SRC" "$PLACE_ACTION_REL"
 stage_file "$BREAK_ACTION_SRC" "$BREAK_ACTION_REL"
 stage_file "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_REL"
+stage_file "$PLAN_AND_BUILD_ACTION_SRC" "$PLAN_AND_BUILD_ACTION_REL"
 stage_file "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_REL"
 stage_file "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_REL"
+stage_file "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_REL"
 stage_file "$POLL_ERRAND_ACTION_SRC" "$POLL_ERRAND_ACTION_REL"
 stage_file "$RUN_ERRAND_ACTION_SRC" "$RUN_ERRAND_ACTION_REL"
 stage_file "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_REL"
 stage_file "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_REL"
 stage_file "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_REL"
+stage_file "$BUILDER_PROVIDER_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_REL"
+stage_file "$BUILD_PLAN_GOVERNOR_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_REL"
 stage_file "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_REL"
 stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
+stage_file "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_REL"
 stage_file "$ERRAND_PLAN_SKILL_SRC" "$ERRAND_PLAN_SKILL_REL"
-ok "Copied bridge client, actions, and helper skills from fork-src"
+stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
+stage_file "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_REL"
+stage_file "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_REL"
+stage_file "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_REL"
+ok "Copied bridge client, timeline telemetry, actions, and helper skills from fork-src"
+
+AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
+if [ ! -f "$AGENT_PATH" ]; then
+    fail "Mindcraft source file missing: $AGENT_PATH"
+    exit 1
+fi
+if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_INBOX_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH"; then
+    info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
+        fail "Could not restore pinned $AGENT_REL before patching."
+        exit 1
+    fi
+fi
+AGENT_BACKUP="$(mktemp -t mindcraft-agent.XXXXXX)"
+cp "$AGENT_PATH" "$AGENT_BACKUP"
+if ! AGENT_PATH="$AGENT_PATH" \
+    AGENT_MANAGEMENT_PATCH_MARKER="$AGENT_MANAGEMENT_PATCH_MARKER" \
+    AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
+    AGENT_HEARTBEAT_PATCH_MARKER="$AGENT_HEARTBEAT_PATCH_MARKER" \
+    AGENT_INBOX_PATCH_MARKER="$AGENT_INBOX_PATCH_MARKER" \
+    AGENT_ACTION_QUEUE_PATCH_MARKER="$AGENT_ACTION_QUEUE_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.AGENT_PATH;
+const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
+const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
+const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
+const inboxMarker = process.env.AGENT_INBOX_PATCH_MARKER;
+const actionQueueMarker = process.env.AGENT_ACTION_QUEUE_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+
+const importAnchor = "import { speak } from './speak.js';\n";
+const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
+const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbeat.js'; // ${heartbeatMarker}\n`;
+const inboxImportLine = `import { installInboxQueue } from './skills/inbox_queue.js'; // ${inboxMarker}\n`;
+const actionQueueImportLine = `import { installActionQueue } from './skills/action_queue.js'; // ${actionQueueMarker}\n`;
+if (!source.includes(importLine)) {
+    if (!source.includes(importAnchor)) {
+        throw new Error('speak import anchor not found while applying Management chat gate');
+    }
+    source = source.replace(importAnchor, importAnchor + importLine);
+}
+if (!source.includes(heartbeatImportLine)) {
+    if (!source.includes(importAnchor)) {
+        throw new Error('speak import anchor not found while applying autonomous heartbeat');
+    }
+    source = source.replace(importAnchor, importAnchor + heartbeatImportLine);
+}
+for (const [line, label] of [
+    [inboxImportLine, 'inbox queue'],
+    [actionQueueImportLine, 'action queue'],
+]) {
+    if (!source.includes(line)) {
+        if (!source.includes(importAnchor)) {
+            throw new Error(`speak import anchor not found while applying ${label}`);
+        }
+        source = source.replace(importAnchor, importAnchor + line);
+    }
+}
+
+const actionQueueCallNeedle = `installActionQueue(this.actions); // ${actionQueueMarker}`;
+if (!source.includes(actionQueueCallNeedle)) {
+    const actionsNeedle = '        this.actions = new ActionManager(this);\n';
+    if (!source.includes(actionsNeedle)) {
+        throw new Error('ActionManager construction anchor not found while applying action queue');
+    }
+    source = source.replace(actionsNeedle, actionsNeedle + `        ${actionQueueCallNeedle}\n`);
+}
+
+let methodStart = source.indexOf('    async openChat(message) {');
+if (methodStart === -1) methodStart = source.indexOf('        async openChat(message) {');
+let methodEnd = source.indexOf('\n    startEvents() {', methodStart);
+if (methodEnd === -1) methodEnd = source.indexOf('\n        startEvents() {', methodStart);
+if (methodStart === -1 || methodEnd === -1) {
+    throw new Error('openChat method shape changed while applying Management chat gate');
+}
+
+const replacement = `    async openChat(message) { // ${marker}
+        const statusMessage = String(message || '').trim();
+        if (/^(I'm stuck!|I'm free\\.|Exiting\\.|Restarting\\.)$/.test(statusMessage)) {
+            console.log('[behavior-status]', this.name + ':', statusMessage);
+            return;
+        }
+        let to_translate = message;
+        let remaining = '';
+        let command_name = containsCommand(message);
+        let translate_up_to = command_name ? message.indexOf(command_name) : -1;
+        if (translate_up_to != -1) { // don't translate the command
+            to_translate = to_translate.substring(0, translate_up_to);
+            remaining = message.substring(translate_up_to);
+        }
+        message = (await handleTranslation(to_translate)).trim() + " " + remaining;
+        // newlines are interpreted as separate chats, which triggers spam filters. replace them with spaces
+        message = message.replaceAll('\\n', ' ');
+
+        const review = await reviewChat({ agentId: this.name, text: message });
+        if (!review.allow) return;
+        if (review.sanitized) {
+            message = review.sanitized.replaceAll('\\n', ' ');
+            to_translate = review.sanitized;
+        }
+
+        if (settings.only_chat_with.length > 0) {
+            for (let username of settings.only_chat_with) {
+                this.bot.whisper(username, message);
+            }
+        }
+        else {
+            if (settings.speak) {
+                speak(to_translate, this.prompter.profile.speak_model);
+            }
+            if (settings.chat_ingame) {this.bot.chat(message);}
+            sendOutputToServer(this.name, message);
+        }
+    }
+`;
+source = source.slice(0, methodStart) + replacement + source.slice(methodEnd);
+
+const cleanExitPatterns = [
+    /(^[ \t]*)((?:await\s+)?this\.openChat\((['"])Exiting\.\3\);)/gm,
+    /(^[ \t]*)((?:await\s+)?this\.bot\.chat\((['"])Exiting\.\3\);)/gm,
+    /(^[ \t]*)((?:await\s+)?bot\.chat\((['"])Exiting\.\3\);)/gm,
+];
+for (const pattern of cleanExitPatterns) {
+    source = source.replace(
+        pattern,
+        (_match, indent, statement) =>
+            `${indent}if (process.env.MINECRAFT_CLEAN_EXIT === '1') ${statement} // ${cleanExitMarker}`,
+    );
+}
+const cleanExitTernaryNeedle = "        this.bot.chat(code > 1 ? 'Restarting.': 'Exiting.');";
+if (source.includes(cleanExitTernaryNeedle)) {
+    source = source.replace(
+        cleanExitTernaryNeedle,
+        `        if (process.env.MINECRAFT_CLEAN_EXIT === '1') this.bot.chat(code > 1 ? 'Restarting.': 'Exiting.'); // ${cleanExitMarker}`,
+    );
+} else if (!source.includes("MINECRAFT_CLEAN_EXIT === '1') this.bot.chat(code > 1")) {
+    throw new Error('cleanKill chat anchor not found');
+}
+
+const heartbeatCallNeedle = `installHeartbeat(this); // ${heartbeatMarker}`;
+if (!source.includes(heartbeatCallNeedle)) {
+    let startEventsNeedle = '    startEvents() {\n';
+    let heartbeatCall = `        ${heartbeatCallNeedle}\n`;
+    if (!source.includes(startEventsNeedle)) {
+        startEventsNeedle = '        startEvents() {\n';
+        heartbeatCall = `            ${heartbeatCallNeedle}\n`;
+    }
+    if (!source.includes(startEventsNeedle)) {
+        throw new Error('startEvents method shape changed while applying autonomous heartbeat');
+    }
+    source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
+}
+const inboxCallNeedle = `installInboxQueue(this); // ${inboxMarker}`;
+if (!source.includes(inboxCallNeedle)) {
+    const setupNeedle = '    async _setupEventHandlers(save_data, init_message) {\n';
+    if (!source.includes(setupNeedle)) {
+        throw new Error('_setupEventHandlers anchor not found while applying inbox queue');
+    }
+    source = source.replace(setupNeedle, setupNeedle + `        ${inboxCallNeedle}\n`);
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply Management chat gate to $AGENT_REL"
+    exit 1
+fi
+ok "Applied Management chat gate to $AGENT_REL"
+
+MODES_PATH="$MINDCRAFT_DIR_ABS/$MODES_REL"
+if [ ! -f "$MODES_PATH" ]; then
+    fail "Mindcraft source file missing: $MODES_PATH"
+    exit 1
+fi
+if grep -q "$MODES_UNSTUCK_PATCH_MARKER" "$MODES_PATH"; then
+    info "Found a previous unstuck no-kill patch in $MODES_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$MODES_REL" > "$MODES_PATH"; then
+        fail "Could not restore pinned $MODES_REL before patching."
+        exit 1
+    fi
+fi
+MODES_BACKUP="$(mktemp -t mindcraft-modes.XXXXXX)"
+cp "$MODES_PATH" "$MODES_BACKUP"
+if ! MODES_PATH="$MODES_PATH" \
+    MODES_UNSTUCK_PATCH_MARKER="$MODES_UNSTUCK_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.MODES_PATH;
+const marker = process.env.MODES_UNSTUCK_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+const stuckNeedle = `if (this.stuck_time > max_stuck_time) {`;
+const stuckPatch = `const activeActionLabel = agent.actions?.currentActionLabel || ''; // ${marker}
+            const effectiveMaxStuckTime = /action:(placeHere|place|buildFromPlan|planAndBuild|collectBlocks|followPlayer)/.test(activeActionLabel) ? max_stuck_time * 3 : max_stuck_time;
+            if (this.stuck_time > effectiveMaxStuckTime) {`;
+if (source.includes(stuckNeedle)) {
+    source = source.replace(stuckNeedle, stuckPatch);
+} else if (!source.includes('effectiveMaxStuckTime')) {
+    throw new Error('unstuck stuck-time anchor not found');
+}
+const needle = `const crashTimeout = setTimeout(() => { agent.cleanKill("Got stuck and couldn't get unstuck") }, 10000);
+                    await skills.moveAway(bot, 5);
+                    clearTimeout(crashTimeout);
+                    say(agent, 'I\\'m free.');`;
+const patch = `let unstuckTimedOut = false; // ${marker}
+                    const unstuckTimeout = new Promise((resolve) => setTimeout(() => {
+                        unstuckTimedOut = true;
+                        console.warn('[mode-status]', agent.name + ':', "unstuck timed out before recovery");
+                        bot.output += "interrupted: unstuck-failed: timed out before recovery\\n";
+                        resolve();
+                    }, 10000));
+                    await Promise.race([skills.moveAway(bot, 5), unstuckTimeout]);
+                    if (!unstuckTimedOut) say(agent, 'I\\'m free.');
+                    else agent.bot.emit('idle');`;
+if (source.includes(needle)) {
+    source = source.replace(needle, patch);
+} else if (!source.includes(marker)) {
+    throw new Error('unstuck cleanKill anchor not found');
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply unstuck no-kill patch to $MODES_REL"
+    exit 1
+fi
+ok "Applied unstuck no-kill patch to $MODES_REL"
+
+ACTION_MANAGER_PATH="$MINDCRAFT_DIR_ABS/$ACTION_MANAGER_REL"
+if [ ! -f "$ACTION_MANAGER_PATH" ]; then
+    fail "Mindcraft source file missing: $ACTION_MANAGER_PATH"
+    exit 1
+fi
+if grep -q "$ACTION_MANAGER_NO_KILL_PATCH_MARKER" "$ACTION_MANAGER_PATH"; then
+    info "Found a previous action-manager no-kill patch in $ACTION_MANAGER_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTION_MANAGER_REL" > "$ACTION_MANAGER_PATH"; then
+        fail "Could not restore pinned $ACTION_MANAGER_REL before patching."
+        exit 1
+    fi
+fi
+ACTION_MANAGER_BACKUP="$(mktemp -t mindcraft-action-manager.XXXXXX)"
+cp "$ACTION_MANAGER_PATH" "$ACTION_MANAGER_BACKUP"
+if ! ACTION_MANAGER_PATH="$ACTION_MANAGER_PATH" \
+    ACTION_MANAGER_NO_KILL_PATCH_MARKER="$ACTION_MANAGER_NO_KILL_PATCH_MARKER" \
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.ACTION_MANAGER_PATH;
+const marker = process.env.ACTION_MANAGER_NO_KILL_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+const needle = `const timeout = setTimeout(() => {
+            this.agent.cleanKill('Code execution refused stop after 10 seconds. Killing process.');
+        }, 10000);
+        while (this.executing) {
+            this.agent.requestInterrupt();
+            console.log('waiting for code to finish executing...');
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        clearTimeout(timeout);`;
+const patch = `const deadline = Date.now() + 10000; // ${marker}
+        while (this.executing && Date.now() < deadline) {
+            this.agent.requestInterrupt();
+            console.log('waiting for code to finish executing...');
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        if (this.executing) {
+            console.warn('[action-status]', \`action \${this.currentActionLabel || 'unknown'} refused stop; forcing idle without process exit\`);
+            this.agent.bot.output = (this.agent.bot.output || '') + 'interrupted: action-stop-timeout: action refused stop before completion\\n';
+            this.agent.bot.interrupt_code = true;
+            this.executing = false;
+            this.currentActionLabel = '';
+            this.currentActionFn = null;
+            this.cancelResume();
+            this.agent.bot.emit('idle');
+        }`;
+if (source.includes(needle)) {
+    source = source.replace(needle, patch);
+} else if (!source.includes(marker)) {
+    throw new Error('action-manager stop cleanKill anchor not found');
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply action-manager no-kill patch to $ACTION_MANAGER_REL"
+    exit 1
+fi
+ok "Applied action-manager no-kill patch to $ACTION_MANAGER_REL"
 
 ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
 if [ ! -f "$ACTIONS_PATH" ]; then
@@ -426,10 +797,13 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PLACE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_POLL_ERRAND_PATCH_MARKER" "$ACTIONS_PATH" || \
-   grep -q "$ACTIONS_RUN_ERRAND_PATCH_MARKER" "$ACTIONS_PATH"; then
+   grep -q "$ACTIONS_RUN_ERRAND_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_PARSE_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -448,10 +822,13 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_PLACE_PATCH_MARKER="$ACTIONS_PLACE_PATCH_MARKER" \
     ACTIONS_BREAK_PATCH_MARKER="$ACTIONS_BREAK_PATCH_MARKER" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
+    ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
     ACTIONS_POLL_ERRAND_PATCH_MARKER="$ACTIONS_POLL_ERRAND_PATCH_MARKER" \
     ACTIONS_RUN_ERRAND_PATCH_MARKER="$ACTIONS_RUN_ERRAND_PATCH_MARKER" \
+    ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
+    ACTIONS_PARSE_GUARD_PATCH_MARKER="$ACTIONS_PARSE_GUARD_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -461,6 +838,33 @@ const anchor = 'export const actionsList = [';
 if (!source.includes(anchor)) {
     throw new Error('actionsList anchor not found');
 }
+const guardMarker = process.env.ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER;
+const parseGuardMarker = process.env.ACTIONS_PARSE_GUARD_PATCH_MARKER;
+const guardImportLine = `import { wrapInterruptedActions } from './place_here_guard.js'; // ${guardMarker}\n`;
+const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}; ${parseGuardMarker}\n`;
+const runAsActionLabelNeedle = `const actionObj = actionsList.find(a => a.perform === wrappedAction);
+            actionLabel = actionObj.name.substring(1); // Remove the ! prefix`;
+const runAsActionLabelPatch = `const actionObj = actionsList.find(a => a.perform === wrappedAction) || this;
+            const actionName = actionObj && typeof actionObj.name === 'string' ? actionObj.name : '!action';
+            actionLabel = actionName.substring(1); // Remove the ! prefix`;
+if (source.includes(runAsActionLabelNeedle)) {
+    source = source.replace(runAsActionLabelNeedle, runAsActionLabelPatch);
+} else if (!source.includes('const actionName = actionObj && typeof actionObj.name')) {
+    throw new Error('runAsAction label anchor not found');
+}
+const runAsActionInterruptedNeedle = `if (code_return.interrupted && !code_return.timedout)
+            return;
+        return code_return.message;`;
+const runAsActionInterruptedPatch = `if (code_return.interrupted && !code_return.timedout) {
+            const detail = code_return.message || \`\${actionLabel || 'action'} interrupted before completion\`;
+            return detail.startsWith('interrupted:') ? detail : \`interrupted: \${detail}\`;
+        }
+        return code_return.message || '';`;
+if (source.includes(runAsActionInterruptedNeedle)) {
+    source = source.replace(runAsActionInterruptedNeedle, runAsActionInterruptedPatch);
+} else if (!source.includes("interrupted before completion")) {
+    throw new Error('runAsAction interrupted-return anchor not found');
+}
 
 const actions = [
     ['bridgePingAction', './bridge_ping_action.js', process.env.ACTIONS_PATCH_MARKER],
@@ -469,6 +873,7 @@ const actions = [
     ['placeAction', './place_action.js', process.env.ACTIONS_PLACE_PATCH_MARKER],
     ['breakAction', './break_action.js', process.env.ACTIONS_BREAK_PATCH_MARKER],
     ['buildFromPlanAction', './build_from_plan_action.js', process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER],
+    ['planAndBuildAction', './plan_and_build_action.js', process.env.ACTIONS_PLAN_AND_BUILD_PATCH_MARKER],
     ['executeCodeAction', './execute_code_action.js', process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER],
     ['observeAction', './observe_action.js', process.env.ACTIONS_OBSERVE_PATCH_MARKER],
     ['pollErrandAction', './poll_errand_action.js', process.env.ACTIONS_POLL_ERRAND_PATCH_MARKER],
@@ -483,8 +888,11 @@ if (missing.length > 0) {
         anchor,
         `${anchor}\n${missing.map(([name, , marker]) => `    ${name}, // ${marker}`).join('\n')}`
     );
-    writeFileSync(path, source);
 }
+if (!source.includes(guardMarker)) {
+    source = guardImportLine + source + guardCallLine;
+}
+writeFileSync(path, source);
 NODE
 then
     fail "Failed to inject bridge action commands into $ACTIONS_REL"

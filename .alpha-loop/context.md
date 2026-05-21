@@ -1,18 +1,22 @@
 ## Architecture
-- **Backend entry:** `core/main.py` — FastAPI app (`core.main:app`) run via `uvicorn` on port 8010. `lifespan()` calls `bootstrap_services()` (`core/bootstrap.py`, returns `Services`) and mounts routers: `core/admin` (auth, kill-switch), `core/auth`, `core/bridge` (Python↔Node Minecraft bridge), `core/public_routes.py`. WebSocket at `/ws` feeds the Phaser `frontend/`.
-- **Database:** PostgreSQL 16 + pgvector. Schema bootstrapped from `db/init.sql`; versioned migrations in `db/migrations/` run via `python -m db up|down|status` (`db/migrate.py`). Async access through `asyncpg`/SQLAlchemy in `core/database.py` and `core/repos/`. Redis (`core/redis_client.py`) for shared state/kill switches.
-- **Key dirs:** `core/` (orchestrator, memory, conversation_engine, bridge, simulation, video), `tools/` (agent tool implementations, all extend `tools/base.py`), `agents/` (YAML personalities), `config/` (conversation/event YAML), `frontend/` (Phaser+Vite), `website/` (Next.js), `scenarios/`/`evals/` (sim harnesses), `mindcraft/` (Minecraft bot fork).
+- Backend entrypoint: `core/main.py` (FastAPI app via `uvicorn core.main:app --port 8010`); lifespan boots `core/bootstrap.py` services, mounts `admin_router`, `bridge_router`, `public_router`, and a WebSocket
+- Frontend `frontend/` (Phaser.js + Vite) renders the pixel world over a WebSocket; `website/` is a separate Next.js public site; Minecraft embodiment lives in `mindcraft/` + `minecraft-server*/`
+- DB: PostgreSQL 16 + pgvector on port **5434**; schema bootstrapped from `db/init.sql` plus 48 numbered up/down migrations in `db/migrations/` run by `db/migrate.py` (auto-migrate on startup). Redis 7 on port **6381**
+- Key dirs: `core/` (orchestrator, conversation_engine, memory, bridge, embodiment, video, eval, admin, auth), `tools/` (agent tools), `agents/<name>/` (YAML personality configs per agent), `specs/` (read-only), `research/PAPER-INDEX.md` (prior art)
 
 ## Conventions
-- Python 3.13 (`>=3.12,<3.14`), full type hints, async/await for I/O, Pydantic for all schemas. Lint/format `ruff`; types `mypy` (lenient config in `pyproject.toml`).
-- Tests: `pytest` under `tests/backend/` (unit) and `tests/integration/` (marked `integration`, need Docker). Run `make test-backend` (PATH-safe, mirrors CI) or `.venv/bin/pytest`. Frontend/website use Vitest. `npm run verify:*` scripts gate specific subsystems.
-- New tools subclass `tools/base.py`; new routers must be imported and mounted in `core/main.py`. New agents need a YAML in `agents/` plus registration via `core/agent_registry.py`. Schema changes require a new file in `db/migrations/`.
+- Python 3.13 (pinned `.python-version`, `<3.14`), `uv` for envs, type hints + `async`/`await` everywhere, Pydantic for all API schemas, `ruff` for lint/format (config in `ruff.toml`)
+- Tests in `tests/backend/` (173 files, pytest with `asyncio_mode = "auto"`) and `tests/integration/` (Docker-backed, marked `integration`); run via `make test-backend` which pins `.venv/bin/pytest` so it works without venv activation
+- TypeScript: strict mode, ESM, named exports, `const` by default (`frontend/`, `website/`)
+- New LLM calls must go through `core/llm_client.py` (OpenRouter routing → Langfuse + cost governor); never call provider SDKs directly
+- New routes: mount on existing routers (`admin_router`, `bridge_router`, `public_router`) which are already wired in `core/main.py`; new DB changes need paired `.up.sql` / `.down.sql` in `db/migrations/`
 
 ## Critical Rules
-- Never hand-edit `specs/` (read-only design reference) or `db/init.sql` without a matching migration. `uv.lock`/`pnpm-lock.yaml` are managed — don't edit by hand.
-- The memory regression gate (`make test-memory-regression`) and bridge contract/protocol tests are CI-blocking; backend memory and Python↔Node bridge schemas (`core/bridge/schemas`, `contract.py`) must stay in sync across both sides.
-- Use Makefile/`.venv/bin/*` targets — stale `python`/`pytest` shims on PATH cause failures. Docker services (`docker compose up -d` + `scripts/check-services.sh`) must be healthy before integration work.
-- Every agent output must pass the Management content filter before TTS; cost governor tracks all LLM calls.
+- Every agent utterance MUST pass `core/management.py` content filter before TTS (3-second intervention window) — never bypass
+- Memory is 3-tier (Core / Recall / Archival) — respect tier boundaries; memory regression gate `make test-memory-regression` covers 13 specific tests
+- `specs/` is read-only — update code, not specs, to match. Don't reassign agent models ad-hoc (personality is tied to model choice in `agents/<name>/`)
+- Default ports are non-standard (Redis 6381, Postgres 5434, Langfuse 3100); don't hardcode standard ports. Run `docker compose up -d && bash scripts/check-services.sh` before integration work
+- External comms (social, email, agent PRs) require human approval gate — don't remove it. `.env` never commits; secrets via env vars listed in `AGENTS.md`
 
 ## Active State
 - Test status: (will be filled in by the loop)

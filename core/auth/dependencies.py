@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import TYPE_CHECKING
 
 import jwt
 from fastapi import Cookie, HTTPException, Request
+
+from core.auth.jwt_secrets import get_hs256_secret
 
 if TYPE_CHECKING:
     from core.models import User
@@ -58,7 +59,7 @@ async def _check_email_rate_limit(request: Request, email: str) -> None:
 
 def _validate_user_jwt(token: str) -> str | None:
     """Return the user_id string from a valid JWT, or None if invalid."""
-    secret = os.environ.get("AUTH_JWT_SECRET", "")
+    secret = get_hs256_secret("AUTH_JWT_SECRET")
     if not secret:
         return None
     try:

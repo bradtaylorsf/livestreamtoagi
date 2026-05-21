@@ -218,7 +218,15 @@ async def simulation_result(services, start_time):
         services=svc,
     )
 
-    await orchestrator.run()
+    previous_conversation_mode = os.environ.get("CONVERSATION_MODE")
+    os.environ["CONVERSATION_MODE"] = "director"
+    try:
+        await orchestrator.run()
+    finally:
+        if previous_conversation_mode is None:
+            os.environ.pop("CONVERSATION_MODE", None)
+        else:
+            os.environ["CONVERSATION_MODE"] = previous_conversation_mode
 
     sim_id = orchestrator.simulation_id
     assert sim_id is not None, "Simulation ID should be set after run"

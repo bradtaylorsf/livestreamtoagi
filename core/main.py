@@ -303,6 +303,22 @@ async def dev_simulate(req: DevSimulateRequest) -> dict[str, Any]:
     max_turns = req.turns
 
     async def _run() -> None:
+        from core.conversation_mode import is_embodied_run
+
+        if is_embodied_run():
+            from datetime import datetime
+
+            logger.info(
+                "E8-6: conversation director gated off for embodied dev simulate; "
+                "relying on Mindcraft decentralized respond/ignore"
+            )
+            await sim_repo.update_status(
+                simulation_id,
+                "completed",
+                completed_at=datetime.now(UTC),
+            )
+            return
+
         tts_pipeline: TTSPipeline | None = getattr(app.state, "tts_pipeline", None)
         batch_ttl = max_turns * 15 + 300
 

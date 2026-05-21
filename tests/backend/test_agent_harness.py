@@ -20,6 +20,15 @@ from scripts.test_agent import (
 )
 
 
+def test_import_does_not_load_dotenv_at_module_scope() -> None:
+    """Importing the harness must not leak developer .env values into pytest."""
+    source = (PROJECT_ROOT / "scripts" / "test_agent.py").read_text(encoding="utf-8")
+    main_index = source.index("def main() -> None:")
+    load_index = source.index('load_dotenv(PROJECT_ROOT / ".env")')
+
+    assert load_index > main_index
+
+
 # ── Arg parsing ───────────────────────────────────────────────────
 
 

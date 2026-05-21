@@ -172,11 +172,13 @@ def test_dry_run_prints_resolved_e2_target_and_local_model(tmp_path: Path) -> No
 
 def test_alpha_profile_is_lmstudio_local_only_with_fixed_name() -> None:
     data = json.loads(PROFILE_TEMPLATE.read_text())
-    assert data == {
-        "name": ALPHA_BOT_NAME,
-        "model": "lmstudio/__LOCAL_LLM_MODEL__",
-        "code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__",
-    }
+    assert set(data) == {"name", "model", "code_model", "bot_responder", "personality"}
+    assert data["name"] == ALPHA_BOT_NAME
+    assert data["model"] == "lmstudio/__LOCAL_LLM_MODEL__"
+    assert data["code_model"] == "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"
+    assert data["personality"]["respond_probability"] == 0.0
+    assert data["personality"]["initiate_probability"] == 0.0
+    assert "ignore" in data["bot_responder"]
     assert "openrouter/" not in PROFILE_TEMPLATE.read_text()
 
 

@@ -27,8 +27,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv
 
-load_dotenv(PROJECT_ROOT / ".env")
-
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -1398,6 +1396,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / ".env")
     args = parse_args()
     try:
         asyncio.run(async_main(args))

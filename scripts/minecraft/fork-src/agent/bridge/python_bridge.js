@@ -181,6 +181,48 @@ function _logBridge(fields) {
     }
 }
 
+let _timelineEmitter = null;
+let _timelineEmitterPromise = null;
+
+function _loadTimelineEmitter() {
+    if (_timelineEmitter) return Promise.resolve(_timelineEmitter);
+    if (_timelineEmitterPromise) return _timelineEmitterPromise;
+    _timelineEmitterPromise = import('./timeline_emitter.js')
+        .then((mod) => {
+            _timelineEmitter = mod && mod.emitTimelineEvent;
+            return _timelineEmitter;
+        })
+        .catch(() => {
+            _timelineEmitter = null;
+            return null;
+        });
+    return _timelineEmitterPromise;
+}
+
+function _emitBridgeTimeline(type, fields, payload = {}) {
+    try {
+        const event = {
+            type,
+            agent: fields.agent_id || process.env.LTAG_AGENT_ID,
+            traceId: fields.trace_id,
+            payload: {
+                component: 'python_bridge',
+                ...fields,
+                ...payload,
+            },
+        };
+        if (_timelineEmitter) {
+            _timelineEmitter(event);
+        } else {
+            _loadTimelineEmitter().then((emit) => {
+                if (emit) emit(event);
+            });
+        }
+    } catch {
+        /* best-effort: telemetry must never mask bridge behavior */
+    }
+}
+
 function _newMetrics() {
     return {
         calls: {}, // "<service>.<method>" -> count
@@ -476,6 +518,17 @@ async function _callBridgeOnce({
             onOpen() {
                 try {
                     sock.send(JSON.stringify(envelope));
+                    _emitBridgeTimeline(
+                        'lifecycle',
+                        {
+                            trace_id: envelope.trace_id,
+                            request_id: envelope.request_id,
+                            agent_id: envelope.agent_id,
+                            service,
+                            method,
+                        },
+                        { lifecycle: 'bridge.connect' },
+                    );
                 } catch (err) {
                     finish(() =>
                         reject(
@@ -538,6 +591,17 @@ async function _callBridgeOnce({
                 // normal close in finish()): a fail-closed handshake refusal
                 // (ADR §4 → WS 1008) or the peer vanishing.
                 const authish = code === 1008;
+                _emitBridgeTimeline(
+                    'lifecycle',
+                    {
+                        trace_id: envelope.trace_id,
+                        request_id: envelope.request_id,
+                        agent_id: envelope.agent_id,
+                        service,
+                        method,
+                    },
+                    { lifecycle: 'bridge.disconnect', code, reason },
+                );
                 finish(() =>
                     reject(
                         new BridgeClientError(
@@ -602,6 +666,11 @@ function _recordConnectFailure() {
     const { circuitThreshold } = _config();
     if (_circuit.state === 'closed' && _circuit.consecutiveFailures >= circuitThreshold) {
         _circuit.state = 'open';
+        _emitBridgeTimeline(
+            'lifecycle',
+            { trace_id: null, agent_id: process.env.LTAG_AGENT_ID, service: 'bridge', method: 'circuit' },
+            { lifecycle: 'bridge.circuit_open', consecutive_failures: _circuit.consecutiveFailures },
+        );
         _scheduleProbe();
     }
 }
@@ -726,6 +795,18 @@ export async function callBridge(opts = {}) {
             outcome: code,
             latency_ms: latencyMs,
         });
+        _emitBridgeTimeline(
+            'error',
+            {
+                trace_id: traceId,
+                agent_id: opts.agentId || process.env.LTAG_AGENT_ID,
+                service,
+                method,
+                outcome: code,
+                latency_ms: latencyMs,
+            },
+            { message: err && err.message ? err.message : String(err) },
+        );
         return err;
     };
 

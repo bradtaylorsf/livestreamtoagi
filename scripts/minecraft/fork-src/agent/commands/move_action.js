@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import { classifyInterruption, messageFromError } from '../skills/action_interruption.js';
 import {
     classifyMovement,
     DEFAULT_ARRIVAL_TOLERANCE_BLOCKS,
@@ -45,9 +46,16 @@ function positiveNumber(value, fallback) {
     return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function suppressActionChat() {
+    const raw = String(process.env.MINECRAFT_SUPPRESS_ACTION_CHAT || '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on'].includes(raw);
+}
+
 function announce(agent, traceId, line, isError = false) {
     try {
-        if (agent && typeof agent.openChat === 'function') agent.openChat(line);
+        if (!suppressActionChat() && agent && typeof agent.openChat === 'function') {
+            agent.openChat(line);
+        }
     } catch {
         /* chat is cosmetic; never let it mask the verified outcome */
     }
@@ -98,14 +106,49 @@ async function ensurePathfinder(bot) {
     return !!(bot && bot.pathfinder && typeof bot.pathfinder.goto === 'function');
 }
 
+function destructivePathsAllowed() {
+    const raw = String(process.env.MINECRAFT_ALLOW_DESTRUCTIVE_PATHS || '1').trim().toLowerCase();
+    return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+async function configureMovementSafety(bot) {
+    if (destructivePathsAllowed()) return;
+    try {
+        const mod = await import('mineflayer-pathfinder');
+        const Movements = (mod && mod.Movements) || (mod && mod.default && mod.default.Movements);
+        if (Movements && bot && bot.pathfinder && typeof bot.pathfinder.setMovements === 'function') {
+            const movements = new Movements(bot);
+            movements.canDig = false;
+            movements.allow1by1towers = false;
+            bot.pathfinder.setMovements(movements);
+        }
+    } catch {
+        /* If safety setup is unavailable, normal pathfinder failure handling still applies. */
+    }
+}
+
 async function pathfindTo(agent, target, tolerance, timeoutMs) {
     const bot = getBot(agent);
     if (!(await ensurePathfinder(bot))) {
         return { failureClass: 'unreachable', detail: 'pathfinder unavailable' };
     }
+    await configureMovementSafety(bot);
 
     const goal = await makeGoalNear(target, tolerance);
     let timer;
+    let pathfinderStopObserved = false;
+    let restoreStop = null;
+    let originalStop = null;
+    if (typeof bot.pathfinder.stop === 'function') {
+        originalStop = bot.pathfinder.stop.bind(bot.pathfinder);
+        bot.pathfinder.stop = (...args) => {
+            pathfinderStopObserved = true;
+            return originalStop(...args);
+        };
+        restoreStop = () => {
+            bot.pathfinder.stop = originalStop;
+        };
+    }
     try {
         await Promise.race([
             bot.pathfinder.goto(goal),
@@ -118,20 +161,33 @@ async function pathfindTo(agent, target, tolerance, timeoutMs) {
         ]);
         return { failureClass: null, detail: '' };
     } catch (err) {
+        const message = messageFromError(err);
+        const interruptionClass = classifyInterruption(err);
+        let result;
+        if (interruptionClass) {
+            result = { failureClass: interruptionClass, detail: message };
+        } else {
+            const lower = message.toLowerCase();
+            if (lower.includes('timed out')) {
+                result = { failureClass: 'timed-out', detail: message };
+            } else if (lower.includes('unreachable') || lower.includes('no path')) {
+                result = { failureClass: 'unreachable', detail: message };
+            } else if (pathfinderStopObserved) {
+                result = { failureClass: 'interrupted', detail: message || 'pathfinder stopped' };
+            } else {
+                result = { failureClass: 'blocked', detail: message };
+            }
+        }
         try {
-            if (bot.pathfinder && typeof bot.pathfinder.stop === 'function') bot.pathfinder.stop();
+            if (originalStop) originalStop();
+            else if (bot.pathfinder && typeof bot.pathfinder.stop === 'function') bot.pathfinder.stop();
         } catch {
             /* stopping pathfinder is best-effort */
         }
-        const message = err && err.message ? err.message : String(err);
-        const lower = message.toLowerCase();
-        if (lower.includes('timed out')) return { failureClass: 'timed-out', detail: message };
-        if (lower.includes('unreachable') || lower.includes('no path')) {
-            return { failureClass: 'unreachable', detail: message };
-        }
-        return { failureClass: 'blocked', detail: message };
+        return result;
     } finally {
         if (timer) clearTimeout(timer);
+        if (restoreStop) restoreStop();
     }
 }
 
@@ -181,6 +237,7 @@ async function emitMovementOutcome({
         payload: {
             action_id: actionId,
             status: statusForMovementClass(outcomeClass),
+            outcome_class: outcomeClass,
             detail,
         },
         deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
@@ -205,12 +262,8 @@ export const moveAction = {
                 'forward, back, left, right, up, down, north, south, east, or west.',
         },
         distance_blocks: {
-            type: 'number',
+            type: 'float',
             description: 'Requested movement distance in blocks.',
-        },
-        timeout_ms: {
-            type: 'number',
-            description: 'Optional movement deadline in milliseconds.',
         },
     },
     perform: async function (agent, action_id, direction, distance_blocks, timeout_ms) {

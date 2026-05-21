@@ -14,6 +14,7 @@ so fork actions can make the same decision without a new dependency.
 | Class | Meaning | Safe policy | Immediate action |
 | --- | --- | --- | --- |
 | `blocked` | The world state or inventory prevents completion: obstruction, protected block, missing reference block, missing item/tool, or no progress. | `idle` | Stop the action and idle. Do not keep pushing against the same blocked state. |
+| `interrupted` | A safety/mode layer deliberately stopped the action, for example `PathStopped` when `mode:unstuck` interrupts placement or movement. | `idle` | Report the interruption and idle so the caller can re-plan. Do not retry into the same safety cycle. |
 | `timeout` | The action or bridge call exceeded its deadline, or the bridge is overloaded. | `retry-bounded` | Retry only within the configured retry budget, using exponential backoff. Abandon after the budget is exhausted. |
 | `invalid` | The request, target, schema, block, recipe, auth, or protocol input is invalid. | `abandon` | Abandon immediately. Do not retry unchanged invalid input. |
 | `unreachable` | Pathfinding or lookup cannot reach the target or required interaction point. | `idle` | Stop and idle so a caller can re-plan from fresh perception. |
@@ -33,6 +34,7 @@ mapping shapes such as `{ "class": "timed-out" }`,
 | Raw label/code | Canonical class |
 | --- | --- |
 | `blocked` | `blocked` |
+| `interrupted`, `aborted`, `path-stopped`, `mode-interrupted` | `interrupted` |
 | `timed-out`, `timeout`, `bridge_timeout`, `bridge_overloaded` | `timeout` |
 | `invalid`, `protected`, `tool-missing`, `bridge_auth_refused`, `bridge_no_token`, `bridge_no_transport`, `bridge_protocol` | `invalid` |
 | `unreachable`, `no-path`, `bridge_unreachable` | `unreachable` |
@@ -44,7 +46,17 @@ abandon instead of retrying or taking an unverified action.
 
 ## Retry Budget
 
-`timeout` is the only retry-bounded class. The default budget is:
+`timeout` is the only retry-bounded class. Recoverable action interruptions
+idle instead of retrying so `mode:unstuck` cycles do not loop. The default
+budget is:
+
+During embodied soaks, the staged Mindcraft launchers patch interrupted
+non-timeout actions to return a structured `interrupted: ...` action result
+instead of `undefined`. They also patch unrecovered `mode:unstuck` recovery to
+idle and emit status telemetry by default rather than killing the bot process.
+Public clean-exit chat is gated behind `MINECRAFT_CLEAN_EXIT=1`; normal soak
+runs keep lifecycle/status chatter out of public conversation and record it as
+timeline telemetry.
 
 | Field | Default |
 | --- | --- |

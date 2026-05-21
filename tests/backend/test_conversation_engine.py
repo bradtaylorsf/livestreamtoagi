@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import core.simulation.phases as phases_module
 from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
 from core.conversation_engine import ConversationEngine
 from core.event_bus import EventType
@@ -33,6 +35,7 @@ from core.models import (
     Transcript,
     TriggerConfig,
 )
+from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 # ── Test config factories ──────────────────────────────────────
 
@@ -361,6 +364,62 @@ def engine(
         context_assembler=mock_context_assembler,
         conversation_repo=mock_conversation_repo,
     )
+
+
+# ── Test: Embodied mode gates off simulation director ───────────
+
+
+class TestEmbodiedModeGate:
+    async def test_embodied_phase_never_constructs_conversation_engine(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Embodied simulation phases rely on Mindcraft respond/ignore."""
+        monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+        event_bus = MagicMock(emit=AsyncMock())
+        proximity = MagicMock()
+        runner = PhaseRunner(
+            config_loader=MagicMock(),
+            agent_registry=MagicMock(),
+            event_bus=event_bus,
+            llm_client=MagicMock(),
+            management=MagicMock(),
+            context_assembler=MagicMock(),
+            conversation_repo=MagicMock(),
+            archival_memory=MagicMock(),
+            proximity=proximity,
+            trigger_system=MagicMock(),
+            selection_logger=MagicMock(),
+            reflection_manager=MagicMock(),
+            simulation_id=uuid.uuid4(),
+            agents=["vera", "rex"],
+        )
+        phase = Phase(name="standup", type=PhaseType.scheduled, required_agents=["vera"])
+        trigger = {
+            "type": "scheduled",
+            "starter_agent_id": "vera",
+            "location": "town_square",
+        }
+
+        with patch("core.conversation_engine.ConversationEngine") as engine_cls:
+            await runner._run_conversation(trigger, phase)
+
+        engine_cls.assert_not_called()
+        event_bus.on.assert_not_called()
+        event_bus.emit.assert_not_called()
+        proximity.update_location.assert_not_called()
+        assert runner._phase_conversations == 0
+        assert runner._phase_turns == 0
+        assert runner._phase_tokens == 0
+        assert runner._phase_cost == Decimal("0")
+
+    def test_phase_runner_does_not_fabricate_zero_cost_local_tokens(self) -> None:
+        """Local-LLM phases can have tokens and true zero spend."""
+        source = inspect.getsource(phases_module.PhaseRunner._run_conversation)
+
+        assert not hasattr(phases_module, "MIN_ACCOUNTED_PHASE_COST")
+        assert "self._phase_cost += cost_in_conv" in source
+        assert "accounted_cost" not in source
 
 
 # ── Test: Trigger detection starts new conversation ────────────
