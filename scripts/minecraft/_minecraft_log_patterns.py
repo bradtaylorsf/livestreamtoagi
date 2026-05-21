@@ -99,7 +99,7 @@ EXECUTION_SUCCESS_RE = re.compile(
 EXECUTION_FAILURE_RE = re.compile(
     r"\b(?:action failed|failed|error|status\s*[:=]\s*(?:failure|partial)|"
     r"status['\"]?\s*:\s*['\"](?:failure|partial)|blocked|invalid|protected|"
-    r"timed[- ]out|timeout|unreachable)\b",
+    r"interrupted|aborted|PathStopped|timed[- ]out|timeout|unreachable)\b",
     re.IGNORECASE,
 )
 VERIFICATION_RE = re.compile(

@@ -16,6 +16,20 @@
           "title": "Detail",
           "type": "string"
         },
+        "outcome_class": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional machine-readable outcome class such as interrupted or blocked.",
+          "title": "Outcome Class"
+        },
         "status": {
           "description": "Terminal status of the action.",
           "enum": [

@@ -15,6 +15,8 @@ from typing import Any, TypedDict
 MOVEMENT_CLASSES = {
     "reached",
     "blocked",
+    "interrupted",
+    "aborted",
     "timed-out",
     "unreachable",
     "invalid",

@@ -34,6 +34,8 @@
 #                               Default: 2.
 #   SOAK_MAX_STUCK_PER_AGENT    Maximum stuck/path-failure lines per tracked
 #                               agent. Default: 5.
+#   SOAK_MAX_RESTARTS_PER_AGENT Maximum restart/disconnect/exit signatures per
+#                               tracked agent. Default: 1.
 #   SOAK_MIN_PUBLIC_CHAT_COHORT Minimum public chat lines across the cohort.
 #                               Default: 10.
 #   SOAK_MIN_GATHER_OR_BUILD_COHORT
@@ -128,6 +130,7 @@ SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_MIN_MOVEMENT_PER_AGENT="${SOAK_MIN_MOVEMENT_PER_AGENT:-5}"
 SOAK_MAX_DEATHS_PER_AGENT="${SOAK_MAX_DEATHS_PER_AGENT:-2}"
 SOAK_MAX_STUCK_PER_AGENT="${SOAK_MAX_STUCK_PER_AGENT:-5}"
+SOAK_MAX_RESTARTS_PER_AGENT="${SOAK_MAX_RESTARTS_PER_AGENT:-1}"
 SOAK_MIN_PUBLIC_CHAT_COHORT="${SOAK_MIN_PUBLIC_CHAT_COHORT:-10}"
 SOAK_MIN_GATHER_OR_BUILD_COHORT="${SOAK_MIN_GATHER_OR_BUILD_COHORT:-3}"
 SOAK_MIN_SHARED_ARTIFACTS="${SOAK_MIN_SHARED_ARTIFACTS:-1}"
@@ -331,6 +334,10 @@ verify_static() {
         fail "multi-agent soak doc must document behavior.tsv"
         problems=1
     }
+    grep -q 'restart_count' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must document restart_count"
+        problems=1
+    }
     grep -q 'timeline.ndjson' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document timeline.ndjson"
         problems=1
@@ -387,7 +394,7 @@ print_plan() {
     info "server dir:     ${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
     info "world config:   ${WORLD_CONFIG:-$SCRIPT_DIR/world.config}"
     info "MindServer:     ${SOAK_MINDSERVER_BASE_PORT}+ per bot"
-    info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
+    info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; restarts<=${SOAK_MAX_RESTARTS_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
@@ -506,6 +513,7 @@ import math
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -531,6 +539,7 @@ agent_set = set(agents)
 min_movement = int_env("SOAK_MIN_MOVEMENT_PER_AGENT", 5)
 max_deaths = int_env("SOAK_MAX_DEATHS_PER_AGENT", 2)
 max_stuck = int_env("SOAK_MAX_STUCK_PER_AGENT", 5)
+max_restarts = int_env("SOAK_MAX_RESTARTS_PER_AGENT", 1)
 min_public_chat = int_env("SOAK_MIN_PUBLIC_CHAT_COHORT", 10)
 min_gather_or_build = int_env("SOAK_MIN_GATHER_OR_BUILD_COHORT", 3)
 min_shared_artifacts = int_env("SOAK_MIN_SHARED_ARTIFACTS", 1)
@@ -539,6 +548,14 @@ movement_re = re.compile(r"!(move|goToPlayer|goToCoordinates|searchForBlock|sear
 death_re = re.compile(r"(died|death|respawn(ed)?)", re.IGNORECASE)
 drowning_re = re.compile(r"drown(ed|ing)?", re.IGNORECASE)
 stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
+restart_re = re.compile(
+    r"(Exiting\.|\bprocess exited with code\s+[1-9]\d*\b|\brejoining\b|\bbot disconnected\b|"
+    r"\bsupervisor.*restart\b|\brestart(?:ed|ing)?\b)",
+    re.IGNORECASE,
+)
+timestamp_re = re.compile(
+    r"(?P<ts>\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)"
+)
 dig_hole_re = re.compile(r"(dig.?hole|stuck in (a )?hole|trapped)", re.IGNORECASE)
 gather_re = re.compile(r"!(collectBlocks|collectAllBlocks|consume|equip|smeltItem)\b", re.IGNORECASE)
 build_re = re.compile(r"!(place|placeHere|placeBlock|build|buildFromPlan)\b", re.IGNORECASE)
@@ -623,7 +640,45 @@ totals = {
     "total_drownings": 0,
     "total_stuck": 0,
     "total_dig_holes": 0,
+    "total_restarts": 0,
+    "total_restart_recurrences": 0,
 }
+
+
+def timestamp_epoch(line: str) -> float | None:
+    match = timestamp_re.search(line)
+    if not match:
+        return None
+    raw = match.group("ts").replace(" ", "T")
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    if re.search(r"[+-]\d{4}$", raw):
+        raw = raw[:-2] + ":" + raw[-2:]
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def restart_epochs(lines: list[str]) -> list[float]:
+    epochs = []
+    for line in lines:
+        if restart_re.search(line):
+            epoch = timestamp_epoch(line)
+            if epoch is not None:
+                epochs.append(epoch)
+    return sorted(epochs)
+
+
+def has_recurrent_restart(lines: list[str], window_seconds: int = 300) -> bool:
+    epochs = restart_epochs(lines)
+    for previous, current in zip(epochs, epochs[1:]):
+        if current - previous <= window_seconds:
+            return True
+    return False
 
 for agent in agents:
     own_lines = read_lines(run_dir / "bots" / f"{agent}.log")
@@ -639,6 +694,8 @@ for agent in agents:
     deaths = count_regex(counter_lines, death_re)
     drownings = count_regex(counter_lines, drowning_re)
     stuck = count_regex(counter_lines, stuck_re)
+    restart_count = count_regex(counter_lines, restart_re)
+    recurrent_restarts = 1 if has_recurrent_restart(counter_lines) else 0
     dig_holes = count_regex(counter_lines, dig_hole_re)
     inter_agent_chat = sum(
         1
@@ -656,6 +713,12 @@ for agent in agents:
         agent_unmet.append(f"agent {agent} deaths expected <= {max_deaths} got {deaths}")
     if stuck > max_stuck:
         agent_unmet.append(f"agent {agent} stuck expected <= {max_stuck} got {stuck}")
+    if restart_count > max_restarts:
+        agent_unmet.append(
+            f"agent {agent} restarts expected <= {max_restarts} got {restart_count}"
+        )
+    if recurrent_restarts:
+        agent_unmet.append(f"agent {agent} repeated restarts within 300s")
     unmet.extend(agent_unmet)
 
     row = {
@@ -670,6 +733,7 @@ for agent in agents:
         "drownings": drownings,
         "stuck": stuck,
         "dig_holes": dig_holes,
+        "restart_count": restart_count,
         "behavior_status": "fail" if agent_unmet else "pass",
     }
     rows.append(row)
@@ -683,6 +747,8 @@ for agent in agents:
     totals["total_drownings"] += drownings
     totals["total_stuck"] += stuck
     totals["total_dig_holes"] += dig_holes
+    totals["total_restarts"] += restart_count
+    totals["total_restart_recurrences"] += recurrent_restarts
 
 
 place_agents: set[str] = set()
@@ -732,6 +798,7 @@ header = [
     "drownings",
     "stuck",
     "dig_holes",
+    "restart_count",
     "behavior_status",
 ]
 with (run_dir / "behavior.tsv").open("w", encoding="utf-8") as handle:
@@ -780,6 +847,8 @@ append_behavior_summary() {
         echo "total_drownings: $(behavior_metric "$run_dir" total_drownings)"
         echo "total_stuck: $(behavior_metric "$run_dir" total_stuck)"
         echo "total_dig_holes: $(behavior_metric "$run_dir" total_dig_holes)"
+        echo "total_restarts: $(behavior_metric "$run_dir" total_restarts)"
+        echo "total_restart_recurrences: $(behavior_metric "$run_dir" total_restart_recurrences)"
         echo "shared_artifact_count: $(behavior_metric "$run_dir" shared_artifact_count)"
         echo
         echo "behavior_gate_status=$(behavior_metric "$run_dir" behavior_gate_status)"
@@ -941,6 +1010,7 @@ write_metadata() {
         echo "min_movement_per_agent=$SOAK_MIN_MOVEMENT_PER_AGENT"
         echo "max_deaths_per_agent=$SOAK_MAX_DEATHS_PER_AGENT"
         echo "max_stuck_per_agent=$SOAK_MAX_STUCK_PER_AGENT"
+        echo "max_restarts_per_agent=$SOAK_MAX_RESTARTS_PER_AGENT"
         echo "min_public_chat_cohort=$SOAK_MIN_PUBLIC_CHAT_COHORT"
         echo "min_gather_or_build_cohort=$SOAK_MIN_GATHER_OR_BUILD_COHORT"
         echo "min_shared_artifacts=$SOAK_MIN_SHARED_ARTIFACTS"

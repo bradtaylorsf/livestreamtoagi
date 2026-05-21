@@ -434,6 +434,11 @@ class ActionResultRequest(BaseModel):
     status: Literal["success", "failure", "partial"] = Field(
         description="Terminal status of the action."
     )
+    outcome_class: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional machine-readable outcome class such as interrupted or blocked.",
+    )
     detail: str = Field(default="", description="Optional human-readable detail.")
 
 

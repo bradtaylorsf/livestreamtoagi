@@ -73,11 +73,12 @@ therefore lower parse success even when no command marker was emitted.
 ### Execution Results
 
 The analyzer counts execution success/failure from action-result-like lines,
-verified action trace lines, and Mindcraft command output. Success markers
+`action.result.outcome_class` values, verified action trace lines, and Mindcraft command output. Success markers
 include `Code output`, `Successfully`, `status=success`, `placed`, `removed`,
 `reached`, `moved`, and `broke`. Failure markers include `Action failed`,
-`failed`, `error`, `status=failure`, `status=partial`, `blocked`, `invalid`,
-`protected`, `timed-out`, `timeout`, and `unreachable`.
+`failed`, `error`, `status=failure`, `status=partial`, `blocked`,
+`interrupted`, `aborted`, `invalid`, `protected`, `PathStopped`, `timed-out`,
+`timeout`, and `unreachable`.
 
 `command_execution_rate` is command executions divided by emitted commands.
 Failures still count as executed commands because they prove the command reached
@@ -93,6 +94,12 @@ evidence. Current accepted evidence includes:
 - Build/errand counters such as `steps_verified=1` or `verified=1`.
 - Verified action classifications such as `placed: position=...`,
   `removed: position=...`, or `reached: distance=...`.
+
+Expected safety interruptions are terminal failures, not process crashes.
+Examples include `interrupted: PathStopped: Path was stopped before it could be
+completed` when `mode:unstuck` stops an in-flight placement or pathfinder goal.
+These lines count as executed commands with failure outcomes, while the
+verified-success denominator remains limited to successful world-state changes.
 
 `verified_success_rate` is verified successful actions divided by execution
 successes. A command can execute and still fail this gate if the log only says
