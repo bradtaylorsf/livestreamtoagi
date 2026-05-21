@@ -194,6 +194,10 @@ curl -X POST http://localhost:8000/api/auth/magic-link \
 Set `EMAIL_CONSOLE_REDIS_STREAM=stream:email:console` to also XADD each
 record to Redis for future dev-tool UIs.
 
+Operator spend-cap and kill-switch alerts use the same email pipeline. Set
+`ALERT_EMAIL` for the operator inbox and `SPEND_ALERT_THRESHOLD_PCT` (default
+`0.8`) to choose when cap-approach alerts fire.
+
 If you don't have Postgres running and just want to verify the capture loop,
 boot the self-contained dev app instead of the full backend — it mounts only
 `/api/auth/*` + `/healthz` with stub services, so no database, Redis, or
