@@ -304,6 +304,143 @@ def test_plan_and_raw_build_commands_are_bucketed_separately(tmp_path: Path) -> 
     assert buckets["buildFromPlan"]["failure"] == 1
 
 
+def test_builder_provider_usage_is_reported_separately(tmp_path: Path) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "builder-provider-usage"
+    _write_bot_log(run_dir, "vera", ["Vera started."])
+    raw_dir = run_dir / "timeline-raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {
+            "ts": "2026-05-21T00:00:00Z",
+            "event_type": "build_plan.generation.completed",
+            "agent": "vera",
+            "trace_id": "trace-builder-paid",
+            "payload": {
+                "action_id": "plan-paid",
+                "provider": "openrouter",
+                "builder_provider": "openrouter",
+                "builder_model": "openrouter/test-frontier",
+                "paid": True,
+                "prompt_tokens": 100,
+                "completion_tokens": 40,
+                "total_tokens": 140,
+                "estimated_usd": 0.0123,
+                "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "oak_log"}]},
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:01Z",
+            "event_type": "build_plan.generation.provider_failed",
+            "agent": "vera",
+            "trace_id": "trace-builder-fallback",
+            "payload": {
+                "provider": "openrouter",
+                "reason": "request_failed",
+                "fallback_reason": "local",
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:02Z",
+            "event_type": "build_plan.generation.completed",
+            "agent": "vera",
+            "trace_id": "trace-builder-local",
+            "payload": {
+                "action_id": "plan-local",
+                "provider": "local",
+                "builder_provider": "local",
+                "builder_model": "local/build",
+                "paid": False,
+                "fallback_reason": "request_failed",
+                "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "torch"}]},
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:03Z",
+            "event_type": "build_plan.generation.budget_capped",
+            "agent": "vera",
+            "trace_id": "trace-builder-cap",
+            "payload": {"provider": "openrouter", "reason": "agent_call_cap"},
+        },
+        {
+            "ts": "2026-05-21T00:00:04Z",
+            "event_type": "build_plan.generation.skipped",
+            "agent": "vera",
+            "trace_id": "trace-builder-active-skip",
+            "payload": {
+                "reason": "active_build_exists",
+                "active_build": {"plan_id": "plan-local", "status": "executing"},
+                "max_builder_calls_per_agent": 6,
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:05Z",
+            "event_type": "build_plan.generation.skipped",
+            "agent": "vera",
+            "trace_id": "trace-builder-cache-hit",
+            "payload": {
+                "reason": "cache_hit",
+                "cache_hit": True,
+                "max_builder_calls_per_agent": 6,
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:06Z",
+            "event_type": "build_plan.generation.skipped",
+            "agent": "vera",
+            "trace_id": "trace-builder-cooldown",
+            "payload": {
+                "reason": "cooldown",
+                "cache_hit": True,
+                "cooldown_remaining_sec": 241,
+                "max_builder_calls_per_agent": 6,
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:07Z",
+            "event_type": "build_plan.generation.skipped",
+            "agent": "vera",
+            "trace_id": "trace-builder-agent-cap",
+            "payload": {
+                "reason": "per_agent_cap",
+                "max_builder_calls_per_agent": 6,
+            },
+        },
+    ]
+    (raw_dir / "vera.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 0,
+        },
+    )
+
+    metrics = data["agents"]["vera"]["builder_plan_metrics"]
+    assert metrics["builder_plan_generated"] == 2
+    assert metrics["builder_plan_paid_calls"] == 1
+    assert metrics["builder_plan_local_calls"] == 1
+    assert metrics["builder_plan_estimated_usd"] == 0.0123
+    assert metrics["builder_plan_prompt_tokens"] == 100
+    assert metrics["builder_plan_completion_tokens"] == 40
+    assert metrics["builder_plan_total_tokens"] == 140
+    assert metrics["builder_plan_failures"] == 2
+    assert metrics["builder_plan_fallbacks"] == 2
+    assert metrics["builder_provider_breakdown"] == {"local": 1, "openrouter": 1}
+    assert metrics["builder_plan_skipped_active"] == 1
+    assert metrics["builder_plan_skipped_cooldown"] == 1
+    assert metrics["builder_plan_skipped_per_agent_cap"] == 1
+    assert metrics["builder_plan_cache_hits"] == 2
+    assert metrics["builder_plan_max_per_agent"] == 6
+
+
 def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> None:
     analyzer = _load_analyzer()
     run_dir = tmp_path / "collect-run"

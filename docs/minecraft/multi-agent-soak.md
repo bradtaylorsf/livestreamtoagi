@@ -24,7 +24,9 @@ runner now assigns unique `MINDSERVER_PORT` values from
 launched BridgeBot plus all eight agents and completed without unrecovered bot
 exits. This proves startup wiring, not the required multi-hour acceptance gate.
 
-No OpenRouter validation was run or required.
+Default validation remains local-only and does not require OpenRouter spend.
+OpenRouter can be enabled only for builder-plan JSON generation with explicit
+caps, described below.
 
 ## What The Soak Runs
 
@@ -200,15 +202,53 @@ MC_SIM_BUILD_MODE=plan pnpm mc:sim:smoke
 ```
 
 In this mode the local wrapper lets agents call
-`!planAndBuild("small shared cabin")`. The action asks the profile
+`!planAndBuild("small shared cabin")`. By default the action asks the profile
 `code_model` (the `LOCAL_LLM_MODEL_BUILDING` tier) for strict JSON, validates
 allowed materials, bounds, and max steps, logs the plan as JSON evidence, and
-executes it through the verified `!buildFromPlan` path. Invalid model plans are
-rejected and replaced with a starter blueprint such as marker camp, 3x3 hut,
-simple wall, or torch-lit storage corner.
+executes it through the verified `!buildFromPlan` path. Invalid local model
+plans are rejected and replaced with a starter blueprint such as marker camp,
+3x3 hut, simple wall, or torch-lit storage corner.
+
+OpenRouter builder routing is opt-in and applies only to this
+`purpose=plan_generation` path:
+
+```bash
+MC_SIM_BUILD_MODE=plan \
+MC_SIM_BUILDER_PROVIDER=openrouter \
+MC_SIM_BUILDER_OPENROUTER_MODEL=<openrouter-model-id> \
+MC_SIM_BUILDER_OPENROUTER_API_KEY=<key> \
+MC_SIM_BUILDER_MAX_CALLS_PER_RUN=12 \
+MC_SIM_BUILDER_MAX_CALLS_PER_AGENT=3 \
+pnpm mc:sim:smoke
+```
+
+Normal chat completions and ordinary action selection still use the local LM
+Studio model. `MC_SIM_BUILDER_FALLBACK=fail` is the default and fails preflight
+when OpenRouter provider/model configuration is missing. Set
+`MC_SIM_BUILDER_FALLBACK=local` to keep plan generation on the local
+`code_model` when OpenRouter is unavailable. `MC_SIM_BUILDER_MAX_USD_PER_RUN`
+is optional; estimated USD uses `MC_SIM_BUILDER_USD_PER_1K_INPUT` and
+`MC_SIM_BUILDER_USD_PER_1K_OUTPUT` when provided.
+
+The build governor runs before any provider call. Each agent may have one
+active build at a time; equivalent completed builds are cooled down for
+`MC_SIM_BUILD_COOLDOWN_SEC` seconds, and cached plans are reused without a new
+builder-model call. Defaults:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MC_SIM_BUILD_MAX_PER_AGENT` | `6` | Max non-cached plan generations per agent. |
+| `MC_SIM_BUILD_COOLDOWN_SEC` | `300` | Cooldown for equivalent completed build requests. |
+| `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks. |
+| `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
 
 Plan evidence appears as `build_plan.generation.*` and
-`build_plan.execution.*` events. `!executeCode` remains separately gated by
+`build_plan.execution.*` events. Provider, model, paid/local request counts,
+token usage, estimated USD, `fallback_reason`, and budget/provider failures are
+included in `timeline.ndjson`, `timeline-totals.json`, `summary.txt`, and
+`monitor.html`. `build_plan.generation.skipped` records `active_build_exists`,
+`cache_hit`, `cooldown`, and `per_agent_cap` outcomes. `!executeCode` remains
+separately gated by
 `SOAK_BLOCK_EXECUTE_CODE_ACTIONS` / `MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS`.
 
 ## Action-Command Reliability Gate

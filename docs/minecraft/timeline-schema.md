@@ -40,8 +40,8 @@ Each `timeline.ndjson` line is one JSON object:
 | `bridge.action.start` | Bridge action-result request start telemetry. This is not counted as an executed Minecraft action. |
 | `bridge.action.result` | Bridge action-result settle telemetry. This is not counted as an executed Minecraft action. |
 | `chat.public` | Public Minecraft chat from Paper or bot logs. Payload includes `speaker` and `message`. |
-| `llm.request` | Local LM Studio request started. Payload includes `model`, `purpose`, `reason`, and prompt token count. |
-| `llm.response` | Local LM Studio response or failure. Payload includes `model`, `latency_ms`, `outcome`, prompt/completion/total tokens, usage source, and command-discard counters when inferred from bot logs. |
+| `llm.request` | Model request started. Local chat/action traffic uses LM Studio; explicit builder-plan routing may emit OpenRouter requests with `purpose: "plan_generation"`. Payload includes `model`, `provider`, `purpose`, `reason`, prompt token count, and paid-call metadata when applicable. |
+| `llm.response` | Model response or failure. Payload includes `model`, `provider`, `latency_ms`, `outcome`, prompt/completion/total tokens, usage source, and command-discard counters when inferred from bot logs. |
 | `llm.queue.enqueued` | Local FIFO LM Studio proxy accepted a request. Payload includes `queued`, `concurrency`, `path`, and `model` when available. |
 | `llm.queue.started` | Proxy worker started forwarding a queued request. Payload includes `wait_ms`, `queued`, `running`, and `model`. |
 | `llm.queue.completed` | Proxy received an upstream response. Payload includes `wait_ms`, `latency_ms`, HTTP `status`, `model`, and nested provider `tokens` when available. |
@@ -59,8 +59,11 @@ Each `timeline.ndjson` line is one JSON object:
 | `inbox.telemetry_ignored` | Lifecycle/status chatter was recorded but intentionally not sent to the LLM. |
 | `inbox.immediate_command` | Direct user command such as `!stop` bypassed the debounce path. |
 | `build_plan.generation.started` | `!planAndBuild` began a builder-model planning request. |
-| `build_plan.generation.completed` | A validated plan is ready. Payload includes `source`, `plan`, `plan_json`, origin, and max steps. |
+| `build_plan.generation.completed` | A validated plan is ready. Payload includes `source`, `provider`, `builder_model`, paid/local counts, token usage when available, estimated USD, `plan`, `plan_json`, origin, and max steps. |
 | `build_plan.generation.rejected` | Builder-model JSON failed schema/material/bounds validation before fallback. |
+| `build_plan.generation.provider_failed` | Builder provider setup or request failed before validated JSON was available. Payload includes provider, model, reason, caps, and fallback reason when local fallback is enabled. |
+| `build_plan.generation.budget_capped` | Builder provider was not called because per-run, per-agent, or estimated USD cap would be exceeded. |
+| `build_plan.generation.skipped` | The build governor avoided a new builder call because an active build exists, an equivalent build is cooling down, the per-agent cap was reached, or a cached plan was reused. |
 | `build_plan.execution.started` | The validated plan began execution through `!buildFromPlan`. |
 | `build_plan.execution.completed` | Plan execution finished with the terminal build result string. |
 | `heartbeat.fired` | Autonomous idle/stall heartbeat prompt was sent. Payload includes reason, idle window, action state, cooldown, and prompt excerpt. |
@@ -97,6 +100,9 @@ source. It includes a top-level `tokens` quick summary with `total`,
 `estimated`, and `provider_reported` token counts, plus the richer
 `token_totals`, `tokens_by_agent`, and `tokens_by_model` breakdowns. Token totals
 are de-duplicated by LLM trace where a request and response pair both exist.
+Builder-plan usage is also broken out under `builder_usage` and
+`builder_usage_by_agent`, separating paid OpenRouter plan-generation calls from
+local LM Studio chat/action usage.
 
 ## Trace Correlation
 
