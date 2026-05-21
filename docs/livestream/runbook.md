@@ -13,6 +13,16 @@ file; never paste them into commits, issues, logs, or screenshots.
 > This doc adds no new runtime tooling. It references the scripts, services,
 > and environment variables introduced by E13-1 through E13-7.
 
+> **Status (2026-05-21):** E13-1 through E13-7 (#609–#615) did not land in
+> this session, so the `scripts/livestream/` helpers, the
+> `livestream.service` unit, the deep-dive docs under `docs/livestream/`,
+> the `core/notifications/stream_alert.py` module, and the
+> `/api/admin/kill` livestream wiring referenced below **do not yet exist
+> in the repository**. Treat this runbook as the planned operator interface
+> for the livestream pipeline. Do not paste the commands into a production
+> host until the upstream issues are merged; until then, they will fail
+> with "command not found", "No such file or directory", or HTTP 404.
+
 ## When to use which doc
 
 This runbook is the fast path for operators. Use the deep-dive docs when you

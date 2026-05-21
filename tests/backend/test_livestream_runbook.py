@@ -109,3 +109,34 @@ def test_runbook_states_docs_only_lmstudio_path(runbook_text: str) -> None:
     assert ".venv/bin/python scripts/check_local_llm.py --list-only" in runbook_text
     assert "bash scripts/check-services.sh" in runbook_text
     assert "Do not spend OpenRouter credits" in runbook_text
+
+
+def test_runbook_warns_when_upstream_e13_infrastructure_missing(
+    runbook_text: str,
+) -> None:
+    """The runbook references scripts and docs introduced by E13-1..E13-7.
+
+    When those upstream issues have not landed yet, the referenced helpers
+    and deep-dive docs are absent from the repository. In that case the
+    runbook must visibly warn operators not to paste the commands into a
+    production host. Once the upstream infrastructure lands, this test
+    auto-skips so the banner can be removed without a test churn.
+    """
+    upstream_paths = (
+        REPO_ROOT / "scripts" / "livestream",
+        REPO_ROOT / "core" / "livestream",
+    )
+    deep_dives = tuple(
+        REPO_ROOT / "docs" / "livestream" / doc for doc in DEEP_DIVE_DOCS
+    )
+    if all(p.exists() for p in upstream_paths) and all(
+        d.exists() for d in deep_dives
+    ):
+        pytest.skip("E13 upstream infrastructure now present; status banner optional")
+
+    assert "**Status" in runbook_text, (
+        "runbook must include a status banner while upstream E13 "
+        "infrastructure is missing from the repository"
+    )
+    assert "do not yet exist" in runbook_text
+    assert "Do not paste the commands into a production" in runbook_text
