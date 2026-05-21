@@ -208,7 +208,9 @@ async def send_spend_alert(
     """Send a spend cap alert to the configured operator inbox. Never raises."""
     recipient = _alert_recipient()
     if recipient is None:
-        logger.info("[notify] skip spend alert agent=%s level=%s reason=no_recipient", agent_id, level)
+        logger.info(
+            "[notify] skip spend alert agent=%s level=%s reason=no_recipient", agent_id, level
+        )
         return NotificationSendResult(sent=False, skipped_reason="no_recipient")
 
     subject = render_spend_alert_subject(

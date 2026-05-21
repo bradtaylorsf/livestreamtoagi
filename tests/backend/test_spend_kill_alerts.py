@@ -103,9 +103,7 @@ async def test_budget_update_at_threshold_sends_one_deduped_approach_email(
     assert second is not None and second.sent is False
     assert second.skipped_reason == "duplicate"
     sender.assert_awaited_once()
-    assert redis.expirations[
-        "spend_alert_sent:vera:2026-05-21T10_00_00Z:approach"
-    ] == 3600
+    assert redis.expirations["spend_alert_sent:vera:2026-05-21T10_00_00Z:approach"] == 3600
 
 
 @pytest.mark.asyncio
