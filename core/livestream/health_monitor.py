@@ -16,7 +16,7 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 DEFAULT_SUPERVISOR_LOG = Path("logs/livestream/livestream-supervisor.log")
-DEFAULT_CHILD_PID_FILE = Path("logs/livestream/livestream-child.pid")
+DEFAULT_CHILD_PID_FILE = Path("logs/livestream/supervise-stream-child.pid")
 DEFAULT_DOWN_THRESHOLD_SECONDS = 30.0
 DEFAULT_POLL_INTERVAL_SECONDS = 15.0
 DEFAULT_ALERT_COOLDOWN_SECONDS = 300.0
@@ -99,11 +99,7 @@ def _parse_log_timestamp(line: str) -> datetime | None:
 
 def _line_is_exit(line: str) -> bool:
     lower = line.lower()
-    return (
-        "child-exited" in lower
-        or "child exited" in lower
-        or "exited unexpectedly" in lower
-    )
+    return "child-exited" in lower or "child exited" in lower or "exited unexpectedly" in lower
 
 
 def _line_is_restart(line: str) -> bool:
@@ -336,8 +332,7 @@ class BlackFrameDetector(_FfmpegDetector):
         ]
         result = await self._run_probe(command)
         durations = [
-            float(match.group("duration"))
-            for match in _BLACK_DURATION_RE.finditer(result.stderr)
+            float(match.group("duration")) for match in _BLACK_DURATION_RE.finditer(result.stderr)
         ]
         tripped = any(duration >= self.min_black_seconds for duration in durations)
         details: dict[str, object] = {
@@ -369,8 +364,7 @@ class SilenceDetector(_FfmpegDetector):
         ]
         result = await self._run_probe(command)
         durations = [
-            float(match.group("duration"))
-            for match in _SILENCE_DURATION_RE.finditer(result.stderr)
+            float(match.group("duration")) for match in _SILENCE_DURATION_RE.finditer(result.stderr)
         ]
         tripped = any(duration >= self.min_silence_seconds for duration in durations)
         details: dict[str, object] = {
@@ -490,9 +484,7 @@ class StreamHealthMonitor:
     def _next_sleep_seconds(self) -> float:
         now = _utc_now()
         next_times = [
-            state.next_poll_at
-            for state in self._states.values()
-            if state.next_poll_at is not None
+            state.next_poll_at for state in self._states.values() if state.next_poll_at is not None
         ]
         if not next_times:
             return self.poll_interval_seconds

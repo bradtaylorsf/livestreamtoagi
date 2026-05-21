@@ -25,6 +25,7 @@ Store real keys only in a private `.env` or host secret store. Leave
 | `TWITCH_RTMP_URL` | no | `rtmp://live.twitch.tv/app` | Override only for alternate ingest. |
 | `YOUTUBE_RTMP_URL` | no | `rtmp://a.rtmp.youtube.com/live2` | Override only for alternate ingest. |
 | `RTMP_SMOKE_URL` | no | none | Optional local/test RTMP endpoint for `--smoke`. |
+| `STREAM_OUTPUT_FILE` | no | none | Optional local FLV output path instead of RTMP. |
 | `TTS_AUDIO_FIFO` | `--with-tts` | `/tmp/livestream_tts.fifo` | PCM FIFO produced by the TTS stream bridge. |
 | `TTS_AUDIO_VOLUME` | no | `1.0` | Volume multiplier for mixed live TTS audio. |
 
@@ -83,6 +84,12 @@ Run the offline-safe smoke command contract:
 
 ```bash
 scripts/livestream/stream-push.sh --smoke --dry-run
+```
+
+Write a local FLV for smoke or TTS verification:
+
+```bash
+scripts/livestream/stream-push.sh --smoke --output-file /tmp/stream_smoke.flv
 ```
 
 Push the smoke pattern to a local/test RTMP endpoint:

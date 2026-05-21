@@ -86,6 +86,7 @@ def test_help_exits_zero_and_describes_usage() -> None:
     assert "--youtube-only" in proc.stdout
     assert "--smoke" in proc.stdout
     assert "--dry-run" in proc.stdout
+    assert "--output-file" in proc.stdout
     assert "--with-tts" in proc.stdout
     assert "TTS_AUDIO_FIFO" in proc.stdout
     assert "TTS_AUDIO_VOLUME" in proc.stdout
@@ -185,6 +186,19 @@ def test_smoke_with_rtmp_url_targets_only_the_smoke_endpoint(tmp_path: Path) -> 
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "rtmp://127.0.0.1/live/test" in proc.stdout
+    assert TWITCH_URL not in proc.stdout
+    assert YOUTUBE_URL not in proc.stdout
+
+
+def test_smoke_output_file_dry_run_targets_local_file(tmp_path: Path) -> None:
+    output = tmp_path / "stream-smoke.flv"
+
+    proc = _run(["--smoke", "--dry-run", "--output-file", str(output)], tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert f"[f=flv]{output}" in proc.stdout
+    assert "target:   local output file" in proc.stdout
+    assert "[f=null]pipe:" not in proc.stdout
     assert TWITCH_URL not in proc.stdout
     assert YOUTUBE_URL not in proc.stdout
 

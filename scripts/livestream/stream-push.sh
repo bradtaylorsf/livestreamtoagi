@@ -14,6 +14,7 @@
 #   scripts/livestream/stream-push.sh --dry-run
 #   scripts/livestream/stream-push.sh --smoke --dry-run
 #   scripts/livestream/stream-push.sh --with-tts --dry-run
+#   scripts/livestream/stream-push.sh --smoke --output-file /tmp/stream_smoke.flv
 #   RTMP_SMOKE_URL=rtmp://127.0.0.1/live/test scripts/livestream/stream-push.sh --smoke
 #
 # Required environment for real platform pushes:
@@ -24,6 +25,7 @@
 #   TWITCH_RTMP_URL        Twitch ingest URL (default: rtmp://live.twitch.tv/app)
 #   YOUTUBE_RTMP_URL       YouTube ingest URL (default: rtmp://a.rtmp.youtube.com/live2)
 #   RTMP_SMOKE_URL         Optional local/test RTMP URL for --smoke pushes.
+#   STREAM_OUTPUT_FILE     Optional local FLV output path instead of RTMP.
 #   CAPTURE_WIDTH          Output width (default: 1280)
 #   CAPTURE_HEIGHT         Output height (default: 720)
 #   CAPTURE_FPS            Output frame rate (default: 30)
@@ -43,6 +45,7 @@ DURATION="60"
 MODE="run"
 SMOKE="0"
 WITH_TTS="0"
+OUTPUT_FILE="${STREAM_OUTPUT_FILE:-}"
 TARGET_TWITCH="1"
 TARGET_YOUTUBE="1"
 TARGET_OPTION=""
@@ -95,6 +98,15 @@ while [ "$#" -gt 0 ]; do
             ;;
         --duration=*)
             DURATION="${1#*=}"
+            shift
+            ;;
+        --output-file)
+            [ "${2:-}" ] || usage_error "Missing value for --output-file"
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        --output-file=*)
+            OUTPUT_FILE="${1#*=}"
             shift
             ;;
         --twitch-only)
@@ -221,6 +233,15 @@ join_by_pipe() {
 build_outputs() {
     local outputs=()
     local redacted=()
+
+    if [ -n "$OUTPUT_FILE" ]; then
+        mkdir -p "$(dirname -- "$OUTPUT_FILE")"
+        outputs=("[f=flv]${OUTPUT_FILE}")
+        redacted=("[f=flv]${OUTPUT_FILE}")
+        TEE_OUTPUTS="$(join_by_pipe "${outputs[@]}")"
+        TEE_OUTPUTS_REDACTED="$(join_by_pipe "${redacted[@]}")"
+        return 0
+    fi
 
     if [ "$SMOKE" = "1" ]; then
         if [ -n "$RTMP_SMOKE_URL" ]; then
@@ -355,7 +376,9 @@ else
 fi
 if [ "$SMOKE" = "1" ]; then
     info "source:   ffmpeg lavfi testsrc2 + sine"
-    if [ -z "$RTMP_SMOKE_URL" ]; then
+    if [ -n "$OUTPUT_FILE" ]; then
+        info "target:   local output file ${OUTPUT_FILE}"
+    elif [ -z "$RTMP_SMOKE_URL" ]; then
         info "target:   smoke validation only (RTMP_SMOKE_URL unset; no network push)"
     else
         info "target:   ${RTMP_SMOKE_URL}"
@@ -378,7 +401,7 @@ if [ "$MODE" = "dry-run" ]; then
     exit 0
 fi
 
-if [ "$SMOKE" = "1" ] && [ -z "$RTMP_SMOKE_URL" ]; then
+if [ "$SMOKE" = "1" ] && [ -z "$RTMP_SMOKE_URL" ] && [ -z "$OUTPUT_FILE" ]; then
     echo
     ok "Smoke command validated; RTMP_SMOKE_URL is unset so no ffmpeg process was launched."
     exit 0

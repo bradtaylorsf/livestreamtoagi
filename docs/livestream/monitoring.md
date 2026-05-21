@@ -52,7 +52,8 @@ Supervisor/PID inputs:
 - `SUPERVISOR_LOG`: retained supervisor log path. Default:
   `logs/livestream/livestream-supervisor.log`.
 - `CHILD_PID_FILE`: supervised stream child PID file. Default:
-  `logs/livestream/livestream-child.pid`.
+  `logs/livestream/supervise-stream-child.pid` (matches
+  `scripts/livestream/supervise-stream.sh` from E13-5).
 
 Thresholds and intervals:
 

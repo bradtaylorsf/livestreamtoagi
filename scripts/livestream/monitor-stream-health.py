@@ -100,9 +100,7 @@ def _build_detectors() -> list[HealthDetector]:
     ]
 
     if not source_url:
-        logger.warning(
-            "STREAM_SOURCE_URL is unset; black-frame and silence probes are disabled"
-        )
+        logger.warning("STREAM_SOURCE_URL is unset; black-frame and silence probes are disabled")
         return detectors
 
     detectors.extend(
@@ -162,10 +160,7 @@ def _black_or_silence_probe(command: Sequence[str]) -> ProbeResult:
     if "blackdetect" in joined:
         return ProbeResult(
             returncode=0,
-            stderr=(
-                "[blackdetect @ 0x1] "
-                "black_start:0 black_end:6.25 black_duration:6.25\n"
-            ),
+            stderr=("[blackdetect @ 0x1] black_start:0 black_end:6.25 black_duration:6.25\n"),
         )
     if "silencedetect" in joined:
         return ProbeResult(
@@ -187,8 +182,7 @@ async def _self_test() -> int:
         email_log = tmp_path / "emails.jsonl"
         stale = datetime.now(UTC) - timedelta(seconds=120)
         supervisor_log.write_text(
-            f"{stale.isoformat().replace('+00:00', 'Z')} "
-            "supervisor: child-exited exit=1\n",
+            f"{stale.isoformat().replace('+00:00', 'Z')} supervisor: child-exited exit=1\n",
             encoding="utf-8",
         )
         os.environ.update(
