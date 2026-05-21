@@ -15,9 +15,14 @@ FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
 ACTION_INTERRUPTION = FORK_SRC / "agent" / "skills" / "action_interruption.js"
 MOVEMENT_HELPERS = FORK_SRC / "agent" / "skills" / "movement.js"
 BUILDING_HELPERS = FORK_SRC / "agent" / "skills" / "building.js"
+BUILD_PLAN_HELPERS = FORK_SRC / "agent" / "skills" / "build_plan.js"
+PERCEPTION_HELPERS = FORK_SRC / "agent" / "skills" / "perception.js"
 MOVE_ACTION = FORK_SRC / "agent" / "commands" / "move_action.js"
 NAVIGATE_ACTION = FORK_SRC / "agent" / "commands" / "navigate_action.js"
 PLACE_ACTION = FORK_SRC / "agent" / "commands" / "place_action.js"
+BREAK_ACTION = FORK_SRC / "agent" / "commands" / "break_action.js"
+BUILD_FROM_PLAN_ACTION = FORK_SRC / "agent" / "commands" / "build_from_plan_action.js"
+OBSERVE_ACTION = FORK_SRC / "agent" / "commands" / "observe_action.js"
 PLACE_HERE_GUARD = FORK_SRC / "agent" / "commands" / "place_here_guard.js"
 CONNECT_BRIDGE_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-bridge-bot.sh"
 CONNECT_ALPHA_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-alpha-bot.sh"
@@ -87,6 +92,25 @@ def _stage_action(tmp_path: Path, action_src: Path, action_filename: str, helper
     skills.mkdir(parents=True)
     shutil.copy2(action_src, commands / action_filename)
     shutil.copy2(helper_src, skills / helper_src.name)
+    shutil.copy2(ACTION_INTERRUPTION, skills / "action_interruption.js")
+    calls_path = _stage_stub_bridge(root)
+    return commands / action_filename, calls_path
+
+
+def _stage_action_with_helpers(
+    tmp_path: Path,
+    action_src: Path,
+    action_filename: str,
+    helper_srcs: list[Path],
+) -> tuple[Path, Path]:
+    root = tmp_path / "fork-src" / "agent"
+    commands = root / "commands"
+    skills = root / "skills"
+    commands.mkdir(parents=True)
+    skills.mkdir(parents=True)
+    shutil.copy2(action_src, commands / action_filename)
+    for helper_src in helper_srcs:
+        shutil.copy2(helper_src, skills / helper_src.name)
     shutil.copy2(ACTION_INTERRUPTION, skills / "action_interruption.js")
     calls_path = _stage_stub_bridge(root)
     return commands / action_filename, calls_path
@@ -335,13 +359,232 @@ process.stdout.write(JSON.stringify({{ first, second }}) + '\\n');
     assert "choose a different target" in result["second"]
 
 
+@requires_node
+def test_break_action_accepts_json_string_position_and_reports_malformed_json(
+    tmp_path: Path,
+) -> None:
+    action_path, calls_path = _stage_action(
+        tmp_path, BREAK_ACTION, "break_action.js", BUILDING_HELPERS
+    )
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.on('uncaughtException', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+process.on('unhandledRejection', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+
+const mod = await import(pathToFileURL({json.dumps(str(action_path))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([['5,67,-9', 'dirt']]);
+const bot = {{
+    username: 'BreakJsonHarnessBot',
+    inventory: {{ slots: [], items() {{ return []; }} }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{ name: 'sentinel', bot, openChat: () => {{}} }};
+const valid = await mod.breakAction.perform(
+    agent,
+    'dirt',
+    '{{"x": 5, "y": 67, "z": -9}}',
+);
+const malformed = await mod.breakAction.perform(agent, 'bad-json', '{{"x": 5');
+process.stdout.write(JSON.stringify({{ status: 'ok', valid, malformed, finalBlock: world.get('5,67,-9') }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"BRIDGE_CALLS_PATH": str(calls_path), "LTAG_AGENT_ID": "sentinel"},
+    )
+    action_calls = [call for call in _read_calls(calls_path) if call["service"] == "action"]
+
+    assert result["status"] == "ok"
+    assert result["finalBlock"] == "air"
+    assert "removed:" in result["valid"]
+    assert "invalid_args:" in result["malformed"]
+    assert [call["payload"]["status"] for call in action_calls] == ["success", "failure"]
+    assert action_calls[0]["payload"]["outcome_class"] == "removed"
+    assert action_calls[1]["payload"]["outcome_class"] == "invalid_args"
+
+
+@requires_node
+def test_build_from_plan_wrong_args_emit_structured_failure(tmp_path: Path) -> None:
+    action_path, calls_path = _stage_action_with_helpers(
+        tmp_path,
+        BUILD_FROM_PLAN_ACTION,
+        "build_from_plan_action.js",
+        [BUILDING_HELPERS, BUILD_PLAN_HELPERS],
+    )
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.on('uncaughtException', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+process.on('unhandledRejection', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+
+const mod = await import(pathToFileURL({json.dumps(str(action_path))}).href);
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'sentinel', bot: {{ username: 'Sentinel' }}, openChat: () => {{}} }},
+    'raw-direct-call',
+);
+process.stdout.write(JSON.stringify({{ status: 'ok', result }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"BRIDGE_CALLS_PATH": str(calls_path), "LTAG_AGENT_ID": "sentinel"},
+    )
+    action_call = next(call for call in _read_calls(calls_path) if call["service"] == "action")
+
+    assert result["status"] == "ok"
+    assert "wrong_args:" in result["result"]
+    assert action_call["payload"]["status"] == "failure"
+    assert action_call["payload"]["outcome_class"] == "wrong_args"
+
+
+@requires_node
+def test_observe_without_args_uses_defaults_without_action_result(tmp_path: Path) -> None:
+    action_path, calls_path = _stage_action_with_helpers(
+        tmp_path,
+        OBSERVE_ACTION,
+        "observe_action.js",
+        [PERCEPTION_HELPERS, BUILDING_HELPERS, MOVEMENT_HELPERS],
+    )
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.on('uncaughtException', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+process.on('unhandledRejection', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+
+const mod = await import(pathToFileURL({json.dumps(str(action_path))}).href);
+const result = await mod.observeAction.perform({{
+    name: 'sentinel',
+    bot: {{
+        username: 'Sentinel',
+        entity: {{ position: {{ x: 0, y: 64, z: 0 }}, yaw: 0, pitch: 0, onGround: true }},
+        entities: {{}},
+        inventory: {{ slots: [], items() {{ return []; }} }},
+        blockAt() {{ return {{ name: 'air' }}; }},
+    }},
+    openChat: () => {{}},
+}});
+process.stdout.write(JSON.stringify({{ status: 'ok', result }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"BRIDGE_CALLS_PATH": str(calls_path), "LTAG_AGENT_ID": "sentinel"},
+    )
+    service_keys = [
+        f"{call['service']}.{call['method']}" for call in _read_calls(calls_path)
+    ]
+
+    assert result["status"] == "ok"
+    assert result["result"].startswith("observe all:")
+    assert service_keys == ["bridge.ping", "perception.report"]
+
+
+@requires_node
+def test_place_here_guard_converts_unknown_object_type_crash_to_action_result(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "fork-src" / "agent"
+    commands = root / "commands"
+    skills = root / "skills"
+    commands.mkdir(parents=True)
+    skills.mkdir(parents=True)
+    shutil.copy2(PLACE_HERE_GUARD, commands / "place_here_guard.js")
+    shutil.copy2(ACTION_INTERRUPTION, skills / "action_interruption.js")
+    calls_path = _stage_stub_bridge(root)
+    crash_signature = "Command '!break' parameter 'position' has an unknown type: object"
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.on('uncaughtException', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+process.on('unhandledRejection', (e) => {{
+    process.stdout.write(JSON.stringify({{ status: 'crash', message: String((e && e.message) || e) }}) + '\\n');
+    process.exit(3);
+}});
+
+const mod = await import(pathToFileURL({json.dumps(str(commands / "place_here_guard.js"))}).href);
+const action = {{
+    name: '!break',
+    async perform() {{
+        throw new TypeError({json.dumps(crash_signature)});
+    }},
+}};
+mod.wrapInterruptedAction(action);
+const result = await action.perform({{ name: 'sentinel', bot: {{ username: 'Sentinel' }} }});
+process.stdout.write(JSON.stringify({{ status: 'ok', result }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"BRIDGE_CALLS_PATH": str(calls_path), "LTAG_AGENT_ID": "sentinel"},
+    )
+    action_call = next(call for call in _read_calls(calls_path) if call["service"] == "action")
+
+    assert result["status"] == "ok"
+    assert "unsupported_arg_type:" in result["result"]
+    assert crash_signature in result["result"]
+    assert action_call["payload"]["status"] == "failure"
+    assert action_call["payload"]["outcome_class"] == "unsupported_arg_type"
+
+
+def test_custom_command_schemas_use_parser_safe_param_types() -> None:
+    for action_path in (
+        PLACE_ACTION,
+        BREAK_ACTION,
+        NAVIGATE_ACTION,
+        BUILD_FROM_PLAN_ACTION,
+        OBSERVE_ACTION,
+    ):
+        src = action_path.read_text(encoding="utf-8")
+        assert "type: 'object'" not in src
+        assert 'type: "object"' not in src
+
+    observe_src = OBSERVE_ACTION.read_text(encoding="utf-8")
+    assert "optional: true" in observe_src
+
+
 def test_launchers_stage_interruption_guard_and_clean_exit_gate() -> None:
     for script in (CONNECT_BRIDGE_SCRIPT, CONNECT_ALPHA_SCRIPT, CONNECT_COHORT_SCRIPT):
         src = script.read_text(encoding="utf-8")
         assert "ACTION_INTERRUPTION_SKILL_REL" in src
         assert "PLACE_HERE_GUARD_REL" in src
+        assert "ACTIONS_PARSE_GUARD_PATCH_MARKER" in src
         assert "wrapInterruptedActions" in src
         assert "LTAG E8-14 action interruption guard" in src
+        assert "LTAG E8-16 command parse guard" in src
         assert "const actionName = actionObj && typeof actionObj.name === 'string'" in src
         assert "interrupted before completion" in src
         assert "MINECRAFT_CLEAN_EXIT" in src
@@ -349,7 +592,7 @@ def test_launchers_stage_interruption_guard_and_clean_exit_gate() -> None:
         assert "clean exit chat gate" in src
         assert "MODES_UNSTUCK_PATCH_MARKER" in src
         assert "effectiveMaxStuckTime" in src
-        assert "/action:(placeHere|collectBlocks|followPlayer)/" in src
+        assert "/action:(placeHere|place|buildFromPlan|planAndBuild|collectBlocks|followPlayer)/" in src
         assert "unstuck timed out before recovery" in src
         assert "interrupted: unstuck-failed: timed out before recovery" in src
         assert "Promise.race([skills.moveAway(bot, 5), unstuckTimeout])" in src

@@ -11,6 +11,9 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ANALYZER = REPO_ROOT / "scripts" / "minecraft" / "analyze_action_reliability.py"
+FAILED_SOAK_FIXTURE = (
+    REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_soak_2026-05-21"
+)
 
 
 def _load_analyzer() -> ModuleType:
@@ -183,6 +186,122 @@ def test_mindcraft_failures_are_classified_from_execution_blocks(tmp_path: Path)
     assert classes["placement_blocked"] == 1
     assert classes["wrong_args"] == 1
     assert classes["undefined_result"] == 1
+
+
+def test_failed_soak_fixture_ignores_incoming_chat_and_groups_execution_blocks(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "failed-soak"
+    fixture_log = FAILED_SOAK_FIXTURE / "bots" / "sentinel.log.txt"
+    _write_bot_log(run_dir, "sentinel", fixture_log.read_text(encoding="utf-8").splitlines())
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 1,
+        },
+        top_n=20,
+    )
+
+    sentinel = data["agents"]["sentinel"]
+    failed_parse_text = "\n".join(
+        item["text"] for item in sentinel["examples"]["failed_parses"]
+    )
+    classes = {
+        item["class"]: item["count"] for item in sentinel["execution_failure_classes"]
+    }
+
+    assert "received message from Sentinel" not in failed_parse_text
+    assert sentinel["counts"]["parse_failures"] == 0
+    assert sentinel["counts"]["emitted_commands"] == 9
+    assert sentinel["counts"]["command_executions"] == 9
+    assert sentinel["counts"]["verified_actions"] == 1
+    assert classes["wrong_args"] == 1
+    assert classes["unsupported_arg_type"] == 1
+    assert classes["interrupted"] == 2
+    assert classes["missing_inventory"] == 1
+    assert classes["placement_blocked"] == 1
+    assert classes["timeout"] == 1
+    assert classes["undefined_result"] == 1
+    assert sentinel["command_buckets"]["placement"]["accepted"] == 4
+    assert sentinel["command_buckets"]["placement"]["verified"] == 1
+    assert sentinel["builder_plan_metrics"]["builder_plan_generated"] == 1
+    assert sentinel["builder_plan_metrics"]["builder_plan_unique"] == 1
+    assert sentinel["builder_plan_metrics"]["builder_plan_skipped_dedupe"] == 1
+    assert sentinel["builder_plan_metrics"]["builder_plan_intended_blocks"] == 2
+    assert sentinel["builder_plan_metrics"]["builder_plan_verified_blocks"] == 1
+    assert sentinel["builder_plan_metrics"]["builder_plan_completion_rate"] == 0.5
+
+
+def test_agent_executed_without_accepted_response_is_not_emitted_denominator(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "executed-only"
+    _write_bot_log(
+        run_dir,
+        "sentinel",
+        [
+            "Agent executed: !placeHere and got: Action output:",
+            "Placed oak_log at (1, 64, 1).",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 0,
+        },
+    )
+
+    sentinel = data["agents"]["sentinel"]
+    assert sentinel["counts"]["emitted_commands"] == 0
+    assert sentinel["counts"]["command_executions"] == 1
+    assert sentinel["counts"]["verified_actions"] == 1
+
+
+def test_plan_and_raw_build_commands_are_bucketed_separately(tmp_path: Path) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "plan-buckets"
+    _write_bot_log(
+        run_dir,
+        "aurora",
+        [
+            'Aurora full response to Rex: ""!planAndBuild("tiny hut")""',
+            "Agent executed: !planAndBuild and got: plan-and-build plan-1: "
+            "build-from-plan plan-1 success: intended=2; present=2; missing=0; "
+            "verified=2; abandoned=0; completion=1.000",
+            'Aurora full response to Rex: ""!buildFromPlan("raw-only")""',
+            "Agent executed: !buildFromPlan and got: wrong_args: origin is required; plan is required",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 1,
+        },
+    )
+
+    buckets = data["agents"]["aurora"]["command_buckets"]
+    assert buckets["planAndBuild"]["accepted"] == 1
+    assert buckets["planAndBuild"]["success"] == 1
+    assert buckets["planAndBuild"]["verified"] == 1
+    assert buckets["buildFromPlan"]["accepted"] == 1
+    assert buckets["buildFromPlan"]["failure"] == 1
 
 
 def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> None:

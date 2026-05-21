@@ -34,6 +34,7 @@ SUCCESS_PATTERNS = (
     re.compile(r"\breached:\s*distance_to_target\b", re.IGNORECASE),
     re.compile(r"\bFound\s+.+?\s+at\s+\(", re.IGNORECASE),
     re.compile(r"\bCollected\s+\d+\s+\w+\b", re.IGNORECASE),
+    re.compile(r"\bsuccess:\s*intended=", re.IGNORECASE),
     re.compile(r"\bNEARBY_BLOCKS\b"),
     re.compile(r"\bCRAFTABLE_ITEMS\b"),
     re.compile(r"\bINVENTORY\b"),
@@ -44,12 +45,20 @@ VERIFICATION_PATTERNS = (
     re.compile(r"\balready\s+at\s+\(", re.IGNORECASE),
     re.compile(r"\bbefore=.*\bafter=", re.IGNORECASE),
     re.compile(r"\bdistance_to_target=.*\bdelta=", re.IGNORECASE),
+    re.compile(r"\bverified\s*[:=]\s*[1-9]", re.IGNORECASE),
     re.compile(r"\bYou have reached\b", re.IGNORECASE),
     re.compile(r"\bFound\s+.+?\s+at\s+\(", re.IGNORECASE),
     re.compile(r"\bCollected\s+\d+\s+\w+\b", re.IGNORECASE),
 )
 FAILURE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("wrong_args", re.compile(r"\bCommand\s+!\w+\s+was given\b|\brequires\s+\d+\s+args?\b")),
+    (
+        "unsupported_arg_type",
+        re.compile(r"\bunknown\s+type:\s*object\b|\bunsupported_arg_type\b|\binvalid_args\b", re.I),
+    ),
+    (
+        "wrong_args",
+        re.compile(r"\bwrong_args\b|\bCommand\s+!\w+\s+was given\b|\brequires\s+\d+\s+args?\b"),
+    ),
     ("missing_inventory", re.compile(r"\bDon'?t have\b|\bmissing\b.*\binventory\b", re.I)),
     ("placement_blocked", re.compile(r"\bFailed to place\b", re.IGNORECASE)),
     ("interrupted", re.compile(r"\bPathStopped\b|\bpath was stopped\b|\binterrupted\b", re.I)),
@@ -167,9 +176,11 @@ def is_execution_boundary(line: str) -> bool:
     )
     if stripped.startswith(prefixes):
         return True
+    if re.search(r"\bfull response\b", stripped, re.IGNORECASE):
+        return True
     if AGENT_EXECUTED_RE.search(stripped):
         return True
-    return re.match(r"^[A-Za-z][A-Za-z0-9_-]* received message\b", stripped) is not None
+    return re.search(r"\breceived message from\b", stripped, re.IGNORECASE) is not None
 
 
 def classify_execution_block(lines: list[str]) -> tuple[str, str, bool]:
@@ -199,6 +210,13 @@ def parse_bot_log_lines(lines: list[str]) -> BotLogParse:
     accepted_keys: set[tuple[int | None, str, str]] = set()
 
     def add_command(command: ParsedCommand) -> None:
+        if command.source == "parsed" and command.generation_line is not None:
+            if any(
+                existing.generation_line == command.generation_line
+                and existing.name == command.name
+                for existing in accepted_commands
+            ):
+                return
         command_key = f"{command.name}:{canonical_args(command.args)}"
         key = (
             command.generation_line,
@@ -278,23 +296,6 @@ def parse_bot_log_lines(lines: list[str]) -> BotLogParse:
         if executed:
             name = executed.group("name")
             generation_line = current_generation.line if current_generation else None
-            fallback = ParsedCommand(
-                line=line_no,
-                name=name,
-                text=command_text(name),
-                source="executed",
-                generation_line=generation_line,
-            )
-            if not any(
-                command.name == name
-                and (
-                    (generation_line is not None and command.generation_line == generation_line)
-                    or (generation_line is None and line_no - command.line <= 3)
-                )
-                for command in accepted_commands
-            ):
-                add_command(fallback)
-
             block = [line]
             end_index = index
             probe = index + 1

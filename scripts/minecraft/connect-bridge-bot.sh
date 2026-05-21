@@ -83,6 +83,7 @@ ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="LTAG E9-1 plan-and-build action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
+ACTIONS_PARSE_GUARD_PATCH_MARKER="LTAG E8-16 command parse guard"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
@@ -454,6 +455,7 @@ verify_committed_assets() {
         grep -q 'wrapInterruptedActions' "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard missing action-list wrapper"; problems=1; }
         grep -q "service: 'action'" "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard does not emit action.result"; problems=1; }
         grep -q 'classifyInterruption' "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard does not classify interruptions"; problems=1; }
+        grep -q 'command parse guard' "$PLACE_HERE_GUARD_SRC" || { fail "place-here guard missing command parse guard"; problems=1; }
     fi
 
     if [ ! -s "$MOVE_ACTION_SRC" ]; then
@@ -582,6 +584,7 @@ if [ "$MODE" = "verify" ]; then
         info "error type, and !bridgePing/!move/!navigate/!place/!break/!buildFromPlan/"
         info "!planAndBuild/!executeCode/!observe are wrapped so failures never crash and embodied outcomes"
         info "or snapshots report through the E4-6 channel."
+        info "Malformed command calls are reported as wrong_args/invalid_args instead of crashing."
         info "(No clone, no network, no Node, no launch — drop --verify to connect.)"
         exit 0
     fi
@@ -1139,7 +1142,8 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
-   grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
+   grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_PARSE_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$ACTIONS_REL" > "$ACTIONS_PATH"; then
         fail "Could not restore pinned $ACTIONS_REL before patching."
@@ -1162,6 +1166,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
     ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
+    ACTIONS_PARSE_GUARD_PATCH_MARKER="$ACTIONS_PARSE_GUARD_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -1176,6 +1181,7 @@ const planAndBuildMarker = process.env.ACTIONS_PLAN_AND_BUILD_PATCH_MARKER;
 const executeCodeMarker = process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER;
 const observeMarker = process.env.ACTIONS_OBSERVE_PATCH_MARKER;
 const guardMarker = process.env.ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER;
+const parseGuardMarker = process.env.ACTIONS_PARSE_GUARD_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 // Anchor on the exact array opener at the pinned commit
@@ -1185,7 +1191,7 @@ if (!source.includes(anchor)) {
     throw new Error('actionsList anchor not found — pinned fork shape changed');
 }
 const guardImportLine = `import { wrapInterruptedActions } from './place_here_guard.js'; // ${guardMarker}\n`;
-const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}\n`;
+const guardCallLine = `\nwrapInterruptedActions(actionsList); // ${guardMarker}; ${parseGuardMarker}\n`;
 const runAsActionLabelNeedle = `const actionObj = actionsList.find(a => a.perform === wrappedAction);
             actionLabel = actionObj.name.substring(1); // Remove the ! prefix`;
 const runAsActionLabelPatch = `const actionObj = actionsList.find(a => a.perform === wrappedAction) || this;
@@ -1335,10 +1341,10 @@ echo
 ok "Launching ${BRIDGE_BOT_NAME} → ${MC_HOST}:${MC_PORT} … (Ctrl+C to stop)"
 info "Then in Minecraft chat:  ${BRIDGE_BOT_NAME} !bridgePing(\"hello\")"
 info "Movement smoke:          ${BRIDGE_BOT_NAME} !move(\"act-1\", \"north\", 1, 10000)"
-info "Building smoke:          ${BRIDGE_BOT_NAME} !place(\"act-2\", \"dirt\", {\"x\":0,\"y\":65,\"z\":0})"
-info "                         ${BRIDGE_BOT_NAME} !break(\"act-3\", {\"x\":0,\"y\":65,\"z\":0}, \"dirt\")"
-info "Build-plan smoke:        ${BRIDGE_BOT_NAME} !buildFromPlan(\"act-4\", {\"x\":0,\"y\":65,\"z\":0}, {\"blocks\":[{\"dx\":0,\"dy\":0,\"dz\":0,\"block_type\":\"dirt\"}]})"
+info "Building smoke:          ${BRIDGE_BOT_NAME} !place(\"act-2\", \"dirt\", \"{\\\"x\\\":0,\\\"y\\\":65,\\\"z\\\":0}\", \"up\")"
+info "                         ${BRIDGE_BOT_NAME} !break(\"act-3\", \"{\\\"x\\\":0,\\\"y\\\":65,\\\"z\\\":0}\", \"dirt\")"
 info "Plan-build smoke:        ${BRIDGE_BOT_NAME} !planAndBuild(\"small shared cabin\")"
+info "Raw buildFromPlan smoke: ${BRIDGE_BOT_NAME} !buildFromPlan(\"act-4\", \"{\\\"x\\\":0,\\\"y\\\":65,\\\"z\\\":0}\", \"{\\\"blocks\\\":[{\\\"dx\\\":0,\\\"dy\\\":0,\\\"dz\\\":0,\\\"block_type\\\":\\\"dirt\\\"}]}\")"
 info "Code smoke:              ${BRIDGE_BOT_NAME} !executeCode(\"python\", \"print(2 + 2)\", 5)"
 info "Perception smoke:        ${BRIDGE_BOT_NAME} !observe(6, \"all\", false)"
 info "Success: the bot logs 'bridge pong: hello'; the Python bridge logs the"

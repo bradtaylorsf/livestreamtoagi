@@ -711,6 +711,59 @@ def command_count(event: dict[str, Any]) -> int:
     return 0
 
 
+def plan_block_count(plan: Any) -> int:
+    if not isinstance(plan, dict):
+        return 0
+    blocks = plan.get("blocks")
+    return len(blocks) if isinstance(blocks, list) else 0
+
+
+def first_int(*values: Any) -> int | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed >= 0:
+            return parsed
+    return None
+
+
+def verified_blocks_from_payload(event_payload: dict[str, Any]) -> int:
+    metric = event_payload.get("metric")
+    if isinstance(metric, dict):
+        parsed = first_int(metric.get("steps_verified"), metric.get("blocks_present"))
+        if parsed is not None:
+            return parsed
+    parsed = first_int(event_payload.get("verified_blocks"), event_payload.get("blocks_verified"))
+    if parsed is not None:
+        return parsed
+    result = str(event_payload.get("result") or event_payload.get("detail") or "")
+    match = re.search(r"\bverified=(?P<count>\d+)\b", result)
+    if match:
+        return int(match.group("count"))
+    return 0
+
+
+def is_dedupe_plan_event(event: dict[str, Any]) -> bool:
+    event_type = str(event.get("event_type") or "")
+    event_payload = payload(event)
+    text = " ".join(
+        str(event_payload.get(key) or "")
+        for key in ("reason", "error", "status", "source", "detail")
+    ).lower()
+    return (
+        event_type.endswith(".skipped")
+        or "dedupe" in text
+        or "duplicate" in text
+        or "cache" in text
+        or bool(event_payload.get("deduped"))
+        or bool(event_payload.get("cache_hit"))
+    )
+
+
 def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     llm_responses = [event for event in events if event.get("event_type") == "llm.response"]
     llm_queue_events = [
@@ -741,6 +794,29 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             or "unknown"
         )
         outcome_classes[key] += 1
+
+    build_generation_completed = [
+        event for event in events if event.get("event_type") == "build_plan.generation.completed"
+    ]
+    build_execution_completed = [
+        event for event in events if event.get("event_type") == "build_plan.execution.completed"
+    ]
+    build_plan_ids = {
+        str(payload(event).get("action_id") or event.get("trace_id") or "")
+        for event in [*build_generation_completed, *build_execution_completed]
+        if str(payload(event).get("action_id") or event.get("trace_id") or "")
+    }
+    builder_plan_intended_blocks = sum(
+        plan_block_count(payload(event).get("plan")) for event in build_generation_completed
+    )
+    builder_plan_verified_blocks = sum(
+        verified_blocks_from_payload(payload(event)) for event in build_execution_completed
+    )
+    builder_plan_completion_rate = (
+        round(builder_plan_verified_blocks / builder_plan_intended_blocks, 4)
+        if builder_plan_intended_blocks
+        else (1.0 if not build_generation_completed else 0.0)
+    )
 
     accepted_commands = sum(command_count(event) for event in action_intents)
     executed_actions = len(action_results)
@@ -804,6 +880,17 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "build_plans_executed": sum(
             1 for event in events if event.get("event_type") == "build_plan.execution.completed"
         ),
+        "builder_plan_generated": len(build_generation_completed),
+        "builder_plan_unique": len(build_plan_ids),
+        "builder_plan_skipped_dedupe": sum(
+            1
+            for event in events
+            if str(event.get("event_type") or "").startswith("build_plan.generation.")
+            and is_dedupe_plan_event(event)
+        ),
+        "builder_plan_intended_blocks": builder_plan_intended_blocks,
+        "builder_plan_verified_blocks": builder_plan_verified_blocks,
+        "builder_plan_completion_rate": builder_plan_completion_rate,
         "execution_rate": round(executed_actions / accepted_commands, 4)
         if accepted_commands
         else 1.0,
@@ -924,6 +1011,10 @@ def build_monitor_model(
         action_rejected_count = 0
         action_depth_latest = 0
         build_plan_count = 0
+        build_plan_ids: set[str] = set()
+        build_plan_intended_blocks = 0
+        build_plan_verified_blocks = 0
+        build_plan_skipped_dedupe = 0
 
         for event in agent_events:
             event_type = str(event.get("event_type") or "")
@@ -957,6 +1048,18 @@ def build_monitor_model(
                 action_rejected_count += 1
             elif event_type == "build_plan.generation.completed":
                 build_plan_count += 1
+                plan_id = str(event_payload.get("action_id") or event.get("trace_id") or "")
+                if plan_id:
+                    build_plan_ids.add(plan_id)
+                build_plan_intended_blocks += plan_block_count(event_payload.get("plan"))
+            elif event_type in {"build_plan.generation.rejected", "build_plan.generation.skipped"}:
+                if is_dedupe_plan_event(event):
+                    build_plan_skipped_dedupe += 1
+            elif event_type == "build_plan.execution.completed":
+                plan_id = str(event_payload.get("action_id") or event.get("trace_id") or "")
+                if plan_id:
+                    build_plan_ids.add(plan_id)
+                build_plan_verified_blocks += verified_blocks_from_payload(event_payload)
             elif event_type == "error":
                 error_count += 1
             if event_type.startswith("inbox."):
@@ -1109,6 +1212,15 @@ def build_monitor_model(
                 "action_rejected_count": action_rejected_count,
                 "action_depth_latest": action_depth_latest,
                 "build_plan_count": build_plan_count,
+                "build_plan_unique": len(build_plan_ids),
+                "build_plan_skipped_dedupe": build_plan_skipped_dedupe,
+                "build_plan_intended_blocks": build_plan_intended_blocks,
+                "build_plan_verified_blocks": build_plan_verified_blocks,
+                "build_plan_completion_rate": (
+                    round(build_plan_verified_blocks / build_plan_intended_blocks, 4)
+                    if build_plan_intended_blocks
+                    else (1.0 if build_plan_count == 0 else 0.0)
+                ),
                 "tokens": token_totals,
             }
         )
@@ -1213,6 +1325,8 @@ def render_agent_cards(agents: list[dict[str, Any]]) -> str:
                 <div><strong>{agent["action_depth_latest"]}</strong><span>action depth</span></div>
                 <div><strong>{agent["action_rejected_count"]}</strong><span>busy rejects</span></div>
                 <div><strong>{agent["build_plan_count"]}</strong><span>plans</span></div>
+                <div><strong>{agent["build_plan_intended_blocks"]}</strong><span>intended blocks</span></div>
+                <div><strong>{agent["build_plan_verified_blocks"]}</strong><span>verified blocks</span></div>
               </div>
             </article>
             """
@@ -1243,6 +1357,11 @@ def render_pipeline(pipeline: dict[str, Any]) -> str:
         ("build_plans_generated", "Plans generated"),
         ("build_plans_rejected", "Plans rejected"),
         ("build_plans_executed", "Plans executed"),
+        ("builder_plan_unique", "Unique plans"),
+        ("builder_plan_skipped_dedupe", "Plan skips"),
+        ("builder_plan_intended_blocks", "Intended blocks"),
+        ("builder_plan_verified_blocks", "Verified blocks"),
+        ("builder_plan_completion_rate", "Plan completion"),
         ("execution_rate", "Execution rate"),
         ("verified_rate", "Verified rate"),
     ]

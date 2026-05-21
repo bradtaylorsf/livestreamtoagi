@@ -110,14 +110,17 @@ export const observeAction = {
     params: {
         radius_blocks: {
             type: 'float',
+            optional: true,
             description: 'Optional perception radius in blocks.',
         },
         scope: {
             type: 'string',
+            optional: true,
             description: 'pose, nearby_blocks, entities, inventory, or all.',
         },
         include_air: {
             type: 'boolean',
+            optional: true,
             description: 'Whether nearby block results include air blocks.',
         },
     },

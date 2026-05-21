@@ -45,6 +45,26 @@ function bridgeErrorLine(prefix, err) {
     return `${prefix} [${code}]: ${detail}`;
 }
 
+function parseJsonArgument(value, label) {
+    if (typeof value !== 'string') return { value, error: null };
+    const text = value.trim();
+    if (!text) return { value: null, error: `${label} is required` };
+    try {
+        return { value: JSON.parse(text), error: null };
+    } catch (err) {
+        const detail = err && err.message ? err.message : String(err);
+        return { value: null, error: `invalid_args: ${label} must be JSON: ${detail}` };
+    }
+}
+
+function parsePositionArgument(value, label = 'position') {
+    const parsed = parseJsonArgument(value, label);
+    if (parsed.error) return { position: null, error: parsed.error };
+    const position = positionFrom(parsed.value);
+    if (!position) return { position: null, error: `invalid_args: ${label} must include finite x/y/z` };
+    return { position, error: null };
+}
+
 async function ensureBridge(agent, traceId) {
     await callBridge({
         service: 'bridge',
@@ -198,6 +218,7 @@ async function emitBreakOutcome({
         payload: {
             action_id: actionId,
             status: statusForBuildClass(outcomeClass),
+            outcome_class: outcomeClass,
             detail,
         },
         deadlineMs: BRIDGE_REPORT_TIMEOUT_MS,
@@ -216,8 +237,8 @@ export const breakAction = {
             description: 'Caller-provided action id echoed in action.result.',
         },
         position: {
-            type: 'object',
-            description: 'Target block cell with x/y/z coordinates.',
+            type: 'string',
+            description: 'Target block cell as JSON with x/y/z coordinates.',
         },
         expected_block_type: {
             type: 'string',
@@ -235,7 +256,8 @@ export const breakAction = {
                 ? `break-${randomUUID()}`
                 : String(action_id);
         const bot = getBot(agent);
-        const target = positionFrom(position);
+        const parsedPosition = parsePositionArgument(position);
+        const target = parsedPosition.position;
         const requestedBlockType = normalizeBlockType(expected_block_type);
 
         try {
@@ -248,6 +270,11 @@ export const breakAction = {
 
         const missingActionId = action_id === undefined || action_id === null || action_id === '';
         if (missingActionId || !target) {
+            const invalidOutcomeClass = missingActionId
+                ? 'wrong_args'
+                : parsedPosition.error
+                  ? 'invalid_args'
+                  : 'invalid';
             try {
                 const detail = await emitBreakOutcome({
                     agent,
@@ -257,8 +284,10 @@ export const breakAction = {
                     beforeBlock: null,
                     afterBlock: null,
                     expectedBlockType: requestedBlockType,
-                    outcomeClass: 'invalid',
-                    extraDetail: missingActionId ? 'missing action_id' : 'invalid position',
+                    outcomeClass: invalidOutcomeClass,
+                    extraDetail: missingActionId
+                        ? 'missing action_id'
+                        : parsedPosition.error || 'invalid position',
                 });
                 announce(agent, traceId, `break ${actionId} ${detail}`, true);
                 return `break ${actionId} ${detail}`;

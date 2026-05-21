@@ -46,6 +46,26 @@ function bridgeErrorLine(prefix, err) {
     return `${prefix} [${code}]: ${detail}`;
 }
 
+function parseJsonArgument(value, label) {
+    if (typeof value !== 'string') return { value, error: null };
+    const text = value.trim();
+    if (!text) return { value: null, error: `${label} is required` };
+    try {
+        return { value: JSON.parse(text), error: null };
+    } catch (err) {
+        const detail = err && err.message ? err.message : String(err);
+        return { value: null, error: `invalid_args: ${label} must be JSON: ${detail}` };
+    }
+}
+
+function parsePositionArgument(value, label = 'position') {
+    const parsed = parseJsonArgument(value, label);
+    if (parsed.error) return { position: null, error: parsed.error };
+    const position = positionFrom(parsed.value);
+    if (!position) return { position: null, error: `invalid_args: ${label} must include finite x/y/z` };
+    return { position, error: null };
+}
+
 async function ensureBridge(agent, traceId) {
     await callBridge({
         service: 'bridge',
@@ -261,8 +281,8 @@ export const placeAction = {
             description: 'Block type to place, for example stone or minecraft:oak_planks.',
         },
         position: {
-            type: 'object',
-            description: 'Target block cell with x/y/z coordinates.',
+            type: 'string',
+            description: 'Target block cell as JSON with x/y/z coordinates.',
         },
         face: {
             type: 'string',
@@ -280,7 +300,8 @@ export const placeAction = {
                 ? `place-${randomUUID()}`
                 : String(action_id);
         const bot = getBot(agent);
-        const target = positionFrom(position);
+        const parsedPosition = parsePositionArgument(position);
+        const target = parsedPosition.position;
         const expectedBlockType = normalizeBlockType(block_type);
         const timeout = DEFAULT_PLACE_TIMEOUT_MS;
 
@@ -296,6 +317,11 @@ export const placeAction = {
         const invalidBlock = !expectedBlockType || expectedBlockType === 'air';
         if (missingActionId || invalidBlock || !target) {
             const before = target ? await readBlockType(bot, target) : null;
+            const invalidOutcomeClass = missingActionId
+                ? 'wrong_args'
+                : parsedPosition.error
+                  ? 'invalid_args'
+                  : 'invalid';
             try {
                 const detail = await emitPlaceOutcome({
                     agent,
@@ -305,10 +331,10 @@ export const placeAction = {
                     beforeBlock: before,
                     afterBlock: before,
                     expectedBlockType,
-                    outcomeClass: 'invalid',
+                    outcomeClass: invalidOutcomeClass,
                     extraDetail: missingActionId
                         ? 'missing action_id'
-                        : 'invalid block_type or position',
+                        : parsedPosition.error || 'invalid block_type or position',
                 });
                 announce(agent, traceId, `place ${actionId} ${detail}`, true);
                 return `place ${actionId} ${detail}`;

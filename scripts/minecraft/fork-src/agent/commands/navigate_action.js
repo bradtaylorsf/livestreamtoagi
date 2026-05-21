@@ -57,12 +57,15 @@ function bridgeErrorLine(prefix, err) {
     return `${prefix} [${code}]: ${detail}`;
 }
 
-function parseTarget(rawTarget) {
-    if (typeof rawTarget !== 'string') return rawTarget;
+function parseJsonArgument(value, label) {
+    if (typeof value !== 'string') return { value, error: null };
+    const text = value.trim();
+    if (!text) return { value: null, error: `${label} is required` };
     try {
-        return JSON.parse(rawTarget);
-    } catch {
-        return null;
+        return { value: JSON.parse(text), error: null };
+    } catch (err) {
+        const detail = err && err.message ? err.message : String(err);
+        return { value: null, error: `invalid_args: ${label} must be JSON: ${detail}` };
     }
 }
 
@@ -100,7 +103,9 @@ function entityPosition(bot, target) {
 }
 
 function resolveTarget(agent, rawTarget) {
-    const target = parseTarget(rawTarget);
+    const parsed = parseJsonArgument(rawTarget, 'target');
+    if (parsed.error) return { failureClass: 'invalid_args', detail: parsed.error };
+    const target = parsed.value;
     const coordinateTarget = poseFrom(target);
     if (coordinateTarget) return { position: coordinateTarget, detail: 'coordinate target' };
     if (target === null || target === undefined || typeof target !== 'object') {
@@ -297,8 +302,8 @@ export const navigateAction = {
             description: 'Caller-provided action id echoed in action.result.',
         },
         target: {
-            type: 'object',
-            description: 'Coordinates {x,y,z}, a block target, or an entity_id target.',
+            type: 'string',
+            description: 'JSON coordinates {x,y,z}, a block target, or an entity_id target.',
         },
         arrive_within_blocks: {
             type: 'float',
@@ -342,7 +347,7 @@ export const navigateAction = {
                     after: before,
                     target: resolved.position,
                     tolerance,
-                    outcomeClass: missingActionId ? 'invalid' : resolved.failureClass || 'invalid',
+                    outcomeClass: missingActionId ? 'wrong_args' : resolved.failureClass || 'invalid',
                     extraDetail: missingActionId ? 'missing action_id' : resolved.detail,
                 });
                 announce(agent, traceId, `navigate ${actionId} ${detail}`, true);
