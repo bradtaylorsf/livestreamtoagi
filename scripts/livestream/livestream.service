@@ -1,0 +1,58 @@
+# livestream.service - systemd unit for the 24/7 livestream pipeline.
+#
+# This is the production supervisor for E13-5. It keeps the capture/encoder/
+# RTMP push command running unattended on the Linux 24/7 host. For Mac/dev
+# hosts without systemd, use scripts/livestream/supervise-stream.sh instead.
+#
+# It supervises scripts/livestream/stream-push.sh directly. That script owns
+# capture, encode, and stream push setup; systemd owns restarts. Do not wrap
+# the bash supervisor inside this unit.
+#
+# Install:
+#   1. Edit User= and the EDIT paths/env placeholders below for this host.
+#   2. Put real stream keys in a host secret store or EnvironmentFile.
+#      Never commit stream keys to this repo.
+#   3. sudo cp scripts/livestream/livestream.service \
+#        /etc/systemd/system/livestream.service
+#   4. sudo systemctl daemon-reload
+#   5. sudo systemctl enable --now livestream
+#   6. journalctl -u livestream -f
+
+[Unit]
+Description=Livestream-to-AGI capture/encoder/RTMP pipeline
+Documentation=https://github.com/bradtaylorsf/livestreamtoagi/blob/main/docs/livestream/resilience.md
+After=network-online.target
+Wants=network-online.target
+# Crash-loop guard: after 5 failed starts inside 5 minutes, systemd stops
+# retrying so a bad key/config cannot spin forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# EDIT: the unprivileged user that owns the repo checkout and stream runtime.
+# Do NOT run the stream as root.
+User=livestream
+# EDIT: absolute path to the repo checkout on this host.
+WorkingDirectory=/opt/livestreamtoagi
+# EDIT: stream keys belong in a host secret store or EnvironmentFile. These
+# placeholders document the required names only; replace them on the host and
+# never commit real keys.
+Environment=TWITCH_STREAM_KEY=EDIT_ON_HOST
+Environment=YOUTUBE_STREAM_KEY=EDIT_ON_HOST
+# Example host secret file, managed outside git:
+# EnvironmentFile=/etc/livestreamtoagi/livestream.env
+ExecStart=/opt/livestreamtoagi/scripts/livestream/stream-push.sh
+# Restart only on failure/crash. A deliberate systemctl stop must stay stopped.
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+# ffmpeg should flush and exit faster than the Minecraft server, but keep a
+# bounded grace period before systemd escalates.
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=livestream
+
+[Install]
+WantedBy=multi-user.target
