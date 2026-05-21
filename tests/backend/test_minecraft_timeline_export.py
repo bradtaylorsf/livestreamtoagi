@@ -70,6 +70,40 @@ def test_fixture_export_writes_ordered_timeline_and_totals(tmp_path: Path) -> No
     assert totals["token_totals"]["total_tokens"] == 17
 
 
+def test_cli_accepts_explicit_output_and_totals_paths(tmp_path: Path) -> None:
+    run_dir = _copy_fixture(tmp_path)
+    output_path = tmp_path / "exports" / "timeline.ndjson"
+    totals_path = tmp_path / "exports" / "timeline-totals.json"
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER),
+            "--run-dir",
+            str(run_dir),
+            "--output",
+            str(output_path),
+            "--totals",
+            str(totals_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert output_path.is_file()
+    assert totals_path.is_file()
+    assert "timeline exported" in proc.stdout
+    assert str(output_path) in proc.stdout
+    assert not (run_dir / "timeline.ndjson").exists()
+    events = _events(output_path)
+    totals = json.loads(totals_path.read_text(encoding="utf-8"))
+    assert any(event["event_type"] == "llm.response" for event in events)
+    assert totals["counts_by_event_type"]["llm.response"] == 1
+
+
 def test_missing_lmstudio_usage_is_estimated_and_marked(tmp_path: Path) -> None:
     builder = _load_builder()
     run_dir = tmp_path / "run"

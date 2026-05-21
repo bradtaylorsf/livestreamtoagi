@@ -876,15 +876,24 @@ def build_timeline(
     return TimelineResult(events=ordered, totals=totals)
 
 
-def write_artifacts(run_dir: Path, result: TimelineResult) -> None:
-    timeline_path = run_dir / "timeline.ndjson"
-    totals_path = run_dir / "timeline-totals.json"
+def write_artifacts(
+    run_dir: Path,
+    result: TimelineResult,
+    *,
+    output_path: Path | None = None,
+    totals_path: Path | None = None,
+) -> tuple[Path, Path]:
+    timeline_path = output_path or run_dir / "timeline.ndjson"
+    totals_path = totals_path or run_dir / "timeline-totals.json"
+    timeline_path.parent.mkdir(parents=True, exist_ok=True)
+    totals_path.parent.mkdir(parents=True, exist_ok=True)
     with timeline_path.open("w", encoding="utf-8") as handle:
         for event in result.events:
             handle.write(json.dumps(event.to_json(), sort_keys=True, separators=(",", ":")) + "\n")
     totals_path.write_text(
         json.dumps(result.totals, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    return timeline_path, totals_path
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -895,6 +904,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         )
     )
     parser.add_argument("--run-dir", required=True, type=Path, help="Soak evidence directory")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Timeline NDJSON output path. Default: <run-dir>/timeline.ndjson",
+    )
+    parser.add_argument(
+        "--totals",
+        type=Path,
+        default=None,
+        help="Timeline totals JSON output path. Default: <run-dir>/timeline-totals.json",
+    )
     parser.add_argument(
         "--state-sample-interval-seconds",
         type=int,
@@ -914,13 +935,18 @@ def main(argv: list[str] | None = None) -> int:
             args.run_dir,
             state_sample_interval_seconds=args.state_sample_interval_seconds,
         )
-        write_artifacts(args.run_dir, result)
+        timeline_path, totals_path = write_artifacts(
+            args.run_dir,
+            result,
+            output_path=args.output,
+            totals_path=args.totals,
+        )
     except Exception as exc:
         print(f"timeline export failed: {exc}", file=sys.stderr)
         return 2
 
     print(
-        f"ok timeline exported {len(result.events)} events; see {args.run_dir / 'timeline.ndjson'}"
+        f"ok timeline exported {len(result.events)} events; see {timeline_path}; totals {totals_path}"
     )
     return 0
 

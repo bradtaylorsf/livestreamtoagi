@@ -8,6 +8,15 @@ Embodied Minecraft soaks write a canonical timeline to:
 - `logs/soak/<UTC timestamp>/timeline-totals.json`
 - raw best-effort Node events in `logs/soak/<UTC timestamp>/timeline-raw/<agent>.ndjson`
 
+Manual exports use the same defaults, or can write to explicit paths:
+
+```bash
+python3 scripts/minecraft/build_timeline.py \
+  --run-dir logs/soak/<UTC timestamp> \
+  --output /tmp/timeline.ndjson \
+  --totals /tmp/timeline-totals.json
+```
+
 Each `timeline.ndjson` line is one JSON object:
 
 ```json
