@@ -277,10 +277,7 @@ class TTSStreamBridge:
         if seconds <= 0:
             return True
         byte_count = int(
-            self._config.sample_rate
-            * self._config.channels
-            * self.sample_width_bytes
-            * seconds
+            self._config.sample_rate * self._config.channels * self.sample_width_bytes * seconds
         )
         return await self._write_bytes(b"\0" * byte_count)
 
