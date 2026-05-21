@@ -71,6 +71,9 @@ EVENT_TYPES = frozenset(
         "build_plan.generation.started",
         "build_plan.generation.completed",
         "build_plan.generation.rejected",
+        "build_plan.generation.provider_failed",
+        "build_plan.generation.budget_capped",
+        "build_plan.generation.skipped",
         "build_plan.execution.started",
         "build_plan.execution.completed",
         "heartbeat.fired",
@@ -248,6 +251,19 @@ def coerce_int(value: Any) -> int | None:
         return int(value)
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
+    return None
+
+
+def coerce_float(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
     return None
 
 
@@ -1087,6 +1103,93 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
         "estimated_requests": token_totals["estimated"]["requests"],
     }
 
+    builder_usage: dict[str, Any] = {
+        "paid_calls": 0,
+        "local_calls": 0,
+        "estimated_usd": 0.0,
+        "failures": 0,
+        "fallbacks": 0,
+        "by_provider": defaultdict(
+            lambda: {
+                "calls": 0,
+                "paid_calls": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "estimated_usd": 0.0,
+            }
+        ),
+    }
+    builder_usage_by_agent: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "paid_calls": 0,
+            "local_calls": 0,
+            "estimated_usd": 0.0,
+            "failures": 0,
+            "fallbacks": 0,
+        }
+    )
+    for event in events:
+        if not event.event_type.startswith("build_plan.generation."):
+            continue
+        payload = event.payload
+        agent = event.agent or "unknown"
+        agent_bucket = builder_usage_by_agent[agent]
+        if event.event_type in {
+            "build_plan.generation.provider_failed",
+            "build_plan.generation.budget_capped",
+        }:
+            builder_usage["failures"] += 1
+            agent_bucket["failures"] += 1
+            if payload.get("fallback_reason"):
+                builder_usage["fallbacks"] += 1
+                agent_bucket["fallbacks"] += 1
+            continue
+        if event.event_type != "build_plan.generation.completed":
+            continue
+        provider = str(
+            payload.get("builder_provider") or payload.get("provider") or "unknown"
+        )
+        paid = bool(payload.get("paid") or provider == "openrouter")
+        prompt_tokens = int(payload.get("prompt_tokens") or 0)
+        completion_tokens = int(payload.get("completion_tokens") or 0)
+        total_tokens = int(payload.get("total_tokens") or prompt_tokens + completion_tokens)
+        estimated_usd = coerce_float(payload.get("estimated_usd")) or 0.0
+        provider_bucket = builder_usage["by_provider"][provider]
+        provider_bucket["calls"] += 1
+        provider_bucket["prompt_tokens"] += prompt_tokens
+        provider_bucket["completion_tokens"] += completion_tokens
+        provider_bucket["total_tokens"] += total_tokens
+        provider_bucket["estimated_usd"] += estimated_usd
+        builder_usage["estimated_usd"] += estimated_usd
+        agent_bucket["estimated_usd"] += estimated_usd
+        if paid:
+            builder_usage["paid_calls"] += 1
+            provider_bucket["paid_calls"] += 1
+            agent_bucket["paid_calls"] += 1
+        else:
+            builder_usage["local_calls"] += 1
+            agent_bucket["local_calls"] += 1
+        if payload.get("fallback_reason"):
+            builder_usage["fallbacks"] += 1
+            agent_bucket["fallbacks"] += 1
+
+    builder_usage["estimated_usd"] = round(float(builder_usage["estimated_usd"]), 8)
+    builder_usage["by_provider"] = {
+        provider: {
+            **bucket,
+            "estimated_usd": round(float(bucket["estimated_usd"]), 8),
+        }
+        for provider, bucket in sorted(builder_usage["by_provider"].items())
+    }
+    builder_usage_by_agent = {
+        agent: {
+            **bucket,
+            "estimated_usd": round(float(bucket["estimated_usd"]), 8),
+        }
+        for agent, bucket in sorted(builder_usage_by_agent.items())
+    }
+
     return {
         "run_dir": str(run_dir),
         "generated_at_utc": isoformat_z(datetime.now(UTC).replace(microsecond=0)),
@@ -1098,6 +1201,8 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
         "token_totals": token_totals,
         "tokens_by_agent": dict(sorted(tokens_by_agent.items())),
         "tokens_by_model": dict(sorted(tokens_by_model.items())),
+        "builder_usage": builder_usage,
+        "builder_usage_by_agent": builder_usage_by_agent,
     }
 
 

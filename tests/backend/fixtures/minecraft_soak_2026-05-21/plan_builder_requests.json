@@ -1,0 +1,30 @@
+{
+  "source": "2026-05-21 plan-builder soak summary",
+  "observed_builder_calls": 56,
+  "requests": [
+    {
+      "agent": "vera",
+      "description": "small shared cabin",
+      "origin": {"x": 0, "y": 64, "z": 0},
+      "count": 53
+    },
+    {
+      "agent": "rex",
+      "description": "torch-lit storage corner",
+      "origin": {"x": 4, "y": 64, "z": 0},
+      "count": 1
+    },
+    {
+      "agent": "aurora",
+      "description": "simple wall",
+      "origin": {"x": 8, "y": 64, "z": 0},
+      "count": 1
+    },
+    {
+      "agent": "pixel",
+      "description": "marker camp",
+      "origin": {"x": 12, "y": 64, "z": 0},
+      "count": 1
+    }
+  ]
+}

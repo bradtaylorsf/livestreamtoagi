@@ -77,6 +77,27 @@
 #                               Set to 1 to block arbitrary !executeCode
 #                               separately from build-plan actions. Default:
 #                               SOAK_BLOCK_SLOW_SIM_ACTIONS.
+#   MC_SIM_BUILDER_PROVIDER     Builder-plan provider for !planAndBuild only:
+#                               local or openrouter. Default: local.
+#   MC_SIM_BUILDER_OPENROUTER_API_KEY
+#                               OpenRouter key for builder plans. Defaults to
+#                               OPENROUTER_API_KEY when unset.
+#   MC_SIM_BUILDER_OPENROUTER_MODEL
+#                               OpenRouter model id for builder plans.
+#   MC_SIM_BUILDER_FALLBACK     fail or local when OpenRouter config/calls
+#                               fail. Default: fail.
+#   MC_SIM_BUILDER_MAX_CALLS_PER_RUN
+#                               Paid builder call cap. Default: 12.
+#   MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
+#                               Paid builder call cap per agent. Default: 3.
+#   MC_SIM_BUILDER_MAX_USD_PER_RUN
+#                               Optional estimated USD cap for paid builder calls.
+#   MC_SIM_BUILD_MAX_PER_AGENT  Max non-cached builder plan generations per
+#                               agent. Default: 6.
+#   MC_SIM_BUILD_COOLDOWN_SEC   Cooldown for equivalent completed builds.
+#                               Default: 300.
+#   MC_SIM_BUILD_ZONE_STRIDE    Per-agent build origin offset stride. Default: 12.
+#   MC_SIM_BUILD_CACHE_TTL_SEC  Plan cache TTL. Default: 3600.
 #   SOAK_SAFE_TERRAIN_ACTIONS   Set to 1 to stage local-sim terrain guards:
 #                               disable auto elbow-room/item pickup/torch modes
 #                               and refuse destructive pathfinding.
@@ -169,6 +190,19 @@ SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-0}"
 SOAK_BLOCK_SLOW_SIM_ACTIONS="${SOAK_BLOCK_SLOW_SIM_ACTIONS:-0}"
 SOAK_BLOCK_EXECUTE_CODE_ACTIONS="${SOAK_BLOCK_EXECUTE_CODE_ACTIONS:-$SOAK_BLOCK_SLOW_SIM_ACTIONS}"
+MC_SIM_BUILDER_PROVIDER="${MC_SIM_BUILDER_PROVIDER:-local}"
+MC_SIM_BUILDER_FALLBACK="${MC_SIM_BUILDER_FALLBACK:-fail}"
+MC_SIM_BUILDER_OPENROUTER_API_KEY="${MC_SIM_BUILDER_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}"
+MC_SIM_BUILDER_OPENROUTER_MODEL="${MC_SIM_BUILDER_OPENROUTER_MODEL:-}"
+MC_SIM_BUILDER_MAX_CALLS_PER_RUN="${MC_SIM_BUILDER_MAX_CALLS_PER_RUN:-12}"
+MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT:-3}"
+MC_SIM_BUILDER_MAX_USD_PER_RUN="${MC_SIM_BUILDER_MAX_USD_PER_RUN:-}"
+MC_SIM_BUILDER_USD_PER_1K_INPUT="${MC_SIM_BUILDER_USD_PER_1K_INPUT:-}"
+MC_SIM_BUILDER_USD_PER_1K_OUTPUT="${MC_SIM_BUILDER_USD_PER_1K_OUTPUT:-}"
+MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
+MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
+MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
+MC_SIM_BUILD_CACHE_TTL_SEC="${MC_SIM_BUILD_CACHE_TTL_SEC:-3600}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
 SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
@@ -281,6 +315,31 @@ server.once('error', () => process.exit(1));
 server.once('listening', () => server.close(() => process.exit(0)));
 server.listen(port, '127.0.0.1');
 NODE
+}
+
+preflight_builder_routing() {
+    case "$MC_SIM_BUILDER_PROVIDER" in
+        local|openrouter) ;;
+        *)
+            fail "MC_SIM_BUILDER_PROVIDER must be local or openrouter."
+            return 2
+            ;;
+    esac
+    case "$MC_SIM_BUILDER_FALLBACK" in
+        fail|local) ;;
+        *)
+            fail "MC_SIM_BUILDER_FALLBACK must be fail or local."
+            return 2
+            ;;
+    esac
+    if [ "$MC_SIM_BUILDER_PROVIDER" = "openrouter" ] \
+        && [ "$MC_SIM_BUILDER_FALLBACK" != "local" ]; then
+        if [ -z "$MC_SIM_BUILDER_OPENROUTER_API_KEY" ] || [ -z "$MC_SIM_BUILDER_OPENROUTER_MODEL" ]; then
+            fail "OpenRouter builder routing requires MC_SIM_BUILDER_OPENROUTER_API_KEY and MC_SIM_BUILDER_OPENROUTER_MODEL (or set MC_SIM_BUILDER_FALLBACK=local)."
+            return 1
+        fi
+    fi
+    return 0
 }
 
 check_mindserver_ports_available() {
@@ -425,6 +484,8 @@ print_plan() {
     fi
     info "chat model:     ${LOCAL_LLM_MODEL:-<unset>}"
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
+    info "builder route:  provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
+    info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "keep MC alive:  $SOAK_KEEP_MINECRAFT_RUNNING"
@@ -964,6 +1025,7 @@ if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
     exit 1
 fi
 export LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LOCAL_LLM_MODEL}"
+preflight_builder_routing || exit $?
 
 if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
     fail "MINECRAFT_BRIDGE_TOKEN is not set; bridge auth is fail-closed."
@@ -1061,6 +1123,17 @@ write_metadata() {
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
         echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"
+        echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
+        echo "builder_openrouter_model=$MC_SIM_BUILDER_OPENROUTER_MODEL"
+        echo "builder_openrouter_key_set=$([ -n "$MC_SIM_BUILDER_OPENROUTER_API_KEY" ] && echo yes || echo no)"
+        echo "builder_fallback=$MC_SIM_BUILDER_FALLBACK"
+        echo "builder_max_calls_per_run=$MC_SIM_BUILDER_MAX_CALLS_PER_RUN"
+        echo "builder_max_calls_per_agent=$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT"
+        echo "builder_max_usd_per_run=$MC_SIM_BUILDER_MAX_USD_PER_RUN"
+        echo "build_max_per_agent=$MC_SIM_BUILD_MAX_PER_AGENT"
+        echo "build_cooldown_sec=$MC_SIM_BUILD_COOLDOWN_SEC"
+        echo "build_zone_stride=$MC_SIM_BUILD_ZONE_STRIDE"
+        echo "build_cache_ttl_sec=$MC_SIM_BUILD_CACHE_TTL_SEC"
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
@@ -1344,6 +1417,11 @@ launch_bot() {
         export LTAG_RUN_ID="$RUN_ID"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
+        export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
+        export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
+        export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUILDER_USD_PER_1K_OUTPUT
+        export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
         export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
         export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"
@@ -1738,6 +1816,24 @@ reported = tokens.get("provider_reported", {})
 estimated = tokens.get("estimated", {})
 print(f"- provider_reported_requests: {reported.get('requests', 0)}")
 print(f"- estimated_requests: {estimated.get('requests', 0)}")
+
+builder = data.get("builder_usage", {})
+print("builder_usage:")
+print(f"- paid_calls: {builder.get('paid_calls', 0)}")
+print(f"- local_calls: {builder.get('local_calls', 0)}")
+print(f"- estimated_usd: {builder.get('estimated_usd', 0)}")
+print(f"- failures: {builder.get('failures', 0)}")
+print(f"- fallbacks: {builder.get('fallbacks', 0)}")
+providers = builder.get("by_provider", {})
+print("builder_usage_by_provider:")
+if providers:
+    for key, value in sorted(providers.items()):
+        print(
+            f"- {key}: calls={value.get('calls', 0)} paid={value.get('paid_calls', 0)} "
+            f"tokens={value.get('total_tokens', 0)} usd={value.get('estimated_usd', 0)}"
+        )
+else:
+    print("- none")
 PY
         else
             echo "not available"

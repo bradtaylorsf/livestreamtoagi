@@ -27,6 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
 BUILDING_HELPERS = FORK_SRC / "agent" / "skills" / "building.js"
 BUILD_PLAN_HELPERS = FORK_SRC / "agent" / "skills" / "build_plan.js"
+BUILDER_PROVIDER_HELPERS = FORK_SRC / "agent" / "skills" / "builder_provider.js"
+BUILD_PLAN_GOVERNOR_HELPERS = FORK_SRC / "agent" / "skills" / "build_plan_governor.js"
 BUILD_FROM_PLAN_ACTION = FORK_SRC / "agent" / "commands" / "build_from_plan_action.js"
 PLAN_AND_BUILD_ACTION = FORK_SRC / "agent" / "commands" / "plan_and_build_action.js"
 CONNECT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-bridge-bot.sh"
@@ -64,6 +66,8 @@ def _stage_action_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copy2(BUILD_FROM_PLAN_ACTION, commands / "build_from_plan_action.js")
     shutil.copy2(BUILDING_HELPERS, skills / "building.js")
     shutil.copy2(BUILD_PLAN_HELPERS, skills / "build_plan.js")
+    shutil.copy2(BUILDER_PROVIDER_HELPERS, skills / "builder_provider.js")
+    shutil.copy2(BUILD_PLAN_GOVERNOR_HELPERS, skills / "build_plan_governor.js")
     calls_path = tmp_path / "bridge_calls.jsonl"
     (bridge / "python_bridge.js").write_text(
         """
@@ -105,6 +109,8 @@ def _stage_plan_and_build_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copy2(PLAN_AND_BUILD_ACTION, commands / "plan_and_build_action.js")
     shutil.copy2(BUILDING_HELPERS, skills / "building.js")
     shutil.copy2(BUILD_PLAN_HELPERS, skills / "build_plan.js")
+    shutil.copy2(BUILDER_PROVIDER_HELPERS, skills / "builder_provider.js")
+    shutil.copy2(BUILD_PLAN_GOVERNOR_HELPERS, skills / "build_plan_governor.js")
     calls_path = tmp_path / "bridge_calls.jsonl"
     (bridge / "python_bridge.js").write_text(
         """
@@ -436,6 +442,8 @@ def test_committed_build_plan_files_match_contract() -> None:
     assert BUILD_PLAN_HELPERS.is_file()
     assert BUILD_FROM_PLAN_ACTION.is_file()
     assert PLAN_AND_BUILD_ACTION.is_file()
+    assert BUILDER_PROVIDER_HELPERS.is_file()
+    assert BUILD_PLAN_GOVERNOR_HELPERS.is_file()
 
     helper_src = BUILD_PLAN_HELPERS.read_text()
     assert "normalizePlan" in helper_src
@@ -458,6 +466,13 @@ def test_committed_build_plan_files_match_contract() -> None:
     assert "validateGeneratedPlan" in plan_action_src
     assert "performBuildFromPlan" in plan_action_src
     assert "build_plan.generation.completed" in plan_action_src
+    provider_src = BUILDER_PROVIDER_HELPERS.read_text()
+    assert "MC_SIM_BUILDER_PROVIDER" in provider_src
+    assert "plan_generation" in provider_src
+    assert "OpenRouter" in provider_src
+    governor_src = BUILD_PLAN_GOVERNOR_HELPERS.read_text()
+    assert "active_build_exists" in governor_src
+    assert "MC_SIM_BUILD_COOLDOWN_SEC" in governor_src
 
 
 def test_connect_script_stages_and_injects_build_plan_action() -> None:
@@ -557,6 +572,7 @@ process.stdout.write(JSON.stringify({{
             "BRIDGE_CALLS_PATH": str(calls_path),
             "LTAG_AGENT_ID": "rex",
             "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
         },
     )
 
@@ -659,6 +675,7 @@ process.stdout.write(JSON.stringify({{
             "BRIDGE_CALLS_PATH": str(calls_path),
             "LTAG_AGENT_ID": "pixel",
             "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
         },
     )
 

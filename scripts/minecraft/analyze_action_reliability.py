@@ -77,6 +77,20 @@ class AgentStats:
     builder_plan_generated: int = 0
     builder_plan_unique_ids: set[str] = field(default_factory=set)
     builder_plan_skipped_dedupe: int = 0
+    builder_plan_skipped_active: int = 0
+    builder_plan_skipped_cooldown: int = 0
+    builder_plan_skipped_per_agent_cap: int = 0
+    builder_plan_cache_hits: int = 0
+    builder_plan_max_per_agent: int = 0
+    builder_plan_paid_calls: int = 0
+    builder_plan_local_calls: int = 0
+    builder_plan_estimated_usd: float = 0.0
+    builder_plan_prompt_tokens: int = 0
+    builder_plan_completion_tokens: int = 0
+    builder_plan_total_tokens: int = 0
+    builder_plan_failures: int = 0
+    builder_plan_fallbacks: int = 0
+    builder_plan_provider_counts: Counter[str] = field(default_factory=Counter)
     builder_plan_intended_blocks: int = 0
     builder_plan_verified_blocks: int = 0
     build_plan_event_keys: set[str] = field(default_factory=set, repr=False)
@@ -158,6 +172,19 @@ class AgentStats:
             "builder_plan_generated": self.builder_plan_generated,
             "builder_plan_unique": self.builder_plan_unique,
             "builder_plan_skipped_dedupe": self.builder_plan_skipped_dedupe,
+            "builder_plan_skipped_active": self.builder_plan_skipped_active,
+            "builder_plan_skipped_cooldown": self.builder_plan_skipped_cooldown,
+            "builder_plan_skipped_per_agent_cap": self.builder_plan_skipped_per_agent_cap,
+            "builder_plan_cache_hits": self.builder_plan_cache_hits,
+            "builder_plan_max_per_agent": self.builder_plan_max_per_agent,
+            "builder_plan_paid_calls": self.builder_plan_paid_calls,
+            "builder_plan_local_calls": self.builder_plan_local_calls,
+            "builder_plan_estimated_usd": round(self.builder_plan_estimated_usd, 8),
+            "builder_plan_prompt_tokens": self.builder_plan_prompt_tokens,
+            "builder_plan_completion_tokens": self.builder_plan_completion_tokens,
+            "builder_plan_total_tokens": self.builder_plan_total_tokens,
+            "builder_plan_failures": self.builder_plan_failures,
+            "builder_plan_fallbacks": self.builder_plan_fallbacks,
             "builder_plan_intended_blocks": self.builder_plan_intended_blocks,
             "builder_plan_verified_blocks": self.builder_plan_verified_blocks,
             "builder_plan_completion_rate": self.builder_plan_completion_rate,
@@ -184,6 +211,20 @@ class AgentStats:
                 "builder_plan_generated": self.builder_plan_generated,
                 "builder_plan_unique": self.builder_plan_unique,
                 "builder_plan_skipped_dedupe": self.builder_plan_skipped_dedupe,
+                "builder_plan_skipped_active": self.builder_plan_skipped_active,
+                "builder_plan_skipped_cooldown": self.builder_plan_skipped_cooldown,
+                "builder_plan_skipped_per_agent_cap": self.builder_plan_skipped_per_agent_cap,
+                "builder_plan_cache_hits": self.builder_plan_cache_hits,
+                "builder_plan_max_per_agent": self.builder_plan_max_per_agent,
+                "builder_plan_paid_calls": self.builder_plan_paid_calls,
+                "builder_plan_local_calls": self.builder_plan_local_calls,
+                "builder_plan_estimated_usd": round(self.builder_plan_estimated_usd, 8),
+                "builder_plan_prompt_tokens": self.builder_plan_prompt_tokens,
+                "builder_plan_completion_tokens": self.builder_plan_completion_tokens,
+                "builder_plan_total_tokens": self.builder_plan_total_tokens,
+                "builder_plan_failures": self.builder_plan_failures,
+                "builder_plan_fallbacks": self.builder_plan_fallbacks,
+                "builder_provider_breakdown": dict(sorted(self.builder_plan_provider_counts.items())),
                 "builder_plan_intended_blocks": self.builder_plan_intended_blocks,
                 "builder_plan_verified_blocks": self.builder_plan_verified_blocks,
                 "builder_plan_completion_rate": self.builder_plan_completion_rate,
@@ -301,6 +342,19 @@ def first_int(*values: Any) -> int | None:
     return None
 
 
+def first_float(*values: Any) -> float | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed >= 0:
+            return parsed
+    return None
+
+
 def verified_blocks_from_payload(payload: dict[str, Any]) -> int:
     metric = payload.get("metric")
     if isinstance(metric, dict):
@@ -374,9 +428,46 @@ def apply_build_plan_event(
         stats.builder_plan_generated += 1
         stats.builder_plan_unique_ids.add(action_id)
         stats.builder_plan_intended_blocks += plan_block_count(payload.get("plan"))
+        stats.builder_plan_max_per_agent = max(
+            stats.builder_plan_max_per_agent,
+            first_int(payload.get("max_builder_calls_per_agent")) or 0,
+        )
+        provider = str(payload.get("builder_provider") or payload.get("provider") or "unknown")
+        stats.builder_plan_provider_counts[provider] += 1
+        if payload.get("paid") or provider == "openrouter":
+            stats.builder_plan_paid_calls += 1
+        else:
+            stats.builder_plan_local_calls += 1
+        stats.builder_plan_prompt_tokens += first_int(payload.get("prompt_tokens")) or 0
+        stats.builder_plan_completion_tokens += first_int(payload.get("completion_tokens")) or 0
+        stats.builder_plan_total_tokens += first_int(payload.get("total_tokens")) or 0
+        stats.builder_plan_estimated_usd += first_float(payload.get("estimated_usd")) or 0.0
+        if payload.get("fallback_reason"):
+            stats.builder_plan_fallbacks += 1
     elif event_type in {"build_plan.generation.rejected", "build_plan.generation.skipped"}:
         if is_dedupe_plan_event(event_type, payload):
             stats.builder_plan_skipped_dedupe += 1
+        if event_type == "build_plan.generation.skipped":
+            reason = str(payload.get("reason") or "").lower()
+            if reason == "active_build_exists":
+                stats.builder_plan_skipped_active += 1
+            elif reason == "cooldown":
+                stats.builder_plan_skipped_cooldown += 1
+            elif reason == "per_agent_cap":
+                stats.builder_plan_skipped_per_agent_cap += 1
+            if reason == "cache_hit" or payload.get("cache_hit"):
+                stats.builder_plan_cache_hits += 1
+            stats.builder_plan_max_per_agent = max(
+                stats.builder_plan_max_per_agent,
+                first_int(payload.get("max_builder_calls_per_agent")) or 0,
+            )
+    elif event_type in {
+        "build_plan.generation.provider_failed",
+        "build_plan.generation.budget_capped",
+    }:
+        stats.builder_plan_failures += 1
+        if payload.get("fallback_reason"):
+            stats.builder_plan_fallbacks += 1
     elif event_type == "build_plan.execution.completed":
         stats.builder_plan_unique_ids.add(action_id)
         stats.builder_plan_verified_blocks += verified_blocks_from_payload(payload)
@@ -601,6 +692,23 @@ def aggregate_stats(agent_stats: list[AgentStats]) -> AgentStats:
         aggregate.builder_plan_generated += stats.builder_plan_generated
         aggregate.builder_plan_unique_ids.update(stats.builder_plan_unique_ids)
         aggregate.builder_plan_skipped_dedupe += stats.builder_plan_skipped_dedupe
+        aggregate.builder_plan_skipped_active += stats.builder_plan_skipped_active
+        aggregate.builder_plan_skipped_cooldown += stats.builder_plan_skipped_cooldown
+        aggregate.builder_plan_skipped_per_agent_cap += stats.builder_plan_skipped_per_agent_cap
+        aggregate.builder_plan_cache_hits += stats.builder_plan_cache_hits
+        aggregate.builder_plan_max_per_agent = max(
+            aggregate.builder_plan_max_per_agent,
+            stats.builder_plan_max_per_agent,
+        )
+        aggregate.builder_plan_paid_calls += stats.builder_plan_paid_calls
+        aggregate.builder_plan_local_calls += stats.builder_plan_local_calls
+        aggregate.builder_plan_estimated_usd += stats.builder_plan_estimated_usd
+        aggregate.builder_plan_prompt_tokens += stats.builder_plan_prompt_tokens
+        aggregate.builder_plan_completion_tokens += stats.builder_plan_completion_tokens
+        aggregate.builder_plan_total_tokens += stats.builder_plan_total_tokens
+        aggregate.builder_plan_failures += stats.builder_plan_failures
+        aggregate.builder_plan_fallbacks += stats.builder_plan_fallbacks
+        aggregate.builder_plan_provider_counts.update(stats.builder_plan_provider_counts)
         aggregate.builder_plan_intended_blocks += stats.builder_plan_intended_blocks
         aggregate.builder_plan_verified_blocks += stats.builder_plan_verified_blocks
     return aggregate
@@ -658,6 +766,22 @@ def analyze_run(
                 "builder_plan_generated": aggregate.builder_plan_generated,
                 "builder_plan_unique": aggregate.builder_plan_unique,
                 "builder_plan_skipped_dedupe": aggregate.builder_plan_skipped_dedupe,
+                "builder_plan_skipped_active": aggregate.builder_plan_skipped_active,
+                "builder_plan_skipped_cooldown": aggregate.builder_plan_skipped_cooldown,
+                "builder_plan_skipped_per_agent_cap": aggregate.builder_plan_skipped_per_agent_cap,
+                "builder_plan_cache_hits": aggregate.builder_plan_cache_hits,
+                "builder_plan_max_per_agent": aggregate.builder_plan_max_per_agent,
+                "builder_plan_paid_calls": aggregate.builder_plan_paid_calls,
+                "builder_plan_local_calls": aggregate.builder_plan_local_calls,
+                "builder_plan_estimated_usd": round(aggregate.builder_plan_estimated_usd, 8),
+                "builder_plan_prompt_tokens": aggregate.builder_plan_prompt_tokens,
+                "builder_plan_completion_tokens": aggregate.builder_plan_completion_tokens,
+                "builder_plan_total_tokens": aggregate.builder_plan_total_tokens,
+                "builder_plan_failures": aggregate.builder_plan_failures,
+                "builder_plan_fallbacks": aggregate.builder_plan_fallbacks,
+                "builder_provider_breakdown": dict(
+                    sorted(aggregate.builder_plan_provider_counts.items())
+                ),
                 "builder_plan_intended_blocks": aggregate.builder_plan_intended_blocks,
                 "builder_plan_verified_blocks": aggregate.builder_plan_verified_blocks,
                 "builder_plan_completion_rate": aggregate.builder_plan_completion_rate,

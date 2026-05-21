@@ -111,6 +111,11 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "SOAK_MIN_EXECUTION_RATE" in proc.stdout
     assert "SOAK_MIN_VERIFIED_SUCCESS" in proc.stdout
     assert "SOAK_RELIABILITY_FAIL_ON_VIOLATION" in proc.stdout
+    assert "MC_SIM_BUILDER_PROVIDER" in proc.stdout
+    assert "MC_SIM_BUILDER_OPENROUTER_MODEL" in proc.stdout
+    assert "MC_SIM_BUILDER_MAX_CALLS_PER_RUN" in proc.stdout
+    assert "MC_SIM_BUILD_COOLDOWN_SEC" in proc.stdout
+    assert "MC_SIM_BUILD_ZONE_STRIDE" in proc.stdout
     assert "timeline.ndjson" in proc.stdout
     assert "timeline-totals.json" in proc.stdout
     assert "SOAK_MIN_MOVEMENT_PER_AGENT" in proc.stdout
@@ -139,6 +144,11 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MINECRAFT_BRIDGE_TOKEN" in wrapper.stdout
     assert "MC_SIM_EASY_MODE" in wrapper.stdout
     assert "MC_SIM_BUILD_MODE" in wrapper.stdout
+    assert "MC_SIM_BUILDER_PROVIDER" in wrapper.stdout
+    assert "MC_SIM_BUILDER_OPENROUTER_MODEL" in wrapper.stdout
+    assert "MC_SIM_BUILDER_MAX_CALLS_PER_AGENT" in wrapper.stdout
+    assert "MC_SIM_BUILD_COOLDOWN_SEC" in wrapper.stdout
+    assert "MC_SIM_BUILD_CACHE_TTL_SEC" in wrapper.stdout
     assert "MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS" in wrapper.stdout
     assert "MC_SIM_MIN_INTENT_TO_COMMAND_RATIO" in wrapper.stdout
     assert "MC_SIM_MIN_PARSE_SUCCESS" in wrapper.stdout
@@ -171,6 +181,8 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "work root:      <per-run temp>" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
     assert "LM queue:       enabled concurrency=1 upstream=http://localhost:1234/v1" in proc.stdout
+    assert "builder route:  provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
+    assert "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s" in proc.stdout
     assert "behavior:       require=1; movement>=5/agent" in proc.stdout
     assert "execute code:   allowed" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
@@ -213,6 +225,8 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "duration:       0.25h" in proc.stdout
     assert "chat model:     google/gemma-4-e4b" in proc.stdout
     assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
+    assert "builder route: provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
+    assert "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s" in proc.stdout
     assert "management review: disabled" in proc.stdout
     assert "build mode: single" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
@@ -229,6 +243,8 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "MindServer base port:" in proc.stdout
     assert "reliability thresholds: intent>=0.6 parse>=0.8 execution>=0.7 verified>=0.5" in proc.stdout
     assert "reliability:    intent>=0.6 parse>=0.8 exec>=0.7 verified>=0.5 min_intents=5 fail=1" in proc.stdout
+    assert "builder route:  provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
+    assert "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s" in proc.stdout
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
     assert "slow actions:   blocked (!newAction/!observe/!navigate/plan actions)" in proc.stdout
     assert "execute code:   blocked (!executeCode)" in proc.stdout
@@ -278,6 +294,67 @@ def test_local_sim_plan_mode_enables_plan_building_but_keeps_execute_code_blocke
     assert "execute code:   blocked (!executeCode)" in proc.stdout
     assert "!planAndBuild(\"small shared cabin\")" in proc.stdout
     assert "init prompt:    set (" in proc.stdout
+
+
+def test_openrouter_builder_routing_fails_closed_when_config_is_missing(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_BUILD_MODE=plan",
+                "MC_SIM_BUILDER_PROVIDER=openrouter",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 1
+    assert "OpenRouter builder routing requires" in proc.stderr
+    assert "MC_SIM_BUILDER_FALLBACK=local" in proc.stdout
+
+
+def test_openrouter_builder_routing_can_fall_back_to_local_without_key(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_BUILD_MODE=plan",
+                "MC_SIM_BUILDER_PROVIDER=openrouter",
+                "MC_SIM_BUILDER_FALLBACK=local",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "builder route: provider=openrouter fallback=local openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
+    assert "builder route:  provider=openrouter fallback=local openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
 
 
 def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
@@ -899,6 +976,10 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
     assert "Builder-Plan Mode" in text
     assert "MINECRAFT_LLM_CONCURRENCY" in text
     assert "MC_SIM_BUILD_MODE=plan" in text
+    assert "MC_SIM_BUILDER_PROVIDER=openrouter" in text
+    assert "MC_SIM_BUILDER_MAX_CALLS_PER_RUN" in text
+    assert "MC_SIM_BUILD_COOLDOWN_SEC" in text
+    assert "build_plan.generation.skipped" in text
     assert "!planAndBuild" in text
     assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
     assert "Action reliability result" in text
@@ -937,6 +1018,9 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
         "inbox.turn_started",
         "inbox.turn_completed",
         "build_plan.generation.completed",
+        "build_plan.generation.provider_failed",
+        "build_plan.generation.budget_capped",
+        "build_plan.generation.skipped",
         "build_plan.execution.completed",
         "heartbeat.fired",
         "heartbeat.skipped",
@@ -949,6 +1033,7 @@ def test_report_documents_static_evidence_and_live_addendum_template() -> None:
         assert event_type in timeline_text
     assert "provider_reported" in timeline_text
     assert "estimated" in timeline_text
+    assert "builder_usage" in timeline_text
 
 
 def test_report_names_failure_classes_and_observed_counters() -> None:

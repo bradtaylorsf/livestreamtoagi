@@ -93,6 +93,8 @@ PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
+BUILDER_PROVIDER_SKILL_REL="src/agent/skills/builder_provider.js"
+BUILD_PLAN_GOVERNOR_SKILL_REL="src/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
@@ -132,6 +134,8 @@ PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
+BUILDER_PROVIDER_SKILL_SRC="$FORK_SRC_DIR/agent/skills/builder_provider.js"
+BUILD_PLAN_GOVERNOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
@@ -271,7 +275,7 @@ verify_committed_assets() {
         "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$PLACE_HERE_GUARD_SRC" \
-        "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" \
+        "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_SRC" \
         "$PERCEPTION_SKILL_SRC" "$SAFE_FAIL_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_SRC"
     do
         if [ ! -s "$required" ]; then
@@ -469,6 +473,8 @@ stage_file "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_REL"
 stage_file "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_REL"
 stage_file "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_REL"
 stage_file "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_REL"
+stage_file "$BUILDER_PROVIDER_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_REL"
+stage_file "$BUILD_PLAN_GOVERNOR_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_REL"
 stage_file "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_REL"
 stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
 stage_file "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_REL"

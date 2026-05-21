@@ -16,6 +16,7 @@ ACTION_INTERRUPTION = FORK_SRC / "agent" / "skills" / "action_interruption.js"
 MOVEMENT_HELPERS = FORK_SRC / "agent" / "skills" / "movement.js"
 BUILDING_HELPERS = FORK_SRC / "agent" / "skills" / "building.js"
 BUILD_PLAN_HELPERS = FORK_SRC / "agent" / "skills" / "build_plan.js"
+BUILD_PLAN_GOVERNOR = FORK_SRC / "agent" / "skills" / "build_plan_governor.js"
 PERCEPTION_HELPERS = FORK_SRC / "agent" / "skills" / "perception.js"
 MOVE_ACTION = FORK_SRC / "agent" / "commands" / "move_action.js"
 NAVIGATE_ACTION = FORK_SRC / "agent" / "commands" / "navigate_action.js"
@@ -28,6 +29,9 @@ CONNECT_BRIDGE_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-bridge-bo
 CONNECT_ALPHA_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-alpha-bot.sh"
 CONNECT_COHORT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-cohort-bot.sh"
 PACKAGE_JSON = REPO_ROOT / "package.json"
+PLAN_BUILDER_FIXTURE = (
+    REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_soak_2026-05-21" / "plan_builder_requests.json"
+)
 
 NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
@@ -127,6 +131,71 @@ def test_interruption_classifier_covers_alpha_pathstopped_signature() -> None:
     assert "path was stopped before it could be completed" in src
     assert "mode:unstuck" in src
     assert "interrupted" in src
+
+
+@requires_node
+def test_build_plan_governor_blocks_active_repeat_and_reduces_soak_duplicates(
+    tmp_path: Path,
+) -> None:
+    harness = f"""
+import {{ readFileSync }} from 'node:fs';
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR))}).href);
+governor.resetBuildPlanGovernor();
+
+const settings = {{ max_steps: 64, allowed_materials: ['oak_log', 'torch'] }};
+const agent = {{ name: 'vera', bot: {{ username: 'vera' }} }};
+const first = governor.tryAcquireBuild(agent, 'small shared cabin', {{ x: 0, y: 64, z: 0 }}, settings, {{ nowMs: 1000 }});
+const second = governor.tryAcquireBuild(agent, 'small shared cabin', {{ x: 0, y: 64, z: 0 }}, settings, {{ nowMs: 1100 }});
+governor.recordBuildFailed(agent, first.plan_id, 'test release', {{ nowMs: 1200 }});
+
+governor.resetBuildPlanGovernor();
+const fixture = JSON.parse(readFileSync({json.dumps(str(PLAN_BUILDER_FIXTURE))}, 'utf8'));
+let modelCalls = 0;
+const callsByAgent = new Map();
+let nowMs = 10_000;
+for (const item of fixture.requests) {{
+    for (let i = 0; i < item.count; i += 1) {{
+        const runAgent = {{ name: item.agent, bot: {{ username: item.agent }} }};
+        const acquired = governor.tryAcquireBuild(runAgent, item.description, item.origin, settings, {{ nowMs }});
+        if (acquired.allowed && !acquired.cache_hit) {{
+            governor.recordBuilderCallStarted(runAgent, acquired);
+            modelCalls += 1;
+            callsByAgent.set(item.agent, (callsByAgent.get(item.agent) || 0) + 1);
+            governor.recordPlanGenerated(runAgent, acquired, {{
+                blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }}],
+            }});
+            governor.recordBuildCompleted(runAgent, acquired.plan_id, 'success', {{ nowMs: nowMs + 100 }});
+        }}
+        nowMs += 1000;
+    }}
+}}
+process.stdout.write(JSON.stringify({{
+    activeRepeat: second,
+    observed: fixture.observed_builder_calls,
+    modelCalls,
+    reduction: 1 - (modelCalls / fixture.observed_builder_calls),
+    callsByAgent: Object.fromEntries(callsByAgent),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "MC_SIM_BUILD_COOLDOWN_SEC": "300",
+            "MC_SIM_BUILD_MAX_PER_AGENT": "6",
+            "MC_SIM_BUILD_ZONE_STRIDE": "12",
+        },
+    )
+
+    assert result["activeRepeat"]["allowed"] is False
+    assert result["activeRepeat"]["reason"] == "active_build_exists"
+    assert result["observed"] == 56
+    assert result["modelCalls"] == 4
+    assert result["reduction"] >= 0.8
+    assert result["callsByAgent"] == {"aurora": 1, "pixel": 1, "rex": 1, "vera": 1}
 
 
 @requires_node

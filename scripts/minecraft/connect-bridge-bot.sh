@@ -110,6 +110,8 @@ PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
 BUILD_PLAN_SKILL_REL="src/agent/skills/build_plan.js"
+BUILDER_PROVIDER_SKILL_REL="src/agent/skills/builder_provider.js"
+BUILD_PLAN_GOVERNOR_SKILL_REL="src/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
@@ -145,6 +147,8 @@ PLACE_HERE_GUARD_DEST=""
 MOVEMENT_SKILL_DEST=""
 BUILDING_SKILL_DEST=""
 BUILD_PLAN_SKILL_DEST=""
+BUILDER_PROVIDER_SKILL_DEST=""
+BUILD_PLAN_GOVERNOR_SKILL_DEST=""
 PERCEPTION_SKILL_DEST=""
 SAFE_FAIL_SKILL_DEST=""
 ACTION_INTERRUPTION_SKILL_DEST=""
@@ -175,6 +179,8 @@ PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
 BUILD_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan.js"
+BUILDER_PROVIDER_SKILL_SRC="$FORK_SRC_DIR/agent/skills/builder_provider.js"
+BUILD_PLAN_GOVERNOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
@@ -241,6 +247,8 @@ restore_clone_patches() {
     [ -n "${MOVEMENT_SKILL_DEST:-}" ] && rm -f "$MOVEMENT_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILDING_SKILL_DEST:-}" ] && rm -f "$BUILDING_SKILL_DEST" 2> /dev/null || true
     [ -n "${BUILD_PLAN_SKILL_DEST:-}" ] && rm -f "$BUILD_PLAN_SKILL_DEST" 2> /dev/null || true
+    [ -n "${BUILDER_PROVIDER_SKILL_DEST:-}" ] && rm -f "$BUILDER_PROVIDER_SKILL_DEST" 2> /dev/null || true
+    [ -n "${BUILD_PLAN_GOVERNOR_SKILL_DEST:-}" ] && rm -f "$BUILD_PLAN_GOVERNOR_SKILL_DEST" 2> /dev/null || true
     [ -n "${PERCEPTION_SKILL_DEST:-}" ] && rm -f "$PERCEPTION_SKILL_DEST" 2> /dev/null || true
     [ -n "${SAFE_FAIL_SKILL_DEST:-}" ] && rm -f "$SAFE_FAIL_SKILL_DEST" 2> /dev/null || true
     [ -n "${ACTION_INTERRUPTION_SKILL_DEST:-}" ] && rm -f "$ACTION_INTERRUPTION_SKILL_DEST" 2> /dev/null || true
@@ -413,6 +421,22 @@ verify_committed_assets() {
         if grep -q 'callBridge' "$BUILD_PLAN_SKILL_SRC"; then
             fail "build-plan helpers must stay pure (no bridge calls)"; problems=1
         fi
+    fi
+
+    if [ ! -s "$BUILDER_PROVIDER_SKILL_SRC" ]; then
+        fail "Builder-provider helper missing or empty: $BUILDER_PROVIDER_SKILL_SRC"; problems=1
+    else
+        grep -q 'MC_SIM_BUILDER_PROVIDER' "$BUILDER_PROVIDER_SKILL_SRC" || { fail "builder provider missing env routing"; problems=1; }
+        grep -q 'plan_generation' "$BUILDER_PROVIDER_SKILL_SRC" || { fail "builder provider missing plan_generation guard"; problems=1; }
+        grep -q 'OpenRouter' "$BUILDER_PROVIDER_SKILL_SRC" || { fail "builder provider missing OpenRouter routing"; problems=1; }
+    fi
+
+    if [ ! -s "$BUILD_PLAN_GOVERNOR_SKILL_SRC" ]; then
+        fail "Build-plan governor helper missing or empty: $BUILD_PLAN_GOVERNOR_SKILL_SRC"; problems=1
+    else
+        grep -q 'active_build_exists' "$BUILD_PLAN_GOVERNOR_SKILL_SRC" || { fail "build-plan governor missing active-build guard"; problems=1; }
+        grep -q 'MC_SIM_BUILD_COOLDOWN_SEC' "$BUILD_PLAN_GOVERNOR_SKILL_SRC" || { fail "build-plan governor missing cooldown env"; problems=1; }
+        grep -q 'buildPlanCacheKey' "$BUILD_PLAN_GOVERNOR_SKILL_SRC" || { fail "build-plan governor missing cache key helper"; problems=1; }
     fi
 
     if [ ! -s "$PERCEPTION_SKILL_SRC" ]; then
@@ -629,7 +653,8 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $PLAN_AND_BUILD_ACTION_REL +"
     info "              $EXECUTE_CODE_ACTION_REL + $OBSERVE_ACTION_REL +"
     info "              $MOVEMENT_SKILL_REL + $BUILDING_SKILL_REL +"
-    info "              $BUILD_PLAN_SKILL_REL + $PERCEPTION_SKILL_REL +"
+    info "              $BUILD_PLAN_SKILL_REL + $BUILDER_PROVIDER_SKILL_REL +"
+    info "              $BUILD_PLAN_GOVERNOR_SKILL_REL + $PERCEPTION_SKILL_REL +"
     info "              $SAFE_FAIL_SKILL_REL + $ACTION_INTERRUPTION_SKILL_REL +"
     info "              $PLACE_HERE_GUARD_REL + $HEARTBEAT_SKILL_REL +"
     info "              $INBOX_QUEUE_SKILL_REL + $ACTION_QUEUE_SKILL_REL"
@@ -756,6 +781,8 @@ PLACE_HERE_GUARD_DEST="$MINDCRAFT_DIR_ABS/$PLACE_HERE_GUARD_REL"
 MOVEMENT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$MOVEMENT_SKILL_REL"
 BUILDING_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILDING_SKILL_REL"
 BUILD_PLAN_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILD_PLAN_SKILL_REL"
+BUILDER_PROVIDER_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILDER_PROVIDER_SKILL_REL"
+BUILD_PLAN_GOVERNOR_SKILL_DEST="$MINDCRAFT_DIR_ABS/$BUILD_PLAN_GOVERNOR_SKILL_REL"
 PERCEPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$PERCEPTION_SKILL_REL"
 SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
 ACTION_INTERRUPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_INTERRUPTION_SKILL_REL"
@@ -780,6 +807,8 @@ mkdir -p \
     "$(dirname -- "$MOVEMENT_SKILL_DEST")" \
     "$(dirname -- "$BUILDING_SKILL_DEST")" \
     "$(dirname -- "$BUILD_PLAN_SKILL_DEST")" \
+    "$(dirname -- "$BUILDER_PROVIDER_SKILL_DEST")" \
+    "$(dirname -- "$BUILD_PLAN_GOVERNOR_SKILL_DEST")" \
     "$(dirname -- "$PERCEPTION_SKILL_DEST")" \
     "$(dirname -- "$SAFE_FAIL_SKILL_DEST")" \
     "$(dirname -- "$ACTION_INTERRUPTION_SKILL_DEST")" \
@@ -803,6 +832,8 @@ cp "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_DEST"
 cp "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_DEST"
 cp "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_DEST"
 cp "$BUILD_PLAN_SKILL_SRC" "$BUILD_PLAN_SKILL_DEST"
+cp "$BUILDER_PROVIDER_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_DEST"
+cp "$BUILD_PLAN_GOVERNOR_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_DEST"
 cp "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_DEST"
 cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
 cp "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_DEST"
@@ -826,6 +857,8 @@ ok "Copied action interruption guard → $PLACE_HERE_GUARD_REL"
 ok "Copied movement helpers → $MOVEMENT_SKILL_REL"
 ok "Copied building helpers → $BUILDING_SKILL_REL"
 ok "Copied build-plan helpers → $BUILD_PLAN_SKILL_REL"
+ok "Copied builder-provider helpers → $BUILDER_PROVIDER_SKILL_REL"
+ok "Copied build-plan governor helpers → $BUILD_PLAN_GOVERNOR_SKILL_REL"
 ok "Copied perception helpers → $PERCEPTION_SKILL_REL"
 ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
 ok "Copied action interruption helpers → $ACTION_INTERRUPTION_SKILL_REL"

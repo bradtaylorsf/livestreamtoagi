@@ -303,7 +303,36 @@ def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) ->
             "agent": "rex",
             "payload": {
                 "source": "builder_model",
+                "provider": "openrouter",
+                "builder_provider": "openrouter",
+                "builder_model": "openrouter/test-frontier",
+                "paid": True,
+                "estimated_usd": 0.0042,
+                "prompt_tokens": 50,
+                "completion_tokens": 20,
+                "total_tokens": 70,
                 "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "oak_log"}]},
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:08.500Z",
+            "event_type": "build_plan.generation.provider_failed",
+            "agent": "rex",
+            "payload": {
+                "provider": "openrouter",
+                "reason": "request_failed",
+                "fallback_reason": "local",
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:08.750Z",
+            "event_type": "build_plan.generation.skipped",
+            "agent": "rex",
+            "payload": {
+                "reason": "cooldown",
+                "cache_hit": True,
+                "cooldown_remaining_sec": 240,
+                "active_build": {"plan_id": "plan-build-1", "status": "executing"},
             },
         },
         {
@@ -312,6 +341,9 @@ def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) ->
             "agent": "rex",
             "payload": {
                 "action_id": "plan-build-1",
+                "plan_id": "plan-build-1",
+                "status": "completed",
+                "cooldown_remaining_sec": 300,
                 "result": "success: intended=1; present=1; missing=0; verified=1; completion=1.000",
             },
         },
@@ -339,16 +371,32 @@ def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) ->
     assert model["pipeline"]["builder_plan_intended_blocks"] == 1
     assert model["pipeline"]["builder_plan_verified_blocks"] == 1
     assert model["pipeline"]["builder_plan_completion_rate"] == 1.0
+    assert model["pipeline"]["builder_paid_calls"] == 1
+    assert model["pipeline"]["builder_local_calls"] == 0
+    assert model["pipeline"]["builder_estimated_usd"] == 0.0042
+    assert model["pipeline"]["builder_provider_failures"] == 1
+    assert model["pipeline"]["builder_plan_cache_hits"] == 1
+    assert model["pipeline"]["builder_plan_skipped_cooldown"] == 1
     assert model["agents"][0]["inbox_queued_count"] == 1
     assert model["agents"][0]["action_rejected_count"] == 1
     assert model["agents"][0]["build_plan_count"] == 1
+    assert model["agents"][0]["builder_paid_calls"] == 1
+    assert model["agents"][0]["builder_failure_count"] == 1
+    assert model["agents"][0]["builder_last_fallback_reason"] == "local"
+    assert model["agents"][0]["builder_cache_hits"] == 1
+    assert model["agents"][0]["builder_skipped_cooldown"] == 1
+    assert model["agents"][0]["builder_cooldown_remaining_sec"] == 300
     assert model["agents"][0]["build_plan_intended_blocks"] == 1
     assert model["agents"][0]["build_plan_verified_blocks"] == 1
     assert "Queues" in html
     assert "Build Plans" in html
     assert "LLM queue done" in html
     assert "Max action depth" in html
-    assert "builder_model" in html
+    assert "openrouter/test-frontier" in html
+    assert "Paid builder" in html
+    assert "Active build" in html
+    assert "Cache hits" in html
+    assert "openrouter" in html
     assert "Intended blocks" in html
     assert "Verified blocks" in html
 

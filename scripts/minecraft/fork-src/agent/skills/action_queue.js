@@ -101,6 +101,15 @@ export function installActionQueue(manager, options = {}) {
         const state = this.__ltagActionQueue;
 
         if (this.executing || state.draining) {
+            if (/planAndBuild/i.test(label)) {
+                emit(this, 'action.rejected_busy', {
+                    action: label,
+                    reason: 'plan_and_build_collision',
+                    queued: true,
+                    queued_behind: this.currentActionLabel || null,
+                    max_queue: maxQueue,
+                });
+            }
             if (state.pending.length >= maxQueue) {
                 console.warn(
                     `[action-status] ${agentId(this)} rejected ${label}; action queue is full (${maxQueue})`,

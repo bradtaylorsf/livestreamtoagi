@@ -48,6 +48,9 @@ ACTIVE_EVENT_TYPES = {
     "action.result",
     "build_plan.generation.started",
     "build_plan.generation.completed",
+    "build_plan.generation.skipped",
+    "build_plan.generation.provider_failed",
+    "build_plan.generation.budget_capped",
     "build_plan.execution.started",
     "build_plan.execution.completed",
 }
@@ -314,6 +317,20 @@ def payload_int(event: dict[str, Any], key: str, default: int = 0) -> int:
     return default
 
 
+def payload_float(event: dict[str, Any], key: str, default: float = 0.0) -> float:
+    value = payload(event).get(key)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
 def parse_duration_seconds(
     metadata: dict[str, str], start: datetime | None, planned_end: datetime | None
 ) -> int | None:
@@ -571,11 +588,35 @@ def event_summary(event: dict[str, Any]) -> str:
         plan = event_payload.get("plan")
         blocks = len(plan.get("blocks") or []) if isinstance(plan, dict) else 0
         clear = len(plan.get("clear") or []) if isinstance(plan, dict) else 0
+        provider = event_payload.get("builder_provider") or event_payload.get("provider") or "builder"
+        model = event_payload.get("builder_model") or event_payload.get("model")
+        model_text = f" {model}" if model else ""
+        paid = " paid" if event_payload.get("paid") else ""
+        usd = event_payload.get("estimated_usd")
+        usd_text = f"; ${usd}" if usd not in (None, "", 0, 0.0) else ""
         return clip(
-            f"plan generated from {event_payload.get('source') or 'builder'}; {blocks + clear} step(s)"
+            f"plan generated from {provider}{model_text}{paid}; {blocks + clear} step(s){usd_text}"
         )
     if event_type == "build_plan.generation.rejected":
         return clip(f"plan rejected: {event_payload.get('error') or 'invalid plan'}")
+    if event_type == "build_plan.generation.skipped":
+        reason = event_payload.get("reason") or "skipped"
+        cooldown = event_payload.get("cooldown_remaining_sec") or 0
+        cooldown_text = f"; cooldown {cooldown}s" if cooldown else ""
+        cache_text = "; cache hit" if event_payload.get("cache_hit") else ""
+        active = event_payload.get("active_build") if isinstance(event_payload.get("active_build"), dict) else {}
+        plan_text = f"; active {active.get('plan_id')}" if active.get("plan_id") else ""
+        return clip(f"plan skipped: {reason}{cache_text}{cooldown_text}{plan_text}")
+    if event_type == "build_plan.generation.provider_failed":
+        return clip(
+            f"builder provider failed: {event_payload.get('reason') or 'provider_failed'} "
+            f"{event_payload.get('fallback_reason') or ''}"
+        )
+    if event_type == "build_plan.generation.budget_capped":
+        return clip(
+            f"builder budget capped: {event_payload.get('reason') or 'budget_capped'} "
+            f"{event_payload.get('fallback_reason') or ''}"
+        )
     if event_type == "build_plan.execution.started":
         return clip(
             f"build {event_payload.get('action_id') or ''} started; {event_payload.get('step_count', 0)} step(s)"
@@ -817,6 +858,33 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         if builder_plan_intended_blocks
         else (1.0 if not build_generation_completed else 0.0)
     )
+    builder_paid_calls = 0
+    builder_local_calls = 0
+    builder_estimated_usd = 0.0
+    builder_provider_counts: dict[str, int] = defaultdict(int)
+    for event in build_generation_completed:
+        event_payload = payload(event)
+        provider = str(
+            event_payload.get("builder_provider") or event_payload.get("provider") or "unknown"
+        )
+        builder_provider_counts[provider] += 1
+        if event_payload.get("paid") or provider == "openrouter":
+            builder_paid_calls += 1
+        else:
+            builder_local_calls += 1
+        builder_estimated_usd += payload_float(event, "estimated_usd")
+    builder_provider_failures = [
+        event
+        for event in events
+        if event.get("event_type")
+        in {"build_plan.generation.provider_failed", "build_plan.generation.budget_capped"}
+    ]
+    builder_skipped_events = [
+        event for event in events if event.get("event_type") == "build_plan.generation.skipped"
+    ]
+    builder_skip_reasons: dict[str, int] = defaultdict(int)
+    for event in builder_skipped_events:
+        builder_skip_reasons[str(payload(event).get("reason") or "unknown")] += 1
 
     accepted_commands = sum(command_count(event) for event in action_intents)
     executed_actions = len(action_results)
@@ -891,6 +959,20 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "builder_plan_intended_blocks": builder_plan_intended_blocks,
         "builder_plan_verified_blocks": builder_plan_verified_blocks,
         "builder_plan_completion_rate": builder_plan_completion_rate,
+        "builder_paid_calls": builder_paid_calls,
+        "builder_local_calls": builder_local_calls,
+        "builder_estimated_usd": round(builder_estimated_usd, 8),
+        "builder_provider_failures": len(builder_provider_failures),
+        "builder_provider_breakdown": dict(sorted(builder_provider_counts.items())),
+        "builder_plan_skipped_active": builder_skip_reasons.get("active_build_exists", 0),
+        "builder_plan_skipped_cooldown": builder_skip_reasons.get("cooldown", 0),
+        "builder_plan_skipped_per_agent_cap": builder_skip_reasons.get("per_agent_cap", 0),
+        "builder_plan_cache_hits": sum(
+            1
+            for event in builder_skipped_events
+            if str(payload(event).get("reason") or "") == "cache_hit"
+            or payload(event).get("cache_hit")
+        ),
         "execution_rate": round(executed_actions / accepted_commands, 4)
         if accepted_commands
         else 1.0,
@@ -1015,6 +1097,19 @@ def build_monitor_model(
         build_plan_intended_blocks = 0
         build_plan_verified_blocks = 0
         build_plan_skipped_dedupe = 0
+        builder_paid_calls = 0
+        builder_local_calls = 0
+        builder_estimated_usd = 0.0
+        builder_provider_counts: dict[str, int] = defaultdict(int)
+        builder_failure_count = 0
+        builder_fallback_count = 0
+        builder_last_fallback_reason = ""
+        builder_skipped_active = 0
+        builder_skipped_cooldown = 0
+        builder_skipped_per_agent_cap = 0
+        builder_cache_hits = 0
+        builder_cooldown_remaining_sec = 0
+        build_active_state: dict[str, Any] | None = None
 
         for event in agent_events:
             event_type = str(event.get("event_type") or "")
@@ -1046,16 +1141,70 @@ def build_monitor_model(
                 action_queued_count += 1
             elif event_type == "action.rejected_busy":
                 action_rejected_count += 1
+            elif event_type in {"build_plan.generation.started", "build_plan.execution.started"}:
+                if isinstance(event_payload.get("active_build"), dict):
+                    build_active_state = event_payload["active_build"]
             elif event_type == "build_plan.generation.completed":
                 build_plan_count += 1
+                if isinstance(event_payload.get("active_build"), dict):
+                    build_active_state = event_payload["active_build"]
                 plan_id = str(event_payload.get("action_id") or event.get("trace_id") or "")
                 if plan_id:
                     build_plan_ids.add(plan_id)
                 build_plan_intended_blocks += plan_block_count(event_payload.get("plan"))
+                provider = str(
+                    event_payload.get("builder_provider")
+                    or event_payload.get("provider")
+                    or "unknown"
+                )
+                builder_provider_counts[provider] += 1
+                if event_payload.get("paid") or provider == "openrouter":
+                    builder_paid_calls += 1
+                else:
+                    builder_local_calls += 1
+                builder_estimated_usd += payload_float(event, "estimated_usd")
+                if event_payload.get("fallback_reason"):
+                    builder_fallback_count += 1
+                    builder_last_fallback_reason = str(event_payload.get("fallback_reason"))
             elif event_type in {"build_plan.generation.rejected", "build_plan.generation.skipped"}:
                 if is_dedupe_plan_event(event):
                     build_plan_skipped_dedupe += 1
+                if event_type == "build_plan.generation.skipped":
+                    reason = str(event_payload.get("reason") or "")
+                    if reason == "active_build_exists":
+                        builder_skipped_active += 1
+                    elif reason == "cooldown":
+                        builder_skipped_cooldown += 1
+                    elif reason == "per_agent_cap":
+                        builder_skipped_per_agent_cap += 1
+                    if reason == "cache_hit" or event_payload.get("cache_hit"):
+                        builder_cache_hits += 1
+                    builder_cooldown_remaining_sec = max(
+                        builder_cooldown_remaining_sec,
+                        payload_int(event, "cooldown_remaining_sec"),
+                    )
+                    if isinstance(event_payload.get("active_build"), dict):
+                        build_active_state = event_payload["active_build"]
+            elif event_type in {
+                "build_plan.generation.provider_failed",
+                "build_plan.generation.budget_capped",
+            }:
+                builder_failure_count += 1
+                if event_payload.get("fallback_reason"):
+                    builder_fallback_count += 1
+                    builder_last_fallback_reason = str(event_payload.get("fallback_reason"))
             elif event_type == "build_plan.execution.completed":
+                if isinstance(event_payload.get("active_build"), dict):
+                    build_active_state = event_payload["active_build"]
+                elif event_payload.get("status") == "completed":
+                    build_active_state = {
+                        "plan_id": event_payload.get("plan_id") or event_payload.get("action_id"),
+                        "status": "completed",
+                    }
+                builder_cooldown_remaining_sec = max(
+                    builder_cooldown_remaining_sec,
+                    payload_int(event, "cooldown_remaining_sec"),
+                )
                 plan_id = str(event_payload.get("action_id") or event.get("trace_id") or "")
                 if plan_id:
                     build_plan_ids.add(plan_id)
@@ -1221,6 +1370,19 @@ def build_monitor_model(
                     if build_plan_intended_blocks
                     else (1.0 if build_plan_count == 0 else 0.0)
                 ),
+                "builder_paid_calls": builder_paid_calls,
+                "builder_local_calls": builder_local_calls,
+                "builder_estimated_usd": round(builder_estimated_usd, 8),
+                "builder_provider_breakdown": dict(sorted(builder_provider_counts.items())),
+                "builder_failure_count": builder_failure_count,
+                "builder_fallback_count": builder_fallback_count,
+                "builder_last_fallback_reason": builder_last_fallback_reason,
+                "builder_skipped_active": builder_skipped_active,
+                "builder_skipped_cooldown": builder_skipped_cooldown,
+                "builder_skipped_per_agent_cap": builder_skipped_per_agent_cap,
+                "builder_cache_hits": builder_cache_hits,
+                "builder_cooldown_remaining_sec": builder_cooldown_remaining_sec,
+                "active_build": build_active_state,
                 "tokens": token_totals,
             }
         )
@@ -1288,6 +1450,38 @@ def render_card_line(label: str, item: dict[str, Any] | None, empty: str) -> str
     return f'<div class="card-line"><dt>{esc(label)}</dt><dd>{esc(value)}</dd></div>'
 
 
+def render_builder_route(agent: dict[str, Any]) -> str:
+    providers = agent.get("builder_provider_breakdown") or {}
+    if providers:
+        provider_text = ", ".join(f"{key}:{value}" for key, value in providers.items())
+    else:
+        provider_text = "none"
+    parts = [
+        f"providers {provider_text}",
+        f"paid {agent.get('builder_paid_calls', 0)}",
+        f"local {agent.get('builder_local_calls', 0)}",
+        f"usd {agent.get('builder_estimated_usd', 0)}",
+    ]
+    if agent.get("builder_last_fallback_reason"):
+        parts.append(f"fallback {agent['builder_last_fallback_reason']}")
+    return f'<div class="card-line"><dt>Builder route</dt><dd>{esc("; ".join(parts))}</dd></div>'
+
+
+def render_active_build(agent: dict[str, Any]) -> str:
+    active = agent.get("active_build") if isinstance(agent.get("active_build"), dict) else {}
+    if active:
+        value = (
+            f"{active.get('plan_id') or 'plan'} "
+            f"{active.get('status') or 'active'}"
+        ).strip()
+    else:
+        value = "No active build"
+    cooldown = agent.get("builder_cooldown_remaining_sec") or 0
+    if cooldown:
+        value = f"{value}; cooldown {cooldown}s"
+    return f'<div class="card-line"><dt>Active build</dt><dd>{esc(value)}</dd></div>'
+
+
 def render_agent_cards(agents: list[dict[str, Any]]) -> str:
     if not agents:
         return '<p class="empty">No agent events found in the timeline.</p>'
@@ -1308,6 +1502,8 @@ def render_agent_cards(agents: list[dict[str, Any]]) -> str:
                 {render_card_line("Latest LLM", agent["latest_llm"], "No LLM activity")}
                 {render_card_line("Inbox", agent["latest_inbox"], "No inbox telemetry")}
                 {render_card_line("Build plan", agent["latest_build"], "No build plan")}
+                {render_active_build(agent)}
+                {render_builder_route(agent)}
                 {render_card_line("State", agent["current_state"], "No state sample")}
               </dl>
               <div class="metrics">
@@ -1325,6 +1521,12 @@ def render_agent_cards(agents: list[dict[str, Any]]) -> str:
                 <div><strong>{agent["action_depth_latest"]}</strong><span>action depth</span></div>
                 <div><strong>{agent["action_rejected_count"]}</strong><span>busy rejects</span></div>
                 <div><strong>{agent["build_plan_count"]}</strong><span>plans</span></div>
+                <div><strong>{agent["builder_paid_calls"]}</strong><span>paid builder</span></div>
+                <div><strong>{agent["builder_local_calls"]}</strong><span>local builder</span></div>
+                <div><strong>{agent["builder_failure_count"]}</strong><span>builder fails</span></div>
+                <div><strong>{agent["builder_cache_hits"]}</strong><span>cache hits</span></div>
+                <div><strong>{agent["builder_skipped_active"]}</strong><span>active skips</span></div>
+                <div><strong>{agent["builder_skipped_cooldown"]}</strong><span>cooldowns</span></div>
                 <div><strong>{agent["build_plan_intended_blocks"]}</strong><span>intended blocks</span></div>
                 <div><strong>{agent["build_plan_verified_blocks"]}</strong><span>verified blocks</span></div>
               </div>
@@ -1362,6 +1564,14 @@ def render_pipeline(pipeline: dict[str, Any]) -> str:
         ("builder_plan_intended_blocks", "Intended blocks"),
         ("builder_plan_verified_blocks", "Verified blocks"),
         ("builder_plan_completion_rate", "Plan completion"),
+        ("builder_paid_calls", "Paid builder"),
+        ("builder_local_calls", "Local builder"),
+        ("builder_estimated_usd", "Builder USD"),
+        ("builder_provider_failures", "Builder failures"),
+        ("builder_plan_cache_hits", "Cache hits"),
+        ("builder_plan_skipped_active", "Active skips"),
+        ("builder_plan_skipped_cooldown", "Cooldown skips"),
+        ("builder_plan_skipped_per_agent_cap", "Cap skips"),
         ("execution_rate", "Execution rate"),
         ("verified_rate", "Verified rate"),
     ]
