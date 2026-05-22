@@ -2,6 +2,11 @@
 
 from typing import Any
 
+from core.minecraft.director.build_macro_scheduler import (
+    BuildMacroAcquireResult,
+    BuildMacroAssignment,
+    BuildMacroScheduler,
+)
 from core.minecraft.director.scene_inbox import (
     ClosedScene,
     Scene,
@@ -38,6 +43,9 @@ from core.minecraft.director.turn_scheduler import (
 
 __all__ = [
     "AgentPose",
+    "BuildMacroAcquireResult",
+    "BuildMacroAssignment",
+    "BuildMacroScheduler",
     "ClosedScene",
     "DirectorPromptGate",
     "DirectorTurnScheduler",

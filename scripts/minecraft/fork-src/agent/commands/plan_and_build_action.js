@@ -16,6 +16,7 @@ import {
     recordBuilderCallStarted,
     recordPlanGenerated,
     tryAcquireBuild,
+    tryAcquireSceneBuild,
 } from '../skills/build_plan_governor.js';
 import { normalizePlan } from '../skills/build_plan.js';
 import { normalizeBlockType, positionFrom } from '../skills/building.js';
@@ -64,6 +65,49 @@ function originFromAgent(agent) {
         return { x: Math.floor(cell.x), y: Math.floor(cell.y), z: Math.floor(cell.z) };
     }
     return { x: 0, y: 64, z: 0 };
+}
+
+function directorBuildContext(agent) {
+    const verdict = agent?.__ltagDirectorContext || {};
+    const macro = verdict && typeof verdict.build_macro === 'object' ? verdict.build_macro || {} : {};
+    return {
+        sceneId: macro.scene_id || verdict.scene_id || null,
+        planId: macro.plan_id || null,
+        owner: macro.owner || null,
+        role: macro.role || null,
+        supportTask: macro.support_task || null,
+    };
+}
+
+function commonBuildPayload(acquisition, context = {}) {
+    const sceneId = acquisition?.scene_id || context.sceneId || null;
+    const owner = acquisition?.active_build_owner || context.owner || null;
+    return {
+        scene_id: sceneId,
+        owner,
+        build_plan_owner: owner,
+        director_role: context.role || null,
+        director_support_task: context.supportTask || null,
+    };
+}
+
+function executionMetrics(result) {
+    const text = String(result || '');
+    const valueFor = (name) => {
+        const match = text.match(new RegExp(`\\b${name}=([0-9]+(?:\\.[0-9]+)?)`, 'i'));
+        if (!match) return null;
+        const parsed = Number(match[1]);
+        return Number.isFinite(parsed) ? parsed : null;
+    };
+    return {
+        intended_blocks: valueFor('intended'),
+        blocks_present: valueFor('present'),
+        blocks_missing: valueFor('missing'),
+        blocks_unexpected: valueFor('unexpected'),
+        verified_blocks: valueFor('verified'),
+        steps_abandoned: valueFor('abandoned'),
+        completion_ratio: valueFor('completion'),
+    };
 }
 
 function localBuilderModel(agent) {
@@ -252,12 +296,13 @@ function markFatalBuilderError(err) {
     return err;
 }
 
-async function generateWithBuilderModel(agent, description, origin, maxSteps, traceId) {
+async function generateWithBuilderModel(agent, description, origin, maxSteps, traceId, telemetryBase = {}) {
     let resolved;
     try {
         resolved = resolveBuilderModel(agent);
     } catch (err) {
         emit(agent, 'build_plan.generation.provider_failed', traceId, {
+            ...telemetryBase,
             provider: err && err.provider ? err.provider : process.env.MC_SIM_BUILDER_PROVIDER || 'local',
             reason: err && err.reason ? err.reason : 'provider_resolution_failed',
             error: err && err.message ? err.message : String(err),
@@ -310,6 +355,7 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
                 ? 'build_plan.generation.budget_capped'
                 : 'build_plan.generation.provider_failed';
             emit(agent, failureType, traceId, {
+                ...telemetryBase,
                 provider: resolved.provider,
                 model: resolved.model,
                 reason: err && err.reason ? err.reason : err && err.code ? err.code : 'provider_failed',
@@ -360,14 +406,29 @@ export const planAndBuildAction = {
             max_steps: stepLimit,
             allowed_materials: [...ALLOWED_MATERIALS].sort(),
         };
-        const acquisition = tryAcquireBuild(agent, description, baseOrigin, buildSettings);
+        const directorContext = directorBuildContext(agent);
+        const acquisition = directorContext.sceneId
+            ? tryAcquireSceneBuild(
+                  directorContext.sceneId,
+                  agent,
+                  description,
+                  baseOrigin,
+                  buildSettings,
+                  {
+                      planId: directorContext.planId || undefined,
+                      ownerAgentId: directorContext.owner || undefined,
+                  },
+              )
+            : tryAcquireBuild(agent, description, baseOrigin, buildSettings);
         const origin = acquisition.origin || baseOrigin;
         actionId = acquisition.plan_id || actionId;
+        const buildPayload = commonBuildPayload(acquisition, directorContext);
 
         if (!acquisition.allowed) {
             emit(agent, 'build_plan.generation.skipped', traceId, {
                 action_id: actionId,
                 plan_id: acquisition.plan_id || null,
+                ...buildPayload,
                 description,
                 origin,
                 reason: acquisition.reason,
@@ -386,6 +447,7 @@ export const planAndBuildAction = {
         emit(agent, 'build_plan.generation.started', traceId, {
             action_id: actionId,
             plan_id: actionId,
+            ...buildPayload,
             description,
             origin,
             base_origin: baseOrigin,
@@ -408,6 +470,7 @@ export const planAndBuildAction = {
                 emit(agent, 'build_plan.generation.skipped', traceId, {
                     action_id: actionId,
                     plan_id: actionId,
+                    ...buildPayload,
                     description,
                     origin,
                     reason: 'cache_hit',
@@ -437,6 +500,7 @@ export const planAndBuildAction = {
                     origin,
                     stepLimit,
                     traceId,
+                    buildPayload,
                 );
                 generated.builder_call_count = callState.builder_call_count;
                 generated.max_builder_calls_per_agent = callState.max_builder_calls_per_agent;
@@ -449,6 +513,7 @@ export const planAndBuildAction = {
             emit(agent, 'build_plan.generation.rejected', traceId, {
                 action_id: actionId,
                 plan_id: actionId,
+                ...buildPayload,
                 description,
                 origin,
                 error: err && err.message ? err.message : String(err),
@@ -466,7 +531,9 @@ export const planAndBuildAction = {
                 max_builder_calls_per_agent: acquisition.max_builder_calls_per_agent,
             });
             if (err && err.builderFatal) {
-                recordBuildFailed(agent, actionId, err && err.message ? err.message : String(err));
+                recordBuildFailed(agent, actionId, err && err.message ? err.message : String(err), {
+                    reason: err && err.reason ? err.reason : err && err.code ? err.code : undefined,
+                });
                 return `plan-and-build ${actionId} failed: ${
                     err && err.message ? err.message : String(err)
                 }`;
@@ -480,6 +547,7 @@ export const planAndBuildAction = {
         emit(agent, 'build_plan.generation.completed', traceId, {
             action_id: actionId,
             plan_id: actionId,
+            ...buildPayload,
             description,
             origin,
             base_origin: baseOrigin,
@@ -518,6 +586,7 @@ export const planAndBuildAction = {
         emit(agent, 'build_plan.execution.started', traceId, {
             action_id: actionId,
             plan_id: actionId,
+            ...buildPayload,
             origin,
             step_count: (plan.clear || []).length + (plan.blocks || []).length,
             cache_key: acquisition.cache_key,
@@ -535,17 +604,32 @@ export const planAndBuildAction = {
                 DEFAULT_TIMEOUT_MS,
             );
         } catch (err) {
-            recordBuildFailed(agent, actionId, err && err.message ? err.message : String(err));
+            recordBuildFailed(agent, actionId, err && err.message ? err.message : String(err), {
+                reason: err && err.reason ? err.reason : undefined,
+            });
             throw err;
         }
         const buildState = /\bsuccess\b/i.test(String(result || ''))
             ? recordBuildCompleted(agent, actionId, result)
             : recordBuildFailed(agent, actionId, result);
+        const metrics = executionMetrics(result);
         emit(agent, 'build_plan.execution.completed', traceId, {
             action_id: actionId,
             plan_id: actionId,
+            ...buildPayload,
             origin,
             result,
+            verified_blocks: metrics.verified_blocks || 0,
+            verified_block_changes: metrics.verified_blocks || 0,
+            metric: {
+                intended_count: metrics.intended_blocks || 0,
+                blocks_present: metrics.blocks_present || 0,
+                blocks_missing: metrics.blocks_missing || 0,
+                blocks_unexpected: metrics.blocks_unexpected || 0,
+                steps_verified: metrics.verified_blocks || 0,
+                steps_abandoned: metrics.steps_abandoned || 0,
+                completion_ratio: metrics.completion_ratio || 0,
+            },
             cache_key: acquisition.cache_key,
             active_build_owner: acquisition.active_build_owner,
             active_build: buildState.active_build,

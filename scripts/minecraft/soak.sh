@@ -104,6 +104,8 @@
 #                               Default: 300.
 #   MC_SIM_BUILD_ZONE_STRIDE    Per-agent build origin offset stride. Default: 12.
 #   MC_SIM_BUILD_CACHE_TTL_SEC  Plan cache TTL. Default: 3600.
+#   SOAK_BUILDER_PROVIDER      Builder smoke selector: local or openrouter.
+#                               Defaults to MC_SIM_BUILDER_PROVIDER.
 #   SOAK_SAFE_TERRAIN_ACTIONS   Set to 1 to stage local-sim terrain guards:
 #                               disable auto elbow-room/item pickup/torch modes
 #                               and refuse destructive pathfinding.
@@ -222,6 +224,7 @@ MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
 MC_SIM_BUILD_CACHE_TTL_SEC="${MC_SIM_BUILD_CACHE_TTL_SEC:-3600}"
+SOAK_BUILDER_PROVIDER="${SOAK_BUILDER_PROVIDER:-$MC_SIM_BUILDER_PROVIDER}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
 SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
@@ -359,6 +362,89 @@ preflight_builder_routing() {
         fi
     fi
     return 0
+}
+
+check_smoke_builder_openrouter() {
+    [ "$SOAK_BUILDER_PROVIDER" = "openrouter" ] || return 0
+    preflight_builder_routing || return $?
+    info "preflight: OpenRouter builder smoke"
+    MC_SIM_BUILDER_PROVIDER=openrouter \
+        MC_SIM_BUILDER_FALLBACK=fail \
+        MC_SIM_BUILDER_OPENROUTER_API_KEY="$MC_SIM_BUILDER_OPENROUTER_API_KEY" \
+        MC_SIM_BUILDER_OPENROUTER_MODEL="$MC_SIM_BUILDER_OPENROUTER_MODEL" \
+        MC_SIM_BUILDER_MAX_CALLS_PER_RUN="$MC_SIM_BUILDER_MAX_CALLS_PER_RUN" \
+        MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT" \
+        MC_SIM_BUILDER_MAX_USD_PER_RUN="$MC_SIM_BUILDER_MAX_USD_PER_RUN" \
+        MC_SIM_BUILDER_USD_PER_1K_INPUT="$MC_SIM_BUILDER_USD_PER_1K_INPUT" \
+        MC_SIM_BUILDER_USD_PER_1K_OUTPUT="$MC_SIM_BUILDER_USD_PER_1K_OUTPUT" \
+        node --experimental-default-type=module --input-type=module <<'NODE'
+import {
+    builderProviderSnapshot,
+    resetBuilderProviderState,
+    resolveBuilderModel,
+} from './scripts/minecraft/fork-src/agent/skills/builder_provider.js';
+
+resetBuilderProviderState();
+const agent = { name: 'soak-builder-smoke', prompter: { code_model: null } };
+const resolved = resolveBuilderModel(agent);
+const content = await resolved.sendRequest(
+    [{ role: 'user', content: 'Return a one-block marker plan.' }],
+    'Return strict JSON: {"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_log"}]}.',
+    { purpose: 'plan_generation', traceId: 'trace-soak-builder-openrouter-smoke' },
+);
+const snapshot = builderProviderSnapshot(agent);
+if (resolved.provider !== 'openrouter' || snapshot.request_count_run < 1) {
+    throw new Error(`expected one OpenRouter builder call, got ${JSON.stringify(snapshot)}`);
+}
+process.stdout.write(JSON.stringify({ provider: resolved.provider, content, snapshot }) + '\n');
+NODE
+    ok "OpenRouter builder smoke recorded a paid builder call"
+}
+
+check_smoke_builder_local() {
+    [ "$SOAK_BUILDER_PROVIDER" = "openrouter" ] && return 0
+    info "preflight: local builder smoke"
+    MC_SIM_BUILDER_PROVIDER=local \
+        MC_SIM_BUILDER_MAX_CALLS_PER_RUN="$MC_SIM_BUILDER_MAX_CALLS_PER_RUN" \
+        MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT" \
+        node --experimental-default-type=module --input-type=module <<'NODE'
+import {
+    builderProviderSnapshot,
+    resetBuilderProviderState,
+    resolveBuilderModel,
+} from './scripts/minecraft/fork-src/agent/skills/builder_provider.js';
+
+resetBuilderProviderState();
+const agent = {
+    name: 'soak-builder-local-smoke',
+    prompter: {
+        code_model: {
+            model_name: 'local/smoke',
+            async sendRequest() {
+                return '{"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_log"}]}';
+            },
+        },
+    },
+};
+const resolved = resolveBuilderModel(agent);
+const snapshot = builderProviderSnapshot(agent);
+if (resolved.provider !== 'local' || snapshot.request_count_run !== 0) {
+    throw new Error(`expected local builder with zero OpenRouter calls, got ${JSON.stringify(snapshot)}`);
+}
+process.stdout.write(JSON.stringify({ provider: resolved.provider, snapshot }) + '\n');
+NODE
+    ok "Local builder smoke kept OpenRouter call count at zero"
+}
+
+check_smoke_builder_routing() {
+    case "$SOAK_BUILDER_PROVIDER" in
+        local) check_smoke_builder_local ;;
+        openrouter) check_smoke_builder_openrouter ;;
+        *)
+            fail "SOAK_BUILDER_PROVIDER must be local or openrouter."
+            return 2
+            ;;
+    esac
 }
 
 check_mindserver_ports_available() {
@@ -1026,6 +1112,7 @@ fi
 
 if [ "$MODE" = "dry-run" ]; then
     verify_static || true
+    check_smoke_builder_routing || exit $?
     print_plan
     echo
     ok "Dry run complete - no services checked, no bots launched"
@@ -1057,6 +1144,7 @@ if [ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]; then
     fail "Node ${NODE_MAJOR:-<missing>} found, but Mindcraft soak requires Node $REQUIRED_NODE_MAJOR LTS."
     exit 1
 fi
+check_smoke_builder_routing || exit $?
 build_settings_json
 case "$SOAK_MINDSERVER_BASE_PORT" in
     ""|*[!0-9]*)

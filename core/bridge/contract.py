@@ -572,6 +572,33 @@ class DirectorGateRequest(BaseModel):
     )
 
 
+class DirectorBuildMacro(BaseModel):
+    """Director-scheduled build macro context for one prompt verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+    scene_id: str = Field(description="Scene id for this build macro decision.")
+    plan_id: str | None = Field(default=None, description="Director build plan id.")
+    owner: str | None = Field(default=None, description="Agent that owns the build plan.")
+    role: Literal["planner_owner", "support"] = Field(
+        description="Whether this agent owns the plan or supports it."
+    )
+    support_role: Literal["gather", "clear", "guard", "converse"] | None = Field(
+        default=None,
+        description="Support role for non-owner agents.",
+    )
+    support_task: str | None = Field(
+        default=None,
+        description="Short support instruction for non-owner agents.",
+    )
+    reason: str = Field(description="Build macro scheduling reason.")
+    granted: bool = Field(
+        default=False,
+        description="Whether the agent may invoke !planAndBuild for this verdict.",
+    )
+    status: str | None = Field(default=None, description="Current Director build plan status.")
+    cache_key: str | None = Field(default=None, description="Stable build-goal cache key.")
+
+
 class DirectorGateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     selected: bool = Field(description="Whether this bot may enter the prompt path.")
@@ -594,6 +621,10 @@ class DirectorGateResponse(BaseModel):
     granted_tools: list[str] = Field(
         default_factory=list,
         description="Action/tool affordances granted to this selected prompt.",
+    )
+    build_macro: DirectorBuildMacro | None = Field(
+        default=None,
+        description="Director-scheduled build macro ownership/support context.",
     )
     queue_depth: int = Field(ge=0, description="Director gate decision queue depth.")
     suppressed_agents: list[str] = Field(

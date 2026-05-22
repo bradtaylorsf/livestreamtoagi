@@ -30,6 +30,16 @@ def _event(**overrides: Any) -> dict[str, Any]:
     return event
 
 
+def _build_event(**overrides: Any) -> dict[str, Any]:
+    event = _event(
+        event_text="Viewer asks the group to build a small shared cabin.",
+        scene_hint="batch:1:viewer:shared-cabin",
+        available_tools=["!inventory", "!planAndBuild", "!buildFromPlan"],
+    )
+    event.update(overrides)
+    return event
+
+
 def _gate() -> DirectorPromptGate:
     gate = DirectorPromptGate(
         scheduler_config=SchedulerConfig(max_turns_per_scene=1, random_jitter=0.0)
@@ -151,3 +161,49 @@ async def test_director_gate_bridge_response_surfaces_prompt_decision(
     assert response.payload["selected"] is True
     assert response.payload["queue_depth"] == 1
     assert "scene_digest" in response.payload
+
+
+async def test_planner_turn_gets_build_macro_ownership_and_plan_tool() -> None:
+    gate = _gate()
+
+    decisions = [await gate.evaluate("sim-test", agent_id, _build_event()) for agent_id in AGENTS]
+
+    owners = [
+        decision
+        for decision in decisions
+        if decision.build_macro is not None and decision.build_macro.role == "planner_owner"
+    ]
+    assert len(owners) == 1
+    owner = owners[0]
+    assert owner.selected is True
+    assert owner.turn_kind == "planner"
+    assert owner.build_macro is not None
+    assert owner.build_macro.granted is True
+    assert owner.build_macro.plan_id
+    assert "!planAndBuild" in owner.available_tools
+
+    supports = [
+        decision
+        for decision in decisions
+        if decision.build_macro is not None and decision.build_macro.role == "support"
+    ]
+    assert supports
+    assert all("!planAndBuild" not in decision.available_tools for decision in supports)
+    assert all(decision.build_macro.support_task for decision in supports if decision.build_macro)
+
+
+async def test_director_gate_bridge_response_surfaces_build_macro(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONVERSATION_MODE", "director_v2")
+
+    response = await build_bridge_response_with_services(
+        _bridge_request(_build_event(agent_id="rex")).model_dump(),
+        services=None,
+    )
+
+    assert response.ok is True
+    assert response.payload is not None
+    assert response.payload["build_macro"]["role"] == "planner_owner"
+    assert response.payload["build_macro"]["granted"] is True
+    assert "!planAndBuild" in response.payload["granted_tools"]

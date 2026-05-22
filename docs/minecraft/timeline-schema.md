@@ -58,17 +58,17 @@ Each `timeline.ndjson` line is one JSON object:
 | `inbox.turn_completed` | Batched conversation turn finished, including outcome and remaining queue depth. |
 | `inbox.telemetry_ignored` | Lifecycle/status chatter was recorded but intentionally not sent to the LLM. |
 | `inbox.immediate_command` | Direct user command such as `!stop` bypassed the debounce path. |
-| `director_gate.selected` | Director V2 allowed this compacted inbox batch to enter the Mindcraft prompt path. Payload includes `scene_id`, `turn_kind`, `reason`, and `queue_depth`. |
-| `director_gate.suppressed` | Director V2 suppressed this compacted inbox batch before `shouldRespond`. Payload includes `scene_id`, `suppression_reason`, `queue_depth`, and suppressed-agent count. |
+| `director_gate.selected` | Director V2 allowed this compacted inbox batch to enter the Mindcraft prompt path. Payload includes `scene_id`, `turn_kind`, `reason`, optional build-plan owner fields, and `queue_depth`. |
+| `director_gate.suppressed` | Director V2 suppressed this compacted inbox batch before `shouldRespond`. Payload includes `scene_id`, `suppression_reason`, optional build support task fields, `queue_depth`, and suppressed-agent count. |
 | `director_gate.stale_discarded` | A Director V2 verdict arrived after a newer gate request superseded it, so the old prompt was discarded. |
-| `build_plan.generation.started` | `!planAndBuild` began a builder-model planning request. |
-| `build_plan.generation.completed` | A validated plan is ready. Payload includes `source`, `provider`, `builder_model`, paid/local counts, token usage when available, estimated USD, `plan`, `plan_json`, origin, and max steps. |
-| `build_plan.generation.rejected` | Builder-model JSON failed schema/material/bounds validation before fallback. |
-| `build_plan.generation.provider_failed` | Builder provider setup or request failed before validated JSON was available. Payload includes provider, model, reason, caps, and fallback reason when local fallback is enabled. |
-| `build_plan.generation.budget_capped` | Builder provider was not called because per-run, per-agent, or estimated USD cap would be exceeded. |
-| `build_plan.generation.skipped` | The build governor avoided a new builder call because an active build exists, an equivalent build is cooling down, the per-agent cap was reached, or a cached plan was reused. |
-| `build_plan.execution.started` | The validated plan began execution through `!buildFromPlan`. |
-| `build_plan.execution.completed` | Plan execution finished with the terminal build result string. |
+| `build_plan.generation.started` | `!planAndBuild` began a builder-model planning request. Payload includes `scene_id`, `plan_id`, owner, cache key, provider route, and per-agent governor counters. |
+| `build_plan.generation.completed` | A validated plan is ready. Payload includes `scene_id`, owner, `source`, `provider`, `builder_model`, paid/local counts, token usage when available, estimated USD, `plan`, `plan_json`, origin, and max steps. |
+| `build_plan.generation.rejected` | Builder-model JSON failed schema/material/bounds validation before fallback. Payload includes `scene_id`, owner, provider/model, and cache key. |
+| `build_plan.generation.provider_failed` | Builder provider setup or request failed before validated JSON was available. Payload includes `scene_id`, owner, provider, model, reason, caps, and fallback reason when local fallback is enabled. |
+| `build_plan.generation.budget_capped` | Builder provider was not called because per-run, per-agent, or estimated USD cap would be exceeded. Payload includes `scene_id`, owner, provider/model, and budget caps. |
+| `build_plan.generation.skipped` | The build governor avoided a new builder call because a scene was locked, an active build exists, an equivalent build is cooling down, the per-agent cap was reached, or a cached plan was reused. |
+| `build_plan.execution.started` | The validated plan began execution through `!buildFromPlan`. Payload includes `scene_id`, `plan_id`, owner, and step count. |
+| `build_plan.execution.completed` | Plan execution finished with the terminal build result string plus parsed verification counters such as `verified_blocks` and `verified_block_changes`. |
 | `heartbeat.fired` | Autonomous idle/stall heartbeat prompt was sent. Payload includes reason, idle window, action state, cooldown, and prompt excerpt. |
 | `heartbeat.skipped` | Heartbeat considered an idle/stall check but did not prompt, such as active action, cooldown, disabled, or max no-command state. |
 | `heartbeat.outcome` | Result of a heartbeat prompt. Payload includes command detection, no-command streak, response excerpt, and error status when applicable. |
