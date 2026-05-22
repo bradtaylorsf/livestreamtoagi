@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
 from core.minecraft.director.tool_adapter import DirectorToolAdapter
 from core.tool_executor import execute_director_tool_call
@@ -220,6 +222,29 @@ async def test_director_adapter_rejects_unknown_tool_name() -> None:
         "tool_name": "unknown_backend_tool",
     }
     builder.assert_not_called()
+
+
+async def test_director_adapter_emits_tool_call_timeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("SOAK_RUN_DIR", str(tmp_path))
+    adapter, builder = _adapter_for({})
+
+    result = await adapter.invoke("rex", "unknown_backend_tool", {}, scene_id="scene-tool-1")
+
+    assert result["status"] == "rejected"
+    builder.assert_not_called()
+    path = tmp_path / "timeline-raw" / "director_v2.ndjson"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    record = records[-1]
+    assert record["event_type"] == "director.tool.call"
+    assert record["agent"] == "rex"
+    assert record["trace_id"] == "scene-tool-1"
+    assert record["payload"]["tool_name"] == "unknown_backend_tool"
+    assert record["payload"]["scene_id"] == "scene-tool-1"
+    assert record["payload"]["ok"] is False
+    assert record["payload"]["latency_ms"] >= 0
 
 
 def test_available_tools_only_returns_callable_now_tools() -> None:

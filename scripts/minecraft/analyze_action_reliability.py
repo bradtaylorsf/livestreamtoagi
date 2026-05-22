@@ -94,6 +94,13 @@ class AgentStats:
     builder_plan_intended_blocks: int = 0
     builder_plan_verified_blocks: int = 0
     build_plan_event_keys: set[str] = field(default_factory=set, repr=False)
+    director_selected_turns: int = 0
+    director_suppressed_turns: int = 0
+    director_suppression_reasons: Counter[str] = field(default_factory=Counter)
+    director_memory_compactions_participated: int = 0
+    director_tool_calls: int = 0
+    director_tool_failures: int = 0
+    director_event_keys: set[str] = field(default_factory=set, repr=False)
 
     @property
     def parse_failures(self) -> int:
@@ -188,6 +195,11 @@ class AgentStats:
             "builder_plan_intended_blocks": self.builder_plan_intended_blocks,
             "builder_plan_verified_blocks": self.builder_plan_verified_blocks,
             "builder_plan_completion_rate": self.builder_plan_completion_rate,
+            "director_selected_turns": self.director_selected_turns,
+            "director_suppressed_turns": self.director_suppressed_turns,
+            "director_memory_compactions_participated": self.director_memory_compactions_participated,
+            "director_tool_calls": self.director_tool_calls,
+            "director_tool_failures": self.director_tool_failures,
         }
 
     def to_json(self, top_n: int) -> dict[str, Any]:
@@ -204,8 +216,7 @@ class AgentStats:
                 for klass, count in self.execution_failure_classes.most_common(top_n)
             ],
             "command_buckets": {
-                bucket: dict(counts)
-                for bucket, counts in sorted(self.command_buckets.items())
+                bucket: dict(counts) for bucket, counts in sorted(self.command_buckets.items())
             },
             "builder_plan_metrics": {
                 "builder_plan_generated": self.builder_plan_generated,
@@ -224,17 +235,31 @@ class AgentStats:
                 "builder_plan_total_tokens": self.builder_plan_total_tokens,
                 "builder_plan_failures": self.builder_plan_failures,
                 "builder_plan_fallbacks": self.builder_plan_fallbacks,
-                "builder_provider_breakdown": dict(sorted(self.builder_plan_provider_counts.items())),
+                "builder_provider_breakdown": dict(
+                    sorted(self.builder_plan_provider_counts.items())
+                ),
                 "builder_plan_intended_blocks": self.builder_plan_intended_blocks,
                 "builder_plan_verified_blocks": self.builder_plan_verified_blocks,
                 "builder_plan_completion_rate": self.builder_plan_completion_rate,
             },
+            "director_metrics": {
+                "selected_turns": self.director_selected_turns,
+                "suppressed_turns": self.director_suppressed_turns,
+                "suppression_reasons": dict(sorted(self.director_suppression_reasons.items())),
+                "memory_compactions_participated": self.director_memory_compactions_participated,
+                "tool_calls": self.director_tool_calls,
+                "tool_failures": self.director_tool_failures,
+            },
             "examples": {
-                "failed_parses": [example.to_json() for example in self.failed_parse_examples[:top_n]],
+                "failed_parses": [
+                    example.to_json() for example in self.failed_parse_examples[:top_n]
+                ],
                 "verified_successes": [
                     example.to_json() for example in self.verified_success_examples[:top_n]
                 ],
-                "intent_without_command": [example.to_json() for example in self.intent_examples[:top_n]],
+                "intent_without_command": [
+                    example.to_json() for example in self.intent_examples[:top_n]
+                ],
                 "execution_failures": [
                     example.to_json() for example in self.execution_failure_examples[:top_n]
                 ],
@@ -385,8 +410,7 @@ def extract_json_event(line: str) -> dict[str, Any] | None:
 
 def is_dedupe_plan_event(event_type: str, payload: dict[str, Any]) -> bool:
     text = " ".join(
-        str(payload.get(key) or "")
-        for key in ("reason", "error", "status", "source", "detail")
+        str(payload.get(key) or "") for key in ("reason", "error", "status", "source", "detail")
     ).lower()
     return (
         "dedupe" in text
@@ -479,6 +503,61 @@ def apply_build_plan_events_from_line(stats: AgentStats, line: str, *, source: s
         apply_build_plan_event(stats, event, source=source)
 
 
+def _event_key(event: dict[str, Any], *, source: str) -> str:
+    return "|".join(
+        [
+            str(event.get("event_type") or event.get("type") or ""),
+            str(event.get("trace_id") or ""),
+            str(event.get("ts") or ""),
+            str(event.get("seq") or ""),
+            source,
+        ]
+    )
+
+
+def apply_director_event(stats: AgentStats, event: dict[str, Any], *, source: str) -> None:
+    event_type = str(event.get("event_type") or event.get("type") or "")
+    if not event_type.startswith("director."):
+        return
+    key = _event_key(event, source=source)
+    if key in stats.director_event_keys:
+        return
+    stats.director_event_keys.add(key)
+
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    if event_type == "director.gate.decision":
+        if payload.get("selected"):
+            stats.director_selected_turns += 1
+        else:
+            stats.director_suppressed_turns += 1
+            reason = str(
+                payload.get("suppression_reason")
+                or payload.get("reason_code")
+                or payload.get("reason")
+                or "unknown"
+            )
+            stats.director_suppression_reasons[reason] += 1
+    elif event_type == "director.memory.compaction":
+        if payload.get("ok") is not False:
+            stats.director_memory_compactions_participated += 1
+    elif event_type == "director.tool.call":
+        stats.director_tool_calls += 1
+        if payload.get("ok") is False:
+            stats.director_tool_failures += 1
+
+
+def agent_ids_from_payload(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return {value.strip().lower()} if value.strip() else set()
+    if isinstance(value, list | tuple | set | frozenset):
+        return {str(item).strip().lower() for item in value if str(item).strip()}
+    return set()
+
+
 def apply_build_plan_events_from_timeline(
     run_dir: Path,
     stats_by_agent: dict[str, AgentStats],
@@ -495,13 +574,33 @@ def apply_build_plan_events_from_timeline(
                 if not event:
                     continue
                 event_type = str(event.get("event_type") or event.get("type") or "")
-                if not event_type.startswith("build_plan."):
-                    continue
-                agent = str(event.get("agent") or path.stem).strip().lower()
-                stats = stats_by_agent.get(agent)
-                if stats is None:
-                    continue
-                apply_build_plan_event(stats, event, source=f"{path}:{line_no}")
+                if event_type.startswith("build_plan."):
+                    agent = str(event.get("agent") or path.stem).strip().lower()
+                    stats = stats_by_agent.get(agent)
+                    if stats is None:
+                        continue
+                    apply_build_plan_event(stats, event, source=f"{path}:{line_no}")
+                elif event_type == "director.memory.compaction":
+                    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                    agents = (
+                        agent_ids_from_payload(payload.get("distributed_to"))
+                        or agent_ids_from_payload(payload.get("participants"))
+                        or {str(event.get("agent") or path.stem).strip().lower()}
+                    )
+                    for agent in agents:
+                        stats = stats_by_agent.get(agent)
+                        if stats is not None:
+                            apply_director_event(stats, event, source=f"{path}:{line_no}")
+                elif event_type.startswith("director."):
+                    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                    agent = (
+                        str(event.get("agent") or payload.get("agent_id") or path.stem)
+                        .strip()
+                        .lower()
+                    )
+                    stats = stats_by_agent.get(agent)
+                    if stats is not None:
+                        apply_director_event(stats, event, source=f"{path}:{line_no}")
 
 
 def is_potential_utterance(line: str) -> bool:
@@ -601,6 +700,9 @@ def analyze_log(path: Path, top_n: int) -> AgentStats:
         for line_no, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip("\n")
             apply_build_plan_events_from_line(stats, line, source=f"{path}:{line_no}")
+            event = extract_json_event(line)
+            if event:
+                apply_director_event(stats, event, source=f"{path}:{line_no}")
             parser_failure = (
                 classify_parser_failure(line)
                 if line_no not in execution_lines and should_count_parser_failure(line)
@@ -711,6 +813,14 @@ def aggregate_stats(agent_stats: list[AgentStats]) -> AgentStats:
         aggregate.builder_plan_provider_counts.update(stats.builder_plan_provider_counts)
         aggregate.builder_plan_intended_blocks += stats.builder_plan_intended_blocks
         aggregate.builder_plan_verified_blocks += stats.builder_plan_verified_blocks
+        aggregate.director_selected_turns += stats.director_selected_turns
+        aggregate.director_suppressed_turns += stats.director_suppressed_turns
+        aggregate.director_suppression_reasons.update(stats.director_suppression_reasons)
+        aggregate.director_memory_compactions_participated += (
+            stats.director_memory_compactions_participated
+        )
+        aggregate.director_tool_calls += stats.director_tool_calls
+        aggregate.director_tool_failures += stats.director_tool_failures
     return aggregate
 
 
@@ -743,7 +853,10 @@ def analyze_run(
 
     return {
         "run_dir": str(run_dir),
-        "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "generated_at_utc": datetime.now(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
         "acceptable": not violations,
         "thresholds": thresholds,
         "agents": agents,
@@ -759,8 +872,7 @@ def analyze_run(
                 for klass, count in aggregate.execution_failure_classes.most_common(top_n)
             ],
             "command_buckets": {
-                bucket: dict(counts)
-                for bucket, counts in sorted(aggregate.command_buckets.items())
+                bucket: dict(counts) for bucket, counts in sorted(aggregate.command_buckets.items())
             },
             "builder_plan_metrics": {
                 "builder_plan_generated": aggregate.builder_plan_generated,
@@ -785,6 +897,16 @@ def analyze_run(
                 "builder_plan_intended_blocks": aggregate.builder_plan_intended_blocks,
                 "builder_plan_verified_blocks": aggregate.builder_plan_verified_blocks,
                 "builder_plan_completion_rate": aggregate.builder_plan_completion_rate,
+            },
+            "director_metrics": {
+                "selected_turns": aggregate.director_selected_turns,
+                "suppressed_turns": aggregate.director_suppressed_turns,
+                "suppression_reasons": dict(sorted(aggregate.director_suppression_reasons.items())),
+                "memory_compactions_participated": (
+                    aggregate.director_memory_compactions_participated
+                ),
+                "tool_calls": aggregate.director_tool_calls,
+                "tool_failures": aggregate.director_tool_failures,
             },
         },
         "threshold_violations": violations,
@@ -852,7 +974,11 @@ def render_markdown(data: dict[str, Any]) -> str:
     ]
     parser_classes = data["aggregate"]["parser_failure_classes"]
     if parser_classes:
-        lines.append(markdown_table(["Class", "Count"], [[item["class"], item["count"]] for item in parser_classes]))
+        lines.append(
+            markdown_table(
+                ["Class", "Count"], [[item["class"], item["count"]] for item in parser_classes]
+            )
+        )
     else:
         lines.append("none captured")
 
@@ -904,6 +1030,18 @@ def render_markdown(data: dict[str, Any]) -> str:
     else:
         lines.append("none captured")
 
+    lines.extend(["", "## Director Metrics", ""])
+    director_metrics = data["aggregate"].get("director_metrics", {})
+    if director_metrics:
+        lines.append(
+            markdown_table(
+                ["Metric", "Value"],
+                [[name, value] for name, value in director_metrics.items()],
+            )
+        )
+    else:
+        lines.append("none captured")
+
     lines.extend(["", "## Threshold Violations", ""])
     if data["threshold_violations"]:
         lines.append(
@@ -930,9 +1068,13 @@ def render_markdown(data: dict[str, Any]) -> str:
             [
                 f"### {agent}",
                 "",
-                markdown_table(["Metric", "Value"], [[name, value] for name, value in stats["metrics"].items()]),
+                markdown_table(
+                    ["Metric", "Value"], [[name, value] for name, value in stats["metrics"].items()]
+                ),
                 "",
-                markdown_table(["Count", "Value"], [[name, value] for name, value in stats["counts"].items()]),
+                markdown_table(
+                    ["Count", "Value"], [[name, value] for name, value in stats["counts"].items()]
+                ),
                 "",
             ]
         )
@@ -956,9 +1098,13 @@ def render_markdown(data: dict[str, Any]) -> str:
             lines.append("")
         lines.extend(render_examples("Failed Parse Examples", stats["examples"]["failed_parses"]))
         lines.append("")
-        lines.extend(render_examples("Verified Success Examples", stats["examples"]["verified_successes"]))
+        lines.extend(
+            render_examples("Verified Success Examples", stats["examples"]["verified_successes"])
+        )
         lines.append("")
-        lines.extend(render_examples("Execution Failure Examples", stats["examples"]["execution_failures"]))
+        lines.extend(
+            render_examples("Execution Failure Examples", stats["examples"]["execution_failures"])
+        )
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -976,7 +1122,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Analyze per-bot Minecraft logs for action-command reliability.",
     )
-    parser.add_argument("--run-dir", required=True, type=Path, help="Soak run directory containing bots/*.log")
+    parser.add_argument(
+        "--run-dir", required=True, type=Path, help="Soak run directory containing bots/*.log"
+    )
     parser.add_argument(
         "--min-intent-to-command",
         type=float,
@@ -1007,7 +1155,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=DEFAULT_MIN_INTENTS,
         help=f"Only enforce thresholds for agents with at least this many intended events. Default: {DEFAULT_MIN_INTENTS}",
     )
-    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N, help=f"Examples/failure classes to retain. Default: {DEFAULT_TOP_N}")
+    parser.add_argument(
+        "--top-n",
+        type=int,
+        default=DEFAULT_TOP_N,
+        help=f"Examples/failure classes to retain. Default: {DEFAULT_TOP_N}",
+    )
     return parser.parse_args(argv)
 
 

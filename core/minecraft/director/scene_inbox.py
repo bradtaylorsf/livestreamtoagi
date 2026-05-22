@@ -26,6 +26,7 @@ from core.minecraft.director.spatial_hearing import (
     AgentPose,
     SpatialHearingAdapter,
 )
+from core.minecraft.director.timeline import emit_director_timeline_event
 
 
 class SceneEventType(str, Enum):
@@ -424,6 +425,21 @@ class SceneInbox:
             close_reason=close_reason,
         )
         self._closed_queue.append(closed)
+        emit_director_timeline_event(
+            "director.scene.closed",
+            {
+                "scene_id": scene.scene_id,
+                "participants": scene.participants,
+                "observers": scene.observers,
+                "event_ids": scene.event_ids,
+                "triggering_event_type": scene.triggering_event_type.value,
+                "opened_at_ms": scene.opened_at_ms,
+                "closed_at_ms": closed_at_ms,
+                "close_reason": close_reason,
+                "entries_count": len(buffer),
+                "queue_depth": len(self._scenes),
+            },
+        )
         return closed
 
     def _closure_reason(self, scene: Scene, now_ms: int) -> str | None:
@@ -506,6 +522,23 @@ class SceneInbox:
                 "suppression_reason": update.suppression_reason,
             },
         )
+        if update.is_new_scene:
+            emit_director_timeline_event(
+                "director.scene.opened",
+                {
+                    "scene_id": scene.scene_id,
+                    "participants": scene.participants,
+                    "observers": scene.observers,
+                    "event_ids": scene.event_ids,
+                    "triggering_event_type": event.type.value,
+                    "source_agent": event.source_agent_id,
+                    "opened_at_ms": scene.opened_at_ms,
+                    "last_event_at_ms": scene.last_event_at_ms,
+                    "suppression_reason": update.suppression_reason,
+                    "queue_depth": len(self._scenes),
+                },
+                agent_id=event.source_agent_id,
+            )
 
     def _to_scene_event(self, raw_event: Mapping[str, Any]) -> SceneEvent | None:
         envelope_type = _text(raw_event.get("event_type"))
