@@ -151,7 +151,9 @@ class BuildMacroScheduler:
                 support_assignments=support_assignments,
             )
 
-        plan_id = f"build-plan-{hashlib.sha1(cache_key.encode()).hexdigest()[:12]}"
+        plan_id = (
+            f"build-plan-{hashlib.sha1(cache_key.encode(), usedforsecurity=False).hexdigest()[:12]}"
+        )
         support_assignments = _assignments_for_plan(
             support_assignments,
             scene_id=scene_key,
@@ -385,7 +387,7 @@ def _cache_key(scene_id: str, owner: str, description: str, origin: Mapping[str,
             str(origin.get("z", 0)),
         )
     )
-    return hashlib.sha1(raw.encode()).hexdigest()
+    return hashlib.sha1(raw.encode(), usedforsecurity=False).hexdigest()
 
 
 def _origin_dict(origin: Mapping[str, Any] | None) -> dict[str, Any]:

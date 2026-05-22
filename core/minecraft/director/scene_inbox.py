@@ -461,7 +461,8 @@ class SceneInbox:
             self.config.scene_window_ms
         )
         digest = hashlib.sha1(
-            f"{event.dimension}|{self._group_key(event)}|{window_start}".encode()
+            f"{event.dimension}|{self._group_key(event)}|{window_start}".encode(),
+            usedforsecurity=False,
         ).hexdigest()[:12]
         return f"mcscene-{window_start}-{digest}"
 

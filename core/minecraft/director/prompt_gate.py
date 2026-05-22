@@ -464,11 +464,13 @@ def _event_key(event: Mapping[str, Any]) -> str:
         "scene_hint": _text(event.get("scene_hint")) or "",
     }
     raw = "|".join(f"{key}={value}" for key, value in payload.items())
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _stable_seed(scene_id: str, event_sequence: int) -> int:
-    digest = hashlib.sha1(f"{scene_id}|{event_sequence}".encode()).hexdigest()
+    digest = hashlib.sha1(
+        f"{scene_id}|{event_sequence}".encode(), usedforsecurity=False
+    ).hexdigest()
     return int(digest[:16], 16)
 
 
@@ -656,8 +658,8 @@ def _default_role(agent_id: str) -> str:
 def _tool_list(value: Any) -> list[str]:
     if not isinstance(value, list | tuple | set | frozenset):
         return []
-    tools = sorted({_text(item) for item in value if _text(item)})
-    return [tool for tool in tools if tool is not None]
+    tools = {_text(item) for item in value}
+    return sorted(tool for tool in tools if tool is not None)
 
 
 def _agent_list(value: Any) -> list[str]:
@@ -666,7 +668,8 @@ def _agent_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [_canonical_agent_id(value)] if _canonical_agent_id(value) else []
     if isinstance(value, list | tuple | set | frozenset):
-        return sorted({_canonical_agent_id(item) for item in value if _canonical_agent_id(item)})
+        agents = {_canonical_agent_id(item) for item in value}
+        return sorted(agent for agent in agents if agent)
     return []
 
 
