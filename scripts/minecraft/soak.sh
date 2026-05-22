@@ -11,6 +11,7 @@
 # Usage:
 #   scripts/minecraft/soak.sh
 #   scripts/minecraft/soak.sh --duration-hours 2
+#   scripts/minecraft/soak.sh --profile director_v2 --duration-hours 2
 #   scripts/minecraft/soak.sh --log-dir /tmp/e8-8-soak
 #   scripts/minecraft/soak.sh --dry-run
 #   scripts/minecraft/soak.sh --verify
@@ -30,6 +31,11 @@
 #   MINECRAFT_LLM_QUEUE_PROXY   Start the FIFO LM Studio proxy. Default: 1.
 #   MINECRAFT_LLM_CONCURRENCY   Proxy request concurrency. Default: 1.
 #   SOAK_DURATION_HOURS         Default: 2.
+#   SOAK_PROFILE                default or director_v2. The director_v2
+#                               profile forces CONVERSATION_MODE=director_v2,
+#                               DIRECTOR_V2_GATE=1, the LM queue proxy, and
+#                               Director acceptance reporting. Default:
+#                               default.
 #   SOAK_AGENT_HOURLY_CAP_USD   Per-agent hourly cap assertion. Default: 0.01.
 #   SOAK_MIN_MOVEMENT_PER_AGENT Minimum movement actions per tracked agent.
 #                               Default: 5.
@@ -154,6 +160,28 @@
 #   SOAK_MONITOR_LLM_IDLE_SECONDS
 #                               Seconds before a monitor no-recent-LLM badge.
 #                               Default: 120.
+#   SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD
+#                               Director V2 acceptance max LM queue depth after
+#                               warm-up, exclusive. Default: 16.
+#   SOAK_ACCEPTANCE_WARMUP_SECONDS
+#                               Seconds ignored before acceptance queue-depth
+#                               assertions. Default: 300.
+#   SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO
+#                               Max selected agents per scene divided by the
+#                               tracked agent count. Default: 0.5.
+#   SOAK_REQUIRE_DIRECTOR_ACCEPTANCE
+#                               Exit nonzero when director_v2 acceptance fails.
+#                               Default: 1.
+#   director-decisions.ndjson    Director V2 scene/open/close and gate decision
+#                               evidence under the run directory.
+#   tool-parity.ndjson          Director tool calls and documented no-tool
+#                               decisions under the run directory.
+#   macro-evidence.ndjson       Build/gather/support macro attempts and
+#                               structured results under the run directory.
+#   memory-digest.ndjson        Director scene digest and memory compaction
+#                               evidence under the run directory.
+#   acceptance-report.json      Machine-readable Director V2 acceptance report.
+#   acceptance-report.md        Human-readable Director V2 acceptance report.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -177,6 +205,7 @@ MINECRAFT_LLM_PROXY_HOST="${MINECRAFT_LLM_PROXY_HOST:-127.0.0.1}"
 MINECRAFT_LLM_PROXY_PORT="${MINECRAFT_LLM_PROXY_PORT:-1235}"
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
 BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8010/api/health}"
+SOAK_PROFILE="${SOAK_PROFILE:-default}"
 CONVERSATION_MODE="${CONVERSATION_MODE:-embodied}"
 case "$CONVERSATION_MODE" in
     embodied|director_v2) ;;
@@ -236,6 +265,10 @@ SOAK_RELIABILITY_MIN_INTENTS="${SOAK_RELIABILITY_MIN_INTENTS:-5}"
 SOAK_RELIABILITY_FAIL_ON_VIOLATION="${SOAK_RELIABILITY_FAIL_ON_VIOLATION:-1}"
 SOAK_MONITOR_STALL_SECONDS="${SOAK_MONITOR_STALL_SECONDS:-120}"
 SOAK_MONITOR_LLM_IDLE_SECONDS="${SOAK_MONITOR_LLM_IDLE_SECONDS:-120}"
+SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD="${SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD:-16}"
+SOAK_ACCEPTANCE_WARMUP_SECONDS="${SOAK_ACCEPTANCE_WARMUP_SECONDS:-300}"
+SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO="${SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO:-0.5}"
+SOAK_REQUIRE_DIRECTOR_ACCEPTANCE="${SOAK_REQUIRE_DIRECTOR_ACCEPTANCE:-1}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 MC_HEARTBEAT_ENABLED="${MC_HEARTBEAT_ENABLED:-1}"
 MC_HEARTBEAT_TICK_MS="${MC_HEARTBEAT_TICK_MS:-5000}"
@@ -263,6 +296,11 @@ while [ "$#" -gt 0 ]; do
         --duration-hours)
             [ "$#" -ge 2 ] || { echo "x --duration-hours needs a value" >&2; exit 2; }
             SOAK_DURATION_HOURS="$2"
+            shift 2
+            ;;
+        --profile)
+            [ "$#" -ge 2 ] || { echo "x --profile needs a value" >&2; exit 2; }
+            SOAK_PROFILE="$2"
             shift 2
             ;;
         --log-dir)
@@ -300,6 +338,26 @@ cd "$REPO_ROOT"
 ok() { echo "ok $*"; }
 info() { echo "  $*"; }
 fail() { echo "x $*" >&2; }
+
+apply_soak_profile() {
+    case "$SOAK_PROFILE" in
+        default|embodied)
+            SOAK_PROFILE="default"
+            ;;
+        director_v2)
+            CONVERSATION_MODE="director_v2"
+            DIRECTOR_V2_GATE="1"
+            MINECRAFT_LLM_QUEUE_PROXY="1"
+            ;;
+        *)
+            fail "SOAK_PROFILE/--profile must be default or director_v2."
+            exit 2
+            ;;
+    esac
+    export SOAK_PROFILE CONVERSATION_MODE DIRECTOR_V2_GATE MINECRAFT_LLM_QUEUE_PROXY
+}
+
+apply_soak_profile
 
 DEFAULT_SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
 DEFAULT_SOAK_COST_AGENTS="alpha vera rex aurora pixel fork sentinel grok"
@@ -505,6 +563,7 @@ verify_static() {
     [ -x "$SCRIPT_DIR/analyze_action_reliability.py" ] || { fail "missing executable: $SCRIPT_DIR/analyze_action_reliability.py"; problems=1; }
     [ -x "$SCRIPT_DIR/build_timeline.py" ] || { fail "missing executable: $SCRIPT_DIR/build_timeline.py"; problems=1; }
     [ -x "$SCRIPT_DIR/build_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/build_monitor.py"; problems=1; }
+    [ -s "$SCRIPT_DIR/build_director_acceptance_report.py" ] || { fail "missing director acceptance report builder: $SCRIPT_DIR/build_director_acceptance_report.py"; problems=1; }
     [ -x "$SCRIPT_DIR/serve_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/serve_monitor.py"; problems=1; }
     [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
@@ -540,8 +599,24 @@ verify_static() {
         fail "multi-agent soak doc must document monitor.html"
         problems=1
     }
+    grep -q 'director-v2-acceptance-soak.md' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must link the Director V2 acceptance soak"
+        problems=1
+    }
     grep -q 'Heartbeat & Idle Recovery' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document autonomous heartbeat idle recovery"
+        problems=1
+    }
+    [ -s "$REPO_ROOT/docs/minecraft/director-v2-acceptance-soak.md" ] || {
+        fail "Director V2 acceptance soak doc is missing"
+        problems=1
+    }
+    grep -q 'acceptance-report.json' "$REPO_ROOT/docs/minecraft/director-v2-acceptance-soak.md" 2> /dev/null || {
+        fail "Director V2 acceptance soak doc must document acceptance-report.json"
+        problems=1
+    }
+    grep -q '#511' "$REPO_ROOT/docs/minecraft/director-v2-acceptance-soak.md" 2> /dev/null || {
+        fail "Director V2 acceptance soak doc must name downstream blockers"
         problems=1
     }
     [ -s "$REPO_ROOT/docs/minecraft/timeline-schema.md" ] || {
@@ -577,6 +652,7 @@ print_plan() {
 
     ok "E8-8 multi-agent soak plan"
     info "duration:       ${SOAK_DURATION_HOURS}h (${seconds:-invalid} seconds)"
+    info "profile:        $SOAK_PROFILE"
     info "log root:       $SOAK_LOG_ROOT"
     info "work root:      ${SOAK_WORK_ROOT:-<per-run temp>}"
     info "bridge:         $MINECRAFT_BRIDGE_URL"
@@ -605,6 +681,10 @@ print_plan() {
     info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
+    if [ "$SOAK_PROFILE" = "director_v2" ]; then
+        info "acceptance:     queue<${SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD} after ${SOAK_ACCEPTANCE_WARMUP_SECONDS}s; selected_ratio<=${SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO}; require=${SOAK_REQUIRE_DIRECTOR_ACCEPTANCE}"
+        info "evidence:       director-decisions.ndjson tool-parity.ndjson macro-evidence.ndjson memory-digest.ndjson acceptance-report.json"
+    fi
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -1231,6 +1311,7 @@ write_metadata() {
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
         echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"
+        echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
         echo "builder_openrouter_model=$MC_SIM_BUILDER_OPENROUTER_MODEL"
         echo "builder_openrouter_key_set=$([ -n "$MC_SIM_BUILDER_OPENROUTER_API_KEY" ] && echo yes || echo no)"
@@ -1274,6 +1355,10 @@ write_metadata() {
         echo "reliability_fail_on_violation=$SOAK_RELIABILITY_FAIL_ON_VIOLATION"
         echo "monitor_stall_seconds=$SOAK_MONITOR_STALL_SECONDS"
         echo "monitor_llm_idle_seconds=$SOAK_MONITOR_LLM_IDLE_SECONDS"
+        echo "acceptance_queue_depth_threshold=$SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD"
+        echo "acceptance_warmup_seconds=$SOAK_ACCEPTANCE_WARMUP_SECONDS"
+        echo "acceptance_max_selected_agent_ratio=$SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"
+        echo "require_director_acceptance=$SOAK_REQUIRE_DIRECTOR_ACCEPTANCE"
         echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
         echo "heartbeat_enabled=$MC_HEARTBEAT_ENABLED"
         echo "heartbeat_tick_ms=$MC_HEARTBEAT_TICK_MS"
@@ -1978,6 +2063,36 @@ append_monitor_summary() {
     } >> "$RUN_DIR/summary.txt"
 }
 
+run_director_acceptance_report() {
+    [ "$SOAK_PROFILE" = "director_v2" ] || return 0
+    "${PYTHON:-python3}" "$SCRIPT_DIR/build_director_acceptance_report.py" \
+        --run-dir "$RUN_DIR" \
+        --queue-threshold "$SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD" \
+        --warmup-seconds "$SOAK_ACCEPTANCE_WARMUP_SECONDS" \
+        --max-selected-agent-ratio "$SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"
+}
+
+append_director_acceptance_summary() {
+    local status="$1" status_label
+    [ "$SOAK_PROFILE" = "director_v2" ] || return 0
+    if [ "$status" -eq 0 ]; then
+        status_label="pass"
+    else
+        status_label="fail"
+    fi
+    {
+        echo
+        echo "Director V2 acceptance"
+        echo "status: $status_label"
+        echo "report_json: $RUN_DIR/acceptance-report.json"
+        echo "report_md: $RUN_DIR/acceptance-report.md"
+        echo "director_decisions: $RUN_DIR/director-decisions.ndjson"
+        echo "tool_parity: $RUN_DIR/tool-parity.ndjson"
+        echo "macro_evidence: $RUN_DIR/macro-evidence.ndjson"
+        echo "memory_digest: $RUN_DIR/memory-digest.ndjson"
+    } >> "$RUN_DIR/summary.txt"
+}
+
 start_lm_queue_proxy
 print_plan
 write_metadata
@@ -2028,6 +2143,11 @@ else
     fail "Monitor render failed; continuing. Re-run with: python3 scripts/minecraft/build_monitor.py --run-dir $RUN_DIR"
     append_monitor_summary "unavailable"
 fi
+ACCEPTANCE_STATUS=0
+if [ "$SOAK_PROFILE" = "director_v2" ]; then
+    run_director_acceptance_report || ACCEPTANCE_STATUS=$?
+    append_director_acceptance_summary "$ACCEPTANCE_STATUS"
+fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
@@ -2051,9 +2171,13 @@ if [ "$SOAK_REQUIRE_BEHAVIOR_GATE" = "1" ] && [ "$BEHAVIOR_GATE_STATUS" != "pass
     fail "Behavioral acceptance gate failed: $(paste -sd '; ' "$RUN_DIR/behavior-unmet-thresholds.txt" 2> /dev/null || echo 'see behavior.tsv')"
     exit 1
 fi
+if [ "$SOAK_PROFILE" = "director_v2" ] && [ "$SOAK_REQUIRE_DIRECTOR_ACCEPTANCE" = "1" ] && [ "$ACCEPTANCE_STATUS" -ne 0 ]; then
+    fail "Director V2 acceptance failed. See $RUN_DIR/acceptance-report.md"
+    exit 1
+fi
 if [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then
     info "behavior gate failed but SOAK_REQUIRE_BEHAVIOR_GATE=$SOAK_REQUIRE_BEHAVIOR_GATE; document the deviation in docs/minecraft/cohort-report.md"
 fi
 
-ok "Soak completed without unrecovered bot exits, within hourly cap, with acceptable action-command reliability, and behavior_gate_status=$BEHAVIOR_GATE_STATUS"
+ok "Soak completed without unrecovered bot exits, within hourly cap, with acceptable action-command reliability, behavior_gate_status=$BEHAVIOR_GATE_STATUS, and director_acceptance_status=${ACCEPTANCE_STATUS:-0}"
 info "evidence: $RUN_DIR"

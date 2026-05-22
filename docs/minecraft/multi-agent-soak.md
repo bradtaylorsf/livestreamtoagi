@@ -116,6 +116,8 @@ Package aliases:
 ```bash
 pnpm mc:sim:smoke
 pnpm mc:sim:soak
+pnpm mc:sim:smoke:director
+pnpm mc:sim:soak:director
 pnpm mc:sim -- --duration-hours 0.5 --log-dir logs/soak
 pnpm mc:soak -- --duration-hours 2 --log-dir logs/soak
 pnpm verify:minecraft-soak
@@ -171,6 +173,25 @@ disables automatic elbow-room/item-pickup/torch modes in the disposable
 Mindcraft clones and refuses pathfinder routes that require digging or
 one-block towers. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
 want the local model to spend extra time synthesizing custom action code.
+
+## Director V2 Acceptance Soak
+
+The embodied E8 soak above is the decentralized baseline. Director V2
+acceptance runs the same local Minecraft stack with `--profile director_v2`,
+which forces `CONVERSATION_MODE=director_v2`, `DIRECTOR_V2_GATE=1`, the LM
+queue proxy, and acceptance report generation. Use:
+
+```bash
+pnpm mc:sim:smoke:director
+pnpm mc:sim:soak:director
+```
+
+That profile writes `director-decisions.ndjson`, `tool-parity.ndjson`,
+`macro-evidence.ndjson`, `memory-digest.ndjson`, `acceptance-report.json`, and
+`acceptance-report.md` in the run directory. Full criteria, evidence columns,
+local single-model mode, optional OpenRouter-builder mode, and residual-gap
+rules live in
+[`director-v2-acceptance-soak.md`](director-v2-acceptance-soak.md).
 
 ## Multi-Agent Runtime Queues
 
