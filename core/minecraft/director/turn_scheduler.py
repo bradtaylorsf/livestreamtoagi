@@ -92,6 +92,15 @@ class SchedulerDecision(BaseModel):
     was_urgent: bool
     seed: int
 
+    @property
+    def selected_planner_agent_id(self) -> str | None:
+        """First selected planner agent, when this scene turn includes one."""
+
+        for turn in self.selected:
+            if turn.kind == "planner":
+                return turn.agent_id
+        return None
+
 
 def score_candidate(
     candidate: SchedulerCandidate,

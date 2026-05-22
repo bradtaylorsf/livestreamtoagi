@@ -102,20 +102,42 @@ function emit(agent, type, payload = {}) {
     });
 }
 
+function filteredGrantedTools(verdict) {
+    const tools = Array.isArray(verdict.granted_tools) ? verdict.granted_tools : [];
+    const macro = verdict.build_macro || null;
+    if (!macro) return tools;
+    if (macro.role === 'planner_owner' && macro.granted === true) return tools;
+    return tools.filter((tool) => tool !== '!planAndBuild');
+}
+
 function enrichMessage(message, verdict) {
     const observations = JSON.stringify(verdict.local_observations || {});
-    const tools = Array.isArray(verdict.granted_tools) ? verdict.granted_tools : [];
-    return [
+    const tools = filteredGrantedTools(verdict);
+    const macro = verdict.build_macro || null;
+    const lines = [
         '[Director V2 context]',
         `Scene: ${verdict.scene_digest || verdict.scene_id || 'unknown'}`,
         `Role: ${verdict.role || 'scene participant'}`,
         `Available tools: ${tools.length ? tools.join(', ') : 'ordinary chat only'}`,
         `Local observations: ${clip(observations, 900)}`,
+    ];
+    if (macro) {
+        lines.push(
+            `Build macro: ${macro.role || 'support'} owner=${macro.owner || 'unknown'} plan=${
+                macro.plan_id || 'pending'
+            }`,
+        );
+        if (macro.role !== 'planner_owner' && macro.support_task) {
+            lines.push(`Support task: ${macro.support_task}`);
+        }
+    }
+    lines.push(
         'Use this current scene context and ignore stale queued requests.',
         '[/Director V2 context]',
         '',
         String(message || ''),
-    ].join('\n');
+    );
+    return lines.join('\n');
 }
 
 async function askDirector(agent, turn, options, gateState) {
@@ -165,6 +187,7 @@ async function askDirector(agent, turn, options, gateState) {
     }
 
     const verdict = response && response.payload ? response.payload : {};
+    verdict.granted_tools = filteredGrantedTools(verdict);
     gateState.lastVerdict = verdict;
     agent.__ltagDirectorContext = verdict;
     if (verdict.selected) {
@@ -172,6 +195,9 @@ async function askDirector(agent, turn, options, gateState) {
             scene_id: verdict.scene_id,
             turn_kind: verdict.turn_kind,
             reason: verdict.reason,
+            build_plan_id: verdict.build_macro?.plan_id,
+            build_owner: verdict.build_macro?.owner,
+            build_role: verdict.build_macro?.role,
             queue_depth: verdict.queue_depth ?? 0,
         });
         return {
@@ -184,6 +210,10 @@ async function askDirector(agent, turn, options, gateState) {
     emit(agent, 'director_gate.suppressed', {
         scene_id: verdict.scene_id,
         suppression_reason: verdict.suppression_reason || 'fanout_capped',
+        build_plan_id: verdict.build_macro?.plan_id,
+        build_owner: verdict.build_macro?.owner,
+        build_role: verdict.build_macro?.role,
+        support_task: verdict.build_macro?.support_task,
         queue_depth: verdict.queue_depth ?? 0,
         suppressed_agents_count: Array.isArray(verdict.suppressed_agents)
             ? verdict.suppressed_agents.length

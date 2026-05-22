@@ -25,6 +25,7 @@ async def handle_director_gate(env: BridgeRequest, services: Any | None = None) 
             "role": "legacy decentralized responder",
             "local_observations": {},
             "granted_tools": payload.available_tools,
+            "build_macro": None,
             "queue_depth": 0,
             "suppressed_agents": [],
         }
@@ -45,6 +46,7 @@ async def handle_director_gate(env: BridgeRequest, services: Any | None = None) 
         "role": decision.role,
         "local_observations": decision.local_observations,
         "granted_tools": decision.available_tools,
+        "build_macro": decision.build_macro.model_dump() if decision.build_macro else None,
         "queue_depth": decision.queue_depth,
         "suppressed_agents": decision.suppressed_agents,
     }

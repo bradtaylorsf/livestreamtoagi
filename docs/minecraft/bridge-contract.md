@@ -78,7 +78,7 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `errand.poll` | Node→Python | `{agent_id}` → `{task_id?, task?, from_agent?, dispatched_at_ms?, urgency?}` |
 | `errand.complete` | Node→Python | `{task_id, status, symbol, detail, step_results[]}` → `{accepted}` |
 | `code.execute` | Node→Python | `{language, code, timeout?}` → `{status, stdout?, stderr?, reason?, exit_code?, execution_time_ms?}` |
-| `director.gate` | Node→Python | `{agent_id, event_kind, event_text, source_agent?, mentions[], position?, scene_hint?, available_tools[]}` → `{selected, turn_kind?, reason, suppression_reason?, scene_id, scene_digest, role, local_observations, granted_tools[], queue_depth, suppressed_agents[]}` |
+| `director.gate` | Node→Python | `{agent_id, event_kind, event_text, source_agent?, mentions[], position?, scene_hint?, available_tools[]}` → `{selected, turn_kind?, reason, suppression_reason?, scene_id, scene_digest, role, local_observations, granted_tools[], build_macro?, queue_depth, suppressed_agents[]}` |
 
 **Naming reconciliation:** issue #541's scope text says `memory.read`; ADR §6
 (authoritative) calls the same verb `memory.recall`. The contract uses

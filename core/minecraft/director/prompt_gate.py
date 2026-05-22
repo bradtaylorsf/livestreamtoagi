@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from collections import OrderedDict, deque
 from collections.abc import Mapping, Sequence
@@ -14,6 +15,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.bridge.contract import Vec3
+from core.minecraft.director.build_macro_scheduler import (
+    BuildMacroAssignment,
+    BuildMacroScheduler,
+)
 from core.minecraft.director.scene_inbox import Scene, SceneEventType, SceneInbox
 from core.minecraft.director.spatial_hearing import (
     AgentPose,
@@ -51,6 +56,7 @@ class PromptDecision(BaseModel):
     role: str
     local_observations: dict[str, Any] = Field(default_factory=dict)
     available_tools: list[str] = Field(default_factory=list)
+    build_macro: BuildMacroAssignment | None = None
     suppressed_agents: list[str] = Field(default_factory=list)
     queue_depth: int = Field(ge=0)
 
@@ -78,6 +84,7 @@ class _CachedVerdict:
     scheduler_decision: SchedulerDecision
     selected_turns: dict[str, SchedulerTurn]
     available_tools: list[str]
+    build_macros: dict[str, BuildMacroAssignment]
     created_ms: int
     accounted_selected: set[str] = field(default_factory=set)
 
@@ -86,6 +93,7 @@ class _CachedVerdict:
 class _GateState:
     inbox: SceneInbox
     scheduler: DirectorTurnScheduler
+    build_scheduler: BuildMacroScheduler = field(default_factory=BuildMacroScheduler)
     agents: dict[str, _AgentState] = field(default_factory=dict)
     recent_speakers: deque[str] = field(default_factory=lambda: deque(maxlen=16))
     decisions: OrderedDict[str, _CachedVerdict] = field(default_factory=OrderedDict)
@@ -238,6 +246,15 @@ class DirectorPromptGate:
             recent_speakers=list(state.recent_speakers),
             seed=seed,
         )
+        build_macros = self._build_macro_assignments(
+            scene=scene,
+            scheduler_decision=scheduler_decision,
+            candidates=candidates,
+            event_text=event_text,
+            origin=origin,
+            available_tools=available_tools,
+            now_ms=now_ms,
+        )
         return _CachedVerdict(
             event_key=event_key,
             event_kind=event_kind,
@@ -248,6 +265,7 @@ class DirectorPromptGate:
             scheduler_decision=scheduler_decision,
             selected_turns={turn.agent_id: turn for turn in scheduler_decision.selected},
             available_tools=available_tools,
+            build_macros=build_macros,
             created_ms=now_ms,
         )
 
@@ -298,6 +316,48 @@ class DirectorPromptGate:
             )
         return candidates
 
+    def _build_macro_assignments(
+        self,
+        *,
+        scene: Scene,
+        scheduler_decision: SchedulerDecision,
+        candidates: Sequence[SchedulerCandidate],
+        event_text: str,
+        origin: Vec3,
+        available_tools: Sequence[str],
+        now_ms: int,
+    ) -> dict[str, BuildMacroAssignment]:
+        if not _is_build_macro_intent(event_text, available_tools):
+            return {}
+        selected = scheduler_decision.selected
+        owner = scheduler_decision.selected_planner_agent_id
+        if owner is None and selected:
+            owner = selected[0].agent_id
+        if owner is None:
+            return {}
+
+        acquisition = self._state.build_scheduler.try_acquire_plan(
+            scene_id=scene.scene_id,
+            agent_id=owner,
+            description=_build_macro_description(event_text),
+            origin=origin.model_dump(),
+            scene=scene,
+            candidates=candidates,
+            now_ms=now_ms,
+        )
+        assignments = dict(acquisition.support_assignments)
+        assignments[owner] = BuildMacroAssignment(
+            scene_id=acquisition.scene_id,
+            plan_id=acquisition.plan_id,
+            owner=acquisition.owner,
+            role="planner_owner",
+            reason=acquisition.reason,
+            granted=acquisition.granted,
+            status=acquisition.status,
+            cache_key=acquisition.cache_key,
+        )
+        return assignments
+
     def _decision_for_agent(
         self,
         agent_id: str,
@@ -333,6 +393,7 @@ class DirectorPromptGate:
             suppression_reason = cached.scheduler_decision.suppression_reason or "fanout_capped"
 
         queue_depth = len(self._state.decisions)
+        build_macro = cached.build_macros.get(agent_id)
         decision = PromptDecision(
             selected=selected,
             turn_kind=turn_kind,
@@ -342,7 +403,12 @@ class DirectorPromptGate:
             scene_digest=_scene_digest(cached),
             role=role,
             local_observations=_local_observations(self._state, agent_id, cached),
-            available_tools=cached.available_tools if selected else [],
+            available_tools=_available_tools_for_agent(
+                cached.available_tools,
+                selected=selected,
+                build_macro=build_macro,
+            ),
+            build_macro=build_macro,
             suppressed_agents=suppressed_agents,
             queue_depth=queue_depth,
         )
@@ -411,6 +477,8 @@ def _scene_event_type(kind: GateEventKind, event_text: Any) -> SceneEventType:
         return SceneEventType.UNSTUCK
     if "stuck" in text:
         return SceneEventType.STUCK
+    if _is_build_macro_intent(text, ()):
+        return SceneEventType.BUILD_ACTION
     if kind == "chat":
         return SceneEventType.CHAT
     if any(word in text for word in ("build", "place", "break", "block", "dig")):
@@ -513,6 +581,54 @@ def _active_task_match(role: str, event_type: SceneEventType, event_text: str) -
     )
 
 
+def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> bool:
+    lowered = str(event_text or "").lower()
+    if any(str(tool).lower() == "!planandbuild" for tool in available_tools):
+        if any(token in lowered for token in ("build", "cabin", "hut", "wall", "shelter")):
+            return True
+    if "!planandbuild" in lowered or "planandbuild" in lowered:
+        return True
+    return any(
+        pattern in lowered
+        for pattern in (
+            "build a ",
+            "build an ",
+            "build the ",
+            "build us ",
+            "build me ",
+            "builder plan",
+            "cabin",
+            "hut",
+            "shelter",
+            "storage corner",
+            "wall",
+            "watchtower",
+        )
+    )
+
+
+def _build_macro_description(event_text: str) -> str:
+    text = " ".join(str(event_text or "").split())
+    match = re.search(r"!?planAndBuild\s*\((?P<arg>.*?)\)", text, flags=re.IGNORECASE)
+    if match:
+        text = match.group("arg").strip().strip("\"'")
+    return _clip(text, 180) or "scene build"
+
+
+def _available_tools_for_agent(
+    available_tools: Sequence[str],
+    *,
+    selected: bool,
+    build_macro: BuildMacroAssignment | None,
+) -> list[str]:
+    if not selected:
+        return []
+    tools = [tool for tool in available_tools if tool != "!planAndBuild"]
+    if build_macro is not None and build_macro.role == "planner_owner" and build_macro.granted:
+        tools.append("!planAndBuild")
+    return sorted(set(tools))
+
+
 def _default_role(agent_id: str) -> str:
     return {
         "alpha": "quiet errand runner",
@@ -586,6 +702,9 @@ def _log_prompt_decision(decision: PromptDecision, *, agent_id: str) -> None:
                 "turn_kind": decision.turn_kind,
                 "reason": decision.reason,
                 "suppression_reason": decision.suppression_reason,
+                "build_plan_id": decision.build_macro.plan_id if decision.build_macro else None,
+                "build_owner": decision.build_macro.owner if decision.build_macro else None,
+                "build_role": decision.build_macro.role if decision.build_macro else None,
                 "queue_depth": decision.queue_depth,
                 "suppressed_agents_count": len(decision.suppressed_agents),
             }

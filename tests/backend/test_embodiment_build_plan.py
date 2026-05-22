@@ -596,6 +596,312 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_plan_and_build_scene_lock_suppresses_duplicate_and_reuses_cache(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([
+    ['0,63,0', 'stone'],
+    ['1,63,0', 'stone'],
+]);
+let plannerCalls = 0;
+let releaseBuilder;
+const builderStarted = new Promise((resolve) => {{
+    releaseBuilder = () => {{}};
+    globalThis.__resolveBuilderStarted = resolve;
+}});
+const waitForRelease = new Promise((resolve) => {{
+    releaseBuilder = resolve;
+}});
+
+function makeBot(username) {{
+    return {{
+        username,
+        entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+        inventory: {{
+            slots: [{{ name: 'oak_log' }}, {{ name: 'torch' }}],
+            items() {{ return this.slots.filter(Boolean); }},
+        }},
+        blockAt(pos) {{
+            const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+            return block(world.get(key(cell)) || 'air', cell);
+        }},
+        async equip(item) {{
+            this.heldItem = item;
+        }},
+        async placeBlock(referenceBlock, faceVector) {{
+            const target = {{
+                x: referenceBlock.position.x + faceVector.x,
+                y: referenceBlock.position.y + faceVector.y,
+                z: referenceBlock.position.z + faceVector.z,
+            }};
+            world.set(key(target), this.heldItem.name);
+        }},
+        async dig(targetBlock) {{
+            world.set(key(targetBlock.position), 'air');
+        }},
+    }};
+}}
+
+const rex = {{
+    name: 'rex',
+    bot: makeBot('RexHarnessBot'),
+    __ltagDirectorContext: {{
+        scene_id: 'scene-build-cache',
+        build_macro: {{
+            scene_id: 'scene-build-cache',
+            plan_id: 'director-plan-cache',
+            owner: 'rex',
+            role: 'planner_owner',
+            granted: true,
+        }},
+    }},
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                plannerCalls += 1;
+                globalThis.__resolveBuilderStarted();
+                await waitForRelease;
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }},
+                        {{ dx: 1, dy: 0, dz: 0, block_type: 'torch' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const vera = {{
+    name: 'vera',
+    bot: makeBot('VeraHarnessBot'),
+    __ltagDirectorContext: {{
+        scene_id: 'scene-build-cache',
+        build_macro: {{
+            scene_id: 'scene-build-cache',
+            plan_id: 'director-plan-cache',
+            owner: 'rex',
+            role: 'support',
+            support_task: 'Gather oak logs for Rex.',
+            granted: false,
+        }},
+    }},
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                throw new Error('support agent must not invoke builder model');
+            }},
+        }},
+    }},
+}};
+
+const firstPromise = mod.planAndBuildAction.perform(rex, 'shared cabin');
+await builderStarted;
+const second = await mod.planAndBuildAction.perform(vera, 'shared cabin');
+releaseBuilder();
+const first = await firstPromise;
+const third = await mod.planAndBuildAction.perform(rex, 'shared cabin');
+
+process.stdout.write(JSON.stringify({{
+    first,
+    second,
+    third,
+    plannerCalls,
+    finalBlocks: {{ a: world.get('0,64,0'), b: world.get('1,64,0') }},
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "rex",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+            "MC_SIM_BUILD_COOLDOWN_SEC": "0",
+        },
+    )
+
+    assert result["plannerCalls"] == 1
+    assert "success" in result["first"]
+    assert result["second"] == "plan-and-build skipped: scene_locked"
+    assert "success" in result["third"]
+    assert result["finalBlocks"] == {"a": "oak_log", "b": "torch"}
+    skipped = [
+        event["payload"]
+        for event in result["events"]
+        if event["type"] == "build_plan.generation.skipped"
+    ]
+    assert any(
+        payload["reason"] == "scene_locked" and payload["owner"] == "rex" for payload in skipped
+    )
+    assert any(payload["reason"] == "cache_hit" for payload in skipped)
+    completed = [
+        event["payload"]
+        for event in result["events"]
+        if event["type"] == "build_plan.generation.completed"
+    ]
+    assert completed[0]["scene_id"] == "scene-build-cache"
+    assert completed[0]["owner"] == "rex"
+    assert completed[-1]["source"] == "plan_cache"
+    execution_completed = [
+        event["payload"]
+        for event in result["events"]
+        if event["type"] == "build_plan.execution.completed"
+    ]
+    assert execution_completed[-1]["verified_blocks"] == 2
+
+
+@requires_node
+def test_plan_and_build_provider_metadata_for_local_and_openrouter_modes(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    provider_path = plan_action.parents[1] / "skills" / "builder_provider.js"
+    governor_path = plan_action.parents[1] / "skills" / "build_plan_governor.js"
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const provider = await import(pathToFileURL({json.dumps(str(provider_path))}).href);
+const governor = await import(pathToFileURL({json.dumps(str(governor_path))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+
+function makeAgent(name, sceneId, model) {{
+    const world = new Map([['0,63,0', 'stone']]);
+    return {{
+        name,
+        bot: {{
+            username: `${{name}}ProviderHarnessBot`,
+            entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+            inventory: {{
+                slots: [{{ name: 'oak_log' }}],
+                items() {{ return this.slots.filter(Boolean); }},
+            }},
+            blockAt(pos) {{
+                const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+                return block(world.get(key(cell)) || 'air', cell);
+            }},
+            async equip(item) {{
+                this.heldItem = item;
+            }},
+            async placeBlock(referenceBlock, faceVector) {{
+                const target = {{
+                    x: referenceBlock.position.x + faceVector.x,
+                    y: referenceBlock.position.y + faceVector.y,
+                    z: referenceBlock.position.z + faceVector.z,
+                }};
+                world.set(key(target), this.heldItem.name);
+            }},
+            async dig(targetBlock) {{
+                world.set(key(targetBlock.position), 'air');
+            }},
+        }},
+        __ltagDirectorContext: {{
+            scene_id: sceneId,
+            build_macro: {{
+                scene_id: sceneId,
+                plan_id: `${{sceneId}}-plan`,
+                owner: name,
+                role: 'planner_owner',
+                granted: true,
+            }},
+        }},
+        prompter: {{
+            code_model: model,
+        }},
+    }};
+}}
+
+async function runLocal() {{
+    globalThis.__timelineEvents = [];
+    provider.resetBuilderProviderState();
+    governor.resetBuildPlanGovernor();
+    process.env.MC_SIM_BUILDER_PROVIDER = 'local';
+    const agent = makeAgent('rex', 'scene-local-provider', {{
+        model_name: 'local/build-json',
+        async sendRequest() {{
+            return JSON.stringify({{ blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }}] }});
+        }},
+    }});
+    await mod.planAndBuildAction.perform(agent, 'local marker');
+    return globalThis.__timelineEvents.find((event) => event.type === 'build_plan.generation.completed').payload;
+}}
+
+async function runOpenRouter() {{
+    globalThis.__timelineEvents = [];
+    provider.resetBuilderProviderState();
+    governor.resetBuildPlanGovernor();
+    process.env.MC_SIM_BUILDER_PROVIDER = 'openrouter';
+    process.env.MC_SIM_BUILDER_OPENROUTER_MODEL = 'openrouter/test-builder';
+    process.env.MC_SIM_BUILDER_OPENROUTER_API_KEY = 'test-key';
+    process.env.MC_SIM_BUILDER_USD_PER_1K_INPUT = '0.001';
+    process.env.MC_SIM_BUILDER_USD_PER_1K_OUTPUT = '0.002';
+    globalThis.fetch = async () => ({{
+        ok: true,
+        status: 200,
+        async text() {{
+            return JSON.stringify({{
+                choices: [
+                    {{
+                        message: {{
+                            content: JSON.stringify({{
+                                blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }}],
+                            }}),
+                        }},
+                    }},
+                ],
+                usage: {{ prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 }},
+            }});
+        }},
+    }});
+    const agent = makeAgent('fork', 'scene-openrouter-provider', null);
+    await mod.planAndBuildAction.perform(agent, 'openrouter marker');
+    return globalThis.__timelineEvents.find((event) => event.type === 'build_plan.generation.completed').payload;
+}}
+
+const localPayload = await runLocal();
+const openrouterPayload = await runOpenRouter();
+process.stdout.write(JSON.stringify({{ localPayload, openrouterPayload }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+            "MC_SIM_BUILD_COOLDOWN_SEC": "0",
+        },
+    )
+
+    assert result["localPayload"]["builder_provider"] == "local"
+    assert result["localPayload"]["builder_model"] == "local/build-json"
+    assert result["localPayload"]["paid"] is False
+    assert result["localPayload"]["request_count_run"] == 0
+    assert result["openrouterPayload"]["builder_provider"] == "openrouter"
+    assert result["openrouterPayload"]["builder_model"] == "openrouter/test-builder"
+    assert result["openrouterPayload"]["paid"] is True
+    assert result["openrouterPayload"]["request_count_run"] == 1
+    assert result["openrouterPayload"]["request_count_agent"] == 1
+    assert result["openrouterPayload"]["estimated_usd"] > 0
+
+
+@requires_node
 def test_plan_and_build_rejects_invalid_model_plan_and_uses_starter_blueprint(
     tmp_path: Path,
 ) -> None:

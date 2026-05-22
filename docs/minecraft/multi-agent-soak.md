@@ -234,10 +234,17 @@ when OpenRouter provider/model configuration is missing. Set
 is optional; estimated USD uses `MC_SIM_BUILDER_USD_PER_1K_INPUT` and
 `MC_SIM_BUILDER_USD_PER_1K_OUTPUT` when provided.
 
+Director V2 treats `!planAndBuild` as a scheduled macro, not a normal tool that
+every character may invoke independently. One scene has one build-plan owner;
+the owner receives `!planAndBuild`, while nearby non-owners receive normal
+support roles such as gathering, clearing, guarding, or conversation support.
+The Node governor mirrors that scene lock so stale direct commands are skipped
+with `reason=scene_locked` before any provider call.
+
 The build governor runs before any provider call. Each agent may have one
-active build at a time; equivalent completed builds are cooled down for
-`MC_SIM_BUILD_COOLDOWN_SEC` seconds, and cached plans are reused without a new
-builder-model call. Defaults:
+active build at a time, each scene may have one active plan owner, equivalent
+completed builds are cooled down for `MC_SIM_BUILD_COOLDOWN_SEC` seconds, and
+cached plans are reused without a new builder-model call. Defaults:
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -247,13 +254,36 @@ builder-model call. Defaults:
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
 
 Plan evidence appears as `build_plan.generation.*` and
-`build_plan.execution.*` events. Provider, model, paid/local request counts,
-token usage, estimated USD, `fallback_reason`, and budget/provider failures are
+`build_plan.execution.*` events. `scene_id`, build-plan id, owner,
+provider/model, paid/local request counts, token usage, estimated USD,
+`fallback_reason`, execution result, and parsed verified block counts are
 included in `timeline.ndjson`, `timeline-totals.json`, `summary.txt`, and
-`monitor.html`. `build_plan.generation.skipped` records `active_build_exists`,
-`cache_hit`, `cooldown`, and `per_agent_cap` outcomes. `!executeCode` remains
-separately gated by
+`monitor.html`. `build_plan.generation.skipped` records `scene_locked`,
+`active_build_exists`, `cache_hit`, `cooldown`, and `per_agent_cap` outcomes.
+`!executeCode` remains separately gated by
 `SOAK_BLOCK_EXECUTE_CODE_ACTIONS` / `MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS`.
+
+Local-only builder smoke:
+
+```bash
+SOAK_BUILDER_PROVIDER=local \
+MC_SIM_BUILD_MODE=plan \
+scripts/minecraft/soak.sh --dry-run
+```
+
+OpenRouter builder smoke, using exactly one paid builder-plan request during
+preflight:
+
+```bash
+SOAK_BUILDER_PROVIDER=openrouter \
+MC_SIM_BUILD_MODE=plan \
+MC_SIM_BUILDER_PROVIDER=openrouter \
+MC_SIM_BUILDER_OPENROUTER_MODEL=<openrouter-model-id> \
+MC_SIM_BUILDER_OPENROUTER_API_KEY=<key> \
+MC_SIM_BUILDER_MAX_CALLS_PER_RUN=1 \
+MC_SIM_BUILDER_MAX_CALLS_PER_AGENT=1 \
+scripts/minecraft/soak.sh --dry-run
+```
 
 ## Action-Command Reliability Gate
 
