@@ -144,12 +144,8 @@ def test_package_json_exposes_director_acceptance_aliases() -> None:
 
     assert scripts["mc:sim:smoke"] == "scripts/minecraft/run-local-sim.sh smoke"
     assert scripts["mc:sim:soak"] == "scripts/minecraft/run-local-sim.sh soak"
-    assert scripts["mc:sim:smoke:director"] == (
-        "scripts/minecraft/run-local-sim.sh smoke-director"
-    )
-    assert scripts["mc:sim:soak:director"] == (
-        "scripts/minecraft/run-local-sim.sh soak-director"
-    )
+    assert scripts["mc:sim:smoke:director"] == ("scripts/minecraft/run-local-sim.sh smoke-director")
+    assert scripts["mc:sim:soak:director"] == ("scripts/minecraft/run-local-sim.sh soak-director")
     assert scripts["verify:director-acceptance-soak"] == (
         ".venv/bin/pytest tests/backend/test_minecraft_director_acceptance_soak.py -v"
     )
@@ -339,9 +335,9 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
     assert report["metrics"]["useful_memory_digest_count"] == 1
     assert report["metrics"]["tool_call_count"] == 1
     assert report["metrics"]["macro_attempt_count"] == 1
-    assert "None. Evidence is sufficient to unblock #511, #512, and #514." in report[
-        "residual_gaps"
-    ]
+    assert (
+        "None. Evidence is sufficient to unblock #511, #512, and #514." in report["residual_gaps"]
+    )
     for artifact in (
         "director-decisions.ndjson",
         "tool-parity.ndjson",
@@ -350,3 +346,82 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
         "acceptance-report.md",
     ):
         assert (run_dir / artifact).is_file()
+
+
+def test_acceptance_report_counts_distinct_selected_agents_for_storm_ratio(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metadata.env").write_text(
+        "start_utc=2026-05-21T00:00:00Z\ncost_agents=alpha vera rex aurora pixel fork sentinel grok\n",
+        encoding="utf-8",
+    )
+    (run_dir / "behavior-totals.env").write_text(
+        "behavior_gate_status=pass\ntotal_restart_recurrences=0\n",
+        encoding="utf-8",
+    )
+    (run_dir / "early-exits.tsv").write_text("", encoding="utf-8")
+    (run_dir / "heartbeat-halts.tsv").write_text("", encoding="utf-8")
+    events = [
+        {
+            "ts": "2026-05-21T00:05:10Z",
+            "event_type": "llm.queue.enqueued",
+            "payload": {"queue_depth": 1},
+        },
+        *[
+            {
+                "ts": f"2026-05-21T00:05:{11 + index:02d}Z",
+                "event_type": "director.gate.decision",
+                "agent": "alpha",
+                "payload": {
+                    "scene_id": "scene-1",
+                    "selected": True,
+                    "reason_code": "followup",
+                    "available_tools": [],
+                },
+            }
+            for index in range(5)
+        ],
+        {
+            "ts": "2026-05-21T00:05:20Z",
+            "event_type": "director.scene.digest",
+            "agent": "alpha",
+            "payload": {
+                "scene_id": "scene-1",
+                "distributed_to": ["alpha"],
+                "entries_count": 5,
+                "summary": "Alpha continued the same scene without fanout.",
+            },
+        },
+        {
+            "ts": "2026-05-21T00:05:21Z",
+            "event_type": "build_plan.generation.completed",
+            "agent": "alpha",
+            "payload": {"scene_id": "scene-1", "plan_id": "plan-1", "provider": "local"},
+        },
+    ]
+    (run_dir / "timeline.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPORT_BUILDER),
+            "--run-dir",
+            str(run_dir),
+            "--max-selected-agent-ratio",
+            "0.5",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    report = json.loads((run_dir / "acceptance-report.json").read_text(encoding="utf-8"))
+    assert report["overall_status"] == "pass"
+    assert report["metrics"]["max_selected_agent_scene_ratio"] == 0.125

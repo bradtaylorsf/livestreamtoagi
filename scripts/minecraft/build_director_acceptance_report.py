@@ -242,7 +242,8 @@ def normalize_tool_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "agent": event_agent(event),
                     "tool_name": data.get("tool_name") or "unknown",
                     "classification": data.get("classification"),
-                    "status": data.get("status") or ("ok" if data.get("ok") is not False else "error"),
+                    "status": data.get("status")
+                    or ("ok" if data.get("ok") is not False else "error"),
                     "ok": data.get("ok", True),
                     "latency_ms": coerce_int(data.get("latency_ms")),
                     "error_class": data.get("error_class"),
@@ -372,7 +373,12 @@ def useful_memory_digest(row: dict[str, Any]) -> bool:
     distributed = row.get("distributed_to")
     summary = str(row.get("summary") or "")
     if event_type == "director.scene.digest":
-        return entries > 0 and bool(summary.strip()) and isinstance(distributed, list) and bool(distributed)
+        return (
+            entries > 0
+            and bool(summary.strip())
+            and isinstance(distributed, list)
+            and bool(distributed)
+        )
     return entries > 0 and row.get("ok") is not False
 
 
@@ -387,7 +393,9 @@ def normalize_memory_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "event_type": event.get("event_type"),
             "scene_id": event_scene_id(event),
             "agent": event_agent(event),
-            "participants": data.get("participants") if isinstance(data.get("participants"), list) else [],
+            "participants": data.get("participants")
+            if isinstance(data.get("participants"), list)
+            else [],
             "distributed_to": data.get("distributed_to")
             if isinstance(data.get("distributed_to"), list)
             else [],
@@ -436,6 +444,7 @@ def selected_scene_metrics(
 ) -> tuple[Counter[str], Counter[str], float, list[str]]:
     selected_by_scene: Counter[str] = Counter()
     selected_by_agent: Counter[str] = Counter()
+    selected_agents_by_scene: dict[str, set[str]] = {}
     for event in events:
         if event.get("event_type") != "director.gate.decision":
             continue
@@ -443,12 +452,18 @@ def selected_scene_metrics(
         if not boolish(data.get("selected")):
             continue
         scene_id = event_scene_id(event) or "unknown"
+        agent_id = event_agent(event) or "unknown"
         selected_by_scene[scene_id] += 1
-        selected_by_agent[event_agent(event) or "unknown"] += 1
-    max_selected_in_scene = max(selected_by_scene.values(), default=0)
+        selected_by_agent[agent_id] += 1
+        selected_agents_by_scene.setdefault(scene_id, set()).add(agent_id)
+    max_selected_in_scene = max(
+        (len(agents) for agents in selected_agents_by_scene.values()), default=0
+    )
     selected_agent_ratio = max_selected_in_scene / max(1, agent_count)
     multi_turn_scene_ids = [
-        scene_id for scene_id, selected_count in sorted(selected_by_scene.items()) if selected_count >= 2
+        scene_id
+        for scene_id, selected_count in sorted(selected_by_scene.items())
+        if selected_count >= 2
     ]
     return selected_by_scene, selected_by_agent, selected_agent_ratio, multi_turn_scene_ids
 
@@ -456,7 +471,9 @@ def selected_scene_metrics(
 def line_count(path: Path) -> int:
     if not path.exists():
         return 0
-    return sum(1 for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line)
+    return sum(
+        1 for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line
+    )
 
 
 def report_markdown(report: dict[str, Any]) -> str:
@@ -637,7 +654,9 @@ def build_report(
     criteria.append(
         Criterion(
             "no_unrecovered_bot_restart_loop",
-            "pass" if early_exits == 0 and heartbeat_halts == 0 and restart_recurrences == 0 else "fail",
+            "pass"
+            if early_exits == 0 and heartbeat_halts == 0 and restart_recurrences == 0
+            else "fail",
             (
                 f"early_exits={early_exits}; heartbeat_halts={heartbeat_halts}; "
                 f"restart_recurrences={restart_recurrences}"
@@ -710,7 +729,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--queue-threshold",
         type=int,
-        default=int(os.environ.get("SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD", DEFAULT_QUEUE_DEPTH_THRESHOLD)),
+        default=int(
+            os.environ.get("SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD", DEFAULT_QUEUE_DEPTH_THRESHOLD)
+        ),
         help=f"Maximum allowed LM queue depth after warm-up, exclusive. Default: {DEFAULT_QUEUE_DEPTH_THRESHOLD}",
     )
     parser.add_argument(
