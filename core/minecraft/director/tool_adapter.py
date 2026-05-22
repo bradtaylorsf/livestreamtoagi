@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from core.llm_client import agent_cost_context
+from core.minecraft.director.timeline import emit_director_timeline_event
 from core.minecraft.director.tool_parity import (
     TOOL_PARITY,
     ToolClassification,
@@ -62,6 +64,7 @@ class DirectorToolAdapter:
     ) -> dict[str, Any]:
         """Invoke a Director-approved backend tool or return a typed rejection."""
 
+        started = time.perf_counter()
         args = dict(arguments or {})
         entry = TOOL_PARITY.get(tool_name)
         if entry is None:
@@ -70,13 +73,27 @@ class DirectorToolAdapter:
                 "reason": "unknown_tool",
                 "tool_name": tool_name,
             }
-            self._log_tool_call(agent_id, tool_name, None, result, simulation_id, scene_id)
+            self._log_tool_call(
+                agent_id,
+                tool_name,
+                None,
+                result,
+                simulation_id,
+                scene_id,
+                started_at=started,
+            )
             return result
 
         if not (is_callable_now(tool_name) or is_approval_gated(tool_name)):
             result = self._not_callable_result(entry)
             self._log_tool_call(
-                agent_id, tool_name, entry.classification, result, simulation_id, scene_id
+                agent_id,
+                tool_name,
+                entry.classification,
+                result,
+                simulation_id,
+                scene_id,
+                started_at=started,
             )
             return result
 
@@ -88,7 +105,13 @@ class DirectorToolAdapter:
                 "classification": entry.classification,
             }
             self._log_tool_call(
-                agent_id, tool_name, entry.classification, result, simulation_id, scene_id
+                agent_id,
+                tool_name,
+                entry.classification,
+                result,
+                simulation_id,
+                scene_id,
+                started_at=started,
             )
             return result
 
@@ -104,10 +127,17 @@ class DirectorToolAdapter:
             if entry.linked_issue is not None:
                 result["linked_issue"] = entry.linked_issue
             self._log_tool_call(
-                agent_id, tool_name, entry.classification, result, simulation_id, scene_id
+                agent_id,
+                tool_name,
+                entry.classification,
+                result,
+                simulation_id,
+                scene_id,
+                started_at=started,
             )
             return result
 
+        error_class = None
         try:
             logger.debug("Director V2 executing tool %s for %s", tool_name, agent_id)
             with agent_cost_context(agent_id):
@@ -119,13 +149,21 @@ class DirectorToolAdapter:
                 )
         except Exception as exc:
             logger.warning("Director V2 tool %s failed for %s: %s", tool_name, agent_id, exc)
+            error_class = exc.__class__.__name__
             result = {"status": "error", "reason": str(exc)}
 
         if is_approval_gated(tool_name):
             result = self._approval_result(entry, result)
 
         self._log_tool_call(
-            agent_id, tool_name, entry.classification, result, simulation_id, scene_id
+            agent_id,
+            tool_name,
+            entry.classification,
+            result,
+            simulation_id,
+            scene_id,
+            started_at=started,
+            error_class=error_class,
         )
         return result
 
@@ -166,13 +204,30 @@ class DirectorToolAdapter:
         result: Mapping[str, Any],
         simulation_id: UUID | None,
         scene_id: str | None,
+        *,
+        started_at: float,
+        error_class: str | None = None,
     ) -> None:
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        status = str(result.get("status", "unknown"))
+        if error_class is None and status in {"error", "rejected"}:
+            reason = result.get("reason")
+            error_class = str(reason).strip() if reason else status
         payload = {
             "agent_id": agent_id,
             "tool_name": tool_name,
             "classification": classification,
-            "status": result.get("status", "unknown"),
+            "status": status,
             "simulation_id": str(simulation_id) if simulation_id else None,
             "scene_id": scene_id,
+            "ok": status not in {"error", "rejected"},
+            "latency_ms": latency_ms,
+            "error_class": error_class,
         }
         logger.info("director_tool_call %s", json.dumps(payload, sort_keys=True))
+        emit_director_timeline_event(
+            "director.tool.call",
+            payload,
+            agent_id=agent_id,
+            trace_id=scene_id,
+        )

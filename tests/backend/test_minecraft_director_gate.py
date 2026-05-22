@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -207,3 +209,26 @@ async def test_director_gate_bridge_response_surfaces_build_macro(
     assert response.payload["build_macro"]["role"] == "planner_owner"
     assert response.payload["build_macro"]["granted"] is True
     assert "!planAndBuild" in response.payload["granted_tools"]
+
+
+async def test_director_gate_emits_soak_timeline_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("SOAK_RUN_DIR", str(tmp_path))
+    gate = _gate()
+
+    decision = await gate.evaluate("sim-test", "vera", _event(trace_id="trace-gate-1"))
+
+    path = tmp_path / "timeline-raw" / "director_v2.ndjson"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    gate_records = [
+        record for record in records if record["event_type"] == "director.gate.decision"
+    ]
+    assert len(gate_records) == 1
+    record = gate_records[0]
+    assert record["trace_id"] == "trace-gate-1"
+    assert record["agent"] == "vera"
+    assert record["payload"]["scene_id"] == decision.scene_id
+    assert record["payload"]["selected"] is decision.selected
+    assert record["payload"]["queue_depth"] == decision.queue_depth

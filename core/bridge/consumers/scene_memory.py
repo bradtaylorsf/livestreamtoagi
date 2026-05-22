@@ -16,6 +16,7 @@ from core.minecraft.director.scene_inbox import (
     SceneBufferEntry,
     SceneInbox,
 )
+from core.minecraft.director.timeline import emit_director_timeline_event
 
 if TYPE_CHECKING:
     from core.memory.compaction import MemoryCompactor
@@ -144,6 +145,7 @@ class SceneMemoryConsumer:
             return
 
         primary_agent_id = scene.participants[0] if scene.participants else recipients[0]
+        started = time.perf_counter()
         try:
             result = await self.compactor.compact_interaction(
                 agent_id=primary_agent_id,
@@ -170,6 +172,35 @@ class SceneMemoryConsumer:
                 )
 
             summary = _recall_summary(result) or _fallback_summary(interaction)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            digest_payload = {
+                "scene_id": scene.scene_id,
+                "participants": scene.participants,
+                "observers": scene.observers,
+                "entries_count": len(closed_scene.buffered_events),
+                "distributed_to": recipients,
+                "tokens": _estimate_tokens(interaction) + _estimate_tokens(summary),
+                "latency_ms": latency_ms,
+                "transcript_id": transcript_id,
+                "close_reason": closed_scene.close_reason,
+                "summary": summary,
+            }
+            emit_director_timeline_event(
+                "director.memory.compaction",
+                {
+                    **digest_payload,
+                    "primary_agent_id": primary_agent_id,
+                    "ok": True,
+                },
+                agent_id=primary_agent_id,
+                trace_id=scene.scene_id,
+            )
+            emit_director_timeline_event(
+                "director.scene.digest",
+                digest_payload,
+                agent_id=primary_agent_id,
+                trace_id=scene.scene_id,
+            )
             await self.event_bus.emit(
                 EventType.BRIDGE_SCENE_DIGEST,
                 {
@@ -184,6 +215,24 @@ class SceneMemoryConsumer:
             )
         except Exception as exc:
             error_class = classify_compaction_error(exc) or exc.__class__.__name__
+            emit_director_timeline_event(
+                "director.memory.compaction",
+                {
+                    "scene_id": scene.scene_id,
+                    "participants": scene.participants,
+                    "observers": scene.observers,
+                    "entries_count": len(closed_scene.buffered_events),
+                    "distributed_to": recipients,
+                    "tokens": _estimate_tokens(interaction),
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "primary_agent_id": primary_agent_id,
+                    "close_reason": closed_scene.close_reason,
+                    "ok": False,
+                    "error_class": error_class,
+                },
+                agent_id=primary_agent_id,
+                trace_id=scene.scene_id,
+            )
             logger.error(
                 "Scene memory compaction failed",
                 extra={
@@ -308,6 +357,11 @@ def _fallback_summary(interaction: str) -> str:
         if stripped and not stripped.startswith("##"):
             return _clip(stripped, 280)
     return "Minecraft scene compacted."
+
+
+def _estimate_tokens(value: Any) -> int:
+    text = str(value or "")
+    return max(1, (len(text) + 3) // 4) if text else 0
 
 
 def _clip(text: str, limit: int) -> str:

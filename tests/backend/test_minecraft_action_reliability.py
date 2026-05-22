@@ -11,9 +11,7 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ANALYZER = REPO_ROOT / "scripts" / "minecraft" / "analyze_action_reliability.py"
-FAILED_SOAK_FIXTURE = (
-    REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_soak_2026-05-21"
-)
+FAILED_SOAK_FIXTURE = REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_soak_2026-05-21"
 
 
 def _load_analyzer() -> ModuleType:
@@ -178,9 +176,7 @@ def test_mindcraft_failures_are_classified_from_execution_blocks(tmp_path: Path)
     )
 
     rex = data["agents"]["rex"]
-    classes = {
-        item["class"]: item["count"] for item in rex["execution_failure_classes"]
-    }
+    classes = {item["class"]: item["count"] for item in rex["execution_failure_classes"]}
     assert rex["counts"]["emitted_commands"] == 3
     assert rex["counts"]["execution_failures"] == 3
     assert classes["placement_blocked"] == 1
@@ -209,12 +205,8 @@ def test_failed_soak_fixture_ignores_incoming_chat_and_groups_execution_blocks(
     )
 
     sentinel = data["agents"]["sentinel"]
-    failed_parse_text = "\n".join(
-        item["text"] for item in sentinel["examples"]["failed_parses"]
-    )
-    classes = {
-        item["class"]: item["count"] for item in sentinel["execution_failure_classes"]
-    }
+    failed_parse_text = "\n".join(item["text"] for item in sentinel["examples"]["failed_parses"])
+    classes = {item["class"]: item["count"] for item in sentinel["execution_failure_classes"]}
 
     assert "received message from Sentinel" not in failed_parse_text
     assert sentinel["counts"]["parse_failures"] == 0
@@ -439,6 +431,87 @@ def test_builder_provider_usage_is_reported_separately(tmp_path: Path) -> None:
     assert metrics["builder_plan_skipped_per_agent_cap"] == 1
     assert metrics["builder_plan_cache_hits"] == 2
     assert metrics["builder_plan_max_per_agent"] == 6
+
+
+def test_director_v2_counts_are_reported_without_changing_reliability_metrics(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "director-v2"
+    _write_bot_log(run_dir, "vera", ["Vera started."])
+    _write_bot_log(run_dir, "rex", ["Rex started."])
+    raw_dir = run_dir / "timeline-raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {
+            "ts": "2026-05-21T00:00:00Z",
+            "event_type": "director.gate.decision",
+            "agent": "vera",
+            "payload": {
+                "agent_id": "vera",
+                "scene_id": "scene-1",
+                "selected": True,
+                "reason": "direct_address",
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:01Z",
+            "event_type": "director.gate.decision",
+            "agent": "rex",
+            "payload": {
+                "agent_id": "rex",
+                "scene_id": "scene-1",
+                "selected": False,
+                "suppression_reason": "fanout_capped",
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:02Z",
+            "event_type": "director.memory.compaction",
+            "agent": "vera",
+            "payload": {
+                "scene_id": "scene-1",
+                "distributed_to": ["vera", "rex"],
+                "ok": True,
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:03Z",
+            "event_type": "director.tool.call",
+            "agent": "rex",
+            "payload": {
+                "agent_id": "rex",
+                "scene_id": "scene-1",
+                "tool_name": "fetch_url",
+                "ok": False,
+                "status": "error",
+            },
+        },
+    ]
+    (raw_dir / "director_v2.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 0,
+        },
+    )
+
+    assert data["agents"]["vera"]["metrics"]["intent_to_command_ratio"] == 1.0
+    assert data["agents"]["vera"]["director_metrics"]["selected_turns"] == 1
+    assert data["agents"]["vera"]["director_metrics"]["memory_compactions_participated"] == 1
+    assert data["agents"]["rex"]["director_metrics"]["suppressed_turns"] == 1
+    assert data["agents"]["rex"]["director_metrics"]["suppression_reasons"] == {"fanout_capped": 1}
+    assert data["agents"]["rex"]["director_metrics"]["tool_calls"] == 1
+    assert data["agents"]["rex"]["director_metrics"]["tool_failures"] == 1
+    assert data["aggregate"]["director_metrics"]["memory_compactions_participated"] == 2
 
 
 def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> None:

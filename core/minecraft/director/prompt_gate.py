@@ -25,6 +25,7 @@ from core.minecraft.director.spatial_hearing import (
     SpatialHearingAdapter,
     SpatialHearingConfig,
 )
+from core.minecraft.director.timeline import emit_director_timeline_event
 from core.minecraft.director.turn_scheduler import (
     DirectorTurnScheduler,
     SchedulerCandidate,
@@ -85,6 +86,10 @@ class _CachedVerdict:
     selected_turns: dict[str, SchedulerTurn]
     available_tools: list[str]
     build_macros: dict[str, BuildMacroAssignment]
+    provider: str | None
+    model: str | None
+    estimated_usd: float | None
+    trace_id: str | None
     created_ms: int
     accounted_selected: set[str] = field(default_factory=set)
 
@@ -266,6 +271,10 @@ class DirectorPromptGate:
             selected_turns={turn.agent_id: turn for turn in scheduler_decision.selected},
             available_tools=available_tools,
             build_macros=build_macros,
+            provider=_text(event.get("provider")),
+            model=_text(event.get("model")),
+            estimated_usd=_float_or_none(event.get("estimated_usd")),
+            trace_id=_text(event.get("trace_id") or event.get("traceId")),
             created_ms=now_ms,
         )
 
@@ -413,6 +422,7 @@ class DirectorPromptGate:
             queue_depth=queue_depth,
         )
         _log_prompt_decision(decision, agent_id=agent_id)
+        _emit_prompt_decision(decision, agent_id=agent_id, cached=cached)
         return decision
 
     def _purge_decisions(self, now_ms: int) -> None:
@@ -682,6 +692,15 @@ def _text(value: Any) -> str | None:
     return text or None
 
 
+def _float_or_none(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _clip(value: str, limit: int) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= limit else f"{text[: max(0, limit - 3)].rstrip()}..."
@@ -709,4 +728,53 @@ def _log_prompt_decision(decision: PromptDecision, *, agent_id: str) -> None:
                 "suppressed_agents_count": len(decision.suppressed_agents),
             }
         },
+    )
+
+
+def _emit_prompt_decision(
+    decision: PromptDecision,
+    *,
+    agent_id: str,
+    cached: _CachedVerdict,
+) -> None:
+    build_macro = decision.build_macro
+    selected_turn = cached.selected_turns.get(agent_id)
+    payload: dict[str, Any] = {
+        "scene_id": decision.scene_id,
+        "agent_id": agent_id,
+        "selected": decision.selected,
+        "selected_speaker": agent_id
+        if decision.selected and decision.turn_kind == "speaker"
+        else None,
+        "selected_action_owner": agent_id
+        if decision.selected and decision.turn_kind == "planner"
+        else None,
+        "turn_kind": decision.turn_kind,
+        "reason": decision.reason,
+        "reason_code": decision.reason if decision.selected else decision.suppression_reason,
+        "suppression_reason": decision.suppression_reason,
+        "suppressed_agents": decision.suppressed_agents,
+        "suppressed_candidates": decision.suppressed_agents,
+        "queue_depth": decision.queue_depth,
+        "scene_event_type": cached.scene.triggering_event_type.value,
+        "source_agent": cached.source_agent,
+        "scene_hint": cached.scene_hint,
+        "available_tools": decision.available_tools,
+        "llm_prompt_count": 1 if decision.selected else 0,
+        "avoided_prompt_count": 0 if decision.selected else 1,
+        "build_plan_id": build_macro.plan_id if build_macro else None,
+        "build_owner": build_macro.owner if build_macro else None,
+        "build_role": build_macro.role if build_macro else None,
+        "build_support_role": build_macro.support_role if build_macro else None,
+        "provider": cached.provider,
+        "model": cached.model,
+        "estimated_usd": cached.estimated_usd,
+        "score": selected_turn.score if selected_turn is not None else None,
+        "factor_breakdown": selected_turn.factor_breakdown if selected_turn is not None else {},
+    }
+    emit_director_timeline_event(
+        "director.gate.decision",
+        payload,
+        agent_id=agent_id,
+        trace_id=cached.trace_id,
     )

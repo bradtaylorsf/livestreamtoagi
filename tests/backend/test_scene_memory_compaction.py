@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -228,6 +230,32 @@ async def test_multi_turn_scene_compacts_digest_for_participants_and_observers()
     assert digests[0]["scene_id"] == compact_call["conversation_id"]
     assert "Vera promised" in digests[0]["summary"]
     assert any("I'll build the bridge" in item for item in digests[0]["commitments"])
+
+
+async def test_scene_memory_emits_director_timeline_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("SOAK_RUN_DIR", str(tmp_path))
+    _bus, _compactor, consumer = _consumer(max_participants=2)
+
+    await consumer.ingest_source_event(
+        _event(
+            "chat",
+            event_id="chat-digest-timeline",
+            payload={"message": "I'll compact this scene for everyone."},
+        )
+    )
+    await consumer.flush_due_scenes(now_ms=3_000)
+
+    path = tmp_path / "timeline-raw" / "director_v2.ndjson"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    event_types = [record["event_type"] for record in records]
+    assert "director.memory.compaction" in event_types
+    assert "director.scene.digest" in event_types
+    digest = next(record for record in records if record["event_type"] == "director.scene.digest")
+    assert digest["payload"]["distributed_to"] == ["vera", "rex", "pixel"]
+    assert digest["payload"]["tokens"] > 0
 
 
 async def test_model_unloaded_is_logged_as_memory_compaction_error(
