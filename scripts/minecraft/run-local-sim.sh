@@ -8,15 +8,19 @@
 #
 # Usage:
 #   scripts/minecraft/run-local-sim.sh smoke
+#   scripts/minecraft/run-local-sim.sh smoke-director
 #   scripts/minecraft/run-local-sim.sh short
 #   scripts/minecraft/run-local-sim.sh soak
+#   scripts/minecraft/run-local-sim.sh soak-director
 #   scripts/minecraft/run-local-sim.sh --duration-hours 0.5 --log-dir logs/soak
 #   scripts/minecraft/run-local-sim.sh --help
 #
 # Modes:
-#   smoke  0.25h first live check (default)
-#   short  0.25h first live check
-#   soak   2h acceptance soak
+#   smoke           0.25h embodied first live check (default)
+#   short           0.25h embodied first live check
+#   soak            2h embodied soak
+#   smoke-director  0.25h Director V2 acceptance smoke
+#   soak-director   2h Director V2 acceptance soak
 #
 # Required in .env:
 #   LLM_PROVIDER=lmstudio
@@ -33,6 +37,8 @@
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
 #   MC_SIM_BUILD_MODE=single          # set to plan for !planAndBuild mode
 #   MC_SIM_BUILDER_PROVIDER=local     # local or openrouter; plan generation only
+#                                      # optional OpenRouter-builder mode is scoped
+#                                      # to !planAndBuild; chat remains local.
 #   MC_SIM_BUILDER_OPENROUTER_API_KEY=<key>  # defaults to OPENROUTER_API_KEY
 #   MC_SIM_BUILDER_OPENROUTER_MODEL=<openrouter-model-id>
 #   MC_SIM_BUILDER_FALLBACK=fail      # fail or local if OpenRouter is missing/fails
@@ -184,6 +190,7 @@ fi
 load_env_file "$ENV_FILE"
 
 mode="${1:-smoke}"
+soak_profile_args=()
 case "$mode" in
     smoke|short)
         duration_hours="${MC_SIM_SMOKE_HOURS:-0.25}"
@@ -193,12 +200,28 @@ case "$mode" in
         duration_hours="${MC_SIM_SOAK_HOURS:-2}"
         shift || true
         ;;
+    smoke-director|director-smoke)
+        duration_hours="${MC_SIM_SMOKE_HOURS:-0.25}"
+        CONVERSATION_MODE="director_v2"
+        DIRECTOR_V2_GATE="1"
+        SOAK_PROFILE="director_v2"
+        soak_profile_args=("--profile" "director_v2")
+        shift || true
+        ;;
+    soak-director|director-soak|acceptance-director)
+        duration_hours="${MC_SIM_SOAK_HOURS:-2}"
+        CONVERSATION_MODE="director_v2"
+        DIRECTOR_V2_GATE="1"
+        SOAK_PROFILE="director_v2"
+        soak_profile_args=("--profile" "director_v2")
+        shift || true
+        ;;
     --*)
         duration_hours="${MC_SIM_DURATION_HOURS:-0.25}"
         ;;
     *)
         fail "Unknown Minecraft sim mode: $mode"
-        info "  Use smoke, short, soak, or pass soak.sh flags directly."
+        info "  Use smoke, short, soak, smoke-director, soak-director, or pass soak.sh flags directly."
         exit 2
         ;;
 esac
@@ -404,9 +427,11 @@ case "${CONVERSATION_MODE:-}" in
 esac
 if [ "${CONVERSATION_MODE:-}" = "director_v2" ]; then
     DIRECTOR_V2_GATE=1
+    SOAK_PROFILE="${SOAK_PROFILE:-director_v2}"
 fi
 DIRECTOR_V2_GATE="${DIRECTOR_V2_GATE:-0}"
-export CONVERSATION_MODE DIRECTOR_V2_GATE
+SOAK_PROFILE="${SOAK_PROFILE:-default}"
+export CONVERSATION_MODE DIRECTOR_V2_GATE SOAK_PROFILE
 if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
     fail "LOCAL_LLM_MODEL is missing."
     info "  Run: pnpm llm:local --list-only"
@@ -421,6 +446,9 @@ fi
 
 log_dir="${MC_SIM_LOG_DIR:-$REPO_ROOT/logs/soak}"
 cmd=("$SCRIPT_DIR/soak.sh")
+if [ "${#soak_profile_args[@]}" -gt 0 ] && ! has_arg "--profile" "$@"; then
+    cmd+=("${soak_profile_args[@]}")
+fi
 if ! has_arg "--duration-hours" "$@"; then
     cmd+=("--duration-hours" "$duration_hours")
 fi
@@ -445,6 +473,7 @@ info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
 info "conversation mode: ${CONVERSATION_MODE}"
 info "Director V2 gate: ${DIRECTOR_V2_GATE}"
+info "soak profile: ${SOAK_PROFILE}"
 info "builder route: provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
 info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"
