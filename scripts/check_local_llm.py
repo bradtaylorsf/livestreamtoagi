@@ -79,11 +79,16 @@ async def _run(args: argparse.Namespace) -> int:
                 {"role": "user", "content": args.prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": 40,
+            "max_tokens": args.max_tokens,
         }
         try:
             chat_resp = await client.post("/chat/completions", json=payload)
             chat_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text.strip()
+            print(f"FAIL: chat completion failed for model {model!r}")
+            print(f"      HTTP {exc.response.status_code}: {body[:500] or exc}")
+            return 1
         except Exception as exc:
             print(f"FAIL: chat completion failed for model {model!r}")
             print(f"      {exc}")
@@ -115,6 +120,12 @@ def main() -> None:
     parser.add_argument("--api-key", default=None, help="API key, if the local server requires one")
     parser.add_argument("--model", default=None, help="Model ID to test")
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout seconds")
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=256,
+        help="Max completion tokens for the chat smoke test",
+    )
     parser.add_argument("--list-only", action="store_true", help="Only list /models")
     parser.add_argument(
         "--prompt",

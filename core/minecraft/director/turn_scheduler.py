@@ -29,6 +29,8 @@ class SchedulerConfig:
     active_task: float = 0.55
     role_fit: float = 0.35
     open_commitment: float = 0.35
+    selection_fairness: float = 2.00
+    selection_starvation_threshold: float = 0.95
     overuse_penalty: float = 0.40
     participation_floor: float = 1.25
     max_turns_per_scene: int = 1
@@ -60,6 +62,8 @@ class SchedulerCandidate(BaseModel):
     seconds_since_spoke: float = Field(ge=0.0)
     turns_since_spoke: int = Field(ge=0)
     recent_turn_count: int = Field(ge=0)
+    selection_count: int = Field(default=0, ge=0)
+    total_selection_count: int = Field(default=0, ge=0)
     has_open_commitment: bool = False
     active_task_match: bool = False
     is_directly_addressed: bool = False
@@ -107,6 +111,7 @@ def score_candidate(
     config: SchedulerConfig,
     *,
     scene_event_type: SceneEventType,
+    eligible_count: int,
     jitter: float,
 ) -> tuple[float, dict[str, float], str]:
     """Return the weighted scheduler score, raw factors, and dominant reason."""
@@ -117,6 +122,7 @@ def score_candidate(
     stuck_priority = 1.0 if candidate.is_stuck else 0.0
     active_task = 1.0 if candidate.active_task_match else 0.0
     open_commitment = 1.0 if candidate.has_open_commitment else 0.0
+    selection_deficit = _selection_deficit(candidate, eligible_count)
     participation_floor = (
         1.0 if candidate.turns_since_spoke >= config.silent_force_select_turns else 0.0
     )
@@ -140,6 +146,7 @@ def score_candidate(
         "active_task": active_task,
         "role_fit": candidate.role_fit,
         "open_commitment": open_commitment,
+        "selection_deficit": selection_deficit,
         "participation_floor": participation_floor,
         "fatigue_penalty": -fatigue_penalty,
     }
@@ -156,13 +163,19 @@ def score_candidate(
         + factors["active_task"] * config.active_task
         + factors["role_fit"] * config.role_fit
         + factors["open_commitment"] * config.open_commitment
+        + factors["selection_deficit"] * config.selection_fairness
         + factors["participation_floor"] * config.participation_floor
         + factors["direct_address_bonus"]
         - fatigue_penalty
     )
     score = max(0.0, score)
 
-    return score, factors, _reason_for(candidate, config, scene_event_type)
+    return score, factors, _reason_for(
+        candidate,
+        config,
+        scene_event_type,
+        selection_deficit=selection_deficit,
+    )
 
 
 class DirectorTurnScheduler:
@@ -206,6 +219,7 @@ class DirectorTurnScheduler:
                 candidate,
                 self.config,
                 scene_event_type=scene_event_type,
+                eligible_count=len(base_eligible),
                 jitter=jitter,
             )
             if _is_consecutive_blocked(candidate.agent_id, recent, self.config):
@@ -256,7 +270,27 @@ class DirectorTurnScheduler:
                     if scored_candidate.candidate.turns_since_spoke
                     >= self.config.silent_force_select_turns
                 ]
-                if force_candidates:
+                starvation_candidates = [
+                    scored_candidate
+                    for scored_candidate in selectable
+                    if scored_candidate.factors.get("selection_deficit", 0.0)
+                    >= self.config.selection_starvation_threshold
+                ]
+                planner_candidates = [
+                    scored_candidate
+                    for scored_candidate in selectable
+                    if _turn_kind(scored_candidate.candidate, scene_event_type) == "planner"
+                ]
+                if starvation_candidates:
+                    selected = [_most_starved(starvation_candidates)]
+                    suppression_reason = "selection_starvation"
+                elif scene_event_type == SceneEventType.BUILD_ACTION and planner_candidates:
+                    selected = _top_scored(
+                        planner_candidates,
+                        max(self.config.max_turns_per_scene, 0),
+                    )
+                    suppression_reason = "fanout_capped"
+                elif force_candidates:
                     selected = [_highest_scored(force_candidates)]
                     suppression_reason = "fanout_capped"
                 else:
@@ -332,6 +366,8 @@ def _reason_for(
     candidate: SchedulerCandidate,
     config: SchedulerConfig,
     scene_event_type: SceneEventType,
+    *,
+    selection_deficit: float = 0.0,
 ) -> str:
     if candidate.is_in_danger:
         return "danger_priority"
@@ -339,6 +375,8 @@ def _reason_for(
         return "stuck_priority"
     if candidate.is_directly_addressed:
         return "direct_address"
+    if selection_deficit >= config.selection_starvation_threshold:
+        return "selection_starvation"
     if candidate.turns_since_spoke >= config.silent_force_select_turns:
         return "participation_floor"
     if candidate.active_task_match:
@@ -364,6 +402,40 @@ def _is_consecutive_blocked(
 
 def _highest_scored(candidates: list[_ScoredCandidate]) -> _ScoredCandidate:
     return max(candidates, key=lambda item: (item.score, item.candidate.agent_id))
+
+
+def _top_scored(candidates: list[_ScoredCandidate], turn_limit: int) -> list[_ScoredCandidate]:
+    if turn_limit <= 0:
+        return []
+    return sorted(
+        candidates,
+        key=lambda item: (item.score, item.candidate.agent_id),
+        reverse=True,
+    )[:turn_limit]
+
+
+def _most_starved(candidates: list[_ScoredCandidate]) -> _ScoredCandidate:
+    return max(
+        candidates,
+        key=lambda item: (
+            item.factors.get("selection_deficit", 0.0),
+            item.score,
+            -item.candidate.selection_count,
+            item.candidate.agent_id,
+        ),
+    )
+
+
+def _selection_deficit(candidate: SchedulerCandidate, eligible_count: int) -> float:
+    if eligible_count <= 0 or candidate.total_selection_count <= 0:
+        return 0.0
+    expected_selections = candidate.total_selection_count / eligible_count
+    if expected_selections <= _EPSILON:
+        return 0.0
+    deficit = expected_selections - candidate.selection_count
+    if deficit <= 0:
+        return 0.0
+    return max(0.0, min(deficit / max(expected_selections, 1.0), 1.0))
 
 
 def _weighted_sample_without_replacement(

@@ -60,6 +60,7 @@ Run from the repository root:
 ```bash
 bash scripts/check-services.sh
 pnpm llm:local --list-only
+pnpm llm:local
 scripts/minecraft/health.sh --json
 curl -fsS http://127.0.0.1:8010/api/health
 ```
@@ -81,7 +82,7 @@ Required runtime state:
 | Paper | `scripts/minecraft/health.sh --json` returns `"up":true`; if down, `soak.sh` starts `scripts/minecraft/supervise.sh` by default. |
 | Backend | `core.main:app` reachable on `http://127.0.0.1:8010/api/health` |
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
-| LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1` |
+| LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1`, with `LOCAL_LLM_MODEL` loaded enough to complete a chat request |
 
 ## Live Soak Command
 
@@ -104,6 +105,16 @@ points `LOCAL_LLM_BASE_URL` at the proxy, while
 `LOCAL_LLM_UPSTREAM_URL` keeps the real LM Studio endpoint. Set
 `MINECRAFT_LLM_QUEUE_PROXY=0` to bypass it, or raise
 `MINECRAFT_LLM_CONCURRENCY` from `1` to `2` for a slightly wider local queue.
+The bridge, Alpha, and cohort launchers write the effective
+`LOCAL_LLM_BASE_URL` into each staged Mindcraft profile, so chat completions
+use the proxy endpoint when it is enabled. Startup embeddings use
+`LOCAL_LLM_UPSTREAM_URL` directly so the chat queue is not blocked behind
+hundreds of example-embedding requests.
+
+The runner performs both `pnpm llm:local --list-only` and a real
+`pnpm llm:local` chat warm-up before launching bots. If LM Studio lists the
+model but later reports `Model unloaded` or `Operation canceled`, reload or pin
+the selected model in LM Studio and rerun the soak.
 
 If you want the soak to fail instead of auto-starting Paper:
 
@@ -201,7 +212,7 @@ The staged Mindcraft overlay now treats each character as a queued actor:
 | --- | --- | --- |
 | Per-agent inbox | `handleMessage` appends incoming chat to a pending inbox, debounces for `MINECRAFT_TURN_DEBOUNCE_MS` (default `2000`), batches recent messages, and saves messages that arrive during generation for the next turn. Lifecycle chatter such as `I'm stuck` stays telemetry-only. | `inbox.queued`, `inbox.turn_started`, `inbox.turn_completed`, `inbox.telemetry_ignored`, `inbox.immediate_command`. |
 | Director V2 gate | When `CONVERSATION_MODE=director_v2`, each compacted inbox batch calls `director.gate` before Mindcraft can enqueue `shouldRespond`. Selected agents receive scene context and affordances; unselected agents resolve the inbox turn without an LLM call. | `director_gate.selected`, `director_gate.suppressed`, `director_gate.stale_discarded`. |
-| LM Studio queue | `lmstudio_queue_proxy.py` serializes OpenAI-compatible requests to LM Studio with `MINECRAFT_LLM_CONCURRENCY` workers and emits wait/latency telemetry. | `timeline-raw/llm-queue.ndjson`, plus `llm.queue.enqueued`, `llm.queue.started`, `llm.queue.completed`, `llm.queue.failed`. |
+| LM Studio queue | `lmstudio_queue_proxy.py` serializes OpenAI-compatible chat requests to LM Studio with `MINECRAFT_LLM_CONCURRENCY` workers, prioritizes chat over embeddings, retries transient model-load 400s, and emits wait/latency telemetry. | `timeline-raw/llm-queue.ndjson`, plus `llm.queue.enqueued`, `llm.queue.started`, `llm.queue.retry`, `llm.queue.completed`, `llm.queue.failed`. |
 | Per-agent action queue | `ActionManager._executeAction` keeps one active action slot per agent. New embodied actions are queued instead of interrupting `placeHere`, `move`, or plan builds; queue overflow emits a busy rejection. | `action.queued`, `action.started`, `action.completed`, `action.rejected_busy`. |
 
 Useful knobs:
@@ -215,6 +226,7 @@ Useful knobs:
 | `MINECRAFT_ACTION_QUEUE_MAX` | `16` | Max deferred embodied actions per agent. |
 | `MINECRAFT_LLM_QUEUE_PROXY` | `1` | Start the local FIFO proxy and route bot LLM traffic through it. |
 | `MINECRAFT_LLM_CONCURRENCY` | `1` | Active upstream LM Studio requests allowed by the proxy. |
+| `MINECRAFT_LLM_RETRY_ATTEMPTS` | `2` | Retries for transient LM Studio model-load 400s such as `Model unloaded` or `Operation canceled`. |
 | `LOCAL_LLM_UPSTREAM_URL` | `$LOCAL_LLM_BASE_URL` | Real LM Studio upstream when the proxy is enabled. |
 
 ## Builder-Plan Mode

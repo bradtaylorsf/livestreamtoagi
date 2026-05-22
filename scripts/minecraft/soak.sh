@@ -30,6 +30,14 @@
 #                               proxy. Default: LOCAL_LLM_BASE_URL.
 #   MINECRAFT_LLM_QUEUE_PROXY   Start the FIFO LM Studio proxy. Default: 1.
 #   MINECRAFT_LLM_CONCURRENCY   Proxy request concurrency. Default: 1.
+#   MINECRAFT_LLM_RETRY_ATTEMPTS
+#                               Retries for transient LM Studio model-load
+#                               400s such as "Model unloaded". Default: 2.
+#   MINECRAFT_LLM_RETRY_DELAY_SECONDS
+#                               Base delay between retry attempts. Default: 2.
+#   SOAK_LLM_SMOKE_TIMEOUT_SECONDS
+#                               Timeout for the preflight LM Studio chat
+#                               warm-up. Default: 120.
 #   SOAK_DURATION_HOURS         Default: 2.
 #   SOAK_PROFILE                default or director_v2. The director_v2
 #                               profile forces CONVERSATION_MODE=director_v2,
@@ -194,6 +202,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+if [ -z "${PYTHON:-}" ] && [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+fi
+PYTHON="${PYTHON:-python3}"
+export PYTHON
 
 MINDCRAFT_COMMIT="${MINDCRAFT_COMMIT:-35be480b4cc0bca990278e6103a1426392559d96}"
 MINDCRAFT_DIR="${MINDCRAFT_DIR:-./mindcraft}"
@@ -201,6 +214,8 @@ LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 LOCAL_LLM_UPSTREAM_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}"
 MINECRAFT_LLM_QUEUE_PROXY="${MINECRAFT_LLM_QUEUE_PROXY:-1}"
 MINECRAFT_LLM_CONCURRENCY="${MINECRAFT_LLM_CONCURRENCY:-1}"
+MINECRAFT_LLM_RETRY_ATTEMPTS="${MINECRAFT_LLM_RETRY_ATTEMPTS:-2}"
+MINECRAFT_LLM_RETRY_DELAY_SECONDS="${MINECRAFT_LLM_RETRY_DELAY_SECONDS:-2}"
 MINECRAFT_LLM_PROXY_HOST="${MINECRAFT_LLM_PROXY_HOST:-127.0.0.1}"
 MINECRAFT_LLM_PROXY_PORT="${MINECRAFT_LLM_PROXY_PORT:-1235}"
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
@@ -220,6 +235,7 @@ fi
 DIRECTOR_V2_GATE="${DIRECTOR_V2_GATE:-0}"
 export CONVERSATION_MODE DIRECTOR_V2_GATE
 SOAK_DURATION_HOURS="${SOAK_DURATION_HOURS:-2}"
+SOAK_LLM_SMOKE_TIMEOUT_SECONDS="${SOAK_LLM_SMOKE_TIMEOUT_SECONDS:-120}"
 SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_MIN_MOVEMENT_PER_AGENT="${SOAK_MIN_MOVEMENT_PER_AGENT:-5}"
 SOAK_MAX_DEATHS_PER_AGENT="${SOAK_MAX_DEATHS_PER_AGENT:-2}"
@@ -660,7 +676,7 @@ print_plan() {
     info "backend health: $BACKEND_HEALTH_URL"
     info "LM Studio:      $LOCAL_LLM_BASE_URL"
     if [ "$MINECRAFT_LLM_QUEUE_PROXY" = "1" ]; then
-        info "LM queue:       enabled concurrency=${MINECRAFT_LLM_CONCURRENCY} upstream=${LOCAL_LLM_UPSTREAM_URL}"
+        info "LM queue:       enabled concurrency=${MINECRAFT_LLM_CONCURRENCY} upstream=${LOCAL_LLM_UPSTREAM_URL} retries=${MINECRAFT_LLM_RETRY_ATTEMPTS}"
     else
         info "LM queue:       disabled"
     fi
@@ -701,7 +717,7 @@ print_plan() {
         info "execute code:   allowed"
     fi
     if [ "$SOAK_SAFE_TERRAIN_ACTIONS" = "1" ]; then
-        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing)"
+        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing; blocks !place/!break/!observe)"
     else
         info "safe terrain:   disabled"
     fi
@@ -724,7 +740,8 @@ print_plan() {
 build_settings_json() {
     if [ -z "$SOAK_INIT_MESSAGE" ] \
         && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ] \
-        && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ]; then
+        && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ] \
+        && [ "$SOAK_SAFE_TERRAIN_ACTIONS" != "1" ]; then
         return 0
     fi
     SETTINGS_JSON="$(
@@ -732,6 +749,7 @@ build_settings_json() {
         SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
         SOAK_BLOCK_PRIVATE_CONVERSATIONS="$SOAK_BLOCK_PRIVATE_CONVERSATIONS" \
         SOAK_BLOCK_SLOW_SIM_ACTIONS="$SOAK_BLOCK_SLOW_SIM_ACTIONS" \
+        SOAK_SAFE_TERRAIN_ACTIONS="$SOAK_SAFE_TERRAIN_ACTIONS" \
         SOAK_BLOCK_EXECUTE_CODE_ACTIONS="$SOAK_BLOCK_EXECUTE_CODE_ACTIONS" \
         node --input-type=module <<'NODE'
 const baseBlockedActions = [
@@ -774,6 +792,16 @@ if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {
         '!buildFromPlan',
         '!planAndBuild',
     ]) {
+        if (!blocked.includes(command)) blocked.push(command);
+    }
+    settings.blocked_actions = blocked;
+}
+
+if (process.env.SOAK_SAFE_TERRAIN_ACTIONS === '1') {
+    const blocked = Array.isArray(settings.blocked_actions)
+        ? [...settings.blocked_actions]
+        : [...baseBlockedActions];
+    for (const command of ["!break", "!observe", "!place"]) {
         if (!blocked.includes(command)) blocked.push(command);
     }
     settings.blocked_actions = blocked;
@@ -848,8 +876,8 @@ min_gather_or_build = int_env("SOAK_MIN_GATHER_OR_BUILD_COHORT", 3)
 min_shared_artifacts = int_env("SOAK_MIN_SHARED_ARTIFACTS", 1)
 
 movement_re = re.compile(r"!(move|goToPlayer|goToCoordinates|searchForBlock|searchForEntity|navigate)\b", re.IGNORECASE)
-death_re = re.compile(r"(died|death|respawn(ed)?)", re.IGNORECASE)
-drowning_re = re.compile(r"drown(ed|ing)?", re.IGNORECASE)
+death_re = re.compile(r"\b(died|death|respawn(?:ed)?)\b", re.IGNORECASE)
+drowning_re = re.compile(r"\bdrown(?:ed|ing)?\b", re.IGNORECASE)
 stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
 restart_re = re.compile(
     r"(Exiting\.|\bprocess exited with code\s+[1-9]\d*\b|\brejoining\b|\bbot disconnected\b|"
@@ -1255,6 +1283,8 @@ if [ ! -d "$MINDCRAFT_BASE_ABS/node_modules" ]; then
 fi
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
+mkdir -p "$SOAK_LOG_ROOT"
+SOAK_LOG_ROOT="$(cd -- "$SOAK_LOG_ROOT" && pwd)"
 RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
 SOAK_WORK_ROOT="${SOAK_WORK_ROOT:-${TMPDIR:-/tmp}/livestreamtoagi-soak-worktrees/$RUN_ID}"
 mkdir -p "$SOAK_WORK_ROOT"
@@ -1307,10 +1337,13 @@ write_metadata() {
         echo "local_llm_upstream_url=$LOCAL_LLM_UPSTREAM_URL"
         echo "minecraft_llm_queue_proxy=$MINECRAFT_LLM_QUEUE_PROXY"
         echo "minecraft_llm_concurrency=$MINECRAFT_LLM_CONCURRENCY"
+        echo "minecraft_llm_retry_attempts=$MINECRAFT_LLM_RETRY_ATTEMPTS"
+        echo "minecraft_llm_retry_delay_seconds=$MINECRAFT_LLM_RETRY_DELAY_SECONDS"
         echo "minecraft_llm_proxy_host=$MINECRAFT_LLM_PROXY_HOST"
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
         echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"
+        echo "llm_smoke_timeout_seconds=$SOAK_LLM_SMOKE_TIMEOUT_SECONDS"
         echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
         echo "builder_openrouter_model=$MC_SIM_BUILDER_OPENROUTER_MODEL"
@@ -1434,11 +1467,14 @@ start_lm_queue_proxy() {
             --port "$proxy_port" \
             --upstream "$upstream_url" \
             --concurrency "$proxy_concurrency" \
+            --retry-attempts "$MINECRAFT_LLM_RETRY_ATTEMPTS" \
+            --retry-delay-seconds "$MINECRAFT_LLM_RETRY_DELAY_SECONDS" \
             --telemetry "$RUN_DIR/timeline-raw/llm-queue.ndjson" \
             > "$RUN_DIR/logs/lmstudio-queue-proxy.log" 2>&1 &
     echo "$!" > "$LLM_PROXY_PID_FILE"
     LOCAL_LLM_BASE_URL="$proxy_url"
     export LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL MINECRAFT_LLM_CONCURRENCY
+    export MINECRAFT_LLM_RETRY_ATTEMPTS MINECRAFT_LLM_RETRY_DELAY_SECONDS
 
     local proxy_pid
     proxy_pid="$(cat "$LLM_PROXY_PID_FILE" 2> /dev/null || true)"
@@ -1620,6 +1656,7 @@ launch_bot() {
         export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
         export LTAG_RUN_ID="$RUN_ID"
+        export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
         export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
@@ -2099,6 +2136,9 @@ write_metadata
 
 run_checked "docker services" "$RUN_DIR/preflight/check-services.txt" bash "$REPO_ROOT/scripts/check-services.sh"
 run_checked "LM Studio models" "$RUN_DIR/preflight/llm-local.txt" pnpm llm:local --list-only
+run_checked "LM Studio chat warm-up" "$RUN_DIR/preflight/llm-local-chat.txt" \
+    pnpm llm:local --timeout "$SOAK_LLM_SMOKE_TIMEOUT_SECONDS" \
+        --prompt "Reply with exactly: minecraft smoke ready"
 if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     run_checked "easy spawn access files" "$RUN_DIR/preflight/easy-spawn-access.txt" \
         node "$SCRIPT_DIR/setup-easy-spawn.mjs" --write-access-only

@@ -211,7 +211,12 @@ class SceneInbox:
         self._closed_queue = []
         return closed
 
-    async def ingest(self, raw_event: Mapping[str, Any]) -> SceneUpdate:
+    async def ingest(
+        self,
+        raw_event: Mapping[str, Any],
+        *,
+        emit_update: bool = True,
+    ) -> SceneUpdate:
         """Translate and group one raw Minecraft/bridge event."""
 
         event = self._to_scene_event(raw_event)
@@ -253,7 +258,8 @@ class SceneInbox:
             event_type=event.type,
             scene=scene,
         )
-        await self._emit_scene_update(event, scene, update)
+        if emit_update:
+            await self._emit_scene_update(event, scene, update)
         return update
 
     def _dedupe(self, event: SceneEvent) -> str | None:
@@ -521,6 +527,8 @@ class SceneInbox:
                 "participants_added": update.participants_added,
                 "observers_added": update.observers_added,
                 "suppression_reason": update.suppression_reason,
+                "source_inbox_id": id(self),
+                "source_event": event.model_dump(mode="json"),
             },
         )
         if update.is_new_scene:

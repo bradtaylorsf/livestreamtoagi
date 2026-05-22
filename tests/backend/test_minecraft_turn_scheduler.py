@@ -296,6 +296,37 @@ def test_idle_scene_fairness_prevents_monopoly_and_force_selects_silent_agent() 
     assert max(counts.values()) <= 80
 
 
+def test_selection_deficit_force_selects_unrepresented_agent() -> None:
+    scheduler = DirectorTurnScheduler(
+        SchedulerConfig(max_turns_per_scene=1, random_jitter=0.0)
+    )
+    scene = _scene(participants=["alpha", "vera", "rex", "fork"])
+    candidates = [
+        _candidate(
+            "alpha",
+            chattiness=1.0,
+            topic_relevance=1.0,
+            role_fit=1.0,
+            selection_count=12,
+            total_selection_count=16,
+        ),
+        _candidate("vera", selection_count=2, total_selection_count=16),
+        _candidate("rex", selection_count=2, total_selection_count=16),
+        _candidate("fork", selection_count=0, total_selection_count=16),
+    ]
+
+    decision = scheduler.select(
+        scene=scene,
+        candidates=candidates,
+        scene_event_type=SceneEventType.CHAT,
+        seed=44,
+    )
+
+    assert [turn.agent_id for turn in decision.selected] == ["fork"]
+    assert decision.selected[0].reason == "selection_starvation"
+    assert decision.suppression_reason == "selection_starvation"
+
+
 def test_consecutive_turn_block_prevents_same_agent_third_turn() -> None:
     scheduler = DirectorTurnScheduler()
     scene = _scene(participants=["rex", "vera", "pixel"])

@@ -1034,6 +1034,38 @@ def correlate_events(events: list[TimelineEvent]) -> list[TimelineEvent]:
     return ordered
 
 
+def dedupe_director_gate_decisions(events: list[TimelineEvent]) -> list[TimelineEvent]:
+    preferred_index_by_key: dict[tuple[Any, ...], int] = {}
+    key_by_index: dict[int, tuple[Any, ...]] = {}
+
+    for index, event in enumerate(events):
+        if event.event_type != "director.gate.decision" or not event.trace_id:
+            continue
+        key = (
+            event.trace_id,
+            event.agent,
+            event.payload.get("scene_id"),
+            bool(event.payload.get("selected")),
+            event.payload.get("turn_kind"),
+            event.payload.get("reason_code") or event.payload.get("reason"),
+            event.payload.get("build_plan_id"),
+        )
+        key_by_index[index] = key
+        previous = preferred_index_by_key.get(key)
+        if previous is None or (
+            event.source == "director_v2" and events[previous].source != "director_v2"
+        ):
+            preferred_index_by_key[key] = index
+
+    if not key_by_index:
+        return events
+    return [
+        event
+        for index, event in enumerate(events)
+        if index not in key_by_index or preferred_index_by_key.get(key_by_index[index]) == index
+    ]
+
+
 def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, Any]:
     by_event_type = Counter(event.event_type for event in events)
     by_agent = Counter(event.agent for event in events if event.agent)
@@ -1338,7 +1370,7 @@ def build_timeline(
         events.extend(parsed)
         seq_base += max(100000, len(parsed) + 1000)
 
-    ordered = correlate_events(events)
+    ordered = dedupe_director_gate_decisions(correlate_events(events))
     totals = summarize_events(ordered, run_dir)
     return TimelineResult(events=ordered, totals=totals)
 

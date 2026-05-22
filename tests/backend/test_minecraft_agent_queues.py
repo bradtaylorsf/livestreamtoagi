@@ -204,6 +204,111 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_inbox_queue_ignores_mindcraft_command_echo_telemetry(
+    tmp_path: Path,
+) -> None:
+    inbox_queue = _stage_skill_tree(tmp_path, INBOX_QUEUE)
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(inbox_queue))}).href);
+globalThis.__timelineEvents = [];
+
+const calls = [];
+const agent = {{
+    name: 'grok',
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'handled';
+    }},
+}};
+
+mod.installInboxQueue(agent, {{ debounceMs: 5 }});
+
+const results = await Promise.all([
+    agent.handleMessage('Sentinel', '*Pixel used break*'),
+    agent.handleMessage('Sentinel', 'Command !break was given 0 args, but requires 4 args.'),
+    agent.handleMessage('Pixel', '!break'),
+]);
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    results,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["calls"] == []
+    assert result["results"] == [False, False, False]
+    telemetry_events = [
+        event for event in result["events"] if event["type"] == "inbox.telemetry_ignored"
+    ]
+    assert len(telemetry_events) == 3
+    assert {
+        event["payload"]["message"]
+        for event in telemetry_events
+    } == {
+        "*Pixel used break*",
+        "Command !break was given 0 args, but requires 4 args.",
+        "!break",
+    }
+
+
+@requires_node
+def test_inbox_queue_keeps_human_commands_immediate(tmp_path: Path) -> None:
+    inbox_queue = _stage_skill_tree(tmp_path, INBOX_QUEUE)
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(inbox_queue))}).href);
+globalThis.__timelineEvents = [];
+
+const calls = [];
+const agent = {{
+    name: 'vera',
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'handled';
+    }},
+}};
+
+mod.installInboxQueue(agent, {{
+    debounceMs: 5,
+    isOtherAgent() {{ return false; }},
+}});
+
+const result = await agent.handleMessage('Viewer', 'please !stop');
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    result,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["result"] == "handled"
+    assert result["calls"] == [
+        {"source": "Viewer", "message": "please !stop", "maxResponses": None}
+    ]
+    immediate_events = [
+        event for event in result["events"] if event["type"] == "inbox.immediate_command"
+    ]
+    assert len(immediate_events) == 1
+    assert immediate_events[0]["payload"]["source"] == "Viewer"
+    assert immediate_events[0]["payload"]["command"] == "!stop"
+
+
+@requires_node
 def test_director_gate_suppresses_unselected_inbox_turns_before_llm(
     tmp_path: Path,
 ) -> None:
@@ -262,6 +367,9 @@ function makeAgent(name) {{
     return {{
         name,
         bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+        actions: {{
+            actionList: ['!break', '!observe', '!place', '!placeHere', '!searchForBlock'],
+        }},
         async handleMessage(source, message, maxResponses = null) {{
             calls.push({{ agent: name, source, message, maxResponses }});
             return `${{name}}-handled`;
@@ -298,13 +406,27 @@ process.stdout.write(JSON.stringify({{
     assert result["results"] == ["vera-handled", False]
     assert len(result["calls"]) == 1
     assert result["calls"][0]["agent"] == "vera"
+    assert result["calls"][0]["source"] == "system"
     assert "[Director V2 context]" in result["calls"][0]["message"]
     assert len(result["bridgeCalls"]) == 2
     assert {call["service"] for call in result["bridgeCalls"]} == {"director"}
     assert {call["method"] for call in result["bridgeCalls"]} == {"gate"}
+    for call in result["bridgeCalls"]:
+        tools = call["payload"]["available_tools"]
+        assert "!placeHere" in tools
+        assert "!searchForBlock" in tools
+        assert "!break" not in tools
+        assert "!observe" not in tools
+        assert "!place" not in tools
     event_types = [event["type"] for event in result["events"]]
     assert "director_gate.selected" in event_types
     assert "director_gate.suppressed" in event_types
+    canonical_decisions = [
+        event for event in result["events"] if event["type"] == "director.gate.decision"
+    ]
+    assert [event["payload"]["selected"] for event in canonical_decisions] == [True, False]
+    assert canonical_decisions[0]["payload"]["llm_prompt_count"] == 1
+    assert canonical_decisions[1]["payload"]["avoided_prompt_count"] == 1
     assert {
         event["payload"].get("outcome")
         for event in result["events"]

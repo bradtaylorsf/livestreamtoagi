@@ -21,7 +21,8 @@
 #   MC_PORT                 E2 server port                (default: 25565)
 #   MINDCRAFT_PROFILE       Profile path inside the clone
 #                           (default: ./profiles/<agent>-bot.json)
-#   LOCAL_LLM_BASE_URL      LM Studio URL for operator pre-flight checks
+#   LOCAL_LLM_BASE_URL      OpenAI-compatible local endpoint for the bot and
+#                           operator pre-flight checks
 #                           (default: http://localhost:1234/v1)
 #   LOCAL_LLM_MODEL         LM Studio model id for the conversation tier (REQUIRED for a real run)
 #   LOCAL_LLM_MODEL_BUILDING  LM Studio model id for the building/code tier (default: = LOCAL_LLM_MODEL)
@@ -48,7 +49,7 @@ MC_PORT="${MC_PORT:-25565}"
 MC_AUTH="offline"
 MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-$COHORT_PROFILE_DEFAULT}"
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
-MINDCRAFT_LLM_URL="http://localhost:1234/v1"
+MINDCRAFT_LLM_URL="$LOCAL_LLM_BASE_URL"
 
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
 
@@ -418,7 +419,7 @@ ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! TEMPLATE_PATH="$COHORT_PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" BOT_NAME="$COHORT_BOT_NAME" node --input-type=module <<'NODE'
+if ! TEMPLATE_PATH="$COHORT_PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" BOT_NAME="$COHORT_BOT_NAME" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const templatePath = process.env.TEMPLATE_PATH;
@@ -426,6 +427,8 @@ const destPath = process.env.DEST_PATH;
 const chatModel = process.env.CHAT_MODEL;
 const codeModel = process.env.CODE_MODEL;
 const botName = process.env.BOT_NAME;
+const llmUrl = process.env.LLM_URL || 'http://localhost:1234/v1';
+const embeddingUrl = process.env.EMBEDDING_URL || llmUrl;
 const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
 
 if (
@@ -436,8 +439,13 @@ if (
     throw new Error(`${botName} profile template lost its local model placeholders`);
 }
 
-profile.model = `lmstudio/${chatModel}`;
-profile.code_model = `lmstudio/${codeModel}`;
+profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl };
+profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
+profile.embedding = {
+    api: 'lmstudio',
+    model: 'lmstudio/text-embedding-nomic-embed-text-v1.5',
+    url: embeddingUrl,
+};
 writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
 NODE
 then
@@ -447,6 +455,7 @@ fi
 ok "Staged profile -> $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
+info "  url:        ${LOCAL_LLM_BASE_URL}"
 
 stage_file() {
     local src="$1"

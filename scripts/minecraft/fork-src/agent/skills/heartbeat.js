@@ -14,9 +14,10 @@ const COMMAND_RE = /!(?<name>[A-Za-z][A-Za-z0-9_]*)\s*(?:\(|\b)/g;
 export const NEXT_ACTION_PROMPT = [
     'Autonomous heartbeat: you have been quiet in the Minecraft simulation.',
     'Pick one useful visible high-level next action now.',
-    'Reply with one short sentence and, when possible, exactly one existing command such as',
-    '!move("heartbeat-scout", "forward", 2), !placeHere("oak_log"), !placeHere("cobblestone"), !nearbyBlocks, or !inventory.',
-    'Do not output per-tick movement, long plans, or repeated searches.',
+    'Reply with one short sentence and exactly one safe command when possible.',
+    'Prefer !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2).',
+    'Use !nearbyBlocks or !inventory only when you truly need information.',
+    'Do not output !place, !break, !observe, JSON/object arguments, per-tick movement, long plans, or repeated searches.',
 ].join(' ');
 
 export const DEFAULT_HEARTBEAT_OPTIONS = Object.freeze({
@@ -71,6 +72,7 @@ function normalizeOptions(options = {}) {
 
 function textFromResponse(value) {
     if (value === undefined || value === null) return '';
+    if (typeof value === 'boolean') return '';
     if (typeof value === 'string') return value;
     if (Array.isArray(value)) return value.map(textFromResponse).filter(Boolean).join('\n');
     if (typeof value === 'object') {
@@ -255,6 +257,15 @@ function restoreEnv(name, value) {
     } else {
         process.env[name] = value;
     }
+}
+
+function directorGateSuppressed(agent, beforeSequence) {
+    const gate = agent?.__ltagDirectorGate;
+    if (!gate || beforeSequence === null || beforeSequence === undefined) return false;
+    const outcome = gate.lastOutcome || null;
+    const sequence = Number(outcome?.sequence);
+    if (!Number.isFinite(sequence) || sequence <= beforeSequence) return false;
+    return outcome.selected === false;
 }
 
 export class HeartbeatController {
@@ -481,6 +492,9 @@ export class HeartbeatController {
         const traceId = `trace-heartbeat-${randomUUID()}`;
         const firedAt = this.now();
         const beforeCommandCounter = this.state.commandCounter || 0;
+        const beforeDirectorGateSequence = Number.isFinite(Number(this.agent?.__ltagDirectorGate?.sequence))
+            ? Number(this.agent.__ltagDirectorGate.sequence)
+            : null;
         const beforeResponseExcerpt = this.state.lastResponseExcerpt || '';
         this.state.lastHeartbeatTs = firedAt;
         this.state.heartbeatInFlight = true;
@@ -513,15 +527,26 @@ export class HeartbeatController {
         }
 
         const classified = classifyHeartbeatResponse(result);
+        const wasDirectorSuppressed = directorGateSuppressed(
+            this.agent,
+            beforeDirectorGateSequence,
+        );
         const hadCommand =
-            classified.hadCommand || (this.state.commandCounter || 0) > beforeCommandCounter;
-        if (hadCommand) {
-            this.state.consecutiveNoCommand = 0;
-        } else {
-            this.state.consecutiveNoCommand += 1;
+            !wasDirectorSuppressed &&
+            (result === true ||
+                classified.hadCommand ||
+                (this.state.commandCounter || 0) > beforeCommandCounter);
+        if (!wasDirectorSuppressed) {
+            if (hadCommand) {
+                this.state.consecutiveNoCommand = 0;
+            } else {
+                this.state.consecutiveNoCommand += 1;
+            }
         }
 
-        const responseExcerpt = classified.excerpt || this.state.lastResponseExcerpt || beforeResponseExcerpt;
+        const responseExcerpt = wasDirectorSuppressed
+            ? ''
+            : classified.excerpt || this.state.lastResponseExcerpt || beforeResponseExcerpt;
         const outcomePayload = {
             reason,
             had_command: hadCommand,
@@ -529,7 +554,14 @@ export class HeartbeatController {
             response_empty: !responseExcerpt,
             response_excerpt: responseExcerpt,
             commands: classified.commands,
-            outcome: error ? 'error' : hadCommand ? 'command' : 'no-command',
+            director_suppressed: wasDirectorSuppressed,
+            outcome: error
+                ? 'error'
+                : wasDirectorSuppressed
+                  ? 'director-suppressed'
+                  : hadCommand
+                    ? 'command'
+                    : 'no-command',
         };
         if (error) {
             outcomePayload.error = error && error.message ? error.message : String(error);

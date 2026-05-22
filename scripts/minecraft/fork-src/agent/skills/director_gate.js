@@ -11,11 +11,28 @@ const PATCH_FLAG = Symbol.for('livestreamtoagi.directorGateInstalled');
 const DEFAULT_DEADLINE_MS = 1500;
 const DEFAULT_TOOLS = Object.freeze([
     '!move',
-    '!place',
     '!placeHere',
-    '!break',
     '!nearbyBlocks',
     '!inventory',
+    '!searchForBlock',
+]);
+const LOCAL_SAFE_TOOLS = new Set([
+    '!move',
+    '!placeHere',
+    '!nearbyBlocks',
+    '!inventory',
+    '!searchForBlock',
+    '!craftable',
+    '!getCraftingPlan',
+]);
+const PLAN_TOOLS = new Set(['!planAndBuild', '!buildFromPlan']);
+const RISKY_PROMPT_TOOLS = new Set([
+    '!break',
+    '!executeCode',
+    '!navigate',
+    '!newAction',
+    '!observe',
+    '!place',
 ]);
 
 function isFalseLike(value) {
@@ -70,6 +87,7 @@ function position(agent) {
 
 function availableTools(agent) {
     const tools = new Set(DEFAULT_TOOLS);
+    const planMode = process.env.MC_SIM_BUILD_MODE === 'plan';
     if (process.env.MC_SIM_BUILD_MODE === 'plan') {
         tools.add('!planAndBuild');
         tools.add('!buildFromPlan');
@@ -78,10 +96,14 @@ function availableTools(agent) {
     if (Array.isArray(actionNames)) {
         for (const name of actionNames) {
             const text = String(name || '').trim();
-            if (text) tools.add(text.startsWith('!') ? text : `!${text}`);
+            if (!text) continue;
+            const command = text.startsWith('!') ? text : `!${text}`;
+            if (LOCAL_SAFE_TOOLS.has(command) || (planMode && PLAN_TOOLS.has(command))) {
+                tools.add(command);
+            }
         }
     }
-    return [...tools].sort();
+    return [...tools].filter((tool) => !RISKY_PROMPT_TOOLS.has(tool)).sort();
 }
 
 function sceneHint({ source, message, batch }) {
@@ -99,6 +121,51 @@ function emit(agent, type, payload = {}) {
         agent: agentId(agent),
         traceId: payload.trace_id || payload.traceId,
         payload,
+    });
+}
+
+function emitDecision(agent, verdict, turn, response) {
+    const macro =
+        verdict && verdict.build_macro && typeof verdict.build_macro === 'object'
+            ? verdict.build_macro
+            : {};
+    const selected = Boolean(verdict && verdict.selected);
+    const turnKind = verdict?.turn_kind || null;
+    emitTimelineEvent({
+        type: 'director.gate.decision',
+        agent: agentId(agent),
+        traceId: response?.trace_id || response?.traceId,
+        payload: {
+            scene_id: verdict?.scene_id,
+            agent_id: agentId(agent),
+            selected,
+            selected_speaker: selected && turnKind === 'speaker' ? agentId(agent) : null,
+            selected_action_owner: selected && turnKind === 'planner' ? agentId(agent) : null,
+            turn_kind: turnKind,
+            reason: verdict?.reason || (selected ? 'selected' : 'suppressed'),
+            reason_code: selected
+                ? verdict?.reason || 'selected'
+                : verdict?.suppression_reason || 'fanout_capped',
+            suppression_reason: verdict?.suppression_reason || null,
+            suppressed_agents: Array.isArray(verdict?.suppressed_agents)
+                ? verdict.suppressed_agents
+                : [],
+            suppressed_candidates: Array.isArray(verdict?.suppressed_agents)
+                ? verdict.suppressed_agents
+                : [],
+            queue_depth: verdict?.queue_depth ?? turn.queueDepth ?? 0,
+            scene_event_type: 'chat',
+            source_agent: turn.source ? String(turn.source) : null,
+            scene_hint: sceneHint(turn),
+            available_tools: Array.isArray(verdict?.granted_tools) ? verdict.granted_tools : [],
+            llm_prompt_count: selected ? 1 : 0,
+            avoided_prompt_count: selected ? 0 : 1,
+            build_plan_id: macro.plan_id || null,
+            build_owner: macro.owner || null,
+            build_role: macro.role || null,
+            build_support_role: macro.support_role || null,
+            estimated_usd: 0.0,
+        },
     });
 }
 
@@ -132,6 +199,7 @@ function enrichMessage(message, verdict) {
         }
     }
     lines.push(
+        'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.',
         'Use this current scene context and ignore stale queued requests.',
         '[/Director V2 context]',
         '',
@@ -170,6 +238,11 @@ async function askDirector(agent, turn, options, gateState) {
             },
         });
     } catch (err) {
+        gateState.lastOutcome = {
+            sequence: gateSeq,
+            selected: true,
+            outcome: 'bridge_error',
+        };
         emit(agent, 'director_gate.error', {
             outcome: err && err.code ? err.code : 'bridge_error',
             error: err && err.message ? err.message : String(err),
@@ -179,6 +252,11 @@ async function askDirector(agent, turn, options, gateState) {
     }
 
     if (gateSeq < gateState.latestSequence) {
+        gateState.lastOutcome = {
+            sequence: gateSeq,
+            selected: false,
+            outcome: 'director_stale_discarded',
+        };
         emit(agent, 'director_gate.stale_discarded', {
             scene_id: response?.payload?.scene_id,
             queue_depth: response?.payload?.queue_depth ?? turn.queueDepth ?? 0,
@@ -188,7 +266,14 @@ async function askDirector(agent, turn, options, gateState) {
 
     const verdict = response && response.payload ? response.payload : {};
     verdict.granted_tools = filteredGrantedTools(verdict);
+    emitDecision(agent, verdict, turn, response);
     gateState.lastVerdict = verdict;
+    gateState.lastOutcome = {
+        sequence: gateSeq,
+        selected: Boolean(verdict.selected),
+        outcome: verdict.selected ? 'selected' : 'director_suppressed',
+        scene_id: verdict.scene_id,
+    };
     agent.__ltagDirectorContext = verdict;
     if (verdict.selected) {
         emit(agent, 'director_gate.selected', {
@@ -202,6 +287,7 @@ async function askDirector(agent, turn, options, gateState) {
         });
         return {
             selected: true,
+            source: 'system',
             message: enrichMessage(turn.message, verdict),
             maxResponses: turn.maxResponses,
         };
@@ -231,6 +317,7 @@ export function installDirectorGate(agent, options = {}) {
         sequence: 0,
         latestSequence: 0,
         lastVerdict: null,
+        lastOutcome: null,
     };
     agent.__ltagDirectorGate = gateState;
 

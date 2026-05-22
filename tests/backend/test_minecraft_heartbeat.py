@@ -169,6 +169,123 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_director_suppressed_heartbeat_does_not_increment_no_command_streak(
+    tmp_path: Path,
+) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const {{ installHeartbeat }} = await import(pathToFileURL({json.dumps(str(HEARTBEAT))}).href);
+let now = 1;
+const events = [];
+const agent = {{
+    name: 'aurora',
+    __ltagDirectorGate: {{
+        sequence: 0,
+        latestSequence: 0,
+        lastOutcome: null,
+    }},
+    async handleMessage() {{
+        this.__ltagDirectorGate.sequence += 1;
+        this.__ltagDirectorGate.lastOutcome = {{
+            sequence: this.__ltagDirectorGate.sequence,
+            selected: false,
+            outcome: 'director_suppressed',
+        }};
+        return false;
+    }},
+    actions: {{}},
+}};
+const heartbeat = installHeartbeat(agent, {{
+    autoStart: false,
+    now: () => now,
+    emit: (event) => events.push(event),
+    idleMs: 0,
+    cooldownMs: 0,
+    staleActionMs: 1000,
+    maxNoCommand: 1,
+}});
+
+const first = await heartbeat.tick();
+now = 2;
+const second = await heartbeat.tick();
+
+process.stdout.write(JSON.stringify({{
+    first,
+    second,
+    halted: heartbeat.state.halted,
+    noCommandStreak: heartbeat.state.consecutiveNoCommand,
+    eventTypes: events.map((event) => event.type),
+    outcomes: events
+        .filter((event) => event.type === 'heartbeat.outcome')
+        .map((event) => event.payload),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["first"]["fired"] is True
+    assert result["first"]["hadCommand"] is False
+    assert result["first"]["noCommandStreak"] == 0
+    assert result["second"]["fired"] is True
+    assert result["halted"] is False
+    assert result["noCommandStreak"] == 0
+    assert "heartbeat.halted" not in result["eventTypes"]
+    assert [outcome["outcome"] for outcome in result["outcomes"]] == [
+        "director-suppressed",
+        "director-suppressed",
+    ]
+    assert all(outcome["director_suppressed"] is True for outcome in result["outcomes"])
+
+
+@requires_node
+def test_mindcraft_boolean_true_counts_as_command_without_true_excerpt(
+    tmp_path: Path,
+) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const {{ installHeartbeat }} = await import(pathToFileURL({json.dumps(str(HEARTBEAT))}).href);
+let now = 1;
+const events = [];
+const agent = {{
+    name: 'rex',
+    async handleMessage() {{
+        return true;
+    }},
+    actions: {{}},
+}};
+const heartbeat = installHeartbeat(agent, {{
+    autoStart: false,
+    now: () => now,
+    emit: (event) => events.push(event),
+    idleMs: 0,
+    cooldownMs: 0,
+    staleActionMs: 1000,
+    maxNoCommand: 3,
+}});
+heartbeat.state.consecutiveNoCommand = 2;
+
+const result = await heartbeat.tick();
+
+process.stdout.write(JSON.stringify({{
+    result,
+    noCommandStreak: heartbeat.state.consecutiveNoCommand,
+    outcome: events.find((event) => event.type === 'heartbeat.outcome')?.payload,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["result"]["fired"] is True
+    assert result["result"]["hadCommand"] is True
+    assert result["noCommandStreak"] == 0
+    assert result["outcome"]["outcome"] == "command"
+    assert result["outcome"]["response_empty"] is True
+    assert result["outcome"]["response_excerpt"] == ""
+
+
+@requires_node
 def test_active_action_suppresses_until_stale_timeout(tmp_path: Path) -> None:
     source = f"""
 import {{ pathToFileURL }} from 'node:url';

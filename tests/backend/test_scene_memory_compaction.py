@@ -213,7 +213,7 @@ async def test_multi_turn_scene_compacts_digest_for_participants_and_observers()
     compact_call = compactor.compact_calls[0]
     assert compact_call["agent_id"] == "vera"
     assert compact_call["participants"] == ["vera", "rex", "pixel"]
-    assert compact_call["conversation_id"]
+    assert compact_call["conversation_id"] is None
 
     interaction = compact_call["interaction"]
     assert "I'll build the bridge" in interaction
@@ -227,7 +227,7 @@ async def test_multi_turn_scene_compacts_digest_for_participants_and_observers()
     assert {call["summary_style"] for call in compactor.recall_calls} == {"scene"}
     assert agent_speaks == []
     assert len(digests) == 1
-    assert digests[0]["scene_id"] == compact_call["conversation_id"]
+    assert digests[0]["scene_id"].startswith("mcscene-")
     assert "Vera promised" in digests[0]["summary"]
     assert any("I'll build the bridge" in item for item in digests[0]["commitments"])
 
@@ -256,6 +256,56 @@ async def test_scene_memory_emits_director_timeline_digest(
     digest = next(record for record in records if record["event_type"] == "director.scene.digest")
     assert digest["payload"]["distributed_to"] == ["vera", "rex", "pixel"]
     assert digest["payload"]["tokens"] > 0
+
+
+async def test_scene_memory_mirrors_external_scene_update_source_event() -> None:
+    bus, compactor, consumer = _consumer(max_participants=2)
+    external_inbox = _inbox(bus=bus, max_participants=2)
+
+    consumer.start()
+    try:
+        await external_inbox.ingest(
+            _event(
+                "chat",
+                event_id="external-gate-chat",
+                payload={"message": "I'll mark the shared camp before we build."},
+            )
+        )
+        await consumer.flush_due_scenes(now_ms=3_000)
+    finally:
+        consumer.stop()
+
+    assert len(compactor.compact_calls) == 1
+    interaction = compactor.compact_calls[0]["interaction"]
+    assert "I'll mark the shared camp" in interaction
+    assert compactor.compact_calls[0]["participants"] == ["vera", "rex", "pixel"]
+
+
+async def test_scene_memory_keeps_system_evidence_but_excludes_it_as_memory_owner() -> None:
+    bus, compactor, consumer = _consumer(max_participants=2)
+    external_inbox = _inbox(bus=bus, max_participants=2)
+
+    consumer.start()
+    try:
+        await external_inbox.ingest(
+            _event(
+                "chat",
+                event_id="external-system-chat",
+                source_agent_id="system",
+                direct_addressees=["vera", "rex", "system"],
+                payload={"message": "System heartbeat: Vera and Rex should place a block."},
+            )
+        )
+        await consumer.flush_due_scenes(now_ms=3_000)
+    finally:
+        consumer.stop()
+
+    assert len(compactor.compact_calls) == 1
+    compact_call = compactor.compact_calls[0]
+    assert compact_call["agent_id"] == "vera"
+    assert compact_call["participants"] == ["vera", "rex", "pixel"]
+    assert "system: System heartbeat" in compact_call["interaction"]
+    assert all(call["agent_id"] != "system" for call in compactor.recall_calls)
 
 
 async def test_model_unloaded_is_logged_as_memory_compaction_error(

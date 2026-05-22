@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import re
 import time
 from collections import OrderedDict, deque
@@ -41,6 +42,8 @@ GateEventKind = Literal["chat", "action_result", "perception_event"]
 
 _DECISION_TTL_MS = 30_000
 _MAX_CACHED_DECISIONS = 256
+_DEFAULT_SIM_AGENT_IDS = ("alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
+_DEFAULT_MAX_SELECTED_AGENT_SCENE_RATIO = 0.5
 
 
 class PromptDecision(BaseModel):
@@ -72,6 +75,7 @@ class _AgentState:
     last_seen_ms: int = 0
     last_prompt_ms: int | None = None
     last_prompt_turn: int | None = None
+    selected_turn_count: int = 0
 
 
 @dataclass
@@ -102,8 +106,10 @@ class _GateState:
     agents: dict[str, _AgentState] = field(default_factory=dict)
     recent_speakers: deque[str] = field(default_factory=lambda: deque(maxlen=16))
     decisions: OrderedDict[str, _CachedVerdict] = field(default_factory=OrderedDict)
+    scene_selected_agents: dict[str, set[str]] = field(default_factory=dict)
     event_sequence: int = 0
     turn_sequence: int = 0
+    total_selected_turns: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -156,6 +162,7 @@ class DirectorPromptGate:
             last_seen_ms=now_ms,
             last_prompt_ms=previous.last_prompt_ms if previous else None,
             last_prompt_turn=previous.last_prompt_turn if previous else None,
+            selected_turn_count=previous.selected_turn_count if previous else 0,
         )
         agent = state.agents[canonical]
         if agent.position is not None:
@@ -182,6 +189,7 @@ class DirectorPromptGate:
         now_ms = _now_ms()
         async with self._state.lock:
             self._purge_decisions(now_ms)
+            self._register_sim_agents(now_ms)
             self.register_agent(
                 canonical_agent,
                 position=event.get("position"),
@@ -242,6 +250,7 @@ class DirectorPromptGate:
             direct_addressees=_agent_list(event.get("mentions")),
             event_type=event_type,
             now_ms=now_ms,
+            broadcast_to_all=source_agent == "system",
         )
         seed = _stable_seed(scene.scene_id, state.event_sequence)
         scheduler_decision = state.scheduler.select(
@@ -250,6 +259,11 @@ class DirectorPromptGate:
             scene_event_type=event_type,
             recent_speakers=list(state.recent_speakers),
             seed=seed,
+        )
+        scheduler_decision = self._limit_scene_selected_agents(
+            scene=scene,
+            scheduler_decision=scheduler_decision,
+            candidates=candidates,
         )
         build_macros = self._build_macro_assignments(
             scene=scene,
@@ -286,6 +300,7 @@ class DirectorPromptGate:
         direct_addressees: Sequence[str],
         event_type: SceneEventType,
         now_ms: int,
+        broadcast_to_all: bool = False,
     ) -> list[SchedulerCandidate]:
         direct = set(direct_addressees)
         participants = set(scene.participants)
@@ -304,10 +319,11 @@ class DirectorPromptGate:
             )
             agent_name_hit = agent.agent_id in event_text.lower()
             role_fit = _role_fit(agent.role, event_type)
+            is_participant = agent.agent_id in participants or broadcast_to_all
             candidates.append(
                 SchedulerCandidate(
                     agent_id=agent.agent_id,
-                    is_participant=agent.agent_id in participants,
+                    is_participant=is_participant,
                     is_observer=agent.agent_id in observers,
                     chattiness=agent.chattiness,
                     role=agent.role,
@@ -315,6 +331,8 @@ class DirectorPromptGate:
                     seconds_since_spoke=seconds_since_spoke,
                     turns_since_spoke=turns_since_spoke,
                     recent_turn_count=list(self._state.recent_speakers).count(agent.agent_id),
+                    selection_count=agent.selected_turn_count,
+                    total_selection_count=self._state.total_selected_turns,
                     has_open_commitment=False,
                     active_task_match=_active_task_match(agent.role, event_type, event_text),
                     is_directly_addressed=agent.agent_id in direct,
@@ -324,6 +342,10 @@ class DirectorPromptGate:
                 )
             )
         return candidates
+
+    def _register_sim_agents(self, now_ms: int) -> None:
+        for agent_id in _configured_agent_ids():
+            self.register_agent(agent_id, timestamp_ms=now_ms)
 
     def _build_macro_assignments(
         self,
@@ -396,7 +418,12 @@ class DirectorPromptGate:
                 if agent is not None:
                     agent.last_prompt_ms = now_ms
                     agent.last_prompt_turn = self._state.turn_sequence
+                    agent.selected_turn_count += 1
+                    self._state.total_selected_turns += 1
                 self._state.recent_speakers.append(agent_id)
+                self._state.scene_selected_agents.setdefault(cached.scene.scene_id, set()).add(
+                    agent_id
+                )
         else:
             reason = "suppressed"
             suppression_reason = cached.scheduler_decision.suppression_reason or "fanout_capped"
@@ -433,6 +460,54 @@ class DirectorPromptGate:
         ]
         for key in expired:
             self._state.decisions.pop(key, None)
+
+    def _limit_scene_selected_agents(
+        self,
+        *,
+        scene: Scene,
+        scheduler_decision: SchedulerDecision,
+        candidates: Sequence[SchedulerCandidate],
+    ) -> SchedulerDecision:
+        if scheduler_decision.was_urgent or not scheduler_decision.selected:
+            return scheduler_decision
+
+        cap = _selected_agent_scene_cap(len(self._state.agents))
+        already_selected = self._state.scene_selected_agents.get(scene.scene_id, set())
+        remaining_new_slots = max(0, cap - len(already_selected))
+        allowed_turns: list[SchedulerTurn] = []
+        allowed_agent_ids: set[str] = set()
+        capped = False
+
+        for turn in scheduler_decision.selected:
+            if turn.agent_id in already_selected or turn.agent_id in allowed_agent_ids:
+                allowed_turns.append(turn)
+                allowed_agent_ids.add(turn.agent_id)
+                continue
+            if remaining_new_slots > 0:
+                allowed_turns.append(turn)
+                allowed_agent_ids.add(turn.agent_id)
+                remaining_new_slots -= 1
+                continue
+            capped = True
+
+        if not capped:
+            return scheduler_decision
+
+        selected_ids = {turn.agent_id for turn in allowed_turns}
+        suppressed_agents = sorted(
+            {
+                candidate.agent_id
+                for candidate in candidates
+                if candidate.agent_id and candidate.agent_id not in selected_ids
+            }
+        )
+        return scheduler_decision.model_copy(
+            update={
+                "selected": allowed_turns,
+                "suppressed_agents": suppressed_agents,
+                "suppression_reason": "scene_selected_agent_cap",
+            }
+        )
 
 
 _GATES: dict[str, DirectorPromptGate] = {}
@@ -587,10 +662,33 @@ def _role_fit(role: str, event_type: SceneEventType) -> float:
 
 
 def _active_task_match(role: str, event_type: SceneEventType, event_text: str) -> bool:
-    lowered = f"{role} {event_text}".lower()
+    del event_text
+    lowered = role.lower()
     return event_type == SceneEventType.BUILD_ACTION and any(
-        token in lowered for token in ("build", "builder", "architect", "place")
+        token in lowered for token in ("builder", "architect", "engineer", "maker", "planner")
     )
+
+
+def _configured_agent_ids() -> list[str]:
+    raw = os.environ.get("LTAG_SIM_AGENTS") or os.environ.get("MINECRAFT_DIRECTOR_AGENTS")
+    if not raw:
+        return list(_DEFAULT_SIM_AGENT_IDS)
+    parsed = [
+        _canonical_agent_id(item)
+        for item in re.split(r"[\s,]+", raw)
+        if _canonical_agent_id(item)
+    ]
+    return parsed or list(_DEFAULT_SIM_AGENT_IDS)
+
+
+def _selected_agent_scene_cap(agent_count: int) -> int:
+    ratio = _float_or_none(os.environ.get("MINECRAFT_DIRECTOR_MAX_SELECTED_AGENT_RATIO"))
+    if ratio is None:
+        ratio = _float_or_none(os.environ.get("SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"))
+    if ratio is None:
+        ratio = _DEFAULT_MAX_SELECTED_AGENT_SCENE_RATIO
+    ratio = max(0.01, min(ratio, 1.0))
+    return max(1, int(max(1, agent_count) * ratio))
 
 
 def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> bool:

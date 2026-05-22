@@ -325,6 +325,8 @@ def test_local_sim_plan_mode_enables_plan_building_but_keeps_execute_code_blocke
     assert "slow sim actions: 0" in proc.stdout
     assert "execute code actions: 1" in proc.stdout
     assert "slow actions:   allowed" in proc.stdout
+    assert "safe terrain:   enabled" in proc.stdout
+    assert "blocks !place/!break/!observe" in proc.stdout
     assert "execute code:   blocked (!executeCode)" in proc.stdout
     assert '!planAndBuild("small shared cabin")' in proc.stdout
     assert "init prompt:    set (" in proc.stdout
@@ -713,8 +715,8 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "!buildFromPlan" in text
     assert "!planAndBuild" in text
     assert "!executeCode" in text
-    assert "'!place'," not in text
-    assert "'!break'," not in text
+    assert '"!place"' in text
+    assert '"!break"' in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text
@@ -880,6 +882,47 @@ def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_
     assert "Behavioral acceptance" in summary
     assert "behavior_gate_status=fail" in summary
     assert "agent alpha movement expected >= 5 got 1" in summary
+
+
+def test_behavior_gate_does_not_count_embodied_text_as_death(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            "Director context says to take another embodied action near spawn.",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(5))
+        if agent_id == "rex":
+            lines.append('!placeHere("stone")')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "rex and vera worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
 
 def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(tmp_path) -> None:

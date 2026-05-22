@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from collections.abc import Awaitable
@@ -35,6 +36,18 @@ SCENE_TRANSCRIPT_CATEGORIES = (
     "Help requests",
 )
 _MODEL_UNLOADED_MARKERS = ("model unloaded", "model_not_loaded")
+_DEFAULT_MEMORY_AGENT_IDS = frozenset(
+    {
+        "alpha",
+        "vera",
+        "rex",
+        "aurora",
+        "pixel",
+        "fork",
+        "sentinel",
+        "grok",
+    }
+)
 
 _registered_consumers: dict[int, SceneMemoryConsumer] = {}
 
@@ -100,8 +113,21 @@ class SceneMemoryConsumer:
         data = event.get("data", {})
         scene = None
         if isinstance(data, dict):
+            source_event = data.get("source_event")
+            source_inbox_id = data.get("source_inbox_id")
+            if isinstance(source_event, dict) and source_inbox_id != id(self.inbox):
+                mirrored_event = dict(source_event)
+                direct_addressees = _merge_agent_fields(
+                    mirrored_event.get("direct_addressees"),
+                    data.get("participants"),
+                    data.get("observers"),
+                )
+                if direct_addressees:
+                    mirrored_event["direct_addressees"] = direct_addressees
+                update = await self.inbox.ingest(mirrored_event, emit_update=False)
+                scene = update.scene
             scene_id = data.get("scene_id")
-            if isinstance(scene_id, str):
+            if scene is None and isinstance(scene_id, str):
                 scene = self.inbox.get_scene(scene_id)
         now_ms = scene.last_event_at_ms if scene is not None else _now_ms()
         self._track_background_task(self.flush_due_scenes(now_ms=now_ms))
@@ -140,11 +166,12 @@ class SceneMemoryConsumer:
     async def _compact_closed_scene(self, closed_scene: ClosedScene) -> None:
         scene = closed_scene.scene
         interaction = render_scene_transcript(closed_scene)
-        recipients = _merge_ordered(scene.participants, scene.observers)
+        evidence_participants = _merge_ordered(scene.participants, scene.observers)
+        recipients = _memory_recipients(evidence_participants)
         if not recipients or not interaction.strip():
             return
 
-        primary_agent_id = scene.participants[0] if scene.participants else recipients[0]
+        primary_agent_id = _first_memory_recipient(scene.participants, recipients)
         started = time.perf_counter()
         try:
             result = await self.compactor.compact_interaction(
@@ -152,7 +179,7 @@ class SceneMemoryConsumer:
                 interaction=interaction,
                 event_type=SCENE_EVENT_TYPE,
                 participants=recipients,
-                conversation_id=scene.scene_id,
+                conversation_id=None,
                 summary_style="scene",
             )
             if result is None:
@@ -265,6 +292,32 @@ def register_scene_memory_consumer(
     return consumer
 
 
+def ensure_scene_memory_consumer(
+    event_bus: EventBus,
+    compactor: MemoryCompactor,
+    *,
+    inbox: SceneInbox | None = None,
+    poll_interval_seconds: float = 1.0,
+) -> SceneMemoryConsumer:
+    """Return the active scene memory consumer, registering it if missing."""
+
+    consumer = _registered_consumers.get(id(event_bus))
+    if consumer is not None:
+        return consumer
+    return register_scene_memory_consumer(
+        event_bus,
+        compactor,
+        inbox=inbox,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+
+
+def get_scene_memory_consumer(event_bus: EventBus) -> SceneMemoryConsumer | None:
+    """Return the registered scene memory consumer for an event bus, if any."""
+
+    return _registered_consumers.get(id(event_bus))
+
+
 def unregister_scene_memory_consumer(event_bus: EventBus) -> None:
     """Remove a scene memory consumer from the event bus."""
 
@@ -341,6 +394,65 @@ def _merge_ordered(first: list[str], second: list[str]) -> list[str]:
         seen.add(agent_id)
         merged.append(agent_id)
     return merged
+
+
+def _merge_agent_fields(*values: Any) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if isinstance(value, str):
+            items: tuple[Any, ...] | list[Any] | set[Any] | frozenset[Any] = (value,)
+        elif isinstance(value, list | tuple | set | frozenset):
+            items = value
+        else:
+            continue
+        for item in items:
+            agent_id = str(item or "").strip().lower()
+            if not agent_id or agent_id in seen:
+                continue
+            seen.add(agent_id)
+            merged.append(agent_id)
+    return merged
+
+
+def _memory_recipients(agent_ids: list[str]) -> list[str]:
+    valid_agent_ids = _memory_agent_ids()
+    recipients = []
+    seen: set[str] = set()
+    for value in agent_ids:
+        agent_id = str(value or "").strip().lower()
+        if agent_id not in valid_agent_ids or agent_id in seen:
+            continue
+        seen.add(agent_id)
+        recipients.append(agent_id)
+    return recipients
+
+
+def _first_memory_recipient(preferred: list[str], fallback: list[str]) -> str:
+    valid_agent_ids = _memory_agent_ids()
+    for value in preferred:
+        agent_id = str(value or "").strip().lower()
+        if agent_id in valid_agent_ids:
+            return agent_id
+    return fallback[0]
+
+
+def _memory_agent_ids() -> frozenset[str]:
+    configured = _agent_ids_from_env("LTAG_SIM_AGENTS") or _agent_ids_from_env(
+        "MINECRAFT_DIRECTOR_AGENTS"
+    )
+    return frozenset(configured) if configured else _DEFAULT_MEMORY_AGENT_IDS
+
+
+def _agent_ids_from_env(name: str) -> set[str]:
+    raw = os.environ.get(name)
+    if not raw:
+        return set()
+    return {
+        item.strip().lower()
+        for item in re.split(r"[\s,]+", raw)
+        if item.strip()
+    }
 
 
 def _recall_summary(result: object) -> str | None:

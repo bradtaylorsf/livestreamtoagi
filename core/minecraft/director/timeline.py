@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DIRECTOR_TIMELINE_FILENAME = "director_v2.ndjson"
+_SOAK_RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z$")
 
 
 def emit_director_timeline_event(
@@ -46,6 +48,30 @@ def emit_director_timeline_event(
             handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
     except OSError:
         logger.debug("Director V2 timeline event write failed", exc_info=True)
+
+
+def ensure_soak_run_dir_from_run_id(
+    run_id: str | None,
+    *,
+    root: str | Path | None = None,
+) -> Path | None:
+    """Infer the current soak evidence directory from a validated run id."""
+
+    existing = _soak_run_dir()
+    if existing is not None:
+        return existing
+
+    candidate_run_id = str(run_id or "").strip()
+    if not _SOAK_RUN_ID_RE.fullmatch(candidate_run_id):
+        return None
+
+    project_root = Path(root) if root is not None else Path(__file__).resolve().parents[3]
+    candidate = project_root / "logs" / "soak" / candidate_run_id
+    if not candidate.exists():
+        return None
+
+    os.environ["MC_RUN_DIR"] = str(candidate)
+    return candidate
 
 
 def _soak_run_dir() -> Path | None:
