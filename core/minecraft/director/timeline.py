@@ -49,7 +49,7 @@ def emit_director_timeline_event(
 
 
 def _soak_run_dir() -> Path | None:
-    raw = os.environ.get("SOAK_RUN_DIR")
+    raw = os.environ.get("SOAK_RUN_DIR") or os.environ.get("MC_RUN_DIR")
     if not raw:
         return None
     return Path(raw)
