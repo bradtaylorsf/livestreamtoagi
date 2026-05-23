@@ -23,6 +23,7 @@ from core.minecraft.eval.live_telemetry import (
     derive_inventory_delta,
     derive_lifecycle_signals,
     derive_pathfinding_signals,
+    derive_timing_signals,
 )
 
 
@@ -120,13 +121,16 @@ class FakeBridgeClient:
         count = self._counts.get(command_name, 0)
         self._counts[command_name] = count + 1
         response = self._response_for(command_name, count)
+        final_state = response.get("final_state")
+        if not isinstance(final_state, Mapping):
+            final_state = _fake_final_state(command_name, command_text, response)
+        final_state = _state_with_response_signals(final_state, response, agent_id=None)
         return {
             "status": response.get("status", "ok"),
             "reason": response.get("reason"),
             "error": response.get("error"),
             "action_events": response.get("action_events", ()),
-            "final_state": response.get("final_state")
-            or _fake_final_state(command_name, command_text, response),
+            "final_state": final_state,
         }
 
     def _response_for(self, command_name: str, count: int) -> Mapping[str, Any]:
@@ -195,17 +199,28 @@ def supported_command_inputs() -> tuple[str, ...]:
 
 
 async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
+    return await _run_case_for_agent(case, bridge=bridge, agent_id=None)
+
+
+async def _run_case_for_agent(
+    case: CommandCase,
+    *,
+    bridge: BridgeClient,
+    agent_id: str | None,
+) -> CaseResult:
     started_ms = _now_ms()
+    params = _case_params(case, agent_id=agent_id)
     events: list[ActionEvent] = [
         ActionEvent(
             action_id=case.action_id,
             kind="start",
             ts_ms=started_ms,
             payload={
+                "agent_id": agent_id,
                 "case_id": case.case_id,
                 "command": case.command_name,
                 "command_text": case.command_text,
-                "params": dict(case.params),
+                "params": dict(params),
             },
         )
     ]
@@ -231,13 +246,14 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
     final_state = response.get("final_state")
     if not isinstance(final_state, Mapping):
         final_state = {}
+    final_state = _state_with_response_signals(final_state, response, agent_id=agent_id)
     detail = response.get("reason") or response.get("outcome_class") or error
     lifecycle_state = _state_with_detail(final_state, detail)
     lifecycle = derive_lifecycle_signals(
         case.command_name,
         outcome_class,
         tuple(events),
-        params=case.params,
+        params=params,
         final_state=lifecycle_state,
     )
     eval_category = classify_eval_category(
@@ -245,6 +261,7 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
         outcome_class,
         detail,
         final_state,
+        params=params,
     )
     eval_category = _category_with_lifecycle(eval_category, lifecycle)
     pathfinding = derive_pathfinding_signals(
@@ -257,21 +274,34 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
     inventory = derive_inventory_delta(
         case.command_name,
         outcome_class,
-        params=case.params,
+        params=params,
         final_state=final_state,
     )
     block_mutation = derive_block_mutation(
         case.command_name,
         outcome_class,
-        params=case.params,
+        params=params,
         final_state=final_state,
     )
+    timing = None
+    if agent_id:
+        timing_state = dict(final_state)
+        timing_state.setdefault("latency_ms", max(0, ended_ms - started_ms))
+        timing = derive_timing_signals(
+            agent_id,
+            tuple(events),
+            params=params,
+            final_state=timing_state,
+        )
+        if timing is not None:
+            eval_category = EvalCategory.MULTI_AGENT_TIMING
     events.append(
         ActionEvent(
             action_id=case.action_id,
             kind="end",
             ts_ms=ended_ms,
             payload={
+                "agent_id": agent_id,
                 "case_id": case.case_id,
                 "command": case.command_name,
                 "status": response.get("status"),
@@ -282,6 +312,7 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
                 "inventory": inventory.to_dict() if inventory else None,
                 "block_mutation": block_mutation.to_dict() if block_mutation else None,
                 "lifecycle": lifecycle.to_dict() if lifecycle else None,
+                "timing": timing.to_dict() if timing else None,
                 "latency_ms": max(0, ended_ms - started_ms),
             },
         )
@@ -290,17 +321,19 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
     return CaseResult(
         case_id=case.case_id,
         command_text=case.command_text,
-        params=case.params,
+        params=params,
         action_events=tuple(events),
         outcome_class=outcome_class,
         final_state=final_state,
         latency_ms=max(0, ended_ms - started_ms),
+        agent_id=agent_id,
         error=error,
         eval_category=eval_category,
         pathfinding=pathfinding,
         inventory=inventory,
         block_mutation=block_mutation,
         lifecycle=lifecycle,
+        timing=timing,
     )
 
 
@@ -584,7 +617,44 @@ def _state_with_detail(
     return state
 
 
+def _state_with_response_signals(
+    final_state: Mapping[str, Any],
+    response: Mapping[str, Any],
+    *,
+    agent_id: str | None,
+) -> dict[str, Any]:
+    state = dict(final_state)
+    if agent_id:
+        state.setdefault("agent_id", agent_id)
+        state.setdefault("multi_agent", True)
+    for key in (
+        "queue_depth",
+        "queue_contention",
+        "self_interruption_count",
+        "director_fanout_count",
+        "dropped_commands",
+        "command_loss_count",
+        "conflicts",
+        "conflicting_action_ids",
+        "last_command_ts_ms",
+        "latency_ms",
+    ):
+        if key in response and key not in state:
+            state[key] = response[key]
+    return state
+
+
+def _case_params(case: CommandCase, *, agent_id: str | None) -> dict[str, Any]:
+    params = dict(case.params)
+    if agent_id:
+        params.setdefault("agent_id", agent_id)
+        params.setdefault("multi_agent", True)
+    return params
+
+
 def _category_with_lifecycle(eval_category: str, lifecycle: Any | None) -> str:
+    if eval_category == EvalCategory.MULTI_AGENT_TIMING:
+        return eval_category
     if lifecycle is None:
         return eval_category
     if lifecycle.death_loop:

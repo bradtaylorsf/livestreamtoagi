@@ -125,6 +125,36 @@ async def test_run_live_command_smoke_records_action_start_and_end_events() -> N
         assert result.action_events[-1].payload["inventory"] is not None
 
 
+async def test_fake_bridge_surfaces_queue_signals_in_final_state() -> None:
+    bridge = FakeBridgeClient(
+        {
+            "move": (
+                {
+                    "status": "ok",
+                    "reason": "completed",
+                    "queue_depth": 2,
+                    "conflicting_action_ids": ["rex-place-1"],
+                },
+            )
+        }
+    )
+
+    summary = await run_live_command_smoke(
+        "move",
+        1,
+        bridge=bridge,
+        profile="flat-eval",
+        seed=1,
+        env={},
+        project_root=REPO_ROOT,
+        dry_run=True,
+    )
+
+    result = summary.case_results[0]
+    assert result.final_state["queue_depth"] == 2
+    assert result.final_state["conflicting_action_ids"] == ["rex-place-1"]
+
+
 async def test_run_live_command_smoke_records_collision_pathfinding_signals() -> None:
     bridge = FakeBridgeClient(
         {

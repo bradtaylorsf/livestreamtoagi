@@ -251,3 +251,91 @@ def test_live_cli_outputs_lifecycle_summary_and_report_section(tmp_path: Path) -
     assert "## Lifecycle" in report
     assert "death_count=2" in report
     assert "death_loop=true" in report
+
+
+def test_live_cli_multi_agent_json_emits_timing_fields() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        [
+            "--multi-agent",
+            "--agents",
+            "vera:move:2,rex:placeHere:2",
+            "--tick-ms",
+            "200",
+            "--stagger-ms",
+            "50",
+            "--director-fanout",
+            "2",
+            "--dry-run",
+            "--json",
+        ],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    data = json.loads(stdout.getvalue())
+    assert data["command"] == "multi-agent-timing"
+    assert data["resolved_command"] == "multi-agent-timing"
+    assert data["category_counts"]["multi_agent_timing"] == 4
+    assert data["timing_summary"]["cases"] == 4
+    assert data["timing_summary"]["agents"] == 2
+    assert data["timing_summary"]["per_agent"]["vera"]["cases"] == 2
+    assert data["profile_detail"]["multi_agent"]["tick_ms"] == 200
+    assert data["case_results"][0]["agent_id"] == "vera"
+    assert data["case_results"][0]["timing"]["agent_id"] == "vera"
+    assert stderr.getvalue() == ""
+
+
+def test_live_cli_multi_agent_invalid_agent_spec_exits_nonzero() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        ["--multi-agent", "--agents", "vera:move", "--dry-run"],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert "invalid --agents spec" in stderr.getvalue()
+
+
+def test_live_cli_multi_agent_report_contains_timing_section(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    report_dir = tmp_path / "report"
+
+    exit_code = main(
+        [
+            "--multi-agent",
+            "--agents",
+            "vera:move:3,rex:placeHere:3",
+            "--dry-run",
+            "--report-dir",
+            str(report_dir),
+        ],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    text = stdout.getvalue()
+    assert exit_code == 0, stderr.getvalue()
+    assert "Minecraft multi-agent timing" in text
+    assert "timing: " in text
+    assert "timing_agent vera:" in text
+
+    report = (report_dir / "report.md").read_text(encoding="utf-8")
+    assert "# Minecraft Multi-agent Timing" in report
+    assert "## Multi-agent timing" in report
+    assert "failure_classes=" in report
+    assert "failure_class=queue_contention" in report

@@ -38,6 +38,7 @@ class EvalCategory:
     DEATH_LOOP = "death_loop"
     SAFE_SPAWN = "safe_spawn"
     STUCK_UNSTUCK = "stuck_unstuck"
+    MULTI_AGENT_TIMING = "multi_agent_timing"
     OTHER = "other"
 
     ALL = (
@@ -48,7 +49,28 @@ class EvalCategory:
         DEATH_LOOP,
         SAFE_SPAWN,
         STUCK_UNSTUCK,
+        MULTI_AGENT_TIMING,
         OTHER,
+    )
+
+
+class MultiAgentTimingFailure:
+    """Stable JSON failure classes for multi-agent timing eval cases."""
+
+    QUEUE_CONTENTION = "queue_contention"
+    SELF_INTERRUPTION = "self_interruption"
+    DIRECTOR_FANOUT = "director_fanout"
+    COMMAND_LOSS = "command_loss"
+    TIMING_DRIFT = "timing_drift"
+    NONE = "none"
+
+    ALL = (
+        QUEUE_CONTENTION,
+        SELF_INTERRUPTION,
+        DIRECTOR_FANOUT,
+        COMMAND_LOSS,
+        TIMING_DRIFT,
+        NONE,
     )
 
 
@@ -56,6 +78,11 @@ _ACTION_EVENT_KINDS = frozenset(
     (
         "start",
         "end",
+        "queued",
+        "dropped",
+        "preempted",
+        "interrupted",
+        "fanout",
         "death",
         "died",
         "killed",
@@ -123,6 +150,59 @@ _UNSAFE_SPAWN_MARKERS = frozenset(
 _UNSTUCK_ATTEMPT_MARKERS = frozenset(("unstuck", "recover", "recovery", "free_self"))
 _UNSTUCK_SUCCESS_MARKERS = frozenset(("recovered", "unstuck_ok", "freed"))
 _UNSTUCK_FAILURE_MARKERS = frozenset(("unstuck_failed", "still_stuck", "recovery_failed"))
+_QUEUE_CONTENTION_MARKERS = frozenset(
+    (
+        "queue contention",
+        "queue_contention",
+        "queue conflict",
+        "contention",
+        "conflicting action",
+        "conflicting_action",
+    )
+)
+_SELF_INTERRUPTION_MARKERS = frozenset(
+    (
+        "self interruption",
+        "self-interruption",
+        "self_interruption",
+        "interrupted",
+        "preempted",
+        "preempt",
+    )
+)
+_DIRECTOR_FANOUT_MARKERS = frozenset(
+    (
+        "director fanout",
+        "director_fanout",
+        "fanout",
+        "duplicate dispatch",
+    )
+)
+_COMMAND_LOSS_MARKERS = frozenset(
+    (
+        "command loss",
+        "command_loss",
+        "dropped command",
+        "lost command",
+        "dropped",
+    )
+)
+_TIMING_DRIFT_MARKERS = frozenset(("timing drift", "timing_drift", "drift", "late command"))
+_TIMING_SIGNAL_KEYS = frozenset(
+    (
+        "timing",
+        "queue_depth",
+        "queue_contention",
+        "self_interruption_count",
+        "director_fanout_count",
+        "dropped_commands",
+        "command_loss_count",
+        "timing_drift",
+        "conflicts",
+        "conflicting_action_ids",
+        "last_command_ts_ms",
+    )
+)
 _LIFECYCLE_COMMANDS = frozenset(
     (
         "move",
@@ -134,7 +214,7 @@ _LIFECYCLE_COMMANDS = frozenset(
     )
 )
 _SIGNAL_TEXT_KEYS = frozenset(
-    ("detail", "error", "last_error", "message", "reason", "status_detail")
+    ("detail", "error", "failure_class", "last_error", "message", "reason", "status_detail")
 )
 _POSE_KEYS = ("final_pose", "pose")
 
@@ -325,6 +405,76 @@ class LifecycleSignals:
 
 
 @dataclass(frozen=True, slots=True)
+class TimingSignals:
+    """Derived queue and timing signals for one multi-agent eval case."""
+
+    agent_id: str
+    queue_depth: int = 0
+    queue_contention: bool = False
+    self_interruption_count: int = 0
+    director_fanout_count: int = 0
+    dropped_commands: int = 0
+    command_loss_count: int = 0
+    latency_ms: int = 0
+    conflicting_action_ids: tuple[str, ...] = ()
+    last_command_ts_ms: int | None = None
+
+    def __post_init__(self) -> None:
+        agent_id = str(self.agent_id).strip()
+        if not agent_id:
+            raise ValueError("agent_id must be non-empty")
+        object.__setattr__(self, "agent_id", agent_id)
+        object.__setattr__(self, "queue_depth", max(0, int(self.queue_depth)))
+        object.__setattr__(self, "queue_contention", bool(self.queue_contention))
+        object.__setattr__(
+            self,
+            "self_interruption_count",
+            max(0, int(self.self_interruption_count)),
+        )
+        object.__setattr__(
+            self,
+            "director_fanout_count",
+            max(0, int(self.director_fanout_count)),
+        )
+        object.__setattr__(self, "dropped_commands", max(0, int(self.dropped_commands)))
+        object.__setattr__(
+            self,
+            "command_loss_count",
+            max(0, int(self.command_loss_count)),
+        )
+        object.__setattr__(self, "latency_ms", max(0, int(self.latency_ms)))
+        object.__setattr__(
+            self,
+            "conflicting_action_ids",
+            tuple(
+                dict.fromkeys(
+                    str(action_id) for action_id in self.conflicting_action_ids if action_id
+                )
+            ),
+        )
+        if self.last_command_ts_ms is not None:
+            object.__setattr__(
+                self,
+                "last_command_ts_ms",
+                max(0, int(self.last_command_ts_ms)),
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "queue_depth": self.queue_depth,
+            "queue_contention": self.queue_contention,
+            "self_interruption_count": self.self_interruption_count,
+            "director_fanout_count": self.director_fanout_count,
+            "dropped_commands": self.dropped_commands,
+            "command_loss_count": self.command_loss_count,
+            "latency_ms": self.latency_ms,
+            "conflicting_action_ids": list(self.conflicting_action_ids),
+            "last_command_ts_ms": self.last_command_ts_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ActionEvent:
     """One action lifecycle event emitted while running a command case."""
 
@@ -363,12 +513,14 @@ class CaseResult:
     outcome_class: str
     final_state: Mapping[str, Any]
     latency_ms: int
+    agent_id: str | None = None
     error: str | None = None
     eval_category: str | None = None
     pathfinding: PathfindingSignals | Mapping[str, Any] | None = None
     inventory: InventoryDelta | Mapping[str, Any] | None = None
     block_mutation: BlockMutation | Mapping[str, Any] | None = None
     lifecycle: LifecycleSignals | Mapping[str, Any] | None = None
+    timing: TimingSignals | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.case_id:
@@ -384,6 +536,9 @@ class CaseResult:
         object.__setattr__(self, "action_events", tuple(self.action_events))
         object.__setattr__(self, "final_state", dict(self.final_state))
         command_name = _command_name_from_case(self.command_text, self.params)
+        agent_id = self.agent_id or _agent_id_from_context(self.params, self.final_state)
+        agent_id = str(agent_id).strip() if agent_id is not None else None
+        object.__setattr__(self, "agent_id", agent_id or None)
 
         lifecycle = self.lifecycle
         if isinstance(lifecycle, Mapping):
@@ -397,18 +552,33 @@ class CaseResult:
                 final_state=self.final_state,
             )
 
+        timing = self.timing
+        if isinstance(timing, Mapping):
+            timing = _coerce_timing_signals(timing)
+        elif timing is None and agent_id:
+            timing = derive_timing_signals(
+                agent_id,
+                self.action_events,
+                params=self.params,
+                final_state=self.final_state,
+            )
+
         eval_category = self.eval_category or classify_eval_category(
             command_name,
             self.outcome_class,
             self.error,
             self.final_state,
+            params=self.params,
         )
+        if timing is not None:
+            eval_category = EvalCategory.MULTI_AGENT_TIMING
         eval_category = _apply_lifecycle_category(command_name, eval_category, lifecycle)
         if eval_category not in EvalCategory.ALL:
             allowed = ", ".join(EvalCategory.ALL)
             raise ValueError(f"eval_category must be one of: {allowed}")
         object.__setattr__(self, "eval_category", eval_category)
         object.__setattr__(self, "lifecycle", lifecycle)
+        object.__setattr__(self, "timing", timing)
 
         pathfinding = self.pathfinding
         if isinstance(pathfinding, Mapping):
@@ -462,6 +632,7 @@ class CaseResult:
             "case_id": self.case_id,
             "command_text": self.command_text,
             "params": dict(self.params),
+            "agent_id": self.agent_id,
             "action_events": [event.to_dict() for event in self.action_events],
             "outcome_class": self.outcome_class,
             "final_state": dict(self.final_state),
@@ -472,6 +643,7 @@ class CaseResult:
             "inventory": self.inventory.to_dict() if self.inventory else None,
             "block_mutation": self.block_mutation.to_dict() if self.block_mutation else None,
             "lifecycle": self.lifecycle.to_dict() if self.lifecycle else None,
+            "timing": self.timing.to_dict() if self.timing else None,
         }
 
 
@@ -631,6 +803,80 @@ class LiveRunSummary:
         return summary
 
     @property
+    def timing_summary(self) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "cases": 0,
+            "agents": 0,
+            "contention": 0,
+            "interruptions": 0,
+            "fanouts": 0,
+            "dropped": 0,
+            "command_loss": 0,
+            "timing_drift": 0,
+            "failure_classes": {failure: 0 for failure in MultiAgentTimingFailure.ALL},
+            "per_agent": {},
+        }
+        per_agent: dict[str, dict[str, Any]] = {}
+        for result in self.case_results:
+            timing = result.timing
+            if timing is None:
+                continue
+            summary["cases"] += 1
+            agent_metrics = per_agent.setdefault(
+                timing.agent_id,
+                {
+                    "cases": 0,
+                    "contention": 0,
+                    "interruptions": 0,
+                    "fanouts": 0,
+                    "dropped": 0,
+                    "command_loss": 0,
+                    "timing_drift": 0,
+                    "max_queue_depth": 0,
+                    "latency_ms_total": 0,
+                    "last_command_ts_ms": None,
+                    "failure_classes": {failure: 0 for failure in MultiAgentTimingFailure.ALL},
+                },
+            )
+            agent_metrics["cases"] += 1
+            agent_metrics["latency_ms_total"] += timing.latency_ms
+            agent_metrics["max_queue_depth"] = max(
+                agent_metrics["max_queue_depth"],
+                timing.queue_depth,
+            )
+            if timing.last_command_ts_ms is not None:
+                agent_metrics["last_command_ts_ms"] = max(
+                    agent_metrics["last_command_ts_ms"] or 0,
+                    timing.last_command_ts_ms,
+                )
+
+            if timing.queue_contention:
+                summary["contention"] += 1
+                agent_metrics["contention"] += 1
+            summary["interruptions"] += timing.self_interruption_count
+            agent_metrics["interruptions"] += timing.self_interruption_count
+            summary["fanouts"] += timing.director_fanout_count
+            agent_metrics["fanouts"] += timing.director_fanout_count
+            summary["dropped"] += timing.dropped_commands
+            agent_metrics["dropped"] += timing.dropped_commands
+            summary["command_loss"] += timing.command_loss_count
+            agent_metrics["command_loss"] += timing.command_loss_count
+
+            failure_class = classify_timing_failure(timing, params=result.params)
+            summary["failure_classes"][failure_class] += 1
+            agent_metrics["failure_classes"][failure_class] += 1
+            if failure_class == MultiAgentTimingFailure.TIMING_DRIFT:
+                summary["timing_drift"] += 1
+                agent_metrics["timing_drift"] += 1
+
+        summary["agents"] = len(per_agent)
+        summary["per_agent"] = {
+            agent_id: _finalize_agent_timing_metrics(metrics)
+            for agent_id, metrics in sorted(per_agent.items())
+        }
+        return summary
+
+    @property
     def passed_count(self) -> int:
         return sum(1 for result in self.case_results if result.passed)
 
@@ -656,6 +902,7 @@ class LiveRunSummary:
             "inventory_summary": self.inventory_summary,
             "block_mutation_summary": self.block_mutation_summary,
             "lifecycle_summary": self.lifecycle_summary,
+            "timing_summary": self.timing_summary,
             "case_results": [result.to_dict() for result in self.case_results],
         }
 
@@ -697,10 +944,17 @@ def classify_eval_category(
     outcome_class: object,
     reason: object | None,
     final_state: Mapping[str, Any] | None,
+    *,
+    params: Mapping[str, Any] | None = None,
 ) -> str:
     """Classify the live-eval behavior category for one command outcome."""
 
-    detail = _normalize_detail(reason, _signal_text(final_state))
+    detail = _normalize_detail(reason, _signal_text(final_state), _signal_text(params))
+    if _has_multi_agent_context(params, final_state) and (
+        _has_timing_signal(detail, final_state) or _has_timing_signal(detail, params)
+    ):
+        return EvalCategory.MULTI_AGENT_TIMING
+
     lifecycle = derive_lifecycle_signals(
         command_name,
         outcome_class,
@@ -1010,6 +1264,188 @@ def derive_lifecycle_signals(
     )
 
 
+def derive_timing_signals(
+    agent_id: object,
+    action_events: Sequence[ActionEvent],
+    *,
+    params: Mapping[str, Any] | None = None,
+    final_state: Mapping[str, Any] | None = None,
+) -> TimingSignals | None:
+    """Derive queue contention and command-loss signals for one agent case."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return None
+
+    state = final_state if isinstance(final_state, Mapping) else {}
+    raw_params = params if isinstance(params, Mapping) else {}
+    event_details: list[str] = []
+    queue_depth = max(
+        _max_int_signal(state, ("queue_depth",)),
+        _max_int_signal(raw_params, ("queue_depth",)),
+    )
+    self_interruption_count = max(
+        _count_signal(state, ("self_interruption_count", "self_interruptions")),
+        _count_signal(raw_params, ("self_interruption_count", "self_interruptions")),
+    )
+    director_fanout_count = max(
+        _count_signal(state, ("director_fanout_count", "director_fanouts")),
+        _count_signal(raw_params, ("director_fanout_count", "director_fanouts")),
+    )
+    dropped_commands = max(
+        _count_signal(state, ("dropped_commands", "dropped")),
+        _count_signal(raw_params, ("dropped_commands", "dropped")),
+    )
+    command_loss_count = max(
+        _count_signal(state, ("command_loss_count", "command_loss", "lost_commands")),
+        _count_signal(raw_params, ("command_loss_count", "command_loss", "lost_commands")),
+    )
+    latency_ms = max(
+        _max_int_signal(state, ("latency_ms", "elapsed_ms", "duration_ms")),
+        _max_int_signal(raw_params, ("latency_ms", "elapsed_ms", "duration_ms")),
+    )
+    last_command_ts_ms = _max_optional_int_signal(
+        state,
+        ("last_command_ts_ms", "scheduled_ts_ms", "command_ts_ms"),
+    )
+    params_last_command = _max_optional_int_signal(
+        raw_params,
+        ("last_command_ts_ms", "scheduled_ts_ms", "command_ts_ms"),
+    )
+    if params_last_command is not None:
+        last_command_ts_ms = max(last_command_ts_ms or 0, params_last_command)
+
+    conflicting_action_ids: list[str] = []
+    conflicting_action_ids.extend(_action_ids_from_context(state))
+    conflicting_action_ids.extend(_action_ids_from_context(raw_params))
+
+    queued_events = 0
+    dropped_events = 0
+    interruption_events = 0
+    fanout_events = 0
+    for raw_event in action_events:
+        kind, payload = _event_parts(raw_event)
+        detail = _normalize_detail(kind, _signal_text(payload))
+        if detail:
+            event_details.append(detail)
+        queue_depth = max(queue_depth, _max_int_signal(payload, ("queue_depth",)))
+        self_interruption_count = max(
+            self_interruption_count,
+            _count_signal(payload, ("self_interruption_count", "self_interruptions")),
+        )
+        director_fanout_count = max(
+            director_fanout_count,
+            _count_signal(payload, ("director_fanout_count", "director_fanouts")),
+        )
+        dropped_commands = max(
+            dropped_commands,
+            _count_signal(payload, ("dropped_commands", "dropped")),
+        )
+        command_loss_count = max(
+            command_loss_count,
+            _count_signal(payload, ("command_loss_count", "command_loss", "lost_commands")),
+        )
+        latency_ms = max(latency_ms, _max_int_signal(payload, ("latency_ms",)))
+        if isinstance(raw_event, ActionEvent):
+            last_command_ts_ms = max(last_command_ts_ms or 0, raw_event.ts_ms)
+        event_ts = _max_optional_int_signal(payload, ("last_command_ts_ms", "command_ts_ms"))
+        if event_ts is not None:
+            last_command_ts_ms = max(last_command_ts_ms or 0, event_ts)
+        conflicting_action_ids.extend(_action_ids_from_context(payload))
+
+        if kind == "queued":
+            queued_events += 1
+        if kind == "dropped":
+            dropped_events += 1
+        if kind in {"interrupted", "preempted"}:
+            interruption_events += 1
+        if kind == "fanout":
+            fanout_events += 1
+
+    combined_detail = _normalize_detail(
+        _signal_text(state), _signal_text(raw_params), *event_details
+    )
+    if dropped_events:
+        dropped_commands = max(dropped_commands, dropped_events)
+        command_loss_count = max(command_loss_count, dropped_events)
+    if interruption_events:
+        self_interruption_count = max(self_interruption_count, interruption_events)
+    if fanout_events:
+        director_fanout_count = max(director_fanout_count, fanout_events)
+    if _has_marker(combined_detail, _SELF_INTERRUPTION_MARKERS):
+        self_interruption_count = max(self_interruption_count, 1)
+    if _has_marker(combined_detail, _DIRECTOR_FANOUT_MARKERS):
+        director_fanout_count = max(director_fanout_count, 1)
+    if _has_marker(combined_detail, _COMMAND_LOSS_MARKERS):
+        dropped_commands = max(dropped_commands, 1)
+        command_loss_count = max(command_loss_count, dropped_commands)
+
+    queue_threshold = _coerce_int(raw_params.get("queue_contention_threshold"))
+    if queue_threshold is None:
+        queue_threshold = 1
+    queue_contention = (
+        queue_depth > queue_threshold
+        or bool(conflicting_action_ids)
+        or _truthy_signal(state, "queue_contention")
+        or _truthy_signal(raw_params, "queue_contention")
+        or _has_marker(combined_detail, _QUEUE_CONTENTION_MARKERS)
+    )
+    if queued_events and queue_depth == 0:
+        queue_depth = queued_events
+
+    observed = any(
+        (
+            _has_multi_agent_context(raw_params, state),
+            queue_depth,
+            queue_contention,
+            self_interruption_count,
+            director_fanout_count,
+            dropped_commands,
+            command_loss_count,
+            latency_ms,
+            conflicting_action_ids,
+            last_command_ts_ms is not None,
+        )
+    )
+    if not observed:
+        return None
+
+    return TimingSignals(
+        agent_id=normalized_agent_id,
+        queue_depth=queue_depth,
+        queue_contention=queue_contention,
+        self_interruption_count=self_interruption_count,
+        director_fanout_count=director_fanout_count,
+        dropped_commands=dropped_commands,
+        command_loss_count=command_loss_count,
+        latency_ms=latency_ms,
+        conflicting_action_ids=tuple(conflicting_action_ids),
+        last_command_ts_ms=last_command_ts_ms,
+    )
+
+
+def classify_timing_failure(
+    timing: TimingSignals,
+    *,
+    params: Mapping[str, Any] | None = None,
+) -> str:
+    """Classify one timing signal set into a primary stable failure class."""
+
+    if timing.command_loss_count or timing.dropped_commands:
+        return MultiAgentTimingFailure.COMMAND_LOSS
+    if timing.queue_contention:
+        return MultiAgentTimingFailure.QUEUE_CONTENTION
+    if timing.self_interruption_count:
+        return MultiAgentTimingFailure.SELF_INTERRUPTION
+    if timing.director_fanout_count:
+        return MultiAgentTimingFailure.DIRECTOR_FANOUT
+    raw_params = params if isinstance(params, Mapping) else {}
+    max_latency_ms = _coerce_int(raw_params.get("max_latency_ms"))
+    if max_latency_ms is not None and timing.latency_ms > max_latency_ms:
+        return MultiAgentTimingFailure.TIMING_DRIFT
+    return MultiAgentTimingFailure.NONE
+
+
 def _inventory_delta(
     initial: Mapping[str, int],
     final: Mapping[str, int],
@@ -1164,11 +1600,30 @@ def _coerce_lifecycle_signals(raw: Mapping[str, Any]) -> LifecycleSignals:
     )
 
 
+def _coerce_timing_signals(raw: Mapping[str, Any]) -> TimingSignals:
+    return TimingSignals(
+        agent_id=str(raw.get("agent_id") or ""),
+        queue_depth=_coerce_int(raw.get("queue_depth")) or 0,
+        queue_contention=_coerce_bool(raw.get("queue_contention")),
+        self_interruption_count=_coerce_int(raw.get("self_interruption_count")) or 0,
+        director_fanout_count=_coerce_int(raw.get("director_fanout_count")) or 0,
+        dropped_commands=_coerce_int(raw.get("dropped_commands")) or 0,
+        command_loss_count=_coerce_int(raw.get("command_loss_count")) or 0,
+        latency_ms=_coerce_int(raw.get("latency_ms")) or 0,
+        conflicting_action_ids=tuple(
+            str(action_id) for action_id in _raw_sequence(raw.get("conflicting_action_ids"))
+        ),
+        last_command_ts_ms=_coerce_int(raw.get("last_command_ts_ms")),
+    )
+
+
 def _apply_lifecycle_category(
     command_name: object,
     eval_category: str,
     lifecycle: LifecycleSignals | None,
 ) -> str:
+    if eval_category == EvalCategory.MULTI_AGENT_TIMING:
+        return eval_category
     if lifecycle is None:
         return eval_category
     if lifecycle.death_loop:
@@ -1346,6 +1801,133 @@ def _has_explicit_unstuck_signal(
 
 def _has_explicit_stuck_events(final_state: Mapping[str, Any] | None) -> bool:
     return _count_signal(final_state, ("stuck_events",)) > 0
+
+
+def _has_multi_agent_context(
+    params: Mapping[str, Any] | None,
+    final_state: Mapping[str, Any] | None,
+) -> bool:
+    return (
+        _truthy_signal(params, "multi_agent")
+        or _truthy_signal(final_state, "multi_agent")
+        or _has_key(params, "agent_id")
+        or _has_key(final_state, "agent_id")
+        or _has_key(params, "agents")
+        or _has_key(final_state, "agents")
+    )
+
+
+def _has_timing_signal(detail: str, raw: object) -> bool:
+    return (
+        _has_marker(detail, _QUEUE_CONTENTION_MARKERS)
+        or _has_marker(detail, _SELF_INTERRUPTION_MARKERS)
+        or _has_marker(detail, _DIRECTOR_FANOUT_MARKERS)
+        or _has_marker(detail, _COMMAND_LOSS_MARKERS)
+        or _has_marker(detail, _TIMING_DRIFT_MARKERS)
+        or _has_any_key(raw, _TIMING_SIGNAL_KEYS)
+    )
+
+
+def _agent_id_from_context(
+    params: Mapping[str, Any],
+    final_state: Mapping[str, Any],
+) -> str | None:
+    for raw in (params, final_state):
+        value = _first_key_value(raw, ("agent_id",))
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _action_ids_from_context(raw: object) -> list[str]:
+    if not isinstance(raw, Mapping):
+        return []
+    values: list[str] = []
+    for key in (
+        "conflicting_action_ids",
+        "conflict_action_ids",
+        "conflicting_actions",
+        "conflicts",
+    ):
+        value = _first_key_value(raw, (key,))
+        if value is None:
+            continue
+        if isinstance(value, Mapping):
+            action_id = value.get("action_id") or value.get("id")
+            if action_id:
+                values.append(str(action_id))
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            for item in value:
+                if isinstance(item, Mapping):
+                    action_id = item.get("action_id") or item.get("id")
+                    if action_id:
+                        values.append(str(action_id))
+                elif item is not None and str(item).strip():
+                    values.append(str(item))
+        elif str(value).strip():
+            values.append(str(value).strip())
+    return values
+
+
+def _max_int_signal(raw: object, keys: tuple[str, ...]) -> int:
+    value = _max_optional_int_signal(raw, keys)
+    return value or 0
+
+
+def _max_optional_int_signal(raw: object, keys: tuple[str, ...]) -> int | None:
+    if not isinstance(raw, Mapping):
+        return None
+    wanted = {key.casefold() for key in keys}
+    values: list[int] = []
+    for key, value in raw.items():
+        if str(key).casefold() in wanted:
+            coerced = _coerce_int(value)
+            if coerced is not None:
+                values.append(max(0, coerced))
+        if isinstance(value, Mapping):
+            nested = _max_optional_int_signal(value, keys)
+            if nested is not None:
+                values.append(nested)
+    return max(values) if values else None
+
+
+def _has_key(raw: object, key: str) -> bool:
+    return _has_any_key(raw, frozenset((key,)))
+
+
+def _has_any_key(raw: object, keys: frozenset[str]) -> bool:
+    if not isinstance(raw, Mapping):
+        return False
+    wanted = {key.casefold() for key in keys}
+    for raw_key, value in raw.items():
+        if str(raw_key).casefold() in wanted:
+            return True
+        if isinstance(value, Mapping) and _has_any_key(value, keys):
+            return True
+    return False
+
+
+def _first_key_value(raw: object, keys: tuple[str, ...]) -> object | None:
+    if not isinstance(raw, Mapping):
+        return None
+    wanted = {key.casefold() for key in keys}
+    for raw_key, value in raw.items():
+        if str(raw_key).casefold() in wanted:
+            return value
+        if isinstance(value, Mapping):
+            nested = _first_key_value(value, keys)
+            if nested is not None:
+                return nested
+    return None
+
+
+def _finalize_agent_timing_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    cases = int(metrics.get("cases") or 0)
+    latency_total = int(metrics.get("latency_ms_total") or 0)
+    finalized = dict(metrics)
+    finalized.pop("latency_ms_total", None)
+    finalized["avg_latency_ms"] = 0 if cases == 0 else round(latency_total / cases)
+    return finalized
 
 
 def _state_with_detail(
