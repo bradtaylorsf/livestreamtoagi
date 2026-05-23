@@ -158,6 +158,65 @@ process.stdout.write(JSON.stringify({{ calls }}) + '\\n');
 
 
 @requires_node
+def test_plan_mode_chat_response_satisfies_heartbeat_without_command(tmp_path: Path) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'plan';
+const {{ installHeartbeat }} = await import(pathToFileURL({json.dumps(str(HEARTBEAT))}).href);
+let now = 1;
+const events = [];
+const agent = {{
+    name: 'fork',
+    async handleMessage() {{
+        await this.routeResponse(null, 'I can support Rex from here and keep watching the cabin.');
+        return undefined;
+    }},
+    async routeResponse() {{
+        return undefined;
+    }},
+    self_prompter: {{
+        async stop() {{
+            throw new Error('plan-mode support chat should not halt');
+        }},
+    }},
+    actions: {{}},
+}};
+const heartbeat = installHeartbeat(agent, {{
+    autoStart: false,
+    now: () => now,
+    emit: (event) => events.push(event),
+    idleMs: 0,
+    cooldownMs: 0,
+    staleActionMs: 1000,
+    maxNoCommand: 2,
+}});
+heartbeat.state.consecutiveNoCommand = 1;
+
+const result = await heartbeat.tick();
+
+process.stdout.write(JSON.stringify({{
+    result,
+    halted: heartbeat.state.halted,
+    noCommandStreak: heartbeat.state.consecutiveNoCommand,
+    eventTypes: events.map((event) => event.type),
+    outcome: events.find((event) => event.type === 'heartbeat.outcome')?.payload,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["result"]["fired"] is True
+    assert result["result"]["hadCommand"] is False
+    assert result["halted"] is False
+    assert result["noCommandStreak"] == 0
+    assert result["eventTypes"] == ["heartbeat.fired", "heartbeat.outcome"]
+    assert result["outcome"]["outcome"] == "chat"
+    assert result["outcome"]["chat_satisfied_heartbeat"] is True
+    assert result["outcome"]["no_command_streak"] == 0
+
+
+@requires_node
 def test_heartbeat_cooldown_suppresses_double_fire(tmp_path: Path) -> None:
     source = f"""
 import {{ pathToFileURL }} from 'node:url';

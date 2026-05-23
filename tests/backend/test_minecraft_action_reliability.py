@@ -550,6 +550,61 @@ def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> 
     assert sentinel["metrics"]["verified_success_rate"] == 1.0
 
 
+def test_support_information_commands_do_not_lower_verified_success_rate(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "support-information"
+    _write_bot_log(
+        run_dir,
+        "alpha",
+        [
+            "Generated response: !inventory",
+            'Alpha full response to system: ""!inventory""',
+            "parsed command: { commandName: '!inventory', args: [] }",
+            "Agent executed: !inventory and got: INVENTORY { oak_log: 64, cobblestone: 32 }",
+            "Saved memory to: ./bots/Alpha/memory.json",
+            "Generated response: !nearbyBlocks",
+            'Alpha full response to system: ""!nearbyBlocks""',
+            "parsed command: { commandName: '!nearbyBlocks', args: [] }",
+            "Agent executed: !nearbyBlocks and got: NEARBY_BLOCKS oak_log,cobblestone,torch",
+            "Saved memory to: ./bots/Alpha/memory.json",
+            'Generated response: !searchForBlock("cobblestone", 16)',
+            'Alpha full response to system: ""!searchForBlock("cobblestone", 16)""',
+            "parsed command: { commandName: '!searchForBlock', args: [ 'cobblestone', 16 ] }",
+            "Agent executed: !searchForBlock and got: Action output:",
+            "Minimum search range is 32.",
+            "Found cobblestone at (-6, 64, -6). Navigating...",
+            "Found non-destructive path.",
+            "You have reached at -6, 64, -6.",
+            "Saved memory to: ./bots/Alpha/memory.json",
+            'Generated response: !placeHere("torch")',
+            'Alpha full response to system: ""!placeHere("torch")""',
+            "parsed command: { commandName: '!placeHere', args: [ 'torch' ] }",
+            "Agent executed: !placeHere and got: Action output: Placed torch at (0, 64, 0).",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0.6,
+            "min_parse_success": 0.8,
+            "min_execution_rate": 0.7,
+            "min_verified_success": 0.5,
+            "min_intents": 1,
+        },
+    )
+
+    alpha = data["agents"]["alpha"]
+    assert data["acceptable"] is True
+    assert alpha["counts"]["execution_successes"] == 4
+    assert alpha["counts"]["verified_actions"] == 2
+    assert alpha["counts"]["support_information_successes"] == 3
+    assert alpha["counts"]["support_information_verified_actions"] == 1
+    assert alpha["metrics"]["verified_success_rate"] == 1.0
+
+
 def test_same_command_name_with_different_args_counts_distinct_accepts(tmp_path: Path) -> None:
     analyzer = _load_analyzer()
     run_dir = tmp_path / "multi-command"

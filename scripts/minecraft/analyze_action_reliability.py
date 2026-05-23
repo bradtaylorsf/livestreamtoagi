@@ -69,6 +69,8 @@ class AgentStats:
     execution_failures: int = 0
     execution_unknowns: int = 0
     verified_actions: int = 0
+    support_information_successes: int = 0
+    support_information_verified_actions: int = 0
     execution_failure_classes: Counter[str] = field(default_factory=Counter)
     failed_parse_examples: list[Example] = field(default_factory=list)
     verified_success_examples: list[Example] = field(default_factory=list)
@@ -147,8 +149,18 @@ class AgentStats:
         else:
             command_execution_rate = 0.0 if self.intended_action_events else 1.0
 
-        if self.execution_successes > 0:
-            verified_success_rate = self.verified_actions / self.execution_successes
+        verifiable_successes = max(
+            0,
+            self.execution_successes - self.support_information_successes,
+        )
+        verifiable_verified_actions = max(
+            0,
+            self.verified_actions - self.support_information_verified_actions,
+        )
+        if verifiable_successes > 0:
+            verified_success_rate = verifiable_verified_actions / verifiable_successes
+        elif self.execution_successes > 0:
+            verified_success_rate = 1.0
         else:
             verified_success_rate = 0.0 if self.intended_action_events else 1.0
 
@@ -176,6 +188,8 @@ class AgentStats:
             "execution_failures": self.execution_failures,
             "execution_unknowns": self.execution_unknowns,
             "verified_actions": self.verified_actions,
+            "support_information_successes": self.support_information_successes,
+            "support_information_verified_actions": self.support_information_verified_actions,
             "builder_plan_generated": self.builder_plan_generated,
             "builder_plan_unique": self.builder_plan_unique,
             "builder_plan_skipped_dedupe": self.builder_plan_skipped_dedupe,
@@ -335,6 +349,11 @@ def command_bucket(command_name: str) -> str:
     if name == "planandbuild":
         return "planAndBuild"
     return "other"
+
+
+def is_support_information_command(command_name: str) -> bool:
+    name = str(command_name or "").lstrip("!").lower()
+    return name in {"inventory", "nearbyblocks", "searchforblock"}
 
 
 def bucket_counts(stats: AgentStats, bucket: str) -> Counter[str]:
@@ -651,9 +670,14 @@ def add_execution(stats: AgentStats, execution: ParsedExecution, top_n: int) -> 
     if execution.outcome == "success":
         stats.execution_successes += 1
         bucket["success"] += 1
+        support_information = is_support_information_command(execution.name)
+        if support_information:
+            stats.support_information_successes += 1
         if execution.verified:
             stats.verified_actions += 1
             bucket["verified"] += 1
+            if support_information:
+                stats.support_information_verified_actions += 1
             if len(stats.verified_success_examples) < top_n:
                 stats.verified_success_examples.append(
                     Example(line=execution.line, text=excerpt(execution.detail))
@@ -790,6 +814,8 @@ def aggregate_stats(agent_stats: list[AgentStats]) -> AgentStats:
         aggregate.execution_failures += stats.execution_failures
         aggregate.execution_unknowns += stats.execution_unknowns
         aggregate.verified_actions += stats.verified_actions
+        aggregate.support_information_successes += stats.support_information_successes
+        aggregate.support_information_verified_actions += stats.support_information_verified_actions
         aggregate.execution_failure_classes.update(stats.execution_failure_classes)
         aggregate.builder_plan_generated += stats.builder_plan_generated
         aggregate.builder_plan_unique_ids.update(stats.builder_plan_unique_ids)

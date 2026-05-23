@@ -282,6 +282,11 @@ function directorGateSuppressed(agent, beforeSequence) {
     return outcome.selected === false;
 }
 
+function planBuildChatSatisfiesHeartbeat(value, wasDirectorSuppressed) {
+    if (wasDirectorSuppressed || process.env.MC_SIM_BUILD_MODE !== 'plan') return false;
+    return !classifyHeartbeatResponse(value).blank;
+}
+
 export class HeartbeatController {
     constructor(agent, options = {}) {
         this.agent = agent;
@@ -545,13 +550,23 @@ export class HeartbeatController {
             this.agent,
             beforeDirectorGateSequence,
         );
+        const latestResponseExcerpt = this.state.lastResponseExcerpt || '';
+        const responseTextForHeartbeat =
+            classified.excerpt ||
+            (latestResponseExcerpt && latestResponseExcerpt !== beforeResponseExcerpt
+                ? latestResponseExcerpt
+                : '');
+        const chatSatisfiedHeartbeat = planBuildChatSatisfiesHeartbeat(
+            responseTextForHeartbeat,
+            wasDirectorSuppressed,
+        );
         const hadCommand =
             !wasDirectorSuppressed &&
             (result === true ||
                 classified.hadCommand ||
                 (this.state.commandCounter || 0) > beforeCommandCounter);
         if (!wasDirectorSuppressed) {
-            if (hadCommand) {
+            if (hadCommand || chatSatisfiedHeartbeat) {
                 this.state.consecutiveNoCommand = 0;
             } else {
                 this.state.consecutiveNoCommand += 1;
@@ -560,7 +575,7 @@ export class HeartbeatController {
 
         const responseExcerpt = wasDirectorSuppressed
             ? ''
-            : classified.excerpt || this.state.lastResponseExcerpt || beforeResponseExcerpt;
+            : responseTextForHeartbeat || beforeResponseExcerpt;
         const outcomePayload = {
             reason,
             had_command: hadCommand,
@@ -569,12 +584,15 @@ export class HeartbeatController {
             response_excerpt: responseExcerpt,
             commands: classified.commands,
             director_suppressed: wasDirectorSuppressed,
+            chat_satisfied_heartbeat: chatSatisfiedHeartbeat,
             outcome: error
                 ? 'error'
                 : wasDirectorSuppressed
                   ? 'director-suppressed'
                   : hadCommand
                     ? 'command'
+                    : chatSatisfiedHeartbeat
+                      ? 'chat'
                     : 'no-command',
         };
         if (error) {
