@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 from core.minecraft.eval.evaluator import EvalOutcome, EvalReport, evaluate_response
+from core.minecraft.eval.live_profile import (
+    BUILTIN_PROFILES,
+    DEFAULT_PROFILE_NAME,
+    EvalProfile,
+    EvalProfileError,
+    list_profiles,
+    parse_world_config,
+    resolve_profile,
+)
 from core.minecraft.eval.parser import ParsedResponse, parse_model_response
 from core.minecraft.eval.provider import (
     ProviderConfig,
@@ -32,7 +41,11 @@ from core.minecraft.eval.runner import (
 
 __all__ = [
     "EvalOutcome",
+    "EvalProfile",
+    "EvalProfileError",
     "EvalReport",
+    "BUILTIN_PROFILES",
+    "DEFAULT_PROFILE_NAME",
     "ParsedResponse",
     "ProviderConfig",
     "ProviderConfigError",
@@ -43,8 +56,11 @@ __all__ = [
     "build_scenario_messages",
     "comparison_md_text",
     "evaluate_response",
+    "list_profiles",
     "parse_model_response",
+    "parse_world_config",
     "report_md_text",
+    "resolve_profile",
     "resolve_provider_config",
     "run_eval",
     "score_run",

@@ -81,6 +81,28 @@ needed.
 | `--passing-prompts <path>` | Write accepted command prompts as NDJSON. |
 | `--compare <scores.json>` | Include an existing scores file in `comparison.md`. May be repeated and requires `--report-dir`. |
 
+## Live Eval Profile (E18)
+
+The live command eval runner uses a separate deterministic profile named
+`flat-eval`. It points at `scripts/minecraft/world-flat-eval.config`, writes a
+fresh server under `minecraft-server-flat-eval/`, and targets
+`127.0.0.1:25568` so it does not collide with the normal server (`25565`) or
+easy sim server (`25566`).
+
+The shipped world config is a flat, seeded, structure-free world:
+`LEVEL_TYPE=minecraft:flat`, `LEVEL_SEED=livestreamtoagi-flat-eval-v1`, and
+`GENERATE_STRUCTURES=false`. The seed must stay non-empty so live failures can
+be attributed to command/action behavior instead of terrain randomness.
+
+Supported overrides for the future live runner are:
+
+| Env key | Purpose |
+| --- | --- |
+| `MC_EVAL_LIVE_PROFILE` | Built-in profile name. Defaults to `flat-eval`. |
+| `MC_EVAL_LIVE_PORT` | Minecraft server port for the eval world. |
+| `MC_EVAL_LIVE_SERVER_DIR` | Server directory for the eval world. Relative paths resolve from the repo root. |
+| `MC_EVAL_LIVE_KEEP_RUNNING` | `true`/`false`; keep the server running after the eval job. Defaults to `false`. |
+
 ## Artifacts
 
 When `--report-dir` is set, the harness writes:
@@ -124,6 +146,7 @@ CI should use fake provider responses only:
 
 ```bash
 pnpm mc:eval:commands:smoke
+pnpm verify:mc-eval-live-profile
 pnpm verify:mc-eval-commands
 ```
 
