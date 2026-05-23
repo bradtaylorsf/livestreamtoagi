@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
+from core.minecraft.eval.live_artifacts import write_live_eval_artifacts
 from core.minecraft.eval.live_profile import DEFAULT_PROFILE_NAME, EvalProfileError
 from core.minecraft.eval.live_runner import (
     BridgeClient,
@@ -20,7 +21,7 @@ from core.minecraft.eval.live_runner import (
     run_live_command_smoke,
     supported_command_inputs,
 )
-from core.minecraft.eval.live_telemetry import CaseResult, LiveRunSummary, classify_timing_failure
+from core.minecraft.eval.live_telemetry import CaseResult, LiveRunSummary
 from core.minecraft.eval.multi_agent import (
     AgentSpec,
     MultiAgentFakeBridge,
@@ -130,7 +131,7 @@ def main(
                 )
             )
         if args.report_dir:
-            _write_report_artifacts(args.report_dir, summary)
+            _write_report_artifacts(args.report_dir, summary, traces_dir=args.traces_dir)
         if args.output:
             _write_output(args.output, summary)
         _emit_summary(summary, json_mode=args.json, verbose=args.verbose, stdout=out)
@@ -199,7 +200,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report-dir",
         default=None,
-        help="Write summary.json, cases.ndjson, and report.md artifacts",
+        help="Write live eval report artifacts",
+    )
+    parser.add_argument(
+        "--traces-dir",
+        default=None,
+        help=(
+            "Optionally write cheap per-case position traces. Relative paths resolve "
+            "inside --report-dir."
+        ),
     )
     return parser
 
@@ -405,274 +414,26 @@ def _write_output(path_arg: str, summary: LiveRunSummary) -> None:
     )
 
 
-def _write_report_artifacts(path_arg: str, summary: LiveRunSummary) -> None:
+def _write_report_artifacts(
+    path_arg: str,
+    summary: LiveRunSummary,
+    *,
+    dataset_path: str | Path | None = None,
+    traces_dir: str | Path | None = None,
+) -> None:
     report_dir = _resolve_path(path_arg)
-    report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "summary.json").write_text(
-        json.dumps(summary.to_dict(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    write_live_eval_artifacts(
+        report_dir,
+        summary,
+        dataset_path=dataset_path,
+        traces=traces_dir,
     )
-    (report_dir / "cases.ndjson").write_text(
-        "".join(
-            json.dumps(result.to_dict(), sort_keys=True) + "\n" for result in summary.case_results
-        ),
-        encoding="utf-8",
-    )
-    (report_dir / "report.md").write_text(_report_md(summary), encoding="utf-8")
-
-
-def _report_md(summary: LiveRunSummary) -> str:
-    if summary.command == "dataset-replay":
-        title = "Minecraft Dataset Replay"
-    elif summary.command == "multi-agent-timing":
-        title = "Minecraft Multi-agent Timing"
-    else:
-        title = "Minecraft Live Command Smoke"
-    lines = [
-        f"# {title}",
-        "",
-        f"- command: `{summary.command}`",
-        f"- resolved_command: `{summary.resolved_command}`",
-        f"- profile: `{summary.profile}`",
-        f"- seed: `{summary.seed}`",
-        f"- dry_run: `{str(summary.dry_run).lower()}`",
-        f"- cases: `{len(summary.case_results)}`",
-        f"- passed: `{summary.passed_count}/{len(summary.case_results)}`",
-        "",
-    ]
-    dataset_detail = summary.profile_detail.get("dataset_replay")
-    if isinstance(dataset_detail, Mapping):
-        lines.extend(_dataset_replay_report_lines(dataset_detail))
-    lines.extend(("## Outcomes", ""))
-    lines.extend(f"- {outcome}: {count}" for outcome, count in summary.outcome_counts.items())
-    lines.extend(("", "## Categories", ""))
-    lines.extend(f"- {category}: {count}" for category, count in summary.category_counts.items())
-    lines.extend(("", "## Pathfinding", ""))
-    pathfinding_lines = _pathfinding_report_lines(summary.case_results)
-    lines.extend(pathfinding_lines if pathfinding_lines else ["None."])
-    lines.extend(("", "## Inventory", ""))
-    inventory_lines = _inventory_report_lines(summary.case_results)
-    lines.extend(inventory_lines if inventory_lines else ["None."])
-    lines.extend(("", "## Block Mutation", ""))
-    block_mutation_lines = _block_mutation_report_lines(summary.case_results)
-    lines.extend(block_mutation_lines if block_mutation_lines else ["None."])
-    lines.extend(("", "## Lifecycle", ""))
-    lifecycle_lines = _lifecycle_report_lines(summary.case_results)
-    lines.extend(lifecycle_lines if lifecycle_lines else ["None."])
-    lines.extend(("", "## Multi-agent timing", ""))
-    timing_lines = _timing_report_lines(summary)
-    lines.extend(timing_lines if timing_lines else ["None."])
-    lines.extend(("", "## Cases", ""))
-    for result in summary.case_results:
-        agent_text = f" `{result.agent_id}`" if result.agent_id else ""
-        lines.append(
-            f"- `{result.case_id}`{agent_text} {result.outcome_class} "
-            f"({result.eval_category}): `{result.command_text}`"
-        )
-    return "\n".join(lines) + "\n"
-
-
-def _dataset_replay_report_lines(dataset_detail: Mapping[str, Any]) -> list[str]:
-    lines = [
-        "## Dataset Replay",
-        "",
-        f"- dataset: `{dataset_detail.get('dataset_path') or 'n/a'}`",
-        f"- prompts_loaded: `{dataset_detail.get('total_prompts', 0)}`",
-        f"- prompts_after_filter: `{dataset_detail.get('selected_prompts', 0)}`",
-        "",
-        "### Per-command Outcomes",
-        "",
-    ]
-    per_command = dataset_detail.get("per_command_outcome_counts")
-    if not isinstance(per_command, Mapping) or not per_command:
-        lines.extend(("None.", ""))
-        return lines
-
-    for command, raw_counts in sorted(per_command.items()):
-        if not isinstance(raw_counts, Mapping):
-            continue
-        counts = ", ".join(
-            f"{outcome}={count}"
-            for outcome, count in raw_counts.items()
-            if isinstance(count, int) and count
-        )
-        lines.append(f"- `{command}`: {counts or 'none'}")
-    lines.extend(("", "### Per-category Outcomes", ""))
-    per_category = dataset_detail.get("per_category_outcome_counts")
-    if isinstance(per_category, Mapping) and per_category:
-        for category, raw_counts in sorted(per_category.items()):
-            if not isinstance(raw_counts, Mapping):
-                continue
-            counts = ", ".join(
-                f"{outcome}={count}"
-                for outcome, count in raw_counts.items()
-                if isinstance(count, int) and count
-            )
-            lines.append(f"- `{category}`: {counts or 'none'}")
-    else:
-        lines.append("None.")
-    lines.append("")
-    return lines
-
-
-def _pathfinding_report_lines(results: Sequence[CaseResult]) -> list[str]:
-    lines: list[str] = []
-    for result in results:
-        signals = result.pathfinding
-        if signals is None:
-            continue
-        pose = (
-            json.dumps(signals.final_pose, sort_keys=True, separators=(",", ":"))
-            if signals.final_pose is not None
-            else "n/a"
-        )
-        lines.append(
-            f"- `{result.case_id}` {result.outcome_class}: "
-            f"stuck={str(signals.stuck).lower()} "
-            f"collision={str(signals.collision).lower()} "
-            f"blocked_path={str(signals.blocked_path).lower()} "
-            f"final_pose=`{pose}`"
-        )
-    return lines
-
-
-def _inventory_report_lines(results: Sequence[CaseResult]) -> list[str]:
-    lines: list[str] = []
-    for result in results:
-        inventory = result.inventory
-        if inventory is None:
-            continue
-        net = json.dumps(inventory.net, sort_keys=True, separators=(",", ":"))
-        final = json.dumps(inventory.final, sort_keys=True, separators=(",", ":"))
-        missing = json.dumps(
-            inventory.missing_expected,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        unexpected = json.dumps(inventory.unexpected, sort_keys=True, separators=(",", ":"))
-        lines.append(
-            f"- `{result.case_id}` {result.outcome_class}: "
-            f"matches_expected={_match_text(inventory.matches_expected)} "
-            f"net=`{net}` final=`{final}` "
-            f"missing_expected=`{missing}` unexpected=`{unexpected}`"
-        )
-    return lines
-
-
-def _block_mutation_report_lines(results: Sequence[CaseResult]) -> list[str]:
-    lines: list[str] = []
-    for result in results:
-        block_mutation = result.block_mutation
-        if block_mutation is None:
-            continue
-        actual = json.dumps(
-            [dict(block) for block in block_mutation.actual_placements],
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        final_blocks = json.dumps(
-            [dict(block) for block in block_mutation.final_blocks],
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        missing = json.dumps(
-            [dict(block) for block in block_mutation.missing_placements],
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        extra = json.dumps(
-            [dict(block) for block in block_mutation.extra_placements],
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        lines.append(
-            f"- `{result.case_id}` {result.outcome_class}: "
-            f"matches_expected={_match_text(block_mutation.matches_expected)} "
-            f"actual=`{actual}` final_blocks=`{final_blocks}` "
-            f"missing=`{missing}` extra=`{extra}`"
-        )
-    return lines
-
-
-def _lifecycle_report_lines(results: Sequence[CaseResult]) -> list[str]:
-    lines: list[str] = []
-    for result in results:
-        lifecycle = result.lifecycle
-        if lifecycle is None:
-            continue
-        lines.append(
-            f"- `{result.case_id}` {result.outcome_class}: "
-            f"death_count={lifecycle.death_count} "
-            f"death_loop={str(lifecycle.death_loop).lower()} "
-            f"safe_spawn={_match_text(lifecycle.safe_spawn)} "
-            f"stuck={str(lifecycle.stuck).lower()} "
-            f"unstuck_attempts={lifecycle.unstuck_attempts} "
-            f"unstuck_succeeded={_match_text(lifecycle.unstuck_succeeded)}"
-        )
-    return lines
-
-
-def _timing_report_lines(summary: LiveRunSummary) -> list[str]:
-    timing_summary = summary.timing_summary
-    if timing_summary["cases"] == 0:
-        return []
-    lines = [
-        "- aggregate: "
-        + ", ".join(
-            f"{signal}={_summary_value_text(count)}"
-            for signal, count in timing_summary.items()
-            if signal != "per_agent"
-        )
-    ]
-    lines.append("")
-    lines.append("### Per-agent")
-    lines.append("")
-    for agent_id, metrics in timing_summary["per_agent"].items():
-        failure_classes = _summary_value_text(metrics.get("failure_classes", {}))
-        lines.append(
-            f"- `{agent_id}`: cases={metrics.get('cases', 0)} "
-            f"contention={metrics.get('contention', 0)} "
-            f"interruptions={metrics.get('interruptions', 0)} "
-            f"fanouts={metrics.get('fanouts', 0)} "
-            f"dropped={metrics.get('dropped', 0)} "
-            f"command_loss={metrics.get('command_loss', 0)} "
-            f"max_queue_depth={metrics.get('max_queue_depth', 0)} "
-            f"failure_classes=`{failure_classes}`"
-        )
-    lines.append("")
-    lines.append("### Cases")
-    lines.append("")
-    for result in summary.case_results:
-        timing = result.timing
-        if timing is None:
-            continue
-        failure_class = classify_timing_failure(timing, params=result.params)
-        lines.append(
-            f"- `{result.case_id}` `{timing.agent_id}`: "
-            f"failure_class={failure_class} "
-            f"queue_depth={timing.queue_depth} "
-            f"contention={str(timing.queue_contention).lower()} "
-            f"interruptions={timing.self_interruption_count} "
-            f"fanouts={timing.director_fanout_count} "
-            f"dropped={timing.dropped_commands} "
-            f"command_loss={timing.command_loss_count} "
-            f"conflicts={list(timing.conflicting_action_ids)}"
-        )
-    return lines
 
 
 def _summary_value_text(value: object) -> str:
     if isinstance(value, Mapping):
         return json.dumps(value, sort_keys=True, separators=(",", ":"))
     return str(value)
-
-
-def _match_text(value: bool | None) -> str:
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    return "unknown"
 
 
 def _resolve_path(path_arg: str) -> Path:
