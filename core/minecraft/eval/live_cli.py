@@ -229,6 +229,11 @@ def _emit_summary(
         ),
         file=stdout,
     )
+    print(
+        "lifecycle: "
+        + ", ".join(f"{signal}={count}" for signal, count in summary.lifecycle_summary.items()),
+        file=stdout,
+    )
     for result in summary.case_results:
         print(
             f"- {result.case_id}: {result.outcome_class} "
@@ -274,6 +279,13 @@ def _emit_verbose_case(result: CaseResult, stdout: TextIO) -> None:
             separators=(",", ":"),
         )
         print(f"  block_mutation {block_mutation}", file=stdout)
+    if result.lifecycle:
+        lifecycle = json.dumps(
+            result.lifecycle.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        print(f"  lifecycle {lifecycle}", file=stdout)
     if result.error:
         print(f"  error {result.error}", file=stdout)
 
@@ -337,6 +349,9 @@ def _report_md(summary: LiveRunSummary) -> str:
     lines.extend(("", "## Block Mutation", ""))
     block_mutation_lines = _block_mutation_report_lines(summary.case_results)
     lines.extend(block_mutation_lines if block_mutation_lines else ["None."])
+    lines.extend(("", "## Lifecycle", ""))
+    lifecycle_lines = _lifecycle_report_lines(summary.case_results)
+    lines.extend(lifecycle_lines if lifecycle_lines else ["None."])
     lines.extend(("", "## Cases", ""))
     for result in summary.case_results:
         lines.append(
@@ -464,6 +479,24 @@ def _block_mutation_report_lines(results: Sequence[CaseResult]) -> list[str]:
             f"matches_expected={_match_text(block_mutation.matches_expected)} "
             f"actual=`{actual}` final_blocks=`{final_blocks}` "
             f"missing=`{missing}` extra=`{extra}`"
+        )
+    return lines
+
+
+def _lifecycle_report_lines(results: Sequence[CaseResult]) -> list[str]:
+    lines: list[str] = []
+    for result in results:
+        lifecycle = result.lifecycle
+        if lifecycle is None:
+            continue
+        lines.append(
+            f"- `{result.case_id}` {result.outcome_class}: "
+            f"death_count={lifecycle.death_count} "
+            f"death_loop={str(lifecycle.death_loop).lower()} "
+            f"safe_spawn={_match_text(lifecycle.safe_spawn)} "
+            f"stuck={str(lifecycle.stuck).lower()} "
+            f"unstuck_attempts={lifecycle.unstuck_attempts} "
+            f"unstuck_succeeded={_match_text(lifecycle.unstuck_succeeded)}"
         )
     return lines
 
