@@ -101,19 +101,34 @@ async def test_multi_agent_chat_groups_nearby_agents_and_direct_distant_addresse
     assert update.scene is not None
     assert update.scene.participants == ["vera", "rex", "pixel", "grok"]
     assert update.scene.observers == []
-    assert emitted == [
-        {
-            "scene_id": update.scene_id,
-            "participants": ["vera", "rex", "pixel", "grok"],
-            "observers": [],
-            "triggering_event_type": "chat",
-            "event_id": "chat-hello",
-            "source_agent_id": "vera",
-            "participants_added": ["vera", "rex", "pixel", "grok"],
-            "observers_added": [],
-            "suppression_reason": None,
-        }
-    ]
+    assert len(emitted) == 1
+    assert "source_event" in emitted[0]
+    assert "source_inbox_id" in emitted[0]
+    assert emitted[0]["source_event"]["dedupe_key"] == "chat:vera:overworld:0:4:0:"
+    assert {
+        key: emitted[0][key]
+        for key in (
+            "scene_id",
+            "participants",
+            "observers",
+            "triggering_event_type",
+            "event_id",
+            "source_agent_id",
+            "participants_added",
+            "observers_added",
+            "suppression_reason",
+        )
+    } == {
+        "scene_id": update.scene_id,
+        "participants": ["vera", "rex", "pixel", "grok"],
+        "observers": [],
+        "triggering_event_type": "chat",
+        "event_id": "chat-hello",
+        "source_agent_id": "vera",
+        "participants_added": ["vera", "rex", "pixel", "grok"],
+        "observers_added": [],
+        "suppression_reason": None,
+    }
 
 
 async def test_nearby_build_action_caps_participants_and_records_observers() -> None:
