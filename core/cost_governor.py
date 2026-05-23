@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 AGENT_CAP_BLOCK_PREFIX = "agent_cap_block:"
+DEFAULT_SPEND_ALERT_THRESHOLD_PCT = Decimal("0.8")
 
 
 def _to_decimal(value: Decimal | int | str | None) -> Decimal | None:
@@ -48,6 +49,7 @@ class CostGovernor:
         window_seconds: int = 3600,
         clock: Callable[[], datetime] | None = None,
         event_bus: EventBus | None = None,
+        alert_threshold_pct: Decimal | int | str | None = DEFAULT_SPEND_ALERT_THRESHOLD_PCT,
     ) -> None:
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
@@ -60,6 +62,7 @@ class CostGovernor:
         self._window_seconds = window_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
         self._event_bus = event_bus
+        self._alert_threshold_pct = _to_decimal(alert_threshold_pct)
 
     @property
     def window_seconds(self) -> int:
@@ -111,7 +114,26 @@ class CostGovernor:
         cannot drift from the durable accounting source.
         """
         _ = _to_decimal(amount)
-        await self.is_allowed(agent_id)
+        cap = self.cap_for(agent_id)
+        if cap is None:
+            return
+
+        block_key = self._block_key(agent_id)
+        if await self._redis.get(block_key) is not None:
+            return
+
+        since = self._clock() - timedelta(seconds=self._window_seconds)
+        spend = await self._cost_repo.get_agent_spend_since(agent_id, since)
+        if spend >= cap:
+            await self._trip(agent_id, spend, cap)
+            return
+
+        if (
+            self._alert_threshold_pct is not None
+            and self._alert_threshold_pct > Decimal("0")
+            and spend / cap >= self._alert_threshold_pct
+        ):
+            await self._emit_budget_update(agent_id, spend, cap, cap_tripped=False)
 
     async def reset(self, agent_id: str) -> None:
         """Clear a temporary block for admin actions or tests."""
@@ -126,20 +148,41 @@ class CostGovernor:
             "tripped",
             ex=self._window_seconds,
         )
+        logger.warning(
+            "Agent hourly spend cap tripped",
+            extra={
+                "cost_cap": {
+                    "cap_tripped": True,
+                    "agent_id": agent_id,
+                    "hourly_spend_usd": spend,
+                    "hourly_cap_usd": cap,
+                    "window_seconds": self._window_seconds,
+                }
+            },
+        )
+        await self._emit_budget_update(agent_id, spend, cap, cap_tripped=True)
+
+    async def _emit_budget_update(
+        self,
+        agent_id: str,
+        spend: Decimal,
+        cap: Decimal,
+        *,
+        cap_tripped: bool,
+    ) -> None:
+        if self._event_bus is None:
+            return
         event: dict[str, Any] = {
-            "cap_tripped": True,
+            "cap_tripped": cap_tripped,
+            "tripped": cap_tripped,
             "agent_id": agent_id,
+            "window_spend_usd": spend,
             "hourly_spend_usd": spend,
+            "cap_usd": cap,
             "hourly_cap_usd": cap,
             "window_seconds": self._window_seconds,
         }
-        logger.warning(
-            "Agent hourly spend cap tripped",
-            extra={"cost_cap": event},
-        )
-        if self._event_bus is None:
-            return
         try:
             await self._event_bus.emit(EventType.BUDGET_UPDATE.value, event)
         except Exception:
-            logger.warning("Failed to emit cost cap trip event", exc_info=True)
+            logger.warning("Failed to emit cost budget update event", exc_info=True)

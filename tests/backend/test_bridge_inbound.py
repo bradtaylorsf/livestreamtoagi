@@ -61,8 +61,9 @@ def token_env(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # No `with TestClient(app)`: lifespan/bootstrap must not run.
+    monkeypatch.delattr(app.state, "services", raising=False)
     return TestClient(app)
 
 

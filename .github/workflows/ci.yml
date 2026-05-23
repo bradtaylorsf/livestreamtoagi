@@ -109,29 +109,13 @@ jobs:
           cost_kill_tests=(
             tests/backend/test_cost_tracking.py
             tests/backend/test_management.py
-          )
-
-          append_if_present() {
-            local test_file="$1"
-            local dependency="$2"
-
-            if [[ -f "$test_file" ]]; then
-              cost_kill_tests+=("$test_file")
-            else
-              echo "Skipping $test_file until $dependency lands."
-            fi
-          }
-
-          # Pending #596 when absent from this PR worktree.
-          append_if_present tests/backend/test_cost_governor.py "#596"
-          # Pending #597/#598 when absent from this PR worktree.
-          append_if_present tests/backend/test_kill_switch.py "#597/#598"
-          # Pending #598 when absent from this PR worktree.
-          append_if_present tests/backend/test_kill_switch_node_bots.py "#598"
-          # Pending #599 when absent from this PR worktree.
-          append_if_present tests/backend/test_spend_kill_alerting.py "#599"
-
-          cost_kill_tests+=(
+            tests/backend/test_cost_governor.py
+            tests/backend/test_kill_switch_routes.py
+            tests/backend/test_kill_switch_e2e.py
+            tests/backend/test_bridge_contract.py
+            tests/backend/test_bridge_server.py
+            tests/backend/test_bridge_node_client.py
+            tests/backend/test_spend_kill_alerts.py
             tests/backend/test_admin_auth.py
           )
 

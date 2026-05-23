@@ -119,6 +119,16 @@ class InMemoryCostRepo:
         )
 
 
+class FakeEventBus:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = data or {}
+        self.events.append((event_type, payload))
+        return {"event_type": event_type, "data": payload}
+
+
 class FakeResponse:
     def __init__(self, input_tokens: int = 10, output_tokens: int = 5) -> None:
         self.status_code = 200
@@ -155,7 +165,12 @@ def make_governor(
     default_cap: Decimal | str | None = Decimal("0.02"),
     per_agent_caps: dict[str, Decimal | str | None] | None = None,
     window_seconds: int = 3600,
+    event_bus: FakeEventBus | None = None,
+    alert_threshold_pct: Decimal | str | None = None,
 ) -> CostGovernor:
+    kwargs: dict[str, Any] = {}
+    if alert_threshold_pct is not None:
+        kwargs["alert_threshold_pct"] = alert_threshold_pct
     return CostGovernor(
         repo,  # type: ignore[arg-type]
         FakeRedis(clock),  # type: ignore[arg-type]
@@ -163,6 +178,8 @@ def make_governor(
         per_agent_caps_usd=per_agent_caps,
         window_seconds=window_seconds,
         clock=clock,
+        event_bus=event_bus,  # type: ignore[arg-type]
+        **kwargs,
     )
 
 
@@ -334,6 +351,64 @@ async def test_cap_breach_on_recorded_call_blocks_next(clock: MutableClock) -> N
             agent_id="vera",
         )
     assert post.await_count == 1
+
+
+async def test_recorded_call_crossing_alert_threshold_emits_budget_update(
+    clock: MutableClock,
+) -> None:
+    repo = InMemoryCostRepo(clock)
+    repo.seed("vera", "0.80")
+    bus = FakeEventBus()
+    governor = make_governor(clock, repo, default_cap=Decimal("1.00"), event_bus=bus)
+
+    await governor.record_and_check("vera", Decimal("0.01"))
+
+    assert bus.events == [
+        (
+            "budget_update",
+            {
+                "cap_tripped": False,
+                "tripped": False,
+                "agent_id": "vera",
+                "window_spend_usd": Decimal("0.80"),
+                "hourly_spend_usd": Decimal("0.80"),
+                "cap_usd": Decimal("1.00"),
+                "hourly_cap_usd": Decimal("1.00"),
+                "window_seconds": 3600,
+            },
+        )
+    ]
+
+
+async def test_recorded_call_below_alert_threshold_emits_no_budget_update(
+    clock: MutableClock,
+) -> None:
+    repo = InMemoryCostRepo(clock)
+    repo.seed("vera", "0.79")
+    bus = FakeEventBus()
+    governor = make_governor(clock, repo, default_cap=Decimal("1.00"), event_bus=bus)
+
+    await governor.record_and_check("vera", Decimal("0.01"))
+
+    assert bus.events == []
+
+
+async def test_recorded_call_uses_configured_alert_threshold(clock: MutableClock) -> None:
+    repo = InMemoryCostRepo(clock)
+    repo.seed("vera", "0.50")
+    bus = FakeEventBus()
+    governor = make_governor(
+        clock,
+        repo,
+        default_cap=Decimal("1.00"),
+        event_bus=bus,
+        alert_threshold_pct=Decimal("0.50"),
+    )
+
+    await governor.record_and_check("vera", Decimal("0.01"))
+
+    assert len(bus.events) == 1
+    assert bus.events[0][1]["window_spend_usd"] == Decimal("0.50")
 
 
 async def test_bridge_cost_gate_returns_real_state(clock: MutableClock) -> None:

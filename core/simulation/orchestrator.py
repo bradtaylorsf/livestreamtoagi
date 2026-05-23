@@ -1180,10 +1180,7 @@ class SimulationOrchestrator:
             raise CostLimitExceededError(
                 f"Total cost ${self._total_cost} exceeds limit ${self._config.max_cost}"
             )
-        if (
-            self._config.max_cost_rolling is not None
-            and self._config.rolling_window is not None
-        ):
+        if self._config.max_cost_rolling is not None and self._config.rolling_window is not None:
             rolling_cost = await self._sim_repo.get_rolling_cost_from_events(
                 self._simulation_id,
                 self._config.rolling_window,

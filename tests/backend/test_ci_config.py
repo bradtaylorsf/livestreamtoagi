@@ -9,9 +9,12 @@ EXPECTED_COST_KILL_TESTS = [
     "tests/backend/test_cost_tracking.py",
     "tests/backend/test_management.py",
     "tests/backend/test_cost_governor.py",
-    "tests/backend/test_kill_switch.py",
-    "tests/backend/test_kill_switch_node_bots.py",
-    "tests/backend/test_spend_kill_alerting.py",
+    "tests/backend/test_kill_switch_routes.py",
+    "tests/backend/test_kill_switch_e2e.py",
+    "tests/backend/test_bridge_contract.py",
+    "tests/backend/test_bridge_server.py",
+    "tests/backend/test_bridge_node_client.py",
+    "tests/backend/test_spend_kill_alerts.py",
     "tests/backend/test_admin_auth.py",
 ]
 

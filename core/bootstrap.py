@@ -351,6 +351,7 @@ async def bootstrap_services(
     from core.event_bus import event_bus as _module_event_bus
 
     all_agent_ids = [a.id for a in agent_registry.get_all_agents()]
+    spend_alert_notifier = SpendAlertNotifier(redis_client=scoped_redis)
     default_agent_cap = _parse_usd_cap_env(
         os.environ.get(AGENT_HOURLY_CAP_ENV, str(DEFAULT_AGENT_HOURLY_CAP_USD)),
         key=AGENT_HOURLY_CAP_ENV,
@@ -361,6 +362,7 @@ async def bootstrap_services(
         default_hourly_cap_usd=default_agent_cap,
         per_agent_caps_usd=_per_agent_caps_from_env(all_agent_ids),
         event_bus=_module_event_bus,
+        alert_threshold_pct=str(spend_alert_notifier.threshold_pct),
     )
     llm_client = make_llm_client(cost_repo=cost_repo, cost_governor=cost_governor)
     embedding_fn = make_embedding_fn(http_client, api_key)
@@ -390,7 +392,6 @@ async def bootstrap_services(
         llm_client=llm_client,
         event_bus=_module_event_bus,
     )
-    spend_alert_notifier = SpendAlertNotifier(redis_client=scoped_redis)
     _module_event_bus.on(EventType.BUDGET_UPDATE, spend_alert_notifier.on_budget_update)
 
     # Inject config_version_repo into config_loader for DB-backed config

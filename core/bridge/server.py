@@ -543,11 +543,7 @@ async def build_bridge_response_with_services(
 
     if key in WORLD_ACTION_VERBS and await _kill_switch_active(services):
         if key in WORLD_ACTION_SAFE_IDLE_VERBS:
-            payload = (
-                {"accepted": True}
-                if key == "perception.report"
-                else _errand_payload(None)
-            )
+            payload = {"accepted": True} if key == "perception.report" else _errand_payload(None)
             return _success_response(env, payload)
         return make_error_response(
             env.request_id,
