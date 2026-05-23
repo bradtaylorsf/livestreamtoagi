@@ -16,24 +16,10 @@ def test_services_dataclass_importable():
     assert dataclasses.is_dataclass(Services)
     field_names = {f.name for f in dataclasses.fields(Services)}
     expected = {
-        "db",
-        "redis",
-        "http_client",
-        "agent_registry",
-        "llm_client",
-        "core_memory",
-        "recall_memory",
-        "archival_memory",
-        "memory_backend",
-        "compactor",
-        "context_assembler",
-        "token_counter",
-        "memory_repo",
-        "transcript_repo",
-        "event_bus",
-        "management",
-        "cost_repo",
-        "config_loader",
+        "db", "redis", "http_client", "agent_registry", "llm_client",
+        "core_memory", "recall_memory", "archival_memory", "memory_backend", "compactor",
+        "context_assembler", "token_counter", "memory_repo", "transcript_repo",
+        "event_bus", "management", "cost_repo", "config_loader",
     }
     assert expected.issubset(field_names), f"Missing fields: {expected - field_names}"
 
@@ -68,7 +54,9 @@ def test_no_database_construction_in_scripts():
         text=True,
     )
     # grep returns 1 when no match is found (which is what we want)
-    assert result.returncode == 1, f"Found direct Database() construction:\n{result.stdout}"
+    assert result.returncode == 1, (
+        f"Found direct Database() construction:\n{result.stdout}"
+    )
 
 
 def testmake_embedding_fn_warns_on_missing_api_key(caplog):
@@ -86,9 +74,9 @@ def testmake_embedding_fn_warns_on_missing_api_key(caplog):
     ):
         make_embedding_fn(httpx.AsyncClient(), "")
 
-    assert any("openrouter embedding API key not set" in msg for msg in caplog.messages), (
-        f"Expected warning about missing API key, got: {caplog.messages}"
-    )
+    assert any(
+        "openrouter embedding API key not set" in msg for msg in caplog.messages
+    ), f"Expected warning about missing API key, got: {caplog.messages}"
 
 
 def testmake_embedding_fn_no_warning_with_api_key(caplog):
@@ -104,11 +92,11 @@ def testmake_embedding_fn_no_warning_with_api_key(caplog):
         patch.dict("os.environ", env),
         caplog.at_level(logging.WARNING, logger="core.bootstrap"),
     ):
-        make_embedding_fn(httpx.AsyncClient(), "test-openrouter-key-for-unit-tests")
+        make_embedding_fn(httpx.AsyncClient(), "sk-test-key")
 
-    assert not any("embedding API key not set" in msg for msg in caplog.messages), (
-        f"Unexpected warning with valid API key: {caplog.messages}"
-    )
+    assert not any(
+        "embedding API key not set" in msg for msg in caplog.messages
+    ), f"Unexpected warning with valid API key: {caplog.messages}"
 
 
 def testmake_embedding_fn_uses_deterministic_for_local_provider(caplog):
@@ -125,9 +113,9 @@ def testmake_embedding_fn_uses_deterministic_for_local_provider(caplog):
     ):
         make_embedding_fn(httpx.AsyncClient(), "")
 
-    assert any("Using deterministic local embeddings" in msg for msg in caplog.messages), (
-        f"Expected deterministic embedding warning, got: {caplog.messages}"
-    )
+    assert any(
+        "Using deterministic local embeddings" in msg for msg in caplog.messages
+    ), f"Expected deterministic embedding warning, got: {caplog.messages}"
 
 
 def test_make_llm_client_uses_lmstudio_env() -> None:
@@ -158,4 +146,6 @@ def test_no_dummy_embed_anywhere():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 1, f"Found _dummy_embed references:\n{result.stdout}"
+    assert result.returncode == 1, (
+        f"Found _dummy_embed references:\n{result.stdout}"
+    )

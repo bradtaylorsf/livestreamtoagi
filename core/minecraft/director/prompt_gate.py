@@ -254,34 +254,20 @@ class DirectorPromptGate:
             broadcast_to_all=source_agent == "system",
         )
         seed = _stable_seed(scene.scene_id, state.event_sequence)
-        if _is_successful_build_plan_status_notice(event_text.lower()):
-            state.plan_mode_build_completed = True
-        if _should_quiesce_after_plan_build(state, event_type):
-            scheduler_decision = _suppressed_scheduler_decision(
-                scene=scene,
-                candidates=candidates,
-                seed=seed,
-                reason="plan_mode_build_completed",
-            )
-        else:
-            scheduler_decision = state.scheduler.select(
-                scene=scene,
-                candidates=candidates,
-                scene_event_type=event_type,
-                recent_speakers=list(state.recent_speakers),
-                seed=seed,
-            )
-        scheduler_decision = _apply_explicit_build_owner(
-            scheduler_decision,
+        scheduler_decision = state.scheduler.select(
+            scene=scene,
             candidates=candidates,
-            event_text=event_text,
             scene_event_type=event_type,
+            recent_speakers=list(state.recent_speakers),
+            seed=seed,
         )
         scheduler_decision = self._limit_scene_selected_agents(
             scene=scene,
             scheduler_decision=scheduler_decision,
             candidates=candidates,
         )
+        if _is_successful_build_plan_status_notice(event_text.lower()):
+            state.plan_mode_build_completed = True
         build_macros = self._build_macro_assignments(
             scene=scene,
             scheduler_decision=scheduler_decision,
@@ -447,11 +433,7 @@ class DirectorPromptGate:
             reason = "suppressed"
             suppression_reason = cached.scheduler_decision.suppression_reason or "fanout_capped"
 
-        queue_depth = (
-            0
-            if cached.scheduler_decision.suppression_reason == "plan_mode_build_completed"
-            else len(self._state.decisions)
-        )
+        queue_depth = len(self._state.decisions)
         build_macro = cached.build_macros.get(agent_id)
         decision = PromptDecision(
             selected=selected,
@@ -712,80 +694,6 @@ def _selected_agent_scene_cap(agent_count: int) -> int:
     return max(1, int(max(1, agent_count) * ratio))
 
 
-def _suppressed_scheduler_decision(
-    *,
-    scene: Scene,
-    candidates: Sequence[SchedulerCandidate],
-    seed: int,
-    reason: str,
-) -> SchedulerDecision:
-    return SchedulerDecision(
-        scene_id=scene.scene_id,
-        selected=[],
-        suppressed_agents=sorted(candidate.agent_id for candidate in candidates),
-        suppression_reason=reason,
-        was_urgent=False,
-        seed=seed,
-    )
-
-
-def _apply_explicit_build_owner(
-    scheduler_decision: SchedulerDecision,
-    *,
-    candidates: Sequence[SchedulerCandidate],
-    event_text: str,
-    scene_event_type: SceneEventType,
-) -> SchedulerDecision:
-    if scene_event_type != SceneEventType.BUILD_ACTION:
-        return scheduler_decision
-    owner = _explicit_build_owner(event_text, candidates)
-    if owner is None:
-        return scheduler_decision
-    if scheduler_decision.selected_planner_agent_id == owner:
-        return scheduler_decision
-
-    suppressed_agents = sorted(
-        candidate.agent_id for candidate in candidates if candidate.agent_id != owner
-    )
-    return scheduler_decision.model_copy(
-        update={
-            "selected": [
-                SchedulerTurn(
-                    agent_id=owner,
-                    kind="planner",
-                    score=1.0,
-                    reason="explicit_build_owner",
-                    factor_breakdown={"explicit_build_owner": 1.0},
-                )
-            ],
-            "suppressed_agents": suppressed_agents,
-            "suppression_reason": "explicit_build_owner" if suppressed_agents else None,
-        }
-    )
-
-
-def _explicit_build_owner(
-    event_text: str,
-    candidates: Sequence[SchedulerCandidate],
-) -> str | None:
-    lowered = str(event_text or "").lower()
-    if not lowered:
-        return None
-    candidate_ids = {candidate.agent_id for candidate in candidates}
-    for pattern in (
-        r"\b(?P<agent>[a-z][a-z0-9_-]*)\s+is\s+the\s+build\s+owner\b",
-        r"\b(?P<agent>[a-z][a-z0-9_-]*)\s+should\s+be\s+the\s+build\s+owner\b",
-        r"\b(?P<agent>[a-z][a-z0-9_-]*)\s+will\s+be\s+the\s+build\s+owner\b",
-        r"\bbuild\s+owner\s*(?:is|:)\s*(?P<agent>[a-z][a-z0-9_-]*)\b",
-    ):
-        match = re.search(pattern, lowered)
-        if match:
-            owner = _canonical_agent_id(match.group("agent"))
-            if owner in candidate_ids:
-                return owner
-    return None
-
-
 def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> bool:
     lowered = str(event_text or "").lower()
     if (
@@ -851,19 +759,6 @@ def _is_plan_mode_single_build_closed(state: _GateState) -> bool:
         return False
     max_per_agent = _int_or_none(os.environ.get("MC_SIM_BUILD_MAX_PER_AGENT"))
     return max_per_agent is None or max_per_agent <= 1
-
-
-def _should_quiesce_after_plan_build(
-    state: _GateState,
-    event_type: SceneEventType,
-) -> bool:
-    if not _is_plan_mode_single_build_closed(state):
-        return False
-    return event_type not in {
-        SceneEventType.HEALTH_DANGER,
-        SceneEventType.STUCK,
-        SceneEventType.UNSTUCK,
-    }
 
 
 def _is_build_completion_chatter(lowered: str) -> bool:

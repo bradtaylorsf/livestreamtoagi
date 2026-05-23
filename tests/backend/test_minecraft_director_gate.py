@@ -390,47 +390,6 @@ async def test_plan_mode_success_closes_single_build_window(
     assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
 
 
-async def test_plan_mode_success_quiesces_post_build_chat(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MC_SIM_BUILD_MODE", "plan")
-    monkeypatch.setenv("MC_SIM_BUILD_MAX_PER_AGENT", "1")
-    gate = _gate()
-    success_event = _build_event(
-        source_agent="vera",
-        event_text=(
-            "build-from-plan build-plan-1 success: intended=32; present=32; "
-            "missing=0; unexpected=0; verified=32; completion=1.000"
-        ),
-    )
-
-    success_decisions = [
-        await gate.evaluate("sim-test", agent_id, success_event) for agent_id in AGENTS
-    ]
-
-    assert all(decision.selected is False for decision in success_decisions)
-    assert {decision.suppression_reason for decision in success_decisions} == {
-        "plan_mode_build_completed"
-    }
-    assert {decision.queue_depth for decision in success_decisions} == {0}
-
-    followup = _build_event(
-        source_agent="system",
-        event_text=(
-            "Autonomous heartbeat: you have been quiet in the Minecraft plan-build "
-            "simulation. Keep the group focused on one coherent shared structure."
-        ),
-    )
-    followup_decisions = [
-        await gate.evaluate("sim-test", agent_id, followup) for agent_id in AGENTS
-    ]
-
-    assert all(decision.selected is False for decision in followup_decisions)
-    assert all(decision.build_macro is None for decision in followup_decisions)
-    assert all(decision.available_tools == [] for decision in followup_decisions)
-    assert {decision.queue_depth for decision in followup_decisions} == {0}
-
-
 async def test_system_broadcast_build_turn_considers_full_sim_cohort() -> None:
     gate = DirectorPromptGate(
         scheduler_config=SchedulerConfig(max_turns_per_scene=1, random_jitter=0.0)
@@ -444,37 +403,6 @@ async def test_system_broadcast_build_turn_considers_full_sim_cohort() -> None:
     assert selected[0].turn_kind == "planner"
     assert selected[0].build_macro is not None
     assert selected[0].build_macro.owner in {"rex", "fork"}
-
-
-async def test_explicit_build_owner_overrides_builder_role_weight() -> None:
-    gate = DirectorPromptGate(
-        scheduler_config=SchedulerConfig(max_turns_per_scene=1, random_jitter=0.0)
-    )
-    event = _build_event(
-        source_agent="system",
-        event_text=(
-            "Vera is the build owner. Build one small coherent starter cabin. "
-            "Rex and Aurora should support only by observing and reporting constraints."
-        ),
-    )
-
-    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
-
-    selected = [decision for decision in decisions if decision.selected]
-    assert len(selected) == 1
-    owner = selected[0]
-    assert owner.turn_kind == "planner"
-    assert owner.reason == "explicit_build_owner"
-    assert owner.build_macro is not None
-    assert owner.build_macro.owner == "vera"
-    assert owner.build_macro.role == "planner_owner"
-    assert owner.build_macro.granted is True
-    assert "!planAndBuild" in owner.available_tools
-
-    by_agent = dict(zip(AGENTS, decisions, strict=True))
-    assert by_agent["rex"].build_macro is not None
-    assert by_agent["rex"].build_macro.role == "support"
-    assert "!planAndBuild" not in by_agent["rex"].available_tools
 
 
 async def test_selection_starvation_guard_eventually_selects_every_agent() -> None:

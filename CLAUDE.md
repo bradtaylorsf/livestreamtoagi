@@ -18,7 +18,7 @@ TypeScript Website (Next.js on Vercel)
 
 ## Tech Stack
 
-### Backend (Python 3.13)
+### Backend (Python 3.12+)
 - **Framework:** FastAPI (async web server + WebSocket)
 - **Agent Framework:** CrewAI (personality-first agent orchestration)
 - **LLM Routing:** OpenRouter (multi-model: Claude, Gemini, GPT, DeepSeek, Grok)
@@ -58,11 +58,11 @@ TypeScript Website (Next.js on Vercel)
 ### Backend (Python)
 ```bash
 # Setup
-uv venv .venv --python 3.13
-uv pip install -e ".[dev]"
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
 # Run
-.venv/bin/uvicorn core.main:app --reload --port 8010 --env-file .env
+uvicorn core.main:app --reload --port 8010
 
 # Test (after activating .venv). For automated runners that don't
 # activate the venv, use `make test-backend` — it pins `.venv/bin/pytest`
@@ -113,7 +113,7 @@ docker compose -f docker-compose.test.yml up  # Test environment
 ## Code Conventions
 
 ### Python
-- Python 3.13, use type hints everywhere
+- Python 3.12+, use type hints everywhere
 - Async/await for all I/O operations
 - Use `ruff` for linting and formatting
 - Import style: stdlib → third-party → local (enforced by ruff)
@@ -168,7 +168,7 @@ PIXELLAB_API_KEY=
 LANGFUSE_SECRET_KEY=
 LANGFUSE_PUBLIC_KEY=
 DATABASE_URL=postgresql://...
-REDIS_URL=redis://:devpassword@localhost:6381
+REDIS_URL=redis://localhost:6379
 KILL_SWITCH_API_KEY=
 ```
 

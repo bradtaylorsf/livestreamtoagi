@@ -43,12 +43,8 @@ def mock_app():
     """Create a TestClient with fully mocked dependencies."""
     vera = _make_agent_config()
     rex = _make_agent_config(
-        id="rex",
-        display_name="Rex",
-        role="Engineer",
-        color_hex="#FF0000",
-        chattiness=0.5,
-        initiative=0.6,
+        id="rex", display_name="Rex", role="Engineer",
+        color_hex="#FF0000", chattiness=0.5, initiative=0.6,
     )
 
     mock_registry = MagicMock()
@@ -82,10 +78,8 @@ def mock_app():
     mock_services.llm_client = None
 
     env_overrides = {
-        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "")
-        or "test-openrouter-key-for-unit-tests",
-        "DATABASE_URL": os.environ.get("DATABASE_URL", "")
-        or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key",
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
     }
     # Mock services object for the FastAPI lifespan to use instead of a real
@@ -98,8 +92,7 @@ def mock_app():
     mock_lifespan_services.llm_client = None
     mock_lifespan_services.core_memory = None
     mock_lifespan_services.config_loader = MagicMock(
-        start_watching=AsyncMock(),
-        stop_watching=AsyncMock(),
+        start_watching=AsyncMock(), stop_watching=AsyncMock(),
     )
     mock_lifespan_services.cost_repo = MagicMock()
     mock_lifespan_services.memory_repo = MagicMock()
@@ -142,7 +135,9 @@ def mock_app():
 
 
 class TestLocalVideoServing:
-    def test_serves_uuid_mp4_from_configured_output_dir(self, mock_app, tmp_path, monkeypatch):
+    def test_serves_uuid_mp4_from_configured_output_dir(
+        self, mock_app, tmp_path, monkeypatch
+    ):
         client, *_ = mock_app
         sim_id = uuid.uuid4()
         video_path = tmp_path / f"{sim_id}.mp4"
@@ -156,7 +151,9 @@ class TestLocalVideoServing:
         assert resp.headers["content-type"].startswith("video/mp4")
         assert resp.content == b"fake mp4 bytes"
 
-    def test_video_head_returns_mp4_content_type(self, mock_app, tmp_path, monkeypatch):
+    def test_video_head_returns_mp4_content_type(
+        self, mock_app, tmp_path, monkeypatch
+    ):
         client, *_ = mock_app
         sim_id = uuid.uuid4()
         (tmp_path / f"{sim_id}.mp4").write_bytes(b"fake mp4 bytes")
@@ -168,7 +165,9 @@ class TestLocalVideoServing:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("video/mp4")
 
-    def test_rejects_non_uuid_and_traversal_video_paths(self, mock_app, tmp_path, monkeypatch):
+    def test_rejects_non_uuid_and_traversal_video_paths(
+        self, mock_app, tmp_path, monkeypatch
+    ):
         client, *_ = mock_app
         monkeypatch.setenv("VIDEO_STORAGE", "local")
         monkeypatch.setenv("VIDEO_OUTPUT_DIR", str(tmp_path))
@@ -176,7 +175,9 @@ class TestLocalVideoServing:
         assert client.get("/videos/not-a-uuid.mp4").status_code == 404
         assert client.get("/videos/%2E%2E%2Fsecret.mp4").status_code == 404
 
-    def test_local_video_route_disabled_for_s3_storage(self, mock_app, tmp_path, monkeypatch):
+    def test_local_video_route_disabled_for_s3_storage(
+        self, mock_app, tmp_path, monkeypatch
+    ):
         client, *_ = mock_app
         sim_id = uuid.uuid4()
         (tmp_path / f"{sim_id}.mp4").write_bytes(b"fake mp4 bytes")
@@ -219,19 +220,17 @@ class TestAgentEndpoints:
 
     def test_get_agent_journal(self, mock_app):
         client, mock_db, *_ = mock_app
-        mock_db.fetch = AsyncMock(
-            return_value=[
-                {
-                    "id": 1,
-                    "agent_id": "vera",
-                    "reflection_type": "daily",
-                    "content": "A good day.",
-                    "token_count": 12,
-                    "image_url": "https://example.com/journals/vera.png",
-                    "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                },
-            ]
-        )
+        mock_db.fetch = AsyncMock(return_value=[
+            {
+                "id": 1,
+                "agent_id": "vera",
+                "reflection_type": "daily",
+                "content": "A good day.",
+                "token_count": 12,
+                "image_url": "https://example.com/journals/vera.png",
+                "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            },
+        ])
         resp = client.get("/api/agents/vera/journal")
         assert resp.status_code == 200
         data = resp.json()
@@ -327,7 +326,10 @@ class TestAgentEndpoints:
         sim_id = uuid.uuid4()
         resp = client.get(f"/api/agents?simulation_id={sim_id}")
         assert resp.status_code == 200
-        cost_queries = [c for c in mock_db.fetch.call_args_list if "cost_events" in c[0][0]]
+        cost_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "cost_events" in c[0][0]
+        ]
         assert cost_queries, "Expected at least one cost_events query"
         for call in cost_queries:
             assert "simulation_id" in call[0][0]
@@ -373,7 +375,9 @@ class TestAgentEndpoints:
         resp = client.get(f"/api/agents/vera/core-memory?simulation_id={sim_id}")
         assert resp.status_code == 200
         # The fetchrow query for current core memory must scope by simulation_id
-        assert any("simulation_id" in call[0][0] for call in mock_db.fetchrow.call_args_list)
+        assert any(
+            "simulation_id" in call[0][0] for call in mock_db.fetchrow.call_args_list
+        )
 
     def test_get_agent_recall_memories_unscoped(self, mock_app):
         """Recall-memories endpoint defaults to all simulations (no LIVE filter)."""
@@ -402,13 +406,9 @@ class TestAgentEndpoints:
         """Costs endpoint without simulation_id aggregates across all sims."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
-        mock_db.fetchrow = AsyncMock(
-            return_value={
-                "total": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-            }
-        )
+        mock_db.fetchrow = AsyncMock(return_value={
+            "total": 0, "input_tokens": 0, "output_tokens": 0,
+        })
         resp = client.get("/api/agents/vera/costs")
         assert resp.status_code == 200
         for call in mock_db.fetch.call_args_list:
@@ -420,13 +420,9 @@ class TestAgentEndpoints:
         """Costs endpoint with simulation_id filters by it."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
-        mock_db.fetchrow = AsyncMock(
-            return_value={
-                "total": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-            }
-        )
+        mock_db.fetchrow = AsyncMock(return_value={
+            "total": 0, "input_tokens": 0, "output_tokens": 0,
+        })
         sim_id = uuid.uuid4()
         resp = client.get(f"/api/agents/vera/costs?simulation_id={sim_id}")
         assert resp.status_code == 200
@@ -622,26 +618,24 @@ class TestConversationEndpoints:
         client, mock_db, *_ = mock_app
         conv_id = uuid.uuid4()
         non_live_sim_id = uuid.uuid4()
-        mock_db.fetch = AsyncMock(
-            return_value=[
-                {
-                    "id": 1,
-                    "conversation_id": conv_id,
-                    "turn_number": 1,
-                    "selected_agent_id": "vera",
-                    "was_interrupt": False,
-                    "agent_scores": {},
-                    "active_agents": [],
-                    "detected_topic": None,
-                    "previous_speaker_id": None,
-                    "conversation_energy": 0.5,
-                    "trigger_type": None,
-                    "config_hash": None,
-                    "simulation_id": non_live_sim_id,
-                    "timestamp": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                },
-            ]
-        )
+        mock_db.fetch = AsyncMock(return_value=[
+            {
+                "id": 1,
+                "conversation_id": conv_id,
+                "turn_number": 1,
+                "selected_agent_id": "vera",
+                "was_interrupt": False,
+                "agent_scores": {},
+                "active_agents": [],
+                "detected_topic": None,
+                "previous_speaker_id": None,
+                "conversation_energy": 0.5,
+                "trigger_type": None,
+                "config_hash": None,
+                "simulation_id": non_live_sim_id,
+                "timestamp": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            },
+        ])
         resp = client.get(f"/api/conversations/{conv_id}/selections")
         assert resp.status_code == 200
         data = resp.json()
@@ -717,7 +711,9 @@ class TestSimulationsEndpoint:
         assert "is_featured" not in list_sql
         assert "is_featured" not in count_sql
 
-    def test_list_simulations_response_includes_is_featured_and_video_url(self, mock_app):
+    def test_list_simulations_response_includes_is_featured_and_video_url(
+        self, mock_app
+    ):
         """Each item in the response has is_featured and video_url fields."""
         client, mock_db, *_ = mock_app
         sim_id = uuid.uuid4()
@@ -784,7 +780,9 @@ class TestSimulationsEndpoint:
         assert 1 in mock_db.fetch.call_args[0][1:]
         assert 1 in mock_db.fetchval.call_args[0][1:]
 
-    def test_list_simulations_completed_within_hours_omitted_does_not_filter(self, mock_app):
+    def test_list_simulations_completed_within_hours_omitted_does_not_filter(
+        self, mock_app
+    ):
         """No completed_within_hours param means no completed_at predicate is added."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
@@ -797,7 +795,9 @@ class TestSimulationsEndpoint:
         assert "completed_at" not in list_sql
         assert "completed_at" not in count_sql
 
-    def test_list_simulations_joins_users_for_submitter_display_name(self, mock_app):
+    def test_list_simulations_joins_users_for_submitter_display_name(
+        self, mock_app
+    ):
         """The list query LEFT JOINs users so the response carries display name."""
         client, mock_db, *_ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
@@ -809,7 +809,9 @@ class TestSimulationsEndpoint:
         assert "LEFT JOIN users" in list_sql
         assert "submitter_display_name" in list_sql
 
-    def test_list_simulations_response_includes_submitter_display_name(self, mock_app):
+    def test_list_simulations_response_includes_submitter_display_name(
+        self, mock_app
+    ):
         """Submitter display name flows through to the response (None == anonymous)."""
         client, mock_db, *_ = mock_app
         sim_id = uuid.uuid4()
@@ -862,7 +864,9 @@ class TestSimulationsEndpoint:
         assert items[0]["submitter_display_name"] == "brad"
         assert items[1]["submitter_display_name"] is None
 
-    def test_simulation_detail_includes_video_render_status_and_failure(self, mock_app):
+    def test_simulation_detail_includes_video_render_status_and_failure(
+        self, mock_app
+    ):
         """Detail response exposes enough video render state for the workspace."""
         client, mock_db, *_ = mock_app
         sim_id = uuid.uuid4()
@@ -918,7 +922,9 @@ class TestSimulationsEndpoint:
         assert data["video_render_failure_reason"] == "Playwright timed out"
         assert data["video_render_cancellation_reason"] is None
 
-    def test_simulation_detail_includes_cost_limited_cancellation_reason(self, mock_app):
+    def test_simulation_detail_includes_cost_limited_cancellation_reason(
+        self, mock_app
+    ):
         """Cancelled cost-limited runs tell the UI why no render is coming."""
         client, mock_db, *_ = mock_app
         sim_id = uuid.uuid4()
@@ -1069,12 +1075,10 @@ class TestEvalEndpoints:
 
     def test_get_eval_categories(self, mock_app):
         client, mock_db, *_ = mock_app
-        mock_db.fetch = AsyncMock(
-            return_value=[
-                {"category": "creativity"},
-                {"category": "safety"},
-            ]
-        )
+        mock_db.fetch = AsyncMock(return_value=[
+            {"category": "creativity"},
+            {"category": "safety"},
+        ])
         resp = client.get("/api/evals/categories")
         assert resp.status_code == 200
         data = resp.json()
@@ -1092,32 +1096,28 @@ class TestEvalEndpoints:
         client, mock_db, *_ = mock_app
         run_id = uuid.uuid4()
         sim_id = uuid.uuid4()
-        mock_db.fetch = AsyncMock(
-            side_effect=[
-                # First call: get_all_eval_runs
-                [
-                    {
-                        "id": run_id,
-                        "simulation_id": sim_id,
-                        "eval_suite": "full",
-                        "status": "completed",
-                        "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                        "completed_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                        "overall_score": 72.5,
-                        "cost": 0.05,
-                        "model_versions": (
-                            '{"vera": {"conversation": "anthropic/claude-haiku-4.5",'
-                            ' "building": "anthropic/claude-sonnet-4.6"}}'
-                        ),
-                        "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                    }
-                ],
-                # Second call: batch-fetch simulation names
-                [{"id": sim_id, "name": "Test Simulation"}],
-                # Third call: get_eval_results for this run
-                [],
-            ]
-        )
+        mock_db.fetch = AsyncMock(side_effect=[
+            # First call: get_all_eval_runs
+            [{
+                "id": run_id,
+                "simulation_id": sim_id,
+                "eval_suite": "full",
+                "status": "completed",
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "overall_score": 72.5,
+                "cost": 0.05,
+                "model_versions": (
+                    '{"vera": {"conversation": "anthropic/claude-haiku-4.5",'
+                    ' "building": "anthropic/claude-sonnet-4.6"}}'
+                ),
+                "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            }],
+            # Second call: batch-fetch simulation names
+            [{"id": sim_id, "name": "Test Simulation"}],
+            # Third call: get_eval_results for this run
+            [],
+        ])
         resp = client.get("/api/evals/runs")
         assert resp.status_code == 200
         data = resp.json()
@@ -1139,7 +1139,10 @@ class TestEvalEndpoints:
         resp = client.get("/api/evals/runs")
         assert resp.status_code == 200
         # The eval_runs list query must NOT mention simulation_id
-        eval_run_queries = [c for c in mock_db.fetch.call_args_list if "FROM eval_runs" in c[0][0]]
+        eval_run_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "FROM eval_runs" in c[0][0]
+        ]
         assert eval_run_queries, "Expected an eval_runs query"
         for call in eval_run_queries:
             assert "simulation_id" not in call[0][0]
@@ -1151,7 +1154,10 @@ class TestEvalEndpoints:
         sim_id = uuid.uuid4()
         resp = client.get(f"/api/evals/runs?simulation_id={sim_id}")
         assert resp.status_code == 200
-        eval_run_queries = [c for c in mock_db.fetch.call_args_list if "FROM eval_runs" in c[0][0]]
+        eval_run_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "FROM eval_runs" in c[0][0]
+        ]
         assert eval_run_queries, "Expected an eval_runs query"
         scoped = [c for c in eval_run_queries if "simulation_id" in c[0][0]]
         assert scoped, "Expected eval_runs query to filter by simulation_id"
@@ -1175,7 +1181,10 @@ class TestEvalEndpoints:
         sim_id = uuid.uuid4()
         resp = client.get(f"/api/evals/latest?simulation_id={sim_id}")
         assert resp.status_code == 200
-        eval_run_queries = [c for c in mock_db.fetch.call_args_list if "FROM eval_runs" in c[0][0]]
+        eval_run_queries = [
+            c for c in mock_db.fetch.call_args_list
+            if "FROM eval_runs" in c[0][0]
+        ]
         assert eval_run_queries
         scoped = [c for c in eval_run_queries if "simulation_id" in c[0][0]]
         assert scoped, "Expected /evals/latest query to filter by simulation_id"
@@ -1193,25 +1202,23 @@ class TestEvalEndpoints:
         client, mock_db, *_ = mock_app
         run_id = uuid.uuid4()
         sim_id = uuid.uuid4()
-        mock_db.fetchrow = AsyncMock(
-            side_effect=[
-                # eval_repo.get_eval_run -> single eval run row
-                {
-                    "id": run_id,
-                    "simulation_id": sim_id,
-                    "eval_suite": "full",
-                    "status": "completed",
-                    "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                    "completed_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                    "overall_score": 80.0,
-                    "cost": 0.10,
-                    "model_versions": "{}",
-                    "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
-                },
-                # simulations name lookup
-                {"name": "Test Sim"},
-            ]
-        )
+        mock_db.fetchrow = AsyncMock(side_effect=[
+            # eval_repo.get_eval_run -> single eval run row
+            {
+                "id": run_id,
+                "simulation_id": sim_id,
+                "eval_suite": "full",
+                "status": "completed",
+                "started_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                "overall_score": 80.0,
+                "cost": 0.10,
+                "model_versions": "{}",
+                "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            },
+            # simulations name lookup
+            {"name": "Test Sim"},
+        ])
         mock_db.fetch = AsyncMock(return_value=[])
         resp = client.get(f"/api/evals/runs/{run_id}")
         assert resp.status_code == 200
@@ -1339,7 +1346,9 @@ class TestChallengeEndpoints:
                     "votes": 2,
                     "category": None,
                     "tags": ["creative"],
-                    "simulation_id": uuid.UUID("00000000-0000-0000-0000-000000000099"),
+                    "simulation_id": uuid.UUID(
+                        "00000000-0000-0000-0000-000000000099"
+                    ),
                     "shared_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
                     "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
                     "completed_at": None,
@@ -1461,7 +1470,9 @@ class TestSnapshotEndpoints:
         parsed = datetime.fromisoformat(snapshot_at)
         assert parsed == target_dt
 
-    def test_snapshot_at_uses_persisted_value_when_present(self, mock_app, tmp_path, monkeypatch):
+    def test_snapshot_at_uses_persisted_value_when_present(
+        self, mock_app, tmp_path, monkeypatch
+    ):
         """When `snapshot_at` is persisted in the file, it is preferred over mtime."""
         import json
 
@@ -1496,6 +1507,5 @@ class TestCORS:
             },
         )
         assert resp.headers.get("access-control-allow-origin") in (
-            "http://localhost:4000",
-            "*",
+            "http://localhost:4000", "*",
         )

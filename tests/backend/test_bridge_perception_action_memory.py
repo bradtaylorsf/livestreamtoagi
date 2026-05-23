@@ -154,8 +154,7 @@ async def _wait_for(predicate: Callable[[], bool], *, timeout: float = 1.0) -> N
 
 
 @pytest.fixture(autouse=True)
-def cleanup_consumer(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.delenv("CONVERSATION_MODE", raising=False)
+def cleanup_consumer() -> Iterator[None]:
     unregister_memory_consumer(event_bus)
     try:
         yield
