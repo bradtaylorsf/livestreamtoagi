@@ -179,9 +179,7 @@ def report_md_text(scored_run: ScoredRun) -> str:
         "| Outcome | Count |",
         "| --- | ---: |",
     ]
-    lines.extend(
-        f"| `{key}` | {scored_run.outcome_counts[key]} |" for key in OUTCOME_COUNT_KEYS
-    )
+    lines.extend(f"| `{key}` | {scored_run.outcome_counts[key]} |" for key in OUTCOME_COUNT_KEYS)
     lines.extend(
         [
             "",
