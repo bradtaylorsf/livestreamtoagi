@@ -102,9 +102,10 @@ def test_cli_dry_run_json_uses_bundled_fixtures_and_redacts_env_secrets() -> Non
     assert data["model"] == "qwen-local"
     assert data["base_url"] == "http://localhost:1234/v1"
     assert data["key_present"] is True
-    assert data["request_count"] == 3
-    assert data["collected_count"] == 3
+    assert data["request_count"] == 4
+    assert data["collected_count"] == 4
     assert data["estimated_cost"] == "0"
+    assert any(result["content"].startswith("!planAndBuild") for result in data["results"])
     assert stderr.getvalue() == ""
 
 
@@ -289,6 +290,8 @@ def test_cli_writes_report_artifacts_passing_prompts_and_comparison(
 
     exit_code = main(
         [
+            "--limit",
+            "3",
             "--report-dir",
             str(report_dir),
             "--passing-prompts",
@@ -331,4 +334,50 @@ def test_cli_writes_report_artifacts_passing_prompts_and_comparison(
     assert "openai/previous" in comparison
     assert "outcomes: malformed=0" in stdout.getvalue()
     assert "disallowed_tool=1" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_cli_dry_run_writes_meaningful_command_passing_prompts(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    report_dir = tmp_path / "dry-run-report"
+    passing_path = tmp_path / "passing-prompts.ndjson"
+
+    exit_code = main(
+        [
+            "--dry-run",
+            "--report-dir",
+            str(report_dir),
+            "--passing-prompts",
+            str(passing_path),
+        ],
+        env={
+            "LOCAL_LLM_BASE_URL": "http://localhost:1234/v1",
+            "LOCAL_LLM_API_KEY": "local-secret-value",
+            "LOCAL_LLM_MODEL": "qwen-local",
+        },
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    scores = json.loads((report_dir / "scores.json").read_text(encoding="utf-8"))
+    assert scores["outcome_counts"]["accepted_command"] == 3
+    assert scores["outcome_counts"]["accepted_chat"] == 1
+
+    passing_lines = [
+        json.loads(line) for line in passing_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [line["scenario_id"] for line in passing_lines] == [
+        "baseline-observe-area",
+        "build-owner-starter-cabin",
+        "movement-with-inventory",
+    ]
+    assert [line["command_token"] for line in passing_lines] == [
+        "!observe",
+        "!planAndBuild",
+        "!move",
+    ]
+    assert "starter cabin" in passing_lines[1]["raw_content"]
     assert stderr.getvalue() == ""

@@ -74,7 +74,8 @@ def replay_client():
     mock_lifespan_services.event_bus = MagicMock()
 
     env_overrides = {
-        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key",
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "")
+        or "test-openrouter-key-for-unit-tests",
         "DATABASE_URL": os.environ.get("DATABASE_URL", "")
         or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",

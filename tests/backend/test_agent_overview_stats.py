@@ -89,7 +89,8 @@ def stats_app():
     )
 
     env_overrides = {
-        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake",
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "")
+        or "test-openrouter-key-for-unit-tests",
         "DATABASE_URL": os.environ.get("DATABASE_URL", "")
         or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
@@ -153,7 +154,8 @@ def test_agent_conversations_unscoped_counts_across_all_sims(stats_app):
 
     # Sanity check: the count query did NOT scope to a simulation_id
     count_queries = [
-        call for call in mock_db.fetchval.call_args_list
+        call
+        for call in mock_db.fetchval.call_args_list
         if "COUNT" in call[0][0].upper() and "conversations" in call[0][0]
     ]
     assert count_queries, "Expected a COUNT query against conversations"
@@ -173,7 +175,8 @@ def test_agent_conversations_scoped_filters_to_one_sim(stats_app):
     assert resp.json()["total"] == 2
 
     count_queries = [
-        call for call in mock_db.fetchval.call_args_list
+        call
+        for call in mock_db.fetchval.call_args_list
         if "COUNT" in call[0][0].upper() and "conversations" in call[0][0]
     ]
     assert count_queries
@@ -216,9 +219,13 @@ def test_overview_stats_use_consistent_lifetime_scope(stats_app):
     client, mock_db, mock_artifact_repo = stats_app
     mock_db.fetch = AsyncMock(return_value=[])
     mock_db.fetchval = AsyncMock(return_value=0)
-    mock_db.fetchrow = AsyncMock(return_value={
-        "total": "0", "input_tokens": 0, "output_tokens": 0,
-    })
+    mock_db.fetchrow = AsyncMock(
+        return_value={
+            "total": "0",
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+    )
     mock_artifact_repo.get_all_artifacts = AsyncMock(return_value=([], 0))
 
     # These are the three calls the AgentDetailClient overview useEffect makes.
