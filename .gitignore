@@ -83,10 +83,13 @@ logs/
 # Session metadata
 review-batch.json
 review-session.json
+review-issue-*.json
+simulations-after-wait.yaml
 
 # Assets (large binaries — track with Git LFS or download separately)
 # frontend/public/assets/tilesets/*.png
 # frontend/public/assets/sprites/*.png
+research/**/*.pdf
 
 # Claude Code session runtime artifacts
 .claude/scheduled_tasks.lock
