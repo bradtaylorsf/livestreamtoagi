@@ -101,10 +101,11 @@ class SkillCard:
         if self.guidance:
             lines.extend(("", "Guidance:", *(f"- {item}" for item in self.guidance)))
 
+        allowed_commands = frozenset(self.allowed_commands)
         example_lines = [
             f"- {example}"
             for example in self.examples
-            if _example_is_renderable(example, command_map)
+            if _example_is_renderable(example, command_map, allowed_commands)
         ]
         if example_lines:
             lines.extend(("", "Examples:", *example_lines))
@@ -218,9 +219,10 @@ def _format_param(param: Any) -> str:
 def _example_is_renderable(
     example: str,
     command_map: Mapping[str, CommandSchema],
+    allowed_commands: frozenset[str],
 ) -> bool:
     text = example.strip()
     if not text.startswith("!"):
         return True
     command_name = text.split(maxsplit=1)[0]
-    return command_name in command_map
+    return command_name in command_map and command_name in allowed_commands

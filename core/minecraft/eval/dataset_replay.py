@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,7 +124,7 @@ def build_command_text(prompt: PassingPrompt) -> str:
     command_token = prompt.command_token.strip()
     if not command_token.startswith("!"):
         command_token = f"!{command_token}"
-    return " ".join((command_token, *prompt.args))
+    return " ".join((command_token, *(shlex.quote(arg) for arg in prompt.args)))
 
 
 def prompt_to_case_id(prompt: PassingPrompt, index: int) -> str:

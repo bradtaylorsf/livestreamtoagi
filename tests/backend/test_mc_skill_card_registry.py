@@ -136,12 +136,41 @@ def test_render_prompt_includes_resolved_signatures_guidance_and_examples() -> N
         "timeout_ms?: int) - Move a verified number of blocks."
     ) in prompt
     assert "Prefer short, verifiable moves" in prompt
-    assert "!move action-move-001 north 3 10000" in prompt
+    assert "!move action-move-001 north 3" in prompt
     assert "!navigate" not in prompt
     assert "{{" not in prompt
     assert "}}" not in prompt
     assert "<" not in prompt
     assert ">" not in prompt
+
+
+def test_render_prompt_filters_examples_to_selected_allowed_commands() -> None:
+    schema_set = CommandSchemaSet(
+        commands=(
+            _schema("!move"),
+            _schema("!navigate"),
+            _schema("!planAndBuild"),
+            _schema("!place"),
+            _schema("!buildFromPlan"),
+        )
+    )
+    [move_card] = get_default_registry().select(
+        ids=("move",),
+        available_commands=("!move",),
+    ).cards
+    [build_card] = get_default_registry().select(
+        ids=("build",),
+        available_commands=("!planAndBuild",),
+    ).cards
+
+    move_prompt = move_card.render_prompt(schema_set)
+    build_prompt = build_card.render_prompt(schema_set)
+
+    assert "!move action-move-001 north 3" in move_prompt
+    assert "!navigate" not in move_prompt
+    assert '!planAndBuild "small oak shelter"' in build_prompt
+    assert "!place" not in build_prompt
+    assert "!buildFromPlan" not in build_prompt
 
 
 def test_safety_card_surfaces_default_disallowed_commands_verbatim() -> None:

@@ -131,6 +131,10 @@ def test_filter_prompts_rejects_negative_limit() -> None:
 def test_build_command_text_ensures_bang_and_joins_args() -> None:
     assert build_command_text(_prompt("move", "move", ("north", "2"))) == "!move north 2"
     assert build_command_text(_prompt("inventory", "!inventory", ())) == "!inventory"
+    assert (
+        build_command_text(_prompt("build", "!planAndBuild", ("small oak shelter",)))
+        == "!planAndBuild 'small oak shelter'"
+    )
 
 
 def test_prompt_to_case_id_is_stable() -> None:

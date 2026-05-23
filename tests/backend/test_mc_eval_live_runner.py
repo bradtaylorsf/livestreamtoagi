@@ -47,9 +47,18 @@ def test_case_generator_produces_expected_command_tokens(command: str) -> None:
     assert all(case.params["action_id"] for case in generated)
 
 
+def test_move_case_uses_public_command_schema_arg_count() -> None:
+    [case] = CaseGenerator("move", 1, seed=3).generate()
+
+    assert len(case.command_text.split()) == 4
+    assert case.command_text.startswith("!move ")
+    assert case.params["timeout_ms"] == 10_000
+
+
 def test_family_resolution_accepts_skill_card_family_ids_and_command_names() -> None:
     assert resolve_command_name("build") == "planAndBuild"
     assert resolve_command_name("observe") == "nearbyBlocks"
+    assert resolve_command_name("!observe") == "nearbyBlocks"
     assert resolve_command_name("!move") == "move"
     assert "build" in supported_command_inputs()
 

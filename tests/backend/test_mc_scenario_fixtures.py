@@ -62,6 +62,10 @@ def _command_surface() -> CommandSchemaSet:
             ),
             _schema("!observe"),
             _schema("!inventory"),
+            _schema(
+                "!planAndBuild",
+                params=(CommandParam(name="description", type="string"),),
+            ),
             _schema("!place"),
             _schema("!craftRecipe"),
             _schema("!collectBlocks"),
@@ -77,6 +81,7 @@ def test_valid_fixtures_load_and_round_trip() -> None:
 
     assert [scenario["id"] for scenario in scenario_set.to_dict()["scenarios"]] == [
         "baseline-observe-area",
+        "build-owner-starter-cabin",
         "chat-only-blocked-command",
         "movement-with-inventory",
     ]

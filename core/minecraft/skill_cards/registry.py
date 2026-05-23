@@ -26,9 +26,8 @@ BUILTIN_SKILL_CARDS: tuple[SkillCard, ...] = (
             "Observe again after movement when the task depends on nearby blocks or entities.",
         ),
         examples=(
-            "!move action-move-001 north 3 10000",
-            '!navigate {"x": 12, "y": 64, "z": -8} 1 20000',
-            "!goToPlace storage_room 2 true",
+            "!move action-move-001 north 3",
+            "!navigate action-nav-001 '{\"x\":12,\"y\":64,\"z\":-8}' 1 20000",
         ),
         tags=("action", "movement", "navigation"),
     ),
@@ -72,9 +71,11 @@ BUILTIN_SKILL_CARDS: tuple[SkillCard, ...] = (
             "Avoid destructive changes unless the scenario explicitly allows them.",
         ),
         examples=(
-            '!place action-place-001 {"x": 12, "y": 64, "z": -8} oak_planks up 10000',
-            '!buildFromPlan {"origin":{"x":12,"y":64,"z":-8},"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_planks"}]} 32 30000',
-            "!planAndBuild small oak shelter 64 60000",
+            "!place action-place-001 oak_planks '{\"x\":12,\"y\":64,\"z\":-8}' up 1",
+            "!buildFromPlan action-build-001 '{\"x\":12,\"y\":64,\"z\":-8}' "
+            "'{\"blocks\":[{\"dx\":0,\"dy\":0,\"dz\":0,\"block_type\":\"oak_planks\"}]}' "
+            "32 30000",
+            '!planAndBuild "small oak shelter"',
         ),
         tags=("action", "building", "construction"),
     ),

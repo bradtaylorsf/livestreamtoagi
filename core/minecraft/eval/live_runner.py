@@ -62,9 +62,11 @@ _SUPPORTED_COMMANDS = (
 )
 _COMMAND_KEY_MAP = {command.casefold(): command for command in _SUPPORTED_COMMANDS}
 _COMMAND_KEY_MAP.update({f"!{command}".casefold(): command for command in _SUPPORTED_COMMANDS})
+_COMMAND_KEY_MAP["!observe"] = "nearbyBlocks"
 _FAMILY_COMMANDS = {
     "build": "planAndBuild",
     "observe": "nearbyBlocks",
+    "!observe": "nearbyBlocks",
 }
 _FAMILY_COMMANDS.update({command: command for command in _SUPPORTED_COMMANDS})
 
@@ -378,7 +380,7 @@ def _move_case(
         "distance_blocks": distance,
         "timeout_ms": timeout_ms,
     }
-    command_text = f"!move {action_id} {direction} {distance} {timeout_ms}"
+    command_text = f"!move {action_id} {direction} {distance}"
     return CommandCase(case_id, "move", command_text, params)
 
 

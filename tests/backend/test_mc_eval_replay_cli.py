@@ -78,6 +78,26 @@ def test_replay_cli_command_filter_narrows_case_list(tmp_path: Path) -> None:
     ]
 
 
+def test_replay_cli_maps_e17_observe_to_read_only_live_command(tmp_path: Path) -> None:
+    dataset_path = _write_dataset(tmp_path, [_record("observe-area", "!observe", [])])
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        ["--dataset", str(dataset_path), "--dry-run", "--json"],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    data = json.loads(stdout.getvalue())
+    assert data["outcome_counts"][OutcomeClass.SUCCESS] == 1
+    assert data["case_results"][0]["command_text"] == "!observe"
+    assert data["case_results"][0]["final_state"]["command"] == "nearbyBlocks"
+
+
 def test_replay_cli_unknown_dataset_path_exits_nonzero(tmp_path: Path) -> None:
     stdout = io.StringIO()
     stderr = io.StringIO()
