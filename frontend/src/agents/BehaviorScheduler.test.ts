@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BehaviorScheduler } from "./BehaviorScheduler";
 import type { AgentSprite } from "./AgentSprite";
 
@@ -24,10 +24,15 @@ describe("BehaviorScheduler", () => {
   let scheduler: BehaviorScheduler;
 
   beforeEach(() => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     sprites = new Map();
     sprites.set("vera", createMockSprite("vera"));
     sprites.set("rex", createMockSprite("rex"));
     scheduler = new BehaviorScheduler(sprites);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("does not trigger animations immediately", () => {

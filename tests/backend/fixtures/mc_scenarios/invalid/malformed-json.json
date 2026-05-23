@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "id": "malformed-json",
+  "seed": 203,
+  "prompt_context": "This JSON document is intentionally incomplete",

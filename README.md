@@ -1,274 +1,250 @@
 # Livestream to AGI
 
-A 24/7 livestreamed AI reality show featuring 9 AI agents living in a pixel art world.
+Livestream to AGI is an experimental AI reality show: nine AI agents with
+distinct personalities live in a simulated world, talk to each other, build
+projects, manage budget pressure, and interact with audiences.
 
-The agents build projects, interact with audiences on Twitch and YouTube, manage a real budget, and expand their world through viewer voting — all while satirizing AI hype and genuinely showcasing technical capability.
+The project is being opened while still in active pre-alpha development. Expect
+rough edges, stale issues from earlier pivots, and fast-moving architecture.
+The current direction is embodied agents in a Minecraft Java Edition world,
+while the repository still contains the earlier Phaser replay/world renderer and
+simulation-first product work until the replacement path is fully proven.
 
-## The Cast
+This repository is public as work-in-progress research and engineering notes,
+not as production-ready autonomous livestream infrastructure. Do not run it as
+an unattended public service until the safety gates in
+[`docs/OPEN_SOURCE_READINESS.md`](docs/OPEN_SOURCE_READINESS.md) and
+[`docs/OPEN_SOURCE_AUDIT_REPORT.md`](docs/OPEN_SOURCE_AUDIT_REPORT.md) are
+cleared.
 
-| Agent | Role | Personality |
-|-------|------|-------------|
-| **Vera** | Showrunner | Obsessively organized coordinator who checks the budget mid-sentence |
-| **Rex** | Engineer | Terse, sarcastic pragmatist — judges everything by "does it ship?" |
-| **Aurora** | Creative Director | Dramatic visionary who speaks in metaphors and breaks into haiku |
-| **Pixel** | Researcher | Insatiably curious audience liaison who finds everything fascinating |
-| **Fork** | Contrarian | Open-source evangelist who proposes forking everything |
-| **Sentinel** | Accountant | Paranoid budget monitor who announces unsolicited cost updates |
-| **Grok** | Wild Card | 40% brilliant insights, 40% terrible takes, 20% content warnings |
-| **Management** | Content Filter | Corporate middle-management that enforces content rules via memos and policy updates |
-| **Alpha** | Wolf Assistant | Eager-to-please errand runner who occasionally brings back the wrong thing |
+Livestream to AGI is an independent AI reality show set in a Minecraft Java
+Edition world. It is not official, sponsored, approved, or associated with
+Mojang or Microsoft.
+
+## What Is Here
+
+- A FastAPI backend that runs agents, simulations, memory, Management review,
+  cost controls, public APIs, admin APIs, evals, reporting, video jobs, and
+  YouTube publishing.
+- Agent personalities and model routing in `agents/`.
+- Three-tier memory: core memory, recall search over pgvector, and archival
+  transcripts.
+- A Management content-review layer that every agent utterance must pass before
+  text-to-speech or public broadcast.
+- Cost-governed LLM routing through OpenRouter or local OpenAI-compatible
+  servers.
+- A Minecraft embodiment bridge built around a pinned Mindcraft fork, a private
+  Paper server, local eval harnesses, and a Python-to-Node bridge contract.
+- A legacy Phaser/Vite renderer and replay pipeline that remains until the
+  Minecraft livestream and website replacement are ready.
+- A Next.js public website for live pages, simulations, reports, agents, and
+  research content.
+
+## Current Status
+
+This is not production-ready software. The main public value right now is the
+code, docs, eval harnesses, and experiment trail.
+
+Current readiness docs:
+
+- [Open-source readiness checklist](docs/OPEN_SOURCE_READINESS.md)
+- [Open-source audit report](docs/OPEN_SOURCE_AUDIT_REPORT.md)
+
+Active work is concentrated around:
+
+- Minecraft embodiment and multi-agent action reliability.
+- Director V2 and run-mode orchestration.
+- Cost/kill-switch hardening for persistent runs.
+- Website adaptation from simulation/replay pages to embodied-world output.
+- Issue triage after several product pivots.
+
+Some older Phaser, office-world, and MP4 replay issues are intentionally still
+open so they can be reviewed and closed or rewritten with context. Do not delete
+the Phaser/replay path solely because it is old; the retirement epic depends on
+Minecraft capture and website adaptation being demonstrably ready.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│  Twitch / YouTube (via Restream.io)             │
-└────────────────────┬────────────────────────────┘
-                     │ OBS / ffmpeg
-┌────────────────────┴────────────────────────────┐
-│  Phaser.js Frontend (headless Chrome on Xvfb)   │
-│  - Pixel art world, agent sprites, speech bubbles│
-└────────────────────┬────────────────────────────┘
-                     │ WebSocket
-┌────────────────────┴────────────────────────────┐
-│  FastAPI Backend (Python)                        │
-│  - CrewAI (9 agents, personality-first)          │
-│  - 3-tier memory (core → recall → archival)      │
-│  - Conversation engine (weighted speaker select) │
-│  - Management content filter                     │
-│  - Cost governor + kill switch                   │
-└────────────────────┬────────────────────────────┘
-                     │
-┌────────────────────┴────────────────────────────┐
-│  Support Services (Docker Compose)               │
-│  - PostgreSQL 16 + pgvector                      │
-│  - Redis 7                                       │
-│  - Langfuse (observability)                      │
-│  - Docker + gVisor (code sandbox)                │
-└─────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────┐
-│  Next.js Website (Vercel)                        │
-│  - Live stream embed, agent profiles, world map  │
-└─────────────────────────────────────────────────┘
+```text
+Audience + operators
+        |
+        v
+Next.js website + admin/public APIs
+        |
+        v
+FastAPI backend
+  - agent registry and orchestration
+  - OpenRouter/local LLM client and cost governor
+  - Management content filter
+  - PostgreSQL + pgvector memory
+  - Redis state and kill switches
+  - eval, reporting, notification, video, YouTube workers
+        |
+        +--> Legacy Phaser/Vite replay renderer
+        |
+        +--> Minecraft embodiment bridge
+              - Paper 1.21.6 local server
+              - pinned Mindcraft fork / Mineflayer bots
+              - authenticated Python <-> Node WebSocket bridge
+              - local command/action eval harnesses
 ```
 
-## Tech Stack
+## Repository Map
 
-| Layer | Technology | Language |
-|-------|-----------|----------|
-| Agent orchestration | CrewAI + OpenRouter/local OpenAI-compatible LLMs | Python |
-| Backend API | FastAPI | Python |
-| Memory system | PostgreSQL + pgvector | Python |
-| TTS | Edge TTS | Python |
-| World renderer | Phaser.js 3 | TypeScript |
-| Website | Next.js | TypeScript |
-| Streaming | OBS + Xvfb + Restream | System |
-| Infrastructure | Docker Compose on Hetzner | YAML |
-
-## Project Structure
-
+```text
+agents/                 Per-agent personality and model configs
+core/                   Python backend and domain modules
+tools/                  Agent tool implementations
+frontend/               Legacy Phaser/Vite renderer
+website/                Next.js public website
+db/                     Database schema and migrations
+docker/                 Service Dockerfiles
+scripts/                Setup, local ops, eval, render, and Minecraft scripts
+scripts/minecraft/      Minecraft server, Mindcraft, bridge, and eval helpers
+tests/                  Pytest suites and integration tests
+docs/                   Current project docs and decision records
+docs/minecraft/         Minecraft runbooks, architecture, and reports
+docs/decisions/         Accepted decision records
+specs/                  Historical/reference specs; treat as read-only
+research/               Prior art and project research notes
+scenarios/, evals/      Evaluation and simulation inputs
+snapshots/              Memory/simulation fixtures
 ```
-livestream-agi/
-├── agents/                    # Agent personality configs
-│   ├── vera/                  # config.yaml, system_prompt.md, behaviors.yaml
-│   ├── rex/
-│   ├── aurora/
-│   ├── pixel/
-│   ├── fork/
-│   ├── sentinel/
-│   ├── grok/
-│   ├── management/
-│   └── alpha/
-├── core/                      # Python backend
-│   ├── orchestrator.py        # Main loop, mode switching
-│   ├── conversation.py        # Turn-taking, speaker selection
-│   ├── crew_tasks.py          # CrewAI task mode
-│   ├── memory.py              # 3-tier memory management
-│   ├── event_bus.py           # WebSocket event emission
-│   ├── management.py          # Content filter pipeline
-│   ├── cost_governor.py       # Budget tracking and limits
-│   └── tts.py                 # Edge TTS pipeline
-├── tools/                     # Python agent tools
-│   ├── messaging.py           # send_message, get_world_state
-│   ├── memory_tools.py        # recall_memory, update_core_memory
-│   ├── code_execution.py      # Sandboxed code execution
-│   ├── image_generation.py    # PixelLab integration
-│   ├── web_tools.py           # web_search, fetch_url
-│   ├── audience_tools.py      # Chat, polls
-│   ├── alpha_tools.py         # dispatch_alpha
-│   ├── revenue_tools.py       # Revenue tracking, social drafts
-│   └── self_modification.py   # Agent self-evolution
-├── frontend/                  # TypeScript — Phaser.js
-│   ├── src/
-│   │   ├── scenes/            # Game scenes
-│   │   ├── sprites/           # Sprite classes
-│   │   └── ui/                # HUD, overlays, speech bubbles
-│   └── public/assets/         # Tilesets, sprites, audio
-├── website/                   # TypeScript — Next.js
-├── tests/
-│   ├── backend/               # pytest (Python)
-│   ├── frontend/              # vitest (TypeScript)
-│   ├── website/               # vitest + Playwright
-│   └── integration/           # Full-stack Docker tests
-├── specs/                     # Design specifications (reference)
-├── scripts/                   # Setup, deploy, utilities
-├── docker/                    # Dockerfiles
-├── docker-compose.yaml        # Redis, PostgreSQL, Langfuse
-├── requirements.txt           # Python dependencies
-├── pyproject.toml             # Python project config (ruff, pytest)
-├── CLAUDE.md                  # Claude Code instructions
-├── AGENTS.md                  # Agent definitions
-└── README.md                  # This file
-```
+
+Local runtime directories such as `mindcraft/`, `minecraft-server/`,
+`minecraft-server-easy/`, `logs/`, `videos/`, and `node_modules/` are ignored.
+They are generated or cloned locally and should not be committed.
+
+## Prerequisites
+
+- Python 3.13, pinned in `.python-version`.
+- Node.js 20.
+- Docker and Docker Compose.
+- `uv` for Python environment/dependency management.
+- Java 21 for Minecraft/Paper work.
+- `pnpm` for root Minecraft/eval scripts that call `pnpm` internally.
+
+Python 3.14+ is not supported yet because native dependencies can fail to
+build. CI and local automation are written for Python 3.13.
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.12+
-- Node.js 20+
-- Docker & Docker Compose
-
-### Setup
-
 ```bash
-# 1. Clone and enter
-git clone https://github.com/yourusername/livestreamtoagi.git
+git clone https://github.com/bradtaylorsf/livestreamtoagi.git
 cd livestreamtoagi
 
-# 2. Start infrastructure
+cp .env.example .env
+# Fill in only the keys needed for the flow you are running.
+# Local LM Studio / deterministic eval paths can avoid cloud LLM spend.
+
+uv venv .venv --python 3.13
+uv pip install -e ".[dev]"
+
+corepack enable
+pnpm install
+npm --prefix frontend install
+npm --prefix website install
+
 docker compose up -d
+bash scripts/check-services.sh
 
-# 3. Backend setup
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env  # Fill in API keys
-
-# 3a. Optional: video render pipeline (Playwright + Chromium).
-#     Skip unless you're working on core/video/ or running scripts/render_simulation_video.py.
-#     The Makefile targets pin `.venv/bin/...` so a stale `python`/`playwright`
-#     shim earlier on PATH cannot intercept the calls.
-make render-install      # uv pip install -e ".[render]" + playwright install chromium
-make render-smoke        # quick import + --help check on the entrypoint
-make render-verify       # render a real sim end-to-end, ffprobe-confirm streams
-                         #   (auto-picks a completed sim with transcripts;
-                         #    pass SIM=<uuid> to target a specific simulation)
-
-# 4. Frontend setup
-cd frontend && npm install && cd ..
-
-# 5. Website setup
-cd website && npm install && cd ..
-
-# 6. Run backend
-uvicorn core.main:app --reload --port 8010
-
-# 7. Run frontend (separate terminal)
-cd frontend && npm run dev
-
-# 8. Run website (separate terminal)
-cd website && npm run dev
+.venv/bin/python -m db up
+npm run dev
 ```
 
-### Capturing dev magic links
+`npm run dev` starts Docker health checks, the backend on port `8010`, the
+legacy renderer, and the website on port `4000`.
 
-The dev/test default is `EMAIL_PROVIDER=console`, which doesn't actually send
-email. To complete the magic-link sign-in flow locally, every "sent" message
-is also appended as a JSON line to the file at `EMAIL_CONSOLE_LOG`
-(default `/tmp/livestream-agi-emails.jsonl`):
+Manual service commands:
 
 ```bash
-# In one terminal, watch the file:
-tail -f /tmp/livestream-agi-emails.jsonl
-
-# In another, request a link:
-curl -X POST http://localhost:8000/api/auth/magic-link \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"you@example.com"}'
-
-# The last line of the file contains {"links": ["http://.../api/auth/verify?token=..."]}
-# — open that URL in the browser to set the session cookie.
+.venv/bin/uvicorn core.main:app --reload --port 8010 --env-file .env
+npm --prefix frontend run dev
+cd website && BACKEND_URL=http://localhost:8010 npm run dev -- --port 4000
 ```
 
-Set `EMAIL_CONSOLE_REDIS_STREAM=stream:email:console` to also XADD each
-record to Redis for future dev-tool UIs.
+## Local LLM And Minecraft Eval
 
-If you don't have Postgres running and just want to verify the capture loop,
-boot the self-contained dev app instead of the full backend — it mounts only
-`/api/auth/*` + `/healthz` with stub services, so no database, Redis, or
-agent registry is required:
+The project can run many checks against LM Studio or another local
+OpenAI-compatible endpoint:
 
 ```bash
-.venv/bin/uvicorn core.auth.dev_email_app:app --port 8765
+npm run llm:local -- --list-only
+npm run mc:eval:commands:smoke
+npm run mc:eval:commands:dry-run
+npm run mc:eval:live -- --command move --cases 3 --dry-run
 ```
 
-## Testing
+For a fuller local simulation:
 
 ```bash
-# Python backend
-pytest tests/backend/ -v
-
-# Frontend (Phaser.js)
-cd frontend && npm test
-
-# Website (Next.js)
-cd website && npm test
-cd website && npm run test:e2e  # Playwright E2E
-
-# Integration (requires Docker)
-docker compose -f docker-compose.test.yml up --abort-on-container-exit
-```
-
-## Local LLM Simulation
-
-This project can run simulations against LM Studio or another OpenAI-compatible
-local server so core behavior can be validated without cloud token spend.
-
-```bash
-# Check LM Studio / local server
-pnpm llm:local --list-only
-
-# Run a focused validation scenario
 LLM_PROVIDER=lmstudio \
 LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
 EMBEDDING_PROVIDER=deterministic \
-python scripts/run_simulation.py \
+.venv/bin/python scripts/run_simulation.py \
   --name "local-llm-validation" \
   --seed-file scenarios/local_llm_validation.yaml \
   --agents vera,rex,aurora,pixel \
   --max-cost 0.01 \
   --verbose
-
-python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
 ```
 
-See [Local LLM Validation Plan](specs/LOCAL-LLM-VALIDATION-PLAN.md) for the full
-research verification matrix.
+See [Minecraft Command Eval](docs/minecraft/command-eval.md) and the
+[Minecraft runbook](docs/minecraft/runbook.md) for the current embodiment
+workflow.
 
-## Monthly Cost Estimate
+## Testing
 
-| Component | Cost |
-|-----------|------|
-| Hetzner AX102 server | $120 |
-| OpenRouter API (all models) | $500-900 |
-| PixelLab (pixel art generation) | $30-50 |
-| Edge TTS / Langfuse / Vercel / Restream | $0 (free tiers) |
-| **Total** | **$655-1,075/month** |
+```bash
+make test-backend
+make test-memory-regression
+npm --prefix frontend test
+npm --prefix website test
+npm --prefix website run test:e2e
+```
 
-Break-even: ~260-430 Twitch subs or equivalent donations.
+Integration work should start with:
 
-## Detailed Specs
+```bash
+docker compose up -d
+bash scripts/check-services.sh
+```
 
-See `specs/` for complete design documentation:
-- [Engineering Specs](specs/ENGINEERING-SPECS.md) — Implementation phases
-- [Implementation Plan](specs/FINAL-IMPLEMENTATION-PLAN.md) — Architecture & strategy
-- [Character Sheets](specs/CHARACTER-SHEETS.md) — Agent personalities
-- [Conversation Engine](specs/CONVERSATION-ENGINE.md) — Speaker selection
-- [Memory System](specs/MEMORY-SYSTEM.md) — Three-tier architecture
-- [Tool Definitions](specs/TOOL-DEFINITIONS.md) — Agent capabilities
-- [Human Checklist](specs/HUMAN-CHECKLIST.md) — Operator responsibilities
+The service check verifies Redis, PostgreSQL, pgvector, pg_trgm, and Langfuse.
+Default ports are intentionally non-standard: Redis `6381`, PostgreSQL `5434`,
+and Langfuse `3100`.
+
+## Security And Safety Invariants
+
+- Never commit `.env`, API keys, tokens, cookies, private keys, local world
+  saves, generated videos, or runtime logs.
+- Route application LLM calls through `core/llm_client.py` so cost tracking,
+  Langfuse, model routing, and the governor can see them.
+- Preserve Management review before TTS or public broadcast.
+- Keep approval gates for external communications from agents.
+- Keep the kill switch and cost governor load-bearing.
+- Treat `specs/` as reference material. Update implementation docs or open a
+  new discussion when reality changes.
+- Keep Minecraft branding unofficial and include the disclaimer above in public
+  surfaces that reference Minecraft.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+## Documentation
+
+- [Docs index](docs/README.md)
+- [Minecraft pivot summary](docs/decisions/0000-summary.md)
+- [Minecraft licensing decision](docs/decisions/0007-licensing.md)
+- [Research paper index](research/PAPER-INDEX.md)
+- [Agent instructions](AGENTS.md)
+
+## Contributing
+
+Contributions are welcome, but this is a young research/product codebase. Start
+with [CONTRIBUTING.md](CONTRIBUTING.md), pick small issues, and include the
+verification you ran. For larger architectural changes, open an issue or
+discussion before coding.
 
 ## License
 
-TBD
+MIT. See [LICENSE](LICENSE).
