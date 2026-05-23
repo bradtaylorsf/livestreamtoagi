@@ -209,7 +209,7 @@ def _make_bridge_client(
     env: Mapping[str, str],
 ) -> tuple[BridgeClient, bool]:
     if args.dry_run or not _live_enabled(env):
-        if args.multi_agent:
+        if getattr(args, "multi_agent", False):
             return MultiAgentFakeBridge(), True
         return FakeBridgeClient(), True
 
