@@ -127,8 +127,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--command",
         required=True,
         help=(
-            "Command family or command name. Supported: "
-            + ", ".join(supported_command_inputs())
+            "Command family or command name. Supported: " + ", ".join(supported_command_inputs())
         ),
     )
     parser.add_argument("--cases", type=int, default=5, help="Number of cases to run")
@@ -190,7 +189,12 @@ def _emit_summary(
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return
 
-    print("Minecraft live command smoke", file=stdout)
+    title = (
+        "Minecraft dataset replay"
+        if summary.command == "dataset-replay"
+        else "Minecraft live command smoke"
+    )
+    print(title, file=stdout)
     print(f"command: {summary.command}", file=stdout)
     print(f"resolved_command: {summary.resolved_command}", file=stdout)
     print(f"profile: {summary.profile}", file=stdout)
@@ -200,9 +204,7 @@ def _emit_summary(
     print(f"passed: {summary.passed_count}/{len(summary.case_results)}", file=stdout)
     print(
         "outcomes: "
-        + ", ".join(
-            f"{outcome}={count}" for outcome, count in summary.outcome_counts.items()
-        ),
+        + ", ".join(f"{outcome}={count}" for outcome, count in summary.outcome_counts.items()),
         file=stdout,
     )
     for result in summary.case_results:
@@ -249,8 +251,7 @@ def _write_report_artifacts(path_arg: str, summary: LiveRunSummary) -> None:
     )
     (report_dir / "cases.ndjson").write_text(
         "".join(
-            json.dumps(result.to_dict(), sort_keys=True) + "\n"
-            for result in summary.case_results
+            json.dumps(result.to_dict(), sort_keys=True) + "\n" for result in summary.case_results
         ),
         encoding="utf-8",
     )
@@ -258,8 +259,13 @@ def _write_report_artifacts(path_arg: str, summary: LiveRunSummary) -> None:
 
 
 def _report_md(summary: LiveRunSummary) -> str:
+    title = (
+        "Minecraft Dataset Replay"
+        if summary.command == "dataset-replay"
+        else "Minecraft Live Command Smoke"
+    )
     lines = [
-        "# Minecraft Live Command Smoke",
+        f"# {title}",
         "",
         f"- command: `{summary.command}`",
         f"- resolved_command: `{summary.resolved_command}`",
@@ -269,18 +275,45 @@ def _report_md(summary: LiveRunSummary) -> str:
         f"- cases: `{len(summary.case_results)}`",
         f"- passed: `{summary.passed_count}/{len(summary.case_results)}`",
         "",
-        "## Outcomes",
-        "",
     ]
-    lines.extend(
-        f"- {outcome}: {count}" for outcome, count in summary.outcome_counts.items()
-    )
+    dataset_detail = summary.profile_detail.get("dataset_replay")
+    if isinstance(dataset_detail, Mapping):
+        lines.extend(_dataset_replay_report_lines(dataset_detail))
+    lines.extend(("## Outcomes", ""))
+    lines.extend(f"- {outcome}: {count}" for outcome, count in summary.outcome_counts.items())
     lines.extend(("", "## Cases", ""))
     for result in summary.case_results:
-        lines.append(
-            f"- `{result.case_id}` {result.outcome_class}: `{result.command_text}`"
-        )
+        lines.append(f"- `{result.case_id}` {result.outcome_class}: `{result.command_text}`")
     return "\n".join(lines) + "\n"
+
+
+def _dataset_replay_report_lines(dataset_detail: Mapping[str, Any]) -> list[str]:
+    lines = [
+        "## Dataset Replay",
+        "",
+        f"- dataset: `{dataset_detail.get('dataset_path') or 'n/a'}`",
+        f"- prompts_loaded: `{dataset_detail.get('total_prompts', 0)}`",
+        f"- prompts_after_filter: `{dataset_detail.get('selected_prompts', 0)}`",
+        "",
+        "### Per-command Outcomes",
+        "",
+    ]
+    per_command = dataset_detail.get("per_command_outcome_counts")
+    if not isinstance(per_command, Mapping) or not per_command:
+        lines.extend(("None.", ""))
+        return lines
+
+    for command, raw_counts in sorted(per_command.items()):
+        if not isinstance(raw_counts, Mapping):
+            continue
+        counts = ", ".join(
+            f"{outcome}={count}"
+            for outcome, count in raw_counts.items()
+            if isinstance(count, int) and count
+        )
+        lines.append(f"- `{command}`: {counts or 'none'}")
+    lines.append("")
+    return lines
 
 
 def _resolve_path(path_arg: str) -> Path:
