@@ -27,7 +27,7 @@ BUILTIN_SKILL_CARDS: tuple[SkillCard, ...] = (
         ),
         examples=(
             "!move action-move-001 north 3",
-            "!navigate action-nav-001 '{\"x\":12,\"y\":64,\"z\":-8}' 1 20000",
+            '!navigate action-nav-001 \'{"x":12,"y":64,"z":-8}\' 1 20000',
         ),
         tags=("action", "movement", "navigation"),
     ),
@@ -71,9 +71,9 @@ BUILTIN_SKILL_CARDS: tuple[SkillCard, ...] = (
             "Avoid destructive changes unless the scenario explicitly allows them.",
         ),
         examples=(
-            "!place action-place-001 oak_planks '{\"x\":12,\"y\":64,\"z\":-8}' up 1",
-            "!buildFromPlan action-build-001 '{\"x\":12,\"y\":64,\"z\":-8}' "
-            "'{\"blocks\":[{\"dx\":0,\"dy\":0,\"dz\":0,\"block_type\":\"oak_planks\"}]}' "
+            '!place action-place-001 oak_planks \'{"x":12,"y":64,"z":-8}\' up 1',
+            '!buildFromPlan action-build-001 \'{"x":12,"y":64,"z":-8}\' '
+            '\'{"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_planks"}]}\' '
             "32 30000",
             '!planAndBuild "small oak shelter"',
         ),

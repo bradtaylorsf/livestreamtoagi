@@ -10,6 +10,13 @@ The current direction is embodied agents in a Minecraft Java Edition world,
 while the repository still contains the earlier Phaser replay/world renderer and
 simulation-first product work until the replacement path is fully proven.
 
+This repository is public as work-in-progress research and engineering notes,
+not as production-ready autonomous livestream infrastructure. Do not run it as
+an unattended public service until the safety gates in
+[`docs/OPEN_SOURCE_READINESS.md`](docs/OPEN_SOURCE_READINESS.md) and
+[`docs/OPEN_SOURCE_AUDIT_REPORT.md`](docs/OPEN_SOURCE_AUDIT_REPORT.md) are
+cleared.
+
 Livestream to AGI is an independent AI reality show set in a Minecraft Java
 Edition world. It is not official, sponsored, approved, or associated with
 Mojang or Microsoft.
@@ -37,6 +44,11 @@ Mojang or Microsoft.
 
 This is not production-ready software. The main public value right now is the
 code, docs, eval harnesses, and experiment trail.
+
+Current readiness docs:
+
+- [Open-source readiness checklist](docs/OPEN_SOURCE_READINESS.md)
+- [Open-source audit report](docs/OPEN_SOURCE_AUDIT_REPORT.md)
 
 Active work is concentrated around:
 
