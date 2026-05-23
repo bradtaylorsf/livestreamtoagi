@@ -94,8 +94,11 @@ def mock_app():
     """Create a TestClient with fully mocked dependencies."""
     vera = _make_agent_config()
     rex = _make_agent_config(
-        id="rex", display_name="Rex", chattiness=0.5,
-        initiative=0.6, interrupt_tendency=0.4,
+        id="rex",
+        display_name="Rex",
+        chattiness=0.5,
+        initiative=0.6,
+        interrupt_tendency=0.4,
     )
 
     mock_registry = MagicMock()
@@ -118,8 +121,10 @@ def mock_app():
     mock_llm = MagicMock()
 
     env_overrides = {
-        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake-key-for-unit-tests",
-        "DATABASE_URL": os.environ.get("DATABASE_URL", "") or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "")
+        or "test-openrouter-key-for-unit-tests",
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "")
+        or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
     }
 
@@ -135,7 +140,8 @@ def mock_app():
     mock_services.llm_client = mock_llm
     mock_services.core_memory = None
     mock_services.config_loader = MagicMock(
-        start_watching=AsyncMock(), stop_watching=AsyncMock(),
+        start_watching=AsyncMock(),
+        stop_watching=AsyncMock(),
     )
     mock_services.cost_repo = MagicMock()
     mock_services.memory_repo = MagicMock()
@@ -178,7 +184,11 @@ class TestAgentEndpoints:
         client, mock_db, _ = mock_app
         mock_db.fetch = AsyncMock(return_value=[])
 
-        with patch("core.repos.cost_repo.CostRepo.get_costs_by_agent", new_callable=AsyncMock, return_value=[]):
+        with patch(
+            "core.repos.cost_repo.CostRepo.get_costs_by_agent",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             resp = client.get("/api/admin/agents")
 
         assert resp.status_code == 200
@@ -240,8 +250,16 @@ class TestAgentEndpoints:
         ]
 
         with (
-            patch("core.repos.memory_repo.MemoryRepo.get_core_memory", new_callable=AsyncMock, return_value=core_mem),
-            patch("core.repos.memory_repo.MemoryRepo.get_core_memory_history", new_callable=AsyncMock, return_value=history),
+            patch(
+                "core.repos.memory_repo.MemoryRepo.get_core_memory",
+                new_callable=AsyncMock,
+                return_value=core_mem,
+            ),
+            patch(
+                "core.repos.memory_repo.MemoryRepo.get_core_memory_history",
+                new_callable=AsyncMock,
+                return_value=history,
+            ),
         ):
             resp = client.get("/api/admin/agents/vera/core-memory")
 
@@ -257,8 +275,11 @@ class TestAgentEndpoints:
 
         memories = [
             RecallMemory(
-                id=1, agent_id="vera", summary="test memory",
-                embedding=[0.1, 0.2], importance_score=0.8,
+                id=1,
+                agent_id="vera",
+                summary="test memory",
+                embedding=[0.1, 0.2],
+                importance_score=0.8,
             ),
         ]
 
@@ -289,7 +310,11 @@ class TestAgentEndpoints:
 
         assert resp.status_code == 200
         mock_search.assert_called_once_with(
-            "vera", "budget", limit=50, offset=0, simulation_id=None,
+            "vera",
+            "budget",
+            limit=50,
+            offset=0,
+            simulation_id=None,
         )
 
     def test_get_agent_conversations(self, mock_app):
@@ -332,8 +357,11 @@ class TestAgentEndpoints:
 
         entries = [
             JournalEntry(
-                id=1, agent_id="vera", reflection_type="daily",
-                content="Today was productive.", token_count=10,
+                id=1,
+                agent_id="vera",
+                reflection_type="daily",
+                content="Today was productive.",
+                token_count=10,
                 image_url="https://example.com/journals/vera.png",
             ),
         ]
@@ -361,8 +389,16 @@ class TestSimulationEndpoints:
         sim = _make_simulation()
 
         with (
-            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[sim]),
-            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=1),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.list",
+                new_callable=AsyncMock,
+                return_value=[sim],
+            ),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.count",
+                new_callable=AsyncMock,
+                return_value=1,
+            ),
         ):
             resp = client.get("/api/admin/simulations?limit=10")
 
@@ -375,8 +411,16 @@ class TestSimulationEndpoints:
         client, mock_db, _ = mock_app
 
         with (
-            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[]) as mock_list,
-            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=0),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.list",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_list,
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.count",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
         ):
             resp = client.get("/api/admin/simulations?status=completed")
 
@@ -387,7 +431,11 @@ class TestSimulationEndpoints:
         client, mock_db, _ = mock_app
         sim = _make_simulation()
 
-        with patch("core.repos.simulation_repo.SimulationRepo.get", new_callable=AsyncMock, return_value=sim):
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.get",
+            new_callable=AsyncMock,
+            return_value=sim,
+        ):
             resp = client.get(f"/api/admin/simulations/{sim.id}")
 
         assert resp.status_code == 200
@@ -482,7 +530,11 @@ class TestSimulationEndpoints:
     def test_get_simulation_not_found(self, mock_app):
         client, mock_db, _ = mock_app
 
-        with patch("core.repos.simulation_repo.SimulationRepo.get", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "core.repos.simulation_repo.SimulationRepo.get",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}")
 
         assert resp.status_code == 404
@@ -547,7 +599,9 @@ class TestSimulationEndpoints:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            resp = client.get(f"/api/admin/simulations/{uuid.uuid4()}/management-log?severity_min=3")
+            resp = client.get(
+                f"/api/admin/simulations/{uuid.uuid4()}/management-log?severity_min=3"
+            )
 
         assert resp.status_code == 200
         assert resp.json() == []
@@ -657,9 +711,7 @@ class TestCreateSimulationWithSeedFile:
         )
         assert resp.status_code == 400
 
-    def test_seed_file_launches_run_simulation_subprocess(
-        self, mock_app, tmp_path, monkeypatch
-    ):
+    def test_seed_file_launches_run_simulation_subprocess(self, mock_app, tmp_path, monkeypatch):
         client, _, _ = mock_app
         scenarios = _patch_project_root(monkeypatch, tmp_path)
         (scenarios / "smoke.yaml").write_text("phases: []\n")
@@ -671,13 +723,18 @@ class TestCreateSimulationWithSeedFile:
         def fake_popen(cmd, *args, **kwargs):
             captured["cmd"] = cmd
             captured["kwargs"] = kwargs
+
             class _P:
                 pid = 1234
+
             return _P()
 
         with (
-            patch("core.repos.simulation_repo.SimulationRepo.create",
-                  new_callable=AsyncMock, return_value=sim),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.create",
+                new_callable=AsyncMock,
+                return_value=sim,
+            ),
             patch("subprocess.Popen", side_effect=fake_popen),
         ):
             resp = client.post(
@@ -711,6 +768,7 @@ class TestCreateSimulationWithSeedFile:
         def fake_popen(cmd, *args, **kwargs):
             class _P:
                 pid = 7
+
             return _P()
 
         async def fake_create(self, sc):
@@ -756,9 +814,21 @@ class TestConversationEndpoints:
         conv = _make_conversation()
 
         with (
-            patch("core.repos.conversation_repo.ConversationRepo.get", new_callable=AsyncMock, return_value=conv),
-            patch("core.repos.conversation_repo.ConversationRepo.get_energy_log", new_callable=AsyncMock, return_value=[]),
-            patch("core.repos.transcript_repo.TranscriptRepo.get_by_conversation", new_callable=AsyncMock, return_value=None),
+            patch(
+                "core.repos.conversation_repo.ConversationRepo.get",
+                new_callable=AsyncMock,
+                return_value=conv,
+            ),
+            patch(
+                "core.repos.conversation_repo.ConversationRepo.get_energy_log",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "core.repos.transcript_repo.TranscriptRepo.get_by_conversation",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             resp = client.get(f"/api/admin/conversations/{conv.id}")
 
@@ -773,7 +843,11 @@ class TestConversationEndpoints:
     def test_get_conversation_not_found(self, mock_app):
         client, mock_db, _ = mock_app
 
-        with patch("core.repos.conversation_repo.ConversationRepo.get", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "core.repos.conversation_repo.ConversationRepo.get",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             resp = client.get(f"/api/admin/conversations/{uuid.uuid4()}")
 
         assert resp.status_code == 404
@@ -1076,24 +1150,52 @@ class TestEvalEndpoints:
         sim_id = uuid.uuid4()
         now = datetime(2026, 4, 1, tzinfo=timezone.utc)
 
-        run_a = EvalRun(id=run_a_id, simulation_id=sim_id, eval_suite="full",
-                        status="completed", started_at=now, overall_score=Decimal("80"))
-        run_b = EvalRun(id=run_b_id, simulation_id=sim_id, eval_suite="full",
-                        status="completed", started_at=now, overall_score=Decimal("85"))
+        run_a = EvalRun(
+            id=run_a_id,
+            simulation_id=sim_id,
+            eval_suite="full",
+            status="completed",
+            started_at=now,
+            overall_score=Decimal("80"),
+        )
+        run_b = EvalRun(
+            id=run_b_id,
+            simulation_id=sim_id,
+            eval_suite="full",
+            status="completed",
+            started_at=now,
+            overall_score=Decimal("85"),
+        )
         result_a = EvalResult(
-            id=uuid.uuid4(), eval_run_id=run_a_id, category="safety",
-            score=Decimal("80"), reasoning="Good", tokens_used=100, cost=Decimal("0.01"),
+            id=uuid.uuid4(),
+            eval_run_id=run_a_id,
+            category="safety",
+            score=Decimal("80"),
+            reasoning="Good",
+            tokens_used=100,
+            cost=Decimal("0.01"),
         )
         result_b = EvalResult(
-            id=uuid.uuid4(), eval_run_id=run_b_id, category="safety",
-            score=Decimal("85"), reasoning="Better", tokens_used=120, cost=Decimal("0.012"),
+            id=uuid.uuid4(),
+            eval_run_id=run_b_id,
+            category="safety",
+            score=Decimal("85"),
+            reasoning="Better",
+            tokens_used=120,
+            cost=Decimal("0.012"),
         )
 
         with (
-            patch("core.repos.eval_repo.EvalRepo.get_eval_run", new_callable=AsyncMock,
-                  side_effect=lambda rid: run_a if rid == run_a_id else run_b),
-            patch("core.repos.eval_repo.EvalRepo.get_eval_results", new_callable=AsyncMock,
-                  side_effect=lambda rid: [result_a] if rid == run_a_id else [result_b]),
+            patch(
+                "core.repos.eval_repo.EvalRepo.get_eval_run",
+                new_callable=AsyncMock,
+                side_effect=lambda rid: run_a if rid == run_a_id else run_b,
+            ),
+            patch(
+                "core.repos.eval_repo.EvalRepo.get_eval_results",
+                new_callable=AsyncMock,
+                side_effect=lambda rid: [result_a] if rid == run_a_id else [result_b],
+            ),
         ):
             resp = client.get(f"/api/admin/evals/compare?run_a={run_a_id}&run_b={run_b_id}")
         assert resp.status_code == 200
@@ -1121,8 +1223,18 @@ class TestEvalEndpoints:
     def test_eval_history(self, mock_app):
         client, _, _ = mock_app
         history_data = [
-            {"score": 75.0, "created_at": "2026-04-01T00:00:00", "simulation_id": str(uuid.uuid4()), "eval_run_id": str(uuid.uuid4())},
-            {"score": 82.0, "created_at": "2026-04-02T00:00:00", "simulation_id": str(uuid.uuid4()), "eval_run_id": str(uuid.uuid4())},
+            {
+                "score": 75.0,
+                "created_at": "2026-04-01T00:00:00",
+                "simulation_id": str(uuid.uuid4()),
+                "eval_run_id": str(uuid.uuid4()),
+            },
+            {
+                "score": 82.0,
+                "created_at": "2026-04-02T00:00:00",
+                "simulation_id": str(uuid.uuid4()),
+                "eval_run_id": str(uuid.uuid4()),
+            },
         ]
         with patch(
             "core.repos.eval_repo.EvalRepo.get_eval_history",
@@ -1142,16 +1254,35 @@ class TestEvalEndpoints:
 
         run_id = uuid.uuid4()
         now = datetime(2026, 4, 1, tzinfo=timezone.utc)
-        run = EvalRun(id=run_id, simulation_id=uuid.uuid4(), eval_suite="full",
-                      status="completed", started_at=now, overall_score=Decimal("80"))
+        run = EvalRun(
+            id=run_id,
+            simulation_id=uuid.uuid4(),
+            eval_suite="full",
+            status="completed",
+            started_at=now,
+            overall_score=Decimal("80"),
+        )
         result = EvalResult(
-            id=uuid.uuid4(), eval_run_id=run_id, category="safety",
-            score=Decimal("80"), reasoning="Good", tokens_used=100, cost=Decimal("0.01"),
+            id=uuid.uuid4(),
+            eval_run_id=run_id,
+            category="safety",
+            score=Decimal("80"),
+            reasoning="Good",
+            tokens_used=100,
+            cost=Decimal("0.01"),
         )
 
         with (
-            patch("core.repos.eval_repo.EvalRepo.get_eval_run", new_callable=AsyncMock, return_value=run),
-            patch("core.repos.eval_repo.EvalRepo.get_eval_results", new_callable=AsyncMock, return_value=[result]),
+            patch(
+                "core.repos.eval_repo.EvalRepo.get_eval_run",
+                new_callable=AsyncMock,
+                return_value=run,
+            ),
+            patch(
+                "core.repos.eval_repo.EvalRepo.get_eval_results",
+                new_callable=AsyncMock,
+                return_value=[result],
+            ),
         ):
             resp = client.get(f"/api/admin/evals/{run_id}/export")
         assert resp.status_code == 200
@@ -1180,8 +1311,16 @@ class TestPagination:
         client, mock_db, _ = mock_app
 
         with (
-            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[]),
-            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=0),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.list",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.count",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
         ):
             resp = client.get("/api/admin/simulations")
 
@@ -1194,8 +1333,16 @@ class TestPagination:
         client, mock_db, _ = mock_app
 
         with (
-            patch("core.repos.simulation_repo.SimulationRepo.list", new_callable=AsyncMock, return_value=[]),
-            patch("core.repos.simulation_repo.SimulationRepo.count", new_callable=AsyncMock, return_value=100),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.list",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "core.repos.simulation_repo.SimulationRepo.count",
+                new_callable=AsyncMock,
+                return_value=100,
+            ),
         ):
             resp = client.get("/api/admin/simulations?limit=5&offset=10")
 

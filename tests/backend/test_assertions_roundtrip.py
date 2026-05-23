@@ -163,7 +163,8 @@ def test_route_renames_phase_and_name_fields():
     )
 
     env_overrides = {
-        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "") or "sk-test-fake",
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", "")
+        or "test-openrouter-key-for-unit-tests",
         "DATABASE_URL": os.environ.get("DATABASE_URL", "")
         or "postgresql://agi:devpassword@localhost:5434/livestream_agi",
         "ADMIN_PASSWORD": "test-admin-password",
