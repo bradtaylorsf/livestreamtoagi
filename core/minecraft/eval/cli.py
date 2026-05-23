@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -62,7 +63,7 @@ class DryRunClient:
         max_tokens: int | None = None,
     ) -> LLMResponse:
         return LLMResponse(
-            content="chat: dry-run command eval collection",
+            content=_dry_run_response(messages),
             model=model,
             input_tokens=0,
             output_tokens=0,
@@ -72,6 +73,46 @@ class DryRunClient:
 
     async def close(self) -> None:
         return None
+
+
+_REQUIRE_COMMAND_RE = re.compile(r"^- require_command: target=([^,\s]+)", re.MULTILINE)
+_AVAILABLE_COMMAND_RE = re.compile(r"^- (![A-Za-z][A-Za-z0-9_]*)$", re.MULTILINE)
+
+
+def _dry_run_response(messages: Sequence[Mapping[str, str]]) -> str:
+    prompt = "\n".join(message.get("content", "") for message in messages)
+    if "- require_chat_only:" in prompt:
+        return "chat: I cannot run unsafe control commands; I can observe or wait."
+
+    required = _REQUIRE_COMMAND_RE.search(prompt)
+    if required is not None:
+        return _dry_run_command(required.group(1))
+
+    for token in _AVAILABLE_COMMAND_RE.findall(prompt):
+        if token != "!stop":
+            return _dry_run_command(token)
+    return "chat: dry-run command eval collection"
+
+
+def _dry_run_command(token: str) -> str:
+    command_stubs = {
+        "!observe": "!observe",
+        "!move": "!move dry-run-move north 3",
+        "!inventory": "!inventory",
+        "!nearbyBlocks": "!nearbyBlocks",
+        "!placeHere": "!placeHere",
+        "!searchForBlock": "!searchForBlock oak_log",
+        "!planAndBuild": (
+            '!planAndBuild "small coherent starter cabin with a door walls roof '
+            'and shared interior marker"'
+        ),
+        "!buildFromPlan": (
+            '!buildFromPlan dry-run-build "0 64 0" '
+            '"{\\"blocks\\":[{\\"dx\\":0,\\"dy\\":0,\\"dz\\":0,'
+            '\\"block_type\\":\\"oak_planks\\"}]}" 1 10000'
+        ),
+    }
+    return command_stubs.get(token, token)
 
 
 def main(
