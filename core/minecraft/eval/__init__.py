@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from core.minecraft.eval.dataset_replay import (
+    DatasetLoadError,
+    PassingPrompt,
+    build_command_text,
+    filter_prompts,
+    load_passing_prompts,
+    prompt_to_case_id,
+)
 from core.minecraft.eval.evaluator import EvalOutcome, EvalReport, evaluate_response
 from core.minecraft.eval.live_profile import (
     BUILTIN_PROFILES,
@@ -34,6 +42,7 @@ from core.minecraft.eval.provider import (
     ProviderConfigError,
     resolve_provider_config,
 )
+from core.minecraft.eval.replay_cli import run_dataset_replay
 from core.minecraft.eval.report import (
     ScoredRun,
     ScoredScenario,
@@ -61,6 +70,7 @@ __all__ = [
     "CaseGenerator",
     "CaseResult",
     "CommandCase",
+    "DatasetLoadError",
     "EvalOutcome",
     "EvalProfile",
     "EvalProfileError",
@@ -73,22 +83,28 @@ __all__ = [
     "ParsedResponse",
     "ProviderConfig",
     "ProviderConfigError",
+    "PassingPrompt",
     "RunSummary",
     "ScoredRun",
     "ScoredScenario",
     "ScenarioRunResult",
+    "build_command_text",
     "build_scenario_messages",
     "classify_bridge_status",
     "comparison_md_text",
     "evaluate_response",
+    "filter_prompts",
     "list_profiles",
+    "load_passing_prompts",
     "parse_model_response",
     "parse_world_config",
+    "prompt_to_case_id",
     "resolve_command_name",
     "report_md_text",
     "resolve_profile",
     "resolve_provider_config",
     "run_eval",
+    "run_dataset_replay",
     "run_live_command_smoke",
     "score_run",
     "scored_run_from_scores_json",
