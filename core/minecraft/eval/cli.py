@@ -102,6 +102,18 @@ def main(
     try:
         config = resolve_provider_config(args, resolved_env)
         scenario_set, commands, skill_cards = _load_inputs(args.scenarios, args.limit)
+        if args.list_only:
+            _emit_listing(
+                config,
+                scenario_set=scenario_set,
+                commands=commands,
+                json_mode=args.json,
+                stdout=out,
+            )
+            if args.output:
+                _write_listing_output(args.output, config, scenario_set, commands)
+            return 0
+
         summary = asyncio.run(
             _run_with_client(
                 scenario_set,
@@ -157,6 +169,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run", action="store_true", help="Render prompts and skip network I/O"
     )
+    parser.add_argument(
+        "--list-only",
+        action="store_true",
+        help="Print resolved eval inputs and exit before provider client construction",
+    )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON summary")
     parser.add_argument("--output", default=None, help="Write JSON summary artifact to this path")
     parser.add_argument(
@@ -173,10 +190,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--compare",
         action="append",
         default=[],
-        help=(
-            "Existing scores.json path to include in report-dir/comparison.md. "
-            "May be repeated."
-        ),
+        help=("Existing scores.json path to include in report-dir/comparison.md. May be repeated."),
     )
     return parser
 
@@ -272,6 +286,71 @@ def _make_client(config: ProviderConfig, client_factory: ClientFactory | None) -
     return config.create_client()
 
 
+def _listing_payload(
+    config: ProviderConfig,
+    *,
+    scenario_set: ScenarioSet,
+    commands: CommandSchemaSet,
+) -> dict[str, Any]:
+    source_counts: dict[str, int] = {}
+    alias_count = 0
+    for command in commands.commands:
+        source = command.source or "unknown"
+        source_counts[source] = source_counts.get(source, 0) + 1
+        alias_count += len(command.aliases)
+
+    return {
+        "mode": "list-only",
+        **config.public_metadata(),
+        "scenario_count": len(scenario_set.scenarios),
+        "scenario_ids": [scenario.id for scenario in scenario_set.scenarios],
+        "commands": {
+            "command_count": len(commands.commands),
+            "alias_count": alias_count,
+            "disallowed_count": len(commands.disallowed),
+            "source_counts": dict(sorted(source_counts.items())),
+        },
+    }
+
+
+def _emit_listing(
+    config: ProviderConfig,
+    *,
+    scenario_set: ScenarioSet,
+    commands: CommandSchemaSet,
+    json_mode: bool,
+    stdout: TextIO,
+) -> None:
+    payload = _listing_payload(config, scenario_set=scenario_set, commands=commands)
+    if json_mode:
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return
+
+    command_summary = payload["commands"]
+    print("Minecraft command eval inputs", file=stdout)
+    print(f"mode: {payload['mode']}", file=stdout)
+    print(f"provider: {payload['provider']}", file=stdout)
+    print(f"model: {payload['model']}", file=stdout)
+    print(f"base_url: {payload['base_url']}", file=stdout)
+    print(f"key_present: {str(payload['key_present']).lower()}", file=stdout)
+    print(f"scenario_count: {payload['scenario_count']}", file=stdout)
+    print("scenario_ids:", file=stdout)
+    for scenario_id in payload["scenario_ids"]:
+        print(f"- {scenario_id}", file=stdout)
+    print(
+        "commands: "
+        f"command_count={command_summary['command_count']}, "
+        f"alias_count={command_summary['alias_count']}, "
+        f"disallowed_count={command_summary['disallowed_count']}",
+        file=stdout,
+    )
+    if command_summary["source_counts"]:
+        sources = ", ".join(
+            f"{source}={count}" for source, count in command_summary["source_counts"].items()
+        )
+        print(f"command_sources: {sources}", file=stdout)
+
+
 def _emit_summary(
     summary: RunSummary,
     *,
@@ -297,9 +376,7 @@ def _emit_summary(
     print(f"collected: {summary.collected_count}/{len(summary.results)}", file=stdout)
     print(
         "outcomes: "
-        + ", ".join(
-            f"{key}={scored_run.outcome_counts[key]}" for key in OUTCOME_COUNT_KEYS
-        ),
+        + ", ".join(f"{key}={scored_run.outcome_counts[key]}" for key in OUTCOME_COUNT_KEYS),
         file=stdout,
     )
     for result in summary.results:
@@ -311,6 +388,25 @@ def _write_output(path_arg: str, summary: RunSummary) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(summary.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_listing_output(
+    path_arg: str,
+    config: ProviderConfig,
+    scenario_set: ScenarioSet,
+    commands: CommandSchemaSet,
+) -> None:
+    path = _resolve_path(path_arg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            _listing_payload(config, scenario_set=scenario_set, commands=commands),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
