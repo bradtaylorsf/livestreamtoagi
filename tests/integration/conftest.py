@@ -27,6 +27,10 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://:devpassword@localhost:6381")
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def services():
     """Bootstrap all services with auto-migration against the test DB."""
+    provider = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+    if provider == "openrouter" and not os.environ.get("OPENROUTER_API_KEY", "").strip():
+        pytest.skip("OPENROUTER_API_KEY is required for real LLM pipeline tests")
+
     # Point bootstrap at test database
     os.environ["DATABASE_URL"] = DATABASE_URL
     os.environ["REDIS_URL"] = REDIS_URL
