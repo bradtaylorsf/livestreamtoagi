@@ -1,0 +1,4 @@
+interface:
+  display_name: "Minecraft Soak Triage"
+  short_description: "Run and debug Minecraft Director soaks"
+  default_prompt: "Run a Minecraft Director smoke, monitor evidence, diagnose failures, and iterate until verified or blocked."
