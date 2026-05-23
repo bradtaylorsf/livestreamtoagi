@@ -20,7 +20,12 @@ from core.minecraft.eval.live_runner import (
     run_live_command_smoke,
     supported_command_inputs,
 )
-from core.minecraft.eval.live_telemetry import CaseResult, LiveRunSummary
+from core.minecraft.eval.live_telemetry import CaseResult, LiveRunSummary, classify_timing_failure
+from core.minecraft.eval.multi_agent import (
+    AgentSpec,
+    MultiAgentFakeBridge,
+    run_multi_agent_timing_eval,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LIVE_ENABLED_VALUES = frozenset(("1", "true", "yes", "on"))
@@ -92,19 +97,38 @@ def main(
         selected_bridge, dry_run = (
             (bridge, False) if bridge is not None else _make_bridge_client(args, resolved_env)
         )
-        summary = asyncio.run(
-            run_live_command_smoke(
-                args.command,
-                args.cases,
-                bridge=selected_bridge,
-                verbose=args.verbose,
-                profile=args.profile,
-                seed=args.seed,
-                env=resolved_env,
-                project_root=PROJECT_ROOT,
-                dry_run=dry_run,
+        if args.multi_agent:
+            summary = asyncio.run(
+                run_multi_agent_timing_eval(
+                    _parse_agent_specs(args.agents),
+                    bridge=selected_bridge,
+                    verbose=args.verbose,
+                    profile=args.profile,
+                    seed=args.seed,
+                    env=resolved_env,
+                    project_root=PROJECT_ROOT,
+                    dry_run=dry_run,
+                    tick_ms=args.tick_ms,
+                    stagger_ms=args.stagger_ms,
+                    director_fanout=args.director_fanout,
+                )
             )
-        )
+        else:
+            if not args.command:
+                raise ValueError("--command is required unless --multi-agent is set")
+            summary = asyncio.run(
+                run_live_command_smoke(
+                    args.command,
+                    args.cases,
+                    bridge=selected_bridge,
+                    verbose=args.verbose,
+                    profile=args.profile,
+                    seed=args.seed,
+                    env=resolved_env,
+                    project_root=PROJECT_ROOT,
+                    dry_run=dry_run,
+                )
+            )
         if args.report_dir:
             _write_report_artifacts(args.report_dir, summary)
         if args.output:
@@ -125,12 +149,39 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--command",
-        required=True,
         help=(
             "Command family or command name. Supported: " + ", ".join(supported_command_inputs())
         ),
     )
     parser.add_argument("--cases", type=int, default=5, help="Number of cases to run")
+    parser.add_argument(
+        "--multi-agent",
+        action="store_true",
+        help="Run the deterministic multi-agent timing/action-queue eval mode",
+    )
+    parser.add_argument(
+        "--agents",
+        default="",
+        help="Comma-separated multi-agent specs as agent_id:command:cases",
+    )
+    parser.add_argument(
+        "--tick-ms",
+        type=int,
+        default=200,
+        help="Multi-agent scheduler tick in milliseconds",
+    )
+    parser.add_argument(
+        "--stagger-ms",
+        type=int,
+        default=50,
+        help="Per-agent command stagger in milliseconds",
+    )
+    parser.add_argument(
+        "--director-fanout",
+        type=int,
+        default=0,
+        help="Synthetic Director fanout count for multi-agent timing cases",
+    )
     parser.add_argument("--verbose", action="store_true", help="Print per-action telemetry")
     parser.add_argument("--seed", type=int, default=0, help="Deterministic case seed")
     parser.add_argument(
@@ -158,6 +209,8 @@ def _make_bridge_client(
     env: Mapping[str, str],
 ) -> tuple[BridgeClient, bool]:
     if args.dry_run or not _live_enabled(env):
+        if args.multi_agent:
+            return MultiAgentFakeBridge(), True
         return FakeBridgeClient(), True
 
     missing = [key for key in _REQUIRED_LIVE_ENV if not env.get(key)]
@@ -177,6 +230,30 @@ def _live_enabled(env: Mapping[str, str]) -> bool:
     return env.get("MC_EVAL_LIVE_ENABLED", "").strip().casefold() in _LIVE_ENABLED_VALUES
 
 
+def _parse_agent_specs(raw_agents: str) -> tuple[AgentSpec, ...]:
+    if not raw_agents.strip():
+        raise ValueError("--agents is required when --multi-agent is set")
+    agents: list[AgentSpec] = []
+    for raw_spec in raw_agents.split(","):
+        spec = raw_spec.strip()
+        if not spec:
+            continue
+        parts = spec.split(":")
+        if len(parts) != 3:
+            raise ValueError(
+                f"invalid --agents spec; expected agent_id:command:cases, got {spec!r}"
+            )
+        agent_id, command_family, raw_cases = (part.strip() for part in parts)
+        if not raw_cases.isdecimal():
+            raise ValueError(
+                f"invalid --agents spec; cases must be a non-negative integer, got {spec!r}"
+            )
+        agents.append(AgentSpec(agent_id, command_family, int(raw_cases)))
+    if not agents:
+        raise ValueError("--agents must include at least one agent spec")
+    return tuple(agents)
+
+
 def _emit_summary(
     summary: LiveRunSummary,
     *,
@@ -189,11 +266,12 @@ def _emit_summary(
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return
 
-    title = (
-        "Minecraft dataset replay"
-        if summary.command == "dataset-replay"
-        else "Minecraft live command smoke"
-    )
+    if summary.command == "dataset-replay":
+        title = "Minecraft dataset replay"
+    elif summary.command == "multi-agent-timing":
+        title = "Minecraft multi-agent timing"
+    else:
+        title = "Minecraft live command smoke"
     print(title, file=stdout)
     print(f"command: {summary.command}", file=stdout)
     print(f"resolved_command: {summary.resolved_command}", file=stdout)
@@ -234,9 +312,30 @@ def _emit_summary(
         + ", ".join(f"{signal}={count}" for signal, count in summary.lifecycle_summary.items()),
         file=stdout,
     )
-    for result in summary.case_results:
+    timing_summary = summary.timing_summary
+    print(
+        "timing: "
+        + ", ".join(
+            f"{signal}={_summary_value_text(count)}"
+            for signal, count in timing_summary.items()
+            if signal != "per_agent"
+        ),
+        file=stdout,
+    )
+    for agent_id, metrics in timing_summary["per_agent"].items():
         print(
-            f"- {result.case_id}: {result.outcome_class} "
+            f"timing_agent {agent_id}: "
+            + ", ".join(
+                f"{signal}={_summary_value_text(count)}"
+                for signal, count in metrics.items()
+                if signal != "failure_classes"
+            ),
+            file=stdout,
+        )
+    for result in summary.case_results:
+        agent_text = f" agent={result.agent_id}" if result.agent_id else ""
+        print(
+            f"- {result.case_id}:{agent_text} {result.outcome_class} "
             f"category={result.eval_category} "
             f"latency_ms={result.latency_ms} command={result.command_text}",
             file=stdout,
@@ -286,6 +385,13 @@ def _emit_verbose_case(result: CaseResult, stdout: TextIO) -> None:
             separators=(",", ":"),
         )
         print(f"  lifecycle {lifecycle}", file=stdout)
+    if result.timing:
+        timing = json.dumps(
+            result.timing.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        print(f"  timing {timing}", file=stdout)
     if result.error:
         print(f"  error {result.error}", file=stdout)
 
@@ -316,11 +422,12 @@ def _write_report_artifacts(path_arg: str, summary: LiveRunSummary) -> None:
 
 
 def _report_md(summary: LiveRunSummary) -> str:
-    title = (
-        "Minecraft Dataset Replay"
-        if summary.command == "dataset-replay"
-        else "Minecraft Live Command Smoke"
-    )
+    if summary.command == "dataset-replay":
+        title = "Minecraft Dataset Replay"
+    elif summary.command == "multi-agent-timing":
+        title = "Minecraft Multi-agent Timing"
+    else:
+        title = "Minecraft Live Command Smoke"
     lines = [
         f"# {title}",
         "",
@@ -352,10 +459,14 @@ def _report_md(summary: LiveRunSummary) -> str:
     lines.extend(("", "## Lifecycle", ""))
     lifecycle_lines = _lifecycle_report_lines(summary.case_results)
     lines.extend(lifecycle_lines if lifecycle_lines else ["None."])
+    lines.extend(("", "## Multi-agent timing", ""))
+    timing_lines = _timing_report_lines(summary)
+    lines.extend(timing_lines if timing_lines else ["None."])
     lines.extend(("", "## Cases", ""))
     for result in summary.case_results:
+        agent_text = f" `{result.agent_id}`" if result.agent_id else ""
         lines.append(
-            f"- `{result.case_id}` {result.outcome_class} "
+            f"- `{result.case_id}`{agent_text} {result.outcome_class} "
             f"({result.eval_category}): `{result.command_text}`"
         )
     return "\n".join(lines) + "\n"
@@ -499,6 +610,61 @@ def _lifecycle_report_lines(results: Sequence[CaseResult]) -> list[str]:
             f"unstuck_succeeded={_match_text(lifecycle.unstuck_succeeded)}"
         )
     return lines
+
+
+def _timing_report_lines(summary: LiveRunSummary) -> list[str]:
+    timing_summary = summary.timing_summary
+    if timing_summary["cases"] == 0:
+        return []
+    lines = [
+        "- aggregate: "
+        + ", ".join(
+            f"{signal}={_summary_value_text(count)}"
+            for signal, count in timing_summary.items()
+            if signal != "per_agent"
+        )
+    ]
+    lines.append("")
+    lines.append("### Per-agent")
+    lines.append("")
+    for agent_id, metrics in timing_summary["per_agent"].items():
+        failure_classes = _summary_value_text(metrics.get("failure_classes", {}))
+        lines.append(
+            f"- `{agent_id}`: cases={metrics.get('cases', 0)} "
+            f"contention={metrics.get('contention', 0)} "
+            f"interruptions={metrics.get('interruptions', 0)} "
+            f"fanouts={metrics.get('fanouts', 0)} "
+            f"dropped={metrics.get('dropped', 0)} "
+            f"command_loss={metrics.get('command_loss', 0)} "
+            f"max_queue_depth={metrics.get('max_queue_depth', 0)} "
+            f"failure_classes=`{failure_classes}`"
+        )
+    lines.append("")
+    lines.append("### Cases")
+    lines.append("")
+    for result in summary.case_results:
+        timing = result.timing
+        if timing is None:
+            continue
+        failure_class = classify_timing_failure(timing, params=result.params)
+        lines.append(
+            f"- `{result.case_id}` `{timing.agent_id}`: "
+            f"failure_class={failure_class} "
+            f"queue_depth={timing.queue_depth} "
+            f"contention={str(timing.queue_contention).lower()} "
+            f"interruptions={timing.self_interruption_count} "
+            f"fanouts={timing.director_fanout_count} "
+            f"dropped={timing.dropped_commands} "
+            f"command_loss={timing.command_loss_count} "
+            f"conflicts={list(timing.conflicting_action_ids)}"
+        )
+    return lines
+
+
+def _summary_value_text(value: object) -> str:
+    if isinstance(value, Mapping):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return str(value)
 
 
 def _match_text(value: bool | None) -> str:

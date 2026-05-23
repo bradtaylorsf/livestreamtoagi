@@ -238,6 +238,9 @@ pnpm mc:eval:commands:dry-run
 # Run focused live-command smoke cases through the deterministic fake bridge
 pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
 
+# Simulate multi-agent action queue timing without live Minecraft
+pnpm mc:eval:live --multi-agent --agents vera:move:5,rex:placeHere:3 --dry-run
+
 # Run a focused validation scenario
 LLM_PROVIDER=lmstudio \
 LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \

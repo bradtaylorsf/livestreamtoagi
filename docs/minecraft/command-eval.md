@@ -17,6 +17,9 @@ pnpm mc:eval:commands:dry-run
 # Run one command family repeatedly with deterministic action telemetry.
 pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
 
+# Simulate a small multi-agent timing/action-queue cohort.
+pnpm mc:eval:live --multi-agent --agents vera:move:5,rex:placeHere:3 --tick-ms 200 --stagger-ms 50 --director-fanout 2 --dry-run
+
 # Replay E17 accepted commands in the flat eval world with a fake bridge.
 pnpm mc:eval:replay:smoke
 
@@ -160,6 +163,34 @@ accepted, including `death_count`, `deaths`, `death_loop`, `respawns`,
 `unstuck_failed`. Reason/message fields containing markers such as `died`,
 `death`, `safe spawn`, `unsafe spawn`, `spawn in lava`, `recovered`,
 `still_stuck`, or `recovery_failed` are folded into the same lifecycle signals.
+
+### Multi-agent Timing
+
+`pnpm mc:eval:live --multi-agent` runs the live eval pipeline in a deterministic
+multi-agent timing mode. It schedules a small cohort by `--tick-ms` and
+`--stagger-ms`, attaches each case to an `agent_id`, and records queue/timing
+signals without requiring live Minecraft in CI. The default dry-run path uses
+`MultiAgentFakeBridge`, so mocked contention, self-interruption, Director
+fanout, and command-loss outcomes are reproducible.
+
+```bash
+pnpm mc:eval:live \
+  --multi-agent \
+  --agents vera:move:5,rex:placeHere:3 \
+  --tick-ms 200 \
+  --stagger-ms 50 \
+  --director-fanout 2 \
+  --dry-run \
+  --report-dir artifacts/mc-eval/multi-agent-timing
+```
+
+Agent specs use `agent_id:command:cases`, where `command` accepts the same
+command families as individual live smoke. The structured summary includes
+`timing_summary`, per-case `agent_id`, per-case `timing`, per-agent timing
+metrics, and failure-class counts. Failure classes are `queue_contention`,
+`self_interruption`, `director_fanout`, `command_loss`, `timing_drift`, and
+`none`. The markdown report adds a `## Multi-agent timing` section with the
+aggregate, per-agent metrics, and per-case failure classes.
 
 ## Dataset Replay
 
