@@ -243,3 +243,139 @@ async def test_build_from_plan_compares_plan_blocks_to_actual_placements() -> No
     assert result.block_mutation.actual_placements == result.block_mutation.intended_placements
     assert result.inventory is not None
     assert result.inventory.matches_expected is True
+
+
+async def test_run_live_command_smoke_records_lifecycle_categories_from_bridge_events() -> None:
+    bridge = FakeBridgeClient(
+        {
+            "move": (
+                {
+                    "status": "failed",
+                    "reason": "death loop: died in lava after respawn",
+                    "action_events": (
+                        {
+                            "kind": "death",
+                            "ts_ms": 1,
+                            "payload": {"reason": "died in lava"},
+                        },
+                        {
+                            "kind": "death",
+                            "ts_ms": 2,
+                            "payload": {"reason": "died in lava again"},
+                        },
+                        {
+                            "kind": "respawn",
+                            "ts_ms": 3,
+                            "payload": {"reason": "unsafe spawn in lava"},
+                        },
+                    ),
+                    "final_state": {
+                        "death_count": 2,
+                        "death_loop": True,
+                        "respawns": 2,
+                        "spawn": {"safe": False, "reason": "spawn in lava"},
+                    },
+                },
+                {
+                    "status": "ok",
+                    "reason": "respawned at safe spawn",
+                    "action_events": (
+                        {
+                            "kind": "respawn",
+                            "ts_ms": 1,
+                            "payload": {"message": "respawned at safe spawn"},
+                        },
+                    ),
+                    "final_state": {"respawns": 1, "spawn_safe": True},
+                },
+                {
+                    "status": "timeout",
+                    "reason": "stuck state detected",
+                    "action_events": (
+                        {
+                            "kind": "stuck",
+                            "ts_ms": 1,
+                            "payload": {"reason": "stuck against fence"},
+                        },
+                    ),
+                    "final_state": {"stuck_events": 1},
+                },
+                {
+                    "status": "ok",
+                    "reason": "recovered after unstuck attempt",
+                    "action_events": (
+                        {
+                            "kind": "unstuck_attempt",
+                            "ts_ms": 1,
+                            "payload": {"message": "free_self recovery"},
+                        },
+                        {
+                            "kind": "unstuck_success",
+                            "ts_ms": 2,
+                            "payload": {"message": "recovered"},
+                        },
+                    ),
+                    "final_state": {
+                        "stuck_events": 1,
+                        "unstuck_attempts": 1,
+                        "unstuck_succeeded": True,
+                    },
+                },
+                {
+                    "status": "failed",
+                    "reason": "unstuck_failed: still_stuck after recovery",
+                    "action_events": (
+                        {
+                            "kind": "unstuck_attempt",
+                            "ts_ms": 1,
+                            "payload": {"message": "recovery"},
+                        },
+                    ),
+                    "final_state": {
+                        "stuck_events": 1,
+                        "unstuck_attempts": 1,
+                        "unstuck_failed": True,
+                    },
+                },
+            )
+        }
+    )
+
+    summary = await run_live_command_smoke(
+        "move",
+        5,
+        bridge=bridge,
+        profile="flat-eval",
+        seed=1,
+        env={},
+        project_root=REPO_ROOT,
+        dry_run=True,
+    )
+
+    death_loop, safe_spawn, stuck, unstuck_success, unstuck_failure = summary.case_results
+    assert death_loop.eval_category == EvalCategory.DEATH_LOOP
+    assert death_loop.outcome_class == OutcomeClass.WORLD_CONSTRAINT
+    assert death_loop.lifecycle is not None
+    assert death_loop.lifecycle.death_count == 2
+    assert death_loop.lifecycle.death_loop is True
+    assert death_loop.lifecycle.safe_spawn is False
+
+    assert safe_spawn.eval_category == EvalCategory.SAFE_SPAWN
+    assert safe_spawn.lifecycle is not None
+    assert safe_spawn.lifecycle.safe_spawn is True
+
+    assert stuck.eval_category == EvalCategory.STUCK_UNSTUCK
+    assert stuck.lifecycle is not None
+    assert stuck.lifecycle.stuck is True
+    assert stuck.lifecycle.unstuck_attempts == 0
+
+    assert unstuck_success.eval_category == EvalCategory.STUCK_UNSTUCK
+    assert unstuck_success.lifecycle is not None
+    assert unstuck_success.lifecycle.unstuck_succeeded is True
+    assert unstuck_success.lifecycle.unstuck_failed is False
+
+    assert unstuck_failure.eval_category == EvalCategory.STUCK_UNSTUCK
+    assert unstuck_failure.lifecycle is not None
+    assert unstuck_failure.lifecycle.unstuck_succeeded is False
+    assert unstuck_failure.lifecycle.unstuck_failed is True
+    assert unstuck_failure.action_events[-1].payload["lifecycle"]["unstuck_failed"] is True

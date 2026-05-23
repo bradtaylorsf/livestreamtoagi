@@ -11,12 +11,14 @@ from core.minecraft.eval.live_telemetry import (
     CaseResult,
     EvalCategory,
     InventoryDelta,
+    LifecycleSignals,
     LiveRunSummary,
     OutcomeClass,
     classify_bridge_status,
     classify_eval_category,
     derive_block_mutation,
     derive_inventory_delta,
+    derive_lifecycle_signals,
     derive_pathfinding_signals,
 )
 
@@ -57,6 +59,30 @@ def test_classify_bridge_status_returns_stable_outcome_classes(
         ("buildFromPlan", "completed", {"blocks": []}, EvalCategory.BLOCK_MUTATION),
         ("buildFromPlan", "no path to target", {"blocked_path": True}, EvalCategory.PATHFINDING),
         ("nearbyBlocks", "completed", {"inventory": {"torch": 4}}, EvalCategory.INVENTORY),
+        (
+            "move",
+            "death loop after repeated lava deaths",
+            {"death_count": 2, "death_loop": True},
+            EvalCategory.DEATH_LOOP,
+        ),
+        (
+            "move",
+            "respawned at safe spawn",
+            {"respawns": 1, "spawn_safe": True},
+            EvalCategory.SAFE_SPAWN,
+        ),
+        (
+            "move",
+            "unsafe spawn in lava after respawn",
+            {"respawns": 1, "spawn": {"safe": False, "reason": "spawn in lava"}},
+            EvalCategory.SAFE_SPAWN,
+        ),
+        (
+            "move",
+            "unstuck_failed: still_stuck after recovery",
+            {"stuck_events": 1, "unstuck_attempts": 1},
+            EvalCategory.STUCK_UNSTUCK,
+        ),
     ],
 )
 def test_classify_eval_category_separates_pathfinding_collision_and_other(
@@ -68,6 +94,140 @@ def test_classify_eval_category_separates_pathfinding_collision_and_other(
     assert (
         classify_eval_category(command_name, OutcomeClass.SUCCESS, reason, final_state) == expected
     )
+
+
+def test_derive_lifecycle_signals_counts_deaths_and_detects_death_loop() -> None:
+    signals = derive_lifecycle_signals(
+        "move",
+        OutcomeClass.WORLD_CONSTRAINT,
+        (
+            ActionEvent(
+                action_id="move-1",
+                kind="death",
+                ts_ms=1,
+                payload={"reason": "died in lava", "pose": {"x": 1, "y": 60, "z": 1}},
+            ),
+            ActionEvent(
+                action_id="move-1",
+                kind="death",
+                ts_ms=2,
+                payload={"reason": "died in lava again"},
+            ),
+        ),
+        params={},
+        final_state={"respawns": 2, "spawn": {"safe": False, "reason": "spawn in lava"}},
+    )
+
+    assert signals is not None
+    assert signals.death_count == 2
+    assert signals.death_loop is True
+    assert signals.respawns == 2
+    assert signals.safe_spawn is False
+    assert signals.unsafe_spawn_count >= 1
+    assert signals.last_pose == {"x": 1, "y": 60, "z": 1}
+
+
+def test_derive_lifecycle_signals_marks_safe_spawn_for_clean_respawn() -> None:
+    signals = derive_lifecycle_signals(
+        "move",
+        OutcomeClass.SUCCESS,
+        (
+            ActionEvent(
+                action_id="move-1",
+                kind="respawn",
+                ts_ms=1,
+                payload={"message": "respawned at safe spawn"},
+            ),
+        ),
+        params={},
+        final_state={"spawn_safe": True},
+    )
+
+    assert signals is not None
+    assert signals.respawns == 1
+    assert signals.safe_spawn is True
+    assert signals.unsafe_spawn_count == 0
+
+
+def test_derive_lifecycle_signals_marks_unsafe_spawn_from_markers() -> None:
+    signals = derive_lifecycle_signals(
+        "move",
+        OutcomeClass.WORLD_CONSTRAINT,
+        (
+            ActionEvent(
+                action_id="move-1",
+                kind="respawn",
+                ts_ms=1,
+                payload={"reason": "unsafe spawn on cliff spawn"},
+            ),
+        ),
+        params={},
+        final_state={"spawn": {"safe": False, "reason": "void spawn"}},
+    )
+
+    assert signals is not None
+    assert signals.safe_spawn is False
+    assert signals.unsafe_spawn_count >= 1
+    assert signals.unsafe_spawn_reasons
+
+
+def test_derive_lifecycle_signals_tracks_unstuck_success_flow() -> None:
+    signals = derive_lifecycle_signals(
+        "move",
+        OutcomeClass.SUCCESS,
+        (
+            ActionEvent(
+                action_id="move-1",
+                kind="stuck",
+                ts_ms=1,
+                payload={"reason": "stuck against fence"},
+            ),
+            ActionEvent(
+                action_id="move-1",
+                kind="unstuck_attempt",
+                ts_ms=2,
+                payload={"message": "free_self recovery"},
+            ),
+            ActionEvent(
+                action_id="move-1",
+                kind="unstuck_success",
+                ts_ms=3,
+                payload={"message": "recovered and freed"},
+            ),
+        ),
+        params={},
+        final_state={"pose": {"x": 2, "y": 64, "z": 2}},
+    )
+
+    assert signals is not None
+    assert signals.stuck is True
+    assert signals.stuck_events >= 1
+    assert signals.unstuck_attempts >= 1
+    assert signals.unstuck_succeeded is True
+    assert signals.unstuck_failed is False
+
+
+def test_derive_lifecycle_signals_marks_unstuck_failed_when_recovery_missing() -> None:
+    signals = derive_lifecycle_signals(
+        "move",
+        OutcomeClass.TIMEOUT,
+        (
+            ActionEvent(
+                action_id="move-1",
+                kind="unstuck_attempt",
+                ts_ms=1,
+                payload={"reason": "unstuck recovery started"},
+            ),
+        ),
+        params={},
+        final_state={"stuck_events": 1},
+    )
+
+    assert signals is not None
+    assert signals.stuck is True
+    assert signals.unstuck_attempts == 1
+    assert signals.unstuck_succeeded is False
+    assert signals.unstuck_failed is True
 
 
 @pytest.mark.parametrize(
@@ -351,6 +511,7 @@ def test_live_run_summary_to_dict_is_json_round_trippable() -> None:
     assert data["inventory_summary"]["cases_with_state"] == 1
     assert data["block_mutation_summary"]["matches"] == 1
     assert data["block_mutation_summary"]["cases_with_state"] == 1
+    assert data["lifecycle_summary"]["cases"] == 1
     assert data["case_results"][0]["eval_category"] == EvalCategory.BLOCK_MUTATION
     assert data["case_results"][0]["inventory"]["matches_expected"] is True
     assert data["case_results"][0]["inventory"]["net"] == {"oak_planks": -1}
@@ -361,6 +522,76 @@ def test_live_run_summary_to_dict_is_json_round_trippable() -> None:
     assert data["case_results"][0]["action_events"][0]["kind"] == "start"
 
     assert json.loads(json.dumps(data)) == data
+
+
+def test_live_run_summary_lifecycle_summary_aggregates_mixed_cases() -> None:
+    death_loop = CaseResult(
+        case_id="live-move-0001",
+        command_text="!move move-1 north 1 10000",
+        params={"action_id": "move-1"},
+        action_events=(),
+        outcome_class=OutcomeClass.WORLD_CONSTRAINT,
+        final_state={},
+        latency_ms=4,
+        eval_category=EvalCategory.DEATH_LOOP,
+        lifecycle=LifecycleSignals(death_count=2, death_loop=True, respawns=2, safe_spawn=False),
+    )
+    recovered = CaseResult(
+        case_id="live-move-0002",
+        command_text="!move move-2 north 1 10000",
+        params={"action_id": "move-2"},
+        action_events=(),
+        outcome_class=OutcomeClass.SUCCESS,
+        final_state={},
+        latency_ms=4,
+        eval_category=EvalCategory.STUCK_UNSTUCK,
+        lifecycle=LifecycleSignals(
+            stuck=True,
+            stuck_events=1,
+            unstuck_attempts=1,
+            unstuck_succeeded=True,
+        ),
+    )
+    failed = CaseResult(
+        case_id="live-move-0003",
+        command_text="!move move-3 north 1 10000",
+        params={"action_id": "move-3"},
+        action_events=(),
+        outcome_class=OutcomeClass.TIMEOUT,
+        final_state={},
+        latency_ms=4,
+        eval_category=EvalCategory.STUCK_UNSTUCK,
+        lifecycle=LifecycleSignals(
+            stuck=True,
+            stuck_events=1,
+            unstuck_attempts=1,
+            unstuck_succeeded=False,
+            unstuck_failed=True,
+        ),
+    )
+    summary = LiveRunSummary(
+        command="move",
+        resolved_command="move",
+        profile="flat-eval",
+        seed=7,
+        dry_run=True,
+        verbose=True,
+        case_results=(death_loop, recovered, failed),
+        profile_detail={},
+    )
+
+    assert summary.lifecycle_summary == {
+        "cases": 3,
+        "deaths": 2,
+        "death_loops": 1,
+        "safe_spawns": 0,
+        "unsafe_spawns": 1,
+        "stuck_events": 2,
+        "unstuck_attempts": 2,
+        "unstuck_successes": 1,
+        "unstuck_failures": 1,
+    }
+    assert summary.to_dict()["case_results"][0]["lifecycle"]["death_loop"] is True
 
 
 def test_inventory_delta_mapping_coerces_to_json_shape() -> None:

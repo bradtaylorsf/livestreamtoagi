@@ -35,6 +35,9 @@ class EvalCategory:
     COLLISION = "collision"
     INVENTORY = "inventory"
     BLOCK_MUTATION = "block_mutation"
+    DEATH_LOOP = "death_loop"
+    SAFE_SPAWN = "safe_spawn"
+    STUCK_UNSTUCK = "stuck_unstuck"
     OTHER = "other"
 
     ALL = (
@@ -42,25 +45,59 @@ class EvalCategory:
         COLLISION,
         INVENTORY,
         BLOCK_MUTATION,
+        DEATH_LOOP,
+        SAFE_SPAWN,
+        STUCK_UNSTUCK,
         OTHER,
     )
 
 
-_ACTION_EVENT_KINDS = frozenset(("start", "end"))
+_ACTION_EVENT_KINDS = frozenset(
+    (
+        "start",
+        "end",
+        "death",
+        "died",
+        "killed",
+        "fatal",
+        "respawn",
+        "respawned",
+        "safe_spawn",
+        "unsafe_spawn",
+        "stuck",
+        "unstuck",
+        "unstuck_attempt",
+        "unstuck_success",
+        "unstuck_failure",
+        "recovery",
+        "recovered",
+    )
+)
 _WORLD_CONSTRAINT_MARKERS = frozenset(
     (
         "blocked",
         "collision",
         "constraint",
+        "death",
+        "died",
+        "fatal",
         "inventory",
+        "killed",
+        "lava",
         "missing",
         "no path",
         "occupied",
         "out of range",
         "path",
         "protected",
+        "recovery",
+        "spawn in lava",
+        "still_stuck",
+        "stuck",
         "terrain",
         "unreachable",
+        "unsafe spawn",
+        "void spawn",
         "world",
     )
 )
@@ -77,6 +114,25 @@ BLOCK_MUTATION_COMMANDS = frozenset(("placehere", "planandbuild", "buildfromplan
 _COLLISION_MARKERS = frozenset(("collision", "collided", "colliding", "hit obstacle"))
 _STUCK_MARKERS = frozenset(("stuck", "timed out", "timeout"))
 _BLOCKED_PATH_MARKERS = frozenset(("blocked", "cannot path", "no path", "unreachable"))
+_DEATH_MARKERS = frozenset(("died", "death", "killed", "fatal"))
+_RESPAWN_MARKERS = frozenset(("respawn", "respawned"))
+_SAFE_SPAWN_MARKERS = frozenset(("safe spawn", "safe_spawn", "spawn_safe", "safe-spawn"))
+_UNSAFE_SPAWN_MARKERS = frozenset(
+    ("unsafe spawn", "lava", "void spawn", "spawn in lava", "cliff spawn")
+)
+_UNSTUCK_ATTEMPT_MARKERS = frozenset(("unstuck", "recover", "recovery", "free_self"))
+_UNSTUCK_SUCCESS_MARKERS = frozenset(("recovered", "unstuck_ok", "freed"))
+_UNSTUCK_FAILURE_MARKERS = frozenset(("unstuck_failed", "still_stuck", "recovery_failed"))
+_LIFECYCLE_COMMANDS = frozenset(
+    (
+        "move",
+        "searchforblock",
+        "nearbyblocks",
+        "placehere",
+        "planandbuild",
+        "buildfromplan",
+    )
+)
 _SIGNAL_TEXT_KEYS = frozenset(
     ("detail", "error", "last_error", "message", "reason", "status_detail")
 )
@@ -211,6 +267,64 @@ class BlockMutation:
 
 
 @dataclass(frozen=True, slots=True)
+class LifecycleSignals:
+    """Derived death-loop, spawn-safety, and unstuck signals for one command."""
+
+    death_count: int = 0
+    deaths: tuple[Mapping[str, Any], ...] = ()
+    death_loop: bool = False
+    respawns: int = 0
+    safe_spawn: bool | None = None
+    unsafe_spawn_count: int = 0
+    unsafe_spawn_reasons: tuple[str, ...] = ()
+    stuck: bool = False
+    stuck_events: int = 0
+    unstuck_attempts: int = 0
+    unstuck_succeeded: bool | None = None
+    unstuck_failed: bool = False
+    last_pose: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "death_count", max(0, int(self.death_count)))
+        object.__setattr__(self, "deaths", _coerce_mapping_tuple(self.deaths))
+        object.__setattr__(self, "death_loop", bool(self.death_loop))
+        object.__setattr__(self, "respawns", max(0, int(self.respawns)))
+        if self.safe_spawn is not None and not isinstance(self.safe_spawn, bool):
+            raise ValueError("safe_spawn must be a bool or None")
+        object.__setattr__(self, "unsafe_spawn_count", max(0, int(self.unsafe_spawn_count)))
+        object.__setattr__(
+            self,
+            "unsafe_spawn_reasons",
+            tuple(str(reason) for reason in self.unsafe_spawn_reasons if str(reason).strip()),
+        )
+        object.__setattr__(self, "stuck", bool(self.stuck))
+        object.__setattr__(self, "stuck_events", max(0, int(self.stuck_events)))
+        object.__setattr__(self, "unstuck_attempts", max(0, int(self.unstuck_attempts)))
+        if self.unstuck_succeeded is not None and not isinstance(self.unstuck_succeeded, bool):
+            raise ValueError("unstuck_succeeded must be a bool or None")
+        object.__setattr__(self, "unstuck_failed", bool(self.unstuck_failed))
+        pose = dict(self.last_pose) if isinstance(self.last_pose, Mapping) else None
+        object.__setattr__(self, "last_pose", pose)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "death_count": self.death_count,
+            "deaths": [dict(death) for death in self.deaths],
+            "death_loop": self.death_loop,
+            "respawns": self.respawns,
+            "safe_spawn": self.safe_spawn,
+            "unsafe_spawn_count": self.unsafe_spawn_count,
+            "unsafe_spawn_reasons": list(self.unsafe_spawn_reasons),
+            "stuck": self.stuck,
+            "stuck_events": self.stuck_events,
+            "unstuck_attempts": self.unstuck_attempts,
+            "unstuck_succeeded": self.unstuck_succeeded,
+            "unstuck_failed": self.unstuck_failed,
+            "last_pose": dict(self.last_pose) if self.last_pose is not None else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ActionEvent:
     """One action lifecycle event emitted while running a command case."""
 
@@ -254,6 +368,7 @@ class CaseResult:
     pathfinding: PathfindingSignals | Mapping[str, Any] | None = None
     inventory: InventoryDelta | Mapping[str, Any] | None = None
     block_mutation: BlockMutation | Mapping[str, Any] | None = None
+    lifecycle: LifecycleSignals | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.case_id:
@@ -269,16 +384,31 @@ class CaseResult:
         object.__setattr__(self, "action_events", tuple(self.action_events))
         object.__setattr__(self, "final_state", dict(self.final_state))
         command_name = _command_name_from_case(self.command_text, self.params)
+
+        lifecycle = self.lifecycle
+        if isinstance(lifecycle, Mapping):
+            lifecycle = _coerce_lifecycle_signals(lifecycle)
+        elif lifecycle is None:
+            lifecycle = derive_lifecycle_signals(
+                command_name,
+                self.outcome_class,
+                self.action_events,
+                params=self.params,
+                final_state=self.final_state,
+            )
+
         eval_category = self.eval_category or classify_eval_category(
             command_name,
             self.outcome_class,
             self.error,
             self.final_state,
         )
+        eval_category = _apply_lifecycle_category(command_name, eval_category, lifecycle)
         if eval_category not in EvalCategory.ALL:
             allowed = ", ".join(EvalCategory.ALL)
             raise ValueError(f"eval_category must be one of: {allowed}")
         object.__setattr__(self, "eval_category", eval_category)
+        object.__setattr__(self, "lifecycle", lifecycle)
 
         pathfinding = self.pathfinding
         if isinstance(pathfinding, Mapping):
@@ -341,6 +471,7 @@ class CaseResult:
             "pathfinding": self.pathfinding.to_dict() if self.pathfinding else None,
             "inventory": self.inventory.to_dict() if self.inventory else None,
             "block_mutation": self.block_mutation.to_dict() if self.block_mutation else None,
+            "lifecycle": self.lifecycle.to_dict() if self.lifecycle else None,
         }
 
 
@@ -467,6 +598,39 @@ class LiveRunSummary:
         return summary
 
     @property
+    def lifecycle_summary(self) -> dict[str, int]:
+        summary = {
+            "cases": 0,
+            "deaths": 0,
+            "death_loops": 0,
+            "safe_spawns": 0,
+            "unsafe_spawns": 0,
+            "stuck_events": 0,
+            "unstuck_attempts": 0,
+            "unstuck_successes": 0,
+            "unstuck_failures": 0,
+        }
+        for result in self.case_results:
+            lifecycle = result.lifecycle
+            if lifecycle is None:
+                continue
+            summary["cases"] += 1
+            summary["deaths"] += lifecycle.death_count
+            if lifecycle.death_loop:
+                summary["death_loops"] += 1
+            if lifecycle.safe_spawn is True:
+                summary["safe_spawns"] += 1
+            if lifecycle.safe_spawn is False or lifecycle.unsafe_spawn_count:
+                summary["unsafe_spawns"] += max(1, lifecycle.unsafe_spawn_count)
+            summary["stuck_events"] += lifecycle.stuck_events
+            summary["unstuck_attempts"] += lifecycle.unstuck_attempts
+            if lifecycle.unstuck_succeeded is True:
+                summary["unstuck_successes"] += 1
+            if lifecycle.unstuck_failed:
+                summary["unstuck_failures"] += 1
+        return summary
+
+    @property
     def passed_count(self) -> int:
         return sum(1 for result in self.case_results if result.passed)
 
@@ -491,6 +655,7 @@ class LiveRunSummary:
             "pathfinding_summary": self.pathfinding_summary,
             "inventory_summary": self.inventory_summary,
             "block_mutation_summary": self.block_mutation_summary,
+            "lifecycle_summary": self.lifecycle_summary,
             "case_results": [result.to_dict() for result in self.case_results],
         }
 
@@ -536,6 +701,30 @@ def classify_eval_category(
     """Classify the live-eval behavior category for one command outcome."""
 
     detail = _normalize_detail(reason, _signal_text(final_state))
+    lifecycle = derive_lifecycle_signals(
+        command_name,
+        outcome_class,
+        (),
+        params=None,
+        final_state=_state_with_detail(final_state, detail),
+    )
+    lifecycle_category = _apply_lifecycle_category(
+        command_name,
+        EvalCategory.OTHER,
+        lifecycle,
+    )
+    if lifecycle_category in (EvalCategory.DEATH_LOOP, EvalCategory.SAFE_SPAWN):
+        return lifecycle_category
+    if lifecycle_category == EvalCategory.STUCK_UNSTUCK and _has_explicit_unstuck_signal(
+        detail,
+        final_state,
+    ):
+        return lifecycle_category
+    if lifecycle_category == EvalCategory.STUCK_UNSTUCK and _has_explicit_stuck_events(
+        final_state,
+    ):
+        return lifecycle_category
+
     if _has_collision_signal(detail, final_state):
         return EvalCategory.COLLISION
 
@@ -551,6 +740,8 @@ def classify_eval_category(
         return EvalCategory.INVENTORY
     if _has_inventory_state(final_state):
         return EvalCategory.INVENTORY
+    if lifecycle_category == EvalCategory.STUCK_UNSTUCK:
+        return EvalCategory.STUCK_UNSTUCK
     return EvalCategory.OTHER
 
 
@@ -644,6 +835,178 @@ def derive_block_mutation(
         matches_expected=matches_expected,
         initial_blocks=initial_blocks,
         final_blocks=actual,
+    )
+
+
+def derive_lifecycle_signals(
+    command_name: object,
+    outcome_class: object,
+    action_events: Sequence[ActionEvent],
+    *,
+    params: Mapping[str, Any] | None = None,
+    final_state: Mapping[str, Any] | None = None,
+) -> LifecycleSignals | None:
+    """Derive death-loop, spawn-safety, and unstuck signals for one eval case."""
+
+    state = final_state if isinstance(final_state, Mapping) else {}
+    raw_params = params if isinstance(params, Mapping) else {}
+    normalized_command = _normalize_command_name(command_name)
+    event_details: list[str] = []
+    state_detail = _normalize_detail(_signal_text(state), _signal_text(raw_params))
+    death_records: list[Mapping[str, Any]] = []
+    event_deaths = 0
+    explicit_death_count = _count_signal(state, ("death_count", "deaths"))
+    respawn_events = 0
+    explicit_respawns = _count_signal(state, ("respawns", "respawn_count"))
+    stuck_event_count = _count_signal(state, ("stuck_events",))
+    unstuck_attempt_events = _count_signal(state, ("unstuck_attempts",))
+    unsafe_spawn_count = _count_signal(state, ("unsafe_spawn_count",))
+    unsafe_spawn_reasons: list[str] = []
+    last_pose = _extract_final_pose(state)
+    unstuck_success_marker = _truthy_signal(state, "unstuck_succeeded") or _truthy_signal(
+        state,
+        "unstuck_success",
+    )
+    unstuck_failure_marker = _truthy_signal(state, "unstuck_failed") or _truthy_signal(
+        state,
+        "unstuck_failure",
+    )
+
+    for raw_event in action_events:
+        kind, payload = _event_parts(raw_event)
+        detail = _normalize_detail(kind, _signal_text(payload))
+        if detail:
+            event_details.append(detail)
+        if last_pose is None:
+            last_pose = _extract_final_pose(payload)
+
+        payload_deaths = _death_records_from_payload(payload)
+        if payload_deaths:
+            death_records.extend(payload_deaths)
+            event_deaths += len(payload_deaths)
+        elif _has_marker(detail, _DEATH_MARKERS) or _truthy_signal(payload, "death"):
+            death_records.append(_event_record(kind, payload))
+            event_deaths += 1
+        explicit_death_count = max(
+            explicit_death_count,
+            _count_signal(payload, ("death_count", "deaths")),
+        )
+
+        if _has_marker(detail, _RESPAWN_MARKERS) or _truthy_signal(payload, "respawn"):
+            respawn_events += 1
+        explicit_respawns = max(
+            explicit_respawns,
+            _count_signal(payload, ("respawns", "respawn_count")),
+        )
+
+        if _has_marker(detail, _STUCK_MARKERS) or _truthy_signal(payload, "stuck"):
+            stuck_event_count += 1
+        stuck_event_count = max(stuck_event_count, _count_signal(payload, ("stuck_events",)))
+
+        if _has_marker(detail, _UNSTUCK_ATTEMPT_MARKERS):
+            unstuck_attempt_events += 1
+        unstuck_attempt_events = max(
+            unstuck_attempt_events,
+            _count_signal(payload, ("unstuck_attempts",)),
+        )
+        if _has_marker(detail, _UNSTUCK_SUCCESS_MARKERS) or _truthy_signal(
+            payload,
+            "unstuck_succeeded",
+        ):
+            unstuck_success_marker = True
+        if _has_marker(detail, _UNSTUCK_FAILURE_MARKERS) or _truthy_signal(
+            payload,
+            "unstuck_failed",
+        ):
+            unstuck_failure_marker = True
+
+        event_unsafe_count, event_unsafe_reasons = _unsafe_spawn_signals(detail, payload)
+        unsafe_spawn_count += event_unsafe_count
+        unsafe_spawn_reasons.extend(event_unsafe_reasons)
+
+    final_state_deaths = _death_records_from_payload(state)
+    if final_state_deaths:
+        death_records.extend(final_state_deaths)
+    combined_detail = _normalize_detail(state_detail, *event_details)
+    death_count = max(explicit_death_count, len(death_records))
+    if death_count == 0 and _has_marker(combined_detail, _DEATH_MARKERS):
+        death_count = 1
+    death_loop = (
+        death_count >= 2
+        or event_deaths >= 2
+        or _truthy_signal(state, "death_loop")
+        or _has_marker(combined_detail, frozenset(("death loop", "death_loop")))
+    )
+    respawns = max(explicit_respawns, respawn_events)
+    if respawns == 0 and _has_marker(combined_detail, _RESPAWN_MARKERS):
+        respawns = 1
+
+    state_unsafe_count, state_unsafe_reasons = _unsafe_spawn_signals(combined_detail, state)
+    unsafe_spawn_count += state_unsafe_count
+    unsafe_spawn_reasons.extend(state_unsafe_reasons)
+    safe_spawn = _safe_spawn_signal(state, combined_detail)
+    if safe_spawn is None and respawns > 0 and unsafe_spawn_count == 0:
+        safe_spawn = True
+    if unsafe_spawn_count > 0:
+        safe_spawn = False
+
+    pathfinding_stuck = _has_marker(combined_detail, _STUCK_MARKERS) or _truthy_signal(
+        state,
+        "stuck",
+    )
+    stuck = pathfinding_stuck or stuck_event_count > 0 or unstuck_attempt_events > 0
+    if stuck and stuck_event_count == 0:
+        stuck_event_count = 1
+
+    unstuck_attempts = unstuck_attempt_events
+    if unstuck_attempts == 0 and _has_marker(combined_detail, _UNSTUCK_ATTEMPT_MARKERS):
+        unstuck_attempts = 1
+    if _has_marker(combined_detail, _UNSTUCK_SUCCESS_MARKERS):
+        unstuck_success_marker = True
+    if _has_marker(combined_detail, _UNSTUCK_FAILURE_MARKERS):
+        unstuck_failure_marker = True
+    if unstuck_success_marker:
+        unstuck_succeeded: bool | None = True
+    elif unstuck_failure_marker or (unstuck_attempts > 0 and stuck):
+        unstuck_succeeded = False
+    else:
+        unstuck_succeeded = None
+    unstuck_failed = bool(
+        unstuck_failure_marker or (unstuck_attempts > 0 and unstuck_succeeded is not True)
+    )
+
+    observed = any(
+        (
+            death_count,
+            death_loop,
+            respawns,
+            safe_spawn is not None,
+            unsafe_spawn_count,
+            stuck,
+            stuck_event_count,
+            unstuck_attempts,
+            unstuck_succeeded is not None,
+            unstuck_failed,
+        )
+    )
+    if not observed and normalized_command not in _LIFECYCLE_COMMANDS:
+        return None
+
+    del outcome_class
+    return LifecycleSignals(
+        death_count=death_count,
+        deaths=tuple(death_records),
+        death_loop=death_loop,
+        respawns=respawns,
+        safe_spawn=safe_spawn,
+        unsafe_spawn_count=unsafe_spawn_count,
+        unsafe_spawn_reasons=tuple(dict.fromkeys(unsafe_spawn_reasons)),
+        stuck=stuck,
+        stuck_events=stuck_event_count,
+        unstuck_attempts=unstuck_attempts,
+        unstuck_succeeded=unstuck_succeeded,
+        unstuck_failed=unstuck_failed,
+        last_pose=last_pose,
     )
 
 
@@ -777,6 +1140,53 @@ def _coerce_block_mutation(raw: Mapping[str, Any]) -> BlockMutation:
     )
 
 
+def _coerce_lifecycle_signals(raw: Mapping[str, Any]) -> LifecycleSignals:
+    safe_spawn = raw.get("safe_spawn")
+    unstuck_succeeded = raw.get("unstuck_succeeded")
+    return LifecycleSignals(
+        death_count=_coerce_int(raw.get("death_count")) or 0,
+        deaths=_raw_sequence(raw.get("deaths")),
+        death_loop=_coerce_bool(raw.get("death_loop")),
+        respawns=_coerce_int(raw.get("respawns")) or 0,
+        safe_spawn=safe_spawn if isinstance(safe_spawn, bool) or safe_spawn is None else None,
+        unsafe_spawn_count=_coerce_int(raw.get("unsafe_spawn_count")) or 0,
+        unsafe_spawn_reasons=tuple(
+            str(reason) for reason in _raw_sequence(raw.get("unsafe_spawn_reasons"))
+        ),
+        stuck=_coerce_bool(raw.get("stuck")),
+        stuck_events=_coerce_int(raw.get("stuck_events")) or 0,
+        unstuck_attempts=_coerce_int(raw.get("unstuck_attempts")) or 0,
+        unstuck_succeeded=unstuck_succeeded
+        if isinstance(unstuck_succeeded, bool) or unstuck_succeeded is None
+        else None,
+        unstuck_failed=_coerce_bool(raw.get("unstuck_failed")),
+        last_pose=raw.get("last_pose") if isinstance(raw.get("last_pose"), Mapping) else None,
+    )
+
+
+def _apply_lifecycle_category(
+    command_name: object,
+    eval_category: str,
+    lifecycle: LifecycleSignals | None,
+) -> str:
+    if lifecycle is None:
+        return eval_category
+    if lifecycle.death_loop:
+        return EvalCategory.DEATH_LOOP
+    if lifecycle.respawns or lifecycle.safe_spawn is not None or lifecycle.unsafe_spawn_count:
+        return EvalCategory.SAFE_SPAWN
+    if (
+        lifecycle.unstuck_attempts
+        or lifecycle.unstuck_succeeded is not None
+        or lifecycle.unstuck_failed
+    ):
+        return EvalCategory.STUCK_UNSTUCK
+    if lifecycle.stuck and eval_category == EvalCategory.OTHER:
+        return EvalCategory.STUCK_UNSTUCK
+    del command_name
+    return eval_category
+
+
 def _is_world_constraint(detail: str) -> bool:
     return any(marker in detail for marker in _WORLD_CONSTRAINT_MARKERS)
 
@@ -789,6 +1199,173 @@ def _coerce_pathfinding_signals(raw: Mapping[str, Any]) -> PathfindingSignals:
         blocked_path=_coerce_bool(raw.get("blocked_path") or raw.get("blocked")),
         final_pose=raw.get("final_pose") if isinstance(raw.get("final_pose"), Mapping) else None,
     )
+
+
+def _event_parts(raw_event: object) -> tuple[str, Mapping[str, Any]]:
+    if isinstance(raw_event, ActionEvent):
+        return raw_event.kind, raw_event.payload
+    if not isinstance(raw_event, Mapping):
+        return "", {}
+    payload = raw_event.get("payload")
+    return str(raw_event.get("kind") or ""), payload if isinstance(payload, Mapping) else {}
+
+
+def _event_record(kind: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    record = dict(payload)
+    if kind and "kind" not in record:
+        record["kind"] = kind
+    return record
+
+
+def _death_records_from_payload(raw: object) -> list[Mapping[str, Any]]:
+    if not isinstance(raw, Mapping):
+        return []
+    deaths = raw.get("deaths")
+    if isinstance(deaths, Sequence) and not isinstance(deaths, (str, bytes, bytearray)):
+        records: list[Mapping[str, Any]] = []
+        for death in deaths:
+            if isinstance(death, Mapping):
+                records.append(dict(death))
+            elif death is not None:
+                records.append({"detail": str(death)})
+        return records
+    if _truthy_signal(raw, "death") or _truthy_signal(raw, "died") or _truthy_signal(raw, "dead"):
+        return [dict(raw)]
+    return []
+
+
+def _count_signal(raw: object, keys: tuple[str, ...]) -> int:
+    if not isinstance(raw, Mapping):
+        return 0
+    counts: list[int] = []
+    wanted = {key.casefold() for key in keys}
+    for key, value in raw.items():
+        if str(key).casefold() in wanted:
+            count = _value_count(value)
+            if count is not None:
+                counts.append(count)
+        if isinstance(value, Mapping):
+            nested = _count_signal(value, keys)
+            if nested:
+                counts.append(nested)
+    return max(counts, default=0)
+
+
+def _value_count(value: object) -> int | None:
+    coerced = _coerce_int(value)
+    if coerced is not None:
+        return max(0, coerced)
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return len(value)
+    return None
+
+
+def _safe_spawn_signal(
+    final_state: Mapping[str, Any],
+    detail: str,
+) -> bool | None:
+    direct = _bool_signal(final_state, ("safe_spawn", "spawn_safe"))
+    if direct is not None:
+        return direct
+    spawn = final_state.get("spawn")
+    if isinstance(spawn, Mapping):
+        spawn_direct = _bool_signal(spawn, ("safe", "spawn_safe", "safe_spawn"))
+        if spawn_direct is not None:
+            return spawn_direct
+    if _truthy_signal(final_state, "unsafe_spawn") or _has_marker(detail, _UNSAFE_SPAWN_MARKERS):
+        return False
+    if _has_marker(detail, _SAFE_SPAWN_MARKERS):
+        return True
+    return None
+
+
+def _bool_signal(raw: object, keys: tuple[str, ...]) -> bool | None:
+    if not isinstance(raw, Mapping):
+        return None
+    wanted = {key.casefold() for key in keys}
+    for key, value in raw.items():
+        if str(key).casefold() not in wanted:
+            continue
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+    return None
+
+
+def _unsafe_spawn_signals(
+    detail: str,
+    raw: object,
+) -> tuple[int, list[str]]:
+    reasons: list[str] = []
+    if isinstance(raw, Mapping):
+        for key in ("unsafe_spawn_reason", "spawn_reason", "reason", "detail", "message"):
+            value = raw.get(key)
+            if value is not None and str(value).strip():
+                value_text = str(value).strip()
+                if _has_marker(value_text.casefold(), _UNSAFE_SPAWN_MARKERS):
+                    reasons.append(value_text)
+        spawn = raw.get("spawn")
+        if isinstance(spawn, Mapping):
+            nested_count, nested_reasons = _unsafe_spawn_signals(_signal_text(spawn), spawn)
+            reasons.extend(nested_reasons)
+            if nested_count:
+                reasons.append("unsafe spawn")
+        if _truthy_signal(raw, "unsafe_spawn"):
+            reasons.append("unsafe_spawn")
+    markers = [marker for marker in _UNSAFE_SPAWN_MARKERS if marker in detail]
+    reasons.extend(markers)
+    count = 1 if markers else 0
+    if reasons and count == 0:
+        count = 1
+    return count, reasons
+
+
+def _has_explicit_unstuck_signal(
+    detail: str,
+    final_state: Mapping[str, Any] | None,
+) -> bool:
+    return (
+        _has_marker(detail, _UNSTUCK_ATTEMPT_MARKERS)
+        or _has_marker(detail, _UNSTUCK_SUCCESS_MARKERS)
+        or _has_marker(detail, _UNSTUCK_FAILURE_MARKERS)
+        or _truthy_signal(final_state, "unstuck")
+        or _truthy_signal(final_state, "unstuck_attempts")
+        or _truthy_signal(final_state, "unstuck_succeeded")
+        or _truthy_signal(final_state, "unstuck_failed")
+    )
+
+
+def _has_explicit_stuck_events(final_state: Mapping[str, Any] | None) -> bool:
+    return _count_signal(final_state, ("stuck_events",)) > 0
+
+
+def _state_with_detail(
+    final_state: Mapping[str, Any] | None,
+    detail: str,
+) -> Mapping[str, Any]:
+    state = dict(final_state) if isinstance(final_state, Mapping) else {}
+    if detail:
+        state.setdefault("status_detail", detail)
+    return state
+
+
+def _coerce_mapping_tuple(raw: object) -> tuple[Mapping[str, Any], ...]:
+    records: list[Mapping[str, Any]] = []
+    for item in _raw_sequence(raw):
+        if isinstance(item, Mapping):
+            records.append(dict(item))
+        elif item is not None:
+            records.append({"detail": str(item)})
+    return tuple(records)
 
 
 def _command_name_from_case(command_text: str, params: Mapping[str, Any]) -> str:

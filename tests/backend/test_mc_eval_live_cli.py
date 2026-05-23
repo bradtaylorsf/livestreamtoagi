@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from core.minecraft.eval.live_cli import main
+from core.minecraft.eval.live_runner import FakeBridgeClient
 
 
 def test_live_cli_dry_run_json_emits_case_count_and_outcomes() -> None:
@@ -180,3 +181,73 @@ def test_live_cli_place_here_report_includes_inventory_and_block_mutation_sectio
     assert "## Block Mutation" in report
     assert "matches_expected=true" in report
     assert "matches_expected=false" in report
+
+
+def test_live_cli_outputs_lifecycle_summary_and_report_section(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    output_path = tmp_path / "summary.json"
+    report_dir = tmp_path / "report"
+    bridge = FakeBridgeClient(
+        {
+            "move": (
+                {
+                    "status": "failed",
+                    "reason": "death loop: died in lava after respawn",
+                    "action_events": (
+                        {
+                            "kind": "death",
+                            "ts_ms": 1,
+                            "payload": {"reason": "died in lava"},
+                        },
+                        {
+                            "kind": "death",
+                            "ts_ms": 2,
+                            "payload": {"reason": "died in lava again"},
+                        },
+                    ),
+                    "final_state": {
+                        "death_count": 2,
+                        "death_loop": True,
+                        "respawns": 2,
+                        "spawn": {"safe": False, "reason": "spawn in lava"},
+                    },
+                },
+            )
+        }
+    )
+
+    exit_code = main(
+        [
+            "--command",
+            "move",
+            "--cases",
+            "1",
+            "--verbose",
+            "--output",
+            str(output_path),
+            "--report-dir",
+            str(report_dir),
+        ],
+        env={},
+        bridge=bridge,
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    text = stdout.getvalue()
+    assert exit_code == 0, stderr.getvalue()
+    assert "lifecycle: " in text
+    assert "death_loops=1" in text
+    assert "  lifecycle " in text
+
+    summary = json.loads(output_path.read_text(encoding="utf-8"))
+    assert summary["lifecycle_summary"]["death_loops"] == 1
+    assert summary["case_results"][0]["eval_category"] == "death_loop"
+    assert summary["case_results"][0]["lifecycle"]["death_count"] == 2
+
+    report = (report_dir / "report.md").read_text(encoding="utf-8")
+    assert "## Lifecycle" in report
+    assert "death_count=2" in report
+    assert "death_loop=true" in report

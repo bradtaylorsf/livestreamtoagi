@@ -32,9 +32,11 @@ from core.minecraft.eval.live_profile import DEFAULT_PROFILE_NAME, EvalProfileEr
 from core.minecraft.eval.live_runner import (
     BridgeClient,
     _case_error,
+    _category_with_lifecycle,
     _coerce_action_events,
     _now_ms,
     _profile_detail,
+    _state_with_detail,
 )
 from core.minecraft.eval.live_telemetry import (
     ActionEvent,
@@ -45,6 +47,7 @@ from core.minecraft.eval.live_telemetry import (
     classify_eval_category,
     derive_block_mutation,
     derive_inventory_delta,
+    derive_lifecycle_signals,
     derive_pathfinding_signals,
 )
 
@@ -268,12 +271,21 @@ async def _run_prompt(
         final_state = {}
     display_command = _display_command(prompt.command_token)
     params = _params_for_prompt(prompt)
+    detail = response.get("reason") or response.get("outcome_class") or error
+    lifecycle = derive_lifecycle_signals(
+        display_command,
+        outcome_class,
+        tuple(events),
+        params=params,
+        final_state=_state_with_detail(final_state, detail),
+    )
     eval_category = classify_eval_category(
         display_command,
         outcome_class,
-        response.get("reason") or response.get("outcome_class") or error,
+        detail,
         final_state,
     )
+    eval_category = _category_with_lifecycle(eval_category, lifecycle)
     pathfinding = derive_pathfinding_signals(
         display_command,
         outcome_class,
@@ -306,6 +318,7 @@ async def _run_prompt(
                 "pathfinding": pathfinding.to_dict() if pathfinding else None,
                 "inventory": inventory.to_dict() if inventory else None,
                 "block_mutation": block_mutation.to_dict() if block_mutation else None,
+                "lifecycle": lifecycle.to_dict() if lifecycle else None,
                 "reason": response.get("reason"),
                 "scenario_id": prompt.scenario_id,
                 "status": response.get("status"),
@@ -327,6 +340,7 @@ async def _run_prompt(
         pathfinding=pathfinding,
         inventory=inventory,
         block_mutation=block_mutation,
+        lifecycle=lifecycle,
     )
 
 
