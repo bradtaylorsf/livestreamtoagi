@@ -17,6 +17,29 @@ check() {
     fi
 }
 
+check_retry() {
+    local name="$1"
+    local attempts="$2"
+    local delay_seconds="$3"
+    local attempt=1
+    shift 3
+
+    while [ "$attempt" -le "$attempts" ]; do
+        if "$@" > /dev/null 2>&1; then
+            echo "✓ $name"
+            PASS=$((PASS + 1))
+            return 0
+        fi
+        if [ "$attempt" -lt "$attempts" ]; then
+            sleep "$delay_seconds"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "✗ $name"
+    FAIL=$((FAIL + 1))
+}
+
 echo "Checking development services..."
 echo
 
@@ -38,7 +61,12 @@ check "pg_trgm extension" bash -c 'docker compose exec -T postgres \
 
 # Langfuse HTTP
 LANGFUSE_PORT="${LANGFUSE_PORT:-3100}"
-check "Langfuse UI (port $LANGFUSE_PORT)" curl -sf "http://localhost:$LANGFUSE_PORT"
+LANGFUSE_READY_ATTEMPTS="${LANGFUSE_READY_ATTEMPTS:-30}"
+LANGFUSE_READY_DELAY_SECONDS="${LANGFUSE_READY_DELAY_SECONDS:-3}"
+check_retry "Langfuse UI (port $LANGFUSE_PORT)" \
+    "$LANGFUSE_READY_ATTEMPTS" \
+    "$LANGFUSE_READY_DELAY_SECONDS" \
+    curl -sf "http://localhost:$LANGFUSE_PORT"
 
 # Minecraft server liveness — OPT-IN (E2-6, issue #531). Off by default so
 # the 5-service dev gate and CI (which run with no Minecraft server present)
