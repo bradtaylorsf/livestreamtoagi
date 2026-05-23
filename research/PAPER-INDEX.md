@@ -1,6 +1,6 @@
 # Research Paper Index — Livestream to AGI
 
-> **Purpose:** This index maps the papers behind the local research notes to the project systems they inform. When working on a subsystem (memory, conversation engine, agent personality, evaluation, etc.), consult the linked source and the relevant notes here for context, prior art, and testable hypotheses.
+> **Purpose:** This index maps every paper in `research/` to the project systems it informs. When working on a subsystem (memory, conversation engine, agent personality, evaluation, etc.), consult the relevant papers listed here for context, prior art, and testable hypotheses.
 >
 > **Last updated:** 2026-04-15
 
@@ -26,7 +26,7 @@
 ## Full Paper Index
 
 ### 1. Generative Agents: Interactive Simulacra of Human Behavior
-- **Source:** [arXiv:2304.03442](https://arxiv.org/abs/2304.03442)
+- **File:** `generative-agents-2304.03442v2.pdf`
 - **Authors:** Park, O'Brien, Cai, Morris, Liang, Bernstein (Stanford / Google)
 - **Venue:** UIST 2023
 - **arXiv:** 2304.03442
@@ -40,7 +40,7 @@
 ---
 
 ### 2. MemGPT: Towards LLMs as Operating Systems
-- **Source:** [arXiv:2310.08560](https://arxiv.org/abs/2310.08560)
+- **File:** `memgpt-2310.08560v2.pdf`
 - **Authors:** Packer, Wooders, Lin, Fang, Patil, Stoica, Gonzalez (UC Berkeley)
 - **Venue:** Preprint, February 2024
 - **arXiv:** 2310.08560
@@ -53,7 +53,7 @@
 ---
 
 ### 3. A-Mem: Agentic Memory for LLM Agents
-- **Source:** [arXiv:2502.12110](https://arxiv.org/abs/2502.12110)
+- **File:** `a-mem-agentic-memory-2502.12110v11.pdf`
 - **Authors:** Xu, Liang, Mei, Gao, Tan, Zhang (Rutgers / AIOS Foundation)
 - **Venue:** Preprint, 2025
 - **arXiv:** 2502.12110
@@ -66,7 +66,7 @@
 ---
 
 ### 4. Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory
-- **Source:** [arXiv:2504.19413](https://arxiv.org/abs/2504.19413)
+- **File:** `mem0-scalable-long-term-memory-2504.19413v1.pdf`
 - **Authors:** Chhikara, Khant, Aryan, Singh, Yadav (Mem0.ai)
 - **Venue:** Preprint, April 2025
 - **arXiv:** 2504.19413
@@ -79,7 +79,7 @@
 ---
 
 ### 5. CAMEL: Communicative Agents for "Mind" Exploration of Large Language Model Society
-- **Source:** [arXiv:2303.17760](https://arxiv.org/abs/2303.17760)
+- **File:** `CAMEL-comms-for-agent-society-2303.17760v2.pdf`
 - **Authors:** Li, Hammoud, Itani, Khizbullin, Ghanem (KAUST)
 - **Venue:** NeurIPS 2023
 - **arXiv:** 2303.17760
@@ -92,7 +92,7 @@
 ---
 
 ### 6. MetaGPT: Meta Programming for a Multi-Agent Collaborative Framework
-- **Source:** [arXiv:2308.00352](https://arxiv.org/abs/2308.00352)
+- **File:** `meta-progr-multi-agent-collab-2308.00352v7.pdf`
 - **Authors:** Hong, Zhuge, Chen, Zheng, Cheng, Zhang, Wang, Yau, Lin, Zhou, Ran, Xiao, Wu, Schmidhuber (DeepWisdom / KAUST / multiple universities)
 - **Venue:** ICLR 2024
 - **arXiv:** 2308.00352
@@ -105,7 +105,7 @@
 ---
 
 ### 7. VOYAGER: An Open-Ended Embodied Agent with Large Language Models
-- **Source:** [arXiv:2305.16291](https://arxiv.org/abs/2305.16291)
+- **File:** `voyager-minecraft-2305.16291v2.pdf`
 - **Authors:** Wang, Xie, Jiang, Mandlekar, Xiao, Zhu, Fan, Anandkumar (NVIDIA / Caltech / UT Austin / Stanford / UW Madison)
 - **Venue:** Preprint, October 2023
 - **arXiv:** 2305.16291
@@ -118,7 +118,7 @@
 ---
 
 ### 8. D2A: Simulating Human-like Daily Activities with Desire-Driven Autonomy
-- **Source:** [arXiv:2412.06435](https://arxiv.org/abs/2412.06435)
+- **File:** `simulating-human-like-activities-desire-driven-autonomy-2412.06435v3.pdf`
 - **Authors:** Wang, Chen, Zhong, Ma, Wang (Peking University / HKU / Beijing Normal University)
 - **Venue:** ICLR 2025
 - **arXiv:** 2412.06435
@@ -131,7 +131,7 @@
 ---
 
 ### 9. AgentSociety: Large-Scale Simulation of LLM-Driven Generative Agents
-- **Source:** [arXiv:2502.08691](https://arxiv.org/abs/2502.08691)
+- **File:** `agent-society-2502.08691v1.pdf`
 - **Authors:** Piao, Yan, Zhang, Li, Yan, Lan, Lu, Zheng, Wang, Zhou, Gao, Xu, Zhang, Rong, Su, Li (Tsinghua University)
 - **Venue:** Preprint, February 2025
 - **arXiv:** 2502.08691
@@ -145,7 +145,7 @@
 ---
 
 ### 10. SOTOPIA: Interactive Evaluation for Social Intelligence in Language Agents
-- **Source:** [arXiv:2310.11667](https://arxiv.org/abs/2310.11667)
+- **File:** `interactive-eval-agents-2310.11667v2.pdf`
 - **Authors:** Zhou, Zhu, Mathur, Zhang, Qi, Yu, Bisk, Fried, Neubig, Sap (CMU)
 - **Venue:** ICLR 2024
 - **arXiv:** 2310.11667
@@ -158,7 +158,7 @@
 ---
 
 ### 11. Spontaneous Emergence of Agent Individuality Through Social Interactions in LLM-Based Communities
-- **Source:** [DOI:10.3390/e26121092](https://doi.org/10.3390/e26121092)
+- **File:** `entropy-26-01092.pdf`
 - **Authors:** Takata, Masumori, Ikegami (University of Tokyo)
 - **Venue:** MDPI Entropy, December 2024
 - **DOI:** 10.3390/e26121092
@@ -172,7 +172,7 @@
 ---
 
 ### 12. Dynamic Personality in LLM Agents: A Framework for Evolutionary Modeling and Behavioral Analysis in the Prisoner's Dilemma
-- **Source:** [ACL Anthology 2025.findings-acl.1185](https://aclanthology.org/2025.findings-acl.1185/)
+- **File:** `dynamic-personality-in-llm-agents-evolutionary-models-behavior-analysis-2025.findings-acl.1185.pdf`
 - **Authors:** Zeng, Wang, Zhao, Qu, He, Hou, Hu (Tianjin University / CHEARI)
 - **Venue:** ACL 2025 Findings
 - **Summary:** Tests dynamic personality evolution using the Prisoner's Dilemma as a socially significant scenario. Agents undergo random mutation (subtle personality description changes) and natural selection (higher-payoff agents survive). Key findings: (1) personality converges — agents tend toward extreme collaboration or defection, (2) the dominant effect appears in a single round while adaptation accumulates over time, (3) BFI (Big Five) personality metrics predictably correlate with behavioral patterns.
@@ -184,7 +184,7 @@
 ---
 
 ### 13. Who Speaks Next? Multi-party AI Discussion Leveraging the Systematics of Turn-Taking in Murder Mystery Games
-- **Source:** [DOI:10.3389/frai.2025.1582287](https://doi.org/10.3389/frai.2025.1582287)
+- **File:** `who-speaks-next-ai-discussions-frai-8-1582287.pdf`
 - **Authors:** Nonomura, Mori (Utsunomiya University)
 - **Venue:** Frontiers in Artificial Intelligence, June 2025
 - **DOI:** 10.3389/frai.2025.1582287
@@ -197,7 +197,7 @@
 ---
 
 ### 14. Multi-Agent Collaboration Mechanisms: A Survey of LLMs
-- **Source:** [arXiv:2501.06322](https://arxiv.org/abs/2501.06322)
+- **File:** `multi-agent-collaboration-mechanisms-2501.06322v1.pdf`
 - **Authors:** Tran, Dao, Nguyen, Pham, O'Sullivan, Nguyen (University College Cork / Pusan National University / Trinity College Dublin)
 - **Venue:** Preprint, January 2025
 - **arXiv:** 2501.06322
@@ -210,7 +210,7 @@
 ---
 
 ### 15. MultiAgentBench: Evaluating the Collaboration and Competition of LLM Agents
-- **Source:** [arXiv:2503.01935](https://arxiv.org/abs/2503.01935)
+- **File:** `multi-agent-bench-colab-competition-agents-2503.01935v1.pdf`
 - **Authors:** Zhu, Du, Hong, Yang, Guo, Wang, Qian, Tang, Ji, You (UIUC)
 - **Venue:** Preprint, March 2025
 - **arXiv:** 2503.01935
@@ -223,7 +223,7 @@
 ---
 
 ### 16. On the Dynamics of Multi-Agent LLM Communities Driven by Value Diversity
-- **Source:** [arXiv:2512.10665](https://arxiv.org/abs/2512.10665)
+- **File:** `multi-agent-llm-communities-driven-by-value-diversity-2512.10665v1.pdf`
 - **Authors:** Huang, Zhao, Yi, Xie (Stanford / Microsoft Research Asia)
 - **Venue:** Working paper, December 2025
 - **arXiv:** 2512.10665
@@ -237,7 +237,7 @@
 ---
 
 ### 17. Personas Evolved: Designing Ethical LLM-Based Conversational Agent Personalities
-- **Source:** [arXiv:2502.20513](https://arxiv.org/abs/2502.20513)
+- **File:** `personas-evolved-designing-ethical-llm-2502.20513v1.pdf`
 - **Authors:** Desai, Dubiel, Zargham, Mildner, Spillner (Northeastern / U. Luxembourg / U. Bremen)
 - **Venue:** Workshop proposal, ACM 2025
 - **arXiv:** 2502.20513
@@ -251,7 +251,7 @@
 
 ## Papers Referenced in Analysis But Not in Collection
 
-These papers are cited in `RESEARCH-ANALYSIS-2026.md` but are not summarized above. Consider adding source links and notes when they become part of the active research set:
+These papers are cited in `RESEARCH-ANALYSIS-2026.md` but their PDFs are not in the `research/` folder. Consider downloading for reference:
 
 | Paper | Why It Matters | Where to Find |
 |-------|---------------|---------------|
@@ -268,7 +268,7 @@ These papers are cited in `RESEARCH-ANALYSIS-2026.md` but are not summarized abo
 **When building or modifying a system:**
 1. Look up the system in the "Quick Lookup" table above
 2. Read the relevant paper summaries and "Relevance to project" sections
-3. Check the linked source for implementation details, evaluation methodology, or experimental design
+3. Check the paper itself for implementation details, evaluation methodology, or experimental design
 
 **When designing an experiment:**
 1. Check if a paper already tested something similar
