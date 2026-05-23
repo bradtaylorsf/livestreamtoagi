@@ -13,13 +13,16 @@ from core.minecraft.eval.live_telemetry import (
     InventoryDelta,
     LifecycleSignals,
     LiveRunSummary,
+    MultiAgentTimingFailure,
     OutcomeClass,
+    TimingSignals,
     classify_bridge_status,
     classify_eval_category,
     derive_block_mutation,
     derive_inventory_delta,
     derive_lifecycle_signals,
     derive_pathfinding_signals,
+    derive_timing_signals,
 )
 
 
@@ -592,6 +595,157 @@ def test_live_run_summary_lifecycle_summary_aggregates_mixed_cases() -> None:
         "unstuck_failures": 1,
     }
     assert summary.to_dict()["case_results"][0]["lifecycle"]["death_loop"] is True
+
+
+def test_derive_timing_signals_classifies_multi_agent_queue_and_loss_markers() -> None:
+    signals = derive_timing_signals(
+        "vera",
+        (
+            ActionEvent(
+                action_id="move-1",
+                kind="queued",
+                ts_ms=100,
+                payload={
+                    "queue_depth": 3,
+                    "queue_contention": True,
+                    "conflicting_action_ids": ["place-2"],
+                },
+            ),
+            ActionEvent(
+                action_id="move-1",
+                kind="interrupted",
+                ts_ms=110,
+                payload={"self_interruption_count": 2},
+            ),
+            ActionEvent(
+                action_id="move-1",
+                kind="fanout",
+                ts_ms=120,
+                payload={"director_fanout_count": 2},
+            ),
+            ActionEvent(
+                action_id="move-1",
+                kind="dropped",
+                ts_ms=130,
+                payload={"dropped_commands": 1, "command_loss_count": 1},
+            ),
+        ),
+        params={"agent_id": "vera", "multi_agent": True},
+        final_state={"agents": {"vera": {}}, "last_command_ts_ms": 130},
+    )
+
+    assert signals is not None
+    assert signals.agent_id == "vera"
+    assert signals.queue_depth == 3
+    assert signals.queue_contention is True
+    assert signals.self_interruption_count == 2
+    assert signals.director_fanout_count == 2
+    assert signals.dropped_commands == 1
+    assert signals.command_loss_count == 1
+    assert signals.conflicting_action_ids == ("place-2",)
+    assert signals.last_command_ts_ms == 130
+
+
+def test_classify_eval_category_returns_multi_agent_timing_for_timing_context() -> None:
+    assert (
+        classify_eval_category(
+            "move",
+            OutcomeClass.SUCCESS,
+            "queue contention",
+            {
+                "agents": {"vera": {}, "rex": {}},
+                "queue_depth": 2,
+            },
+            params={"multi_agent": True},
+        )
+        == EvalCategory.MULTI_AGENT_TIMING
+    )
+
+
+def test_case_result_coerces_timing_mapping_to_timing_signals() -> None:
+    result = CaseResult(
+        case_id="vera-live-move-0001",
+        command_text="!move move-1 north 1 10000",
+        params={"agent_id": "vera", "multi_agent": True},
+        action_events=(),
+        outcome_class=OutcomeClass.SUCCESS,
+        final_state={"agents": {"vera": {}}, "queue_depth": 2},
+        latency_ms=5,
+        timing={
+            "agent_id": "vera",
+            "queue_depth": 2,
+            "queue_contention": True,
+            "conflicting_action_ids": ["rex-place-1"],
+        },
+    )
+
+    assert result.agent_id == "vera"
+    assert result.eval_category == EvalCategory.MULTI_AGENT_TIMING
+    assert isinstance(result.timing, TimingSignals)
+    assert result.timing.queue_depth == 2
+    assert result.to_dict()["timing"]["conflicting_action_ids"] == ["rex-place-1"]
+
+
+def test_live_run_summary_timing_summary_aggregates_by_agent_and_failure_class() -> None:
+    queue_case = CaseResult(
+        case_id="vera-live-move-0001",
+        command_text="!move move-1 north 1 10000",
+        params={"agent_id": "vera", "multi_agent": True},
+        action_events=(),
+        outcome_class=OutcomeClass.ERROR,
+        final_state={"agents": {"vera": {}}, "queue_depth": 3},
+        latency_ms=4,
+        eval_category=EvalCategory.MULTI_AGENT_TIMING,
+        timing=TimingSignals(agent_id="vera", queue_depth=3, queue_contention=True),
+    )
+    interruption_case = CaseResult(
+        case_id="rex-live-move-0001",
+        command_text="!move move-1 north 1 10000",
+        params={"agent_id": "rex", "multi_agent": True},
+        action_events=(),
+        outcome_class=OutcomeClass.TIMEOUT,
+        final_state={"agents": {"rex": {}}, "self_interruption_count": 2},
+        latency_ms=6,
+        eval_category=EvalCategory.MULTI_AGENT_TIMING,
+        timing=TimingSignals(agent_id="rex", self_interruption_count=2),
+    )
+    loss_case = CaseResult(
+        case_id="rex-live-move-0002",
+        command_text="!move move-2 north 1 10000",
+        params={"agent_id": "rex", "multi_agent": True},
+        action_events=(),
+        outcome_class=OutcomeClass.ERROR,
+        final_state={"agents": {"rex": {}}, "command_loss_count": 1},
+        latency_ms=8,
+        eval_category=EvalCategory.MULTI_AGENT_TIMING,
+        timing=TimingSignals(
+            agent_id="rex",
+            dropped_commands=1,
+            command_loss_count=1,
+        ),
+    )
+    summary = LiveRunSummary(
+        command="multi-agent-timing",
+        resolved_command="multi-agent-timing",
+        profile="flat-eval",
+        seed=7,
+        dry_run=True,
+        verbose=True,
+        case_results=(queue_case, interruption_case, loss_case),
+        profile_detail={},
+    )
+
+    timing = summary.timing_summary
+    assert timing["cases"] == 3
+    assert timing["agents"] == 2
+    assert timing["contention"] == 1
+    assert timing["interruptions"] == 2
+    assert timing["command_loss"] == 1
+    assert timing["failure_classes"][MultiAgentTimingFailure.QUEUE_CONTENTION] == 1
+    assert timing["failure_classes"][MultiAgentTimingFailure.SELF_INTERRUPTION] == 1
+    assert timing["failure_classes"][MultiAgentTimingFailure.COMMAND_LOSS] == 1
+    assert timing["per_agent"]["rex"]["cases"] == 2
+    assert summary.to_dict()["case_results"][0]["timing"]["queue_contention"] is True
 
 
 def test_inventory_delta_mapping_coerces_to_json_shape() -> None:
