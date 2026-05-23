@@ -229,6 +229,9 @@ local server so core behavior can be validated without cloud token spend.
 # Check LM Studio / local server
 pnpm llm:local --list-only
 
+# Render text-only Minecraft command eval prompts without starting bots
+pnpm mc:eval:commands --provider lmstudio --model <model-id-from-LM-Studio> --dry-run
+
 # Run a focused validation scenario
 LLM_PROVIDER=lmstudio \
 LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
