@@ -17,6 +17,9 @@ pnpm mc:eval:commands:dry-run
 # Run one command family repeatedly with deterministic action telemetry.
 pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
 
+# Replay E17 accepted commands in the flat eval world with a fake bridge.
+pnpm mc:eval:replay:smoke
+
 # Run the focused regression suite used by CI.
 pnpm verify:mc-eval-commands
 ```
@@ -135,6 +138,44 @@ Live smoke artifacts are intentionally lightweight:
 | `summary.json` | Full structured `LiveRunSummary` payload. |
 | `cases.ndjson` | One `CaseResult` payload per generated command case. |
 | `report.md` | Human-readable command, profile, outcome, and per-case summary. |
+
+## Dataset Replay
+
+`pnpm mc:eval:replay` loads E17 `passing-prompts.ndjson` artifacts, filters
+accepted command prompts, and replays the rebuilt command text through the same
+live bridge surface used by `pnpm mc:eval:live`. It defaults to the deterministic
+fake bridge unless `MC_EVAL_LIVE_ENABLED=1` is set.
+
+```bash
+pnpm mc:eval:replay \
+  --dataset artifacts/mc-eval/openrouter-gpt-4o-mini/passing-prompts.ndjson \
+  --command move \
+  --limit 20 \
+  --dry-run \
+  --report-dir artifacts/mc-eval/replay-move
+
+pnpm verify:mc-eval-replay
+```
+
+Replay flags:
+
+| Flag | Purpose |
+| --- | --- |
+| `--dataset <path>` | Required path to an E17 `passing-prompts.ndjson` artifact. |
+| `--command <token>` | Optional repeatable command filter; accepts `move` or `!move`. |
+| `--scenario <id>` | Optional repeatable exact scenario id filter. |
+| `--limit <count>` | Replay only the first N filtered prompts. |
+| `--profile <name>` | Live eval profile. Defaults to `flat-eval`. |
+| `--dry-run` | Force the deterministic fake bridge. |
+| `--json` | Print machine-readable summary JSON. |
+| `--output <path>` | Write the structured summary JSON. |
+| `--report-dir <dir>` | Write `summary.json`, `cases.ndjson`, and `report.md`. |
+| `--verbose` | Print per-action start/end telemetry. |
+
+Replay outcomes keep parser/text rejection separate from live-world execution
+failures: `malformed` and `rejected` indicate pre-execution rejection, while
+`world_constraint`, `timeout`, and `error` indicate live execution failure modes.
+The replay report also includes dataset counts and per-command outcome counts.
 
 ## Artifacts
 
