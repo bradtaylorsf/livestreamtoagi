@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import http.client
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
+import urllib.parse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, TextIO
@@ -41,7 +41,7 @@ class HttpBridgeClient:
     """Small HTTP command bridge for explicitly enabled live eval runs."""
 
     def __init__(self, url: str, token: str, *, timeout: float = 30.0) -> None:
-        self.url = url
+        self.url = _parse_bridge_url(url)
         self.token = token
         self.timeout = timeout
 
@@ -50,23 +50,58 @@ class HttpBridgeClient:
 
     def _post_command(self, command_text: str) -> Mapping[str, Any]:
         body = json.dumps({"command_text": command_text}).encode("utf-8")
-        request = urllib.request.Request(
-            self.url,
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
+        path = self.url.path or "/"
+        if self.url.query:
+            path = f"{path}?{self.url.query}"
+        connection_cls = (
+            http.client.HTTPSConnection
+            if self.url.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        host = self.url.hostname
+        if host is None:
+            raise LiveBridgeConfigError("MC_EVAL_LIVE_BRIDGE_URL must include a host")
+        connection = connection_cls(
+            host,
+            port=self.url.port,
+            timeout=self.timeout,
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as exc:
+            connection.request(
+                "POST",
+                path,
+                body=body,
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read().decode("utf-8"))
+            if response.status >= 400:
+                raise OSError(f"live bridge returned HTTP {response.status}: {payload}")
+        except (OSError, http.client.HTTPException) as exc:
             raise OSError(f"live bridge request failed: {exc}") from exc
+        finally:
+            connection.close()
         if not isinstance(payload, Mapping):
             raise ValueError("live bridge response must be a JSON object")
         return payload
+
+
+def _parse_bridge_url(url: str) -> urllib.parse.SplitResult:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise LiveBridgeConfigError(f"invalid MC_EVAL_LIVE_BRIDGE_URL: {exc}") from exc
+    if parsed.scheme not in {"http", "https"}:
+        raise LiveBridgeConfigError("MC_EVAL_LIVE_BRIDGE_URL must use http or https")
+    if not parsed.hostname:
+        raise LiveBridgeConfigError("MC_EVAL_LIVE_BRIDGE_URL must include a host")
+    if parsed.username or parsed.password:
+        raise LiveBridgeConfigError("MC_EVAL_LIVE_BRIDGE_URL must not include credentials")
+    return parsed
 
 
 def main(
