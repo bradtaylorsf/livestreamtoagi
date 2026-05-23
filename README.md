@@ -229,8 +229,11 @@ local server so core behavior can be validated without cloud token spend.
 # Check LM Studio / local server
 pnpm llm:local --list-only
 
-# Render text-only Minecraft command eval prompts without starting bots
-pnpm mc:eval:commands --provider lmstudio --model <model-id-from-LM-Studio> --dry-run
+# List text-only Minecraft command eval inputs without starting bots
+pnpm mc:eval:commands:smoke
+
+# Render and score text-only command eval prompts with a fake provider
+pnpm mc:eval:commands:dry-run
 
 # Run a focused validation scenario
 LLM_PROVIDER=lmstudio \
@@ -245,6 +248,9 @@ python scripts/run_simulation.py \
 
 python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
 ```
+
+See [Minecraft Command Eval](docs/minecraft/command-eval.md) for local model,
+OpenRouter, artifact, and comparison workflows.
 
 See [Local LLM Validation Plan](specs/LOCAL-LLM-VALIDATION-PLAN.md) for the full
 research verification matrix.

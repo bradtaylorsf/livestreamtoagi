@@ -1,0 +1,131 @@
+# Minecraft Command Eval
+
+The command eval harness runs text-only Minecraft action prompts against a local
+or hosted model. It does not launch Minecraft, Mindcraft bots, Mineflayer, or
+the bridge. Use it to catch malformed commands, disallowed tools, and obvious
+semantic misses before a live soak run.
+
+## Quickstart
+
+```bash
+# Deterministic smoke: resolves fixtures and command schemas, no provider calls.
+pnpm mc:eval:commands:smoke
+
+# Render prompts and score deterministic fake responses.
+pnpm mc:eval:commands:dry-run
+
+# Run the focused regression suite used by CI.
+pnpm verify:mc-eval-commands
+```
+
+`pnpm mc:eval:commands:smoke` maps to
+`pnpm mc:eval:commands --dry-run --list-only`, mirroring the low-risk
+`pnpm llm:local --list-only` convention for local checks.
+
+## Local Provider
+
+Local runs use the same OpenAI-compatible configuration names as the local
+simulation tooling:
+
+| Env key | Required | Notes |
+| --- | --- | --- |
+| `LLM_PROVIDER` | No | Use `lmstudio`, `local`, or `openai-compatible`. Defaults to `lmstudio`. |
+| `LOCAL_LLM_BASE_URL` | No | Defaults to `http://localhost:1234/v1`. Legacy `LLM_BASE_URL` is also accepted. |
+| `LOCAL_LLM_API_KEY` | No | Defaults to the non-secret LM Studio value `lm-studio`. Legacy `LLM_API_KEY` is also accepted. |
+| `LOCAL_LLM_MODEL` | Yes for live local calls | Model id served by LM Studio or the compatible local server. `--dry-run` can omit it. |
+
+Example:
+
+```bash
+pnpm llm:local --list-only
+
+LLM_PROVIDER=lmstudio \
+LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
+pnpm mc:eval:commands --provider lmstudio --report-dir artifacts/mc-eval/local-qwen
+```
+
+## OpenRouter
+
+OpenRouter runs require an API key and an explicit model id. The key is only
+used for provider construction and is never printed in CLI output or artifacts.
+
+```bash
+OPENROUTER_API_KEY=<key> \
+pnpm mc:eval:commands \
+  --provider openrouter \
+  --model openai/gpt-4o-mini \
+  --report-dir artifacts/mc-eval/openrouter-gpt-4o-mini
+```
+
+`OPENROUTER_BASE_URL` may override the default OpenRouter API base URL when
+needed.
+
+## CLI Flags
+
+| Flag | Purpose |
+| --- | --- |
+| `--scenarios <path>` | Scenario JSON file or directory. Defaults to `tests/backend/fixtures/mc_scenarios/valid`. |
+| `--provider <name>` | `lmstudio`, `openai-compatible`, or `openrouter`. |
+| `--model <id>` | Model id. Required for OpenRouter and live local calls. |
+| `--base-url <url>` | Override provider base URL. |
+| `--api-key <key>` | Override provider key. Never printed. |
+| `--timeout <seconds>` | Provider request timeout. |
+| `--max-tokens <count>` | Completion token cap. |
+| `--temperature <value>` | Sampling temperature. |
+| `--limit <count>` | Evaluate only the first N resolved scenarios. |
+| `--dry-run` | Use a deterministic fake provider response and skip network I/O. |
+| `--list-only` | Print provider/model, scenario ids, and command schema summary, then exit before provider client construction. |
+| `--json` | Print machine-readable summary or list-only payload. |
+| `--output <path>` | Write the raw run summary, or list-only payload, as JSON. |
+| `--report-dir <dir>` | Write scored run artifacts. |
+| `--passing-prompts <path>` | Write accepted command prompts as NDJSON. |
+| `--compare <scores.json>` | Include an existing scores file in `comparison.md`. May be repeated and requires `--report-dir`. |
+
+## Artifacts
+
+When `--report-dir` is set, the harness writes:
+
+| Artifact | Contents |
+| --- | --- |
+| `generations.ndjson` | One raw generation and scoring result per scenario. |
+| `scores.json` | Structured aggregate metrics, outcome counts, token usage, and model metadata. |
+| `report.md` | Human-readable run summary with malformed, rejected, chat-only, and valid command examples. |
+| `comparison.md` | Written when `--compare` is provided; compares current and prior `scores.json` files. |
+
+`--passing-prompts <path>` writes accepted command examples to a separate NDJSON
+file for downstream prompt review. `--output <path>` writes the raw collection
+summary or list-only metadata payload.
+
+## Comparison Workflow
+
+Use separate report directories per provider/model, then compare against the
+prior `scores.json` artifacts with the same scenario set and seed.
+
+```bash
+pnpm mc:eval:commands \
+  --provider lmstudio \
+  --model local-qwen \
+  --report-dir artifacts/mc-eval/local-qwen
+
+OPENROUTER_API_KEY=<key> \
+pnpm mc:eval:commands \
+  --provider openrouter \
+  --model openai/gpt-4o-mini \
+  --report-dir artifacts/mc-eval/openrouter-gpt-4o-mini \
+  --compare artifacts/mc-eval/local-qwen/scores.json
+```
+
+Repeat `--compare` to include more previous runs. The current run is always
+included first in the generated `comparison.md`.
+
+## CI And Regression Tests
+
+CI should use fake provider responses only:
+
+```bash
+pnpm mc:eval:commands:smoke
+pnpm verify:mc-eval-commands
+```
+
+The regression suite injects fake clients and dry-run responses, so it does not
+require live LLMs, OpenRouter credentials, Minecraft, or Mindcraft bots.

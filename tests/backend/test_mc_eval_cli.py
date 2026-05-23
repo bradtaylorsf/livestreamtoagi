@@ -108,6 +108,73 @@ def test_cli_dry_run_json_uses_bundled_fixtures_and_redacts_env_secrets() -> Non
     assert stderr.getvalue() == ""
 
 
+def test_cli_list_only_prints_inputs_without_client_construction() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    secret = "local-secret-value"
+
+    def factory(config: ProviderConfig) -> FakeClient:
+        raise AssertionError("list-only must not construct a provider client")
+
+    exit_code = main(
+        ["--list-only", "--limit", "2"],
+        env={
+            "LOCAL_LLM_BASE_URL": "http://localhost:1234/v1",
+            "LOCAL_LLM_API_KEY": secret,
+            "LOCAL_LLM_MODEL": "qwen-local",
+        },
+        client_factory=factory,
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    text = stdout.getvalue()
+    assert exit_code == 0, stderr.getvalue()
+    assert "provider: lmstudio" in text
+    assert "model: qwen-local" in text
+    assert "- baseline-observe-area" in text
+    assert "- chat-only-blocked-command" in text
+    assert "- movement-with-inventory" not in text
+    assert "commands: command_count=" in text
+    assert secret not in text
+    assert secret not in stderr.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_cli_list_only_json_emits_structured_listing_without_client_construction() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    secret = "flag-secret-value"
+
+    def factory(config: ProviderConfig) -> FakeClient:
+        raise AssertionError("list-only must not construct a provider client")
+
+    exit_code = main(
+        ["--dry-run", "--list-only", "--json", "--limit", "1", "--api-key", secret],
+        env={},
+        client_factory=factory,
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    data = json.loads(stdout.getvalue())
+    assert data["mode"] == "list-only"
+    assert data["provider"] == "lmstudio"
+    assert data["model"] == "dry-run-local-model"
+    assert data["key_present"] is True
+    assert data["scenario_count"] == 1
+    assert data["scenario_ids"] == ["baseline-observe-area"]
+    assert data["commands"]["command_count"] > 0
+    assert data["commands"]["disallowed_count"] > 0
+    assert data["commands"]["source_counts"]
+    assert secret not in stdout.getvalue()
+    assert secret not in stderr.getvalue()
+    assert stderr.getvalue() == ""
+
+
 def test_cli_uses_injected_client_factory_without_network() -> None:
     stdout = io.StringIO()
     stderr = io.StringIO()
