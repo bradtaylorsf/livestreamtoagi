@@ -157,9 +157,7 @@ def resolve_profile(
         level_type=level_type,
         level_name=config["LEVEL_NAME"],
         generate_structures=_parse_bool(config["GENERATE_STRUCTURES"], "GENERATE_STRUCTURES"),
-        spawn_protection=_parse_non_negative_int(
-            config["SPAWN_PROTECTION"], "SPAWN_PROTECTION"
-        ),
+        spawn_protection=_parse_non_negative_int(config["SPAWN_PROTECTION"], "SPAWN_PROTECTION"),
         keep_server_running=_resolve_keep_server_running(template, resolved_env),
     )
 

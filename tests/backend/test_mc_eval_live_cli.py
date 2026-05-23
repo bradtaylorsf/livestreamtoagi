@@ -100,6 +100,27 @@ def test_live_cli_enabled_live_mode_without_env_exits_nonzero() -> None:
     assert "MINECRAFT_BRIDGE_TOKEN" in stderr.getvalue()
 
 
+def test_live_cli_rejects_non_http_bridge_url() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        ["--command", "move", "--cases", "1"],
+        env={
+            "MC_EVAL_LIVE_ENABLED": "1",
+            "MC_EVAL_LIVE_BRIDGE_URL": "file:///tmp/bridge.sock",
+            "MINECRAFT_BRIDGE_TOKEN": "test-token",
+        },
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert "MC_EVAL_LIVE_BRIDGE_URL must use http or https" in stderr.getvalue()
+
+
 def test_live_cli_writes_output_and_report_artifacts(tmp_path: Path) -> None:
     stdout = io.StringIO()
     stderr = io.StringIO()
