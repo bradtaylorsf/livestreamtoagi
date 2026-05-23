@@ -1,5 +1,6 @@
 {
   "name": "livestream-agi",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n docker,backend,frontend,website -c blue,green,cyan,magenta \"pnpm dev:docker\" \"pnpm dev:backend\" \"pnpm dev:frontend\" \"pnpm dev:website\"",

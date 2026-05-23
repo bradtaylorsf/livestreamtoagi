@@ -2,7 +2,8 @@
 name = "livestream-agi"
 version = "0.1.0"
 description = "24/7 AI reality show — 9 agents in a pixel art world"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.13,<3.14"
+license = { text = "MIT" }
 dependencies = [
     "crewai>=0.80.0",
     "openai>=1.0.0",
