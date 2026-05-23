@@ -145,6 +145,11 @@ def test_replay_cli_report_dir_writes_dataset_artifacts(tmp_path: Path) -> None:
     assert (report_dir / "summary.json").is_file()
     assert (report_dir / "cases.ndjson").is_file()
     assert (report_dir / "report.md").is_file()
+    assert (report_dir / "live-generations.ndjson").is_file()
+    assert (report_dir / "live-actions.ndjson").is_file()
+    assert (report_dir / "live-scores.json").is_file()
+    assert (report_dir / "live-report.md").is_file()
+    assert (report_dir / "timeline.ndjson").is_file()
 
     summary = json.loads((report_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["cases"] == 2
@@ -157,13 +162,57 @@ def test_replay_cli_report_dir_writes_dataset_artifacts(tmp_path: Path) -> None:
     assert len(case_lines) == 2
     assert json.loads(case_lines[0])["command_text"] == "!move north 2"
 
+    generations = (report_dir / "live-generations.ndjson").read_text(encoding="utf-8").splitlines()
+    assert len(generations) == 1
+    generation = json.loads(generations[0])
+    assert generation["record_type"] == "dataset-reference"
+    assert generation["dataset_path"] == str(dataset_path)
+    assert generation["selected_scenario_ids"] == ["move-north", "inventory-check"]
+
     report = (report_dir / "report.md").read_text(encoding="utf-8")
     assert "## Dataset Replay" in report
     assert "## Categories" in report
     assert "## Pathfinding" in report
+    assert "[live-generations.ndjson](live-generations.ndjson)" in report
     assert "prompts_loaded: `2`" in report
     assert "`move`: success=1" in report
     assert "### Per-category Outcomes" in report
+
+
+def test_replay_cli_traces_dir_writes_position_traces_linked_from_report(
+    tmp_path: Path,
+) -> None:
+    dataset_path = _write_dataset(tmp_path, [_record("move-north", "!move", ["north", "2"])])
+    report_dir = tmp_path / "report"
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        [
+            "--dataset",
+            str(dataset_path),
+            "--dry-run",
+            "--report-dir",
+            str(report_dir),
+            "--traces-dir",
+            "traces",
+        ],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    trace_files = sorted((report_dir / "traces").glob("*.json"))
+    assert len(trace_files) == 1
+    trace = json.loads(trace_files[0].read_text(encoding="utf-8"))
+    assert trace["case_id"] == "replay-move-north-0001"
+    assert trace["final_pose"] is not None
+
+    report = (report_dir / "live-report.md").read_text(encoding="utf-8")
+    assert "### Position Traces" in report
+    assert f"[traces/{trace_files[0].name}](traces/{trace_files[0].name})" in report
 
 
 def test_replay_cli_verbose_prints_action_start_and_end_lines(tmp_path: Path) -> None:

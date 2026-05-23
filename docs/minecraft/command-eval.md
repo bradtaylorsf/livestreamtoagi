@@ -17,6 +17,9 @@ pnpm mc:eval:commands:dry-run
 # Run one command family repeatedly with deterministic action telemetry.
 pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
 
+# Write live eval artifacts plus cheap position traces to a temp report dir.
+pnpm mc:eval:live:report
+
 # Simulate a small multi-agent timing/action-queue cohort.
 pnpm mc:eval:live --multi-agent --agents vera:move:5,rex:placeHere:3 --tick-ms 200 --stagger-ms 50 --director-fanout 2 --dry-run
 
@@ -123,6 +126,8 @@ Minecraft, Mindcraft bots, or OpenRouter credentials.
 ```bash
 pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
 pnpm mc:eval:live:smoke
+pnpm mc:eval:live:report
+pnpm verify:mc-eval-live-artifacts
 pnpm verify:mc-eval-live
 ```
 
@@ -140,7 +145,18 @@ Live smoke artifacts are intentionally lightweight:
 | --- | --- |
 | `summary.json` | Full structured `LiveRunSummary` payload. |
 | `cases.ndjson` | One `CaseResult` payload per generated command case. |
-| `report.md` | Human-readable command, profile, outcome, and per-case summary. |
+| `live-generations.ndjson` | One generated command per smoke case, or a single dataset replay reference containing the dataset path, filters, selected scenario ids, and command tokens. |
+| `live-actions.ndjson` | One flattened action event per line with `case_id`, `agent_id`, `action_id`, `kind`, `ts_ms`, and payload. |
+| `live-scores.json` | Compact scoring summary with pass/fail counts, outcome/category counts, behavior summaries, and per-case scoring fields. |
+| `live-report.md` | Human-readable command, profile, outcome, artifact links, optional trace links, and per-case summary. |
+| `timeline.ndjson` | Monitor-compatible subset using soak timeline event names such as `action.start`, `action.completed`, `action.result`, `error`, and `lifecycle`. |
+| `report.md` | Legacy alias for `live-report.md`. |
+
+Pass `--report-dir <dir>` to write the artifact set. Pass
+`--traces-dir traces` with `--report-dir` to save cheap per-case position traces
+under `<dir>/traces/<case_id>.json`; trace files are linked from
+`live-report.md` when a final pose is available. Relative trace paths resolve
+inside the report directory.
 
 ### Lifecycle Categories
 

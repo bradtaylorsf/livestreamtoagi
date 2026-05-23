@@ -129,6 +129,11 @@ def test_live_cli_writes_output_and_report_artifacts(tmp_path: Path) -> None:
     assert (report_dir / "summary.json").is_file()
     assert (report_dir / "cases.ndjson").is_file()
     assert (report_dir / "report.md").is_file()
+    assert (report_dir / "live-generations.ndjson").is_file()
+    assert (report_dir / "live-actions.ndjson").is_file()
+    assert (report_dir / "live-scores.json").is_file()
+    assert (report_dir / "live-report.md").is_file()
+    assert (report_dir / "timeline.ndjson").is_file()
 
     output = json.loads(output_path.read_text(encoding="utf-8"))
     assert output["command"] == "build"
@@ -146,6 +151,44 @@ def test_live_cli_writes_output_and_report_artifacts(tmp_path: Path) -> None:
     assert "## Pathfinding" in report
     assert "## Inventory" in report
     assert "## Block Mutation" in report
+    assert "[live-actions.ndjson](live-actions.ndjson)" in report
+
+
+def test_live_cli_traces_dir_writes_position_traces_linked_from_report(
+    tmp_path: Path,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    report_dir = tmp_path / "report"
+
+    exit_code = main(
+        [
+            "--command",
+            "move",
+            "--cases",
+            "1",
+            "--dry-run",
+            "--report-dir",
+            str(report_dir),
+            "--traces-dir",
+            "traces",
+        ],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    trace_files = sorted((report_dir / "traces").glob("*.json"))
+    assert len(trace_files) == 1
+    trace = json.loads(trace_files[0].read_text(encoding="utf-8"))
+    assert trace["case_id"] == "live-move-0001"
+    assert trace["final_pose"] is not None
+
+    report = (report_dir / "live-report.md").read_text(encoding="utf-8")
+    assert "### Position Traces" in report
+    assert f"[traces/{trace_files[0].name}](traces/{trace_files[0].name})" in report
 
 
 def test_live_cli_place_here_report_includes_inventory_and_block_mutation_sections(

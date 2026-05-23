@@ -110,7 +110,12 @@ def main(
         if not selected_prompts and not args.json:
             print("No dataset prompts matched the selected filters.", file=out)
         if args.report_dir:
-            _write_report_artifacts(args.report_dir, summary)
+            _write_report_artifacts(
+                args.report_dir,
+                summary,
+                dataset_path=dataset_path,
+                traces_dir=args.traces_dir,
+            )
         if args.output:
             _write_output(args.output, summary)
         _emit_summary(summary, json_mode=args.json, verbose=args.verbose, stdout=out)
@@ -207,7 +212,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report-dir",
         default=None,
-        help="Write summary.json, cases.ndjson, and report.md artifacts",
+        help="Write live eval report artifacts",
+    )
+    parser.add_argument(
+        "--traces-dir",
+        default=None,
+        help=(
+            "Optionally write cheap per-case position traces. Relative paths resolve "
+            "inside --report-dir."
+        ),
     )
     parser.add_argument("--verbose", action="store_true", help="Print per-action telemetry")
     return parser
