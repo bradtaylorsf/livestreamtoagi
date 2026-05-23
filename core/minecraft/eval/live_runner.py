@@ -16,6 +16,8 @@ from core.minecraft.eval.live_telemetry import (
     LiveRunSummary,
     OutcomeClass,
     classify_bridge_status,
+    classify_eval_category,
+    derive_pathfinding_signals,
 )
 
 
@@ -63,9 +65,9 @@ _FAMILY_COMMANDS.update({command: command for command in _SUPPORTED_COMMANDS})
 _DEFAULT_FAKE_CYCLE: tuple[Mapping[str, Any], ...] = (
     {"status": "ok", "reason": "completed"},
     {"status": "ok", "reason": "completed"},
-    {"status": "failed", "reason": "blocked by world constraint"},
+    {"status": "failed", "reason": "blocked by collision: cannot path to target"},
     {"status": "rejected", "reason": "permission gate rejected command"},
-    {"status": "timeout", "reason": "action timed out"},
+    {"status": "timeout", "reason": "stuck: action timed out while pathfinding"},
     {"status": "malformed", "reason": "parser rejected command before dispatch"},
 )
 
@@ -168,9 +170,7 @@ def resolve_command_name(command: str) -> str:
     if not normalized:
         raise ValueError(_unknown_command_message(command))
 
-    family_match = _FAMILY_COMMANDS.get(normalized) or _FAMILY_COMMANDS.get(
-        normalized.casefold()
-    )
+    family_match = _FAMILY_COMMANDS.get(normalized) or _FAMILY_COMMANDS.get(normalized.casefold())
     if family_match is not None:
         return family_match
 
@@ -221,6 +221,22 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
         error=response.get("error"),
     )
     error = error or _case_error(outcome_class, response)
+    final_state = response.get("final_state")
+    if not isinstance(final_state, Mapping):
+        final_state = {}
+    eval_category = classify_eval_category(
+        case.command_name,
+        outcome_class,
+        response.get("reason") or response.get("outcome_class") or error,
+        final_state,
+    )
+    pathfinding = derive_pathfinding_signals(
+        case.command_name,
+        outcome_class,
+        reason=response.get("reason") or response.get("outcome_class"),
+        error=response.get("error") or error,
+        final_state=final_state,
+    )
     events.append(
         ActionEvent(
             action_id=case.action_id,
@@ -232,14 +248,12 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
                 "status": response.get("status"),
                 "reason": response.get("reason"),
                 "outcome_class": outcome_class,
+                "eval_category": eval_category,
+                "pathfinding": pathfinding.to_dict() if pathfinding else None,
                 "latency_ms": max(0, ended_ms - started_ms),
             },
         )
     )
-
-    final_state = response.get("final_state")
-    if not isinstance(final_state, Mapping):
-        final_state = {}
 
     return CaseResult(
         case_id=case.case_id,
@@ -250,6 +264,8 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
         final_state=final_state,
         latency_ms=max(0, ended_ms - started_ms),
         error=error,
+        eval_category=eval_category,
+        pathfinding=pathfinding,
     )
 
 
@@ -400,9 +416,7 @@ def _build_from_plan_case(
     }
     origin_json = json.dumps(origin, separators=(",", ":"))
     plan_json = json.dumps(plan, separators=(",", ":"))
-    command_text = (
-        f"!buildFromPlan {action_id} {origin_json} {plan_json} {max_steps} {timeout_ms}"
-    )
+    command_text = f"!buildFromPlan {action_id} {origin_json} {plan_json} {max_steps} {timeout_ms}"
     return CommandCase(case_id, "buildFromPlan", command_text, params)
 
 
@@ -427,14 +441,22 @@ def _fake_final_state(
         "bridge_status": response.get("status", "ok"),
         "outcome_class": outcome_class,
     }
-    if command_name == "move":
+    if command_name in {"move", "searchForBlock", "planAndBuild", "buildFromPlan"}:
+        detail = f"{response.get('reason') or ''} {response.get('error') or ''}".casefold()
         state["pose"] = {"x": 1, "y": 64, "z": 0, "yaw": 90}
-    elif command_name in {"placeHere", "buildFromPlan", "planAndBuild"}:
+        state["pathfinding"] = {
+            "stuck": "stuck" in detail or "timed out" in detail,
+            "collision": "collision" in detail,
+            "blocked_path": any(
+                marker in detail for marker in ("blocked", "cannot path", "no path", "unreachable")
+            ),
+        }
+    if command_name in {"placeHere", "buildFromPlan", "planAndBuild"}:
         state["blocks"] = [{"x": 0, "y": 64, "z": 1, "block_type": "oak_planks"}]
         state["inventory"] = {"oak_planks": 7, "cobblestone": 8}
     elif command_name == "inventory":
         state["inventory"] = {"oak_planks": 8, "cobblestone": 8, "torch": 4}
-    else:
+    elif command_name not in {"move", "searchForBlock", "planAndBuild", "buildFromPlan"}:
         state["nearby_blocks"] = [
             {"x": 0, "y": 63, "z": 0, "block_type": "grass_block"},
             {"x": 1, "y": 64, "z": 1, "block_type": "oak_log"},

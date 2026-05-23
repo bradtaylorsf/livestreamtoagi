@@ -42,6 +42,8 @@ from core.minecraft.eval.live_telemetry import (
     LiveRunSummary,
     OutcomeClass,
     classify_bridge_status,
+    classify_eval_category,
+    derive_pathfinding_signals,
 )
 
 
@@ -259,6 +261,23 @@ async def _run_prompt(
         error=response.get("error"),
     )
     error = error or _case_error(outcome_class, response)
+    final_state = response.get("final_state")
+    if not isinstance(final_state, Mapping):
+        final_state = {}
+    display_command = _display_command(prompt.command_token)
+    eval_category = classify_eval_category(
+        display_command,
+        outcome_class,
+        response.get("reason") or response.get("outcome_class") or error,
+        final_state,
+    )
+    pathfinding = derive_pathfinding_signals(
+        display_command,
+        outcome_class,
+        reason=response.get("reason") or response.get("outcome_class"),
+        error=response.get("error") or error,
+        final_state=final_state,
+    )
     events.append(
         ActionEvent(
             action_id=action_id,
@@ -266,8 +285,10 @@ async def _run_prompt(
             ts_ms=ended_ms,
             payload={
                 "case_id": case_id,
-                "command": _display_command(prompt.command_token),
+                "command": display_command,
                 "outcome_class": outcome_class,
+                "eval_category": eval_category,
+                "pathfinding": pathfinding.to_dict() if pathfinding else None,
                 "reason": response.get("reason"),
                 "scenario_id": prompt.scenario_id,
                 "status": response.get("status"),
@@ -275,10 +296,6 @@ async def _run_prompt(
             },
         )
     )
-
-    final_state = response.get("final_state")
-    if not isinstance(final_state, Mapping):
-        final_state = {}
 
     return CaseResult(
         case_id=case_id,
@@ -299,6 +316,8 @@ async def _run_prompt(
         final_state=final_state,
         latency_ms=max(0, ended_ms - started_ms),
         error=error,
+        eval_category=eval_category,
+        pathfinding=pathfinding,
     )
 
 
@@ -315,6 +334,7 @@ def _dataset_replay_detail(
         "command_counts": dict(sorted(command_counts.items())),
         "dataset_path": str(dataset_path) if dataset_path is not None else None,
         "filters": dict(filters),
+        "per_category_outcome_counts": _per_category_outcome_counts(results),
         "per_command_outcome_counts": _per_command_outcome_counts(prompts, results),
         "selected_prompts": len(prompts),
         "total_prompts": total_prompts,
@@ -329,6 +349,18 @@ def _per_command_outcome_counts(
     for prompt, result in zip(prompts, results, strict=False):
         command = _display_command(prompt.command_token)
         bucket = counts.setdefault(command, {outcome: 0 for outcome in OutcomeClass.ALL})
+        bucket[result.outcome_class] += 1
+    return dict(sorted(counts.items()))
+
+
+def _per_category_outcome_counts(
+    results: Sequence[CaseResult],
+) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for result in results:
+        bucket = counts.setdefault(
+            result.eval_category, {outcome: 0 for outcome in OutcomeClass.ALL}
+        )
         bucket[result.outcome_class] += 1
     return dict(sorted(counts.items()))
 

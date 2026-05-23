@@ -13,7 +13,7 @@ from core.minecraft.eval.live_runner import (
     run_live_command_smoke,
     supported_command_inputs,
 )
-from core.minecraft.eval.live_telemetry import OutcomeClass
+from core.minecraft.eval.live_telemetry import EvalCategory, OutcomeClass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -95,6 +95,11 @@ async def test_fake_bridge_maps_statuses_to_outcome_classes() -> None:
     assert len(bridge.calls) == 6
     assert summary.outcome_counts[OutcomeClass.SUCCESS] == 1
     assert summary.outcome_counts[OutcomeClass.WORLD_CONSTRAINT] == 1
+    assert all(
+        result.eval_category in {EvalCategory.PATHFINDING, EvalCategory.COLLISION}
+        for result in summary.case_results
+    )
+    assert summary.case_results[3].eval_category == EvalCategory.COLLISION
 
 
 async def test_run_live_command_smoke_records_action_start_and_end_events() -> None:
@@ -113,3 +118,42 @@ async def test_run_live_command_smoke_records_action_start_and_end_events() -> N
     for result in summary.case_results:
         assert [event.kind for event in result.action_events] == ["start", "end"]
         assert result.final_state["command"] == "inventory"
+        assert result.eval_category == EvalCategory.OTHER
+
+
+async def test_run_live_command_smoke_records_collision_pathfinding_signals() -> None:
+    bridge = FakeBridgeClient(
+        {
+            "move": (
+                {
+                    "status": "failed",
+                    "reason": "blocked by collision: cannot path to target",
+                    "final_state": {
+                        "pose": {"x": 4, "y": 64, "z": 1, "yaw": 180},
+                        "pathfinding": {"collision": True, "blocked_path": True},
+                    },
+                },
+            )
+        }
+    )
+
+    summary = await run_live_command_smoke(
+        "move",
+        1,
+        bridge=bridge,
+        profile="flat-eval",
+        seed=1,
+        env={},
+        project_root=REPO_ROOT,
+        dry_run=True,
+    )
+
+    result = summary.case_results[0]
+    assert result.outcome_class == OutcomeClass.WORLD_CONSTRAINT
+    assert result.eval_category == EvalCategory.COLLISION
+    assert result.pathfinding is not None
+    assert result.pathfinding.collision is True
+    assert result.pathfinding.blocked_path is True
+    assert result.pathfinding.final_pose == {"x": 4, "y": 64, "z": 1, "yaw": 180}
+    assert result.final_state["pose"] == {"x": 4, "y": 64, "z": 1, "yaw": 180}
+    assert result.action_events[-1].payload["eval_category"] == EvalCategory.COLLISION

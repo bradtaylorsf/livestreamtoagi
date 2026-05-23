@@ -159,8 +159,11 @@ def test_replay_cli_report_dir_writes_dataset_artifacts(tmp_path: Path) -> None:
 
     report = (report_dir / "report.md").read_text(encoding="utf-8")
     assert "## Dataset Replay" in report
+    assert "## Categories" in report
+    assert "## Pathfinding" in report
     assert "prompts_loaded: `2`" in report
     assert "`move`: success=1" in report
+    assert "### Per-category Outcomes" in report
 
 
 def test_replay_cli_verbose_prints_action_start_and_end_lines(tmp_path: Path) -> None:
@@ -219,6 +222,44 @@ def test_replay_cli_distinguishes_text_rejection_from_world_failure(
         OutcomeClass.TIMEOUT,
         OutcomeClass.MALFORMED,
     ]
+
+
+def test_replay_cli_records_category_counts_and_pathfinding_signals(
+    tmp_path: Path,
+) -> None:
+    dataset_path = _write_dataset(
+        tmp_path,
+        [_record(f"move-{index}", "!move", ["north", str(index)]) for index in range(5)],
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        ["--dataset", str(dataset_path), "--dry-run", "--json"],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    data = json.loads(stdout.getvalue())
+    detail = data["profile_detail"]["dataset_replay"]
+    assert detail["per_category_outcome_counts"]["collision"][OutcomeClass.WORLD_CONSTRAINT] == 1
+    assert detail["per_category_outcome_counts"]["pathfinding"][OutcomeClass.SUCCESS] == 2
+    assert detail["per_category_outcome_counts"]["pathfinding"][OutcomeClass.TIMEOUT] == 1
+    assert data["category_counts"]["collision"] == 1
+    assert data["pathfinding_summary"]["collision"] == 1
+    assert data["pathfinding_summary"]["blocked_path"] == 1
+    assert data["pathfinding_summary"]["stuck"] == 1
+
+    collision_case = data["case_results"][2]
+    stuck_case = data["case_results"][4]
+    assert collision_case["eval_category"] == "collision"
+    assert collision_case["pathfinding"]["collision"] is True
+    assert collision_case["pathfinding"]["blocked_path"] is True
+    assert stuck_case["eval_category"] == "pathfinding"
+    assert stuck_case["pathfinding"]["stuck"] is True
 
 
 def test_replay_cli_empty_filter_exits_zero_with_clear_message(tmp_path: Path) -> None:

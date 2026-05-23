@@ -30,6 +30,11 @@ def test_live_cli_dry_run_json_emits_case_count_and_outcomes() -> None:
     assert len(data["case_results"]) == 3
     assert data["outcome_counts"]["success"] == 2
     assert data["outcome_counts"]["world_constraint"] == 1
+    assert data["category_counts"]["pathfinding"] == 2
+    assert data["category_counts"]["collision"] == 1
+    assert data["pathfinding_summary"]["success"] == 2
+    assert data["pathfinding_summary"]["collision"] == 1
+    assert data["pathfinding_summary"]["blocked_path"] == 1
     assert stderr.getvalue() == ""
 
 
@@ -125,8 +130,13 @@ def test_live_cli_writes_output_and_report_artifacts(tmp_path: Path) -> None:
     assert output["command"] == "build"
     assert output["resolved_command"] == "planAndBuild"
     assert output["cases"] == 2
+    assert "category_counts" in output
+    assert "pathfinding_summary" in output
 
     case_lines = (report_dir / "cases.ndjson").read_text(encoding="utf-8").splitlines()
     assert len(case_lines) == 2
     assert json.loads(case_lines[0])["command_text"].startswith("!planAndBuild")
-    assert "planAndBuild" in (report_dir / "report.md").read_text(encoding="utf-8")
+    report = (report_dir / "report.md").read_text(encoding="utf-8")
+    assert "planAndBuild" in report
+    assert "## Categories" in report
+    assert "## Pathfinding" in report

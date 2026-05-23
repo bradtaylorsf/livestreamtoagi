@@ -207,9 +207,20 @@ def _emit_summary(
         + ", ".join(f"{outcome}={count}" for outcome, count in summary.outcome_counts.items()),
         file=stdout,
     )
+    print(
+        "categories: "
+        + ", ".join(f"{category}={count}" for category, count in summary.category_counts.items()),
+        file=stdout,
+    )
+    print(
+        "pathfinding: "
+        + ", ".join(f"{signal}={count}" for signal, count in summary.pathfinding_summary.items()),
+        file=stdout,
+    )
     for result in summary.case_results:
         print(
             f"- {result.case_id}: {result.outcome_class} "
+            f"category={result.eval_category} "
             f"latency_ms={result.latency_ms} command={result.command_text}",
             file=stdout,
         )
@@ -229,6 +240,14 @@ def _emit_verbose_case(result: CaseResult, stdout: TextIO) -> None:
     print(f"  outcome {result.outcome_class}", file=stdout)
     final_state = json.dumps(result.final_state, sort_keys=True, separators=(",", ":"))
     print(f"  final_state {final_state}", file=stdout)
+    print(f"  eval_category {result.eval_category}", file=stdout)
+    if result.pathfinding:
+        pathfinding = json.dumps(
+            result.pathfinding.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        print(f"  pathfinding {pathfinding}", file=stdout)
     if result.error:
         print(f"  error {result.error}", file=stdout)
 
@@ -281,9 +300,17 @@ def _report_md(summary: LiveRunSummary) -> str:
         lines.extend(_dataset_replay_report_lines(dataset_detail))
     lines.extend(("## Outcomes", ""))
     lines.extend(f"- {outcome}: {count}" for outcome, count in summary.outcome_counts.items())
+    lines.extend(("", "## Categories", ""))
+    lines.extend(f"- {category}: {count}" for category, count in summary.category_counts.items())
+    lines.extend(("", "## Pathfinding", ""))
+    pathfinding_lines = _pathfinding_report_lines(summary.case_results)
+    lines.extend(pathfinding_lines if pathfinding_lines else ["None."])
     lines.extend(("", "## Cases", ""))
     for result in summary.case_results:
-        lines.append(f"- `{result.case_id}` {result.outcome_class}: `{result.command_text}`")
+        lines.append(
+            f"- `{result.case_id}` {result.outcome_class} "
+            f"({result.eval_category}): `{result.command_text}`"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -312,7 +339,42 @@ def _dataset_replay_report_lines(dataset_detail: Mapping[str, Any]) -> list[str]
             if isinstance(count, int) and count
         )
         lines.append(f"- `{command}`: {counts or 'none'}")
+    lines.extend(("", "### Per-category Outcomes", ""))
+    per_category = dataset_detail.get("per_category_outcome_counts")
+    if isinstance(per_category, Mapping) and per_category:
+        for category, raw_counts in sorted(per_category.items()):
+            if not isinstance(raw_counts, Mapping):
+                continue
+            counts = ", ".join(
+                f"{outcome}={count}"
+                for outcome, count in raw_counts.items()
+                if isinstance(count, int) and count
+            )
+            lines.append(f"- `{category}`: {counts or 'none'}")
+    else:
+        lines.append("None.")
     lines.append("")
+    return lines
+
+
+def _pathfinding_report_lines(results: Sequence[CaseResult]) -> list[str]:
+    lines: list[str] = []
+    for result in results:
+        signals = result.pathfinding
+        if signals is None:
+            continue
+        pose = (
+            json.dumps(signals.final_pose, sort_keys=True, separators=(",", ":"))
+            if signals.final_pose is not None
+            else "n/a"
+        )
+        lines.append(
+            f"- `{result.case_id}` {result.outcome_class}: "
+            f"stuck={str(signals.stuck).lower()} "
+            f"collision={str(signals.collision).lower()} "
+            f"blocked_path={str(signals.blocked_path).lower()} "
+            f"final_pose=`{pose}`"
+        )
     return lines
 
 
