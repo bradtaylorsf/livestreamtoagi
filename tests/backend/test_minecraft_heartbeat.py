@@ -118,6 +118,46 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_plan_mode_heartbeat_prompt_avoids_standalone_place_commands(tmp_path: Path) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'plan';
+const {{ installHeartbeat }} = await import(pathToFileURL({json.dumps(str(HEARTBEAT))}).href);
+let now = 1000;
+const calls = [];
+const agent = {{
+    name: 'rex',
+    async handleMessage(source, message, maxResponses) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'Checking inventory before the cabin plan. !inventory';
+    }},
+    actions: {{}},
+}};
+
+const heartbeat = installHeartbeat(agent, {{
+    autoStart: false,
+    now: () => now,
+    emit: () => {{}},
+    idleMs: 0,
+    cooldownMs: 0,
+    staleActionMs: 1000,
+    maxNoCommand: 3,
+}});
+await heartbeat.tick();
+
+process.stdout.write(JSON.stringify({{ calls }}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    prompt = result["calls"][0]["message"]
+    assert "If you are the build owner and !planAndBuild is available" in prompt
+    assert "!placeHere" not in prompt
+    assert "standalone block placement" in prompt
+
+
+@requires_node
 def test_heartbeat_cooldown_suppresses_double_fire(tmp_path: Path) -> None:
     source = f"""
 import {{ pathToFileURL }} from 'node:url';

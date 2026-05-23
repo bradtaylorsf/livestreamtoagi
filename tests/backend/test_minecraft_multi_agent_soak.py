@@ -329,7 +329,11 @@ def test_local_sim_plan_mode_enables_plan_building_but_keeps_execute_code_blocke
     assert "blocks !place/!break/!observe" in proc.stdout
     assert "execute code:   blocked (!executeCode)" in proc.stdout
     assert '!planAndBuild("small shared cabin")' in proc.stdout
+    assert "Only the build owner should place blocks through !planAndBuild" in proc.stdout
+    assert 'execute one visible command such as !placeHere("oak_log")' not in proc.stdout
+    assert "do not wait for consensus before placing the first camp marker" not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
+    assert "init delivery:  after easy-spawn starter kit" in proc.stdout
 
 
 def test_openrouter_builder_routing_fails_closed_when_config_is_missing(tmp_path) -> None:
@@ -673,6 +677,20 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "signal_process_tree" in text
     assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
     assert "SOAK_INIT_MESSAGE" in text
+    assert "SOAK_SETTINGS_INIT_MESSAGE" in text
+    assert "send_deferred_init_message" in text
+    assert "easy spawn deferred init" in text
+    assert "after_easy_spawn_starter_kit" in text
+    assert "MC_SIM_BUILD_MODE" in text
+    assert "export MC_SIM_BUILD_MODE" in text
+    assert "build_mode=$MC_SIM_BUILD_MODE" in text
+    assert "MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" in text
+    assert "apply_suppress_empty_init_chat_patch" in text
+    assert "waiting for deferred init message" in text
+    assert "suppress_empty_init_chat=$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" in text
+    assert "apply_director_tool_guard_patch" in text
+    assert "Director V2 blocked unavailable command" in text
+    assert "is not available for this Director V2 turn" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
     assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
     assert "SOAK_BLOCK_EXECUTE_CODE_ACTIONS" in text
@@ -775,7 +793,9 @@ def test_easy_spawn_script_builds_safe_starter_arena() -> None:
     assert "EASY_SETUP_OPERATORS" in text
     assert "EASY_SETUP_SPECTATORS" in text
     assert "/gamemode spectator" in text
+    assert "/clear @a" in text
     assert "minecraft:oak_log 32" in text
+    assert "minecraft:oak_planks" in text
     assert "minecraft:stone_pickaxe 1" in text
 
 

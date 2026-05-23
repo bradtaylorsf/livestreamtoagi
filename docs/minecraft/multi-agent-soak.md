@@ -271,8 +271,11 @@ Director V2 treats `!planAndBuild` as a scheduled macro, not a normal tool that
 every character may invoke independently. One scene has one build-plan owner;
 the owner receives `!planAndBuild`, while nearby non-owners receive normal
 support roles such as gathering, clearing, guarding, or conversation support.
-The Node governor mirrors that scene lock so stale direct commands are skipped
-with `reason=scene_locked` before any provider call.
+In focused `MC_SIM_BUILD_MODE=plan` runs, support roles are observation/chat
+only unless the owner explicitly coordinates additional work; standalone
+placement/build commands are removed from non-owner tool menus and blocked at
+the command parser. The Node governor mirrors that scene lock so stale direct
+commands are skipped with `reason=scene_locked` before any provider call.
 
 The build governor runs before any provider call. Each agent may have one
 active build at a time, each scene may have one active plan owner, equivalent
@@ -285,6 +288,11 @@ cached plans are reused without a new builder-model call. Defaults:
 | `MC_SIM_BUILD_COOLDOWN_SEC` | `300` | Cooldown for equivalent completed build requests. |
 | `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks. |
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
+
+When the local smoke auto-starts the easy Paper server and applies the safe
+starter inventory, `MC_SIM_INIT_MESSAGE` is delivered after that starter-kit
+setup so build owners do not begin a plan before the requested materials are
+available.
 
 Plan evidence appears as `build_plan.generation.*` and
 `build_plan.execution.*` events. `scene_id`, build-plan id, owner,

@@ -265,6 +265,7 @@ MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT:-3}"
 MC_SIM_BUILDER_MAX_USD_PER_RUN="${MC_SIM_BUILDER_MAX_USD_PER_RUN:-}"
 MC_SIM_BUILDER_USD_PER_1K_INPUT="${MC_SIM_BUILDER_USD_PER_1K_INPUT:-}"
 MC_SIM_BUILDER_USD_PER_1K_OUTPUT="${MC_SIM_BUILDER_USD_PER_1K_OUTPUT:-}"
+MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
 MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
@@ -273,6 +274,14 @@ SOAK_BUILDER_PROVIDER="${SOAK_BUILDER_PROVIDER:-$MC_SIM_BUILDER_PROVIDER}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
 SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
+SOAK_SETTINGS_INIT_MESSAGE="$SOAK_INIT_MESSAGE"
+if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+    SOAK_SETTINGS_INIT_MESSAGE=""
+fi
+MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT="${MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT:-0}"
+if [ "$SOAK_EASY_SPAWN" = "1" ] && [ -n "$SOAK_INIT_MESSAGE" ]; then
+    MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT=1
+fi
 SOAK_MIN_INTENT_TO_COMMAND_RATIO="${SOAK_MIN_INTENT_TO_COMMAND_RATIO:-0.6}"
 SOAK_MIN_PARSE_SUCCESS="${SOAK_MIN_PARSE_SUCCESS:-0.8}"
 SOAK_MIN_EXECUTION_RATE="${SOAK_MIN_EXECUTION_RATE:-0.7}"
@@ -728,6 +737,9 @@ print_plan() {
     fi
     if [ -n "$SOAK_INIT_MESSAGE" ]; then
         info "init prompt:    set (${#SOAK_INIT_MESSAGE} chars)"
+        if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+            info "init delivery:  after easy-spawn starter kit"
+        fi
     else
         info "init prompt:    <none>"
     fi
@@ -738,7 +750,7 @@ print_plan() {
 }
 
 build_settings_json() {
-    if [ -z "$SOAK_INIT_MESSAGE" ] \
+    if [ -z "$SOAK_SETTINGS_INIT_MESSAGE" ] \
         && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ] \
         && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ] \
         && [ "$SOAK_SAFE_TERRAIN_ACTIONS" != "1" ]; then
@@ -746,7 +758,7 @@ build_settings_json() {
     fi
     SETTINGS_JSON="$(
         SETTINGS_JSON_CURRENT="${SETTINGS_JSON:-}" \
-        SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+        SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" \
         SOAK_BLOCK_PRIVATE_CONVERSATIONS="$SOAK_BLOCK_PRIVATE_CONVERSATIONS" \
         SOAK_BLOCK_SLOW_SIM_ACTIONS="$SOAK_BLOCK_SLOW_SIM_ACTIONS" \
         SOAK_SAFE_TERRAIN_ACTIONS="$SOAK_SAFE_TERRAIN_ACTIONS" \
@@ -765,8 +777,8 @@ if (existing.trim().length > 0) {
     settings = JSON.parse(existing);
 }
 
-if (process.env.SOAK_INIT_MESSAGE && !Object.hasOwn(settings, 'init_message')) {
-    settings.init_message = process.env.SOAK_INIT_MESSAGE;
+if (process.env.SOAK_SETTINGS_INIT_MESSAGE && !Object.hasOwn(settings, 'init_message')) {
+    settings.init_message = process.env.SOAK_SETTINGS_INIT_MESSAGE;
 }
 
 if (process.env.SOAK_BLOCK_PRIVATE_CONVERSATIONS === '1') {
@@ -824,10 +836,10 @@ NODE
 settings_json_for_bot() {
     local bot="$1"
     [ -n "${SETTINGS_JSON:-}" ] || return 1
-    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" \
         node --input-type=module <<'NODE'
 const settings = JSON.parse(process.env.SETTINGS_JSON_INPUT);
-if (process.env.BOT_ID === 'bridge' && process.env.SOAK_INIT_MESSAGE) {
+if (process.env.BOT_ID === 'bridge' && process.env.SOAK_SETTINGS_INIT_MESSAGE) {
     settings.init_message = '';
 }
 process.stdout.write(JSON.stringify(settings));
@@ -1352,6 +1364,7 @@ write_metadata() {
         echo "builder_max_calls_per_run=$MC_SIM_BUILDER_MAX_CALLS_PER_RUN"
         echo "builder_max_calls_per_agent=$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT"
         echo "builder_max_usd_per_run=$MC_SIM_BUILDER_MAX_USD_PER_RUN"
+        echo "build_mode=$MC_SIM_BUILD_MODE"
         echo "build_max_per_agent=$MC_SIM_BUILD_MAX_PER_AGENT"
         echo "build_cooldown_sec=$MC_SIM_BUILD_COOLDOWN_SEC"
         echo "build_zone_stride=$MC_SIM_BUILD_ZONE_STRIDE"
@@ -1378,6 +1391,7 @@ write_metadata() {
         echo "block_slow_sim_actions=$SOAK_BLOCK_SLOW_SIM_ACTIONS"
         echo "block_execute_code_actions=$SOAK_BLOCK_EXECUTE_CODE_ACTIONS"
         echo "safe_terrain_actions=$SOAK_SAFE_TERRAIN_ACTIONS"
+        echo "suppress_empty_init_chat=$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT"
         echo "easy_spawn=$SOAK_EASY_SPAWN"
         echo "easy_spawn_online_delay_seconds=$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
         echo "min_intent_to_command_ratio=$SOAK_MIN_INTENT_TO_COMMAND_RATIO"
@@ -1406,9 +1420,15 @@ write_metadata() {
         if [ -n "$SOAK_INIT_MESSAGE" ]; then
             echo "init_message_set=yes"
             echo "init_message_chars=${#SOAK_INIT_MESSAGE}"
+            if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+                echo "init_message_delivery=after_easy_spawn_starter_kit"
+            else
+                echo "init_message_delivery=settings_startup"
+            fi
         else
             echo "init_message_set=no"
             echo "init_message_chars=0"
+            echo "init_message_delivery=none"
         fi
         echo "mindserver_base_port=$SOAK_MINDSERVER_BASE_PORT"
         echo "bots=$SOAK_BOTS"
@@ -1546,8 +1566,88 @@ prepare_mindcraft_clone() {
     if [ -f "$MINDCRAFT_BASE_ABS/keys.json" ]; then
         ln -s "$MINDCRAFT_BASE_ABS/keys.json" "$dest/keys.json"
     fi
+    apply_suppress_empty_init_chat_patch "$dest"
+    apply_director_tool_guard_patch "$dest"
     apply_safe_terrain_patch "$dest"
     printf '%s\n' "$dest"
+}
+
+apply_suppress_empty_init_chat_patch() {
+    local dest="$1" agent_path
+    [ "$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" = "1" ] || return 0
+    agent_path="$dest/src/agent/agent.js"
+    if [ ! -f "$agent_path" ]; then
+        fail "Deferred init patch could not find Mindcraft agent file in $dest"
+        return 1
+    fi
+    DEFERRED_INIT_AGENT_PATH="$agent_path" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.DEFERRED_INIT_AGENT_PATH;
+const marker = 'LTAG deferred init suppress empty hello';
+let source = readFileSync(path, 'utf8');
+if (!source.includes(marker)) {
+    const needle = `        else {
+            this.openChat("Hello world! I am "+this.name);
+        }
+`;
+    const patch = `        else {
+            if (process.env.MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT === '1') { // ${marker}
+                console.log(this.name, 'waiting for deferred init message');
+            }
+            else {
+                this.openChat("Hello world! I am "+this.name);
+            }
+        }
+`;
+    if (!source.includes(needle)) {
+        throw new Error('empty init hello chat anchor not found');
+    }
+    source = source.replace(needle, patch);
+    writeFileSync(path, source);
+}
+NODE
+}
+
+apply_director_tool_guard_patch() {
+    local dest="$1" commands_path
+    commands_path="$dest/src/agent/commands/index.js"
+    if [ ! -f "$commands_path" ]; then
+        fail "Director tool guard patch could not find Mindcraft commands file in $dest"
+        return 1
+    fi
+    DIRECTOR_TOOL_GUARD_COMMANDS_PATH="$commands_path" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.DIRECTOR_TOOL_GUARD_COMMANDS_PATH;
+const marker = 'LTAG director v2 runtime tool guard';
+let source = readFileSync(path, 'utf8');
+if (!source.includes(marker)) {
+    const needle = `        const command = getCommand(parsed.commandName);
+        let numArgs = 0;
+`;
+    const patch = `        const command = getCommand(parsed.commandName);
+        const directorRestrictedTools = new Set(['!planAndBuild', '!buildFromPlan', '!placeHere', '!place', '!break']); // ${marker}
+        const directorContext = agent && agent.__ltagDirectorContext;
+        const directorGrantedTools = Array.isArray(directorContext?.granted_tools)
+            ? directorContext.granted_tools
+            : null;
+        const directorGateEnabled = process.env.DIRECTOR_V2_GATE !== '0'
+            && String(process.env.CONVERSATION_MODE || '').trim().toLowerCase() === 'director_v2';
+        if (directorGateEnabled && directorGrantedTools && directorRestrictedTools.has(parsed.commandName)
+            && !directorGrantedTools.includes(parsed.commandName)) {
+            console.warn('Director V2 blocked unavailable command:', parsed.commandName);
+            return \`Command \${parsed.commandName} is not available for this Director V2 turn.\`;
+        }
+        let numArgs = 0;
+`;
+    if (!source.includes(needle)) {
+        throw new Error('executeCommand command lookup anchor not found');
+    }
+    source = source.replace(needle, patch);
+    writeFileSync(path, source);
+}
+NODE
 }
 
 apply_safe_terrain_patch() {
@@ -1658,11 +1758,13 @@ launch_bot() {
         export LTAG_RUN_ID="$RUN_ID"
         export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
+        export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
         export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
         export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
         export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
         export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUILDER_USD_PER_1K_OUTPUT
+        export MC_SIM_BUILD_MODE
         export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
         export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
         export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
@@ -1676,6 +1778,111 @@ launch_bot() {
     pid="$!"
     printf '%s\t%s\t%s\t%s\t%s\n' "$bot" "$pid" "$script" "$worktree" "$log" >> "$PID_FILE"
     sleep "$SOAK_LAUNCH_STAGGER_SECONDS"
+}
+
+send_deferred_init_message() {
+    [ "$SOAK_EASY_SPAWN" = "1" ] || return 0
+    [ -n "$SOAK_INIT_MESSAGE" ] || return 0
+    MINDCRAFT_BASE_ABS="$MINDCRAFT_BASE_ABS" \
+    SOAK_BOTS="$SOAK_BOTS" \
+    SOAK_MINDSERVER_BASE_PORT="$SOAK_MINDSERVER_BASE_PORT" \
+    SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+        node --input-type=module <<'NODE'
+import { createRequire } from 'node:module';
+
+const mindcraftDir = process.env.MINDCRAFT_BASE_ABS;
+const require = createRequire(`${mindcraftDir}/package.json`);
+const { io } = require('socket.io-client');
+
+const botNames = new Map([
+    ['alpha', 'Alpha'],
+    ['vera', 'Vera'],
+    ['rex', 'Rex'],
+    ['aurora', 'Aurora'],
+    ['pixel', 'Pixel'],
+    ['fork', 'Fork'],
+    ['sentinel', 'Sentinel'],
+    ['grok', 'Grok'],
+    ['bridge', 'BridgeBot'],
+]);
+const bots = String(process.env.SOAK_BOTS || '').trim().split(/\s+/).filter(Boolean);
+const basePort = Number.parseInt(process.env.SOAK_MINDSERVER_BASE_PORT || '8080', 10);
+const message = process.env.SOAK_INIT_MESSAGE || '';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function agentNameFor(bot) {
+    return botNames.get(bot) || `${bot.slice(0, 1).toUpperCase()}${bot.slice(1)}`;
+}
+
+function connect(socket) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('connect timeout')), 1500);
+        socket.once('connect', () => {
+            clearTimeout(timer);
+            resolve();
+        });
+        socket.once('connect_error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+function nextAgentsStatus(socket) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve([]), 1500);
+        socket.once('agents-status', (agents) => {
+            clearTimeout(timer);
+            resolve(Array.isArray(agents) ? agents : []);
+        });
+    });
+}
+
+async function sendToBot(bot, index) {
+    if (bot === 'bridge') {
+        return { bot, agentName: agentNameFor(bot), skipped: true, reason: 'bridge receives no init prompt' };
+    }
+    const port = basePort + index;
+    const agentName = agentNameFor(bot);
+    const deadline = Date.now() + 30000;
+    let lastError = 'agent not observed in game';
+    while (Date.now() < deadline) {
+        const socket = io(`http://localhost:${port}`, {
+            transports: ['websocket'],
+            timeout: 1500,
+            reconnection: false,
+            forceNew: true,
+        });
+        const statusPromise = nextAgentsStatus(socket);
+        try {
+            await connect(socket);
+            const agents = await statusPromise;
+            const status = agents.find((agent) => agent && agent.name === agentName);
+            if (status?.in_game && status?.socket_connected !== false) {
+                socket.emit('send-message', agentName, { from: 'system', message });
+                await sleep(100);
+                socket.disconnect();
+                return { bot, agentName, port, sent: true };
+            }
+            lastError = status
+                ? `status in_game=${status.in_game} socket_connected=${status.socket_connected}`
+                : `agent ${agentName} missing from agents-status`;
+        } catch (err) {
+            lastError = err && err.message ? err.message : String(err);
+        } finally {
+            socket.disconnect();
+        }
+        await sleep(500);
+    }
+    throw new Error(`Timed out sending deferred init to ${agentName} on MindServer :${port}: ${lastError}`);
+}
+
+const results = [];
+for (let index = 0; index < bots.length; index += 1) {
+    results.push(await sendToBot(bots[index], index));
+}
+process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
+NODE
 }
 
 stop_process_file() {
@@ -2163,6 +2370,10 @@ if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     sleep "$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
     run_checked "easy spawn starter kit" "$RUN_DIR/preflight/easy-spawn-kit.txt" \
         node "$SCRIPT_DIR/setup-easy-spawn.mjs"
+    if [ -n "$SOAK_INIT_MESSAGE" ]; then
+        run_checked "easy spawn deferred init" "$RUN_DIR/preflight/easy-spawn-init.txt" \
+            send_deferred_init_message
+    fi
 fi
 
 MONITOR_STATUS=0

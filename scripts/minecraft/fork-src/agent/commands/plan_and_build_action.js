@@ -26,6 +26,7 @@ const DEFAULT_MAX_STEPS = 64;
 const DEFAULT_TIMEOUT_MS = 60000;
 const MAX_RADIUS = 6;
 const MAX_HEIGHT = 5;
+const MIN_CABIN_BLOCKS = 32;
 const ALLOWED_MATERIALS = new Set([
     'oak_log',
     'oak_planks',
@@ -148,9 +149,71 @@ function hutBlueprint() {
     return { blocks };
 }
 
-function starterBlueprint(description) {
+function isCabinRequest(description) {
     const text = String(description || '').toLowerCase();
-    if (text.includes('hut') || text.includes('cabin') || text.includes('shelter')) {
+    return text.includes('cabin') || text.includes('house') || text.includes('shelter');
+}
+
+function cabinBlueprint(maxSteps = DEFAULT_MAX_STEPS) {
+    if (maxSteps < MIN_CABIN_BLOCKS) return hutBlueprint();
+    const blocks = [];
+    const corners = [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+    ];
+
+    for (const [dx, dz] of corners) {
+        blocks.push({ dx, dy: 0, dz, block_type: 'oak_log' });
+    }
+    for (const [dx, dz] of [
+        [0, -1],
+        [-1, 0],
+        [1, 0],
+        [0, 1],
+    ]) {
+        blocks.push({ dx, dy: 0, dz, block_type: 'cobblestone' });
+    }
+    for (let y = 1; y <= 2; y += 1) {
+        for (const [dx, dz] of corners) {
+            blocks.push({ dx, dy: y, dz, block_type: 'oak_log' });
+        }
+        for (const [dx, dz] of [
+            [-1, 0],
+            [1, 0],
+            [0, 1],
+        ]) {
+            blocks.push({ dx, dy: y, dz, block_type: 'oak_planks' });
+        }
+    }
+    for (const [dx, dz] of [
+        [-1, -1],
+        [1, -1],
+        [-1, 0],
+        [1, 0],
+        [-1, 1],
+        [0, 1],
+        [1, 1],
+    ]) {
+        blocks.push({ dx, dy: 3, dz, block_type: 'oak_planks' });
+    }
+    for (const [dx, dz] of [
+        [-1, 0],
+        [1, 0],
+    ]) {
+        blocks.push({ dx, dy: 4, dz, block_type: 'oak_planks' });
+    }
+    blocks.push({ dx: 0, dy: 1, dz: -1, block_type: 'torch' });
+    return { blocks };
+}
+
+function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
+    const text = String(description || '').toLowerCase();
+    if (isCabinRequest(text)) {
+        return cabinBlueprint(maxSteps);
+    }
+    if (text.includes('hut')) {
         return hutBlueprint();
     }
     if (text.includes('wall')) {
@@ -185,6 +248,27 @@ function starterBlueprint(description) {
             { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
         ],
     };
+}
+
+function assertPlanMatchesRequest(plan, description, maxSteps) {
+    if (!isCabinRequest(description) || maxSteps < MIN_CABIN_BLOCKS) return;
+    const blocks = Array.isArray(plan?.blocks) ? plan.blocks : [];
+    if (blocks.length < MIN_CABIN_BLOCKS) {
+        throw new TypeError(`cabin plan too small: expected at least ${MIN_CABIN_BLOCKS} blocks`);
+    }
+    const materials = new Set(blocks.map((block) => normalizeBlockType(block.block_type)));
+    for (const required of ['oak_log', 'oak_planks', 'cobblestone', 'torch']) {
+        if (!materials.has(required)) throw new TypeError(`cabin plan missing ${required}`);
+    }
+    const xs = new Set(blocks.map((block) => block.dx));
+    const zs = new Set(blocks.map((block) => block.dz));
+    const maxDy = Math.max(...blocks.map((block) => block.dy));
+    if (xs.size < 3 || zs.size < 3) {
+        throw new TypeError('cabin plan lacks a recognizable footprint');
+    }
+    if (maxDy < 3) {
+        throw new TypeError('cabin plan lacks a roof outline');
+    }
 }
 
 function stripJsonFence(text) {
@@ -313,7 +397,7 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
     }
 
     if (!resolved.available) {
-        return { source: 'starter_blueprint', plan: starterBlueprint(description), raw: '' };
+        return { source: 'starter_blueprint', plan: starterBlueprint(description, maxSteps), raw: '' };
     }
 
     const systemMessage = [
@@ -506,6 +590,7 @@ export const planAndBuildAction = {
                 generated.max_builder_calls_per_agent = callState.max_builder_calls_per_agent;
             }
             plan = validateGeneratedPlan(generated.plan, origin, stepLimit);
+            assertPlanMatchesRequest(plan, description, stepLimit);
             if (!acquisition.cache_hit) {
                 recordPlanGenerated(agent, acquisition, plan);
             }
@@ -538,7 +623,11 @@ export const planAndBuildAction = {
                     err && err.message ? err.message : String(err)
                 }`;
             }
-            generated = { source: 'starter_blueprint_after_rejection', raw: '', plan: starterBlueprint(description) };
+            generated = {
+                source: 'starter_blueprint_after_rejection',
+                raw: '',
+                plan: starterBlueprint(description, stepLimit),
+            };
             plan = validateGeneratedPlan(generated.plan, origin, stepLimit);
             recordPlanGenerated(agent, acquisition, plan);
         }

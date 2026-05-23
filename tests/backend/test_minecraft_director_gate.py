@@ -305,6 +305,91 @@ async def test_planner_turn_gets_build_macro_ownership_and_plan_tool() -> None:
     assert all(decision.build_macro.support_task for decision in supports if decision.build_macro)
 
 
+async def test_build_plan_success_notice_does_not_start_second_macro() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="rex",
+        event_text=(
+            "build-from-plan build-plan-1 success: intended=32; present=32; "
+            "missing=0; unexpected=0; verified=32; completion=1.000"
+        ),
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert all(decision.build_macro is None for decision in decisions)
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
+async def test_build_completion_chatter_does_not_start_second_macro() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="rex",
+        event_text="Looks like the cabin is done! Nice job everyone!",
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert all(decision.build_macro is None for decision in decisions)
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
+async def test_bare_cabin_followup_does_not_start_second_macro() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="rex",
+        event_text="Awesome! The cabin is up. What's next?",
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert all(decision.build_macro is None for decision in decisions)
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
+async def test_heartbeat_text_does_not_start_build_macro() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text=(
+            "Autonomous heartbeat: you have been quiet in the Minecraft plan-build "
+            "simulation. If you are the build owner and !planAndBuild is available, "
+            "use one concise request."
+        ),
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert all(decision.build_macro is None for decision in decisions)
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
+async def test_plan_mode_success_closes_single_build_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "plan")
+    monkeypatch.setenv("MC_SIM_BUILD_MAX_PER_AGENT", "1")
+    gate = _gate()
+    success_event = _build_event(
+        source_agent="rex",
+        event_text=(
+            "build-from-plan build-plan-1 success: intended=32; present=32; "
+            "missing=0; unexpected=0; verified=32; completion=1.000"
+        ),
+    )
+    for agent_id in AGENTS:
+        await gate.evaluate("sim-test", agent_id, success_event)
+
+    followup = _build_event(
+        source_agent="fork",
+        event_text="Let's build a simple work table right here for organized storage.",
+    )
+    decisions = [await gate.evaluate("sim-test", agent_id, followup) for agent_id in AGENTS]
+
+    assert all(decision.build_macro is None for decision in decisions)
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
 async def test_system_broadcast_build_turn_considers_full_sim_cohort() -> None:
     gate = DirectorPromptGate(
         scheduler_config=SchedulerConfig(max_turns_per_scene=1, random_jitter=0.0)

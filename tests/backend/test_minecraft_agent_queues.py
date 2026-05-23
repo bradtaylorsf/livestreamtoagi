@@ -432,3 +432,78 @@ process.stdout.write(JSON.stringify({{
         for event in result["events"]
         if event["type"] == "inbox.turn_completed"
     } >= {"ok", "director_suppressed"}
+
+
+@requires_node
+def test_director_gate_plan_mode_enrichment_avoids_standalone_place_commands(
+    tmp_path: Path,
+) -> None:
+    director_gate = _stage_skill_tree(tmp_path, DIRECTOR_GATE)
+    bridge = director_gate.parent.parent / "bridge"
+    (bridge / "python_bridge.js").write_text(
+        """
+export async function callBridge(opts = {}) {
+    globalThis.__bridgeCalls = globalThis.__bridgeCalls || [];
+    globalThis.__bridgeCalls.push(opts);
+    return {
+        ok: true,
+        payload: {
+            selected: true,
+            turn_kind: 'speaker',
+            reason: 'support',
+            scene_id: 'scene-cabin',
+            scene_digest: 'one full log cabin house',
+            role: 'support',
+            local_observations: {},
+            granted_tools: ['!placeHere', '!inventory', '!planAndBuild'],
+            build_macro: {
+                role: 'support',
+                owner: 'rex',
+                plan_id: 'plan-cabin',
+                support_task: 'inventory check',
+            },
+            queue_depth: 1,
+            suppressed_agents: [],
+        },
+    };
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'plan';
+const gate = await import(pathToFileURL({json.dumps(str(director_gate))}).href);
+const calls = [];
+const agent = {{
+    name: 'vera',
+    bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+    actions: {{
+        actionList: ['!placeHere', '!inventory', '!planAndBuild'],
+    }},
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'supporting';
+    }},
+}};
+
+gate.installDirectorGate(agent, {{ enabled: true, deadlineMs: 100 }});
+await agent.handleMessage('system', 'Coordinate the cabin build.');
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    bridgeCalls: globalThis.__bridgeCalls,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    message = result["calls"][0]["message"]
+    assert "Support role only" in message
+    assert "Do not use plan/build commands" in message
+    assert "Available tools: !inventory" in message
+    assert "Available tools: !inventory, !placeHere" not in message
+    assert "prefer one visible safe command" not in message
+    assert "!placeHere" not in result["bridgeCalls"][0]["payload"]["available_tools"]
+    assert "!buildFromPlan" not in result["bridgeCalls"][0]["payload"]["available_tools"]

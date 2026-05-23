@@ -110,6 +110,7 @@ class _GateState:
     event_sequence: int = 0
     turn_sequence: int = 0
     total_selected_turns: int = 0
+    plan_mode_build_completed: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -265,6 +266,8 @@ class DirectorPromptGate:
             scheduler_decision=scheduler_decision,
             candidates=candidates,
         )
+        if _is_successful_build_plan_status_notice(event_text.lower()):
+            state.plan_mode_build_completed = True
         build_macros = self._build_macro_assignments(
             scene=scene,
             scheduler_decision=scheduler_decision,
@@ -358,6 +361,8 @@ class DirectorPromptGate:
         available_tools: Sequence[str],
         now_ms: int,
     ) -> dict[str, BuildMacroAssignment]:
+        if _is_plan_mode_single_build_closed(self._state):
+            return {}
         if not _is_build_macro_intent(event_text, available_tools):
             return {}
         selected = scheduler_decision.selected
@@ -693,11 +698,18 @@ def _selected_agent_scene_cap(agent_count: int) -> int:
 
 def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> bool:
     lowered = str(event_text or "").lower()
-    if any(str(tool).lower() == "!planandbuild" for tool in available_tools):
-        if any(token in lowered for token in ("build", "cabin", "hut", "wall", "shelter")):
-            return True
+    if (
+        lowered.startswith("autonomous heartbeat:")
+        or _is_build_plan_status_notice(lowered)
+        or _is_build_completion_chatter(lowered)
+    ):
+        return False
     if "!planandbuild" in lowered or "planandbuild" in lowered:
         return True
+    return _has_build_request_intent(lowered)
+
+
+def _has_build_request_intent(lowered: str) -> bool:
     return any(
         pattern in lowered
         for pattern in (
@@ -706,14 +718,59 @@ def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> b
             "build the ",
             "build us ",
             "build me ",
+            "build one ",
+            "build our ",
+            "build this ",
+            "build from plan",
             "builder plan",
-            "cabin",
-            "hut",
-            "shelter",
+            "construct a ",
+            "construct an ",
+            "construct the ",
+            "make a ",
+            "make an ",
+            "make the ",
+            "need a cabin",
+            "need a hut",
+            "need a shelter",
+            "plan a cabin",
+            "plan a house",
+            "plan a shelter",
+            "plan and build",
+            "should build",
             "storage corner",
-            "wall",
-            "watchtower",
+            "let's build",
+            "lets build",
         )
+    )
+
+
+def _is_build_plan_status_notice(lowered: str) -> bool:
+    return (
+        "build-from-plan" in lowered
+        and any(status in lowered for status in (" success:", " partial:", " failed:"))
+    )
+
+
+def _is_successful_build_plan_status_notice(lowered: str) -> bool:
+    return "build-from-plan" in lowered and " success:" in lowered
+
+
+def _is_plan_mode_single_build_closed(state: _GateState) -> bool:
+    if not state.plan_mode_build_completed:
+        return False
+    if os.environ.get("MC_SIM_BUILD_MODE") != "plan":
+        return False
+    max_per_agent = _int_or_none(os.environ.get("MC_SIM_BUILD_MAX_PER_AGENT"))
+    return max_per_agent is None or max_per_agent <= 1
+
+
+def _is_build_completion_chatter(lowered: str) -> bool:
+    return any(
+        done in lowered
+        for done in ("done", "finished", "complete", "completed", "nice job", "good job")
+    ) and any(
+        target in lowered
+        for target in ("build", "cabin", "house", "hut", "shelter", "structure")
     )
 
 
@@ -798,6 +855,15 @@ def _float_or_none(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 

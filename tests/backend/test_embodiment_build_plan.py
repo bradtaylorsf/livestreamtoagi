@@ -1005,6 +1005,125 @@ process.stdout.write(JSON.stringify({{
     assert "exceeds horizontal build bounds" in rejected["payload"]["error"]
 
 
+@requires_node
+def test_plan_and_build_rejects_tiny_cabin_plan_and_uses_cabin_blueprint(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = -2; x <= 2; x += 1) {{
+    for (let z = -2; z <= 2; z += 1) {{
+        world.set(`${{x}},63,${{z}}`, 'grass_block');
+    }}
+}}
+const bot = {{
+    username: 'RexHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [
+            {{ name: 'oak_log' }},
+            {{ name: 'oak_planks' }},
+            {{ name: 'cobblestone' }},
+            {{ name: 'torch' }},
+        ],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'rex',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }},
+                        {{ dx: 1, dy: 0, dz: 0, block_type: 'oak_planks' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(
+    agent,
+    'full log cabin house with oak-log corners, oak-plank walls, cobblestone foundation, torch-lit interior, doorway, and simple roof',
+);
+process.stdout.write(JSON.stringify({{
+    result,
+    finalBlocks: {{
+        nwBase: world.get('-1,64,-1'),
+        seTop: world.get('1,66,1'),
+        threshold: world.get('0,64,-1'),
+        doorwayTorch: world.get('0,65,-1'),
+        sideWall: world.get('-1,65,0'),
+        roof: world.get('-1,67,0'),
+        ridge: world.get('-1,68,0'),
+    }},
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "rex",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "64",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert result["finalBlocks"] == {
+        "nwBase": "oak_log",
+        "seTop": "oak_log",
+        "threshold": "cobblestone",
+        "doorwayTorch": "torch",
+        "sideWall": "oak_planks",
+        "roof": "oak_planks",
+        "ridge": "oak_planks",
+    }
+    completed = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.completed"
+    )
+    assert completed["payload"]["source"] == "starter_blueprint_after_rejection"
+    assert len(completed["payload"]["plan"]["blocks"]) >= 32
+    rejected = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.rejected"
+    )
+    assert "cabin plan too small" in rejected["payload"]["error"]
+
+
 def test_package_json_wires_embodiment_build_plan_verifier() -> None:
     scripts = json.loads(PACKAGE_JSON.read_text())["scripts"]
 

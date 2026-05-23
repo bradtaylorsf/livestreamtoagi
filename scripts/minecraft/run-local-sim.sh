@@ -387,7 +387,11 @@ if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
     esac
 fi
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
-    EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\") and !placeHere(\"cobblestone\"). Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke."
+    if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+        EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build one coherent shared structure before doing more resource collection. Only the build owner should place blocks through !planAndBuild; support agents should coordinate in ordinary public Minecraft chat, check inventory or nearby resources when useful, and avoid standalone block placement unless the owner asks for help. Do not use !place, !placeHere, !break, !observe, or JSON/object command arguments in this local smoke."
+    else
+        EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\") and !placeHere(\"cobblestone\"). Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke."
+    fi
     case "$SOAK_INIT_MESSAGE" in
         *"Easy-mode rules:"*) ;;
         *) SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE $EASY_MODE_GUIDANCE" ;;

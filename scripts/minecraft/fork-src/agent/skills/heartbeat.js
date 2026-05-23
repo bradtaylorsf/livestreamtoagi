@@ -20,6 +20,14 @@ export const NEXT_ACTION_PROMPT = [
     'Do not output !place, !break, !observe, JSON/object arguments, per-tick movement, long plans, or repeated searches.',
 ].join(' ');
 
+export const PLAN_BUILD_NEXT_ACTION_PROMPT = [
+    'Autonomous heartbeat: you have been quiet in the Minecraft plan-build simulation.',
+    'Keep the group focused on one coherent shared structure.',
+    'If you are the build owner and !planAndBuild is available, use one concise !planAndBuild request and then let buildFromPlan finish.',
+    'Otherwise use a short public chat update, !inventory, !nearbyBlocks, or !searchForBlock only when useful.',
+    'Do not output standalone block placement, breaking, observation commands, JSON/object arguments, per-tick movement, long plans, or repeated searches.',
+].join(' ');
+
 export const DEFAULT_HEARTBEAT_OPTIONS = Object.freeze({
     enabled: true,
     tickMs: 5000,
@@ -30,6 +38,12 @@ export const DEFAULT_HEARTBEAT_OPTIONS = Object.freeze({
     prompt: NEXT_ACTION_PROMPT,
     autoStart: true,
 });
+
+function defaultPrompt() {
+    return process.env.MC_SIM_BUILD_MODE === 'plan'
+        ? PLAN_BUILD_NEXT_ACTION_PROMPT
+        : DEFAULT_HEARTBEAT_OPTIONS.prompt;
+}
 
 function isFalseLike(value) {
     return ['0', 'false', 'no', 'off', 'disabled'].includes(String(value).trim().toLowerCase());
@@ -61,7 +75,7 @@ function normalizeOptions(options = {}) {
             'MC_HEARTBEAT_MAX_NO_COMMAND',
             DEFAULT_HEARTBEAT_OPTIONS.maxNoCommand,
         ),
-        prompt: process.env.MC_HEARTBEAT_PROMPT || DEFAULT_HEARTBEAT_OPTIONS.prompt,
+        prompt: process.env.MC_HEARTBEAT_PROMPT || defaultPrompt(),
         autoStart: DEFAULT_HEARTBEAT_OPTIONS.autoStart,
         ...options,
     };

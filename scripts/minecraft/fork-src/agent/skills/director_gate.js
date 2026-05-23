@@ -25,7 +25,7 @@ const LOCAL_SAFE_TOOLS = new Set([
     '!craftable',
     '!getCraftingPlan',
 ]);
-const PLAN_TOOLS = new Set(['!planAndBuild', '!buildFromPlan']);
+const STANDALONE_BUILD_TOOLS = new Set(['!placeHere', '!place', '!break', '!buildFromPlan']);
 const RISKY_PROMPT_TOOLS = new Set([
     '!break',
     '!executeCode',
@@ -86,11 +86,10 @@ function position(agent) {
 }
 
 function availableTools(agent) {
-    const tools = new Set(DEFAULT_TOOLS);
     const planMode = process.env.MC_SIM_BUILD_MODE === 'plan';
-    if (process.env.MC_SIM_BUILD_MODE === 'plan') {
+    const tools = new Set(planMode ? DEFAULT_TOOLS.filter((tool) => !STANDALONE_BUILD_TOOLS.has(tool)) : DEFAULT_TOOLS);
+    if (planMode) {
         tools.add('!planAndBuild');
-        tools.add('!buildFromPlan');
     }
     const actionNames = agent?.actions?.actions || agent?.actions?.actionList || null;
     if (Array.isArray(actionNames)) {
@@ -98,7 +97,8 @@ function availableTools(agent) {
             const text = String(name || '').trim();
             if (!text) continue;
             const command = text.startsWith('!') ? text : `!${text}`;
-            if (LOCAL_SAFE_TOOLS.has(command) || (planMode && PLAN_TOOLS.has(command))) {
+            if (planMode && STANDALONE_BUILD_TOOLS.has(command)) continue;
+            if (LOCAL_SAFE_TOOLS.has(command) || (planMode && command === '!planAndBuild')) {
                 tools.add(command);
             }
         }
@@ -172,9 +172,27 @@ function emitDecision(agent, verdict, turn, response) {
 function filteredGrantedTools(verdict) {
     const tools = Array.isArray(verdict.granted_tools) ? verdict.granted_tools : [];
     const macro = verdict.build_macro || null;
+    if (process.env.MC_SIM_BUILD_MODE === 'plan') {
+        return tools.filter((tool) => {
+            if (STANDALONE_BUILD_TOOLS.has(tool)) return false;
+            if (tool === '!planAndBuild') return macro?.role === 'planner_owner' && macro.granted === true;
+            return true;
+        });
+    }
     if (!macro) return tools;
     if (macro.role === 'planner_owner' && macro.granted === true) return tools;
     return tools.filter((tool) => tool !== '!planAndBuild');
+}
+
+function commandPolicy(verdict) {
+    const macro = verdict.build_macro || null;
+    if (process.env.MC_SIM_BUILD_MODE === 'plan' || macro) {
+        if (macro?.role === 'planner_owner' && macro.granted === true) {
+            return 'Command policy: Only the build owner should place blocks through !planAndBuild. Use exactly one concise !planAndBuild request for the shared structure, then let buildFromPlan finish. Do not use standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
+        }
+        return 'Command policy: Support role only. Use ordinary chat, !inventory, !nearbyBlocks, or !searchForBlock when useful. Do not use plan/build commands, standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
+    }
+    return 'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
 }
 
 function enrichMessage(message, verdict) {
@@ -199,7 +217,7 @@ function enrichMessage(message, verdict) {
         }
     }
     lines.push(
-        'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.',
+        commandPolicy(verdict),
         'Use this current scene context and ignore stale queued requests.',
         '[/Director V2 context]',
         '',
