@@ -119,7 +119,7 @@ fi
 
 VIEWER_URL="http://127.0.0.1:${VIEWER_PORT}"
 
-# shellcheck disable=SC2329  # invoked indirectly by the EXIT trap below.
+# shellcheck disable=SC2317,SC2329  # invoked indirectly by the EXIT trap below.
 cleanup() {
     if [ -n "${BROWSER_PID:-}" ] && kill -0 "$BROWSER_PID" 2> /dev/null; then
         kill "$BROWSER_PID" 2> /dev/null || true

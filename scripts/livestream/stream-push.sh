@@ -312,9 +312,16 @@ build_ffmpeg_cmd() {
                 )
                 ;;
             *)
-                fail "No display capture backend is available on this host."
-                info "  macOS uses ffmpeg avfoundation; Linux requires X11 DISPLAY or STREAM_X11_DISPLAY."
-                return 1
+                if [ "$MODE" = "dry-run" ]; then
+                    FFMPEG_CMD+=(
+                        -f x11grab -video_size "$VIDEO_SIZE" -framerate "$FPS" -i "<display-capture-required>"
+                        -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_SAMPLE_RATE}"
+                    )
+                else
+                    fail "No display capture backend is available on this host."
+                    info "  macOS uses ffmpeg avfoundation; Linux requires X11 DISPLAY or STREAM_X11_DISPLAY."
+                    return 1
+                fi
                 ;;
         esac
     fi
