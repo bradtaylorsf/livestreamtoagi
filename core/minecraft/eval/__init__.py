@@ -12,6 +12,22 @@ from core.minecraft.eval.live_profile import (
     parse_world_config,
     resolve_profile,
 )
+from core.minecraft.eval.live_runner import (
+    BridgeClient,
+    CaseGenerator,
+    CommandCase,
+    FakeBridgeClient,
+    resolve_command_name,
+    run_live_command_smoke,
+    supported_command_inputs,
+)
+from core.minecraft.eval.live_telemetry import (
+    ActionEvent,
+    CaseResult,
+    LiveRunSummary,
+    OutcomeClass,
+    classify_bridge_status,
+)
 from core.minecraft.eval.parser import ParsedResponse, parse_model_response
 from core.minecraft.eval.provider import (
     ProviderConfig,
@@ -40,12 +56,20 @@ from core.minecraft.eval.runner import (
 )
 
 __all__ = [
+    "ActionEvent",
+    "BridgeClient",
+    "CaseGenerator",
+    "CaseResult",
+    "CommandCase",
     "EvalOutcome",
     "EvalProfile",
     "EvalProfileError",
     "EvalReport",
+    "FakeBridgeClient",
     "BUILTIN_PROFILES",
     "DEFAULT_PROFILE_NAME",
+    "LiveRunSummary",
+    "OutcomeClass",
     "ParsedResponse",
     "ProviderConfig",
     "ProviderConfigError",
@@ -54,18 +78,22 @@ __all__ = [
     "ScoredScenario",
     "ScenarioRunResult",
     "build_scenario_messages",
+    "classify_bridge_status",
     "comparison_md_text",
     "evaluate_response",
     "list_profiles",
     "parse_model_response",
     "parse_world_config",
+    "resolve_command_name",
     "report_md_text",
     "resolve_profile",
     "resolve_provider_config",
     "run_eval",
+    "run_live_command_smoke",
     "score_run",
     "scored_run_from_scores_json",
     "scores_json_dict",
+    "supported_command_inputs",
     "write_comparison_md",
     "write_generations_ndjson",
     "write_passing_prompts_ndjson",
