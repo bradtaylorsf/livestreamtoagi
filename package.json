@@ -44,6 +44,7 @@
     "eval": ".venv/bin/python scripts/chat.py eval",
     "coverage": ".venv/bin/python scripts/chat.py coverage",
     "llm:local": ".venv/bin/python scripts/check_local_llm.py",
+    "mc:eval:commands": ".venv/bin/python scripts/minecraft/eval_commands.py",
     "mc:verify-routing": "scripts/minecraft/verify-model-routing.sh --verify",
     "mc:gen-profiles": ".venv/bin/python scripts/minecraft/gen_profiles.py",
     "mc:connect-bridge": "scripts/minecraft/connect-bridge-bot.sh",
