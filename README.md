@@ -235,6 +235,9 @@ pnpm mc:eval:commands:smoke
 # Render and score text-only command eval prompts with a fake provider
 pnpm mc:eval:commands:dry-run
 
+# Run focused live-command smoke cases through the deterministic fake bridge
+pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
+
 # Run a focused validation scenario
 LLM_PROVIDER=lmstudio \
 LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
