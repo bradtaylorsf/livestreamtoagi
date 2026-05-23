@@ -262,6 +262,56 @@ def test_replay_cli_records_category_counts_and_pathfinding_signals(
     assert stuck_case["pathfinding"]["stuck"] is True
 
 
+def test_replay_cli_records_inventory_and_block_mutation_expectations(
+    tmp_path: Path,
+) -> None:
+    dataset_path = _write_dataset(
+        tmp_path,
+        [
+            _record(
+                "place-oak",
+                "!placeHere",
+                ["oak_planks"],
+                expected_constraints=[
+                    {
+                        "kind": "inventory_delta",
+                        "expected_inventory_delta": {"oak_planks": -1},
+                    },
+                    {
+                        "kind": "expected_blocks",
+                        "expected_blocks": [{"x": 0, "y": 64, "z": 1, "block_type": "oak_planks"}],
+                    },
+                ],
+            )
+        ],
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        ["--dataset", str(dataset_path), "--dry-run", "--json"],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    data = json.loads(stdout.getvalue())
+    case = data["case_results"][0]
+    assert case["eval_category"] == "block_mutation"
+    assert case["inventory"]["matches_expected"] is True
+    assert case["inventory"]["net"] == {"oak_planks": -1}
+    assert case["block_mutation"]["matches_expected"] is True
+    assert case["block_mutation"]["actual_placements"] == [
+        {"x": 0, "y": 64, "z": 1, "block_type": "oak_planks"}
+    ]
+
+    detail = data["profile_detail"]["dataset_replay"]
+    assert detail["per_command_inventory_match_counts"]["placeHere"]["match"] == 1
+    assert detail["per_command_block_mutation_match_counts"]["placeHere"]["match"] == 1
+
+
 def test_replay_cli_empty_filter_exits_zero_with_clear_message(tmp_path: Path) -> None:
     dataset_path = _write_dataset(tmp_path, [_record("move-north", "!move", ["north"])])
     stdout = io.StringIO()
@@ -297,14 +347,15 @@ def _record(
     scenario_id: str,
     command_token: str,
     args: list[str],
+    *,
+    expected_constraints: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "args": args,
-        "available_commands": ["!move", "!inventory"],
+        "available_commands": ["!move", "!inventory", "!placeHere"],
         "command_token": command_token,
-        "expected_constraints": [
-            {"kind": "requires_command", "command": f"!{command_token.lstrip('!')}"}
-        ],
+        "expected_constraints": expected_constraints
+        or [{"kind": "requires_command", "command": f"!{command_token.lstrip('!')}"}],
         "prompt_context": f"Prompt for {scenario_id}.",
         "raw_content": " ".join((command_token, *args)),
         "scenario_id": scenario_id,
