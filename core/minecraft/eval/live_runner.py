@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 import time
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -17,6 +18,8 @@ from core.minecraft.eval.live_telemetry import (
     OutcomeClass,
     classify_bridge_status,
     classify_eval_category,
+    derive_block_mutation,
+    derive_inventory_delta,
     derive_pathfinding_signals,
 )
 
@@ -64,7 +67,7 @@ _FAMILY_COMMANDS.update({command: command for command in _SUPPORTED_COMMANDS})
 
 _DEFAULT_FAKE_CYCLE: tuple[Mapping[str, Any], ...] = (
     {"status": "ok", "reason": "completed"},
-    {"status": "ok", "reason": "completed"},
+    {"status": "ok", "reason": "completed", "mutation_mismatch": True},
     {"status": "failed", "reason": "blocked by collision: cannot path to target"},
     {"status": "rejected", "reason": "permission gate rejected command"},
     {"status": "timeout", "reason": "stuck: action timed out while pathfinding"},
@@ -237,6 +240,18 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
         error=response.get("error") or error,
         final_state=final_state,
     )
+    inventory = derive_inventory_delta(
+        case.command_name,
+        outcome_class,
+        params=case.params,
+        final_state=final_state,
+    )
+    block_mutation = derive_block_mutation(
+        case.command_name,
+        outcome_class,
+        params=case.params,
+        final_state=final_state,
+    )
     events.append(
         ActionEvent(
             action_id=case.action_id,
@@ -250,6 +265,8 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
                 "outcome_class": outcome_class,
                 "eval_category": eval_category,
                 "pathfinding": pathfinding.to_dict() if pathfinding else None,
+                "inventory": inventory.to_dict() if inventory else None,
+                "block_mutation": block_mutation.to_dict() if block_mutation else None,
                 "latency_ms": max(0, ended_ms - started_ms),
             },
         )
@@ -266,6 +283,8 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
         error=error,
         eval_category=eval_category,
         pathfinding=pathfinding,
+        inventory=inventory,
+        block_mutation=block_mutation,
     )
 
 
@@ -322,7 +341,12 @@ def _place_here_case(
 ) -> CommandCase:
     blocks = ("oak_log", "cobblestone", "oak_planks", "torch", "glass")
     block_type = blocks[(index + rng.randrange(len(blocks))) % len(blocks)]
-    params = {"action_id": action_id, "block_type": block_type}
+    params = {
+        "action_id": action_id,
+        "block_type": block_type,
+        "expected_inventory_delta": {block_type: -1},
+        "expected_blocks": [{"dx": 0, "dy": 0, "dz": 1, "block_type": block_type}],
+    }
     return CommandCase(case_id, "placeHere", f"!placeHere {block_type}", params)
 
 
@@ -411,6 +435,7 @@ def _build_from_plan_case(
         "action_id": action_id,
         "origin": origin,
         "plan": plan,
+        "expected_inventory_delta": {block_type: -len(plan["blocks"])},
         "max_steps": max_steps,
         "timeout_ms": timeout_ms,
     }
@@ -451,17 +476,154 @@ def _fake_final_state(
                 marker in detail for marker in ("blocked", "cannot path", "no path", "unreachable")
             ),
         }
-    if command_name in {"placeHere", "buildFromPlan", "planAndBuild"}:
-        state["blocks"] = [{"x": 0, "y": 64, "z": 1, "block_type": "oak_planks"}]
-        state["inventory"] = {"oak_planks": 7, "cobblestone": 8}
+
+    if command_name == "placeHere":
+        block_type = _place_here_block_type(command_text)
+        initial_inventory = {block_type: 4}
+        intended_block = {"x": 0, "y": 64, "z": 1, "block_type": block_type}
+        placed_blocks = (
+            []
+            if response.get("mutation_mismatch") or outcome_class != OutcomeClass.SUCCESS
+            else [intended_block]
+        )
+        final_inventory = _inventory_after_placements(initial_inventory, placed_blocks)
+        state.update(
+            {
+                "pose": {"x": 0, "y": 64, "z": 0, "yaw": 0},
+                "initial_inventory": initial_inventory,
+                "final_inventory": final_inventory,
+                "inventory": final_inventory,
+                "initial_blocks": [],
+                "placed_blocks": placed_blocks,
+                "blocks": placed_blocks,
+            }
+        )
+    elif command_name == "buildFromPlan":
+        origin, plan = _build_from_plan_payload(command_text)
+        intended_blocks = _translated_plan_blocks(plan, origin)
+        placed_blocks = (
+            intended_blocks[:-1]
+            if (response.get("mutation_mismatch") or outcome_class != OutcomeClass.SUCCESS)
+            and intended_blocks
+            else intended_blocks
+        )
+        initial_inventory = _initial_inventory_for_plan(intended_blocks)
+        final_inventory = _inventory_after_placements(initial_inventory, placed_blocks)
+        state.update(
+            {
+                "initial_inventory": initial_inventory,
+                "final_inventory": final_inventory,
+                "inventory": final_inventory,
+                "initial_blocks": [],
+                "placed_blocks": placed_blocks,
+                "blocks": placed_blocks,
+            }
+        )
+    elif command_name == "planAndBuild":
+        intended_blocks = [{"x": 0, "y": 64, "z": 1, "block_type": "oak_planks"}]
+        placed_blocks = (
+            []
+            if response.get("mutation_mismatch") or outcome_class != OutcomeClass.SUCCESS
+            else intended_blocks
+        )
+        initial_inventory = _initial_inventory_for_plan(intended_blocks)
+        final_inventory = _inventory_after_placements(initial_inventory, placed_blocks)
+        state.update(
+            {
+                "initial_inventory": initial_inventory,
+                "final_inventory": final_inventory,
+                "inventory": final_inventory,
+                "initial_blocks": [],
+                "placed_blocks": placed_blocks,
+                "blocks": placed_blocks,
+            }
+        )
     elif command_name == "inventory":
-        state["inventory"] = {"oak_planks": 8, "cobblestone": 8, "torch": 4}
+        initial_inventory = {"oak_planks": 8, "cobblestone": 8, "torch": 4}
+        final_inventory = (
+            {"oak_planks": 8, "cobblestone": 8, "torch": 3}
+            if response.get("mutation_mismatch")
+            else dict(initial_inventory)
+        )
+        state["initial_inventory"] = initial_inventory
+        state["final_inventory"] = final_inventory
+        state["inventory"] = final_inventory
     elif command_name not in {"move", "searchForBlock", "planAndBuild", "buildFromPlan"}:
         state["nearby_blocks"] = [
             {"x": 0, "y": 63, "z": 0, "block_type": "grass_block"},
             {"x": 1, "y": 64, "z": 1, "block_type": "oak_log"},
         ]
     return state
+
+
+def _place_here_block_type(command_text: str) -> str:
+    parts = command_text.strip().split()
+    if len(parts) >= 2 and parts[1].strip():
+        return parts[1].strip()
+    return "oak_planks"
+
+
+def _build_from_plan_payload(command_text: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    parts = command_text.strip().split(maxsplit=5)
+    if len(parts) >= 4:
+        try:
+            origin = json.loads(parts[2])
+            plan = json.loads(parts[3])
+        except json.JSONDecodeError:
+            origin = {"x": 0, "y": 64, "z": 0}
+            plan = {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "oak_planks"}]}
+        if isinstance(origin, Mapping) and isinstance(plan, Mapping):
+            return origin, plan
+    return {"x": 0, "y": 64, "z": 0}, {
+        "blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "oak_planks"}]
+    }
+
+
+def _translated_plan_blocks(
+    plan: Mapping[str, Any],
+    origin: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    raw_blocks = plan.get("blocks")
+    if not isinstance(raw_blocks, Sequence) or isinstance(raw_blocks, (str, bytes)):
+        return []
+    origin_x = int(origin.get("x", 0))
+    origin_y = int(origin.get("y", 64))
+    origin_z = int(origin.get("z", 0))
+    blocks: list[dict[str, Any]] = []
+    for raw_block in raw_blocks:
+        if not isinstance(raw_block, Mapping):
+            continue
+        block_type = raw_block.get("block_type")
+        if not block_type:
+            continue
+        if all(key in raw_block for key in ("x", "y", "z")):
+            x = int(raw_block["x"])
+            y = int(raw_block["y"])
+            z = int(raw_block["z"])
+        else:
+            x = origin_x + int(raw_block.get("dx", 0))
+            y = origin_y + int(raw_block.get("dy", 0))
+            z = origin_z + int(raw_block.get("dz", 0))
+        blocks.append({"x": x, "y": y, "z": z, "block_type": str(block_type)})
+    return blocks
+
+
+def _initial_inventory_for_plan(blocks: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    counts = Counter(str(block.get("block_type")) for block in blocks if block.get("block_type"))
+    return {block_type: count + 4 for block_type, count in sorted(counts.items())}
+
+
+def _inventory_after_placements(
+    initial_inventory: Mapping[str, int],
+    placed_blocks: Sequence[Mapping[str, Any]],
+) -> dict[str, int]:
+    final_inventory = dict(initial_inventory)
+    for block in placed_blocks:
+        block_type = str(block.get("block_type") or "")
+        if not block_type:
+            continue
+        final_inventory[block_type] = final_inventory.get(block_type, 0) - 1
+    return final_inventory
 
 
 def _coerce_action_events(raw_events: object, fallback_action_id: str) -> tuple[ActionEvent, ...]:

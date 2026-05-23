@@ -43,6 +43,8 @@ from core.minecraft.eval.live_telemetry import (
     OutcomeClass,
     classify_bridge_status,
     classify_eval_category,
+    derive_block_mutation,
+    derive_inventory_delta,
     derive_pathfinding_signals,
 )
 
@@ -265,6 +267,7 @@ async def _run_prompt(
     if not isinstance(final_state, Mapping):
         final_state = {}
     display_command = _display_command(prompt.command_token)
+    params = _params_for_prompt(prompt)
     eval_category = classify_eval_category(
         display_command,
         outcome_class,
@@ -278,6 +281,18 @@ async def _run_prompt(
         error=response.get("error") or error,
         final_state=final_state,
     )
+    inventory = derive_inventory_delta(
+        display_command,
+        outcome_class,
+        params=params,
+        final_state=final_state,
+    )
+    block_mutation = derive_block_mutation(
+        display_command,
+        outcome_class,
+        params=params,
+        final_state=final_state,
+    )
     events.append(
         ActionEvent(
             action_id=action_id,
@@ -289,6 +304,8 @@ async def _run_prompt(
                 "outcome_class": outcome_class,
                 "eval_category": eval_category,
                 "pathfinding": pathfinding.to_dict() if pathfinding else None,
+                "inventory": inventory.to_dict() if inventory else None,
+                "block_mutation": block_mutation.to_dict() if block_mutation else None,
                 "reason": response.get("reason"),
                 "scenario_id": prompt.scenario_id,
                 "status": response.get("status"),
@@ -300,17 +317,7 @@ async def _run_prompt(
     return CaseResult(
         case_id=case_id,
         command_text=command_text,
-        params={
-            "args": list(prompt.args),
-            "available_commands": list(prompt.available_commands),
-            "command_token": prompt.command_token,
-            "expected_constraints": [
-                dict(constraint) for constraint in prompt.expected_constraints
-            ],
-            "raw_content": prompt.raw_content,
-            "scenario_id": prompt.scenario_id,
-            "seed": prompt.seed,
-        },
+        params=params,
         action_events=tuple(events),
         outcome_class=outcome_class,
         final_state=final_state,
@@ -318,6 +325,8 @@ async def _run_prompt(
         error=error,
         eval_category=eval_category,
         pathfinding=pathfinding,
+        inventory=inventory,
+        block_mutation=block_mutation,
     )
 
 
@@ -335,6 +344,16 @@ def _dataset_replay_detail(
         "dataset_path": str(dataset_path) if dataset_path is not None else None,
         "filters": dict(filters),
         "per_category_outcome_counts": _per_category_outcome_counts(results),
+        "per_command_block_mutation_match_counts": _per_command_match_counts(
+            prompts,
+            results,
+            "block_mutation",
+        ),
+        "per_command_inventory_match_counts": _per_command_match_counts(
+            prompts,
+            results,
+            "inventory",
+        ),
         "per_command_outcome_counts": _per_command_outcome_counts(prompts, results),
         "selected_prompts": len(prompts),
         "total_prompts": total_prompts,
@@ -363,6 +382,109 @@ def _per_category_outcome_counts(
         )
         bucket[result.outcome_class] += 1
     return dict(sorted(counts.items()))
+
+
+def _per_command_match_counts(
+    prompts: Sequence[PassingPrompt],
+    results: Sequence[CaseResult],
+    field_name: str,
+) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for prompt, result in zip(prompts, results, strict=False):
+        command = _display_command(prompt.command_token)
+        bucket = counts.setdefault(command, {"match": 0, "mismatch": 0, "unknown": 0, "none": 0})
+        detail = getattr(result, field_name)
+        if detail is None:
+            bucket["none"] += 1
+        elif detail.matches_expected is True:
+            bucket["match"] += 1
+        elif detail.matches_expected is False:
+            bucket["mismatch"] += 1
+        else:
+            bucket["unknown"] += 1
+    return dict(sorted(counts.items()))
+
+
+def _params_for_prompt(prompt: PassingPrompt) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "args": list(prompt.args),
+        "available_commands": list(prompt.available_commands),
+        "command_token": prompt.command_token,
+        "expected_constraints": [dict(constraint) for constraint in prompt.expected_constraints],
+        "raw_content": prompt.raw_content,
+        "scenario_id": prompt.scenario_id,
+        "seed": prompt.seed,
+    }
+    params.update(_mutation_expectations_from_constraints(prompt.expected_constraints))
+    return params
+
+
+def _mutation_expectations_from_constraints(
+    constraints: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    expected: dict[str, Any] = {}
+    inventory_delta: dict[str, int] = {}
+    expected_blocks: list[Mapping[str, Any]] = []
+
+    for constraint in constraints:
+        if not isinstance(constraint, Mapping):
+            continue
+        inventory_raw = _constraint_value(
+            constraint,
+            ("expected_inventory_delta", "inventory_delta", "delta"),
+            kinds=("inventory_delta", "expected_inventory_delta"),
+        )
+        if isinstance(inventory_raw, Mapping):
+            for item, amount in inventory_raw.items():
+                if isinstance(amount, bool):
+                    continue
+                try:
+                    inventory_delta[str(item)] = int(amount)
+                except (TypeError, ValueError):
+                    continue
+
+        blocks_raw = _constraint_value(
+            constraint,
+            ("expected_blocks", "placed_blocks", "blocks"),
+            kinds=("expected_blocks", "placed_blocks", "block_mutation"),
+        )
+        if isinstance(blocks_raw, Sequence) and not isinstance(blocks_raw, (str, bytes)):
+            expected_blocks.extend(
+                dict(block) for block in blocks_raw if isinstance(block, Mapping)
+            )
+
+    if inventory_delta:
+        expected["expected_inventory_delta"] = inventory_delta
+    if expected_blocks:
+        expected["expected_blocks"] = expected_blocks
+    return expected
+
+
+def _constraint_value(
+    constraint: Mapping[str, Any],
+    keys: tuple[str, ...],
+    *,
+    kinds: tuple[str, ...],
+) -> object | None:
+    wanted_keys = {key.casefold() for key in keys}
+    for key, value in constraint.items():
+        if str(key).casefold() in wanted_keys:
+            return value
+
+    kind = str(
+        constraint.get("kind")
+        or constraint.get("name")
+        or constraint.get("type")
+        or constraint.get("constraint")
+        or ""
+    ).casefold()
+    if kind not in {value.casefold() for value in kinds}:
+        return None
+    for key in keys:
+        value = constraint.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 def _display_command(command_token: str) -> str:
