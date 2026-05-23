@@ -55,6 +55,9 @@ def test_live_cli_verbose_prints_action_start_and_end_lines() -> None:
     assert text.count("command_input !inventory") == 2
     assert text.count("action_start action_id=") == 2
     assert text.count("action_end action_id=") == 2
+    assert "inventory: " in text
+    assert "block_mutation: " in text
+    assert text.count("  inventory ") == 2
     assert "final_state" in text
     assert stderr.getvalue() == ""
 
@@ -140,3 +143,40 @@ def test_live_cli_writes_output_and_report_artifacts(tmp_path: Path) -> None:
     assert "planAndBuild" in report
     assert "## Categories" in report
     assert "## Pathfinding" in report
+    assert "## Inventory" in report
+    assert "## Block Mutation" in report
+
+
+def test_live_cli_place_here_report_includes_inventory_and_block_mutation_sections(
+    tmp_path: Path,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    report_dir = tmp_path / "report"
+
+    exit_code = main(
+        [
+            "--command",
+            "placeHere",
+            "--cases",
+            "2",
+            "--dry-run",
+            "--report-dir",
+            str(report_dir),
+        ],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+        load_env=False,
+    )
+
+    text = stdout.getvalue()
+    assert exit_code == 0, stderr.getvalue()
+    assert "inventory: " in text
+    assert "block_mutation: " in text
+
+    report = (report_dir / "report.md").read_text(encoding="utf-8")
+    assert "## Inventory" in report
+    assert "## Block Mutation" in report
+    assert "matches_expected=true" in report
+    assert "matches_expected=false" in report

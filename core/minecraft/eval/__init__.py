@@ -31,10 +31,17 @@ from core.minecraft.eval.live_runner import (
 )
 from core.minecraft.eval.live_telemetry import (
     ActionEvent,
+    BlockMutation,
     CaseResult,
+    EvalCategory,
+    InventoryDelta,
     LiveRunSummary,
     OutcomeClass,
     classify_bridge_status,
+    classify_eval_category,
+    derive_block_mutation,
+    derive_inventory_delta,
+    derive_pathfinding_signals,
 )
 from core.minecraft.eval.parser import ParsedResponse, parse_model_response
 from core.minecraft.eval.provider import (
@@ -66,11 +73,13 @@ from core.minecraft.eval.runner import (
 
 __all__ = [
     "ActionEvent",
+    "BlockMutation",
     "BridgeClient",
     "CaseGenerator",
     "CaseResult",
     "CommandCase",
     "DatasetLoadError",
+    "EvalCategory",
     "EvalOutcome",
     "EvalProfile",
     "EvalProfileError",
@@ -78,6 +87,7 @@ __all__ = [
     "FakeBridgeClient",
     "BUILTIN_PROFILES",
     "DEFAULT_PROFILE_NAME",
+    "InventoryDelta",
     "LiveRunSummary",
     "OutcomeClass",
     "ParsedResponse",
@@ -91,7 +101,11 @@ __all__ = [
     "build_command_text",
     "build_scenario_messages",
     "classify_bridge_status",
+    "classify_eval_category",
     "comparison_md_text",
+    "derive_block_mutation",
+    "derive_inventory_delta",
+    "derive_pathfinding_signals",
     "evaluate_response",
     "filter_prompts",
     "list_profiles",

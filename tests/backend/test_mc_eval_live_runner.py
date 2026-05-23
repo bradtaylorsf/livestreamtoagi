@@ -118,7 +118,11 @@ async def test_run_live_command_smoke_records_action_start_and_end_events() -> N
     for result in summary.case_results:
         assert [event.kind for event in result.action_events] == ["start", "end"]
         assert result.final_state["command"] == "inventory"
-        assert result.eval_category == EvalCategory.OTHER
+        assert result.eval_category == EvalCategory.INVENTORY
+        assert result.inventory is not None
+        assert result.inventory.initial
+        assert result.inventory.final
+        assert result.action_events[-1].payload["inventory"] is not None
 
 
 async def test_run_live_command_smoke_records_collision_pathfinding_signals() -> None:
@@ -157,3 +161,85 @@ async def test_run_live_command_smoke_records_collision_pathfinding_signals() ->
     assert result.pathfinding.final_pose == {"x": 4, "y": 64, "z": 1, "yaw": 180}
     assert result.final_state["pose"] == {"x": 4, "y": 64, "z": 1, "yaw": 180}
     assert result.action_events[-1].payload["eval_category"] == EvalCategory.COLLISION
+
+
+async def test_place_here_records_inventory_and_block_mutation_success() -> None:
+    summary = await run_live_command_smoke(
+        "placeHere",
+        1,
+        bridge=FakeBridgeClient(),
+        profile="flat-eval",
+        seed=2,
+        env={},
+        project_root=REPO_ROOT,
+        dry_run=True,
+    )
+
+    result = summary.case_results[0]
+    assert result.eval_category == EvalCategory.BLOCK_MUTATION
+    assert result.inventory is not None
+    assert result.inventory.matches_expected is True
+    assert result.inventory.net == {result.params["block_type"]: -1}
+    assert result.block_mutation is not None
+    assert result.block_mutation.matches_expected is True
+    assert result.block_mutation.missing_placements == ()
+    assert result.action_events[-1].payload["inventory"]["matches_expected"] is True
+    assert result.action_events[-1].payload["block_mutation"]["matches_expected"] is True
+
+
+async def test_place_here_records_block_mutation_mismatch_when_expected_block_missing() -> None:
+    summary = await run_live_command_smoke(
+        "placeHere",
+        1,
+        bridge=FakeBridgeClient(
+            {
+                "placeHere": (
+                    {
+                        "status": "ok",
+                        "reason": "completed",
+                        "final_state": {
+                            "pose": {"x": 0, "y": 64, "z": 0},
+                            "initial_inventory": {"oak_planks": 2},
+                            "inventory": {"oak_planks": 2},
+                            "initial_blocks": [],
+                            "blocks": [],
+                        },
+                    },
+                )
+            }
+        ),
+        profile="flat-eval",
+        seed=2,
+        env={},
+        project_root=REPO_ROOT,
+        dry_run=True,
+    )
+
+    result = summary.case_results[0]
+    assert result.block_mutation is not None
+    assert result.block_mutation.matches_expected is False
+    assert result.block_mutation.missing_placements == result.block_mutation.intended_placements
+    assert result.inventory is not None
+    assert result.inventory.matches_expected is False
+
+
+async def test_build_from_plan_compares_plan_blocks_to_actual_placements() -> None:
+    summary = await run_live_command_smoke(
+        "buildFromPlan",
+        1,
+        bridge=FakeBridgeClient(),
+        profile="flat-eval",
+        seed=4,
+        env={},
+        project_root=REPO_ROOT,
+        dry_run=True,
+    )
+
+    result = summary.case_results[0]
+    assert result.eval_category == EvalCategory.BLOCK_MUTATION
+    assert result.block_mutation is not None
+    assert result.block_mutation.matches_expected is True
+    assert len(result.block_mutation.intended_placements) == 2
+    assert result.block_mutation.actual_placements == result.block_mutation.intended_placements
+    assert result.inventory is not None
+    assert result.inventory.matches_expected is True

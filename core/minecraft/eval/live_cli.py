@@ -217,6 +217,18 @@ def _emit_summary(
         + ", ".join(f"{signal}={count}" for signal, count in summary.pathfinding_summary.items()),
         file=stdout,
     )
+    print(
+        "inventory: "
+        + ", ".join(f"{signal}={count}" for signal, count in summary.inventory_summary.items()),
+        file=stdout,
+    )
+    print(
+        "block_mutation: "
+        + ", ".join(
+            f"{signal}={count}" for signal, count in summary.block_mutation_summary.items()
+        ),
+        file=stdout,
+    )
     for result in summary.case_results:
         print(
             f"- {result.case_id}: {result.outcome_class} "
@@ -248,6 +260,20 @@ def _emit_verbose_case(result: CaseResult, stdout: TextIO) -> None:
             separators=(",", ":"),
         )
         print(f"  pathfinding {pathfinding}", file=stdout)
+    if result.inventory:
+        inventory = json.dumps(
+            result.inventory.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        print(f"  inventory {inventory}", file=stdout)
+    if result.block_mutation:
+        block_mutation = json.dumps(
+            result.block_mutation.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        print(f"  block_mutation {block_mutation}", file=stdout)
     if result.error:
         print(f"  error {result.error}", file=stdout)
 
@@ -305,6 +331,12 @@ def _report_md(summary: LiveRunSummary) -> str:
     lines.extend(("", "## Pathfinding", ""))
     pathfinding_lines = _pathfinding_report_lines(summary.case_results)
     lines.extend(pathfinding_lines if pathfinding_lines else ["None."])
+    lines.extend(("", "## Inventory", ""))
+    inventory_lines = _inventory_report_lines(summary.case_results)
+    lines.extend(inventory_lines if inventory_lines else ["None."])
+    lines.extend(("", "## Block Mutation", ""))
+    block_mutation_lines = _block_mutation_report_lines(summary.case_results)
+    lines.extend(block_mutation_lines if block_mutation_lines else ["None."])
     lines.extend(("", "## Cases", ""))
     for result in summary.case_results:
         lines.append(
@@ -376,6 +408,72 @@ def _pathfinding_report_lines(results: Sequence[CaseResult]) -> list[str]:
             f"final_pose=`{pose}`"
         )
     return lines
+
+
+def _inventory_report_lines(results: Sequence[CaseResult]) -> list[str]:
+    lines: list[str] = []
+    for result in results:
+        inventory = result.inventory
+        if inventory is None:
+            continue
+        net = json.dumps(inventory.net, sort_keys=True, separators=(",", ":"))
+        final = json.dumps(inventory.final, sort_keys=True, separators=(",", ":"))
+        missing = json.dumps(
+            inventory.missing_expected,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        unexpected = json.dumps(inventory.unexpected, sort_keys=True, separators=(",", ":"))
+        lines.append(
+            f"- `{result.case_id}` {result.outcome_class}: "
+            f"matches_expected={_match_text(inventory.matches_expected)} "
+            f"net=`{net}` final=`{final}` "
+            f"missing_expected=`{missing}` unexpected=`{unexpected}`"
+        )
+    return lines
+
+
+def _block_mutation_report_lines(results: Sequence[CaseResult]) -> list[str]:
+    lines: list[str] = []
+    for result in results:
+        block_mutation = result.block_mutation
+        if block_mutation is None:
+            continue
+        actual = json.dumps(
+            [dict(block) for block in block_mutation.actual_placements],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        final_blocks = json.dumps(
+            [dict(block) for block in block_mutation.final_blocks],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        missing = json.dumps(
+            [dict(block) for block in block_mutation.missing_placements],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        extra = json.dumps(
+            [dict(block) for block in block_mutation.extra_placements],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        lines.append(
+            f"- `{result.case_id}` {result.outcome_class}: "
+            f"matches_expected={_match_text(block_mutation.matches_expected)} "
+            f"actual=`{actual}` final_blocks=`{final_blocks}` "
+            f"missing=`{missing}` extra=`{extra}`"
+        )
+    return lines
+
+
+def _match_text(value: bool | None) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "unknown"
 
 
 def _resolve_path(path_arg: str) -> Path:
