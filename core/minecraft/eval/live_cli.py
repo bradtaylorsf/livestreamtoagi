@@ -1,0 +1,294 @@
+"""CLI for focused Minecraft live command smoke runs."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any, TextIO
+
+from core.minecraft.eval.live_profile import DEFAULT_PROFILE_NAME, EvalProfileError
+from core.minecraft.eval.live_runner import (
+    BridgeClient,
+    FakeBridgeClient,
+    run_live_command_smoke,
+    supported_command_inputs,
+)
+from core.minecraft.eval.live_telemetry import CaseResult, LiveRunSummary
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_LIVE_ENABLED_VALUES = frozenset(("1", "true", "yes", "on"))
+_REQUIRED_LIVE_ENV = ("MC_EVAL_LIVE_BRIDGE_URL", "MINECRAFT_BRIDGE_TOKEN")
+
+
+class LiveBridgeConfigError(ValueError):
+    """Raised when the real live bridge mode is requested without configuration."""
+
+
+class HttpBridgeClient:
+    """Small HTTP command bridge for explicitly enabled live eval runs."""
+
+    def __init__(self, url: str, token: str, *, timeout: float = 30.0) -> None:
+        self.url = url
+        self.token = token
+        self.timeout = timeout
+
+    async def send_command(self, command_text: str) -> Mapping[str, Any]:
+        return await asyncio.to_thread(self._post_command, command_text)
+
+    def _post_command(self, command_text: str) -> Mapping[str, Any]:
+        body = json.dumps({"command_text": command_text}).encode("utf-8")
+        request = urllib.request.Request(
+            self.url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise OSError(f"live bridge request failed: {exc}") from exc
+        if not isinstance(payload, Mapping):
+            raise ValueError("live bridge response must be a JSON object")
+        return payload
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    bridge: BridgeClient | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    load_env: bool = True,
+) -> int:
+    """Run the live command smoke CLI and return a process exit code."""
+
+    out = stdout or sys.stdout
+    err = stderr or sys.stderr
+    parser = _build_parser()
+    try:
+        args = parser.parse_args(list(argv) if argv is not None else None)
+    except SystemExit as exc:
+        return int(exc.code)
+
+    if load_env and env is None:
+        from dotenv import load_dotenv
+
+        load_dotenv(PROJECT_ROOT / ".env")
+    resolved_env = os.environ if env is None else env
+
+    try:
+        selected_bridge, dry_run = (
+            (bridge, False) if bridge is not None else _make_bridge_client(args, resolved_env)
+        )
+        summary = asyncio.run(
+            run_live_command_smoke(
+                args.command,
+                args.cases,
+                bridge=selected_bridge,
+                verbose=args.verbose,
+                profile=args.profile,
+                seed=args.seed,
+                env=resolved_env,
+                project_root=PROJECT_ROOT,
+                dry_run=dry_run,
+            )
+        )
+        if args.report_dir:
+            _write_report_artifacts(args.report_dir, summary)
+        if args.output:
+            _write_output(args.output, summary)
+        _emit_summary(summary, json_mode=args.json, verbose=args.verbose, stdout=out)
+    except (EvalProfileError, LiveBridgeConfigError, OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=err)
+        return 1
+    except Exception as exc:
+        print(f"ERROR: Minecraft live eval failed: {exc}", file=err)
+        return 1
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run one Minecraft command family repeatedly with action telemetry",
+    )
+    parser.add_argument(
+        "--command",
+        required=True,
+        help=(
+            "Command family or command name. Supported: "
+            + ", ".join(supported_command_inputs())
+        ),
+    )
+    parser.add_argument("--cases", type=int, default=5, help="Number of cases to run")
+    parser.add_argument("--verbose", action="store_true", help="Print per-action telemetry")
+    parser.add_argument("--seed", type=int, default=0, help="Deterministic case seed")
+    parser.add_argument(
+        "--profile",
+        default=DEFAULT_PROFILE_NAME,
+        help="Minecraft live eval profile name",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Force the deterministic fake bridge. Default unless MC_EVAL_LIVE_ENABLED=1.",
+    )
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    parser.add_argument("--output", default=None, help="Write JSON summary artifact")
+    parser.add_argument(
+        "--report-dir",
+        default=None,
+        help="Write summary.json, cases.ndjson, and report.md artifacts",
+    )
+    return parser
+
+
+def _make_bridge_client(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+) -> tuple[BridgeClient, bool]:
+    if args.dry_run or not _live_enabled(env):
+        return FakeBridgeClient(), True
+
+    missing = [key for key in _REQUIRED_LIVE_ENV if not env.get(key)]
+    if missing:
+        required = ", ".join(_REQUIRED_LIVE_ENV)
+        missing_text = ", ".join(missing)
+        raise LiveBridgeConfigError(
+            "live Minecraft eval is explicitly gated; "
+            f"MC_EVAL_LIVE_ENABLED=1 requires {required}. "
+            f"Missing: {missing_text}. Pass --dry-run for deterministic local smoke."
+        )
+
+    return HttpBridgeClient(env["MC_EVAL_LIVE_BRIDGE_URL"], env["MINECRAFT_BRIDGE_TOKEN"]), False
+
+
+def _live_enabled(env: Mapping[str, str]) -> bool:
+    return env.get("MC_EVAL_LIVE_ENABLED", "").strip().casefold() in _LIVE_ENABLED_VALUES
+
+
+def _emit_summary(
+    summary: LiveRunSummary,
+    *,
+    json_mode: bool,
+    verbose: bool,
+    stdout: TextIO,
+) -> None:
+    payload = summary.to_dict()
+    if json_mode:
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return
+
+    print("Minecraft live command smoke", file=stdout)
+    print(f"command: {summary.command}", file=stdout)
+    print(f"resolved_command: {summary.resolved_command}", file=stdout)
+    print(f"profile: {summary.profile}", file=stdout)
+    print(f"seed: {summary.seed}", file=stdout)
+    print(f"dry_run: {str(summary.dry_run).lower()}", file=stdout)
+    print(f"cases: {len(summary.case_results)}", file=stdout)
+    print(f"passed: {summary.passed_count}/{len(summary.case_results)}", file=stdout)
+    print(
+        "outcomes: "
+        + ", ".join(
+            f"{outcome}={count}" for outcome, count in summary.outcome_counts.items()
+        ),
+        file=stdout,
+    )
+    for result in summary.case_results:
+        print(
+            f"- {result.case_id}: {result.outcome_class} "
+            f"latency_ms={result.latency_ms} command={result.command_text}",
+            file=stdout,
+        )
+        if verbose:
+            _emit_verbose_case(result, stdout)
+
+
+def _emit_verbose_case(result: CaseResult, stdout: TextIO) -> None:
+    print(f"  command_input {result.command_text}", file=stdout)
+    for event in result.action_events:
+        event_name = f"action_{event.kind}"
+        payload = json.dumps(event.payload, sort_keys=True, separators=(",", ":"))
+        print(
+            f"  {event_name} action_id={event.action_id} ts_ms={event.ts_ms} payload={payload}",
+            file=stdout,
+        )
+    print(f"  outcome {result.outcome_class}", file=stdout)
+    final_state = json.dumps(result.final_state, sort_keys=True, separators=(",", ":"))
+    print(f"  final_state {final_state}", file=stdout)
+    if result.error:
+        print(f"  error {result.error}", file=stdout)
+
+
+def _write_output(path_arg: str, summary: LiveRunSummary) -> None:
+    path = _resolve_path(path_arg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(summary.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_report_artifacts(path_arg: str, summary: LiveRunSummary) -> None:
+    report_dir = _resolve_path(path_arg)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "summary.json").write_text(
+        json.dumps(summary.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (report_dir / "cases.ndjson").write_text(
+        "".join(
+            json.dumps(result.to_dict(), sort_keys=True) + "\n"
+            for result in summary.case_results
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "report.md").write_text(_report_md(summary), encoding="utf-8")
+
+
+def _report_md(summary: LiveRunSummary) -> str:
+    lines = [
+        "# Minecraft Live Command Smoke",
+        "",
+        f"- command: `{summary.command}`",
+        f"- resolved_command: `{summary.resolved_command}`",
+        f"- profile: `{summary.profile}`",
+        f"- seed: `{summary.seed}`",
+        f"- dry_run: `{str(summary.dry_run).lower()}`",
+        f"- cases: `{len(summary.case_results)}`",
+        f"- passed: `{summary.passed_count}/{len(summary.case_results)}`",
+        "",
+        "## Outcomes",
+        "",
+    ]
+    lines.extend(
+        f"- {outcome}: {count}" for outcome, count in summary.outcome_counts.items()
+    )
+    lines.extend(("", "## Cases", ""))
+    for result in summary.case_results:
+        lines.append(
+            f"- `{result.case_id}` {result.outcome_class}: `{result.command_text}`"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _resolve_path(path_arg: str) -> Path:
+    path = Path(path_arg)
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

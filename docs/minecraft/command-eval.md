@@ -14,6 +14,9 @@ pnpm mc:eval:commands:smoke
 # Render prompts and score deterministic fake responses.
 pnpm mc:eval:commands:dry-run
 
+# Run one command family repeatedly with deterministic action telemetry.
+pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
+
 # Run the focused regression suite used by CI.
 pnpm verify:mc-eval-commands
 ```
@@ -102,6 +105,36 @@ Supported overrides for the future live runner are:
 | `MC_EVAL_LIVE_PORT` | Minecraft server port for the eval world. |
 | `MC_EVAL_LIVE_SERVER_DIR` | Server directory for the eval world. Relative paths resolve from the repo root. |
 | `MC_EVAL_LIVE_KEEP_RUNNING` | `true`/`false`; keep the server running after the eval job. Defaults to `false`. |
+
+## Individual Live Command Smoke
+
+`pnpm mc:eval:live` runs deterministic variations of one command family and
+captures command input, action start/end events, outcome class, latency, and a
+command-relevant final state. The default path uses `FakeBridgeClient` unless
+`MC_EVAL_LIVE_ENABLED=1` is set, so CI and local smoke runs do not require
+Minecraft, Mindcraft bots, or OpenRouter credentials.
+
+```bash
+pnpm mc:eval:live --command move --cases 20 --verbose --dry-run
+pnpm mc:eval:live:smoke
+pnpm verify:mc-eval-live
+```
+
+Supported command inputs include `move`, `placeHere`, `searchForBlock`,
+`inventory`, `nearbyBlocks`, `planAndBuild`, and `buildFromPlan`. Skill-card
+family ids such as `build` and `observe` resolve to a primary supported command.
+
+Live mode is explicitly gated. To use a real command bridge, set
+`MC_EVAL_LIVE_ENABLED=1`, `MC_EVAL_LIVE_BRIDGE_URL`, and
+`MINECRAFT_BRIDGE_TOKEN`; otherwise pass `--dry-run` or leave live mode disabled.
+
+Live smoke artifacts are intentionally lightweight:
+
+| Artifact | Contents |
+| --- | --- |
+| `summary.json` | Full structured `LiveRunSummary` payload. |
+| `cases.ndjson` | One `CaseResult` payload per generated command case. |
+| `report.md` | Human-readable command, profile, outcome, and per-case summary. |
 
 ## Artifacts
 
