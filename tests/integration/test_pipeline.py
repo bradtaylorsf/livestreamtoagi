@@ -10,7 +10,8 @@ Runs a minimal simulation and validates every stage of the pipeline:
 
 Run with: pytest tests/integration/test_pipeline.py -v -m integration -x
 Requires: Docker Compose services running (Redis, PostgreSQL, Langfuse)
-Requires: OPENROUTER_API_KEY set for real LLM calls
+Requires: OPENROUTER_API_KEY set for real LLM calls; real-LLM stages are
+skipped in public CI when the key is absent.
 """
 
 from __future__ import annotations
