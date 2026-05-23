@@ -139,6 +139,28 @@ Live smoke artifacts are intentionally lightweight:
 | `cases.ndjson` | One `CaseResult` payload per generated command case. |
 | `report.md` | Human-readable command, profile, outcome, and per-case summary. |
 
+### Lifecycle Categories
+
+Live eval also scores lifecycle behavior that text-only evals cannot prove:
+`DEATH_LOOP`, `SAFE_SPAWN`, and `STUCK_UNSTUCK`. These categories cover
+repeated deaths, unsafe or recovered respawns, stuck states, unstuck attempts,
+and unstuck success or failure. The structured summary includes
+`lifecycle_summary`, and each lifecycle-aware case may include a `lifecycle`
+object with `death_count`, `death_loop`, `respawns`, `safe_spawn`,
+`unsafe_spawn_count`, `stuck`, `stuck_events`, `unstuck_attempts`,
+`unstuck_succeeded`, `unstuck_failed`, and `last_pose`. The markdown report
+adds a `## Lifecycle` per-case section with the same core outcomes.
+
+Bridge adapters can drive these fields with mocked or live `action_events`
+using kinds such as `death`, `respawn`, `stuck`, `unstuck_attempt`,
+`unstuck_success`, or `unstuck_failure`. Equivalent final-state keys are also
+accepted, including `death_count`, `deaths`, `death_loop`, `respawns`,
+`spawn_safe`, `safe_spawn`, `unsafe_spawn_count`, `spawn.safe`,
+`stuck_events`, `unstuck_attempts`, `unstuck_succeeded`, and
+`unstuck_failed`. Reason/message fields containing markers such as `died`,
+`death`, `safe spawn`, `unsafe spawn`, `spawn in lava`, `recovered`,
+`still_stuck`, or `recovery_failed` are folded into the same lifecycle signals.
+
 ## Dataset Replay
 
 `pnpm mc:eval:replay` loads E17 `passing-prompts.ndjson` artifacts, filters

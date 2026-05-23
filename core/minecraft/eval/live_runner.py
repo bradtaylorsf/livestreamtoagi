@@ -14,12 +14,14 @@ from core.minecraft.eval.live_profile import DEFAULT_PROFILE_NAME, EvalProfile, 
 from core.minecraft.eval.live_telemetry import (
     ActionEvent,
     CaseResult,
+    EvalCategory,
     LiveRunSummary,
     OutcomeClass,
     classify_bridge_status,
     classify_eval_category,
     derive_block_mutation,
     derive_inventory_delta,
+    derive_lifecycle_signals,
     derive_pathfinding_signals,
 )
 
@@ -72,6 +74,8 @@ _DEFAULT_FAKE_CYCLE: tuple[Mapping[str, Any], ...] = (
     {"status": "rejected", "reason": "permission gate rejected command"},
     {"status": "timeout", "reason": "stuck: action timed out while pathfinding"},
     {"status": "malformed", "reason": "parser rejected command before dispatch"},
+    {"status": "failed", "reason": "death loop: died in lava after respawn"},
+    {"status": "failed", "reason": "unstuck_failed: still_stuck after recovery"},
 )
 
 
@@ -227,12 +231,22 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
     final_state = response.get("final_state")
     if not isinstance(final_state, Mapping):
         final_state = {}
+    detail = response.get("reason") or response.get("outcome_class") or error
+    lifecycle_state = _state_with_detail(final_state, detail)
+    lifecycle = derive_lifecycle_signals(
+        case.command_name,
+        outcome_class,
+        tuple(events),
+        params=case.params,
+        final_state=lifecycle_state,
+    )
     eval_category = classify_eval_category(
         case.command_name,
         outcome_class,
-        response.get("reason") or response.get("outcome_class") or error,
+        detail,
         final_state,
     )
+    eval_category = _category_with_lifecycle(eval_category, lifecycle)
     pathfinding = derive_pathfinding_signals(
         case.command_name,
         outcome_class,
@@ -267,6 +281,7 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
                 "pathfinding": pathfinding.to_dict() if pathfinding else None,
                 "inventory": inventory.to_dict() if inventory else None,
                 "block_mutation": block_mutation.to_dict() if block_mutation else None,
+                "lifecycle": lifecycle.to_dict() if lifecycle else None,
                 "latency_ms": max(0, ended_ms - started_ms),
             },
         )
@@ -285,6 +300,7 @@ async def _run_case(case: CommandCase, *, bridge: BridgeClient) -> CaseResult:
         pathfinding=pathfinding,
         inventory=inventory,
         block_mutation=block_mutation,
+        lifecycle=lifecycle,
     )
 
 
@@ -553,7 +569,70 @@ def _fake_final_state(
             {"x": 0, "y": 63, "z": 0, "block_type": "grass_block"},
             {"x": 1, "y": 64, "z": 1, "block_type": "oak_log"},
         ]
+    _add_fake_lifecycle_state(state, response)
     return state
+
+
+def _state_with_detail(
+    final_state: Mapping[str, Any],
+    detail: object | None,
+) -> Mapping[str, Any]:
+    if not detail:
+        return final_state
+    state = dict(final_state)
+    state.setdefault("status_detail", str(detail))
+    return state
+
+
+def _category_with_lifecycle(eval_category: str, lifecycle: Any | None) -> str:
+    if lifecycle is None:
+        return eval_category
+    if lifecycle.death_loop:
+        return EvalCategory.DEATH_LOOP
+    if lifecycle.respawns or lifecycle.safe_spawn is not None or lifecycle.unsafe_spawn_count:
+        return EvalCategory.SAFE_SPAWN
+    if (
+        lifecycle.unstuck_attempts
+        or lifecycle.unstuck_succeeded is not None
+        or lifecycle.unstuck_failed
+    ):
+        return EvalCategory.STUCK_UNSTUCK
+    if lifecycle.stuck and eval_category == EvalCategory.OTHER:
+        return EvalCategory.STUCK_UNSTUCK
+    return eval_category
+
+
+def _add_fake_lifecycle_state(state: dict[str, Any], response: Mapping[str, Any]) -> None:
+    detail = f"{response.get('reason') or ''} {response.get('error') or ''}".casefold()
+    if "death" in detail or "died" in detail or "killed" in detail:
+        deaths = [{"reason": "died in lava" if "lava" in detail else "death event"}]
+        if "loop" in detail or "again" in detail:
+            deaths.append({"reason": "repeated death"})
+        state["deaths"] = deaths
+        state["death_count"] = len(deaths)
+        state["death_loop"] = len(deaths) >= 2 or "loop" in detail
+        state["respawns"] = max(1, len(deaths))
+        state["spawn"] = {
+            "safe": "lava" not in detail and "unsafe" not in detail and "void" not in detail,
+            "reason": "spawn in lava" if "lava" in detail else "safe spawn",
+        }
+    if "unsafe spawn" in detail or "spawn in lava" in detail or "void spawn" in detail:
+        state["unsafe_spawn_count"] = 1
+        state["spawn"] = {"safe": False, "reason": response.get("reason") or "unsafe spawn"}
+    elif "safe spawn" in detail or "respawn" in detail:
+        state["spawn_safe"] = True
+        state["respawns"] = max(1, int(state.get("respawns") or 0))
+    if "stuck_events" in detail:
+        state["stuck_events"] = max(1, int(state.get("stuck_events") or 0))
+    if "unstuck" in detail or "recover" in detail:
+        state["stuck_events"] = max(1, int(state.get("stuck_events") or 0))
+        state["unstuck_attempts"] = 1
+        succeeded = any(marker in detail for marker in ("recovered", "unstuck_ok", "freed"))
+        failed = any(marker in detail for marker in ("unstuck_failed", "still_stuck", "failed"))
+        if succeeded:
+            state["unstuck_succeeded"] = True
+        if failed:
+            state["unstuck_failed"] = True
 
 
 def _place_here_block_type(command_text: str) -> str:
