@@ -170,11 +170,15 @@ def score_candidate(
     )
     score = max(0.0, score)
 
-    return score, factors, _reason_for(
-        candidate,
-        config,
-        scene_event_type,
-        selection_deficit=selection_deficit,
+    return (
+        score,
+        factors,
+        _reason_for(
+            candidate,
+            config,
+            scene_event_type,
+            selection_deficit=selection_deficit,
+        ),
     )
 
 

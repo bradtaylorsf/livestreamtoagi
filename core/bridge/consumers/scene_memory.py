@@ -448,11 +448,7 @@ def _agent_ids_from_env(name: str) -> set[str]:
     raw = os.environ.get(name)
     if not raw:
         return set()
-    return {
-        item.strip().lower()
-        for item in re.split(r"[\s,]+", raw)
-        if item.strip()
-    }
+    return {item.strip().lower() for item in re.split(r"[\s,]+", raw) if item.strip()}
 
 
 def _recall_summary(result: object) -> str | None:

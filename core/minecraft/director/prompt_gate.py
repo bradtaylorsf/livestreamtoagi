@@ -679,9 +679,7 @@ def _configured_agent_ids() -> list[str]:
     if not raw:
         return list(_DEFAULT_SIM_AGENT_IDS)
     parsed = [
-        _canonical_agent_id(item)
-        for item in re.split(r"[\s,]+", raw)
-        if _canonical_agent_id(item)
+        _canonical_agent_id(item) for item in re.split(r"[\s,]+", raw) if _canonical_agent_id(item)
     ]
     return parsed or list(_DEFAULT_SIM_AGENT_IDS)
 
@@ -745,9 +743,8 @@ def _has_build_request_intent(lowered: str) -> bool:
 
 
 def _is_build_plan_status_notice(lowered: str) -> bool:
-    return (
-        "build-from-plan" in lowered
-        and any(status in lowered for status in (" success:", " partial:", " failed:"))
+    return "build-from-plan" in lowered and any(
+        status in lowered for status in (" success:", " partial:", " failed:")
     )
 
 
@@ -769,8 +766,7 @@ def _is_build_completion_chatter(lowered: str) -> bool:
         done in lowered
         for done in ("done", "finished", "complete", "completed", "nice job", "good job")
     ) and any(
-        target in lowered
-        for target in ("build", "cabin", "house", "hut", "shelter", "structure")
+        target in lowered for target in ("build", "cabin", "house", "hut", "shelter", "structure")
     )
 
 
