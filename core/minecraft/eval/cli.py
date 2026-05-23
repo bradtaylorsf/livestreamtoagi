@@ -25,6 +25,17 @@ from core.minecraft.eval.provider import (
     ProviderConfigError,
     resolve_provider_config,
 )
+from core.minecraft.eval.report import (
+    OUTCOME_COUNT_KEYS,
+    ScoredRun,
+    score_run,
+    scored_run_from_scores_json,
+    write_comparison_md,
+    write_generations_ndjson,
+    write_passing_prompts_ndjson,
+    write_report_md,
+    write_scores_json,
+)
 from core.minecraft.eval.runner import RunSummary, run_eval
 from core.minecraft.scenarios import ScenarioSet, ScenarioValidationError, load_scenario_set
 from core.minecraft.skill_cards import SkillCardSet, get_default_registry
@@ -101,7 +112,15 @@ def main(
                 client_factory=client_factory,
             )
         )
-        _emit_summary(summary, json_mode=args.json, stdout=out)
+        scored_run = score_run(summary, scenario_set, commands)
+        if args.report_dir:
+            _write_report_artifacts(args.report_dir, scored_run)
+        if args.passing_prompts:
+            _write_passing_prompts(args.passing_prompts, scored_run)
+        if args.compare:
+            _write_comparison(args.report_dir, scored_run, args.compare)
+
+        _emit_summary(summary, scored_run=scored_run, json_mode=args.json, stdout=out)
         if args.output:
             _write_output(args.output, summary)
     except (ProviderConfigError, ScenarioValidationError, OSError, ValueError) as exc:
@@ -140,6 +159,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON summary")
     parser.add_argument("--output", default=None, help="Write JSON summary artifact to this path")
+    parser.add_argument(
+        "--report-dir",
+        default=None,
+        help="Write scored generations.ndjson, scores.json, and report.md artifacts here",
+    )
+    parser.add_argument(
+        "--passing-prompts",
+        default=None,
+        help="Write accepted command prompts to this NDJSON path",
+    )
+    parser.add_argument(
+        "--compare",
+        action="append",
+        default=[],
+        help=(
+            "Existing scores.json path to include in report-dir/comparison.md. "
+            "May be repeated."
+        ),
+    )
     return parser
 
 
@@ -234,7 +272,13 @@ def _make_client(config: ProviderConfig, client_factory: ClientFactory | None) -
     return config.create_client()
 
 
-def _emit_summary(summary: RunSummary, *, json_mode: bool, stdout: TextIO) -> None:
+def _emit_summary(
+    summary: RunSummary,
+    *,
+    scored_run: ScoredRun,
+    json_mode: bool,
+    stdout: TextIO,
+) -> None:
     if json_mode:
         print(json.dumps(summary.to_dict(), indent=2, sort_keys=True), file=stdout)
         return
@@ -251,6 +295,13 @@ def _emit_summary(summary: RunSummary, *, json_mode: bool, stdout: TextIO) -> No
     print(f"completion_tokens: {summary.completion_tokens}", file=stdout)
     print(f"estimated_cost: {summary.estimated_cost}", file=stdout)
     print(f"collected: {summary.collected_count}/{len(summary.results)}", file=stdout)
+    print(
+        "outcomes: "
+        + ", ".join(
+            f"{key}={scored_run.outcome_counts[key]}" for key in OUTCOME_COUNT_KEYS
+        ),
+        file=stdout,
+    )
     for result in summary.results:
         print(f"- {result.scenario_id}: {result.status}", file=stdout)
 
@@ -262,6 +313,41 @@ def _write_output(path_arg: str, summary: RunSummary) -> None:
         json.dumps(summary.to_dict(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _write_report_artifacts(report_dir_arg: str, scored_run: ScoredRun) -> None:
+    report_dir = _resolve_path(report_dir_arg)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    write_generations_ndjson(report_dir / "generations.ndjson", scored_run)
+    write_scores_json(report_dir / "scores.json", scored_run)
+    write_report_md(report_dir / "report.md", scored_run)
+
+
+def _write_passing_prompts(path_arg: str, scored_run: ScoredRun) -> None:
+    write_passing_prompts_ndjson(_resolve_path(path_arg), scored_run)
+
+
+def _write_comparison(
+    report_dir_arg: str | None,
+    current_run: ScoredRun,
+    scores_paths: Sequence[str],
+) -> None:
+    if not report_dir_arg:
+        raise ValueError("--compare requires --report-dir so comparison.md has a destination")
+
+    runs = [current_run]
+    for path_arg in scores_paths:
+        runs.append(_load_scores_json(path_arg))
+    write_comparison_md(_resolve_path(report_dir_arg) / "comparison.md", runs)
+
+
+def _load_scores_json(path_arg: str) -> ScoredRun:
+    path = _resolve_path(path_arg)
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"scores JSON must be an object: {path}")
+    return scored_run_from_scores_json(payload)
 
 
 if __name__ == "__main__":
