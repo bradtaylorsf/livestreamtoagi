@@ -16,6 +16,7 @@ from collections.abc import Awaitable
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
+from core.conversation_mode import is_director_v2_run
 from core.event_bus import EventBus, EventCallback, EventType
 
 if TYPE_CHECKING:
@@ -85,6 +86,10 @@ def format_action_result(action_id: object, status: object, detail: object) -> s
 
 async def on_bridge_perception(event: dict[str, Any], *, compactor: MemoryCompactor) -> None:
     """Compact a bridge perception event into archival and recall memory."""
+    if is_director_v2_run():
+        logger.debug("Skipping per-event perception compaction during Director V2 run")
+        return
+
     data = event.get("data", {})
     if not isinstance(data, dict):
         logger.debug("Skipping bridge perception memory compaction with non-dict data")
@@ -100,6 +105,10 @@ async def on_bridge_perception(event: dict[str, Any], *, compactor: MemoryCompac
 
 async def on_bridge_action_result(event: dict[str, Any], *, compactor: MemoryCompactor) -> None:
     """Compact a bridge action-result event into archival and recall memory."""
+    if is_director_v2_run():
+        logger.debug("Skipping per-event action-result compaction during Director V2 run")
+        return
+
     data = event.get("data", {})
     if not isinstance(data, dict):
         logger.debug("Skipping bridge action-result memory compaction with non-dict data")

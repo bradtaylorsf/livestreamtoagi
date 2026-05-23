@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small OpenAI-compatible FIFO queue proxy for local LM Studio.
+"""Small OpenAI-compatible priority queue proxy for local LM Studio.
 
 The Minecraft cohort can otherwise fan out eight simultaneous chat completion
 requests to LM Studio. This proxy keeps the OpenAI-compatible surface area tiny:
@@ -74,13 +74,24 @@ class ProxyJob:
 
 
 class QueueProxy:
-    def __init__(self, upstream: str, concurrency: int, telemetry_path: Path | None) -> None:
+    def __init__(
+        self,
+        upstream: str,
+        concurrency: int,
+        telemetry_path: Path | None,
+        retry_attempts: int = 2,
+        retry_delay_seconds: float = 2.0,
+    ) -> None:
         self.upstream = upstream.rstrip("/")
         self.concurrency = max(1, concurrency)
         self.telemetry_path = telemetry_path
-        self.jobs: queue.Queue[ProxyJob | None] = queue.Queue()
+        self.retry_attempts = max(0, retry_attempts)
+        self.retry_delay_seconds = max(0.0, retry_delay_seconds)
+        self.jobs: queue.PriorityQueue[tuple[int, int, ProxyJob | None]] = queue.PriorityQueue()
         self.stats = ProxyStats()
         self._telemetry_lock = threading.Lock()
+        self._sequence_lock = threading.Lock()
+        self._sequence = 0
         self._workers: list[threading.Thread] = []
 
     def start(self) -> None:
@@ -95,7 +106,7 @@ class QueueProxy:
 
     def stop(self) -> None:
         for _ in self._workers:
-            self.jobs.put(None)
+            self.jobs.put((100, self._next_sequence(), None))
         for worker in self._workers:
             worker.join(timeout=2)
 
@@ -113,19 +124,20 @@ class QueueProxy:
                 "model": self._model_from_body(job.body),
             },
         )
-        self.jobs.put(job)
+        self.jobs.put((self._priority(job), self._next_sequence(), job))
 
     def health(self) -> dict[str, Any]:
         return {
             "ok": True,
             "upstream": self.upstream,
             "concurrency": self.concurrency,
+            "retry_attempts": self.retry_attempts,
             **self.stats.snapshot(self.jobs.qsize()),
         }
 
     def _worker_loop(self) -> None:
         while True:
-            job = self.jobs.get()
+            _, _, job = self.jobs.get()
             if job is None:
                 self.jobs.task_done()
                 return
@@ -190,26 +202,75 @@ class QueueProxy:
             if key.lower() not in {"host", "content-length", "connection", "accept-encoding"}
         }
         request_body = None if job.method in {"GET", "HEAD"} and not job.body else job.body
-        request = urllib.request.Request(url, data=request_body, headers=headers, method=job.method)
-        try:
-            with urllib.request.urlopen(request, timeout=600) as response:
-                job.response_status = int(response.status)
+        for attempt in range(self.retry_attempts + 1):
+            request = urllib.request.Request(url, data=request_body, headers=headers, method=job.method)
+            try:
+                with urllib.request.urlopen(request, timeout=600) as response:
+                    job.response_status = int(response.status)
+                    job.response_headers = {
+                        key.lower(): value
+                        for key, value in response.headers.items()
+                        if key.lower()
+                        not in {"transfer-encoding", "connection", "content-length", "content-encoding"}
+                    }
+                    job.response_body = response.read()
+                    return
+            except urllib.error.HTTPError as exc:
+                body = exc.read()
+                if self._should_retry_http_error(job, int(exc.code), body) and attempt < self.retry_attempts:
+                    delay = self.retry_delay_seconds * (attempt + 1)
+                    self._emit(
+                        "llm.queue.retry",
+                        job,
+                        {
+                            "attempt": attempt + 1,
+                            "delay_ms": int(delay * 1000),
+                            "status": int(exc.code),
+                            "model": self._model_from_body(job.body),
+                            "error_preview": body.decode("utf-8", errors="replace")[:240],
+                        },
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                job.response_status = int(exc.code)
                 job.response_headers = {
                     key.lower(): value
-                    for key, value in response.headers.items()
+                    for key, value in exc.headers.items()
                     if key.lower()
                     not in {"transfer-encoding", "connection", "content-length", "content-encoding"}
                 }
-                job.response_body = response.read()
-        except urllib.error.HTTPError as exc:
-            job.response_status = int(exc.code)
-            job.response_headers = {
-                key.lower(): value
-                for key, value in exc.headers.items()
-                if key.lower()
-                not in {"transfer-encoding", "connection", "content-length", "content-encoding"}
-            }
-            job.response_body = exc.read()
+                job.response_body = body
+                return
+
+    @staticmethod
+    def _should_retry_http_error(job: ProxyJob, status: int, body: bytes) -> bool:
+        if status != 400:
+            return False
+        path = urllib.parse.urlparse(job.path).path
+        if not (path.endswith("/chat/completions") or path.endswith("/completions")):
+            return False
+        lowered = body.decode("utf-8", errors="replace").lower()
+        return any(
+            marker in lowered
+            for marker in (
+                "model unloaded",
+                "failed to load model",
+                "operation canceled",
+            )
+        )
+
+    def _next_sequence(self) -> int:
+        with self._sequence_lock:
+            self._sequence += 1
+            return self._sequence
+
+    @staticmethod
+    def _priority(job: ProxyJob) -> int:
+        path = urllib.parse.urlparse(job.path).path
+        if path.endswith("/chat/completions") or path.endswith("/completions"):
+            return 0
+        return 10
 
     def _upstream_url(self, path: str) -> str:
         """Join proxy paths to an upstream that may already include `/v1`."""
@@ -316,7 +377,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         for key, value in headers.items():
             self.send_header(key, value)
         self.end_headers()
-        self.wfile.write(job.response_body)
+        try:
+            self.wfile.write(job.response_body)
+        except BrokenPipeError:
+            return
 
 
 class ProxyServer(ThreadingHTTPServer):
@@ -349,6 +413,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("MINECRAFT_LLM_CONCURRENCY", "1")),
     )
+    parser.add_argument(
+        "--retry-attempts",
+        type=int,
+        default=int(os.environ.get("MINECRAFT_LLM_RETRY_ATTEMPTS", "2")),
+    )
+    parser.add_argument(
+        "--retry-delay-seconds",
+        type=float,
+        default=float(os.environ.get("MINECRAFT_LLM_RETRY_DELAY_SECONDS", "2")),
+    )
     parser.add_argument("--telemetry", default=os.environ.get("MINECRAFT_LLM_QUEUE_TELEMETRY"))
     return parser.parse_args(argv)
 
@@ -359,19 +433,21 @@ def main(argv: list[str] | None = None) -> int:
         upstream=args.upstream,
         concurrency=args.concurrency,
         telemetry_path=telemetry_path_from_env(args.telemetry),
+        retry_attempts=args.retry_attempts,
+        retry_delay_seconds=args.retry_delay_seconds,
     )
     proxy.start()
     server = ProxyServer((args.host, args.port), ProxyHandler)
     server.proxy = proxy
 
     def _shutdown(_signum: int, _frame: Any) -> None:
-        server.shutdown()
+        threading.Thread(target=server.shutdown, name="lmstudio-queue-shutdown", daemon=True).start()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
     print(
         f"LM Studio queue proxy listening on http://{args.host}:{args.port} -> {args.upstream} "
-        f"(concurrency={proxy.concurrency})",
+        f"(concurrency={proxy.concurrency}, retry_attempts={proxy.retry_attempts})",
         flush=True,
     )
     try:

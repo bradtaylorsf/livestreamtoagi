@@ -91,6 +91,42 @@ def test_fixture_export_writes_ordered_timeline_and_totals(tmp_path: Path) -> No
     assert totals["tokens"]["estimated"] == 0
 
 
+def test_director_v2_events_flow_through_timeline_and_totals(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = _copy_fixture(tmp_path)
+
+    result = builder.build_timeline(run_dir, state_sample_interval_seconds=30)
+    builder.write_artifacts(run_dir, result)
+
+    exported = _events(run_dir / "timeline.ndjson")
+    director_events = [event for event in exported if event["event_type"].startswith("director.")]
+    assert [event["event_type"] for event in director_events] == [
+        "director.scene.opened",
+        "director.gate.decision",
+        "director.gate.decision",
+        "director.gate.decision",
+        "director.tool.call",
+        "director.memory.compaction",
+        "director.scene.digest",
+        "director.scene.closed",
+    ]
+    assert {event["trace_id"] for event in director_events} == {"trace-scene-1"}
+
+    totals = json.loads((run_dir / "timeline-totals.json").read_text(encoding="utf-8"))
+    director = totals["director"]
+    assert director["scenes_opened"] == 1
+    assert director["scenes_closed"] == 1
+    assert director["selected_turns"] == 1
+    assert director["suppressed_count"] == 2
+    assert director["suppressed_by_reason"] == {"fanout_capped": 2}
+    assert director["tool_calls_by_tool"] == {"recall_memory": 1}
+    assert director["memory_compactions"] == 1
+    assert director["build_plan_ids"] == ["build-plan-fixture-1"]
+    assert director["llm_prompts_total"] == 1
+    assert director["avoided_llm_prompts"] == 2
+    assert director["ratio_prompts_per_scene_turn"] == 1.0
+
+
 def test_cli_accepts_explicit_output_and_totals_paths(tmp_path: Path) -> None:
     run_dir = _copy_fixture(tmp_path)
     output_path = tmp_path / "exports" / "timeline.ndjson"
@@ -230,7 +266,7 @@ def test_bot_log_lmstudio_calls_are_inferred_without_raw_telemetry(tmp_path: Pat
         "\n".join(
             [
                 "2026-05-20T22:00:01Z Awaiting LM Studio response from model local/test",
-                "2026-05-20T22:00:03Z Generated response: I will mark the base. !placeHere(\"oak_log\")",
+                '2026-05-20T22:00:03Z Generated response: I will mark the base. !placeHere("oak_log")',
                 '2026-05-20T22:00:04Z Vera full response to Rex: ""I will mark the base. !placeHere("oak_log")""',
                 "2026-05-20T22:00:05Z parsed command: { commandName: '!placeHere', args: [ 'oak_log' ] }",
                 "2026-05-20T22:00:06Z Agent executed: !placeHere and got: Action output:",
@@ -323,7 +359,7 @@ def test_incoming_chat_command_examples_do_not_become_action_intents_or_errors(
         "\n".join(
             [
                 "2026-05-20T22:00:01Z Sentinel received message from Vera: "
-                "please provide exact coordinates before using !place(\"act\", \"dirt\", {\"x\":1,\"y\":64,\"z\":1})",
+                'please provide exact coordinates before using !place("act", "dirt", {"x":1,"y":64,"z":1})',
                 "2026-05-20T22:00:02Z Memory updated to: Sentinel should ask for coordinates.",
             ]
         )

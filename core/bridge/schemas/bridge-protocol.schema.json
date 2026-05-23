@@ -524,6 +524,326 @@
       "title": "CostGateResponse",
       "type": "object"
     },
+    "DirectorBuildMacro": {
+      "additionalProperties": false,
+      "description": "Director-scheduled build macro context for one prompt verdict.",
+      "properties": {
+        "cache_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stable build-goal cache key.",
+          "title": "Cache Key"
+        },
+        "granted": {
+          "default": false,
+          "description": "Whether the agent may invoke !planAndBuild for this verdict.",
+          "title": "Granted",
+          "type": "boolean"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent that owns the build plan.",
+          "title": "Owner"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Director build plan id.",
+          "title": "Plan Id"
+        },
+        "reason": {
+          "description": "Build macro scheduling reason.",
+          "title": "Reason",
+          "type": "string"
+        },
+        "role": {
+          "description": "Whether this agent owns the plan or supports it.",
+          "enum": [
+            "planner_owner",
+            "support"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "scene_id": {
+          "description": "Scene id for this build macro decision.",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Current Director build plan status.",
+          "title": "Status"
+        },
+        "support_role": {
+          "anyOf": [
+            {
+              "enum": [
+                "gather",
+                "clear",
+                "guard",
+                "converse"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Support role for non-owner agents.",
+          "title": "Support Role"
+        },
+        "support_task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Short support instruction for non-owner agents.",
+          "title": "Support Task"
+        }
+      },
+      "required": [
+        "scene_id",
+        "role",
+        "reason"
+      ],
+      "title": "DirectorBuildMacro",
+      "type": "object"
+    },
+    "DirectorGateRequest": {
+      "additionalProperties": false,
+      "description": "``director.gate`` \u2014 Director V2 prompt eligibility check for Mindcraft.",
+      "properties": {
+        "agent_id": {
+          "description": "Bot requesting prompt permission.",
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "available_tools": {
+          "description": "Mindcraft action/tool affordances available to the selected prompt.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Available Tools",
+          "type": "array"
+        },
+        "event_kind": {
+          "description": "Kind of scene event that would trigger a Mindcraft prompt.",
+          "enum": [
+            "chat",
+            "action_result",
+            "perception_event"
+          ],
+          "title": "Event Kind",
+          "type": "string"
+        },
+        "event_text": {
+          "description": "Human-readable chat/action/perception text.",
+          "title": "Event Text",
+          "type": "string"
+        },
+        "mentions": {
+          "description": "Directly addressed agent ids parsed by the caller.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Mentions",
+          "type": "array"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Vec3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Best-known local Minecraft position for spatial scheduling."
+        },
+        "scene_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional caller-side grouping hint for batched messages.",
+          "title": "Scene Hint"
+        },
+        "source_agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent or speaker that caused the event, when known.",
+          "title": "Source Agent"
+        }
+      },
+      "required": [
+        "agent_id",
+        "event_kind",
+        "event_text"
+      ],
+      "title": "DirectorGateRequest",
+      "type": "object"
+    },
+    "DirectorGateResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "build_macro": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectorBuildMacro"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Director-scheduled build macro ownership/support context."
+        },
+        "granted_tools": {
+          "description": "Action/tool affordances granted to this selected prompt.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Granted Tools",
+          "type": "array"
+        },
+        "local_observations": {
+          "additionalProperties": true,
+          "description": "Local scene observations to include in selected prompt context.",
+          "title": "Local Observations",
+          "type": "object"
+        },
+        "queue_depth": {
+          "description": "Director gate decision queue depth.",
+          "minimum": 0,
+          "title": "Queue Depth",
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Selection or bypass reason.",
+          "title": "Reason",
+          "type": "string"
+        },
+        "role": {
+          "description": "Role assigned to the selected prompt context.",
+          "title": "Role",
+          "type": "string"
+        },
+        "scene_digest": {
+          "description": "Compact scene context for the selected prompt.",
+          "title": "Scene Digest",
+          "type": "string"
+        },
+        "scene_id": {
+          "description": "Director V2 scene id used for the decision.",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "selected": {
+          "description": "Whether this bot may enter the prompt path.",
+          "title": "Selected",
+          "type": "boolean"
+        },
+        "suppressed_agents": {
+          "description": "Known agents suppressed by this scene decision.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Suppressed Agents",
+          "type": "array"
+        },
+        "suppression_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why this bot was suppressed, when selected is false.",
+          "title": "Suppression Reason"
+        },
+        "turn_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "speaker",
+                "planner"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Selected turn class, or null when suppressed/bypassed.",
+          "title": "Turn Kind"
+        }
+      },
+      "required": [
+        "selected",
+        "reason",
+        "scene_id",
+        "scene_digest",
+        "role",
+        "queue_depth"
+      ],
+      "title": "DirectorGateResponse",
+      "type": "object"
+    },
     "EntityObservation": {
       "additionalProperties": false,
       "description": "Observed entity near the bot.",
@@ -1282,7 +1602,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.6",
+  "protocolVersion": "1.7",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -1299,6 +1619,10 @@
     "cost.gate": {
       "request": "#/$defs/CostGateRequest",
       "response": "#/$defs/CostGateResponse"
+    },
+    "director.gate": {
+      "request": "#/$defs/DirectorGateRequest",
+      "response": "#/$defs/DirectorGateResponse"
     },
     "errand.complete": {
       "request": "#/$defs/ErrandCompleteRequest",

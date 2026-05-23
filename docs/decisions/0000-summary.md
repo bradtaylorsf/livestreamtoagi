@@ -29,6 +29,7 @@ and the final broadcast hardening pass.
 | Model routing | Use native Mindcraft `model` and `code_model`; validate locally with LM Studio profile strings before any OpenRouter spend. No immediate routing patch. | #520 |
 | Embeddings | Do not rely on OpenRouter embeddings in Mindcraft. Use LM Studio embeddings where available, another local provider, or accept word-overlap until Python memory replaces it. | #520 |
 | Conversation | Use Mindcraft pairwise bot conversations as the base. Add our own personality/proximity/eavesdrop layer. | #521 |
+| Director V2 | Keep #510 decentralized mode available, then add opt-in Minecraft Director V2 as the post-#510 showrunner that selects one speaker/tool/build step per scene and writes batched scene summaries. | #750, #749 |
 | Management | Never spawn Management as a bot. Keep it Python-side and out-of-band. | #521 |
 | Alpha | First embodied bot, action-only/non-verbal. Block normal conversation initiation. | #521 |
 | Bridge extension | Fork patch, not plugin. Add Node bridge module plus explicit commands/skills. | #522 |
@@ -89,3 +90,4 @@ and the final broadcast hardening pass.
 - [0006: Minecraft Video Capture](0006-video-capture.md)
 - [0007: Minecraft Licensing And Commercial Posture](0007-licensing.md)
 - [0010: Bridge Protocol And Transport](0010-bridge-protocol.md)
+- [0011: Director V2 Architecture](0011-director-v2-architecture.md)

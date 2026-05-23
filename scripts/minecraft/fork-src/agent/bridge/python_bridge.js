@@ -67,11 +67,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.6 is the E7-3 (#567) minor bump:
-// `errand.complete` lets Alpha report verified errand outcomes over the bridge.
-// The server only gates on the major, so this stays wire-compatible with
-// earlier 1.x peers.
-export const PROTOCOL_VERSION = '1.6';
+// contract.PROTOCOL_VERSION (ADR §3). 1.7 is the E8.5-4 (#753) minor bump:
+// `director.gate` lets Director V2 bound Mindcraft prompt fanout. The server
+// only gates on the major, so this stays wire-compatible with earlier 1.x peers.
+export const PROTOCOL_VERSION = '1.7';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';

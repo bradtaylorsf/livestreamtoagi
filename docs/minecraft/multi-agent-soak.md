@@ -60,6 +60,7 @@ Run from the repository root:
 ```bash
 bash scripts/check-services.sh
 pnpm llm:local --list-only
+pnpm llm:local
 scripts/minecraft/health.sh --json
 curl -fsS http://127.0.0.1:8010/api/health
 ```
@@ -81,7 +82,7 @@ Required runtime state:
 | Paper | `scripts/minecraft/health.sh --json` returns `"up":true`; if down, `soak.sh` starts `scripts/minecraft/supervise.sh` by default. |
 | Backend | `core.main:app` reachable on `http://127.0.0.1:8010/api/health` |
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
-| LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1` |
+| LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1`, with `LOCAL_LLM_MODEL` loaded enough to complete a chat request |
 
 ## Live Soak Command
 
@@ -93,6 +94,7 @@ export LOCAL_LLM_BASE_URL=http://localhost:1234/v1
 export LOCAL_LLM_MODEL=<model-id-from-LM-Studio>
 export LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 export EMBEDDING_PROVIDER=deterministic
+export CONVERSATION_MODE=embodied
 export MINECRAFT_BRIDGE_TOKEN=<same-secret-as-backend>
 
 scripts/minecraft/soak.sh --duration-hours 2 --log-dir logs/soak
@@ -103,6 +105,16 @@ points `LOCAL_LLM_BASE_URL` at the proxy, while
 `LOCAL_LLM_UPSTREAM_URL` keeps the real LM Studio endpoint. Set
 `MINECRAFT_LLM_QUEUE_PROXY=0` to bypass it, or raise
 `MINECRAFT_LLM_CONCURRENCY` from `1` to `2` for a slightly wider local queue.
+The bridge, Alpha, and cohort launchers write the effective
+`LOCAL_LLM_BASE_URL` into each staged Mindcraft profile, so chat completions
+use the proxy endpoint when it is enabled. Startup embeddings use
+`LOCAL_LLM_UPSTREAM_URL` directly so the chat queue is not blocked behind
+hundreds of example-embedding requests.
+
+The runner performs both `pnpm llm:local --list-only` and a real
+`pnpm llm:local` chat warm-up before launching bots. If LM Studio lists the
+model but later reports `Model unloaded` or `Operation canceled`, reload or pin
+the selected model in LM Studio and rerun the soak.
 
 If you want the soak to fail instead of auto-starting Paper:
 
@@ -115,6 +127,8 @@ Package aliases:
 ```bash
 pnpm mc:sim:smoke
 pnpm mc:sim:soak
+pnpm mc:sim:smoke:director
+pnpm mc:sim:soak:director
 pnpm mc:sim -- --duration-hours 0.5 --log-dir logs/soak
 pnpm mc:soak -- --duration-hours 2 --log-dir logs/soak
 pnpm verify:minecraft-soak
@@ -171,6 +185,25 @@ Mindcraft clones and refuses pathfinder routes that require digging or
 one-block towers. Set `MC_SIM_ALLOW_NEW_ACTION=1` only when you deliberately
 want the local model to spend extra time synthesizing custom action code.
 
+## Director V2 Acceptance Soak
+
+The embodied E8 soak above is the decentralized baseline. Director V2
+acceptance runs the same local Minecraft stack with `--profile director_v2`,
+which forces `CONVERSATION_MODE=director_v2`, `DIRECTOR_V2_GATE=1`, the LM
+queue proxy, and acceptance report generation. Use:
+
+```bash
+pnpm mc:sim:smoke:director
+pnpm mc:sim:soak:director
+```
+
+That profile writes `director-decisions.ndjson`, `tool-parity.ndjson`,
+`macro-evidence.ndjson`, `memory-digest.ndjson`, `acceptance-report.json`, and
+`acceptance-report.md` in the run directory. Full criteria, evidence columns,
+local single-model mode, optional OpenRouter-builder mode, and residual-gap
+rules live in
+[`director-v2-acceptance-soak.md`](director-v2-acceptance-soak.md).
+
 ## Multi-Agent Runtime Queues
 
 The staged Mindcraft overlay now treats each character as a queued actor:
@@ -178,7 +211,8 @@ The staged Mindcraft overlay now treats each character as a queued actor:
 | Layer | Behavior | Evidence |
 | --- | --- | --- |
 | Per-agent inbox | `handleMessage` appends incoming chat to a pending inbox, debounces for `MINECRAFT_TURN_DEBOUNCE_MS` (default `2000`), batches recent messages, and saves messages that arrive during generation for the next turn. Lifecycle chatter such as `I'm stuck` stays telemetry-only. | `inbox.queued`, `inbox.turn_started`, `inbox.turn_completed`, `inbox.telemetry_ignored`, `inbox.immediate_command`. |
-| LM Studio queue | `lmstudio_queue_proxy.py` serializes OpenAI-compatible requests to LM Studio with `MINECRAFT_LLM_CONCURRENCY` workers and emits wait/latency telemetry. | `timeline-raw/llm-queue.ndjson`, plus `llm.queue.enqueued`, `llm.queue.started`, `llm.queue.completed`, `llm.queue.failed`. |
+| Director V2 gate | When `CONVERSATION_MODE=director_v2`, each compacted inbox batch calls `director.gate` before Mindcraft can enqueue `shouldRespond`. Selected agents receive scene context and affordances; unselected agents resolve the inbox turn without an LLM call. | `director_gate.selected`, `director_gate.suppressed`, `director_gate.stale_discarded`. |
+| LM Studio queue | `lmstudio_queue_proxy.py` serializes OpenAI-compatible chat requests to LM Studio with `MINECRAFT_LLM_CONCURRENCY` workers, prioritizes chat over embeddings, retries transient model-load 400s, and emits wait/latency telemetry. | `timeline-raw/llm-queue.ndjson`, plus `llm.queue.enqueued`, `llm.queue.started`, `llm.queue.retry`, `llm.queue.completed`, `llm.queue.failed`. |
 | Per-agent action queue | `ActionManager._executeAction` keeps one active action slot per agent. New embodied actions are queued instead of interrupting `placeHere`, `move`, or plan builds; queue overflow emits a busy rejection. | `action.queued`, `action.started`, `action.completed`, `action.rejected_busy`. |
 
 Useful knobs:
@@ -187,9 +221,12 @@ Useful knobs:
 | --- | --- | --- |
 | `MINECRAFT_TURN_DEBOUNCE_MS` | `2000` | Inbox debounce before one batched conversation turn. |
 | `MINECRAFT_TURN_BATCH_MAX` | `12` | Max inbox messages sent to one prompt. |
+| `CONVERSATION_MODE` | `embodied` | `embodied` preserves the #510 decentralized prompt mode; `director_v2` enables Director V2 prompt gating. |
+| `DIRECTOR_V2_GATE` | `0` | Automatically set to `1` by the wrappers when `CONVERSATION_MODE=director_v2`. |
 | `MINECRAFT_ACTION_QUEUE_MAX` | `16` | Max deferred embodied actions per agent. |
 | `MINECRAFT_LLM_QUEUE_PROXY` | `1` | Start the local FIFO proxy and route bot LLM traffic through it. |
 | `MINECRAFT_LLM_CONCURRENCY` | `1` | Active upstream LM Studio requests allowed by the proxy. |
+| `MINECRAFT_LLM_RETRY_ATTEMPTS` | `2` | Retries for transient LM Studio model-load 400s such as `Model unloaded` or `Operation canceled`. |
 | `LOCAL_LLM_UPSTREAM_URL` | `$LOCAL_LLM_BASE_URL` | Real LM Studio upstream when the proxy is enabled. |
 
 ## Builder-Plan Mode
@@ -230,10 +267,20 @@ when OpenRouter provider/model configuration is missing. Set
 is optional; estimated USD uses `MC_SIM_BUILDER_USD_PER_1K_INPUT` and
 `MC_SIM_BUILDER_USD_PER_1K_OUTPUT` when provided.
 
+Director V2 treats `!planAndBuild` as a scheduled macro, not a normal tool that
+every character may invoke independently. One scene has one build-plan owner;
+the owner receives `!planAndBuild`, while nearby non-owners receive normal
+support roles such as gathering, clearing, guarding, or conversation support.
+In focused `MC_SIM_BUILD_MODE=plan` runs, support roles are observation/chat
+only unless the owner explicitly coordinates additional work; standalone
+placement/build commands are removed from non-owner tool menus and blocked at
+the command parser. The Node governor mirrors that scene lock so stale direct
+commands are skipped with `reason=scene_locked` before any provider call.
+
 The build governor runs before any provider call. Each agent may have one
-active build at a time; equivalent completed builds are cooled down for
-`MC_SIM_BUILD_COOLDOWN_SEC` seconds, and cached plans are reused without a new
-builder-model call. Defaults:
+active build at a time, each scene may have one active plan owner, equivalent
+completed builds are cooled down for `MC_SIM_BUILD_COOLDOWN_SEC` seconds, and
+cached plans are reused without a new builder-model call. Defaults:
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -242,14 +289,42 @@ builder-model call. Defaults:
 | `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks. |
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
 
+When the local smoke auto-starts the easy Paper server and applies the safe
+starter inventory, `MC_SIM_INIT_MESSAGE` is delivered after that starter-kit
+setup so build owners do not begin a plan before the requested materials are
+available.
+
 Plan evidence appears as `build_plan.generation.*` and
-`build_plan.execution.*` events. Provider, model, paid/local request counts,
-token usage, estimated USD, `fallback_reason`, and budget/provider failures are
+`build_plan.execution.*` events. `scene_id`, build-plan id, owner,
+provider/model, paid/local request counts, token usage, estimated USD,
+`fallback_reason`, execution result, and parsed verified block counts are
 included in `timeline.ndjson`, `timeline-totals.json`, `summary.txt`, and
-`monitor.html`. `build_plan.generation.skipped` records `active_build_exists`,
-`cache_hit`, `cooldown`, and `per_agent_cap` outcomes. `!executeCode` remains
-separately gated by
+`monitor.html`. `build_plan.generation.skipped` records `scene_locked`,
+`active_build_exists`, `cache_hit`, `cooldown`, and `per_agent_cap` outcomes.
+`!executeCode` remains separately gated by
 `SOAK_BLOCK_EXECUTE_CODE_ACTIONS` / `MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS`.
+
+Local-only builder smoke:
+
+```bash
+SOAK_BUILDER_PROVIDER=local \
+MC_SIM_BUILD_MODE=plan \
+scripts/minecraft/soak.sh --dry-run
+```
+
+OpenRouter builder smoke, using exactly one paid builder-plan request during
+preflight:
+
+```bash
+SOAK_BUILDER_PROVIDER=openrouter \
+MC_SIM_BUILD_MODE=plan \
+MC_SIM_BUILDER_PROVIDER=openrouter \
+MC_SIM_BUILDER_OPENROUTER_MODEL=<openrouter-model-id> \
+MC_SIM_BUILDER_OPENROUTER_API_KEY=<key> \
+MC_SIM_BUILDER_MAX_CALLS_PER_RUN=1 \
+MC_SIM_BUILDER_MAX_CALLS_PER_AGENT=1 \
+scripts/minecraft/soak.sh --dry-run
+```
 
 ## Action-Command Reliability Gate
 

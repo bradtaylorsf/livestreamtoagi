@@ -670,6 +670,12 @@ def test_launchers_stage_interruption_guard_and_clean_exit_gate() -> None:
         assert "forcing idle without process exit" in src
         assert "action-manager no-kill patch" in src
         assert "[behavior-status]" in src
+        assert "LLM_URL=\"$LOCAL_LLM_BASE_URL\"" in src
+        assert "EMBEDDING_URL=\"${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}\"" in src
+        assert "profile.model = { api: 'lmstudio'" in src
+        assert "profile.code_model = { api: 'lmstudio'" in src
+        assert "profile.embedding = {" in src
+        assert "url: embeddingUrl" in src
 
 
 def test_package_json_exposes_action_interruption_verifier() -> None:

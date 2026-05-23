@@ -42,12 +42,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.6 is a
-# minor bump: E7-3 (#567) adds the `errand.complete` bridge verb so Alpha can
-# tie a verified in-world errand outcome back to its dispatcher with ✓/✗/?
-# semantics. Earlier 1.x peers remain wire-compatible because
+# additive-compatible within a major and fail-closed across majors. 1.7 is a
+# minor bump: E8.5-4 (#753) adds the `director.gate` bridge verb so Mindcraft
+# bot prompts can be bounded by Director V2. Earlier 1.x peers remain
+# wire-compatible because
 # `is_supported_version` gates only on the major.
-PROTOCOL_VERSION = "1.6"
+PROTOCOL_VERSION = "1.7"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -541,6 +541,98 @@ class CodeExecuteResponse(BaseModel):
     )
 
 
+class DirectorGateRequest(BaseModel):
+    """``director.gate`` — Director V2 prompt eligibility check for Mindcraft."""
+
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str = Field(min_length=1, description="Bot requesting prompt permission.")
+    event_kind: Literal["chat", "action_result", "perception_event"] = Field(
+        description="Kind of scene event that would trigger a Mindcraft prompt."
+    )
+    event_text: str = Field(description="Human-readable chat/action/perception text.")
+    source_agent: str | None = Field(
+        default=None,
+        description="Agent or speaker that caused the event, when known.",
+    )
+    mentions: list[str] = Field(
+        default_factory=list,
+        description="Directly addressed agent ids parsed by the caller.",
+    )
+    position: Vec3 | None = Field(
+        default=None,
+        description="Best-known local Minecraft position for spatial scheduling.",
+    )
+    scene_hint: str | None = Field(
+        default=None,
+        description="Optional caller-side grouping hint for batched messages.",
+    )
+    available_tools: list[str] = Field(
+        default_factory=list,
+        description="Mindcraft action/tool affordances available to the selected prompt.",
+    )
+
+
+class DirectorBuildMacro(BaseModel):
+    """Director-scheduled build macro context for one prompt verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+    scene_id: str = Field(description="Scene id for this build macro decision.")
+    plan_id: str | None = Field(default=None, description="Director build plan id.")
+    owner: str | None = Field(default=None, description="Agent that owns the build plan.")
+    role: Literal["planner_owner", "support"] = Field(
+        description="Whether this agent owns the plan or supports it."
+    )
+    support_role: Literal["gather", "clear", "guard", "converse"] | None = Field(
+        default=None,
+        description="Support role for non-owner agents.",
+    )
+    support_task: str | None = Field(
+        default=None,
+        description="Short support instruction for non-owner agents.",
+    )
+    reason: str = Field(description="Build macro scheduling reason.")
+    granted: bool = Field(
+        default=False,
+        description="Whether the agent may invoke !planAndBuild for this verdict.",
+    )
+    status: str | None = Field(default=None, description="Current Director build plan status.")
+    cache_key: str | None = Field(default=None, description="Stable build-goal cache key.")
+
+
+class DirectorGateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selected: bool = Field(description="Whether this bot may enter the prompt path.")
+    turn_kind: Literal["speaker", "planner"] | None = Field(
+        default=None,
+        description="Selected turn class, or null when suppressed/bypassed.",
+    )
+    reason: str = Field(description="Selection or bypass reason.")
+    suppression_reason: str | None = Field(
+        default=None,
+        description="Why this bot was suppressed, when selected is false.",
+    )
+    scene_id: str = Field(description="Director V2 scene id used for the decision.")
+    scene_digest: str = Field(description="Compact scene context for the selected prompt.")
+    role: str = Field(description="Role assigned to the selected prompt context.")
+    local_observations: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Local scene observations to include in selected prompt context.",
+    )
+    granted_tools: list[str] = Field(
+        default_factory=list,
+        description="Action/tool affordances granted to this selected prompt.",
+    )
+    build_macro: DirectorBuildMacro | None = Field(
+        default=None,
+        description="Director-scheduled build macro ownership/support context.",
+    )
+    queue_depth: int = Field(ge=0, description="Director gate decision queue depth.")
+    suppressed_agents: list[str] = Field(
+        default_factory=list,
+        description="Known agents suppressed by this scene decision.",
+    )
+
+
 # ── Service registry (ADR §6 closed set) ────────────────────────────────────
 
 # Maps "<service>.<method>" -> (request payload model, response payload model).
@@ -562,6 +654,7 @@ SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "errand.poll": (ErrandPollRequest, ErrandPollResponse),
     "errand.complete": (ErrandCompleteRequest, ErrandCompleteResponse),
     "code.execute": (CodeExecuteRequest, CodeExecuteResponse),
+    "director.gate": (DirectorGateRequest, DirectorGateResponse),
 }
 
 # The six initial verbs #541 requires schemas for (ADR §6 names; the issue's
@@ -692,6 +785,8 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     ErrandCompleteResponse,
     CodeExecuteRequest,
     CodeExecuteResponse,
+    DirectorGateRequest,
+    DirectorGateResponse,
 )
 
 

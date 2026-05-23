@@ -33,6 +33,7 @@ SOAK_BOTS_LINE = "bots:           bridge alpha vera rex aurora pixel fork sentin
 
 _MINECRAFT_ENV_KEYS = {
     "CONVERSATION_MODE",
+    "DIRECTOR_V2_GATE",
     "EMBEDDING_PROVIDER",
     "ENV_FILE",
     "LLM_PROVIDER",
@@ -50,8 +51,7 @@ def _clean_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in _MINECRAFT_ENV_KEYS
-        and not key.startswith(_MINECRAFT_ENV_PREFIXES)
+        if key not in _MINECRAFT_ENV_KEYS and not key.startswith(_MINECRAFT_ENV_PREFIXES)
     }
     if overrides:
         env.update(overrides)
@@ -84,7 +84,9 @@ def test_soak_script_bash_syntax_is_valid() -> None:
     assert proc.returncode == 0, proc.stderr
     proc = subprocess.run(["bash", "-n", str(RUN_SCRIPT)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
-    proc = subprocess.run(["node", "--check", str(EASY_SETUP_SCRIPT)], capture_output=True, text=True)
+    proc = subprocess.run(
+        ["node", "--check", str(EASY_SETUP_SCRIPT)], capture_output=True, text=True
+    )
     assert proc.returncode == 0, proc.stderr
 
 
@@ -181,8 +183,15 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
     assert "work root:      <per-run temp>" in proc.stdout
     assert "MindServer:     8080+ per bot" in proc.stdout
     assert "LM queue:       enabled concurrency=1 upstream=http://localhost:1234/v1" in proc.stdout
-    assert "builder route:  provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
-    assert "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s" in proc.stdout
+    assert "conversation:   mode=embodied director_gate=0" in proc.stdout
+    assert (
+        "builder route:  provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>"
+        in proc.stdout
+    )
+    assert (
+        "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s"
+        in proc.stdout
+    )
     assert "behavior:       require=1; movement>=5/agent" in proc.stdout
     assert "execute code:   allowed" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
@@ -225,8 +234,16 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "duration:       0.25h" in proc.stdout
     assert "chat model:     google/gemma-4-e4b" in proc.stdout
     assert "build model:    google/gemma-4-26b-a4b" in proc.stdout
-    assert "builder route: provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
-    assert "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s" in proc.stdout
+    assert "conversation mode: embodied" in proc.stdout
+    assert "Director V2 gate: 0" in proc.stdout
+    assert (
+        "builder route: provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>"
+        in proc.stdout
+    )
+    assert (
+        "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s"
+        in proc.stdout
+    )
     assert "management review: disabled" in proc.stdout
     assert "build mode: single" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
@@ -234,22 +251,39 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "execute code actions: 1" in proc.stdout
     assert "suppress action chat: 1" in proc.stdout
     assert "safe terrain actions: 1" in proc.stdout
-    assert "heartbeat: enabled=1 idle=12s cooldown=7s stale_action=30s max_no_command=2" in proc.stdout
+    assert (
+        "heartbeat: enabled=1 idle=12s cooldown=7s stale_action=30s max_no_command=2" in proc.stdout
+    )
     assert "easy mode: 1" in proc.stdout
     assert "keep MC server running: 1" in proc.stdout
     assert "minecraft: 127.0.0.1:25566" in proc.stdout
     assert "server dir:" in proc.stdout and "minecraft-server-easy" in proc.stdout
     assert "world config:" in proc.stdout and "world-easy.config" in proc.stdout
     assert "MindServer base port:" in proc.stdout
-    assert "reliability thresholds: intent>=0.6 parse>=0.8 execution>=0.7 verified>=0.5" in proc.stdout
-    assert "reliability:    intent>=0.6 parse>=0.8 exec>=0.7 verified>=0.5 min_intents=5 fail=1" in proc.stdout
-    assert "builder route:  provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
-    assert "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s" in proc.stdout
+    assert (
+        "reliability thresholds: intent>=0.6 parse>=0.8 execution>=0.7 verified>=0.5" in proc.stdout
+    )
+    assert (
+        "reliability:    intent>=0.6 parse>=0.8 exec>=0.7 verified>=0.5 min_intents=5 fail=1"
+        in proc.stdout
+    )
+    assert (
+        "builder route:  provider=local fallback=fail openrouter_model=<unset> caps run=12 agent=3 usd=<unset>"
+        in proc.stdout
+    )
+    assert "conversation:   mode=embodied director_gate=0" in proc.stdout
+    assert (
+        "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s"
+        in proc.stdout
+    )
     assert "private conv:   blocked (!startConversation/!endConversation)" in proc.stdout
     assert "slow actions:   blocked (!newAction/!observe/!navigate/plan actions)" in proc.stdout
     assert "execute code:   blocked (!executeCode)" in proc.stdout
     assert "safe terrain:   enabled" in proc.stdout
-    assert "heartbeat:      enabled=1 idle=12000ms cooldown=7000ms stale_action=30000ms max_no_command=2" in proc.stdout
+    assert (
+        "heartbeat:      enabled=1 idle=12000ms cooldown=7000ms stale_action=30000ms max_no_command=2"
+        in proc.stdout
+    )
     assert "easy spawn:     enabled" in proc.stdout
     assert "keep MC alive:  1" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
@@ -291,9 +325,15 @@ def test_local_sim_plan_mode_enables_plan_building_but_keeps_execute_code_blocke
     assert "slow sim actions: 0" in proc.stdout
     assert "execute code actions: 1" in proc.stdout
     assert "slow actions:   allowed" in proc.stdout
+    assert "safe terrain:   enabled" in proc.stdout
+    assert "blocks !place/!break/!observe" in proc.stdout
     assert "execute code:   blocked (!executeCode)" in proc.stdout
-    assert "!planAndBuild(\"small shared cabin\")" in proc.stdout
+    assert '!planAndBuild("small shared cabin")' in proc.stdout
+    assert "Only the build owner should place blocks through !planAndBuild" in proc.stdout
+    assert 'execute one visible command such as !placeHere("oak_log")' not in proc.stdout
+    assert "do not wait for consensus before placing the first camp marker" not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
+    assert "init delivery:  after easy-spawn starter kit" in proc.stdout
 
 
 def test_openrouter_builder_routing_fails_closed_when_config_is_missing(tmp_path) -> None:
@@ -353,8 +393,14 @@ def test_openrouter_builder_routing_can_fall_back_to_local_without_key(tmp_path)
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "builder route: provider=openrouter fallback=local openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
-    assert "builder route:  provider=openrouter fallback=local openrouter_model=<unset> caps run=12 agent=3 usd=<unset>" in proc.stdout
+    assert (
+        "builder route: provider=openrouter fallback=local openrouter_model=<unset> caps run=12 agent=3 usd=<unset>"
+        in proc.stdout
+    )
+    assert (
+        "builder route:  provider=openrouter fallback=local openrouter_model=<unset> caps run=12 agent=3 usd=<unset>"
+        in proc.stdout
+    )
 
 
 def test_local_sim_wrapper_uses_mode_defaults_from_env(tmp_path) -> None:
@@ -412,8 +458,13 @@ def test_local_sim_wrapper_echoes_reliability_threshold_overrides(tmp_path) -> N
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "reliability thresholds: intent>=0.4 parse>=0.9 execution>=0.8 verified>=0.7" in proc.stdout
-    assert "reliability:    intent>=0.4 parse>=0.9 exec>=0.8 verified>=0.7 min_intents=5 fail=1" in proc.stdout
+    assert (
+        "reliability thresholds: intent>=0.4 parse>=0.9 execution>=0.8 verified>=0.7" in proc.stdout
+    )
+    assert (
+        "reliability:    intent>=0.4 parse>=0.9 exec>=0.8 verified>=0.7 min_intents=5 fail=1"
+        in proc.stdout
+    )
 
 
 def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
@@ -626,6 +677,20 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "signal_process_tree" in text
     assert "SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS" in text
     assert "SOAK_INIT_MESSAGE" in text
+    assert "SOAK_SETTINGS_INIT_MESSAGE" in text
+    assert "send_deferred_init_message" in text
+    assert "easy spawn deferred init" in text
+    assert "after_easy_spawn_starter_kit" in text
+    assert "MC_SIM_BUILD_MODE" in text
+    assert "export MC_SIM_BUILD_MODE" in text
+    assert "build_mode=$MC_SIM_BUILD_MODE" in text
+    assert "MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" in text
+    assert "apply_suppress_empty_init_chat_patch" in text
+    assert "waiting for deferred init message" in text
+    assert "suppress_empty_init_chat=$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" in text
+    assert "apply_director_tool_guard_patch" in text
+    assert "Director V2 blocked unavailable command" in text
+    assert "is not available for this Director V2 turn" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
     assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
     assert "SOAK_BLOCK_EXECUTE_CODE_ACTIONS" in text
@@ -668,8 +733,8 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "!buildFromPlan" in text
     assert "!planAndBuild" in text
     assert "!executeCode" in text
-    assert "'!place'," not in text
-    assert "'!break'," not in text
+    assert '"!place"' in text
+    assert '"!break"' in text
     assert 'if "$SCRIPT_DIR/health.sh" --quiet' in text
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text
@@ -680,12 +745,14 @@ def test_easy_spawn_access_writer_is_offline_safe(tmp_path) -> None:
     proc = subprocess.run(
         ["node", str(EASY_SETUP_SCRIPT), "--write-access-only"],
         cwd=REPO_ROOT,
-        env=_clean_env({
-            "SERVER_DIR": str(tmp_path / "easy-server"),
-            "EASY_SETUP_PLAYERS": "Alpha Vera",
-            "EASY_SETUP_OBSERVERS": "bradtaylorsf",
-            "EASY_SETUP_OPERATORS": "bradtaylorsf",
-        }),
+        env=_clean_env(
+            {
+                "SERVER_DIR": str(tmp_path / "easy-server"),
+                "EASY_SETUP_PLAYERS": "Alpha Vera",
+                "EASY_SETUP_OBSERVERS": "bradtaylorsf",
+                "EASY_SETUP_OPERATORS": "bradtaylorsf",
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=30,
@@ -726,7 +793,9 @@ def test_easy_spawn_script_builds_safe_starter_arena() -> None:
     assert "EASY_SETUP_OPERATORS" in text
     assert "EASY_SETUP_SPECTATORS" in text
     assert "/gamemode spectator" in text
+    assert "/clear @a" in text
     assert "minecraft:oak_log 32" in text
+    assert "minecraft:oak_planks" in text
     assert "minecraft:stone_pickaxe 1" in text
 
 
@@ -833,6 +902,47 @@ def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_
     assert "Behavioral acceptance" in summary
     assert "behavior_gate_status=fail" in summary
     assert "agent alpha movement expected >= 5 got 1" in summary
+
+
+def test_behavior_gate_does_not_count_embodied_text_as_death(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            "Director context says to take another embodied action near spawn.",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(5))
+        if agent_id == "rex":
+            lines.append('!placeHere("stone")')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "rex and vera worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
 
 def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(tmp_path) -> None:

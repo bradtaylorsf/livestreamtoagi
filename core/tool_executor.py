@@ -149,3 +149,31 @@ async def execute_tool_calls(
             }
         )
     return results
+
+
+async def execute_director_tool_call(
+    adapter: Any,
+    agent_id: str,
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    tool_call_id: str | None = None,
+    simulation_id: UUID | None = None,
+    conversation_id: UUID | None = None,
+    scene_id: str | None = None,
+) -> dict[str, str]:
+    """Execute one Director V2 tool call and return an LLM tool-role message."""
+
+    result = await adapter.invoke(
+        agent_id,
+        tool_name,
+        arguments or {},
+        simulation_id=simulation_id,
+        conversation_id=conversation_id,
+        scene_id=scene_id,
+    )
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id or f"director_{tool_name}",
+        "content": json.dumps(result, default=str),
+    }

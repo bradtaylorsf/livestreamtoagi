@@ -11,9 +11,7 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ANALYZER = REPO_ROOT / "scripts" / "minecraft" / "analyze_action_reliability.py"
-FAILED_SOAK_FIXTURE = (
-    REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_soak_2026-05-21"
-)
+FAILED_SOAK_FIXTURE = REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_soak_2026-05-21"
 
 
 def _load_analyzer() -> ModuleType:
@@ -178,9 +176,7 @@ def test_mindcraft_failures_are_classified_from_execution_blocks(tmp_path: Path)
     )
 
     rex = data["agents"]["rex"]
-    classes = {
-        item["class"]: item["count"] for item in rex["execution_failure_classes"]
-    }
+    classes = {item["class"]: item["count"] for item in rex["execution_failure_classes"]}
     assert rex["counts"]["emitted_commands"] == 3
     assert rex["counts"]["execution_failures"] == 3
     assert classes["placement_blocked"] == 1
@@ -209,12 +205,8 @@ def test_failed_soak_fixture_ignores_incoming_chat_and_groups_execution_blocks(
     )
 
     sentinel = data["agents"]["sentinel"]
-    failed_parse_text = "\n".join(
-        item["text"] for item in sentinel["examples"]["failed_parses"]
-    )
-    classes = {
-        item["class"]: item["count"] for item in sentinel["execution_failure_classes"]
-    }
+    failed_parse_text = "\n".join(item["text"] for item in sentinel["examples"]["failed_parses"])
+    classes = {item["class"]: item["count"] for item in sentinel["execution_failure_classes"]}
 
     assert "received message from Sentinel" not in failed_parse_text
     assert sentinel["counts"]["parse_failures"] == 0
@@ -441,6 +433,87 @@ def test_builder_provider_usage_is_reported_separately(tmp_path: Path) -> None:
     assert metrics["builder_plan_max_per_agent"] == 6
 
 
+def test_director_v2_counts_are_reported_without_changing_reliability_metrics(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "director-v2"
+    _write_bot_log(run_dir, "vera", ["Vera started."])
+    _write_bot_log(run_dir, "rex", ["Rex started."])
+    raw_dir = run_dir / "timeline-raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {
+            "ts": "2026-05-21T00:00:00Z",
+            "event_type": "director.gate.decision",
+            "agent": "vera",
+            "payload": {
+                "agent_id": "vera",
+                "scene_id": "scene-1",
+                "selected": True,
+                "reason": "direct_address",
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:01Z",
+            "event_type": "director.gate.decision",
+            "agent": "rex",
+            "payload": {
+                "agent_id": "rex",
+                "scene_id": "scene-1",
+                "selected": False,
+                "suppression_reason": "fanout_capped",
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:02Z",
+            "event_type": "director.memory.compaction",
+            "agent": "vera",
+            "payload": {
+                "scene_id": "scene-1",
+                "distributed_to": ["vera", "rex"],
+                "ok": True,
+            },
+        },
+        {
+            "ts": "2026-05-21T00:00:03Z",
+            "event_type": "director.tool.call",
+            "agent": "rex",
+            "payload": {
+                "agent_id": "rex",
+                "scene_id": "scene-1",
+                "tool_name": "fetch_url",
+                "ok": False,
+                "status": "error",
+            },
+        },
+    ]
+    (raw_dir / "director_v2.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0,
+            "min_parse_success": 0,
+            "min_execution_rate": 0,
+            "min_verified_success": 0,
+            "min_intents": 0,
+        },
+    )
+
+    assert data["agents"]["vera"]["metrics"]["intent_to_command_ratio"] == 1.0
+    assert data["agents"]["vera"]["director_metrics"]["selected_turns"] == 1
+    assert data["agents"]["vera"]["director_metrics"]["memory_compactions_participated"] == 1
+    assert data["agents"]["rex"]["director_metrics"]["suppressed_turns"] == 1
+    assert data["agents"]["rex"]["director_metrics"]["suppression_reasons"] == {"fanout_capped": 1}
+    assert data["agents"]["rex"]["director_metrics"]["tool_calls"] == 1
+    assert data["agents"]["rex"]["director_metrics"]["tool_failures"] == 1
+    assert data["aggregate"]["director_metrics"]["memory_compactions_participated"] == 2
+
+
 def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> None:
     analyzer = _load_analyzer()
     run_dir = tmp_path / "collect-run"
@@ -475,6 +548,61 @@ def test_collect_blocks_success_counts_as_verified_execution(tmp_path: Path) -> 
     assert sentinel["counts"]["execution_successes"] == 1
     assert sentinel["counts"]["verified_actions"] == 1
     assert sentinel["metrics"]["verified_success_rate"] == 1.0
+
+
+def test_support_information_commands_do_not_lower_verified_success_rate(
+    tmp_path: Path,
+) -> None:
+    analyzer = _load_analyzer()
+    run_dir = tmp_path / "support-information"
+    _write_bot_log(
+        run_dir,
+        "alpha",
+        [
+            "Generated response: !inventory",
+            'Alpha full response to system: ""!inventory""',
+            "parsed command: { commandName: '!inventory', args: [] }",
+            "Agent executed: !inventory and got: INVENTORY { oak_log: 64, cobblestone: 32 }",
+            "Saved memory to: ./bots/Alpha/memory.json",
+            "Generated response: !nearbyBlocks",
+            'Alpha full response to system: ""!nearbyBlocks""',
+            "parsed command: { commandName: '!nearbyBlocks', args: [] }",
+            "Agent executed: !nearbyBlocks and got: NEARBY_BLOCKS oak_log,cobblestone,torch",
+            "Saved memory to: ./bots/Alpha/memory.json",
+            'Generated response: !searchForBlock("cobblestone", 16)',
+            'Alpha full response to system: ""!searchForBlock("cobblestone", 16)""',
+            "parsed command: { commandName: '!searchForBlock', args: [ 'cobblestone', 16 ] }",
+            "Agent executed: !searchForBlock and got: Action output:",
+            "Minimum search range is 32.",
+            "Found cobblestone at (-6, 64, -6). Navigating...",
+            "Found non-destructive path.",
+            "You have reached at -6, 64, -6.",
+            "Saved memory to: ./bots/Alpha/memory.json",
+            'Generated response: !placeHere("torch")',
+            'Alpha full response to system: ""!placeHere("torch")""',
+            "parsed command: { commandName: '!placeHere', args: [ 'torch' ] }",
+            "Agent executed: !placeHere and got: Action output: Placed torch at (0, 64, 0).",
+        ],
+    )
+
+    data = analyzer.analyze_run(
+        run_dir,
+        thresholds={
+            "min_intent_to_command": 0.6,
+            "min_parse_success": 0.8,
+            "min_execution_rate": 0.7,
+            "min_verified_success": 0.5,
+            "min_intents": 1,
+        },
+    )
+
+    alpha = data["agents"]["alpha"]
+    assert data["acceptable"] is True
+    assert alpha["counts"]["execution_successes"] == 4
+    assert alpha["counts"]["verified_actions"] == 2
+    assert alpha["counts"]["support_information_successes"] == 3
+    assert alpha["counts"]["support_information_verified_actions"] == 1
+    assert alpha["metrics"]["verified_success_rate"] == 1.0
 
 
 def test_same_command_name_with_different_args_counts_distinct_accepts(tmp_path: Path) -> None:

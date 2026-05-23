@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FORK_SRC = REPO_ROOT / "scripts" / "minecraft" / "fork-src"
 ACTION_QUEUE = FORK_SRC / "agent" / "skills" / "action_queue.js"
 INBOX_QUEUE = FORK_SRC / "agent" / "skills" / "inbox_queue.js"
+DIRECTOR_GATE = FORK_SRC / "agent" / "skills" / "director_gate.js"
 
 NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
@@ -183,7 +184,9 @@ process.stdout.write(JSON.stringify({{
 
     assert len(result["calls"]) == 3
     assert result["batchResults"] == ["handled-1", "handled-1"]
-    assert "Incoming message batch since your last turn (2 messages):" in result["calls"][0]["message"]
+    assert (
+        "Incoming message batch since your last turn (2 messages):" in result["calls"][0]["message"]
+    )
     assert "first batch message" in result["calls"][0]["message"]
     assert "second batch message" in result["calls"][0]["message"]
     assert result["deferredResults"] == ["handled-2", "handled-3"]
@@ -191,8 +194,316 @@ process.stdout.write(JSON.stringify({{
     assert result["calls"][2]["message"] == "message while model is generating"
     event_types = [event["type"] for event in result["events"]]
     running_queue_events = [
-        event for event in result["events"] if event["type"] == "inbox.queued" and event["payload"].get("running")
+        event
+        for event in result["events"]
+        if event["type"] == "inbox.queued" and event["payload"].get("running")
     ]
     assert event_types.count("inbox.turn_started") == 3
     assert event_types.count("inbox.turn_completed") == 3
     assert running_queue_events
+
+
+@requires_node
+def test_inbox_queue_ignores_mindcraft_command_echo_telemetry(
+    tmp_path: Path,
+) -> None:
+    inbox_queue = _stage_skill_tree(tmp_path, INBOX_QUEUE)
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(inbox_queue))}).href);
+globalThis.__timelineEvents = [];
+
+const calls = [];
+const agent = {{
+    name: 'grok',
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'handled';
+    }},
+}};
+
+mod.installInboxQueue(agent, {{ debounceMs: 5 }});
+
+const results = await Promise.all([
+    agent.handleMessage('Sentinel', '*Pixel used break*'),
+    agent.handleMessage('Sentinel', 'Command !break was given 0 args, but requires 4 args.'),
+    agent.handleMessage('Pixel', '!break'),
+]);
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    results,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["calls"] == []
+    assert result["results"] == [False, False, False]
+    telemetry_events = [
+        event for event in result["events"] if event["type"] == "inbox.telemetry_ignored"
+    ]
+    assert len(telemetry_events) == 3
+    assert {
+        event["payload"]["message"]
+        for event in telemetry_events
+    } == {
+        "*Pixel used break*",
+        "Command !break was given 0 args, but requires 4 args.",
+        "!break",
+    }
+
+
+@requires_node
+def test_inbox_queue_keeps_human_commands_immediate(tmp_path: Path) -> None:
+    inbox_queue = _stage_skill_tree(tmp_path, INBOX_QUEUE)
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(inbox_queue))}).href);
+globalThis.__timelineEvents = [];
+
+const calls = [];
+const agent = {{
+    name: 'vera',
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'handled';
+    }},
+}};
+
+mod.installInboxQueue(agent, {{
+    debounceMs: 5,
+    isOtherAgent() {{ return false; }},
+}});
+
+const result = await agent.handleMessage('Viewer', 'please !stop');
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    result,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["result"] == "handled"
+    assert result["calls"] == [
+        {"source": "Viewer", "message": "please !stop", "maxResponses": None}
+    ]
+    immediate_events = [
+        event for event in result["events"] if event["type"] == "inbox.immediate_command"
+    ]
+    assert len(immediate_events) == 1
+    assert immediate_events[0]["payload"]["source"] == "Viewer"
+    assert immediate_events[0]["payload"]["command"] == "!stop"
+
+
+@requires_node
+def test_director_gate_suppresses_unselected_inbox_turns_before_llm(
+    tmp_path: Path,
+) -> None:
+    inbox_queue = _stage_skill_tree(tmp_path, INBOX_QUEUE)
+    skills = inbox_queue.parent
+    shutil.copy2(DIRECTOR_GATE, skills / DIRECTOR_GATE.name)
+    bridge = skills.parent / "bridge"
+    (bridge / "python_bridge.js").write_text(
+        """
+export async function callBridge(opts = {}) {
+    globalThis.__bridgeCalls = globalThis.__bridgeCalls || [];
+    globalThis.__bridgeCalls.push(opts);
+    const verdict = globalThis.__directorVerdicts.shift();
+    return { ok: true, payload: verdict };
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const inbox = await import(pathToFileURL({json.dumps(str(inbox_queue))}).href);
+const gate = await import(pathToFileURL({json.dumps(str(skills / DIRECTOR_GATE.name))}).href);
+globalThis.__timelineEvents = [];
+globalThis.__bridgeCalls = [];
+globalThis.__directorVerdicts = [
+    {{
+        selected: true,
+        turn_kind: 'speaker',
+        reason: 'weighted_scene_fit',
+        scene_id: 'scene-1',
+        scene_digest: 'viewer asked for one camp marker',
+        role: 'host facilitator',
+        local_observations: {{ scene_participants: ['vera', 'rex'] }},
+        granted_tools: ['!placeHere'],
+        queue_depth: 1,
+        suppressed_agents: ['rex'],
+    }},
+    {{
+        selected: false,
+        turn_kind: null,
+        reason: 'suppressed',
+        suppression_reason: 'fanout_capped',
+        scene_id: 'scene-1',
+        scene_digest: 'viewer asked for one camp marker',
+        role: 'builder',
+        local_observations: {{}},
+        granted_tools: [],
+        queue_depth: 1,
+        suppressed_agents: ['rex'],
+    }},
+];
+
+const calls = [];
+function makeAgent(name) {{
+    return {{
+        name,
+        bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+        actions: {{
+            actionList: ['!break', '!observe', '!place', '!placeHere', '!searchForBlock'],
+        }},
+        async handleMessage(source, message, maxResponses = null) {{
+            calls.push({{ agent: name, source, message, maxResponses }});
+            return `${{name}}-handled`;
+        }},
+    }};
+}}
+
+const vera = makeAgent('vera');
+const rex = makeAgent('rex');
+for (const agent of [vera, rex]) {{
+    inbox.installInboxQueue(agent, {{ debounceMs: 5, maxBatch: 4 }});
+    gate.installDirectorGate(agent, {{ enabled: true, deadlineMs: 100 }});
+}}
+
+const results = await Promise.all([
+    vera.handleMessage('Viewer', 'Please place one shared camp marker.'),
+    rex.handleMessage('Viewer', 'Please place one shared camp marker.'),
+]);
+
+process.stdout.write(JSON.stringify({{
+    results,
+    calls,
+    bridgeCalls: globalThis.__bridgeCalls,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        agent: event.agent,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["results"] == ["vera-handled", False]
+    assert len(result["calls"]) == 1
+    assert result["calls"][0]["agent"] == "vera"
+    assert result["calls"][0]["source"] == "system"
+    assert "[Director V2 context]" in result["calls"][0]["message"]
+    assert len(result["bridgeCalls"]) == 2
+    assert {call["service"] for call in result["bridgeCalls"]} == {"director"}
+    assert {call["method"] for call in result["bridgeCalls"]} == {"gate"}
+    for call in result["bridgeCalls"]:
+        tools = call["payload"]["available_tools"]
+        assert "!placeHere" in tools
+        assert "!searchForBlock" in tools
+        assert "!break" not in tools
+        assert "!observe" not in tools
+        assert "!place" not in tools
+    event_types = [event["type"] for event in result["events"]]
+    assert "director_gate.selected" in event_types
+    assert "director_gate.suppressed" in event_types
+    canonical_decisions = [
+        event for event in result["events"] if event["type"] == "director.gate.decision"
+    ]
+    assert [event["payload"]["selected"] for event in canonical_decisions] == [True, False]
+    assert canonical_decisions[0]["payload"]["llm_prompt_count"] == 1
+    assert canonical_decisions[1]["payload"]["avoided_prompt_count"] == 1
+    assert {
+        event["payload"].get("outcome")
+        for event in result["events"]
+        if event["type"] == "inbox.turn_completed"
+    } >= {"ok", "director_suppressed"}
+
+
+@requires_node
+def test_director_gate_plan_mode_enrichment_avoids_standalone_place_commands(
+    tmp_path: Path,
+) -> None:
+    director_gate = _stage_skill_tree(tmp_path, DIRECTOR_GATE)
+    bridge = director_gate.parent.parent / "bridge"
+    (bridge / "python_bridge.js").write_text(
+        """
+export async function callBridge(opts = {}) {
+    globalThis.__bridgeCalls = globalThis.__bridgeCalls || [];
+    globalThis.__bridgeCalls.push(opts);
+    return {
+        ok: true,
+        payload: {
+            selected: true,
+            turn_kind: 'speaker',
+            reason: 'support',
+            scene_id: 'scene-cabin',
+            scene_digest: 'one full log cabin house',
+            role: 'support',
+            local_observations: {},
+            granted_tools: ['!placeHere', '!inventory', '!planAndBuild'],
+            build_macro: {
+                role: 'support',
+                owner: 'rex',
+                plan_id: 'plan-cabin',
+                support_task: 'inventory check',
+            },
+            queue_depth: 1,
+            suppressed_agents: [],
+        },
+    };
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'plan';
+const gate = await import(pathToFileURL({json.dumps(str(director_gate))}).href);
+const calls = [];
+const agent = {{
+    name: 'vera',
+    bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+    actions: {{
+        actionList: ['!placeHere', '!inventory', '!planAndBuild'],
+    }},
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'supporting';
+    }},
+}};
+
+gate.installDirectorGate(agent, {{ enabled: true, deadlineMs: 100 }});
+await agent.handleMessage('system', 'Coordinate the cabin build.');
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    bridgeCalls: globalThis.__bridgeCalls,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    message = result["calls"][0]["message"]
+    assert "Support role only" in message
+    assert "Do not use plan/build commands" in message
+    assert "Available tools: !inventory" in message
+    assert "Available tools: !inventory, !placeHere" not in message
+    assert "prefer one visible safe command" not in message
+    assert "!placeHere" not in result["bridgeCalls"][0]["payload"]["available_tools"]
+    assert "!buildFromPlan" not in result["bridgeCalls"][0]["payload"]["available_tools"]

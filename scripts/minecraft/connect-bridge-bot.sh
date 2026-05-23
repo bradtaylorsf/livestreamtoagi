@@ -40,8 +40,8 @@
 #   MC_HOST                 E2 server host                (default: 127.0.0.1)
 #   MC_PORT                 E2 server port                (default: 25565)
 #   MINDCRAFT_PROFILE       Profile path inside the clone (default: ./profiles/bridge-bot.json)
-#   LOCAL_LLM_BASE_URL      LM Studio URL for the PRE-FLIGHT reachability check
-#                           only (pnpm llm:local --list-only).
+#   LOCAL_LLM_BASE_URL      OpenAI-compatible local endpoint for the bot and
+#                           pre-flight reachability checks.
 #                           (default: http://localhost:1234/v1)
 #   LOCAL_LLM_MODEL         LM Studio model id for the conversation tier (REQUIRED for a real run)
 #   LOCAL_LLM_MODEL_BUILDING  LM Studio model id for the building/code tier (default: = LOCAL_LLM_MODEL)
@@ -62,7 +62,7 @@ MC_PORT="${MC_PORT:-25565}"               # E2 start-server.sh default
 MC_AUTH="offline"                         # E1-R2 / decisions 0002
 MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/bridge-bot.json}"
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
-MINDCRAFT_LLM_URL="http://localhost:1234/v1"   # where the bot actually connects
+MINDCRAFT_LLM_URL="$LOCAL_LLM_BASE_URL"        # where the bot actually connects
 BRIDGE_BOT_NAME="BridgeBot"               # MUST match "name" in profiles/bridge-bot.json
 
 # ── Bridge defaults (decision 0010 §1/§4) ──
@@ -88,6 +88,7 @@ AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
 AGENT_INBOX_PATCH_MARKER="LTAG E9-1 inbox queue"
+AGENT_DIRECTOR_GATE_PATCH_MARKER="LTAG E8.5-4 director gate"
 AGENT_ACTION_QUEUE_PATCH_MARKER="LTAG E9-1 action queue"
 MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
 ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
@@ -118,6 +119,7 @@ ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
 INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
+DIRECTOR_GATE_SKILL_REL="src/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
 
 MINDCRAFT_DIR_ABS=""
@@ -155,6 +157,7 @@ ACTION_INTERRUPTION_SKILL_DEST=""
 LMSTUDIO_USAGE_SKILL_DEST=""
 HEARTBEAT_SKILL_DEST=""
 INBOX_QUEUE_SKILL_DEST=""
+DIRECTOR_GATE_SKILL_DEST=""
 ACTION_QUEUE_SKILL_DEST=""
 
 # Resolve the committed templates relative to THIS script (not the caller's
@@ -187,6 +190,7 @@ ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
 INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
+DIRECTOR_GATE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
 
 MODE="run"
@@ -361,6 +365,15 @@ verify_committed_assets() {
         grep -q 'MINECRAFT_TURN_DEBOUNCE_MS' "$INBOX_QUEUE_SKILL_SRC" || { fail "inbox queue missing debounce env"; problems=1; }
         grep -q 'inbox.queued' "$INBOX_QUEUE_SKILL_SRC" || { fail "inbox queue missing telemetry"; problems=1; }
         grep -q 'installInboxQueue' "$INBOX_QUEUE_SKILL_SRC" || { fail "inbox queue missing installer"; problems=1; }
+    fi
+
+    if [ ! -s "$DIRECTOR_GATE_SKILL_SRC" ]; then
+        fail "Director gate skill missing or empty: $DIRECTOR_GATE_SKILL_SRC"; problems=1
+    else
+        grep -q 'director_gate.selected' "$DIRECTOR_GATE_SKILL_SRC" || { fail "director gate missing selected telemetry"; problems=1; }
+        grep -q 'director_gate.suppressed' "$DIRECTOR_GATE_SKILL_SRC" || { fail "director gate missing suppressed telemetry"; problems=1; }
+        grep -q "service: 'director'" "$DIRECTOR_GATE_SKILL_SRC" || { fail "director gate does not call director.gate"; problems=1; }
+        grep -q 'installDirectorGate' "$DIRECTOR_GATE_SKILL_SRC" || { fail "director gate missing installer"; problems=1; }
     fi
 
     if [ ! -s "$ACTION_QUEUE_SKILL_SRC" ]; then
@@ -657,7 +670,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $BUILD_PLAN_GOVERNOR_SKILL_REL + $PERCEPTION_SKILL_REL +"
     info "              $SAFE_FAIL_SKILL_REL + $ACTION_INTERRUPTION_SKILL_REL +"
     info "              $PLACE_HERE_GUARD_REL + $HEARTBEAT_SKILL_REL +"
-    info "              $INBOX_QUEUE_SKILL_REL + $ACTION_QUEUE_SKILL_REL"
+    info "              $INBOX_QUEUE_SKILL_REL + $DIRECTOR_GATE_SKILL_REL + $ACTION_QUEUE_SKILL_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
     info "              placeAction, breakAction, buildFromPlanAction, planAndBuildAction, executeCodeAction"
     info "              and observeAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
@@ -735,13 +748,15 @@ ok "Enabled LM Studio timeline telemetry in settings.js"
 # (e) Stage the profile with the LM Studio model ids substituted in.
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" node --input-type=module <<'NODE'
+if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const templatePath = process.env.TEMPLATE_PATH;
 const destPath = process.env.DEST_PATH;
 const chatModel = process.env.CHAT_MODEL;
 const codeModel = process.env.CODE_MODEL;
+const llmUrl = process.env.LLM_URL || 'http://localhost:1234/v1';
+const embeddingUrl = process.env.EMBEDDING_URL || llmUrl;
 const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
 
 if (
@@ -751,8 +766,13 @@ if (
     throw new Error('bridge-bot profile template lost its local model placeholders');
 }
 
-profile.model = `lmstudio/${chatModel}`;
-profile.code_model = `lmstudio/${codeModel}`;
+profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl };
+profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
+profile.embedding = {
+    api: 'lmstudio',
+    model: 'lmstudio/text-embedding-nomic-embed-text-v1.5',
+    url: embeddingUrl,
+};
 writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
 NODE
 then
@@ -762,6 +782,7 @@ fi
 ok "Staged profile → $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}        (conversation tier — decision 0003)"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}  (building tier — decision 0003)"
+info "  url:        ${LOCAL_LLM_BASE_URL}"
 
 # (f) Copy the committed bridge client + movement/building/code/perception actions verbatim into the
 #     clone (the decision 0005 extension points). Removed again on exit.
@@ -789,6 +810,7 @@ ACTION_INTERRUPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_INTERRUPTION_SKILL_RE
 LMSTUDIO_USAGE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$LMSTUDIO_USAGE_SKILL_REL"
 HEARTBEAT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$HEARTBEAT_SKILL_REL"
 INBOX_QUEUE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$INBOX_QUEUE_SKILL_REL"
+DIRECTOR_GATE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$DIRECTOR_GATE_SKILL_REL"
 ACTION_QUEUE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_QUEUE_SKILL_REL"
 mkdir -p \
     "$(dirname -- "$BRIDGE_CLIENT_DEST")" \
@@ -815,6 +837,7 @@ mkdir -p \
     "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")" \
     "$(dirname -- "$HEARTBEAT_SKILL_DEST")" \
     "$(dirname -- "$INBOX_QUEUE_SKILL_DEST")" \
+    "$(dirname -- "$DIRECTOR_GATE_SKILL_DEST")" \
     "$(dirname -- "$ACTION_QUEUE_SKILL_DEST")"
 cp "$BRIDGE_CLIENT_SRC" "$BRIDGE_CLIENT_DEST"
 cp "$TIMELINE_EMITTER_SRC" "$TIMELINE_EMITTER_DEST"
@@ -840,6 +863,7 @@ cp "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_DEST"
 cp "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_DEST"
 cp "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_DEST"
 cp "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_DEST"
+cp "$DIRECTOR_GATE_SKILL_SRC" "$DIRECTOR_GATE_SKILL_DEST"
 cp "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_DEST"
 ok "Copied bridge client → $BRIDGE_CLIENT_REL"
 ok "Copied timeline emitter → $TIMELINE_EMITTER_REL"
@@ -865,6 +889,7 @@ ok "Copied action interruption helpers → $ACTION_INTERRUPTION_SKILL_REL"
 ok "Copied LM Studio usage shim → $LMSTUDIO_USAGE_SKILL_REL"
 ok "Copied autonomous heartbeat skill → $HEARTBEAT_SKILL_REL"
 ok "Copied inbox queue skill → $INBOX_QUEUE_SKILL_REL"
+ok "Copied Director gate skill → $DIRECTOR_GATE_SKILL_REL"
 ok "Copied action queue skill → $ACTION_QUEUE_SKILL_REL"
 
 AGENT_PATH="$MINDCRAFT_DIR_ABS/$AGENT_REL"
@@ -876,6 +901,7 @@ if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_INBOX_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_DIRECTOR_GATE_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
@@ -890,6 +916,7 @@ if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
     AGENT_HEARTBEAT_PATCH_MARKER="$AGENT_HEARTBEAT_PATCH_MARKER" \
     AGENT_INBOX_PATCH_MARKER="$AGENT_INBOX_PATCH_MARKER" \
+    AGENT_DIRECTOR_GATE_PATCH_MARKER="$AGENT_DIRECTOR_GATE_PATCH_MARKER" \
     AGENT_ACTION_QUEUE_PATCH_MARKER="$AGENT_ACTION_QUEUE_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -899,6 +926,7 @@ const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
 const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
 const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
 const inboxMarker = process.env.AGENT_INBOX_PATCH_MARKER;
+const directorGateMarker = process.env.AGENT_DIRECTOR_GATE_PATCH_MARKER;
 const actionQueueMarker = process.env.AGENT_ACTION_QUEUE_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
@@ -906,6 +934,7 @@ const importAnchor = "import { speak } from './speak.js';\n";
 const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
 const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbeat.js'; // ${heartbeatMarker}\n`;
 const inboxImportLine = `import { installInboxQueue } from './skills/inbox_queue.js'; // ${inboxMarker}\n`;
+const directorGateImportLine = `import { installDirectorGate } from './skills/director_gate.js'; // ${directorGateMarker}\n`;
 const actionQueueImportLine = `import { installActionQueue } from './skills/action_queue.js'; // ${actionQueueMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
@@ -921,6 +950,7 @@ if (!source.includes(heartbeatImportLine)) {
 }
 for (const [line, label] of [
     [inboxImportLine, 'inbox queue'],
+    [directorGateImportLine, 'director gate'],
     [actionQueueImportLine, 'action queue'],
 ]) {
     if (!source.includes(line)) {
@@ -1025,12 +1055,18 @@ if (!source.includes(heartbeatCallNeedle)) {
     source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
 }
 const inboxCallNeedle = `installInboxQueue(this); // ${inboxMarker}`;
+const directorGateCallNeedle = `installDirectorGate(this); // ${directorGateMarker}`;
 if (!source.includes(inboxCallNeedle)) {
     const setupNeedle = '    async _setupEventHandlers(save_data, init_message) {\n';
     if (!source.includes(setupNeedle)) {
         throw new Error('_setupEventHandlers anchor not found while applying inbox queue');
     }
-    source = source.replace(setupNeedle, setupNeedle + `        ${inboxCallNeedle}\n`);
+    source = source.replace(
+        setupNeedle,
+        setupNeedle + `        ${inboxCallNeedle}\n        ${directorGateCallNeedle}\n`,
+    );
+} else if (!source.includes(directorGateCallNeedle)) {
+    source = source.replace(inboxCallNeedle, `${inboxCallNeedle}\n        ${directorGateCallNeedle}`);
 }
 writeFileSync(path, source);
 NODE

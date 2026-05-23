@@ -23,7 +23,8 @@
 #   MC_HOST                 E2 server host                (default: 127.0.0.1)
 #   MC_PORT                 E2 server port                (default: 25565)
 #   MINDCRAFT_PROFILE       Profile path inside the clone (default: ./profiles/alpha-bot.json)
-#   LOCAL_LLM_BASE_URL      LM Studio URL for pre-flight reachability checks
+#   LOCAL_LLM_BASE_URL      OpenAI-compatible local endpoint for the bot and
+#                           pre-flight reachability checks
 #                           (default: http://localhost:1234/v1)
 #   LOCAL_LLM_MODEL         LM Studio model id for Alpha's conversation tier (REQUIRED for a real run)
 #   LOCAL_LLM_MODEL_BUILDING  LM Studio model id for Alpha's building/code tier (default: = LOCAL_LLM_MODEL)
@@ -43,7 +44,7 @@ MC_PORT="${MC_PORT:-25565}"
 MC_AUTH="offline"
 MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/alpha-bot.json}"
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
-MINDCRAFT_LLM_URL="http://localhost:1234/v1"
+MINDCRAFT_LLM_URL="$LOCAL_LLM_BASE_URL"
 ALPHA_BOT_NAME="Alpha"
 
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
@@ -68,6 +69,7 @@ AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
 AGENT_INBOX_PATCH_MARKER="LTAG E9-1 inbox queue"
+AGENT_DIRECTOR_GATE_PATCH_MARKER="LTAG E8.5-4 director gate"
 AGENT_ACTION_QUEUE_PATCH_MARKER="LTAG E9-1 action queue"
 MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
 ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
@@ -102,6 +104,7 @@ ERRAND_PLAN_SKILL_REL="src/agent/skills/errand_plan.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
 INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
+DIRECTOR_GATE_SKILL_REL="src/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
 
 MINDCRAFT_DIR_ABS=""
@@ -148,6 +151,7 @@ ERRAND_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/errand_plan.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
 INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
+DIRECTOR_GATE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
 
 MODE="run"
@@ -255,7 +259,7 @@ verify_committed_assets() {
 
     for required in \
         "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
-        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" \
+        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" "$DIRECTOR_GATE_SKILL_SRC" \
         "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$PLACE_HERE_GUARD_SRC" "$POLL_ERRAND_ACTION_SRC" \
@@ -361,6 +365,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would wrap:   upstream action interruptions via $PLACE_HERE_GUARD_REL"
     info "Would copy:   fork-src/ timeline telemetry and LM Studio usage shim"
     info "Would copy:   fork-src/ autonomous heartbeat skill"
+    info "Would copy:   fork-src/ Director V2 gate skill"
     info "Would inject: !pollErrand and !runErrand for Alpha errands"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
@@ -427,13 +432,15 @@ ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" node --input-type=module <<'NODE'
+if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const templatePath = process.env.TEMPLATE_PATH;
 const destPath = process.env.DEST_PATH;
 const chatModel = process.env.CHAT_MODEL;
 const codeModel = process.env.CODE_MODEL;
+const llmUrl = process.env.LLM_URL || 'http://localhost:1234/v1';
+const embeddingUrl = process.env.EMBEDDING_URL || llmUrl;
 const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
 
 if (
@@ -444,8 +451,13 @@ if (
     throw new Error('alpha-bot profile template lost its local model placeholders');
 }
 
-profile.model = `lmstudio/${chatModel}`;
-profile.code_model = `lmstudio/${codeModel}`;
+profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl };
+profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
+profile.embedding = {
+    api: 'lmstudio',
+    model: 'lmstudio/text-embedding-nomic-embed-text-v1.5',
+    url: embeddingUrl,
+};
 writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
 NODE
 then
@@ -455,6 +467,7 @@ fi
 ok "Staged profile -> $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
+info "  url:        ${LOCAL_LLM_BASE_URL}"
 
 stage_file() {
     local src="$1"
@@ -492,6 +505,7 @@ stage_file "$ERRAND_PLAN_SKILL_SRC" "$ERRAND_PLAN_SKILL_REL"
 stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
 stage_file "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_REL"
 stage_file "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_REL"
+stage_file "$DIRECTOR_GATE_SKILL_SRC" "$DIRECTOR_GATE_SKILL_REL"
 stage_file "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_REL"
 ok "Copied bridge client, timeline telemetry, actions, and helper skills from fork-src"
 
@@ -504,6 +518,7 @@ if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_CLEAN_EXIT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_INBOX_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_DIRECTOR_GATE_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
@@ -518,6 +533,7 @@ if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_CLEAN_EXIT_PATCH_MARKER="$AGENT_CLEAN_EXIT_PATCH_MARKER" \
     AGENT_HEARTBEAT_PATCH_MARKER="$AGENT_HEARTBEAT_PATCH_MARKER" \
     AGENT_INBOX_PATCH_MARKER="$AGENT_INBOX_PATCH_MARKER" \
+    AGENT_DIRECTOR_GATE_PATCH_MARKER="$AGENT_DIRECTOR_GATE_PATCH_MARKER" \
     AGENT_ACTION_QUEUE_PATCH_MARKER="$AGENT_ACTION_QUEUE_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -527,6 +543,7 @@ const marker = process.env.AGENT_MANAGEMENT_PATCH_MARKER;
 const cleanExitMarker = process.env.AGENT_CLEAN_EXIT_PATCH_MARKER;
 const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
 const inboxMarker = process.env.AGENT_INBOX_PATCH_MARKER;
+const directorGateMarker = process.env.AGENT_DIRECTOR_GATE_PATCH_MARKER;
 const actionQueueMarker = process.env.AGENT_ACTION_QUEUE_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
@@ -534,6 +551,7 @@ const importAnchor = "import { speak } from './speak.js';\n";
 const importLine = `import { reviewChat } from './bridge/management_review.js'; // ${marker}\n`;
 const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbeat.js'; // ${heartbeatMarker}\n`;
 const inboxImportLine = `import { installInboxQueue } from './skills/inbox_queue.js'; // ${inboxMarker}\n`;
+const directorGateImportLine = `import { installDirectorGate } from './skills/director_gate.js'; // ${directorGateMarker}\n`;
 const actionQueueImportLine = `import { installActionQueue } from './skills/action_queue.js'; // ${actionQueueMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
@@ -549,6 +567,7 @@ if (!source.includes(heartbeatImportLine)) {
 }
 for (const [line, label] of [
     [inboxImportLine, 'inbox queue'],
+    [directorGateImportLine, 'director gate'],
     [actionQueueImportLine, 'action queue'],
 ]) {
     if (!source.includes(line)) {
@@ -653,12 +672,18 @@ if (!source.includes(heartbeatCallNeedle)) {
     source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
 }
 const inboxCallNeedle = `installInboxQueue(this); // ${inboxMarker}`;
+const directorGateCallNeedle = `installDirectorGate(this); // ${directorGateMarker}`;
 if (!source.includes(inboxCallNeedle)) {
     const setupNeedle = '    async _setupEventHandlers(save_data, init_message) {\n';
     if (!source.includes(setupNeedle)) {
         throw new Error('_setupEventHandlers anchor not found while applying inbox queue');
     }
-    source = source.replace(setupNeedle, setupNeedle + `        ${inboxCallNeedle}\n`);
+    source = source.replace(
+        setupNeedle,
+        setupNeedle + `        ${inboxCallNeedle}\n        ${directorGateCallNeedle}\n`,
+    );
+} else if (!source.includes(directorGateCallNeedle)) {
+    source = source.replace(inboxCallNeedle, `${inboxCallNeedle}\n        ${directorGateCallNeedle}`);
 }
 writeFileSync(path, source);
 NODE

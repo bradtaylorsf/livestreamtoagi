@@ -15,6 +15,21 @@ const DEFAULT_DEBOUNCE_MS = 2000;
 const DEFAULT_MAX_BATCH = 12;
 const DEFAULT_MAX_MESSAGE_CHARS = 320;
 const DEFAULT_MAX_BATCH_CHARS = 2400;
+const COMMAND_PARSE_ERROR_RE =
+    /^Command\s+![A-Za-z]\w*\s+was given\s+\d+\s+args?,\s+but requires\s+\d+\s+args?\.?$/i;
+const USED_COMMAND_STATUS_RE = /^\*[A-Za-z][A-Za-z0-9_-]*\s+used\s+[A-Za-z]\w*\*\s*$/i;
+const DEFAULT_BOT_NAMES = [
+    'alpha',
+    'aurora',
+    'bridge',
+    'bridgebot',
+    'fork',
+    'grok',
+    'pixel',
+    'rex',
+    'sentinel',
+    'vera',
+];
 
 function intEnv(name, fallback) {
     const raw = process.env[name];
@@ -32,9 +47,36 @@ function clip(value, limit) {
     return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trim()}...`;
 }
 
-function isTelemetryOnlyMessage(source, message) {
+function knownBotNames() {
+    const fromEnv = String(process.env.SOAK_BOTS || '')
+        .split(/\s+/)
+        .map((name) => name.trim().toLowerCase())
+        .filter(Boolean);
+    return new Set([...DEFAULT_BOT_NAMES, ...fromEnv]);
+}
+
+function isKnownBotSource(agent, source) {
+    const name = String(source || '').trim();
+    if (!name || name.toLowerCase() === 'system' || name === agent?.name) return false;
+    if (agent && typeof agent.__ltagIsOtherAgent === 'function') {
+        try {
+            if (agent.__ltagIsOtherAgent(name)) return true;
+        } catch {
+            // Fall back to the static soak roster below.
+        }
+    }
+    return knownBotNames().has(name.toLowerCase());
+}
+
+function isTelemetryOnlyMessage(agent, source, message) {
     const text = String(message || '').trim();
     if (!text) return false;
+    if (COMMAND_PARSE_ERROR_RE.test(text) || USED_COMMAND_STATUS_RE.test(text)) {
+        return true;
+    }
+    if (isKnownBotSource(agent, source) && containsCommand(text)) {
+        return true;
+    }
     if (/^(I'm stuck!?|I'm free\.?|unstuck timed out(?: before recovery)?|Restarting\.|Exiting\.)$/i.test(text)) {
         return true;
     }
@@ -48,9 +90,9 @@ function hasImmediateUserCommand(agent, source, message) {
     if (!agent || !source || source === 'system' || source === agent.name) return false;
     const command = containsCommand(String(message || ''));
     if (!command) return false;
-    if (command === '!stop') return true;
-    const fromOtherBot = agent.__ltagIsOtherAgent ? agent.__ltagIsOtherAgent(source) : false;
-    return !fromOtherBot;
+    const fromOtherBot = isKnownBotSource(agent, source);
+    if (fromOtherBot) return false;
+    return true;
 }
 
 function batchSource(batch) {
@@ -103,9 +145,9 @@ async function runTurnQueue(agent, originalHandleMessage, options) {
     try {
         while (state.pending.length > 0) {
             const batch = state.pending.splice(0, options.maxBatch);
-            const source = batchSource(batch);
-            const message = compactBatchMessage(batch, options);
-            const maxResponses = batchMaxResponses(batch);
+            let source = batchSource(batch);
+            let message = compactBatchMessage(batch, options);
+            let maxResponses = batchMaxResponses(batch);
             emit(agent, 'inbox.turn_started', {
                 batch_size: batch.length,
                 source,
@@ -113,6 +155,31 @@ async function runTurnQueue(agent, originalHandleMessage, options) {
             });
             let result;
             try {
+                const gate = state && typeof state.beforeTurn === 'function' ? state.beforeTurn : null;
+                if (gate) {
+                    const verdict = await gate.call(agent, {
+                        batch,
+                        source,
+                        message,
+                        maxResponses,
+                        queueDepth: state.pending.length,
+                    });
+                    if (verdict && verdict.selected === false) {
+                        result = verdict.result ?? false;
+                        for (const entry of batch) entry.resolve(result);
+                        emit(agent, 'inbox.turn_completed', {
+                            batch_size: batch.length,
+                            outcome: verdict.outcome || 'director_suppressed',
+                            remaining_depth: state.pending.length,
+                        });
+                        continue;
+                    }
+                    if (verdict && typeof verdict.source === 'string') source = verdict.source;
+                    if (verdict && typeof verdict.message === 'string') message = verdict.message;
+                    if (verdict && Object.hasOwn(verdict, 'maxResponses')) {
+                        maxResponses = verdict.maxResponses;
+                    }
+                }
                 result = await originalHandleMessage.call(agent, source, message, maxResponses);
                 for (const entry of batch) entry.resolve(result);
                 emit(agent, 'inbox.turn_completed', {
@@ -163,6 +230,7 @@ export function installInboxQueue(agent, options = {}) {
         pending: [],
         running: false,
         timer: null,
+        beforeTurn: null,
     };
     agent.__ltagIsOtherAgent =
         options.isOtherAgent ||
@@ -178,7 +246,7 @@ export function installInboxQueue(agent, options = {}) {
         if (!source || !message) {
             return originalHandleMessage.call(this, source, message, maxResponses);
         }
-        if (isTelemetryOnlyMessage(source, message)) {
+        if (isTelemetryOnlyMessage(this, source, message)) {
             console.log('[inbox-telemetry]', agentId(this) + ':', `${source}: ${message}`);
             emit(this, 'inbox.telemetry_ignored', {
                 source: String(source),

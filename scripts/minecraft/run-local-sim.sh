@@ -8,15 +8,19 @@
 #
 # Usage:
 #   scripts/minecraft/run-local-sim.sh smoke
+#   scripts/minecraft/run-local-sim.sh smoke-director
 #   scripts/minecraft/run-local-sim.sh short
 #   scripts/minecraft/run-local-sim.sh soak
+#   scripts/minecraft/run-local-sim.sh soak-director
 #   scripts/minecraft/run-local-sim.sh --duration-hours 0.5 --log-dir logs/soak
 #   scripts/minecraft/run-local-sim.sh --help
 #
 # Modes:
-#   smoke  0.25h first live check (default)
-#   short  0.25h first live check
-#   soak   2h acceptance soak
+#   smoke           0.25h embodied first live check (default)
+#   short           0.25h embodied first live check
+#   soak            2h embodied soak
+#   smoke-director  0.25h Director V2 acceptance smoke
+#   soak-director   2h Director V2 acceptance soak
 #
 # Required in .env:
 #   LLM_PROVIDER=lmstudio
@@ -24,7 +28,7 @@
 #   LOCAL_LLM_MODEL=<model-id-from-LM-Studio>
 #   LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 #   EMBEDDING_PROVIDER=deterministic
-#   CONVERSATION_MODE=embodied
+#   CONVERSATION_MODE=embodied          # or director_v2 for Director V2 prompt gating
 #   MINECRAFT_BRIDGE_TOKEN=<same secret the backend reads>
 #
 # Optional in .env:
@@ -33,6 +37,8 @@
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
 #   MC_SIM_BUILD_MODE=single          # set to plan for !planAndBuild mode
 #   MC_SIM_BUILDER_PROVIDER=local     # local or openrouter; plan generation only
+#                                      # optional OpenRouter-builder mode is scoped
+#                                      # to !planAndBuild; chat remains local.
 #   MC_SIM_BUILDER_OPENROUTER_API_KEY=<key>  # defaults to OPENROUTER_API_KEY
 #   MC_SIM_BUILDER_OPENROUTER_MODEL=<openrouter-model-id>
 #   MC_SIM_BUILDER_FALLBACK=fail      # fail or local if OpenRouter is missing/fails
@@ -184,6 +190,7 @@ fi
 load_env_file "$ENV_FILE"
 
 mode="${1:-smoke}"
+soak_profile_args=()
 case "$mode" in
     smoke|short)
         duration_hours="${MC_SIM_SMOKE_HOURS:-0.25}"
@@ -193,12 +200,28 @@ case "$mode" in
         duration_hours="${MC_SIM_SOAK_HOURS:-2}"
         shift || true
         ;;
+    smoke-director|director-smoke)
+        duration_hours="${MC_SIM_SMOKE_HOURS:-0.25}"
+        CONVERSATION_MODE="director_v2"
+        DIRECTOR_V2_GATE="1"
+        SOAK_PROFILE="director_v2"
+        soak_profile_args=("--profile" "director_v2")
+        shift || true
+        ;;
+    soak-director|director-soak|acceptance-director)
+        duration_hours="${MC_SIM_SOAK_HOURS:-2}"
+        CONVERSATION_MODE="director_v2"
+        DIRECTOR_V2_GATE="1"
+        SOAK_PROFILE="director_v2"
+        soak_profile_args=("--profile" "director_v2")
+        shift || true
+        ;;
     --*)
         duration_hours="${MC_SIM_DURATION_HOURS:-0.25}"
         ;;
     *)
         fail "Unknown Minecraft sim mode: $mode"
-        info "  Use smoke, short, soak, or pass soak.sh flags directly."
+        info "  Use smoke, short, soak, smoke-director, soak-director, or pass soak.sh flags directly."
         exit 2
         ;;
 esac
@@ -349,7 +372,7 @@ if [ -n "${MC_SIM_SPECTATOR_NAMES:-}" ]; then
 fi
 export EASY_SETUP_OBSERVERS EASY_SETUP_OPERATORS EASY_SETUP_SPECTATORS
 
-DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation in an easy starter meadow with nearby surface resources and a starter kit already in your inventory. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: inspect the meadow, pick a shared camp spot, place blocks, add torches, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Good early commands are !inventory, !nearbyBlocks, !searchForBlock(\"crafting_table\", 16), !move(\"scout_1\", \"forward\", 2), !placeHere(\"oak_log\"), !placeHere(\"cobblestone\"), and !place(\"camp-1\", \"oak_log\", {\"x\": 0, \"y\": 64, \"z\": 4}, \"up\"). After one nearby/inventory check, stop looping on gathering and place visible camp blocks. Avoid digging down, avoid underground targets, and only collect blocks that are reachable on the surface or already in the starter meadow. Keep actions safe, use public chat every few actions, and continue until the run ends."
+DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show smoke simulation in an easy starter meadow with nearby surface resources and a starter kit already in your inventory. Coordinate with the nearby characters using ordinary public Minecraft chat, choose roles, and visibly do useful things: inspect the meadow, pick a shared camp spot, place blocks, add torches, and start a tiny shared camp or marker build. Private bot-conversation commands are disabled in this local sim. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Good early commands are !inventory, !nearbyBlocks, !searchForBlock(\"crafting_table\", 16), !move(\"scout_1\", \"forward\", 2), !placeHere(\"oak_log\"), and !placeHere(\"cobblestone\"). After one nearby/inventory check, stop looping on gathering and place visible camp blocks. Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke. Avoid digging down, avoid underground targets, and only collect blocks that are reachable on the surface or already in the starter meadow. Keep actions safe, use public chat every few actions, and continue until the run ends."
 if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
     DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft plan-build simulation in an easy starter meadow. Coordinate in ordinary public chat, choose one compact shared structure, and use !planAndBuild(\"small shared cabin\") or another concise !planAndBuild request to generate a bounded JSON plan with the builder model and execute it through !buildFromPlan. Good starter requests are \"marker camp\", \"3x3 hut\", \"simple wall\", and \"torch-lit storage corner\". Keep arbitrary code execution out of the run; !executeCode remains blocked. After a plan starts, let the build finish before issuing another embodied action."
 fi
@@ -364,7 +387,11 @@ if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
     esac
 fi
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
-    EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\"), !placeHere(\"cobblestone\"), and !place(\"marker-1\", \"torch\", {\"x\": 2, \"y\": 64, \"z\": 2}, \"up\")."
+    if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+        EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build one coherent shared structure before doing more resource collection. Only the build owner should place blocks through !planAndBuild; support agents should coordinate in ordinary public Minecraft chat, check inventory or nearby resources when useful, and avoid standalone block placement unless the owner asks for help. Do not use !place, !placeHere, !break, !observe, or JSON/object command arguments in this local smoke."
+    else
+        EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\") and !placeHere(\"cobblestone\"). Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke."
+    fi
     case "$SOAK_INIT_MESSAGE" in
         *"Easy-mode rules:"*) ;;
         *) SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE $EASY_MODE_GUIDANCE" ;;
@@ -393,11 +420,22 @@ if [ "${LLM_PROVIDER:-}" != "lmstudio" ]; then
     info "  Add to .env: LLM_PROVIDER=lmstudio"
     exit 1
 fi
-if [ "${CONVERSATION_MODE:-}" != "embodied" ]; then
-    fail "CONVERSATION_MODE must be embodied for the Minecraft sim."
-    info "  Add to .env: CONVERSATION_MODE=embodied"
-    exit 1
+case "${CONVERSATION_MODE:-}" in
+    embodied|director_v2) ;;
+    *)
+        fail "CONVERSATION_MODE must be embodied or director_v2 for the Minecraft sim."
+        info "  Add to .env: CONVERSATION_MODE=embodied"
+        info "  Or use Director V2 prompt gating: CONVERSATION_MODE=director_v2"
+        exit 1
+        ;;
+esac
+if [ "${CONVERSATION_MODE:-}" = "director_v2" ]; then
+    DIRECTOR_V2_GATE=1
+    SOAK_PROFILE="${SOAK_PROFILE:-director_v2}"
 fi
+DIRECTOR_V2_GATE="${DIRECTOR_V2_GATE:-0}"
+SOAK_PROFILE="${SOAK_PROFILE:-default}"
+export CONVERSATION_MODE DIRECTOR_V2_GATE SOAK_PROFILE
 if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
     fail "LOCAL_LLM_MODEL is missing."
     info "  Run: pnpm llm:local --list-only"
@@ -412,6 +450,9 @@ fi
 
 log_dir="${MC_SIM_LOG_DIR:-$REPO_ROOT/logs/soak}"
 cmd=("$SCRIPT_DIR/soak.sh")
+if [ "${#soak_profile_args[@]}" -gt 0 ] && ! has_arg "--profile" "$@"; then
+    cmd+=("${soak_profile_args[@]}")
+fi
 if ! has_arg "--duration-hours" "$@"; then
     cmd+=("--duration-hours" "$duration_hours")
 fi
@@ -434,6 +475,9 @@ info "mode: ${mode}"
 info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
+info "conversation mode: ${CONVERSATION_MODE}"
+info "Director V2 gate: ${DIRECTOR_V2_GATE}"
+info "soak profile: ${SOAK_PROFILE}"
 info "builder route: provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
 info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
 info "management review: ${MINECRAFT_MANAGEMENT_REVIEW_MODE:-enabled}"

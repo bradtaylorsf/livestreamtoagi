@@ -11,7 +11,7 @@ import os
 import re
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +25,9 @@ DEFAULT_REPEAT_COMMAND_COUNT = 3
 DEFAULT_RESTART_RECENT_SECONDS = 300
 DEFAULT_STUCK_LOOP_COUNT = 3
 DEFAULT_LLM_IDLE_SECONDS = 120
+DEFAULT_DIRECTOR_QUEUE_DEPTH = 16
+DEFAULT_DIRECTOR_STARVATION_SCENES = 3
+DEFAULT_DIRECTOR_FAILURE_LOOP_COUNT = 3
 DEFAULT_FEED_LIMIT = 80
 FIXTURE_PATH_SUFFIX = ("tests", "backend", "fixtures", "minecraft_timeline")
 
@@ -53,6 +56,12 @@ ACTIVE_EVENT_TYPES = {
     "build_plan.generation.budget_capped",
     "build_plan.execution.started",
     "build_plan.execution.completed",
+    "director.gate.decision",
+    "director.scene.opened",
+    "director.scene.closed",
+    "director.scene.digest",
+    "director.memory.compaction",
+    "director.tool.call",
 }
 COMMAND_RE = re.compile(r"!\w+\s*(?:\([^)]*\))?", re.DOTALL)
 RESTART_RE = re.compile(
@@ -75,6 +84,9 @@ class WarningThresholds:
     restart_recent_seconds: int = DEFAULT_RESTART_RECENT_SECONDS
     stuck_loop_count: int = DEFAULT_STUCK_LOOP_COUNT
     llm_idle_seconds: int = DEFAULT_LLM_IDLE_SECONDS
+    director_queue_depth: int = DEFAULT_DIRECTOR_QUEUE_DEPTH
+    director_starvation_scenes: int = DEFAULT_DIRECTOR_STARVATION_SCENES
+    director_failure_loop_count: int = DEFAULT_DIRECTOR_FAILURE_LOOP_COUNT
 
 
 def isoformat_z(value: datetime) -> str:
@@ -123,6 +135,17 @@ def thresholds_from_env() -> WarningThresholds:
         ),
         stuck_loop_count=parse_int_env("SOAK_MONITOR_STUCK_LOOP_COUNT", DEFAULT_STUCK_LOOP_COUNT),
         llm_idle_seconds=parse_int_env("SOAK_MONITOR_LLM_IDLE_SECONDS", DEFAULT_LLM_IDLE_SECONDS),
+        director_queue_depth=parse_int_env(
+            "SOAK_MONITOR_DIRECTOR_QUEUE_DEPTH", DEFAULT_DIRECTOR_QUEUE_DEPTH
+        ),
+        director_starvation_scenes=parse_int_env(
+            "SOAK_MONITOR_DIRECTOR_STARVATION_SCENES",
+            DEFAULT_DIRECTOR_STARVATION_SCENES,
+        ),
+        director_failure_loop_count=parse_int_env(
+            "SOAK_MONITOR_DIRECTOR_FAILURE_LOOP_COUNT",
+            DEFAULT_DIRECTOR_FAILURE_LOOP_COUNT,
+        ),
     )
 
 
@@ -263,6 +286,8 @@ def event_category(event_type: str) -> str:
         return "action"
     if event_type.startswith("build_plan."):
         return "build"
+    if event_type.startswith("director."):
+        return "director"
     if event_type == "state.sample":
         return "movement"
     if event_type.startswith("bridge.") or event_type == "behavior.event":
@@ -530,9 +555,7 @@ def event_summary(event: dict[str, Any]) -> str:
     if event_type == "inbox.queued":
         source = event_payload.get("source") or "unknown"
         preview = event_payload.get("message_preview") or ""
-        return clip(
-            f"{source} queued; depth {event_payload.get('queue_depth', 0)}; {preview}"
-        )
+        return clip(f"{source} queued; depth {event_payload.get('queue_depth', 0)}; {preview}")
     if event_type == "inbox.turn_started":
         return clip(
             f"turn started with {event_payload.get('batch_size', 0)} message(s) from {event_payload.get('source') or 'batch'}"
@@ -542,7 +565,9 @@ def event_summary(event: dict[str, Any]) -> str:
             f"turn {event_payload.get('outcome') or 'completed'}; batch {event_payload.get('batch_size', 0)}; remaining {event_payload.get('remaining_depth', 0)}"
         )
     if event_type == "inbox.telemetry_ignored":
-        return clip(f"telemetry ignored from {event_payload.get('source')}: {event_payload.get('message')}")
+        return clip(
+            f"telemetry ignored from {event_payload.get('source')}: {event_payload.get('message')}"
+        )
     if event_type == "inbox.immediate_command":
         return clip(
             f"immediate command from {event_payload.get('source')}: {event_payload.get('command')}"
@@ -570,7 +595,9 @@ def event_summary(event: dict[str, Any]) -> str:
             f"{event_payload.get('model') or 'unknown model'} running; waited {event_payload.get('wait_ms', 0)}ms; active {event_payload.get('running', 0)}"
         )
     if event_type == "llm.queue.completed":
-        tokens = event_payload.get("tokens") if isinstance(event_payload.get("tokens"), dict) else {}
+        tokens = (
+            event_payload.get("tokens") if isinstance(event_payload.get("tokens"), dict) else {}
+        )
         total = tokens.get("total_tokens") if isinstance(tokens, dict) else None
         token_text = f"; {total} tokens" if total is not None else ""
         return clip(
@@ -588,7 +615,9 @@ def event_summary(event: dict[str, Any]) -> str:
         plan = event_payload.get("plan")
         blocks = len(plan.get("blocks") or []) if isinstance(plan, dict) else 0
         clear = len(plan.get("clear") or []) if isinstance(plan, dict) else 0
-        provider = event_payload.get("builder_provider") or event_payload.get("provider") or "builder"
+        provider = (
+            event_payload.get("builder_provider") or event_payload.get("provider") or "builder"
+        )
         model = event_payload.get("builder_model") or event_payload.get("model")
         model_text = f" {model}" if model else ""
         paid = " paid" if event_payload.get("paid") else ""
@@ -604,7 +633,11 @@ def event_summary(event: dict[str, Any]) -> str:
         cooldown = event_payload.get("cooldown_remaining_sec") or 0
         cooldown_text = f"; cooldown {cooldown}s" if cooldown else ""
         cache_text = "; cache hit" if event_payload.get("cache_hit") else ""
-        active = event_payload.get("active_build") if isinstance(event_payload.get("active_build"), dict) else {}
+        active = (
+            event_payload.get("active_build")
+            if isinstance(event_payload.get("active_build"), dict)
+            else {}
+        )
         plan_text = f"; active {active.get('plan_id')}" if active.get("plan_id") else ""
         return clip(f"plan skipped: {reason}{cache_text}{cooldown_text}{plan_text}")
     if event_type == "build_plan.generation.provider_failed":
@@ -625,6 +658,44 @@ def event_summary(event: dict[str, Any]) -> str:
         return clip(
             f"build {event_payload.get('action_id') or ''} completed: {event_payload.get('result') or ''}"
         )
+    if event_type == "director.gate.decision":
+        scene = event_payload.get("scene_id") or "scene"
+        agent = event_payload.get("agent_id") or event_agent(event) or "agent"
+        if event_payload.get("selected"):
+            role = event_payload.get("turn_kind") or "turn"
+            reason = event_payload.get("reason") or "selected"
+            return clip(f"{scene}: selected {agent} for {role}; {reason}")
+        reason = (
+            event_payload.get("suppression_reason")
+            or event_payload.get("reason_code")
+            or "suppressed"
+        )
+        return clip(
+            f"{scene}: suppressed {agent}; {reason}; depth {event_payload.get('queue_depth', 0)}"
+        )
+    if event_type == "director.scene.opened":
+        return clip(
+            f"opened {event_payload.get('scene_id') or 'scene'} from {event_payload.get('triggering_event_type') or 'event'}"
+        )
+    if event_type == "director.scene.closed":
+        return clip(
+            f"closed {event_payload.get('scene_id') or 'scene'}: {event_payload.get('close_reason') or 'closed'}"
+        )
+    if event_type == "director.scene.digest":
+        return clip(
+            f"digest {event_payload.get('scene_id') or 'scene'}; {event_payload.get('tokens') or 0} tokens; {event_payload.get('summary') or ''}"
+        )
+    if event_type == "director.memory.compaction":
+        status = "ok" if event_payload.get("ok") is not False else "failed"
+        return clip(
+            f"memory compaction {status} for {event_payload.get('scene_id') or 'scene'}; {event_payload.get('entries_count') or 0} entries"
+        )
+    if event_type == "director.tool.call":
+        status = event_payload.get("status") or "unknown"
+        tool = event_payload.get("tool_name") or "tool"
+        return clip(
+            f"{tool} {status}; scene {event_payload.get('scene_id') or 'n/a'}; {event_payload.get('latency_ms') or 0}ms"
+        )
     if event_type == "state.sample":
         return format_position(event_payload)
     if event_type == "error":
@@ -637,10 +708,10 @@ def event_summary(event: dict[str, Any]) -> str:
         kind = event_payload.get("kind") or "behavior"
         return clip(f"{kind}: {event_payload.get('text') or ''}")
     if event_type.startswith("bridge."):
-        bridge = event_payload.get("bridge") if isinstance(event_payload.get("bridge"), dict) else {}
-        return clip(
-            f"{event_type} {bridge.get('phase') or ''} ok={bridge.get('ok') or ''}"
+        bridge = (
+            event_payload.get("bridge") if isinstance(event_payload.get("bridge"), dict) else {}
         )
+        return clip(f"{event_type} {bridge.get('phase') or ''} ok={bridge.get('ok') or ''}")
     return clip(event_payload)
 
 
@@ -829,11 +900,7 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     outcome_classes: dict[str, int] = defaultdict(int)
     for event in action_results:
         event_payload = payload(event)
-        key = str(
-            event_payload.get("outcome_class")
-            or event_payload.get("outcome")
-            or "unknown"
-        )
+        key = str(event_payload.get("outcome_class") or event_payload.get("outcome") or "unknown")
         outcome_classes[key] += 1
 
     build_generation_completed = [
@@ -889,10 +956,20 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     accepted_commands = sum(command_count(event) for event in action_intents)
     executed_actions = len(action_results)
     verified_actions = sum(1 for event in action_results if payload(event).get("verified"))
+    director_gate_decisions = [
+        event for event in events if event.get("event_type") == "director.gate.decision"
+    ]
+    director_tool_calls = [
+        event for event in events if event.get("event_type") == "director.tool.call"
+    ]
+    director_memory_compactions = [
+        event for event in events if event.get("event_type") == "director.memory.compaction"
+    ]
     llm_waits = [
         payload_int(event, "wait_ms")
         for event in llm_queue_events
-        if event.get("event_type") in {"llm.queue.started", "llm.queue.completed", "llm.queue.failed"}
+        if event.get("event_type")
+        in {"llm.queue.started", "llm.queue.completed", "llm.queue.failed"}
     ]
     latest_lm_queue = llm_queue_events[-1] if llm_queue_events else {}
     action_depths = [
@@ -919,8 +996,7 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "llm_queue_wait_ms_max": max(llm_waits or [0]),
         "discarded_stale_responses": len(discarded_responses),
         "discarded_commands": sum(
-            int(payload(event).get("discarded_commands") or 0)
-            for event in discarded_responses
+            int(payload(event).get("discarded_commands") or 0) for event in discarded_responses
         ),
         "inbox_queued_messages": sum(
             1 for event in events if event.get("event_type") == "inbox.queued"
@@ -932,9 +1008,7 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "accepted_commands": accepted_commands,
         "executed_actions": executed_actions,
         "verified_actions": verified_actions,
-        "actions_queued": sum(
-            1 for event in events if event.get("event_type") == "action.queued"
-        ),
+        "actions_queued": sum(1 for event in events if event.get("event_type") == "action.queued"),
         "actions_rejected_busy": sum(
             1 for event in events if event.get("event_type") == "action.rejected_busy"
         ),
@@ -973,13 +1047,342 @@ def build_pipeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             if str(payload(event).get("reason") or "") == "cache_hit"
             or payload(event).get("cache_hit")
         ),
+        "director_scenes_opened": sum(
+            1 for event in events if event.get("event_type") == "director.scene.opened"
+        ),
+        "director_selected_turns": sum(
+            1 for event in director_gate_decisions if payload(event).get("selected")
+        ),
+        "director_suppressed_turns": sum(
+            1 for event in director_gate_decisions if not payload(event).get("selected")
+        ),
+        "director_queue_depth_max": max(
+            [payload_int(event, "queue_depth") for event in director_gate_decisions] or [0]
+        ),
+        "director_memory_compactions": sum(
+            1 for event in director_memory_compactions if payload(event).get("ok") is not False
+        ),
+        "director_tool_calls": len(director_tool_calls),
+        "director_tool_failures": sum(
+            1 for event in director_tool_calls if payload(event).get("ok") is False
+        ),
         "execution_rate": round(executed_actions / accepted_commands, 4)
         if accepted_commands
         else 1.0,
-        "verified_rate": round(verified_actions / executed_actions, 4)
-        if executed_actions
-        else 1.0,
+        "verified_rate": round(verified_actions / executed_actions, 4) if executed_actions else 1.0,
         "outcome_classes": dict(sorted(outcome_classes.items())),
+    }
+
+
+def payload_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list | tuple | set | frozenset):
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+    return []
+
+
+def gini(values: list[int]) -> float:
+    if not values or sum(values) == 0:
+        return 0.0
+    sorted_values = sorted(max(0, value) for value in values)
+    n = len(sorted_values)
+    weighted_sum = sum((index + 1) * value for index, value in enumerate(sorted_values))
+    return round((2 * weighted_sum) / (n * sum(sorted_values)) - (n + 1) / n, 4)
+
+
+def build_director_evidence(
+    events: list[dict[str, Any]],
+    thresholds: WarningThresholds,
+) -> dict[str, Any]:
+    scene_order: list[str] = []
+    scenes: dict[str, dict[str, Any]] = {}
+    per_agent: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"selected": 0, "suppressed": 0, "tools": 0, "tool_failures": 0}
+    )
+    scene_agent_sets: dict[str, dict[str, set[str]]] = {}
+    digest_rows: list[dict[str, Any]] = []
+    macro_tool_rows: list[dict[str, Any]] = []
+    warnings: list[dict[str, str]] = []
+    agent_warnings: dict[str, list[dict[str, str]]] = defaultdict(list)
+    tool_failures: Counter[tuple[str, str, str]] = Counter()
+
+    def bucket(scene_id: str) -> dict[str, Any]:
+        scene_key = scene_id or "unknown"
+        if scene_key not in scenes:
+            scene_order.append(scene_key)
+            scenes[scene_key] = {
+                "scene_id": scene_key,
+                "selected_agents": set(),
+                "suppressed_agents": set(),
+                "reason_codes": Counter(),
+                "queue_depth_max": 0,
+                "participants": set(),
+                "observers": set(),
+                "build_plan_ids": set(),
+                "tools": Counter(),
+                "tool_failures": 0,
+                "digest_count": 0,
+                "digest_tokens": 0,
+                "memory_compactions": 0,
+                "memory_compaction_failures": 0,
+                "opened_ts": "",
+                "closed_ts": "",
+                "triggering_event_type": "",
+            }
+        return scenes[scene_key]
+
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        event_payload = payload(event)
+        if event_type == "director.gate.decision":
+            scene_id = str(event_payload.get("scene_id") or "unknown")
+            scene = bucket(scene_id)
+            agent = str(event_payload.get("agent_id") or event_agent(event) or "unknown").lower()
+            selected = bool(event_payload.get("selected"))
+            scene_sets = scene_agent_sets.setdefault(
+                scene_id, {"selected": set(), "suppressed": set()}
+            )
+            scene["queue_depth_max"] = max(
+                scene["queue_depth_max"],
+                int(event_payload.get("queue_depth") or 0),
+            )
+            if event_payload.get("scene_event_type") and not scene["triggering_event_type"]:
+                scene["triggering_event_type"] = str(event_payload.get("scene_event_type"))
+            reason_code = str(
+                event_payload.get("suppression_reason")
+                or event_payload.get("reason_code")
+                or event_payload.get("reason")
+                or "unknown"
+            )
+            if selected:
+                scene["selected_agents"].add(agent)
+                scene_sets["selected"].add(agent)
+                per_agent[agent]["selected"] += 1
+            else:
+                scene["suppressed_agents"].add(agent)
+                scene["reason_codes"][reason_code] += 1
+                scene_sets["suppressed"].add(agent)
+                per_agent[agent]["suppressed"] += 1
+            for suppressed_agent in payload_list(
+                event_payload.get("suppressed_candidates") or event_payload.get("suppressed_agents")
+            ):
+                scene["suppressed_agents"].add(suppressed_agent)
+            if event_payload.get("build_plan_id"):
+                scene["build_plan_ids"].add(str(event_payload["build_plan_id"]))
+            if int(event_payload.get("queue_depth") or 0) >= thresholds.director_queue_depth:
+                item = warning(
+                    "director_queue_depth",
+                    "Director queue depth",
+                    f"{scene_id} depth {event_payload.get('queue_depth')} reason {reason_code}",
+                )
+                warnings.append(item)
+                agent_warnings[agent].append(item)
+        elif event_type in {"director.scene.opened", "director.scene.closed"}:
+            scene_id = str(event_payload.get("scene_id") or "unknown")
+            scene = bucket(scene_id)
+            scene["participants"].update(payload_list(event_payload.get("participants")))
+            scene["observers"].update(payload_list(event_payload.get("observers")))
+            if event_payload.get("triggering_event_type"):
+                scene["triggering_event_type"] = str(event_payload["triggering_event_type"])
+            if event_type == "director.scene.opened":
+                scene["opened_ts"] = str(event.get("ts") or "")
+            else:
+                scene["closed_ts"] = str(event.get("ts") or "")
+        elif event_type in {"director.scene.digest", "director.memory.compaction"}:
+            scene_id = str(event_payload.get("scene_id") or "unknown")
+            scene = bucket(scene_id)
+            scene["participants"].update(payload_list(event_payload.get("participants")))
+            scene["observers"].update(payload_list(event_payload.get("observers")))
+            tokens = int(event_payload.get("tokens") or 0)
+            if event_type == "director.scene.digest":
+                scene["digest_count"] += 1
+                scene["digest_tokens"] += tokens
+            else:
+                if event_payload.get("ok") is False:
+                    scene["memory_compaction_failures"] += 1
+                else:
+                    scene["memory_compactions"] += 1
+            digest_rows.append(
+                {
+                    "ts": event.get("ts") or "",
+                    "scene_id": scene_id,
+                    "kind": event_type.rsplit(".", 1)[-1],
+                    "participants": ", ".join(
+                        display_agent(item) for item in sorted(scene["participants"])
+                    ),
+                    "distributed_to": ", ".join(
+                        display_agent(item)
+                        for item in payload_list(event_payload.get("distributed_to"))
+                    ),
+                    "entries": event_payload.get("entries_count") or 0,
+                    "tokens": tokens,
+                    "latency_ms": event_payload.get("latency_ms") or 0,
+                    "status": "failed" if event_payload.get("ok") is False else "ok",
+                    "summary": clip(
+                        event_payload.get("summary") or event_payload.get("error_class") or "", 220
+                    ),
+                }
+            )
+        elif event_type == "director.tool.call":
+            scene_id = str(event_payload.get("scene_id") or "unknown")
+            scene = bucket(scene_id)
+            agent = str(event_payload.get("agent_id") or event_agent(event) or "unknown").lower()
+            tool = str(event_payload.get("tool_name") or "unknown")
+            status = str(event_payload.get("status") or "unknown")
+            error_class = str(event_payload.get("error_class") or status)
+            scene["tools"][tool] += 1
+            per_agent[agent]["tools"] += 1
+            if event_payload.get("ok") is False:
+                scene["tool_failures"] += 1
+                per_agent[agent]["tool_failures"] += 1
+                tool_failures[(agent, tool, error_class)] += 1
+            macro_tool_rows.append(
+                {
+                    "ts": event.get("ts") or "",
+                    "scene_id": scene_id,
+                    "kind": "tool",
+                    "agent": display_agent(agent),
+                    "owner": display_agent(agent),
+                    "plan_id": "",
+                    "tool": tool,
+                    "status": status,
+                    "provider": "",
+                    "cost": "",
+                }
+            )
+        elif event_type.startswith("build_plan."):
+            scene_id = str(event_payload.get("scene_id") or "")
+            if not scene_id:
+                continue
+            scene = bucket(scene_id)
+            owner = str(
+                event_payload.get("owner")
+                or event_payload.get("build_plan_owner")
+                or event_payload.get("active_build_owner")
+                or event_agent(event)
+                or "unknown"
+            ).lower()
+            plan_id = str(event_payload.get("plan_id") or event_payload.get("action_id") or "")
+            if plan_id:
+                scene["build_plan_ids"].add(plan_id)
+            provider = str(
+                event_payload.get("builder_provider") or event_payload.get("provider") or ""
+            )
+            cost = event_payload.get("estimated_usd")
+            macro_tool_rows.append(
+                {
+                    "ts": event.get("ts") or "",
+                    "scene_id": scene_id,
+                    "kind": event_type.replace("build_plan.", ""),
+                    "agent": display_agent(event_agent(event)),
+                    "owner": display_agent(owner),
+                    "plan_id": plan_id,
+                    "tool": "!planAndBuild",
+                    "status": event_payload.get("reason")
+                    or event_payload.get("status")
+                    or event_type.rsplit(".", 1)[-1],
+                    "provider": provider,
+                    "cost": cost if cost not in (None, "") else "",
+                }
+            )
+
+    streaks: dict[str, int] = defaultdict(int)
+    warned_starvation: set[str] = set()
+    for scene_id in scene_order:
+        sets = scene_agent_sets.get(scene_id)
+        if not sets:
+            continue
+        agents = sets["selected"] | sets["suppressed"]
+        for agent in sorted(agents):
+            if agent in sets["selected"]:
+                streaks[agent] = 0
+                continue
+            if agent in sets["suppressed"]:
+                streaks[agent] += 1
+                if (
+                    streaks[agent] >= thresholds.director_starvation_scenes
+                    and agent not in warned_starvation
+                ):
+                    item = warning(
+                        "director_starvation",
+                        "Director starvation",
+                        f"{display_agent(agent)} suppressed for {streaks[agent]} consecutive scene(s)",
+                    )
+                    warnings.append(item)
+                    agent_warnings[agent].append(item)
+                    warned_starvation.add(agent)
+
+    for (agent, tool, error_class), count in sorted(tool_failures.items()):
+        if count < thresholds.director_failure_loop_count:
+            continue
+        item = warning(
+            "director_tool_failure_loop",
+            "Tool failure loop",
+            f"{display_agent(agent)} saw {count} {tool} failure(s): {error_class}",
+        )
+        warnings.append(item)
+        agent_warnings[agent].append(item)
+
+    scene_rows = []
+    for scene_id in scene_order:
+        scene = scenes[scene_id]
+        scene_rows.append(
+            {
+                "scene_id": scene_id,
+                "trigger": scene["triggering_event_type"],
+                "selected": ", ".join(
+                    display_agent(item) for item in sorted(scene["selected_agents"])
+                ),
+                "suppressed": ", ".join(
+                    display_agent(item) for item in sorted(scene["suppressed_agents"])
+                ),
+                "reasons": ", ".join(
+                    f"{reason}:{count}" for reason, count in sorted(scene["reason_codes"].items())
+                ),
+                "queue_depth_max": scene["queue_depth_max"],
+                "build_plan_ids": ", ".join(sorted(scene["build_plan_ids"])),
+                "tools": ", ".join(
+                    f"{tool}:{count}" for tool, count in sorted(scene["tools"].items())
+                ),
+                "digest_tokens": scene["digest_tokens"],
+                "memory_compactions": scene["memory_compactions"],
+                "tool_failures": scene["tool_failures"],
+            }
+        )
+
+    fairness_rows = []
+    for agent, counts in sorted(per_agent.items()):
+        total = counts["selected"] + counts["suppressed"]
+        fairness_rows.append(
+            {
+                "agent": display_agent(agent),
+                "selected": counts["selected"],
+                "suppressed": counts["suppressed"],
+                "selection_rate": round(counts["selected"] / total, 4) if total else 0.0,
+                "tool_calls": counts["tools"],
+                "tool_failures": counts["tool_failures"],
+            }
+        )
+
+    selected_counts = [row["selected"] for row in fairness_rows]
+    return {
+        "warnings": warnings,
+        "agent_warnings": dict(agent_warnings),
+        "scene_rows": scene_rows,
+        "digest_rows": digest_rows,
+        "macro_tool_rows": macro_tool_rows,
+        "fairness_rows": fairness_rows,
+        "summary": {
+            "scenes": len(scene_rows),
+            "selected_turns": sum(row["selected"] for row in fairness_rows),
+            "suppressed_turns": sum(row["suppressed"] for row in fairness_rows),
+            "fairness_gini": gini(selected_counts),
+            "queue_depth_max": max((row["queue_depth_max"] for row in scene_rows), default=0),
+            "tool_failures": sum(row["tool_failures"] for row in fairness_rows),
+        },
     }
 
 
@@ -1010,6 +1413,7 @@ def build_monitor_model(
     thresholds = thresholds or thresholds_from_env()
     now = (now or datetime.now(UTC)).astimezone(UTC)
     sorted_events = sorted(events, key=event_sort_key)
+    director = build_director_evidence(sorted_events, thresholds)
 
     summary_fields = parse_summary_fields(run_dir / "summary.txt")
     start = parse_iso_ts(metadata.get("start_utc") or summary_fields.get("start_utc"))
@@ -1040,6 +1444,7 @@ def build_monitor_model(
             *(agent for agent in metadata_agents if agent != "bridge"),
             *(agent for agent in (event_agent(event) for event in sorted_events) if agent),
             *(agent for agent in tokens_by_agent if agent and agent != "unknown"),
+            *(agent for agent in director.get("agent_warnings", {}) if agent != "unknown"),
         }
     )
 
@@ -1216,7 +1621,12 @@ def build_monitor_model(
                     payload_int(event, "queue_depth"),
                     payload_int(event, "remaining_depth"),
                 )
-            if event_type in {"action.queued", "action.started", "action.completed", "action.rejected_busy"}:
+            if event_type in {
+                "action.queued",
+                "action.started",
+                "action.completed",
+                "action.rejected_busy",
+            }:
                 action_depth_latest = max(
                     payload_int(event, "queue_depth"),
                     payload_int(event, "remaining_depth"),
@@ -1230,7 +1640,9 @@ def build_monitor_model(
         elif start:
             idle_seconds = int((reference_time - start).total_seconds())
 
-        agent_warnings: list[dict[str, str]] = []
+        agent_warnings: list[dict[str, str]] = list(
+            director.get("agent_warnings", {}).get(agent, [])
+        )
         if idle_seconds is not None and idle_seconds > thresholds.stall_seconds:
             agent_warnings.append(
                 warning(
@@ -1398,6 +1810,7 @@ def build_monitor_model(
         or row["event_type"] in {"action.queued", "action.rejected_busy"}
     ][-feed_limit:]
     build_feed = [row for row in all_rows if row["category"] == "build"][-feed_limit:]
+    director_feed = [row for row in all_rows if row["category"] == "director"][-feed_limit:]
     timeline_feed = all_rows[-feed_limit:]
 
     status = "completed" if actual_end else "in progress"
@@ -1419,6 +1832,7 @@ def build_monitor_model(
             "warning_count": total_warnings,
         },
         "pipeline": build_pipeline_summary(sorted_events),
+        "director": director,
         "thresholds": thresholds.__dict__,
         "agents": cards,
         "feeds": {
@@ -1427,6 +1841,7 @@ def build_monitor_model(
             "llm": build_llm_feed(sorted_events, feed_limit),
             "queue": list(reversed(queue_feed)),
             "build": list(reversed(build_feed)),
+            "director": list(reversed(director_feed)),
             "timeline": list(reversed(timeline_feed)),
         },
     }
@@ -1470,10 +1885,7 @@ def render_builder_route(agent: dict[str, Any]) -> str:
 def render_active_build(agent: dict[str, Any]) -> str:
     active = agent.get("active_build") if isinstance(agent.get("active_build"), dict) else {}
     if active:
-        value = (
-            f"{active.get('plan_id') or 'plan'} "
-            f"{active.get('status') or 'active'}"
-        ).strip()
+        value = (f"{active.get('plan_id') or 'plan'} {active.get('status') or 'active'}").strip()
     else:
         value = "No active build"
     cooldown = agent.get("builder_cooldown_remaining_sec") or 0
@@ -1572,13 +1984,144 @@ def render_pipeline(pipeline: dict[str, Any]) -> str:
         ("builder_plan_skipped_active", "Active skips"),
         ("builder_plan_skipped_cooldown", "Cooldown skips"),
         ("builder_plan_skipped_per_agent_cap", "Cap skips"),
+        ("director_scenes_opened", "Director scenes"),
+        ("director_selected_turns", "Selected turns"),
+        ("director_suppressed_turns", "Suppressed turns"),
+        ("director_queue_depth_max", "Director max depth"),
+        ("director_memory_compactions", "Memory compactions"),
+        ("director_tool_calls", "Director tool calls"),
+        ("director_tool_failures", "Director tool fails"),
         ("execution_rate", "Execution rate"),
         ("verified_rate", "Verified rate"),
     ]
     return "\n".join(
-        f'<div><strong>{esc(pipeline.get(key))}</strong><span>{esc(label)}</span></div>'
+        f"<div><strong>{esc(pipeline.get(key))}</strong><span>{esc(label)}</span></div>"
         for key, label in labels
     )
+
+
+def render_director_warnings(warnings: list[dict[str, str]]) -> str:
+    if not warnings:
+        return '<span class="badge badge-ok">Director clear</span>'
+    return "".join(
+        f'<span class="badge badge-warn" title="{esc(item["detail"])}">{esc(item["label"])}</span>'
+        for item in warnings
+    )
+
+
+def render_director_rows(rows: list[dict[str, Any]], columns: tuple[str, ...]) -> str:
+    if not rows:
+        return (
+            f'<tr><td class="empty-row" colspan="{len(columns)}">No Director V2 evidence</td></tr>'
+        )
+    rendered = []
+    for row in rows:
+        rendered.append(
+            "<tr>" + "".join(f"<td>{esc(row.get(column))}</td>" for column in columns) + "</tr>"
+        )
+    return "\n".join(rendered)
+
+
+def render_director_panels(director: dict[str, Any]) -> str:
+    summary = director.get("summary") if isinstance(director.get("summary"), dict) else {}
+    scene_columns = (
+        "scene_id",
+        "trigger",
+        "selected",
+        "suppressed",
+        "reasons",
+        "queue_depth_max",
+        "build_plan_ids",
+        "tools",
+    )
+    digest_columns = (
+        "ts",
+        "scene_id",
+        "kind",
+        "participants",
+        "distributed_to",
+        "entries",
+        "tokens",
+        "latency_ms",
+        "status",
+        "summary",
+    )
+    macro_columns = (
+        "ts",
+        "scene_id",
+        "kind",
+        "agent",
+        "owner",
+        "plan_id",
+        "tool",
+        "status",
+        "provider",
+        "cost",
+    )
+    fairness_columns = (
+        "agent",
+        "selected",
+        "suppressed",
+        "selection_rate",
+        "tool_calls",
+        "tool_failures",
+    )
+    return f"""
+    <section>
+      <div class="section-head">
+        <h2>Director V2 Evidence</h2>
+        <div class="badges">{render_director_warnings(director.get("warnings", []))}</div>
+      </div>
+      <article class="feed-panel">
+        <div class="metrics pipeline-metrics">
+          <div><strong>{esc(summary.get("scenes", 0))}</strong><span>scenes</span></div>
+          <div><strong>{esc(summary.get("selected_turns", 0))}</strong><span>selected turns</span></div>
+          <div><strong>{esc(summary.get("suppressed_turns", 0))}</strong><span>suppressed turns</span></div>
+          <div><strong>{esc(summary.get("queue_depth_max", 0))}</strong><span>max queue depth</span></div>
+          <div><strong>{esc(summary.get("fairness_gini", 0))}</strong><span>fairness gini</span></div>
+          <div><strong>{esc(summary.get("tool_failures", 0))}</strong><span>tool failures</span></div>
+        </div>
+      </article>
+      <div class="feed-grid director-grid">
+        <article class="feed-panel">
+          <h3>Selected vs Suppressed</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>{"".join(f"<th>{esc(column.replace('_', ' ').title())}</th>" for column in scene_columns)}</tr></thead>
+              <tbody>{render_director_rows(director.get("scene_rows", []), scene_columns)}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Scene Digests &amp; Compactions</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>{"".join(f"<th>{esc(column.replace('_', ' ').title())}</th>" for column in digest_columns)}</tr></thead>
+              <tbody>{render_director_rows(director.get("digest_rows", []), digest_columns)}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Builder Macros &amp; Tools</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>{"".join(f"<th>{esc(column.replace('_', ' ').title())}</th>" for column in macro_columns)}</tr></thead>
+              <tbody>{render_director_rows(director.get("macro_tool_rows", []), macro_columns)}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Fairness</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>{"".join(f"<th>{esc(column.replace('_', ' ').title())}</th>" for column in fairness_columns)}</tr></thead>
+              <tbody>{render_director_rows(director.get("fairness_rows", []), fairness_columns)}</tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+    """
 
 
 def render_feed_rows(
@@ -1828,6 +2371,8 @@ def render_monitor_html(model: dict[str, Any]) -> str:
       </article>
     </section>
 
+    {render_director_panels(model["director"])}
+
     <section>
       <div class="section-head"><h2>Agents</h2></div>
       <div class="agent-grid">
@@ -1843,6 +2388,7 @@ def render_monitor_html(model: dict[str, Any]) -> str:
         <label><input type="checkbox" data-filter="inbox" checked>Inbox</label>
         <label><input type="checkbox" data-filter="action" checked>Action</label>
         <label><input type="checkbox" data-filter="build" checked>Build</label>
+        <label><input type="checkbox" data-filter="director" checked>Director</label>
         <label><input type="checkbox" data-filter="movement" checked>Movement</label>
         <label><input type="checkbox" data-filter="error" checked>Error</label>
         <label><input type="checkbox" data-filter="lifecycle" checked>Lifecycle</label>
@@ -1881,6 +2427,15 @@ def render_monitor_html(model: dict[str, Any]) -> str:
             <table>
               <thead><tr><th>Time</th><th>Agent</th><th>Progress</th></tr></thead>
               <tbody>{render_feed_rows(model["feeds"]["build"])}</tbody>
+            </table>
+          </div>
+        </article>
+        <article class="feed-panel">
+          <h3>Director Events</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Agent</th><th>Evidence</th></tr></thead>
+              <tbody>{render_feed_rows(model["feeds"]["director"])}</tbody>
             </table>
           </div>
         </article>
@@ -2004,6 +2559,9 @@ def main(argv: list[str] | None = None) -> int:
             restart_recent_seconds=thresholds.restart_recent_seconds,
             stuck_loop_count=thresholds.stuck_loop_count,
             llm_idle_seconds=max(1, args.llm_idle_seconds or thresholds.llm_idle_seconds),
+            director_queue_depth=thresholds.director_queue_depth,
+            director_starvation_scenes=thresholds.director_starvation_scenes,
+            director_failure_loop_count=thresholds.director_failure_loop_count,
         )
     try:
         output_path = build(

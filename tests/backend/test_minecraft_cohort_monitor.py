@@ -200,7 +200,9 @@ def test_llm_feed_renders_response_output(tmp_path: Path) -> None:
             "agent": "vera",
             "trace_id": "trace-llm-1",
             "payload": {
-                "commands": [{"name": "placeHere", "args": '"oak_log"', "text": '!placeHere("oak_log")'}]
+                "commands": [
+                    {"name": "placeHere", "args": '"oak_log"', "text": '!placeHere("oak_log")'}
+                ]
             },
         },
         {
@@ -234,7 +236,7 @@ def test_llm_feed_renders_response_output(tmp_path: Path) -> None:
     assert "<th>Output</th>" in html
     assert "<th>Game effect</th>" in html
     assert "I will scout the ridge." in html
-    assert '!placeHere(&quot;oak_log&quot;)' in html
+    assert "!placeHere(&quot;oak_log&quot;)" in html
     assert "placeHere: success placed oak_log" in html
 
 
@@ -399,6 +401,194 @@ def test_monitor_surfaces_runtime_queue_and_build_plan_events(tmp_path: Path) ->
     assert "openrouter" in html
     assert "Intended blocks" in html
     assert "Verified blocks" in html
+
+
+def test_monitor_surfaces_director_v2_panels_and_warnings(tmp_path: Path) -> None:
+    monitor = _load_monitor()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    events = [
+        {
+            "ts": "2026-05-20T22:00:01Z",
+            "event_type": "director.scene.opened",
+            "agent": "beta",
+            "trace_id": "trace-scene-1",
+            "payload": {
+                "scene_id": "scene-1",
+                "participants": ["alpha", "beta"],
+                "observers": [],
+                "triggering_event_type": "chat",
+                "queue_depth": 1,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:02Z",
+            "event_type": "director.gate.decision",
+            "agent": "beta",
+            "trace_id": "trace-scene-1",
+            "payload": {
+                "scene_id": "scene-1",
+                "agent_id": "beta",
+                "selected": True,
+                "turn_kind": "speaker",
+                "reason": "direct_address",
+                "suppressed_agents": ["alpha"],
+                "queue_depth": 1,
+                "scene_event_type": "chat",
+                "llm_prompt_count": 1,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:02.100Z",
+            "event_type": "director.gate.decision",
+            "agent": "alpha",
+            "trace_id": "trace-scene-1",
+            "payload": {
+                "scene_id": "scene-1",
+                "agent_id": "alpha",
+                "selected": False,
+                "reason": "suppressed",
+                "suppression_reason": "fanout_capped",
+                "queue_depth": 20,
+                "scene_event_type": "chat",
+                "avoided_prompt_count": 1,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:03Z",
+            "event_type": "director.gate.decision",
+            "agent": "alpha",
+            "trace_id": "trace-scene-2",
+            "payload": {
+                "scene_id": "scene-2",
+                "agent_id": "alpha",
+                "selected": False,
+                "reason": "suppressed",
+                "suppression_reason": "cooldown",
+                "queue_depth": 2,
+                "scene_event_type": "chat",
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:04Z",
+            "event_type": "director.gate.decision",
+            "agent": "alpha",
+            "trace_id": "trace-scene-3",
+            "payload": {
+                "scene_id": "scene-3",
+                "agent_id": "alpha",
+                "selected": False,
+                "reason": "suppressed",
+                "suppression_reason": "cooldown",
+                "queue_depth": 2,
+                "scene_event_type": "chat",
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:05Z",
+            "event_type": "director.tool.call",
+            "agent": "alpha",
+            "payload": {
+                "agent_id": "alpha",
+                "scene_id": "scene-1",
+                "tool_name": "fetch_url",
+                "status": "error",
+                "ok": False,
+                "error_class": "TimeoutError",
+                "latency_ms": 100,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:06Z",
+            "event_type": "director.tool.call",
+            "agent": "alpha",
+            "payload": {
+                "agent_id": "alpha",
+                "scene_id": "scene-1",
+                "tool_name": "fetch_url",
+                "status": "error",
+                "ok": False,
+                "error_class": "TimeoutError",
+                "latency_ms": 100,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:07Z",
+            "event_type": "director.tool.call",
+            "agent": "alpha",
+            "payload": {
+                "agent_id": "alpha",
+                "scene_id": "scene-1",
+                "tool_name": "fetch_url",
+                "status": "error",
+                "ok": False,
+                "error_class": "TimeoutError",
+                "latency_ms": 100,
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:08Z",
+            "event_type": "director.scene.digest",
+            "agent": "beta",
+            "payload": {
+                "scene_id": "scene-1",
+                "participants": ["alpha", "beta"],
+                "distributed_to": ["alpha", "beta"],
+                "entries_count": 3,
+                "tokens": 33,
+                "latency_ms": 50,
+                "summary": "Beta spoke while Alpha was suppressed.",
+            },
+        },
+        {
+            "ts": "2026-05-20T22:00:09Z",
+            "event_type": "build_plan.generation.completed",
+            "agent": "beta",
+            "payload": {
+                "scene_id": "scene-1",
+                "owner": "beta",
+                "plan_id": "plan-scene-1",
+                "provider": "local",
+                "estimated_usd": 0,
+                "plan": {"blocks": []},
+            },
+        },
+    ]
+
+    model = monitor.build_monitor_model(
+        run_dir,
+        events,
+        metadata={"start_utc": "2026-05-20T22:00:00Z", "cost_agents": "alpha beta"},
+        now=monitor.parse_iso_ts("2026-05-20T22:00:09Z"),
+        thresholds=monitor.WarningThresholds(
+            director_queue_depth=10,
+            director_starvation_scenes=3,
+            director_failure_loop_count=3,
+        ),
+    )
+    html = monitor.render_monitor_html(model)
+
+    codes = {item["code"] for item in model["director"]["warnings"]}
+    assert {
+        "director_queue_depth",
+        "director_starvation",
+        "director_tool_failure_loop",
+    }.issubset(codes)
+    alpha = next(agent for agent in model["agents"] if agent["agent"] == "alpha")
+    assert {"director_queue_depth", "director_starvation", "director_tool_failure_loop"}.issubset(
+        {item["code"] for item in alpha["warnings"]}
+    )
+    assert model["director"]["summary"]["selected_turns"] == 1
+    assert model["director"]["summary"]["suppressed_turns"] == 3
+    assert model["director"]["summary"]["queue_depth_max"] == 20
+    assert "Director V2 Evidence" in html
+    assert "Selected vs Suppressed" in html
+    assert "Scene Digests &amp; Compactions" in html
+    assert "Builder Macros &amp; Tools" in html
+    assert "Fairness" in html
+    assert "Director Events" in html
+    assert "fanout_capped" in html
+    assert "TimeoutError" in html
 
 
 def test_monitor_separates_stale_discards_from_action_failures(tmp_path: Path) -> None:

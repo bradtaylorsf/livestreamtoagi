@@ -11,6 +11,7 @@
 # Usage:
 #   scripts/minecraft/soak.sh
 #   scripts/minecraft/soak.sh --duration-hours 2
+#   scripts/minecraft/soak.sh --profile director_v2 --duration-hours 2
 #   scripts/minecraft/soak.sh --log-dir /tmp/e8-8-soak
 #   scripts/minecraft/soak.sh --dry-run
 #   scripts/minecraft/soak.sh --verify
@@ -29,7 +30,20 @@
 #                               proxy. Default: LOCAL_LLM_BASE_URL.
 #   MINECRAFT_LLM_QUEUE_PROXY   Start the FIFO LM Studio proxy. Default: 1.
 #   MINECRAFT_LLM_CONCURRENCY   Proxy request concurrency. Default: 1.
+#   MINECRAFT_LLM_RETRY_ATTEMPTS
+#                               Retries for transient LM Studio model-load
+#                               400s such as "Model unloaded". Default: 2.
+#   MINECRAFT_LLM_RETRY_DELAY_SECONDS
+#                               Base delay between retry attempts. Default: 2.
+#   SOAK_LLM_SMOKE_TIMEOUT_SECONDS
+#                               Timeout for the preflight LM Studio chat
+#                               warm-up. Default: 120.
 #   SOAK_DURATION_HOURS         Default: 2.
+#   SOAK_PROFILE                default or director_v2. The director_v2
+#                               profile forces CONVERSATION_MODE=director_v2,
+#                               DIRECTOR_V2_GATE=1, the LM queue proxy, and
+#                               Director acceptance reporting. Default:
+#                               default.
 #   SOAK_AGENT_HOURLY_CAP_USD   Per-agent hourly cap assertion. Default: 0.01.
 #   SOAK_MIN_MOVEMENT_PER_AGENT Minimum movement actions per tracked agent.
 #                               Default: 5.
@@ -63,6 +77,12 @@
 #                               Default: 180.
 #   SOAK_INIT_MESSAGE           Optional initial objective sent to each
 #                               Mindcraft bot through settings.init_message.
+#   CONVERSATION_MODE           embodied (legacy #510 decentralized mode) or
+#                               director_v2 (Director V2 prompt gate).
+#                               Default: embodied.
+#   DIRECTOR_V2_GATE            Set to 1 to gate Mindcraft prompt batches
+#                               through director.gate. Automatically enabled
+#                               when CONVERSATION_MODE=director_v2.
 #   SOAK_BLOCK_PRIVATE_CONVERSATIONS
 #                               Set to 1 to disable Mindcraft's private
 #                               bot-to-bot conversation commands and force
@@ -98,6 +118,8 @@
 #                               Default: 300.
 #   MC_SIM_BUILD_ZONE_STRIDE    Per-agent build origin offset stride. Default: 12.
 #   MC_SIM_BUILD_CACHE_TTL_SEC  Plan cache TTL. Default: 3600.
+#   SOAK_BUILDER_PROVIDER      Builder smoke selector: local or openrouter.
+#                               Defaults to MC_SIM_BUILDER_PROVIDER.
 #   SOAK_SAFE_TERRAIN_ACTIONS   Set to 1 to stage local-sim terrain guards:
 #                               disable auto elbow-room/item pickup/torch modes
 #                               and refuse destructive pathfinding.
@@ -146,6 +168,28 @@
 #   SOAK_MONITOR_LLM_IDLE_SECONDS
 #                               Seconds before a monitor no-recent-LLM badge.
 #                               Default: 120.
+#   SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD
+#                               Director V2 acceptance max LM queue depth after
+#                               warm-up, exclusive. Default: 16.
+#   SOAK_ACCEPTANCE_WARMUP_SECONDS
+#                               Seconds ignored before acceptance queue-depth
+#                               assertions. Default: 300.
+#   SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO
+#                               Max selected agents per scene divided by the
+#                               tracked agent count. Default: 0.5.
+#   SOAK_REQUIRE_DIRECTOR_ACCEPTANCE
+#                               Exit nonzero when director_v2 acceptance fails.
+#                               Default: 1.
+#   director-decisions.ndjson    Director V2 scene/open/close and gate decision
+#                               evidence under the run directory.
+#   tool-parity.ndjson          Director tool calls and documented no-tool
+#                               decisions under the run directory.
+#   macro-evidence.ndjson       Build/gather/support macro attempts and
+#                               structured results under the run directory.
+#   memory-digest.ndjson        Director scene digest and memory compaction
+#                               evidence under the run directory.
+#   acceptance-report.json      Machine-readable Director V2 acceptance report.
+#   acceptance-report.md        Human-readable Director V2 acceptance report.
 #   SOAK_BOTS                   Space-separated bot ids to launch. Default:
 #                               bridge alpha vera rex aurora pixel fork
 #                               sentinel grok.
@@ -158,6 +202,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+if [ -z "${PYTHON:-}" ] && [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+fi
+PYTHON="${PYTHON:-python3}"
+export PYTHON
 
 MINDCRAFT_COMMIT="${MINDCRAFT_COMMIT:-35be480b4cc0bca990278e6103a1426392559d96}"
 MINDCRAFT_DIR="${MINDCRAFT_DIR:-./mindcraft}"
@@ -165,11 +214,28 @@ LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 LOCAL_LLM_UPSTREAM_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}"
 MINECRAFT_LLM_QUEUE_PROXY="${MINECRAFT_LLM_QUEUE_PROXY:-1}"
 MINECRAFT_LLM_CONCURRENCY="${MINECRAFT_LLM_CONCURRENCY:-1}"
+MINECRAFT_LLM_RETRY_ATTEMPTS="${MINECRAFT_LLM_RETRY_ATTEMPTS:-2}"
+MINECRAFT_LLM_RETRY_DELAY_SECONDS="${MINECRAFT_LLM_RETRY_DELAY_SECONDS:-2}"
 MINECRAFT_LLM_PROXY_HOST="${MINECRAFT_LLM_PROXY_HOST:-127.0.0.1}"
 MINECRAFT_LLM_PROXY_PORT="${MINECRAFT_LLM_PROXY_PORT:-1235}"
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
 BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8010/api/health}"
+SOAK_PROFILE="${SOAK_PROFILE:-default}"
+CONVERSATION_MODE="${CONVERSATION_MODE:-embodied}"
+case "$CONVERSATION_MODE" in
+    embodied|director_v2) ;;
+    *)
+        echo "x CONVERSATION_MODE must be embodied or director_v2." >&2
+        exit 2
+        ;;
+esac
+if [ "$CONVERSATION_MODE" = "director_v2" ]; then
+    DIRECTOR_V2_GATE=1
+fi
+DIRECTOR_V2_GATE="${DIRECTOR_V2_GATE:-0}"
+export CONVERSATION_MODE DIRECTOR_V2_GATE
 SOAK_DURATION_HOURS="${SOAK_DURATION_HOURS:-2}"
+SOAK_LLM_SMOKE_TIMEOUT_SECONDS="${SOAK_LLM_SMOKE_TIMEOUT_SECONDS:-120}"
 SOAK_AGENT_HOURLY_CAP_USD="${SOAK_AGENT_HOURLY_CAP_USD:-0.01}"
 SOAK_MIN_MOVEMENT_PER_AGENT="${SOAK_MIN_MOVEMENT_PER_AGENT:-5}"
 SOAK_MAX_DEATHS_PER_AGENT="${SOAK_MAX_DEATHS_PER_AGENT:-2}"
@@ -199,13 +265,23 @@ MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT:-3}"
 MC_SIM_BUILDER_MAX_USD_PER_RUN="${MC_SIM_BUILDER_MAX_USD_PER_RUN:-}"
 MC_SIM_BUILDER_USD_PER_1K_INPUT="${MC_SIM_BUILDER_USD_PER_1K_INPUT:-}"
 MC_SIM_BUILDER_USD_PER_1K_OUTPUT="${MC_SIM_BUILDER_USD_PER_1K_OUTPUT:-}"
+MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
 MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
 MC_SIM_BUILD_CACHE_TTL_SEC="${MC_SIM_BUILD_CACHE_TTL_SEC:-3600}"
+SOAK_BUILDER_PROVIDER="${SOAK_BUILDER_PROVIDER:-$MC_SIM_BUILDER_PROVIDER}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
 SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
+SOAK_SETTINGS_INIT_MESSAGE="$SOAK_INIT_MESSAGE"
+if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+    SOAK_SETTINGS_INIT_MESSAGE=""
+fi
+MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT="${MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT:-0}"
+if [ "$SOAK_EASY_SPAWN" = "1" ] && [ -n "$SOAK_INIT_MESSAGE" ]; then
+    MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT=1
+fi
 SOAK_MIN_INTENT_TO_COMMAND_RATIO="${SOAK_MIN_INTENT_TO_COMMAND_RATIO:-0.6}"
 SOAK_MIN_PARSE_SUCCESS="${SOAK_MIN_PARSE_SUCCESS:-0.8}"
 SOAK_MIN_EXECUTION_RATE="${SOAK_MIN_EXECUTION_RATE:-0.7}"
@@ -214,6 +290,10 @@ SOAK_RELIABILITY_MIN_INTENTS="${SOAK_RELIABILITY_MIN_INTENTS:-5}"
 SOAK_RELIABILITY_FAIL_ON_VIOLATION="${SOAK_RELIABILITY_FAIL_ON_VIOLATION:-1}"
 SOAK_MONITOR_STALL_SECONDS="${SOAK_MONITOR_STALL_SECONDS:-120}"
 SOAK_MONITOR_LLM_IDLE_SECONDS="${SOAK_MONITOR_LLM_IDLE_SECONDS:-120}"
+SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD="${SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD:-16}"
+SOAK_ACCEPTANCE_WARMUP_SECONDS="${SOAK_ACCEPTANCE_WARMUP_SECONDS:-300}"
+SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO="${SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO:-0.5}"
+SOAK_REQUIRE_DIRECTOR_ACCEPTANCE="${SOAK_REQUIRE_DIRECTOR_ACCEPTANCE:-1}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 MC_HEARTBEAT_ENABLED="${MC_HEARTBEAT_ENABLED:-1}"
 MC_HEARTBEAT_TICK_MS="${MC_HEARTBEAT_TICK_MS:-5000}"
@@ -241,6 +321,11 @@ while [ "$#" -gt 0 ]; do
         --duration-hours)
             [ "$#" -ge 2 ] || { echo "x --duration-hours needs a value" >&2; exit 2; }
             SOAK_DURATION_HOURS="$2"
+            shift 2
+            ;;
+        --profile)
+            [ "$#" -ge 2 ] || { echo "x --profile needs a value" >&2; exit 2; }
+            SOAK_PROFILE="$2"
             shift 2
             ;;
         --log-dir)
@@ -278,6 +363,26 @@ cd "$REPO_ROOT"
 ok() { echo "ok $*"; }
 info() { echo "  $*"; }
 fail() { echo "x $*" >&2; }
+
+apply_soak_profile() {
+    case "$SOAK_PROFILE" in
+        default|embodied)
+            SOAK_PROFILE="default"
+            ;;
+        director_v2)
+            CONVERSATION_MODE="director_v2"
+            DIRECTOR_V2_GATE="1"
+            MINECRAFT_LLM_QUEUE_PROXY="1"
+            ;;
+        *)
+            fail "SOAK_PROFILE/--profile must be default or director_v2."
+            exit 2
+            ;;
+    esac
+    export SOAK_PROFILE CONVERSATION_MODE DIRECTOR_V2_GATE MINECRAFT_LLM_QUEUE_PROXY
+}
+
+apply_soak_profile
 
 DEFAULT_SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
 DEFAULT_SOAK_COST_AGENTS="alpha vera rex aurora pixel fork sentinel grok"
@@ -342,6 +447,89 @@ preflight_builder_routing() {
     return 0
 }
 
+check_smoke_builder_openrouter() {
+    [ "$SOAK_BUILDER_PROVIDER" = "openrouter" ] || return 0
+    preflight_builder_routing || return $?
+    info "preflight: OpenRouter builder smoke"
+    MC_SIM_BUILDER_PROVIDER=openrouter \
+        MC_SIM_BUILDER_FALLBACK=fail \
+        MC_SIM_BUILDER_OPENROUTER_API_KEY="$MC_SIM_BUILDER_OPENROUTER_API_KEY" \
+        MC_SIM_BUILDER_OPENROUTER_MODEL="$MC_SIM_BUILDER_OPENROUTER_MODEL" \
+        MC_SIM_BUILDER_MAX_CALLS_PER_RUN="$MC_SIM_BUILDER_MAX_CALLS_PER_RUN" \
+        MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT" \
+        MC_SIM_BUILDER_MAX_USD_PER_RUN="$MC_SIM_BUILDER_MAX_USD_PER_RUN" \
+        MC_SIM_BUILDER_USD_PER_1K_INPUT="$MC_SIM_BUILDER_USD_PER_1K_INPUT" \
+        MC_SIM_BUILDER_USD_PER_1K_OUTPUT="$MC_SIM_BUILDER_USD_PER_1K_OUTPUT" \
+        node --experimental-default-type=module --input-type=module <<'NODE'
+import {
+    builderProviderSnapshot,
+    resetBuilderProviderState,
+    resolveBuilderModel,
+} from './scripts/minecraft/fork-src/agent/skills/builder_provider.js';
+
+resetBuilderProviderState();
+const agent = { name: 'soak-builder-smoke', prompter: { code_model: null } };
+const resolved = resolveBuilderModel(agent);
+const content = await resolved.sendRequest(
+    [{ role: 'user', content: 'Return a one-block marker plan.' }],
+    'Return strict JSON: {"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_log"}]}.',
+    { purpose: 'plan_generation', traceId: 'trace-soak-builder-openrouter-smoke' },
+);
+const snapshot = builderProviderSnapshot(agent);
+if (resolved.provider !== 'openrouter' || snapshot.request_count_run < 1) {
+    throw new Error(`expected one OpenRouter builder call, got ${JSON.stringify(snapshot)}`);
+}
+process.stdout.write(JSON.stringify({ provider: resolved.provider, content, snapshot }) + '\n');
+NODE
+    ok "OpenRouter builder smoke recorded a paid builder call"
+}
+
+check_smoke_builder_local() {
+    [ "$SOAK_BUILDER_PROVIDER" = "openrouter" ] && return 0
+    info "preflight: local builder smoke"
+    MC_SIM_BUILDER_PROVIDER=local \
+        MC_SIM_BUILDER_MAX_CALLS_PER_RUN="$MC_SIM_BUILDER_MAX_CALLS_PER_RUN" \
+        MC_SIM_BUILDER_MAX_CALLS_PER_AGENT="$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT" \
+        node --experimental-default-type=module --input-type=module <<'NODE'
+import {
+    builderProviderSnapshot,
+    resetBuilderProviderState,
+    resolveBuilderModel,
+} from './scripts/minecraft/fork-src/agent/skills/builder_provider.js';
+
+resetBuilderProviderState();
+const agent = {
+    name: 'soak-builder-local-smoke',
+    prompter: {
+        code_model: {
+            model_name: 'local/smoke',
+            async sendRequest() {
+                return '{"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_log"}]}';
+            },
+        },
+    },
+};
+const resolved = resolveBuilderModel(agent);
+const snapshot = builderProviderSnapshot(agent);
+if (resolved.provider !== 'local' || snapshot.request_count_run !== 0) {
+    throw new Error(`expected local builder with zero OpenRouter calls, got ${JSON.stringify(snapshot)}`);
+}
+process.stdout.write(JSON.stringify({ provider: resolved.provider, snapshot }) + '\n');
+NODE
+    ok "Local builder smoke kept OpenRouter call count at zero"
+}
+
+check_smoke_builder_routing() {
+    case "$SOAK_BUILDER_PROVIDER" in
+        local) check_smoke_builder_local ;;
+        openrouter) check_smoke_builder_openrouter ;;
+        *)
+            fail "SOAK_BUILDER_PROVIDER must be local or openrouter."
+            return 2
+            ;;
+    esac
+}
+
 check_mindserver_ports_available() {
     local bot bot_index=0 port problems=0
     for bot in $SOAK_BOTS; do
@@ -400,6 +588,7 @@ verify_static() {
     [ -x "$SCRIPT_DIR/analyze_action_reliability.py" ] || { fail "missing executable: $SCRIPT_DIR/analyze_action_reliability.py"; problems=1; }
     [ -x "$SCRIPT_DIR/build_timeline.py" ] || { fail "missing executable: $SCRIPT_DIR/build_timeline.py"; problems=1; }
     [ -x "$SCRIPT_DIR/build_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/build_monitor.py"; problems=1; }
+    [ -s "$SCRIPT_DIR/build_director_acceptance_report.py" ] || { fail "missing director acceptance report builder: $SCRIPT_DIR/build_director_acceptance_report.py"; problems=1; }
     [ -x "$SCRIPT_DIR/serve_monitor.py" ] || { fail "missing executable: $SCRIPT_DIR/serve_monitor.py"; problems=1; }
     [ -s "$SCRIPT_DIR/world-easy.config" ] || { fail "missing easy world config: $SCRIPT_DIR/world-easy.config"; problems=1; }
 
@@ -435,8 +624,24 @@ verify_static() {
         fail "multi-agent soak doc must document monitor.html"
         problems=1
     }
+    grep -q 'director-v2-acceptance-soak.md' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
+        fail "multi-agent soak doc must link the Director V2 acceptance soak"
+        problems=1
+    }
     grep -q 'Heartbeat & Idle Recovery' "$REPO_ROOT/docs/minecraft/multi-agent-soak.md" 2> /dev/null || {
         fail "multi-agent soak doc must document autonomous heartbeat idle recovery"
+        problems=1
+    }
+    [ -s "$REPO_ROOT/docs/minecraft/director-v2-acceptance-soak.md" ] || {
+        fail "Director V2 acceptance soak doc is missing"
+        problems=1
+    }
+    grep -q 'acceptance-report.json' "$REPO_ROOT/docs/minecraft/director-v2-acceptance-soak.md" 2> /dev/null || {
+        fail "Director V2 acceptance soak doc must document acceptance-report.json"
+        problems=1
+    }
+    grep -q '#511' "$REPO_ROOT/docs/minecraft/director-v2-acceptance-soak.md" 2> /dev/null || {
+        fail "Director V2 acceptance soak doc must name downstream blockers"
         problems=1
     }
     [ -s "$REPO_ROOT/docs/minecraft/timeline-schema.md" ] || {
@@ -472,13 +677,15 @@ print_plan() {
 
     ok "E8-8 multi-agent soak plan"
     info "duration:       ${SOAK_DURATION_HOURS}h (${seconds:-invalid} seconds)"
+    info "profile:        $SOAK_PROFILE"
     info "log root:       $SOAK_LOG_ROOT"
     info "work root:      ${SOAK_WORK_ROOT:-<per-run temp>}"
     info "bridge:         $MINECRAFT_BRIDGE_URL"
+    info "conversation:   mode=${CONVERSATION_MODE} director_gate=${DIRECTOR_V2_GATE}"
     info "backend health: $BACKEND_HEALTH_URL"
     info "LM Studio:      $LOCAL_LLM_BASE_URL"
     if [ "$MINECRAFT_LLM_QUEUE_PROXY" = "1" ]; then
-        info "LM queue:       enabled concurrency=${MINECRAFT_LLM_CONCURRENCY} upstream=${LOCAL_LLM_UPSTREAM_URL}"
+        info "LM queue:       enabled concurrency=${MINECRAFT_LLM_CONCURRENCY} upstream=${LOCAL_LLM_UPSTREAM_URL} retries=${MINECRAFT_LLM_RETRY_ATTEMPTS}"
     else
         info "LM queue:       disabled"
     fi
@@ -499,6 +706,10 @@ print_plan() {
     info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
+    if [ "$SOAK_PROFILE" = "director_v2" ]; then
+        info "acceptance:     queue<${SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD} after ${SOAK_ACCEPTANCE_WARMUP_SECONDS}s; selected_ratio<=${SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO}; require=${SOAK_REQUIRE_DIRECTOR_ACCEPTANCE}"
+        info "evidence:       director-decisions.ndjson tool-parity.ndjson macro-evidence.ndjson memory-digest.ndjson acceptance-report.json"
+    fi
     if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
         info "private conv:   blocked (!startConversation/!endConversation)"
     else
@@ -515,7 +726,7 @@ print_plan() {
         info "execute code:   allowed"
     fi
     if [ "$SOAK_SAFE_TERRAIN_ACTIONS" = "1" ]; then
-        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing)"
+        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing; blocks !place/!break/!observe)"
     else
         info "safe terrain:   disabled"
     fi
@@ -526,6 +737,9 @@ print_plan() {
     fi
     if [ -n "$SOAK_INIT_MESSAGE" ]; then
         info "init prompt:    set (${#SOAK_INIT_MESSAGE} chars)"
+        if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+            info "init delivery:  after easy-spawn starter kit"
+        fi
     else
         info "init prompt:    <none>"
     fi
@@ -536,16 +750,18 @@ print_plan() {
 }
 
 build_settings_json() {
-    if [ -z "$SOAK_INIT_MESSAGE" ] \
+    if [ -z "$SOAK_SETTINGS_INIT_MESSAGE" ] \
         && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ] \
-        && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ]; then
+        && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ] \
+        && [ "$SOAK_SAFE_TERRAIN_ACTIONS" != "1" ]; then
         return 0
     fi
     SETTINGS_JSON="$(
         SETTINGS_JSON_CURRENT="${SETTINGS_JSON:-}" \
-        SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+        SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" \
         SOAK_BLOCK_PRIVATE_CONVERSATIONS="$SOAK_BLOCK_PRIVATE_CONVERSATIONS" \
         SOAK_BLOCK_SLOW_SIM_ACTIONS="$SOAK_BLOCK_SLOW_SIM_ACTIONS" \
+        SOAK_SAFE_TERRAIN_ACTIONS="$SOAK_SAFE_TERRAIN_ACTIONS" \
         SOAK_BLOCK_EXECUTE_CODE_ACTIONS="$SOAK_BLOCK_EXECUTE_CODE_ACTIONS" \
         node --input-type=module <<'NODE'
 const baseBlockedActions = [
@@ -561,8 +777,8 @@ if (existing.trim().length > 0) {
     settings = JSON.parse(existing);
 }
 
-if (process.env.SOAK_INIT_MESSAGE && !Object.hasOwn(settings, 'init_message')) {
-    settings.init_message = process.env.SOAK_INIT_MESSAGE;
+if (process.env.SOAK_SETTINGS_INIT_MESSAGE && !Object.hasOwn(settings, 'init_message')) {
+    settings.init_message = process.env.SOAK_SETTINGS_INIT_MESSAGE;
 }
 
 if (process.env.SOAK_BLOCK_PRIVATE_CONVERSATIONS === '1') {
@@ -593,6 +809,16 @@ if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {
     settings.blocked_actions = blocked;
 }
 
+if (process.env.SOAK_SAFE_TERRAIN_ACTIONS === '1') {
+    const blocked = Array.isArray(settings.blocked_actions)
+        ? [...settings.blocked_actions]
+        : [...baseBlockedActions];
+    for (const command of ["!break", "!observe", "!place"]) {
+        if (!blocked.includes(command)) blocked.push(command);
+    }
+    settings.blocked_actions = blocked;
+}
+
 if (process.env.SOAK_BLOCK_EXECUTE_CODE_ACTIONS === '1') {
     const blocked = Array.isArray(settings.blocked_actions)
         ? [...settings.blocked_actions]
@@ -610,10 +836,10 @@ NODE
 settings_json_for_bot() {
     local bot="$1"
     [ -n "${SETTINGS_JSON:-}" ] || return 1
-    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" \
         node --input-type=module <<'NODE'
 const settings = JSON.parse(process.env.SETTINGS_JSON_INPUT);
-if (process.env.BOT_ID === 'bridge' && process.env.SOAK_INIT_MESSAGE) {
+if (process.env.BOT_ID === 'bridge' && process.env.SOAK_SETTINGS_INIT_MESSAGE) {
     settings.init_message = '';
 }
 process.stdout.write(JSON.stringify(settings));
@@ -662,8 +888,8 @@ min_gather_or_build = int_env("SOAK_MIN_GATHER_OR_BUILD_COHORT", 3)
 min_shared_artifacts = int_env("SOAK_MIN_SHARED_ARTIFACTS", 1)
 
 movement_re = re.compile(r"!(move|goToPlayer|goToCoordinates|searchForBlock|searchForEntity|navigate)\b", re.IGNORECASE)
-death_re = re.compile(r"(died|death|respawn(ed)?)", re.IGNORECASE)
-drowning_re = re.compile(r"drown(ed|ing)?", re.IGNORECASE)
+death_re = re.compile(r"\b(died|death|respawn(?:ed)?)\b", re.IGNORECASE)
+drowning_re = re.compile(r"\bdrown(?:ed|ing)?\b", re.IGNORECASE)
 stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
 restart_re = re.compile(
     r"(Exiting\.|\bprocess exited with code\s+[1-9]\d*\b|\brejoining\b|\bbot disconnected\b|"
@@ -1006,6 +1232,7 @@ fi
 
 if [ "$MODE" = "dry-run" ]; then
     verify_static || true
+    check_smoke_builder_routing || exit $?
     print_plan
     echo
     ok "Dry run complete - no services checked, no bots launched"
@@ -1037,6 +1264,7 @@ if [ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]; then
     fail "Node ${NODE_MAJOR:-<missing>} found, but Mindcraft soak requires Node $REQUIRED_NODE_MAJOR LTS."
     exit 1
 fi
+check_smoke_builder_routing || exit $?
 build_settings_json
 case "$SOAK_MINDSERVER_BASE_PORT" in
     ""|*[!0-9]*)
@@ -1067,6 +1295,8 @@ if [ ! -d "$MINDCRAFT_BASE_ABS/node_modules" ]; then
 fi
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
+mkdir -p "$SOAK_LOG_ROOT"
+SOAK_LOG_ROOT="$(cd -- "$SOAK_LOG_ROOT" && pwd)"
 RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
 SOAK_WORK_ROOT="${SOAK_WORK_ROOT:-${TMPDIR:-/tmp}/livestreamtoagi-soak-worktrees/$RUN_ID}"
 mkdir -p "$SOAK_WORK_ROOT"
@@ -1119,10 +1349,14 @@ write_metadata() {
         echo "local_llm_upstream_url=$LOCAL_LLM_UPSTREAM_URL"
         echo "minecraft_llm_queue_proxy=$MINECRAFT_LLM_QUEUE_PROXY"
         echo "minecraft_llm_concurrency=$MINECRAFT_LLM_CONCURRENCY"
+        echo "minecraft_llm_retry_attempts=$MINECRAFT_LLM_RETRY_ATTEMPTS"
+        echo "minecraft_llm_retry_delay_seconds=$MINECRAFT_LLM_RETRY_DELAY_SECONDS"
         echo "minecraft_llm_proxy_host=$MINECRAFT_LLM_PROXY_HOST"
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
         echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"
+        echo "llm_smoke_timeout_seconds=$SOAK_LLM_SMOKE_TIMEOUT_SECONDS"
+        echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
         echo "builder_openrouter_model=$MC_SIM_BUILDER_OPENROUTER_MODEL"
         echo "builder_openrouter_key_set=$([ -n "$MC_SIM_BUILDER_OPENROUTER_API_KEY" ] && echo yes || echo no)"
@@ -1130,12 +1364,15 @@ write_metadata() {
         echo "builder_max_calls_per_run=$MC_SIM_BUILDER_MAX_CALLS_PER_RUN"
         echo "builder_max_calls_per_agent=$MC_SIM_BUILDER_MAX_CALLS_PER_AGENT"
         echo "builder_max_usd_per_run=$MC_SIM_BUILDER_MAX_USD_PER_RUN"
+        echo "build_mode=$MC_SIM_BUILD_MODE"
         echo "build_max_per_agent=$MC_SIM_BUILD_MAX_PER_AGENT"
         echo "build_cooldown_sec=$MC_SIM_BUILD_COOLDOWN_SEC"
         echo "build_zone_stride=$MC_SIM_BUILD_ZONE_STRIDE"
         echo "build_cache_ttl_sec=$MC_SIM_BUILD_CACHE_TTL_SEC"
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
+        echo "conversation_mode=$CONVERSATION_MODE"
+        echo "director_v2_gate=$DIRECTOR_V2_GATE"
         echo "agent_hourly_cap_usd=$SOAK_AGENT_HOURLY_CAP_USD"
         echo "min_movement_per_agent=$SOAK_MIN_MOVEMENT_PER_AGENT"
         echo "max_deaths_per_agent=$SOAK_MAX_DEATHS_PER_AGENT"
@@ -1154,6 +1391,7 @@ write_metadata() {
         echo "block_slow_sim_actions=$SOAK_BLOCK_SLOW_SIM_ACTIONS"
         echo "block_execute_code_actions=$SOAK_BLOCK_EXECUTE_CODE_ACTIONS"
         echo "safe_terrain_actions=$SOAK_SAFE_TERRAIN_ACTIONS"
+        echo "suppress_empty_init_chat=$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT"
         echo "easy_spawn=$SOAK_EASY_SPAWN"
         echo "easy_spawn_online_delay_seconds=$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
         echo "min_intent_to_command_ratio=$SOAK_MIN_INTENT_TO_COMMAND_RATIO"
@@ -1164,6 +1402,10 @@ write_metadata() {
         echo "reliability_fail_on_violation=$SOAK_RELIABILITY_FAIL_ON_VIOLATION"
         echo "monitor_stall_seconds=$SOAK_MONITOR_STALL_SECONDS"
         echo "monitor_llm_idle_seconds=$SOAK_MONITOR_LLM_IDLE_SECONDS"
+        echo "acceptance_queue_depth_threshold=$SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD"
+        echo "acceptance_warmup_seconds=$SOAK_ACCEPTANCE_WARMUP_SECONDS"
+        echo "acceptance_max_selected_agent_ratio=$SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"
+        echo "require_director_acceptance=$SOAK_REQUIRE_DIRECTOR_ACCEPTANCE"
         echo "allow_destructive_paths=$MINECRAFT_ALLOW_DESTRUCTIVE_PATHS"
         echo "heartbeat_enabled=$MC_HEARTBEAT_ENABLED"
         echo "heartbeat_tick_ms=$MC_HEARTBEAT_TICK_MS"
@@ -1178,9 +1420,15 @@ write_metadata() {
         if [ -n "$SOAK_INIT_MESSAGE" ]; then
             echo "init_message_set=yes"
             echo "init_message_chars=${#SOAK_INIT_MESSAGE}"
+            if [ "$SOAK_EASY_SPAWN" = "1" ]; then
+                echo "init_message_delivery=after_easy_spawn_starter_kit"
+            else
+                echo "init_message_delivery=settings_startup"
+            fi
         else
             echo "init_message_set=no"
             echo "init_message_chars=0"
+            echo "init_message_delivery=none"
         fi
         echo "mindserver_base_port=$SOAK_MINDSERVER_BASE_PORT"
         echo "bots=$SOAK_BOTS"
@@ -1239,11 +1487,14 @@ start_lm_queue_proxy() {
             --port "$proxy_port" \
             --upstream "$upstream_url" \
             --concurrency "$proxy_concurrency" \
+            --retry-attempts "$MINECRAFT_LLM_RETRY_ATTEMPTS" \
+            --retry-delay-seconds "$MINECRAFT_LLM_RETRY_DELAY_SECONDS" \
             --telemetry "$RUN_DIR/timeline-raw/llm-queue.ndjson" \
             > "$RUN_DIR/logs/lmstudio-queue-proxy.log" 2>&1 &
     echo "$!" > "$LLM_PROXY_PID_FILE"
     LOCAL_LLM_BASE_URL="$proxy_url"
     export LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL MINECRAFT_LLM_CONCURRENCY
+    export MINECRAFT_LLM_RETRY_ATTEMPTS MINECRAFT_LLM_RETRY_DELAY_SECONDS
 
     local proxy_pid
     proxy_pid="$(cat "$LLM_PROXY_PID_FILE" 2> /dev/null || true)"
@@ -1315,8 +1566,88 @@ prepare_mindcraft_clone() {
     if [ -f "$MINDCRAFT_BASE_ABS/keys.json" ]; then
         ln -s "$MINDCRAFT_BASE_ABS/keys.json" "$dest/keys.json"
     fi
+    apply_suppress_empty_init_chat_patch "$dest"
+    apply_director_tool_guard_patch "$dest"
     apply_safe_terrain_patch "$dest"
     printf '%s\n' "$dest"
+}
+
+apply_suppress_empty_init_chat_patch() {
+    local dest="$1" agent_path
+    [ "$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" = "1" ] || return 0
+    agent_path="$dest/src/agent/agent.js"
+    if [ ! -f "$agent_path" ]; then
+        fail "Deferred init patch could not find Mindcraft agent file in $dest"
+        return 1
+    fi
+    DEFERRED_INIT_AGENT_PATH="$agent_path" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.DEFERRED_INIT_AGENT_PATH;
+const marker = 'LTAG deferred init suppress empty hello';
+let source = readFileSync(path, 'utf8');
+if (!source.includes(marker)) {
+    const needle = `        else {
+            this.openChat("Hello world! I am "+this.name);
+        }
+`;
+    const patch = `        else {
+            if (process.env.MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT === '1') { // ${marker}
+                console.log(this.name, 'waiting for deferred init message');
+            }
+            else {
+                this.openChat("Hello world! I am "+this.name);
+            }
+        }
+`;
+    if (!source.includes(needle)) {
+        throw new Error('empty init hello chat anchor not found');
+    }
+    source = source.replace(needle, patch);
+    writeFileSync(path, source);
+}
+NODE
+}
+
+apply_director_tool_guard_patch() {
+    local dest="$1" commands_path
+    commands_path="$dest/src/agent/commands/index.js"
+    if [ ! -f "$commands_path" ]; then
+        fail "Director tool guard patch could not find Mindcraft commands file in $dest"
+        return 1
+    fi
+    DIRECTOR_TOOL_GUARD_COMMANDS_PATH="$commands_path" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.DIRECTOR_TOOL_GUARD_COMMANDS_PATH;
+const marker = 'LTAG director v2 runtime tool guard';
+let source = readFileSync(path, 'utf8');
+if (!source.includes(marker)) {
+    const needle = `        const command = getCommand(parsed.commandName);
+        let numArgs = 0;
+`;
+    const patch = `        const command = getCommand(parsed.commandName);
+        const directorRestrictedTools = new Set(['!planAndBuild', '!buildFromPlan', '!placeHere', '!place', '!break']); // ${marker}
+        const directorContext = agent && agent.__ltagDirectorContext;
+        const directorGrantedTools = Array.isArray(directorContext?.granted_tools)
+            ? directorContext.granted_tools
+            : null;
+        const directorGateEnabled = process.env.DIRECTOR_V2_GATE !== '0'
+            && String(process.env.CONVERSATION_MODE || '').trim().toLowerCase() === 'director_v2';
+        if (directorGateEnabled && directorGrantedTools && directorRestrictedTools.has(parsed.commandName)
+            && !directorGrantedTools.includes(parsed.commandName)) {
+            console.warn('Director V2 blocked unavailable command:', parsed.commandName);
+            return \`Command \${parsed.commandName} is not available for this Director V2 turn.\`;
+        }
+        let numArgs = 0;
+`;
+    if (!source.includes(needle)) {
+        throw new Error('executeCommand command lookup anchor not found');
+    }
+    source = source.replace(needle, patch);
+    writeFileSync(path, source);
+}
+NODE
 }
 
 apply_safe_terrain_patch() {
@@ -1425,12 +1756,15 @@ launch_bot() {
         export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
         export LTAG_RUN_ID="$RUN_ID"
+        export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
+        export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
         export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
         export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
         export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
         export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUILDER_USD_PER_1K_OUTPUT
+        export MC_SIM_BUILD_MODE
         export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
         export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
         export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
@@ -1444,6 +1778,111 @@ launch_bot() {
     pid="$!"
     printf '%s\t%s\t%s\t%s\t%s\n' "$bot" "$pid" "$script" "$worktree" "$log" >> "$PID_FILE"
     sleep "$SOAK_LAUNCH_STAGGER_SECONDS"
+}
+
+send_deferred_init_message() {
+    [ "$SOAK_EASY_SPAWN" = "1" ] || return 0
+    [ -n "$SOAK_INIT_MESSAGE" ] || return 0
+    MINDCRAFT_BASE_ABS="$MINDCRAFT_BASE_ABS" \
+    SOAK_BOTS="$SOAK_BOTS" \
+    SOAK_MINDSERVER_BASE_PORT="$SOAK_MINDSERVER_BASE_PORT" \
+    SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE" \
+        node --input-type=module <<'NODE'
+import { createRequire } from 'node:module';
+
+const mindcraftDir = process.env.MINDCRAFT_BASE_ABS;
+const require = createRequire(`${mindcraftDir}/package.json`);
+const { io } = require('socket.io-client');
+
+const botNames = new Map([
+    ['alpha', 'Alpha'],
+    ['vera', 'Vera'],
+    ['rex', 'Rex'],
+    ['aurora', 'Aurora'],
+    ['pixel', 'Pixel'],
+    ['fork', 'Fork'],
+    ['sentinel', 'Sentinel'],
+    ['grok', 'Grok'],
+    ['bridge', 'BridgeBot'],
+]);
+const bots = String(process.env.SOAK_BOTS || '').trim().split(/\s+/).filter(Boolean);
+const basePort = Number.parseInt(process.env.SOAK_MINDSERVER_BASE_PORT || '8080', 10);
+const message = process.env.SOAK_INIT_MESSAGE || '';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function agentNameFor(bot) {
+    return botNames.get(bot) || `${bot.slice(0, 1).toUpperCase()}${bot.slice(1)}`;
+}
+
+function connect(socket) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('connect timeout')), 1500);
+        socket.once('connect', () => {
+            clearTimeout(timer);
+            resolve();
+        });
+        socket.once('connect_error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+function nextAgentsStatus(socket) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve([]), 1500);
+        socket.once('agents-status', (agents) => {
+            clearTimeout(timer);
+            resolve(Array.isArray(agents) ? agents : []);
+        });
+    });
+}
+
+async function sendToBot(bot, index) {
+    if (bot === 'bridge') {
+        return { bot, agentName: agentNameFor(bot), skipped: true, reason: 'bridge receives no init prompt' };
+    }
+    const port = basePort + index;
+    const agentName = agentNameFor(bot);
+    const deadline = Date.now() + 30000;
+    let lastError = 'agent not observed in game';
+    while (Date.now() < deadline) {
+        const socket = io(`http://localhost:${port}`, {
+            transports: ['websocket'],
+            timeout: 1500,
+            reconnection: false,
+            forceNew: true,
+        });
+        const statusPromise = nextAgentsStatus(socket);
+        try {
+            await connect(socket);
+            const agents = await statusPromise;
+            const status = agents.find((agent) => agent && agent.name === agentName);
+            if (status?.in_game && status?.socket_connected !== false) {
+                socket.emit('send-message', agentName, { from: 'system', message });
+                await sleep(100);
+                socket.disconnect();
+                return { bot, agentName, port, sent: true };
+            }
+            lastError = status
+                ? `status in_game=${status.in_game} socket_connected=${status.socket_connected}`
+                : `agent ${agentName} missing from agents-status`;
+        } catch (err) {
+            lastError = err && err.message ? err.message : String(err);
+        } finally {
+            socket.disconnect();
+        }
+        await sleep(500);
+    }
+    throw new Error(`Timed out sending deferred init to ${agentName} on MindServer :${port}: ${lastError}`);
+}
+
+const results = [];
+for (let index = 0; index < bots.length; index += 1) {
+    results.push(await sendToBot(bots[index], index));
+}
+process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
+NODE
 }
 
 stop_process_file() {
@@ -1868,12 +2307,45 @@ append_monitor_summary() {
     } >> "$RUN_DIR/summary.txt"
 }
 
+run_director_acceptance_report() {
+    [ "$SOAK_PROFILE" = "director_v2" ] || return 0
+    "${PYTHON:-python3}" "$SCRIPT_DIR/build_director_acceptance_report.py" \
+        --run-dir "$RUN_DIR" \
+        --queue-threshold "$SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD" \
+        --warmup-seconds "$SOAK_ACCEPTANCE_WARMUP_SECONDS" \
+        --max-selected-agent-ratio "$SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"
+}
+
+append_director_acceptance_summary() {
+    local status="$1" status_label
+    [ "$SOAK_PROFILE" = "director_v2" ] || return 0
+    if [ "$status" -eq 0 ]; then
+        status_label="pass"
+    else
+        status_label="fail"
+    fi
+    {
+        echo
+        echo "Director V2 acceptance"
+        echo "status: $status_label"
+        echo "report_json: $RUN_DIR/acceptance-report.json"
+        echo "report_md: $RUN_DIR/acceptance-report.md"
+        echo "director_decisions: $RUN_DIR/director-decisions.ndjson"
+        echo "tool_parity: $RUN_DIR/tool-parity.ndjson"
+        echo "macro_evidence: $RUN_DIR/macro-evidence.ndjson"
+        echo "memory_digest: $RUN_DIR/memory-digest.ndjson"
+    } >> "$RUN_DIR/summary.txt"
+}
+
 start_lm_queue_proxy
 print_plan
 write_metadata
 
 run_checked "docker services" "$RUN_DIR/preflight/check-services.txt" bash "$REPO_ROOT/scripts/check-services.sh"
 run_checked "LM Studio models" "$RUN_DIR/preflight/llm-local.txt" pnpm llm:local --list-only
+run_checked "LM Studio chat warm-up" "$RUN_DIR/preflight/llm-local-chat.txt" \
+    pnpm llm:local --timeout "$SOAK_LLM_SMOKE_TIMEOUT_SECONDS" \
+        --prompt "Reply with exactly: minecraft smoke ready"
 if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     run_checked "easy spawn access files" "$RUN_DIR/preflight/easy-spawn-access.txt" \
         node "$SCRIPT_DIR/setup-easy-spawn.mjs" --write-access-only
@@ -1898,6 +2370,10 @@ if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     sleep "$SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS"
     run_checked "easy spawn starter kit" "$RUN_DIR/preflight/easy-spawn-kit.txt" \
         node "$SCRIPT_DIR/setup-easy-spawn.mjs"
+    if [ -n "$SOAK_INIT_MESSAGE" ]; then
+        run_checked "easy spawn deferred init" "$RUN_DIR/preflight/easy-spawn-init.txt" \
+            send_deferred_init_message
+    fi
 fi
 
 MONITOR_STATUS=0
@@ -1917,6 +2393,11 @@ if run_monitor_render; then
 else
     fail "Monitor render failed; continuing. Re-run with: python3 scripts/minecraft/build_monitor.py --run-dir $RUN_DIR"
     append_monitor_summary "unavailable"
+fi
+ACCEPTANCE_STATUS=0
+if [ "$SOAK_PROFILE" = "director_v2" ]; then
+    run_director_acceptance_report || ACCEPTANCE_STATUS=$?
+    append_director_acceptance_summary "$ACCEPTANCE_STATUS"
 fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
@@ -1941,9 +2422,13 @@ if [ "$SOAK_REQUIRE_BEHAVIOR_GATE" = "1" ] && [ "$BEHAVIOR_GATE_STATUS" != "pass
     fail "Behavioral acceptance gate failed: $(paste -sd '; ' "$RUN_DIR/behavior-unmet-thresholds.txt" 2> /dev/null || echo 'see behavior.tsv')"
     exit 1
 fi
+if [ "$SOAK_PROFILE" = "director_v2" ] && [ "$SOAK_REQUIRE_DIRECTOR_ACCEPTANCE" = "1" ] && [ "$ACCEPTANCE_STATUS" -ne 0 ]; then
+    fail "Director V2 acceptance failed. See $RUN_DIR/acceptance-report.md"
+    exit 1
+fi
 if [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then
     info "behavior gate failed but SOAK_REQUIRE_BEHAVIOR_GATE=$SOAK_REQUIRE_BEHAVIOR_GATE; document the deviation in docs/minecraft/cohort-report.md"
 fi
 
-ok "Soak completed without unrecovered bot exits, within hourly cap, with acceptable action-command reliability, and behavior_gate_status=$BEHAVIOR_GATE_STATUS"
+ok "Soak completed without unrecovered bot exits, within hourly cap, with acceptable action-command reliability, behavior_gate_status=$BEHAVIOR_GATE_STATUS, and director_acceptance_status=${ACCEPTANCE_STATUS:-0}"
 info "evidence: $RUN_DIR"

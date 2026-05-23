@@ -76,6 +76,12 @@ EVENT_TYPES = frozenset(
         "build_plan.generation.skipped",
         "build_plan.execution.started",
         "build_plan.execution.completed",
+        "director.gate.decision",
+        "director.scene.opened",
+        "director.scene.closed",
+        "director.scene.digest",
+        "director.memory.compaction",
+        "director.tool.call",
         "heartbeat.fired",
         "heartbeat.skipped",
         "heartbeat.outcome",
@@ -529,7 +535,9 @@ def parse_raw_timeline_file(
         if event_type.startswith("llm.queue."):
             agent = data.get("agent") or data.get("agent_id") or payload.get("agent")
         else:
-            agent = data.get("agent") or data.get("agent_id") or payload.get("agent") or default_agent
+            agent = (
+                data.get("agent") or data.get("agent_id") or payload.get("agent") or default_agent
+            )
         trace_id = (
             data.get("trace_id")
             or data.get("traceId")
@@ -1026,6 +1034,38 @@ def correlate_events(events: list[TimelineEvent]) -> list[TimelineEvent]:
     return ordered
 
 
+def dedupe_director_gate_decisions(events: list[TimelineEvent]) -> list[TimelineEvent]:
+    preferred_index_by_key: dict[tuple[Any, ...], int] = {}
+    key_by_index: dict[int, tuple[Any, ...]] = {}
+
+    for index, event in enumerate(events):
+        if event.event_type != "director.gate.decision" or not event.trace_id:
+            continue
+        key = (
+            event.trace_id,
+            event.agent,
+            event.payload.get("scene_id"),
+            bool(event.payload.get("selected")),
+            event.payload.get("turn_kind"),
+            event.payload.get("reason_code") or event.payload.get("reason"),
+            event.payload.get("build_plan_id"),
+        )
+        key_by_index[index] = key
+        previous = preferred_index_by_key.get(key)
+        if previous is None or (
+            event.source == "director_v2" and events[previous].source != "director_v2"
+        ):
+            preferred_index_by_key[key] = index
+
+    if not key_by_index:
+        return events
+    return [
+        event
+        for index, event in enumerate(events)
+        if index not in key_by_index or preferred_index_by_key.get(key_by_index[index]) == index
+    ]
+
+
 def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, Any]:
     by_event_type = Counter(event.event_type for event in events)
     by_agent = Counter(event.agent for event in events if event.agent)
@@ -1147,9 +1187,7 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
             continue
         if event.event_type != "build_plan.generation.completed":
             continue
-        provider = str(
-            payload.get("builder_provider") or payload.get("provider") or "unknown"
-        )
+        provider = str(payload.get("builder_provider") or payload.get("provider") or "unknown")
         paid = bool(payload.get("paid") or provider == "openrouter")
         prompt_tokens = int(payload.get("prompt_tokens") or 0)
         completion_tokens = int(payload.get("completion_tokens") or 0)
@@ -1190,6 +1228,99 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
         for agent, bucket in sorted(builder_usage_by_agent.items())
     }
 
+    director_events = [event for event in events if event.event_type.startswith("director.")]
+    gate_decisions = [
+        event for event in director_events if event.event_type == "director.gate.decision"
+    ]
+    selected_turns = [event for event in gate_decisions if bool(event.payload.get("selected"))]
+    suppressed_turns = [
+        event for event in gate_decisions if not bool(event.payload.get("selected"))
+    ]
+    suppressed_by_reason = Counter(
+        str(
+            event.payload.get("suppression_reason") or event.payload.get("reason_code") or "unknown"
+        )
+        for event in suppressed_turns
+    )
+    stale_discarded = sum(
+        1
+        for event in events
+        if event.event_type == "llm.response"
+        and str(event.payload.get("outcome") or "") == "discarded_stale"
+    )
+    memory_compactions = [
+        event for event in director_events if event.event_type == "director.memory.compaction"
+    ]
+    tool_calls = [event for event in director_events if event.event_type == "director.tool.call"]
+    tool_calls_by_tool = Counter(
+        str(event.payload.get("tool_name") or "unknown") for event in tool_calls
+    )
+    build_macros_by_owner: Counter[str] = Counter()
+    build_plan_ids: set[str] = set()
+    for event in events:
+        if event.event_type.startswith("build_plan.generation."):
+            owner = (
+                event.payload.get("owner")
+                or event.payload.get("build_plan_owner")
+                or event.payload.get("active_build_owner")
+            )
+            if owner:
+                build_macros_by_owner[str(owner).lower()] += 1
+            plan_id = event.payload.get("plan_id") or event.payload.get("action_id")
+            if plan_id:
+                build_plan_ids.add(str(plan_id))
+            continue
+        if event.event_type == "director.gate.decision":
+            owner = event.payload.get("build_owner")
+            plan_id = event.payload.get("build_plan_id")
+            if owner and plan_id and event.payload.get("build_role") == "planner_owner":
+                build_macros_by_owner[str(owner).lower()] += 1
+                build_plan_ids.add(str(plan_id))
+
+    selected_by_agent = Counter(str(event.agent or "unknown") for event in selected_turns)
+    suppressed_by_agent = Counter(str(event.agent or "unknown") for event in suppressed_turns)
+    llm_prompt_count = sum(
+        int(event.payload.get("llm_prompt_count") or 0) for event in gate_decisions
+    )
+    if not gate_decisions:
+        llm_prompt_count = token_totals["requests"]
+    scene_turn_count = len(selected_turns)
+    director_summary = {
+        "scenes_opened": sum(
+            1 for event in director_events if event.event_type == "director.scene.opened"
+        ),
+        "scenes_closed": sum(
+            1 for event in director_events if event.event_type == "director.scene.closed"
+        ),
+        "selected_turns": scene_turn_count,
+        "suppressed_count": len(suppressed_turns),
+        "suppressed_by_reason": dict(sorted(suppressed_by_reason.items())),
+        "queue_depth_max": max(
+            (coerce_int(event.payload.get("queue_depth")) or 0 for event in director_events),
+            default=0,
+        ),
+        "stale_discarded": stale_discarded,
+        "memory_compactions": sum(
+            1 for event in memory_compactions if event.payload.get("ok") is not False
+        ),
+        "memory_compaction_failures": sum(
+            1 for event in memory_compactions if event.payload.get("ok") is False
+        ),
+        "tool_calls_by_tool": dict(sorted(tool_calls_by_tool.items())),
+        "tool_failures": sum(1 for event in tool_calls if event.payload.get("ok") is False),
+        "build_macros_by_owner": dict(sorted(build_macros_by_owner.items())),
+        "build_plan_ids": sorted(build_plan_ids),
+        "llm_prompts_total": llm_prompt_count,
+        "avoided_llm_prompts": sum(
+            int(event.payload.get("avoided_prompt_count") or 0) for event in gate_decisions
+        ),
+        "ratio_prompts_per_scene_turn": round(llm_prompt_count / scene_turn_count, 4)
+        if scene_turn_count
+        else 0.0,
+        "selected_by_agent": dict(sorted(selected_by_agent.items())),
+        "suppressed_by_agent": dict(sorted(suppressed_by_agent.items())),
+    }
+
     return {
         "run_dir": str(run_dir),
         "generated_at_utc": isoformat_z(datetime.now(UTC).replace(microsecond=0)),
@@ -1203,6 +1334,7 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
         "tokens_by_model": dict(sorted(tokens_by_model.items())),
         "builder_usage": builder_usage,
         "builder_usage_by_agent": builder_usage_by_agent,
+        "director": director_summary,
     }
 
 
@@ -1238,7 +1370,7 @@ def build_timeline(
         events.extend(parsed)
         seq_base += max(100000, len(parsed) + 1000)
 
-    ordered = correlate_events(events)
+    ordered = dedupe_director_gate_decisions(correlate_events(events))
     totals = summarize_events(ordered, run_dir)
     return TimelineResult(events=ordered, totals=totals)
 
