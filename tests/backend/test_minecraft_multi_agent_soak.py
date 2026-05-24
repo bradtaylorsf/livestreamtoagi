@@ -695,6 +695,10 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
     assert "node_modules" in text
     assert "SOAK_MINDSERVER_BASE_PORT + bot_index" in text
     assert 'export MINDSERVER_PORT="$mindserver_port"' in text
+    assert "delegate_to_embodied_supervisor" in text
+    assert "MC_SIM_LOWLEVEL" in text
+    assert "--mode embodied" in text
+    assert "--embodied-runtime-arg" in text
 
 
 def test_script_auto_starts_minecraft_when_health_is_down() -> None:

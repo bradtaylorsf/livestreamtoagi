@@ -6,7 +6,11 @@ import argparse
 
 from core.simulation.orchestrator import SimulationConfig
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
-from scripts.run_simulation import _agents_from_run_config, _memory_seed_from_run_config
+from scripts.run_simulation import (
+    _agents_from_run_config,
+    _embodied_run_mode_from_config,
+    _memory_seed_from_run_config,
+)
 
 
 def _args(**overrides) -> argparse.Namespace:
@@ -27,6 +31,24 @@ def test_run_config_agents_override_cli_default_roster() -> None:
     )
 
     assert agents == ["vera", "rex", "aurora", "pixel"]
+
+
+def test_run_config_embodied_run_mode_overrides_cli_default() -> None:
+    run_mode = _embodied_run_mode_from_config(
+        _args(run_mode="experimental", persistent=False),
+        {"run_mode": "persistent"},
+    )
+
+    assert run_mode == "persistent"
+
+
+def test_persistent_flag_overrides_run_config_mode() -> None:
+    run_mode = _embodied_run_mode_from_config(
+        _args(run_mode="experimental", persistent=True),
+        {"run_mode": "experimental"},
+    )
+
+    assert run_mode == "persistent"
 
 
 def test_run_config_memory_seed_translates_public_inherit_shape() -> None:

@@ -21,6 +21,7 @@ import json
 import logging
 import signal
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 # Ensure project root is importable
@@ -31,16 +32,14 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+
 def _default_agents() -> str:
     """Build default agent list from registry (conversation participants only)."""
     from core.agent_registry import AgentRegistry
 
     registry = AgentRegistry(redis_client=None)
     agents = registry._load_all_from_yaml()
-    return ",".join(
-        a.id for a in agents.values()
-        if a.chattiness > 0 or a.initiative > 0
-    )
+    return ",".join(a.id for a in agents.values() if a.chattiness > 0 or a.initiative > 0)
 
 
 DEFAULT_AGENTS = _default_agents()
@@ -64,6 +63,15 @@ def _agents_from_run_config(args: argparse.Namespace, run_config: dict) -> list[
     if not isinstance(raw_agents, list):
         raise ValueError("run config agents must be a list or comma-separated string")
     return [a.strip() for a in raw_agents if isinstance(a, str) and a.strip()]
+
+
+def _embodied_run_mode_from_config(args: argparse.Namespace, run_config: dict) -> str:
+    if getattr(args, "persistent", False):
+        return "persistent"
+    run_mode = run_config.get("run_mode", args.run_mode)
+    if run_mode not in {"persistent", "experimental"}:
+        raise ValueError("embodied run_mode must be persistent or experimental")
+    return run_mode
 
 
 def _memory_seed_from_run_config(args: argparse.Namespace, run_config: dict):
@@ -111,10 +119,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     from core.bootstrap import bootstrap_services, shutdown_services
-    from core.conversation_mode import get_conversation_mode
     from core.conversation.proximity import ProximityManager
     from core.conversation.selection_logger import SelectionLogger
     from core.conversation.triggers import TriggerSystem
+    from core.conversation_mode import get_conversation_mode
     from core.event_bus import event_bus
     from core.memory.reflection import ReflectionManager
     from core.repos.conversation_repo import ConversationRepo
@@ -133,7 +141,9 @@ async def run_simulation(args: argparse.Namespace) -> None:
     agents = _agents_from_run_config(args, run_config)
 
     duration = None
-    if args.duration:
+    if getattr(args, "duration_hours", None) is not None:
+        duration = timedelta(hours=float(args.duration_hours))
+    elif args.duration:
         duration = parse_duration(args.duration)
 
     rolling_window = None
@@ -145,35 +155,74 @@ async def run_simulation(args: argparse.Namespace) -> None:
     # Build memory_seed config from CLI flags or public run config.
     memory_seed_cfg = _memory_seed_from_run_config(args, run_config)
 
-    sim_config = SimulationConfig(
-        name=args.name,
-        description=args.description,
-        seed_file=args.seed_file,
-        agents=agents,
-        max_cost=args.max_cost,
-        max_cost_rolling=args.max_cost_rolling,
-        rolling_window=rolling_window,
-        speed=args.speed,
-        speed_multiplier=args.speed_multiplier,
-        duration=duration,
-        dry_run=args.dry_run,
-        verbose=verbose,
-        management_shadow=args.management_shadow,
-        existing_sim_id=getattr(args, "sim_id", None),
-        hypothesis=getattr(args, "hypothesis", None),
-        auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
-        memory_seed=memory_seed_cfg,
-        scenario_id=run_config.get("scenario_id"),
-        scenario_meta=run_config.get("scenario_meta"),
-        scenario_agents=run_config.get("scenario_agents"),
-        excluded_agents=run_config.get("excluded_agents"),
-        factions=run_config.get("factions"),
-        initial_agent_energy=run_config.get("energy"),
-        conversation_cadence=run_config.get("conversation_cadence", 1.0),
-        conversation_mode=get_conversation_mode(),
-        submitted_params=run_config.get("params"),
-        source=run_config.get("source"),
+    requested_mode = args.mode or ("seeded" if args.seed_file else "autonomous")
+    embodied_run_mode = (
+        _embodied_run_mode_from_config(args, run_config)
+        if requested_mode == "embodied"
+        else args.run_mode
     )
+
+    if requested_mode == "embodied":
+        from core.simulation.embodied_supervisor import EmbodiedSimulationConfig
+
+        sim_config = EmbodiedSimulationConfig(
+            name=args.name,
+            description=args.description,
+            run_mode=embodied_run_mode,
+            agents=agents,
+            max_cost=args.max_cost,
+            max_cost_rolling=args.max_cost_rolling,
+            rolling_window=rolling_window,
+            duration=duration,
+            dry_run=args.dry_run,
+            verbose=verbose,
+            management_shadow=args.management_shadow,
+            existing_sim_id=getattr(args, "sim_id", None),
+            hypothesis=getattr(args, "hypothesis", None),
+            auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
+            memory_seed=memory_seed_cfg,
+            factions=run_config.get("factions"),
+            goal_predicate=getattr(args, "goal_predicate", None)
+            or run_config.get("goal_predicate"),
+            world_config=run_config.get("world_config") or run_config.get("world"),
+            runtime_args=getattr(args, "embodied_runtime_arg", None),
+            tick_seconds=getattr(args, "tick_seconds", 5.0),
+            end_eval_suite=getattr(args, "end_eval_suite", "quick"),
+            run_end_hooks=not getattr(args, "no_embodied_end_hooks", False),
+            speed_multiplier=args.speed_multiplier if args.speed_multiplier > 0 else 1.0,
+            submitted_params=run_config.get("params"),
+            source=run_config.get("source"),
+        )
+    else:
+        sim_config = SimulationConfig(
+            name=args.name,
+            description=args.description,
+            seed_file=args.seed_file,
+            agents=agents,
+            max_cost=args.max_cost,
+            max_cost_rolling=args.max_cost_rolling,
+            rolling_window=rolling_window,
+            speed=args.speed,
+            speed_multiplier=args.speed_multiplier,
+            duration=duration,
+            dry_run=args.dry_run,
+            verbose=verbose,
+            management_shadow=args.management_shadow,
+            existing_sim_id=getattr(args, "sim_id", None),
+            hypothesis=getattr(args, "hypothesis", None),
+            auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
+            memory_seed=memory_seed_cfg,
+            scenario_id=run_config.get("scenario_id"),
+            scenario_meta=run_config.get("scenario_meta"),
+            scenario_agents=run_config.get("scenario_agents"),
+            excluded_agents=run_config.get("excluded_agents"),
+            factions=run_config.get("factions"),
+            initial_agent_energy=run_config.get("energy"),
+            conversation_cadence=run_config.get("conversation_cadence", 1.0),
+            conversation_mode=get_conversation_mode(),
+            submitted_params=run_config.get("params"),
+            source=run_config.get("source"),
+        )
     sim_config.world_sim = args.world_sim
     # Validate faction membership against the participating-agents set so
     # misconfigured scenarios fail loudly at load time.
@@ -200,15 +249,19 @@ async def run_simulation(args: argparse.Namespace) -> None:
         management = svc.management
 
     proximity = ProximityManager(
-        svc.redis, cfg, event_bus,
+        svc.redis,
+        cfg,
+        event_bus,
         role_bonuses=svc.agent_registry.get_role_bonuses(),
     )
     sim_clock = SimulationClock(speed_multiplier=sim_config.speed_multiplier)
     trigger_system = TriggerSystem(
-        cfg.triggers, svc.recall_memory,
+        cfg.triggers,
+        svc.recall_memory,
         goal_manager=svc.goal_manager,
         agent_state_manager=svc.agent_state_manager,
-        clock=sim_clock, now_fn=sim_clock.now,
+        clock=sim_clock,
+        now_fn=sim_clock.now,
     )
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
@@ -233,39 +286,63 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
     display = SimulationDisplay(verbose=verbose, agent_registry=svc.agent_registry)
 
-    # ── Build orchestrator ────────────────────────────────
-    orchestrator = SimulationOrchestrator(
-        config=sim_config,
-        db=svc.db,
-        redis_client=svc.redis,
-        simulation_repo=simulation_repo,
-        config_loader=svc.config_loader,
-        agent_registry=svc.agent_registry,
-        event_bus=event_bus,
-        llm_client=svc.llm_client,
-        management=management,
-        context_assembler=svc.context_assembler,
-        conversation_repo=conversation_repo,
-        archival_memory=svc.archival_memory,
-        proximity=proximity,
-        trigger_system=trigger_system,
-        selection_logger=selection_logger,
-        reflection_manager=reflection_manager,
-        compactor=svc.compactor,
-        memory_repo=svc.memory_repo,
-        display=display,
-        services=svc,
-        clock=sim_clock,
-        relationship_repo=svc.relationship_repo,
-    )
+    # ── Build runner ──────────────────────────────────────
+    if requested_mode == "embodied":
+        from core.simulation.embodied_supervisor import EmbodiedSimulationSupervisor
+
+        runner = EmbodiedSimulationSupervisor(
+            config=sim_config,
+            db=svc.db,
+            redis_client=svc.redis,
+            simulation_repo=simulation_repo,
+            config_loader=svc.config_loader,
+            agent_registry=svc.agent_registry,
+            event_bus=event_bus,
+            llm_client=svc.llm_client,
+            management=management,
+            context_assembler=svc.context_assembler,
+            reflection_manager=reflection_manager,
+            compactor=svc.compactor,
+            memory_repo=svc.memory_repo,
+            display=display,
+            services=svc,
+            clock=sim_clock,
+            relationship_repo=svc.relationship_repo,
+        )
+    else:
+        runner = SimulationOrchestrator(
+            config=sim_config,
+            db=svc.db,
+            redis_client=svc.redis,
+            simulation_repo=simulation_repo,
+            config_loader=svc.config_loader,
+            agent_registry=svc.agent_registry,
+            event_bus=event_bus,
+            llm_client=svc.llm_client,
+            management=management,
+            context_assembler=svc.context_assembler,
+            conversation_repo=conversation_repo,
+            archival_memory=svc.archival_memory,
+            proximity=proximity,
+            trigger_system=trigger_system,
+            selection_logger=selection_logger,
+            reflection_manager=reflection_manager,
+            compactor=svc.compactor,
+            memory_repo=svc.memory_repo,
+            display=display,
+            services=svc,
+            clock=sim_clock,
+            relationship_repo=svc.relationship_repo,
+        )
 
     # ── Signal handling ───────────────────────────────────
     loop = asyncio.get_running_loop()
 
     def _signal_handler() -> None:
         from core.simulation.display import console
+
         console.print("\n[dim]Cancelling simulation...[/dim]")
-        orchestrator.cancel()
+        runner.cancel()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
@@ -301,19 +378,19 @@ async def run_simulation(args: argparse.Namespace) -> None:
                 logger.warning("Snapshot restore warning: %s", w)
 
     # ── Run ───────────────────────────────────────────────
-    if sim_config.mode == "autonomous":
-        await orchestrator.run_autonomous()
+    if requested_mode == "embodied":
+        await runner.run()
+    elif sim_config.mode == "autonomous":
+        await runner.run_autonomous()
     else:
-        await orchestrator.run()
+        await runner.run()
 
     # ── Cleanup ───────────────────────────────────────────
     await shutdown_services(svc)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run a full-day simulation of the AI reality show"
-    )
+    parser = argparse.ArgumentParser(description="Run a full-day simulation of the AI reality show")
     parser.add_argument(
         "--name",
         type=str,
@@ -333,10 +410,37 @@ def main() -> None:
         help="Path to the YAML seed file defining phases (omit for autonomous mode)",
     )
     parser.add_argument(
+        "--mode",
+        choices=["seeded", "autonomous", "embodied"],
+        default=None,
+        help=(
+            "Execution mode. Defaults to seeded when --seed-file is set, "
+            "otherwise autonomous. Use embodied for Minecraft supervisor runs."
+        ),
+    )
+    parser.add_argument(
+        "--run-mode",
+        choices=["persistent", "experimental"],
+        default="experimental",
+        help="Embodied run lifecycle mode (default: experimental)",
+    )
+    parser.add_argument(
+        "--persistent",
+        action="store_true",
+        default=False,
+        help="Shortcut for --mode embodied --run-mode persistent",
+    )
+    parser.add_argument(
         "--duration",
         type=str,
         default=None,
         help="Simulated duration for autonomous mode (e.g. '7d', '1d', '12h')",
+    )
+    parser.add_argument(
+        "--duration-hours",
+        type=float,
+        default=None,
+        help="Wall/sim duration in hours for embodied experimental runs",
     )
     parser.add_argument(
         "--agents",
@@ -354,19 +458,13 @@ def main() -> None:
         "--max-cost-rolling",
         type=float,
         default=None,
-        help=(
-            "Maximum cost in dollars within --rolling-window before stopping "
-            "(default: off)"
-        ),
+        help=("Maximum cost in dollars within --rolling-window before stopping (default: off)"),
     )
     parser.add_argument(
         "--rolling-window",
         type=str,
         default=None,
-        help=(
-            "Rolling cost window for --max-cost-rolling, e.g. '1h' or '24h' "
-            "(default: off)"
-        ),
+        help=("Rolling cost window for --max-cost-rolling, e.g. '1h' or '24h' (default: off)"),
     )
     parser.add_argument(
         "--speed",
@@ -421,6 +519,39 @@ def main() -> None:
             "Path to a JSON config file with public submission overrides "
             "(agents, exclusions, factions, memory seed, energy, cadence)."
         ),
+    )
+    parser.add_argument(
+        "--goal-predicate",
+        type=str,
+        default=None,
+        help=(
+            "Optional embodied goal predicate label recorded in the run spec. "
+            "Callable predicates are supported when the supervisor is used in-process."
+        ),
+    )
+    parser.add_argument(
+        "--tick-seconds",
+        type=float,
+        default=5.0,
+        help="Supervisor monitor cadence for embodied runs (default: 5)",
+    )
+    parser.add_argument(
+        "--end-eval-suite",
+        type=str,
+        default="quick",
+        help="Eval suite launched at the end of embodied runs (default: quick)",
+    )
+    parser.add_argument(
+        "--no-embodied-end-hooks",
+        action="store_true",
+        default=False,
+        help="Skip end-of-run eval/report hooks for embodied runs",
+    )
+    parser.add_argument(
+        "--embodied-runtime-arg",
+        action="append",
+        default=None,
+        help="Additional argument passed to the low-level Minecraft soak runtime",
     )
     parser.add_argument(
         "--world-sim",
@@ -482,14 +613,40 @@ def main() -> None:
         help="Show what would execute without making LLM calls",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
 
     args = parser.parse_args()
-    if not args.seed_file and not args.duration:
-        parser.error("Either --seed-file or --duration must be provided")
+    if args.persistent:
+        args.mode = "embodied"
+        args.run_mode = "persistent"
+    if args.duration and args.duration_hours is not None:
+        parser.error("--duration and --duration-hours are mutually exclusive")
+    requested_mode = args.mode or ("seeded" if args.seed_file else "autonomous")
+    embodied_run_mode = args.run_mode
+    if requested_mode == "embodied":
+        try:
+            validation_run_config = _load_run_config_file(args.run_config_file)
+            embodied_run_mode = _embodied_run_mode_from_config(args, validation_run_config)
+        except ValueError as exc:
+            parser.error(str(exc))
+    if requested_mode == "seeded" and not args.seed_file:
+        parser.error("--mode seeded requires --seed-file")
+    if requested_mode == "autonomous" and not args.duration and args.duration_hours is None:
+        parser.error("autonomous mode requires --duration")
+    if (
+        requested_mode == "embodied"
+        and embodied_run_mode == "experimental"
+        and not args.duration
+        and args.duration_hours is None
+        and not args.goal_predicate
+    ):
+        parser.error(
+            "embodied experimental mode requires --duration, --duration-hours, or --goal-predicate"
+        )
     if (args.max_cost_rolling is None) != (args.rolling_window is None):
         parser.error("--max-cost-rolling and --rolling-window must be provided together")
     if args.max_cost_rolling is not None and args.max_cost_rolling < 0:
@@ -499,7 +656,7 @@ def main() -> None:
     # simulated time only advances by wall-clock conversation duration, so a
     # --duration of "7d" would take an extremely long time to reach. Recommend
     # using a speed multiplier (e.g. --speed-multiplier 42) for autonomous runs.
-    if args.duration and args.speed_multiplier == 0 and not args.seed_file:
+    if requested_mode == "autonomous" and args.duration and args.speed_multiplier == 0:
         print(
             "\n  WARNING: --duration with --speed-multiplier 0 (instant mode)"
             "\n  will advance simulated time very slowly. Each conversation only"

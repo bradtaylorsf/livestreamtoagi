@@ -190,7 +190,7 @@
           "type": "string"
         },
         "simulation_id": {
-          "description": "Simulation this message belongs to (journal + cost).",
+          "description": "Simulation this message belongs to (journal + cost). Embodied supervisors propagate this from LTAG_SIMULATION_ID / MINECRAFT_SIMULATION_ID so all bridge events share the run id.",
           "minLength": 1,
           "title": "Simulation Id",
           "type": "string"
@@ -1651,7 +1651,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.8",
+  "protocolVersion": "1.9",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",

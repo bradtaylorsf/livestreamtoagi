@@ -124,9 +124,10 @@ def test_client_carries_the_full_request_envelope() -> None:
     assert "agent_tier" in src and "conversation" in src
     assert "budget_bucket" in src and "'bridge'" in src
     assert "estimated_cost_usd" in src
-    # 1.8 carries the additive director.gate and kill.status verbs, still
+    # 1.9 carries supervisor-propagated simulation_id scoping, still
     # wire-compatible with earlier 1.x peers.
-    assert "PROTOCOL_VERSION = '1.8'" in src, "protocol version must be 1.8"
+    assert "PROTOCOL_VERSION = '1.9'" in src, "protocol version must be 1.9"
+    assert "MINECRAFT_SIMULATION_ID" in src
 
 
 def test_client_uses_bearer_auth_and_the_bridge_endpoint() -> None:

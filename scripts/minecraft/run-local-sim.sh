@@ -4,7 +4,9 @@
 # This is the ergonomic operator wrapper for the E8 all-character path:
 # start the app with `pnpm dev`, or let the sim auto-start the local FastAPI
 # backend when it is down. It loads the same repo `.env`, adds the common
-# macOS Java 21 / Node 20 Homebrew paths, and delegates to soak.sh.
+# macOS Java 21 / Node 20 Homebrew paths, and delegates to the embodied
+# simulation supervisor via soak.sh. Set MC_SIM_LOWLEVEL=1 for shell-only
+# diagnostics that do not allocate a supervisor simulation id.
 #
 # Usage:
 #   scripts/minecraft/run-local-sim.sh smoke
@@ -67,6 +69,8 @@
 #   MC_SIM_MEMORY_RECALL_MAX_CHARS=1200
 #   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS=management,alpha
 #   MC_SIM_AUTO_SETUP_MINDCRAFT=1
+#   MC_SIM_LOWLEVEL=1          # bypass supervisor for low-level diagnostics
+#   MC_SIM_RUN_MODE=experimental # or persistent when delegating to supervisor
 #   MC_SIM_EASY_MODE=1
 #   MC_SIM_START_BACKEND_IF_DOWN=1
 #   MC_SIM_MC_PORT=25566
@@ -491,6 +495,7 @@ fi
 
 ok "Launching local Minecraft sim from $ENV_FILE"
 info "mode: ${mode}"
+info "lifecycle: supervisor by default; MC_SIM_LOWLEVEL=1 keeps shell-only diagnostics"
 info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
