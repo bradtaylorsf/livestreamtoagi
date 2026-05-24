@@ -2,8 +2,8 @@
 # Run the local embodied Minecraft simulation from .env.
 #
 # This is the ergonomic operator wrapper for the E8 all-character path:
-# start the app with `pnpm dev`, then run this command from another terminal.
-# It loads the same repo `.env` that the FastAPI backend uses, adds the common
+# start the app with `pnpm dev`, or let the sim auto-start the local FastAPI
+# backend when it is down. It loads the same repo `.env`, adds the common
 # macOS Java 21 / Node 20 Homebrew paths, and delegates to soak.sh.
 #
 # Usage:
@@ -68,6 +68,7 @@
 #   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS=management,alpha
 #   MC_SIM_AUTO_SETUP_MINDCRAFT=1
 #   MC_SIM_EASY_MODE=1
+#   MC_SIM_START_BACKEND_IF_DOWN=1
 #   MC_SIM_MC_PORT=25566
 #   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
 #   MC_SIM_KEEP_SERVER_RUNNING=1
@@ -360,7 +361,8 @@ if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-}" ]; then
     export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
 fi
 SOAK_AUTO_SETUP_MINDCRAFT="${SOAK_AUTO_SETUP_MINDCRAFT:-${MC_SIM_AUTO_SETUP_MINDCRAFT:-1}}"
-export SOAK_AUTO_SETUP_MINDCRAFT
+SOAK_START_BACKEND_IF_DOWN="${SOAK_START_BACKEND_IF_DOWN:-${MC_SIM_START_BACKEND_IF_DOWN:-1}}"
+export SOAK_AUTO_SETUP_MINDCRAFT SOAK_START_BACKEND_IF_DOWN
 
 MC_SIM_EASY_MODE="${MC_SIM_EASY_MODE:-1}"
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
@@ -508,6 +510,7 @@ info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
 info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
 info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
 info "Mindcraft setup: auto=${SOAK_AUTO_SETUP_MINDCRAFT}"
+info "backend setup: auto=${SOAK_START_BACKEND_IF_DOWN}"
 info "easy mode: ${MC_SIM_EASY_MODE}"
 info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"

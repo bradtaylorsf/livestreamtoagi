@@ -80,7 +80,7 @@ Required runtime state:
 | Java | Java 21 for Paper |
 | Mindcraft | `./mindcraft` at `35be480b4cc0bca990278e6103a1426392559d96` with `node_modules/` installed; real soak runs invoke `scripts/minecraft/setup-mindcraft.sh` by default when this is missing or stale. |
 | Paper | `scripts/minecraft/health.sh --json` returns `"up":true`; if down, `soak.sh` starts `scripts/minecraft/supervise.sh` by default. |
-| Backend | `core.main:app` reachable on `http://127.0.0.1:8010/api/health` |
+| Backend | `core.main:app` reachable on `http://127.0.0.1:8010/api/health`; real soak runs start the local FastAPI backend by default when that local URL is down. |
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
 | LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1`, with `LOCAL_LLM_MODEL` loaded enough to complete a chat request |
 
@@ -122,6 +122,12 @@ lacks `node_modules/`, the runner invokes `scripts/minecraft/setup-mindcraft.sh`
 once and rechecks the clone. Set `SOAK_AUTO_SETUP_MINDCRAFT=0` when you want the
 older fail-fast behavior instead.
 
+For the local backend, the runner first checks `BACKEND_HEALTH_URL`. If the
+default local URL is down, it starts `.venv/bin/uvicorn core.main:app --port
+8010 --env-file .env`, waits for health, and stops that auto-started backend at
+cleanup. Set `SOAK_START_BACKEND_IF_DOWN=0` to require a separately running
+`pnpm dev:backend` process.
+
 If you want the soak to fail instead of auto-starting Paper:
 
 ```bash
@@ -142,8 +148,10 @@ pnpm verify:minecraft-soak
 
 `pnpm mc:sim*` loads the same repo `.env` used by `pnpm dev`, adds the common
 local Java 21 / Node 20 Homebrew paths on macOS, then delegates to
-`scripts/minecraft/soak.sh`. Use it for the normal local operator flow: start
-`pnpm dev`, then run the desired Minecraft sim command in a second terminal.
+`scripts/minecraft/soak.sh`. Use it for the normal local operator flow: run the
+desired Minecraft sim command from a terminal; the backend is auto-started when
+the local health URL is down, or you can start `pnpm dev` first for a full app
+session.
 By default the local sim uses an isolated easy-mode Paper server at
 `127.0.0.1:25566`, with files in `minecraft-server-easy/` and world-generation
 inputs from `scripts/minecraft/world-easy.config`. This avoids disturbing the
@@ -235,6 +243,7 @@ Useful knobs:
 | `MINECRAFT_LLM_RETRY_ATTEMPTS` | `2` | Retries for transient LM Studio model-load 400s such as `Model unloaded` or `Operation canceled`. |
 | `LOCAL_LLM_UPSTREAM_URL` | `$LOCAL_LLM_BASE_URL` | Real LM Studio upstream when the proxy is enabled. |
 | `SOAK_AUTO_SETUP_MINDCRAFT` | `1` | Auto-run `setup-mindcraft.sh` in real runs when the base `MINDCRAFT_DIR` clone is missing, unpinned, or lacks `node_modules/`. |
+| `SOAK_START_BACKEND_IF_DOWN` | `1` | Auto-start local FastAPI backend when the local `BACKEND_HEALTH_URL` is down. |
 
 ## Builder-Plan Mode
 

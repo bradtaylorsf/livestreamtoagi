@@ -73,6 +73,11 @@
 #   SOAK_LAUNCH_STAGGER_SECONDS Default: 3.
 #   SOAK_START_MINECRAFT_IF_DOWN Start supervise.sh when health is down.
 #                               Default: 1.
+#   SOAK_START_BACKEND_IF_DOWN Start local FastAPI backend when the local
+#                               backend health URL is down. Default: 1.
+#   SOAK_BACKEND_BOOT_TIMEOUT_SECONDS
+#                               Seconds to wait for auto-started backend
+#                               health. Default: 120.
 #   SOAK_KEEP_MINECRAFT_RUNNING Keep an auto-started Paper server running after
 #                               the timed sim ends. Default: 0.
 #   SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS
@@ -267,6 +272,8 @@ SOAK_AUTO_SETUP_MINDCRAFT="${SOAK_AUTO_SETUP_MINDCRAFT:-1}"
 SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
+SOAK_START_BACKEND_IF_DOWN="${SOAK_START_BACKEND_IF_DOWN:-1}"
+SOAK_BACKEND_BOOT_TIMEOUT_SECONDS="${SOAK_BACKEND_BOOT_TIMEOUT_SECONDS:-120}"
 SOAK_KEEP_MINECRAFT_RUNNING="${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
@@ -769,6 +776,8 @@ print_plan() {
     info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
+    info "auto-start API: $SOAK_START_BACKEND_IF_DOWN"
+    info "API boot wait:  ${SOAK_BACKEND_BOOT_TIMEOUT_SECONDS}s"
     info "keep MC alive:  $SOAK_KEEP_MINECRAFT_RUNNING"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
     info "MC target:      ${MC_HOST:-127.0.0.1}:${MC_PORT:-${SERVER_PORT:-25565}}"
@@ -1363,6 +1372,7 @@ printf '%s\n' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"
 PID_FILE="$RUN_DIR/pids.tsv"
 TAIL_PID_FILE="$RUN_DIR/tail-pids.txt"
 LLM_PROXY_PID_FILE="$RUN_DIR/lmstudio-queue-proxy.pid"
+BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 EARLY_EXIT_FILE="$RUN_DIR/early-exits.tsv"
 HEARTBEAT_HALT_FILE="$RUN_DIR/heartbeat-halts.tsv"
 : > "$PID_FILE"
@@ -1616,6 +1626,85 @@ ensure_minecraft_server() {
 
     fail "Minecraft server did not become healthy within ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s."
     tail -40 "$RUN_DIR/logs/minecraft-supervisor-stdout.log" >&2 || true
+    return 1
+}
+
+backend_health_available() {
+    curl --connect-timeout 1 --max-time 2 -fsS "$BACKEND_HEALTH_URL" > /dev/null 2>&1
+}
+
+backend_start_port() {
+    local without_scheme host_port port
+    case "$BACKEND_HEALTH_URL" in
+        http://127.0.0.1:*/*|http://localhost:*/*) ;;
+        *) return 1 ;;
+    esac
+    without_scheme="${BACKEND_HEALTH_URL#http://}"
+    host_port="${without_scheme%%/*}"
+    port="${host_port##*:}"
+    case "$port" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s\n' "$port"
+}
+
+ensure_backend_server() {
+    if backend_health_available; then
+        ok "Backend already healthy"
+        return 0
+    fi
+
+    if [ "$SOAK_START_BACKEND_IF_DOWN" != "1" ]; then
+        fail "Backend is down and SOAK_START_BACKEND_IF_DOWN is not 1."
+        info "  Start it with pnpm dev:backend or enable auto-start."
+        return 1
+    fi
+
+    local backend_port uvicorn_bin waited backend_pid
+    backend_port="$(backend_start_port || true)"
+    if [ -z "$backend_port" ]; then
+        fail "Backend health is down and $BACKEND_HEALTH_URL is not a local auto-start URL."
+        info "  Start the backend manually or set BACKEND_HEALTH_URL to http://127.0.0.1:<port>/api/health."
+        return 1
+    fi
+
+    uvicorn_bin="${UVICORN_BIN:-$REPO_ROOT/.venv/bin/uvicorn}"
+    if [ ! -x "$uvicorn_bin" ]; then
+        uvicorn_bin="$(command -v uvicorn 2> /dev/null || true)"
+    fi
+    if [ -z "$uvicorn_bin" ]; then
+        fail "uvicorn not found. Install backend dependencies or start pnpm dev:backend manually."
+        return 1
+    fi
+
+    info "Backend down; starting FastAPI backend for the soak on 127.0.0.1:${backend_port}"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        "$uvicorn_bin" core.main:app --host 127.0.0.1 --port "$backend_port" --env-file "$REPO_ROOT/.env" \
+            > "$RUN_DIR/logs/backend-stdout.log" 2> "$RUN_DIR/logs/backend-stderr.log" &
+    else
+        "$uvicorn_bin" core.main:app --host 127.0.0.1 --port "$backend_port" \
+            > "$RUN_DIR/logs/backend-stdout.log" 2> "$RUN_DIR/logs/backend-stderr.log" &
+    fi
+    backend_pid="$!"
+    echo "$backend_pid" > "$BACKEND_PID_FILE"
+
+    waited=0
+    while [ "$waited" -lt "$SOAK_BACKEND_BOOT_TIMEOUT_SECONDS" ]; do
+        if backend_health_available; then
+            ok "Backend became healthy after ${waited}s"
+            return 0
+        fi
+        if ! kill -0 "$backend_pid" 2> /dev/null; then
+            fail "Backend exited before health became reachable."
+            tail -40 "$RUN_DIR/logs/backend-stderr.log" >&2 || true
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    fail "Backend did not become healthy within ${SOAK_BACKEND_BOOT_TIMEOUT_SECONDS}s."
+    tail -40 "$RUN_DIR/logs/backend-stderr.log" >&2 || true
     return 1
 }
 
@@ -2018,6 +2107,7 @@ cleanup() {
     local status=$?
     stop_bots
     stop_minecraft_supervisor
+    stop_process_file "$BACKEND_PID_FILE"
     stop_process_file "$LLM_PROXY_PID_FILE"
     stop_process_file "$TAIL_PID_FILE"
     cleanup_worktrees
@@ -2423,6 +2513,7 @@ if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     run_checked "easy spawn terrain" "$RUN_DIR/preflight/easy-spawn-terrain.txt" \
         node "$SCRIPT_DIR/setup-easy-spawn.mjs" --terrain-only
 fi
+ensure_backend_server || exit 1
 run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS "$BACKEND_HEALTH_URL"
 
 start_log_capture

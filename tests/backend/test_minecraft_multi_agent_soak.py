@@ -131,6 +131,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in proc.stdout
     assert "MC_SIM_MEMORY_RECALL_LIMIT" in proc.stdout
     assert "SOAK_AUTO_SETUP_MINDCRAFT" in proc.stdout
+    assert "SOAK_START_BACKEND_IF_DOWN" in proc.stdout
     assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
@@ -164,6 +165,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in wrapper.stdout
     assert "MC_SIM_MEMORY_RECALL_LIMIT" in wrapper.stdout
     assert "MC_SIM_AUTO_SETUP_MINDCRAFT" in wrapper.stdout
+    assert "MC_SIM_START_BACKEND_IF_DOWN" in wrapper.stdout
     assert "timeline.ndjson" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
@@ -681,6 +683,10 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
     for bot in BOT_IDS:
         assert f"connect-{bot}-bot.sh" in text
     assert "SOAK_AUTO_SETUP_MINDCRAFT" in text
+    assert "SOAK_START_BACKEND_IF_DOWN" in text
+    assert "ensure_backend_server" in text
+    assert "core.main:app" in text
+    assert "backend.pid" in text
     assert "setup-mindcraft.sh" in text
     assert "ensure_mindcraft_base" in text
     assert "git clone --shared" in text
