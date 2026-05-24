@@ -1,0 +1,117 @@
+# Experimental Short Run - bounded A/B comparison scenario for LM Studio.
+#
+# Confirm local model availability:
+#   python scripts/check_local_llm.py
+#
+# Variant A:
+#   LLM_PROVIDER=lmstudio \
+#   LOCAL_LLM_BASE_URL=http://localhost:1234/v1 \
+#   LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
+#   EMBEDDING_PROVIDER=deterministic \
+#   python scripts/run_simulation.py \
+#     --name "experimental-short-a" \
+#     --seed-file scenarios/experimental_short_run.yaml \
+#     --run-mode experimental \
+#     --max-cost 0.01
+#
+# Variant B can use a run config with different persona_overrides, factions, or
+# agent_goals:
+#   LLM_PROVIDER=lmstudio \
+#   LOCAL_LLM_BASE_URL=http://localhost:1234/v1 \
+#   LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
+#   EMBEDDING_PROVIDER=deterministic \
+#   python scripts/run_simulation.py \
+#     --name "experimental-short-b" \
+#     --seed-file scenarios/experimental_short_run.yaml \
+#     --run-mode experimental \
+#     --run-config-file /path/to/variant-b-run-config.json \
+#     --max-cost 0.01
+#
+# Compare after both runs complete:
+#   python scripts/report_simulation.py <run-a-uuid> --compare <run-b-uuid> --format json
+
+meta:
+  name: "Experimental Short Run"
+  description: "Fresh-world, bounded scenario for comparing starting-condition variants."
+  agents: [vera, rex, aurora, pixel]
+  expected_max_cost: 0.01
+  expected_runtime_minutes: 10
+
+run_mode: experimental
+experimental_goal:
+  kind: phases_complete
+  target: 3
+agents:
+  - vera
+  - rex
+  - aurora
+  - pixel
+world:
+  world_type: flat
+  seed: 607
+  persistent: false
+memory_seed:
+  mode: none
+persona_overrides:
+  - agent_id: vera
+    backstory: "Vera starts as the field coordinator for a ten-minute build comparison."
+    system_prompt_append: "Keep the team focused on measurable outcomes."
+  - agent_id: rex
+    backstory: "Rex starts with a bias toward fast visible prototypes."
+agent_goals:
+  vera:
+    - "Define one measurable success criterion before the run ends."
+  rex:
+    - "Prototype a visible shelter marker before the comparison report."
+  aurora:
+    - "Keep the build visually coherent."
+  pixel:
+    - "Track one concrete UI or world-state detail for the report."
+factions:
+  - name: planners
+    members: [vera, aurora]
+    goal: "Favor coordinated design before action."
+    stance: deliberate
+  - name: builders
+    members: [rex, pixel]
+    goal: "Favor quick physical progress."
+    stance: action-first
+
+phases:
+  - name: starting_conditions_brief
+    type: scheduled
+    trigger: standup
+    required_agents: [vera]
+    topic: "State the starting conditions and decide what makes this short run comparable."
+    location: town_square
+    max_turns: 4
+    assertions:
+      - type: conversation
+        min_turns: 2
+        severity: error
+
+  - name: faction_tradeoff
+    type: organic
+    count: 1
+    required_agents: [vera, rex, aurora, pixel]
+    topics:
+      - "Planners and builders disagree on whether to sketch first or place blocks first."
+    location: workshop
+    max_turns: 5
+    assertions:
+      - type: conversation
+        min_turns: 2
+        severity: error
+
+  - name: comparison_checkpoint
+    type: tool_exercise
+    agent: pixel
+    required_agents: [pixel]
+    tool: get_world_state
+    context: "Inspect world state and name one result that should appear in the comparison report."
+    location: town_square
+    max_turns: 3
+    assertions:
+      - type: tool
+        any_of: [get_world_state]
+        severity: warning
