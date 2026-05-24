@@ -241,8 +241,8 @@ class SimulationConfig:
         self.initial_agent_energy = dict(initial_agent_energy or {})
         self.conversation_cadence = max(0.1, float(conversation_cadence or 1.0))
         normalized_conversation_mode = conversation_mode.strip().lower()
-        if normalized_conversation_mode not in {"director", "embodied"}:
-            raise ValueError("conversation_mode must be one of: director, embodied")
+        if normalized_conversation_mode not in {"director", "embodied", "director_v2"}:
+            raise ValueError("conversation_mode must be one of: director, embodied, director_v2")
         self.conversation_mode = normalized_conversation_mode
         self.submitted_params = dict(submitted_params or {})
         self.source = source

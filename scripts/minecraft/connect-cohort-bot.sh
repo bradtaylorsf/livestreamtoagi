@@ -102,6 +102,7 @@ SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
+MEMORY_CONTEXT_SKILL_REL="src/agent/skills/memory_context.js"
 INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
 DIRECTOR_GATE_SKILL_REL="src/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
@@ -144,6 +145,7 @@ SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
+MEMORY_CONTEXT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/memory_context.js"
 INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
 DIRECTOR_GATE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
@@ -275,7 +277,7 @@ verify_committed_assets() {
 
     for required in \
         "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
-        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" "$DIRECTOR_GATE_SKILL_SRC" \
+        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" "$MEMORY_CONTEXT_SKILL_SRC" "$DIRECTOR_GATE_SKILL_SRC" \
         "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$PLACE_HERE_GUARD_SRC" \
@@ -353,6 +355,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would wrap:   upstream action interruptions via $PLACE_HERE_GUARD_REL"
     info "Would copy:   fork-src/ timeline telemetry and LM Studio usage shim"
     info "Would copy:   fork-src/ autonomous heartbeat skill"
+    info "Would copy:   fork-src/ memory context skill"
     info "Would copy:   fork-src/ Director V2 gate skill"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
@@ -493,6 +496,7 @@ stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
 stage_file "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_REL"
 stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
 stage_file "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_REL"
+stage_file "$MEMORY_CONTEXT_SKILL_SRC" "$MEMORY_CONTEXT_SKILL_REL"
 stage_file "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_REL"
 stage_file "$DIRECTOR_GATE_SKILL_SRC" "$DIRECTOR_GATE_SKILL_REL"
 stage_file "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_REL"

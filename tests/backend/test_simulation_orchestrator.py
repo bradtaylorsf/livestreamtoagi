@@ -174,6 +174,17 @@ class TestSimulationConfig:
         finally:
             os.unlink(path)
 
+    def test_director_v2_conversation_mode_is_valid_for_embodied_supervisor(self):
+        config = SimulationConfig(
+            name="director-v2-embodied",
+            agents=["vera"],
+            run_mode="experimental",
+            duration=timedelta(minutes=15),
+            conversation_mode="director_v2",
+        )
+
+        assert config.conversation_mode == "director_v2"
+
     def test_required_agents_extracted_from_phase(self):
         phases = [
             {"name": "standup", "type": "scheduled", "required_agents": ["vera", "rex"]}

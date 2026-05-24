@@ -21,6 +21,7 @@ import json
 import logging
 import signal
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 # Ensure project root is importable
@@ -106,6 +107,14 @@ def _world_from_run_config(args: argparse.Namespace, run_config: dict) -> dict |
     return raw
 
 
+def _duration_from_hours(value: float | None) -> timedelta | None:
+    if value is None:
+        return None
+    if value <= 0:
+        raise ValueError("--duration-hours must be greater than zero")
+    return timedelta(seconds=value * 3600)
+
+
 async def run_simulation(args: argparse.Namespace) -> None:
     """Main async entry point."""
     verbose = getattr(args, "verbose", False)
@@ -147,7 +156,9 @@ async def run_simulation(args: argparse.Namespace) -> None:
     agents = _agents_from_run_config(args, run_config)
 
     duration = None
-    if args.duration:
+    if getattr(args, "duration_hours", None) is not None:
+        duration = _duration_from_hours(args.duration_hours)
+    elif args.duration:
         duration = parse_duration(args.duration)
 
     experimental_goal = None
@@ -194,7 +205,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         factions=run_config.get("factions"),
         initial_agent_energy=run_config.get("energy"),
         conversation_cadence=run_config.get("conversation_cadence", 1.0),
-        conversation_mode=get_conversation_mode(),
+        conversation_mode=args.conversation_mode or get_conversation_mode(),
         submitted_params=run_config.get("params"),
         source=run_config.get("source"),
     )
@@ -217,6 +228,34 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
     conversation_repo = ConversationRepo(svc.db)
     simulation_repo = SimulationRepo(svc.db)
+
+    if (
+        sim_config.conversation_mode in {"embodied", "director_v2"}
+        and not getattr(args, "no_embodied_supervisor", False)
+    ):
+        from core.simulation.embodied_supervisor import EmbodiedSimulationSupervisor
+
+        supervisor = EmbodiedSimulationSupervisor(
+            config=sim_config,
+            simulation_repo=simulation_repo,
+            redis_client=svc.redis,
+            project_root=PROJECT_ROOT,
+            run_dir=Path(args.minecraft_log_dir) if args.minecraft_log_dir else None,
+            run_eval=not args.no_embodied_eval,
+            run_report=not args.no_embodied_report,
+        )
+        try:
+            result = await supervisor.run()
+            print(
+                "Embodied supervisor completed "
+                f"simulation_id={result.simulation_id} "
+                f"run_id={result.run_id} "
+                f"status={result.status.value} "
+                f"stop_reason={result.stop_reason}"
+            )
+            return
+        finally:
+            await shutdown_services(svc)
 
     if sim_config.management_shadow:
         from core.management import Management
@@ -374,6 +413,12 @@ def main() -> None:
         help="Simulated duration for autonomous mode (e.g. '7d', '1d', '12h')",
     )
     parser.add_argument(
+        "--duration-hours",
+        type=float,
+        default=None,
+        help="Wall-clock-style duration in hours for embodied Minecraft supervisor runs",
+    )
+    parser.add_argument(
         "--agents",
         type=str,
         default=DEFAULT_AGENTS,
@@ -469,6 +514,40 @@ def main() -> None:
             "Run-mode starting condition. Seeded runs default to experimental; "
             "persistent is only used when explicitly requested."
         ),
+    )
+    parser.add_argument(
+        "--conversation-mode",
+        type=str,
+        choices=["director", "embodied", "director_v2"],
+        default=None,
+        help=(
+            "Conversation implementation for this run. embodied and director_v2 "
+            "use the embodied Minecraft supervisor by default."
+        ),
+    )
+    parser.add_argument(
+        "--no-embodied-supervisor",
+        action="store_true",
+        default=False,
+        help="Run the legacy Python orchestrator even when --conversation-mode is embodied",
+    )
+    parser.add_argument(
+        "--minecraft-log-dir",
+        type=str,
+        default=None,
+        help="Evidence directory passed to the embodied Minecraft supervisor",
+    )
+    parser.add_argument(
+        "--no-embodied-eval",
+        action="store_true",
+        default=False,
+        help="Skip the embodied supervisor end-of-run eval hook",
+    )
+    parser.add_argument(
+        "--no-embodied-report",
+        action="store_true",
+        default=False,
+        help="Skip the embodied supervisor end-of-run report hook",
     )
     parser.add_argument(
         "--experimental-goal",
@@ -569,7 +648,11 @@ def main() -> None:
         args.run_mode = "experimental"
     if args.resume_sim_id and args.sim_id and args.resume_sim_id != args.sim_id:
         parser.error("--resume-sim-id and --sim-id must match when both are provided")
-    if args.run_mode == "persistent" and args.duration:
+    if args.duration and args.duration_hours is not None:
+        parser.error("--duration and --duration-hours are mutually exclusive")
+    if args.duration_hours is not None and args.duration_hours <= 0:
+        parser.error("--duration-hours must be greater than zero")
+    if args.run_mode == "persistent" and (args.duration or args.duration_hours is not None):
         parser.error("persistent mode is indefinite; do not set --duration")
     if args.run_mode == "persistent" and args.experimental_goal:
         parser.error("persistent mode is indefinite; do not set --experimental-goal")
@@ -579,16 +662,22 @@ def main() -> None:
         args.run_mode == "experimental"
         and not args.seed_file
         and not args.duration
+        and args.duration_hours is None
         and not args.experimental_goal
     ):
-        parser.error("experimental mode requires --seed-file, --duration, or --experimental-goal")
+        parser.error(
+            "experimental mode requires --seed-file, --duration, --duration-hours, or --experimental-goal"
+        )
     if (
         not args.seed_file
         and not args.duration
+        and args.duration_hours is None
         and not args.experimental_goal
         and args.run_mode != "persistent"
     ):
-        parser.error("Either --seed-file, --duration, or --experimental-goal must be provided")
+        parser.error(
+            "Either --seed-file, --duration, --duration-hours, or --experimental-goal must be provided"
+        )
     if (args.max_cost_rolling is None) != (args.rolling_window is None):
         parser.error("--max-cost-rolling and --rolling-window must be provided together")
     if args.max_cost_rolling is not None and args.max_cost_rolling < 0:
@@ -606,7 +695,7 @@ def main() -> None:
     # simulated time only advances by wall-clock conversation duration, so a
     # --duration of "7d" would take an extremely long time to reach. Recommend
     # using a speed multiplier (e.g. --speed-multiplier 42) for autonomous runs.
-    if args.duration and args.speed_multiplier == 0 and not args.seed_file:
+    if (args.duration or args.duration_hours is not None) and args.speed_multiplier == 0 and not args.seed_file:
         print(
             "\n  WARNING: --duration with --speed-multiplier 0 (instant mode)"
             "\n  will advance simulated time very slowly. Each conversation only"
