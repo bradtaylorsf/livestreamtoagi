@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -369,6 +370,20 @@ def test_inbound_verbs_match_handlers_and_registry() -> None:
     assert set(inbound.INBOUND_HANDLERS) == set(inbound.INBOUND_VERBS)
     assert set(inbound.INBOUND_VERBS) <= set(c.SERVICE_REGISTRY)
     assert sorted(inbound.INBOUND_VERBS) == ["action.result", "perception.report"]
+
+
+def test_repeated_failure_windows_are_pruned() -> None:
+    inbound._failure_windows.clear()
+    inbound._failure_windows[("sim-old", "rex", "blocked")] = deque([1.0])
+    inbound._failure_windows[("sim-new", "rex", "blocked")] = deque(
+        [inbound.REPEATED_FAILURE_WINDOW_SECONDS + 2.0]
+    )
+
+    inbound._prune_failure_windows(inbound.REPEATED_FAILURE_WINDOW_SECONDS + 3.0)
+
+    assert ("sim-old", "rex", "blocked") not in inbound._failure_windows
+    assert ("sim-new", "rex", "blocked") in inbound._failure_windows
+    inbound._failure_windows.clear()
 
 
 def test_bridge_event_types_exist() -> None:

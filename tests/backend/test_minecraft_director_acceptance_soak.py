@@ -305,10 +305,18 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
             "payload": {
                 "scene_id": "scene-1",
                 "owner": "alpha",
+                "objective_id": "phase-cabin",
+                "phase_index": 0,
+                "phase_owner": "alpha",
                 "plan_id": "plan-1",
                 "provider": "local",
                 "status": "completed",
                 "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "torch"}]},
+                "metric": {
+                    "intended_count": 1,
+                    "steps_verified": 1,
+                    "completion_ratio": 1.0,
+                },
             },
         },
     ]
@@ -335,6 +343,10 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
     assert report["metrics"]["useful_memory_digest_count"] == 1
     assert report["metrics"]["tool_call_count"] == 1
     assert report["metrics"]["macro_attempt_count"] == 1
+    assert report["metrics"]["settlement_objective_count"] == 1
+    assert report["metrics"]["settlement_objectives_with_structured_results"] == 1
+    assert report["metrics"]["settlement_objectives"][0]["objective_id"] == "phase-cabin"
+    assert report["metrics"]["settlement_objectives"][0]["verified_blocks"] == 1
     assert (
         "None. Evidence is sufficient to unblock #511, #512, and #514." in report["residual_gaps"]
     )
@@ -342,6 +354,7 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
         "director-decisions.ndjson",
         "tool-parity.ndjson",
         "macro-evidence.ndjson",
+        "settlement-objectives.ndjson",
         "memory-digest.ndjson",
         "distress-evidence.ndjson",
         "acceptance-report.md",

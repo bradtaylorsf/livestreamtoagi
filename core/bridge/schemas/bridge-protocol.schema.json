@@ -547,6 +547,19 @@
           "title": "Granted",
           "type": "boolean"
         },
+        "objective_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Settlement objective id.",
+          "title": "Objective Id"
+        },
         "owner": {
           "anyOf": [
             {
@@ -559,6 +572,33 @@
           "default": null,
           "description": "Agent that owns the build plan.",
           "title": "Owner"
+        },
+        "phase_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Settlement phase index.",
+          "title": "Phase Index"
+        },
+        "phase_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Current phase owner.",
+          "title": "Phase Owner"
         },
         "plan_id": {
           "anyOf": [
@@ -650,6 +690,18 @@
       "additionalProperties": false,
       "description": "``director.gate`` \u2014 Director V2 prompt eligibility check for Mindcraft.",
       "properties": {
+        "active_objective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedSettlementObjective"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Current settlement phase objective when a multi-phase build is active."
+        },
         "agent_id": {
           "description": "Bot requesting prompt permission.",
           "minLength": 1,
@@ -1221,6 +1273,179 @@
         "reported_by"
       ],
       "title": "EmbodiedResourceEntry",
+      "type": "object"
+    },
+    "EmbodiedSettlementObjective": {
+      "properties": {
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "completion_ratio": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Completion Ratio",
+          "type": "number"
+        },
+        "cooldown_until_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cooldown Until Ms"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "additionalProperties": true,
+          "title": "Evidence",
+          "type": "object"
+        },
+        "intended_blocks": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Intended Blocks",
+          "type": "integer"
+        },
+        "objective_id": {
+          "minLength": 1,
+          "title": "Objective Id",
+          "type": "string"
+        },
+        "owner_agent_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Agent Id"
+        },
+        "owner_started_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Started At Ms"
+        },
+        "phase_index": {
+          "minimum": 0,
+          "title": "Phase Index",
+          "type": "integer"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Id"
+        },
+        "previous_owner_agent_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Previous Owner Agent Ids",
+          "type": "array"
+        },
+        "reassign_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reassign Reason"
+        },
+        "stale_after_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stale After Ms"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "in_progress",
+            "blocked",
+            "owner_cap_reached",
+            "cooldown",
+            "stale",
+            "completed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "verified_blocks": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Verified Blocks",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "objective_id",
+        "phase_index",
+        "description"
+      ],
+      "title": "EmbodiedSettlementObjective",
       "type": "object"
     },
     "EmbodiedVerifiedAction": {
@@ -2151,6 +2376,17 @@
     "SharedStateReadResponse": {
       "additionalProperties": false,
       "properties": {
+        "active_objective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedSettlementObjective"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "build_site": {
           "anyOf": [
             {
@@ -2211,6 +2447,13 @@
             "$ref": "#/$defs/EmbodiedResourceEntry"
           },
           "title": "Resources",
+          "type": "array"
+        },
+        "settlement_objectives": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedSettlementObjective"
+          },
+          "title": "Settlement Objectives",
           "type": "array"
         },
         "unresolved_dangers": {
@@ -2306,7 +2549,10 @@
             "danger_resolve",
             "verified_action_record",
             "build_site_set",
-            "next_step_add"
+            "next_step_add",
+            "settlement_objectives_set",
+            "settlement_objective_assign",
+            "settlement_objective_advance"
           ],
           "title": "Operation",
           "type": "string"
@@ -2321,6 +2567,24 @@
             }
           ],
           "default": null
+        },
+        "settlement_objective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedSettlementObjective"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settlement_objectives": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedSettlementObjective"
+          },
+          "title": "Settlement Objectives",
+          "type": "array"
         },
         "verified_action": {
           "anyOf": [

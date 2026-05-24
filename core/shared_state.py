@@ -23,6 +23,7 @@ VERIFIED_ACTIONS_KEY = "shared:verified_actions"
 BUILD_SITE_KEY = "shared:build_site"
 GOAL_KEY = "shared:goal"
 NEXT_STEPS_KEY = "shared:next_steps"
+SETTLEMENT_OBJECTIVES_KEY = "shared:settlement_objectives"
 
 # Completed tasks older than this are pruned to prevent context bloat
 _COMPLETED_TASK_TTL = 3600  # 1 hour
@@ -30,6 +31,7 @@ _MAX_COMPLETED_TASKS = 10
 _MAX_RECENT_DANGERS = 25
 _MAX_RECENT_VERIFIED_ACTIONS = 25
 _MAX_NEXT_STEPS = 25
+_MAX_SETTLEMENT_OBJECTIVES = 12
 
 DANGER_KINDS = frozenset(
     {
@@ -105,6 +107,27 @@ class DangerReport:
     rescuer_id: str | None = None
     recovery_status: str = "open"
     details: str | None = None
+
+
+@dataclass
+class SettlementObjective:
+    objective_id: str
+    phase_index: int
+    description: str
+    owner_agent_id: str | None = None
+    status: str = "pending"
+    plan_id: str | None = None
+    intended_blocks: int = 0
+    verified_blocks: int = 0
+    completion_ratio: float = 0.0
+    started_at: float | None = None
+    completed_at: float | None = None
+    reassign_reason: str | None = None
+    previous_owner_agent_ids: list[str] = field(default_factory=list)
+    owner_started_at_ms: int | None = None
+    stale_after_ms: int | None = None
+    cooldown_until_ms: int | None = None
+    evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -358,6 +381,106 @@ class SharedWorkingState:
             )
         return danger
 
+    async def set_settlement_objectives(
+        self,
+        objectives: list[SettlementObjective],
+    ) -> None:
+        """Replace the run's ordered settlement objective list."""
+
+        ordered = sorted(
+            objectives[:_MAX_SETTLEMENT_OBJECTIVES],
+            key=lambda item: (int(item.phase_index), item.objective_id),
+        )
+        for objective in ordered:
+            objective.status = _normalize_objective_status(objective.status)
+            objective.phase_index = max(0, int(objective.phase_index))
+            objective.intended_blocks = max(0, int(objective.intended_blocks))
+            objective.verified_blocks = max(0, int(objective.verified_blocks))
+            objective.completion_ratio = max(0.0, min(float(objective.completion_ratio), 1.0))
+        await self._redis.set(
+            SETTLEMENT_OBJECTIVES_KEY,
+            json.dumps([asdict(objective) for objective in ordered]),
+        )
+
+    async def get_settlement_objectives(self) -> list[SettlementObjective]:
+        raw = await self._redis.get(SETTLEMENT_OBJECTIVES_KEY)
+        if not raw:
+            return []
+        data = _loads(raw)
+        if not isinstance(data, list):
+            return []
+        objectives = [
+            SettlementObjective(**item)
+            for item in data
+            if isinstance(item, dict) and item.get("objective_id")
+        ]
+        return sorted(objectives, key=lambda item: (item.phase_index, item.objective_id))
+
+    async def get_active_settlement_objective(self) -> SettlementObjective | None:
+        for objective in await self.get_settlement_objectives():
+            if objective.status not in {"completed", "failed"}:
+                return objective
+        return None
+
+    async def assign_settlement_objective_owner(
+        self,
+        objective_id: str,
+        owner_agent_id: str,
+        *,
+        reason: str | None = None,
+        owner_started_at_ms: int | None = None,
+    ) -> SettlementObjective | None:
+        objectives = await self.get_settlement_objectives()
+        for objective in objectives:
+            if objective.objective_id != objective_id:
+                continue
+            owner = owner_agent_id.strip().lower()
+            if objective.owner_agent_id and objective.owner_agent_id != owner:
+                objective.previous_owner_agent_ids = [
+                    *objective.previous_owner_agent_ids,
+                    objective.owner_agent_id,
+                ]
+            objective.owner_agent_id = owner
+            objective.status = "in_progress"
+            objective.reassign_reason = reason
+            objective.started_at = objective.started_at or time.time()
+            objective.owner_started_at_ms = owner_started_at_ms
+            await self.set_settlement_objectives(objectives)
+            return objective
+        return None
+
+    async def advance_settlement_objective(
+        self,
+        objective_id: str,
+        *,
+        status: str,
+        plan_id: str | None = None,
+        intended_blocks: int | None = None,
+        verified_blocks: int | None = None,
+        completion_ratio: float | None = None,
+        evidence: dict[str, object] | None = None,
+    ) -> SettlementObjective | None:
+        objectives = await self.get_settlement_objectives()
+        for objective in objectives:
+            if objective.objective_id != objective_id:
+                continue
+            objective.status = _normalize_objective_status(status)
+            if plan_id:
+                objective.plan_id = plan_id
+            if intended_blocks is not None:
+                objective.intended_blocks = max(0, int(intended_blocks))
+            if verified_blocks is not None:
+                objective.verified_blocks = max(0, int(verified_blocks))
+            if completion_ratio is not None:
+                objective.completion_ratio = max(0.0, min(float(completion_ratio), 1.0))
+            if evidence:
+                objective.evidence.update(evidence)
+            if objective.status == "completed":
+                objective.completed_at = time.time()
+            await self.set_settlement_objectives(objectives)
+            return objective
+        return None
+
     async def record_verified_action(self, action: VerifiedAction) -> None:
         await self._redis.rpush(VERIFIED_ACTIONS_KEY, json.dumps(asdict(action)))
         await self._redis.ltrim(VERIFIED_ACTIONS_KEY, -_MAX_RECENT_VERIFIED_ACTIONS, -1)
@@ -497,6 +620,15 @@ class SharedWorkingState:
             for step in next_steps[-8:]:
                 lines.append(f"  - {step.text} (added by {step.added_by})")
 
+        active_objective = await self.get_active_settlement_objective()
+        if active_objective:
+            owner = active_objective.owner_agent_id or "unassigned"
+            lines.append(
+                "**Active settlement objective:** "
+                f"phase {active_objective.phase_index}: {active_objective.description} "
+                f"(owner: {owner}, status: {active_objective.status})"
+            )
+
         actions = await self.get_recent_verified_actions(5)
         if actions:
             lines.append("**Recent verified actions:**")
@@ -544,6 +676,21 @@ class SharedWorkingState:
 def _normalize_danger_kind(kind: str) -> str:
     text = str(kind or "").strip().lower().replace("-", "_").replace(" ", "_")
     return text if text in DANGER_KINDS else "trapped"
+
+
+def _normalize_objective_status(status: str) -> str:
+    text = str(status or "").strip().lower().replace("-", "_").replace(" ", "_")
+    valid = {
+        "pending",
+        "in_progress",
+        "blocked",
+        "owner_cap_reached",
+        "cooldown",
+        "stale",
+        "completed",
+        "failed",
+    }
+    return text if text in valid else "pending"
 
 
 def _is_unresolved_danger(danger: DangerReport) -> bool:

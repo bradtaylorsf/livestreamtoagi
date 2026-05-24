@@ -67,6 +67,7 @@ INBOUND_VERBS: frozenset[str] = frozenset({"perception.report", "action.result"}
 REPEATED_FAILURE_OUTCOMES = frozenset({"interrupted", "blocked"})
 REPEATED_FAILURE_THRESHOLD = 3
 REPEATED_FAILURE_WINDOW_SECONDS = 90
+MAX_FAILURE_WINDOWS = 4096
 _failure_windows: dict[tuple[str, str, str], deque[float]] = {}
 
 
@@ -208,6 +209,7 @@ async def _maybe_emit_repeated_failure_distress(
     window.append(now)
     while window and now - window[0] > REPEATED_FAILURE_WINDOW_SECONDS:
         window.popleft()
+    _prune_failure_windows(now)
     if len(window) < REPEATED_FAILURE_THRESHOLD:
         return
     window.clear()
@@ -221,6 +223,22 @@ async def _maybe_emit_repeated_failure_distress(
         details=payload.detail or f"Repeated {outcome} action results",
     )
     await record_distress_report(env, services, report, writer="bridge_action_result")
+
+
+def _prune_failure_windows(now: float) -> None:
+    for key, window in list(_failure_windows.items()):
+        while window and now - window[0] > REPEATED_FAILURE_WINDOW_SECONDS:
+            window.popleft()
+        if not window:
+            _failure_windows.pop(key, None)
+    if len(_failure_windows) <= MAX_FAILURE_WINDOWS:
+        return
+    oldest = sorted(
+        _failure_windows.items(),
+        key=lambda item: item[1][-1] if item[1] else 0.0,
+    )
+    for key, _window in oldest[: max(0, len(_failure_windows) - MAX_FAILURE_WINDOWS)]:
+        _failure_windows.pop(key, None)
 
 
 # Defensive parity: the inbound handler set, the public verb set, and the

@@ -9,6 +9,8 @@ from typing import Any
 
 from core.bridge.contract import (
     BridgeRequest,
+    RescueTaskRequest,
+    RescueTaskResponse,
     SharedStateReadRequest,
     SharedStateWriteRequest,
 )
@@ -21,6 +23,7 @@ from core.shared_state import (
     GroupGoal,
     NextStep,
     ResourceEntry,
+    SettlementObjective,
     SharedWorkingState,
     VerifiedAction,
 )
@@ -46,6 +49,8 @@ async def _read_payload(state: SharedWorkingState) -> dict[str, Any]:
     goal = await state.get_group_goal()
     build_site = await state.get_build_site()
     unresolved = await state.get_unresolved_dangers()
+    objectives = await state.get_settlement_objectives()
+    active_objective = await state.get_active_settlement_objective()
     return {
         "goal": asdict(goal) if goal else None,
         "resources": [asdict(resource) for resource in await state.get_resources()],
@@ -57,6 +62,8 @@ async def _read_payload(state: SharedWorkingState) -> dict[str, Any]:
         ],
         "build_site": asdict(build_site) if build_site else None,
         "next_steps": [asdict(step) for step in await state.get_next_steps()],
+        "settlement_objectives": [asdict(objective) for objective in objectives],
+        "active_objective": asdict(active_objective) if active_objective else None,
         "formatted": await state.get_summary_for_context(),
     }
 
@@ -83,6 +90,14 @@ async def record_distress_report(
     mode = _rescue_mode()
     rescuer_id = await _select_rescuer(state, report.agent_id)
     strategy = RESCUE_STRATEGIES_BY_MODE.get(mode, "navigate")
+    rescue_request = RescueTaskRequest(
+        rescue_id=f"rescue-{report.danger_id}",
+        target_agent_id=report.agent_id,
+        rescuer_agent_id=rescuer_id,
+        strategy=strategy,
+        mode=mode,
+        danger_id=report.danger_id,
+    )
     rescue_task = await state.dispatch_rescue_task(
         report.danger_id,
         rescuer_id=rescuer_id,
@@ -92,6 +107,7 @@ async def record_distress_report(
     payload = {
         "danger": asdict(report),
         "rescue_task": asdict(rescue_task) if rescue_task else None,
+        "rescue_request": rescue_request.model_dump(),
         "rescue_mode": mode,
         "rescue_strategy": strategy,
     }
@@ -138,6 +154,14 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
         if payload.danger_resolution is None:
             raise ValueError("danger_resolve requires danger_resolution")
         data = payload.danger_resolution.model_dump()
+        rescue_response = RescueTaskResponse(
+            rescue_id=f"rescue-{data.get('danger_id') or data.get('agent_id') or 'unknown'}",
+            target_agent_id=data.get("agent_id") or "unknown",
+            rescuer_agent_id=data.get("rescuer_id") or writer,
+            status="failure" if data["recovery_status"] == "failed" else "success",
+            recovery_status=data["recovery_status"],
+            detail="",
+        )
         resolved = await state.mark_danger_resolved(
             danger_id=data.get("danger_id"),
             agent_id=data.get("agent_id"),
@@ -146,6 +170,7 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
         )
         if resolved is None:
             raise ValueError("danger_resolve did not match an unresolved danger")
+        rescue_response.model_dump()
     elif payload.operation == "verified_action_record":
         if payload.verified_action is None:
             raise ValueError("verified_action_record requires verified_action")
@@ -162,6 +187,43 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
         data = payload.next_step.model_dump()
         data["added_by"] = writer
         await state.add_next_step(NextStep(**data))
+    elif payload.operation == "settlement_objectives_set":
+        if not payload.settlement_objectives:
+            raise ValueError("settlement_objectives_set requires settlement_objectives")
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(**objective.model_dump())
+                for objective in payload.settlement_objectives
+            ]
+        )
+    elif payload.operation == "settlement_objective_assign":
+        if payload.settlement_objective is None:
+            raise ValueError("settlement_objective_assign requires settlement_objective")
+        data = payload.settlement_objective.model_dump()
+        owner = data.get("owner_agent_id") or writer
+        updated = await state.assign_settlement_objective_owner(
+            data["objective_id"],
+            owner,
+            reason=data.get("reassign_reason") or "bridge_assignment",
+            owner_started_at_ms=data.get("owner_started_at_ms"),
+        )
+        if updated is None:
+            raise ValueError("settlement_objective_assign did not match an objective")
+    elif payload.operation == "settlement_objective_advance":
+        if payload.settlement_objective is None:
+            raise ValueError("settlement_objective_advance requires settlement_objective")
+        data = payload.settlement_objective.model_dump()
+        updated = await state.advance_settlement_objective(
+            data["objective_id"],
+            status=data["status"],
+            plan_id=data.get("plan_id"),
+            intended_blocks=data.get("intended_blocks"),
+            verified_blocks=data.get("verified_blocks"),
+            completion_ratio=data.get("completion_ratio"),
+            evidence=data.get("evidence") or None,
+        )
+        if updated is None:
+            raise ValueError("settlement_objective_advance did not match an objective")
 
     return {
         "accepted": True,

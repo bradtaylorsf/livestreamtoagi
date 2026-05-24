@@ -983,6 +983,35 @@ class EmbodiedDangerResolution(BaseModel):
     resolved_at: float = Field(default_factory=time.time)
 
 
+class EmbodiedSettlementObjective(BaseModel):
+    objective_id: str = Field(min_length=1)
+    phase_index: int = Field(ge=0)
+    description: str = Field(min_length=1)
+    owner_agent_id: str | None = Field(default=None, min_length=1)
+    status: Literal[
+        "pending",
+        "in_progress",
+        "blocked",
+        "owner_cap_reached",
+        "cooldown",
+        "stale",
+        "completed",
+        "failed",
+    ] = "pending"
+    plan_id: str | None = Field(default=None, min_length=1)
+    intended_blocks: int = Field(default=0, ge=0)
+    verified_blocks: int = Field(default=0, ge=0)
+    completion_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    started_at: float | None = None
+    completed_at: float | None = None
+    reassign_reason: str | None = None
+    previous_owner_agent_ids: list[str] = Field(default_factory=list)
+    owner_started_at_ms: int | None = Field(default=None, ge=0)
+    stale_after_ms: int | None = Field(default=None, ge=0)
+    cooldown_until_ms: int | None = Field(default=None, ge=0)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 class EmbodiedVerifiedAction(BaseModel):
     agent_id: str = Field(min_length=1)
     action: str = Field(min_length=1)

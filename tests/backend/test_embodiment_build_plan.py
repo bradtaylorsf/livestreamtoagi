@@ -1016,6 +1016,108 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_plan_and_build_does_not_fallback_to_marker_for_unknown_non_cabin(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([['0,63,0', 'grass_block']]);
+const bot = {{
+    username: 'NoFallbackHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'oak_log' }}, {{ name: 'cobblestone' }}, {{ name: 'torch' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'fork',
+    bot,
+    __ltagDirectorContext: {{
+        scene_id: 'settlement-phase-2',
+        build_macro: {{
+            scene_id: 'settlement-phase-2',
+            plan_id: 'phase-two-plan',
+            owner: 'fork',
+            role: 'planner_owner',
+            granted: true,
+            objective_id: 'phase-two',
+            phase_index: 2,
+        }},
+    }},
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                return JSON.stringify({{
+                    blocks: [{{ dx: 99, dy: 0, dz: 0, block_type: 'bedrock' }}],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'decorative statue balcony');
+process.stdout.write(JSON.stringify({{
+    result,
+    finalBlocks: {{
+        markerBase: world.get('0,64,0') || null,
+        markerTop: world.get('0,66,0') || null,
+    }},
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "fork",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert result["result"] == "plan-and-build skipped: no_starter_blueprint"
+    assert result["finalBlocks"] == {"markerBase": None, "markerTop": None}
+    event_types = [event["type"] for event in result["events"]]
+    assert "build_plan.generation.rejected" in event_types
+    assert "build_plan.generation.skipped" in event_types
+    assert "build_plan.generation.completed" not in event_types
+    skipped = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.skipped"
+    )
+    assert skipped["payload"]["reason"] == "no_starter_blueprint"
+    assert skipped["payload"]["objective_id"] == "phase-two"
+
+
+@requires_node
 def test_plan_and_build_rejects_tiny_cabin_plan_and_uses_cabin_blueprint(
     tmp_path: Path,
 ) -> None:

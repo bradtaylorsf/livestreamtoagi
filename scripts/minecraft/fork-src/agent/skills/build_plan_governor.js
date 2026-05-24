@@ -173,6 +173,9 @@ function publicActiveBuild(activeBuild) {
         started_at_ms: activeBuild.startedAt,
         cache_key: activeBuild.cacheKey,
         owner: activeBuild.owner || activeBuild.agentKey || null,
+        objective_id: activeBuild.objectiveId || null,
+        phase_index: Number.isInteger(activeBuild.phaseIndex) ? activeBuild.phaseIndex : null,
+        phase_owner: activeBuild.phaseOwner || activeBuild.owner || activeBuild.agentKey || null,
     };
 }
 
@@ -219,6 +222,9 @@ function skipResult({
     planId = null,
     cooldownRemainingSec = 0,
     cacheHit = false,
+    objectiveId = null,
+    phaseIndex = null,
+    phaseOwner = null,
 }) {
     state.skipCounts[reason] = (state.skipCounts[reason] || 0) + 1;
     return {
@@ -232,6 +238,9 @@ function skipResult({
         cache_key: cacheKey,
         origin,
         cache_hit: cacheHit,
+        objective_id: objectiveId,
+        phase_index: Number.isInteger(phaseIndex) ? phaseIndex : null,
+        phase_owner: phaseOwner,
         cooldown_remaining_sec: cooldownRemainingSec,
         builder_call_count: state.builderCallCount,
         max_builder_calls_per_agent: intEnv(
@@ -306,6 +315,9 @@ function tryAcquireAgentBuild(agentKey, description, origin, settings = {}, opti
         owner: options.ownerAgentId || agentKey,
         agentKey,
         status: cached ? 'cache_hit' : 'planning',
+        objectiveId: options.objectiveId || null,
+        phaseIndex: Number.isInteger(options.phaseIndex) ? options.phaseIndex : null,
+        phaseOwner: options.phaseOwner || options.ownerAgentId || agentKey,
     };
     if (cached) state.skipCounts.cache_hit += 1;
     return {
@@ -320,6 +332,9 @@ function tryAcquireAgentBuild(agentKey, description, origin, settings = {}, opti
         origin: buildOrigin,
         cache_hit: Boolean(cached),
         cached_plan: cached ? cached.plan : null,
+        objective_id: options.objectiveId || null,
+        phase_index: Number.isInteger(options.phaseIndex) ? options.phaseIndex : null,
+        phase_owner: options.phaseOwner || options.ownerAgentId || agentKey,
         cooldown_remaining_sec: 0,
         builder_call_count: state.builderCallCount,
         max_builder_calls_per_agent: maxPerAgent,
@@ -344,6 +359,7 @@ export function tryAcquireSceneBuild(
 
     const agentKey = agentKeyFor(agent);
     const ownerAgentId = options.ownerAgentId ? String(options.ownerAgentId).toLowerCase() : agentKey;
+    const phaseOwner = options.phaseOwner ? String(options.phaseOwner).toLowerCase() : ownerAgentId;
     const now = nowMs(options);
     const buildOrigin = applyBuildZoneOffset(agentKey, origin);
     const cacheKey = buildPlanCacheKey(agentKey, description, buildOrigin, settings);
@@ -351,11 +367,11 @@ export function tryAcquireSceneBuild(
     expireSceneBuild(sceneState, now);
     const cachedScenePlan = sceneState.planCache.get(cacheKey) || null;
 
-    if (ownerAgentId !== agentKey) {
+    if (phaseOwner !== agentKey) {
         return skipResult({
             agentKey,
             state: stateFor(agentKey),
-            reason: 'scene_locked',
+            reason: options.objectiveId ? 'not_phase_owner' : 'scene_locked',
             cacheKey,
             origin: buildOrigin,
             activeBuild: sceneState.activeBuild || {
@@ -366,13 +382,19 @@ export function tryAcquireSceneBuild(
                 cacheKey,
                 startedAt: now,
                 status: 'director_owned',
-                owner: ownerAgentId,
-                agentKey: ownerAgentId,
+                owner: phaseOwner,
+                agentKey: phaseOwner,
+                objectiveId: options.objectiveId || null,
+                phaseIndex: Number.isInteger(options.phaseIndex) ? options.phaseIndex : null,
+                phaseOwner,
             },
-            activeBuildOwner: ownerAgentId,
+            activeBuildOwner: phaseOwner,
             sceneId: normalizedSceneId,
             planId: options.planId || sceneState.activeBuild?.planId || null,
             cacheHit: Boolean(cachedScenePlan),
+            objectiveId: options.objectiveId || null,
+            phaseIndex: options.phaseIndex,
+            phaseOwner,
         });
     }
 
@@ -389,6 +411,9 @@ export function tryAcquireSceneBuild(
             sceneId: normalizedSceneId,
             planId: sceneState.activeBuild.planId,
             cacheHit: Boolean(cachedScenePlan),
+            objectiveId: sceneState.activeBuild.objectiveId || options.objectiveId || null,
+            phaseIndex: sceneState.activeBuild.phaseIndex ?? options.phaseIndex ?? null,
+            phaseOwner: sceneState.activeBuild.phaseOwner || activeOwner,
         });
     }
 
@@ -408,6 +433,9 @@ export function tryAcquireSceneBuild(
             sceneId: normalizedSceneId,
             cooldownRemainingSec,
             cacheHit: Boolean(cachedScenePlan),
+            objectiveId: options.objectiveId || null,
+            phaseIndex: options.phaseIndex,
+            phaseOwner,
         });
     }
 
@@ -417,7 +445,8 @@ export function tryAcquireSceneBuild(
         cacheKey,
         cachedPlanEntry: cachedScenePlan,
         sceneId: normalizedSceneId,
-        ownerAgentId,
+        ownerAgentId: phaseOwner,
+        phaseOwner,
     });
     if (!acquisition.allowed) return acquisition;
 
@@ -428,16 +457,22 @@ export function tryAcquireSceneBuild(
         cacheKey: acquisition.cache_key,
         startedAt: now,
         sceneId: normalizedSceneId,
-        owner: ownerAgentId,
+        owner: phaseOwner,
         agentKey,
         status: acquisition.cache_hit ? 'cache_hit' : 'planning',
+        objectiveId: options.objectiveId || null,
+        phaseIndex: Number.isInteger(options.phaseIndex) ? options.phaseIndex : null,
+        phaseOwner,
     };
     if (acquisition.cache_hit) sceneState.skipCounts.cache_hit += 1;
     return {
         ...acquisition,
         scene_id: normalizedSceneId,
-        active_build_owner: ownerAgentId,
+        active_build_owner: phaseOwner,
         active_build: publicActiveBuild(sceneState.activeBuild),
+        objective_id: options.objectiveId || null,
+        phase_index: Number.isInteger(options.phaseIndex) ? options.phaseIndex : null,
+        phase_owner: phaseOwner,
     };
 }
 

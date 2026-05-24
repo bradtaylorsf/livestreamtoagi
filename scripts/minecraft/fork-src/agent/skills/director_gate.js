@@ -104,7 +104,7 @@ function position(agent) {
 }
 
 function availableTools(agent) {
-    const planMode = process.env.MC_SIM_BUILD_MODE === 'plan';
+    const planMode = ['plan', 'settlement'].includes(process.env.MC_SIM_BUILD_MODE);
     const tools = new Set(planMode ? DEFAULT_TOOLS.filter((tool) => !STANDALONE_BUILD_TOOLS.has(tool)) : DEFAULT_TOOLS);
     if (planMode) {
         tools.add('!planAndBuild');
@@ -122,6 +122,21 @@ function availableTools(agent) {
         }
     }
     return [...tools].filter((tool) => !RISKY_PROMPT_TOOLS.has(tool)).sort();
+}
+
+function activeSettlementObjective(agent) {
+    const raw =
+        agent?.__ltagSettlementObjective ||
+        globalThis.__ltagSettlementObjective ||
+        process.env.MC_SIM_ACTIVE_OBJECTIVE_JSON;
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try {
+        const parsed = JSON.parse(String(raw));
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
 }
 
 function sceneHint({ source, message, batch }) {
@@ -277,6 +292,7 @@ async function askDirector(agent, turn, options, gateState) {
         position: position(agent),
         scene_hint: sceneHint(turn),
         available_tools: availableTools(agent),
+        active_objective: activeSettlementObjective(agent),
     };
     const deadlineMs = options.deadlineMs ?? intEnv('DIRECTOR_V2_GATE_DEADLINE_MS', DEFAULT_DEADLINE_MS);
 
