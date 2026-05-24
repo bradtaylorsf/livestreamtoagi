@@ -67,6 +67,9 @@
 #                               Default: system temp/livestreamtoagi-soak-worktrees/<run id>.
 #   SOAK_KEEP_WORKTREES         Keep temp Mindcraft clones after cleanup for
 #                               debugging. Default: 0.
+#   SOAK_AUTO_SETUP_MINDCRAFT   Run setup-mindcraft.sh during real runs when
+#                               the base clone is missing, unpinned, or lacks
+#                               node_modules. Default: 1.
 #   SOAK_LAUNCH_STAGGER_SECONDS Default: 3.
 #   SOAK_START_MINECRAFT_IF_DOWN Start supervise.sh when health is down.
 #                               Default: 1.
@@ -260,6 +263,7 @@ SOAK_MIN_SHARED_ARTIFACTS="${SOAK_MIN_SHARED_ARTIFACTS:-1}"
 SOAK_REQUIRE_BEHAVIOR_GATE="${SOAK_REQUIRE_BEHAVIOR_GATE:-1}"
 SOAK_LOG_ROOT="${SOAK_LOG_ROOT:-$REPO_ROOT/logs/soak}"
 SOAK_KEEP_WORKTREES="${SOAK_KEEP_WORKTREES:-0}"
+SOAK_AUTO_SETUP_MINDCRAFT="${SOAK_AUTO_SETUP_MINDCRAFT:-1}"
 SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
@@ -563,6 +567,59 @@ check_mindserver_ports_available() {
     fi
 }
 
+mindcraft_base_is_ready() {
+    local base="$1" head_sha
+    if [ -z "$base" ] || [ ! -d "$base/.git" ] || [ ! -d "$base/node_modules" ]; then
+        return 1
+    fi
+    head_sha="$(git -C "$base" rev-parse HEAD 2> /dev/null || true)"
+    [ "$head_sha" = "$MINDCRAFT_COMMIT" ]
+}
+
+resolve_mindcraft_base() {
+    if MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd)"; then
+        :
+    else
+        MINDCRAFT_BASE_ABS=""
+    fi
+}
+
+ensure_mindcraft_base() {
+    resolve_mindcraft_base
+    if mindcraft_base_is_ready "$MINDCRAFT_BASE_ABS"; then
+        return 0
+    fi
+
+    if [ "$SOAK_AUTO_SETUP_MINDCRAFT" != "1" ]; then
+        if [ -z "$MINDCRAFT_BASE_ABS" ] || [ ! -d "$MINDCRAFT_BASE_ABS/.git" ]; then
+            fail "No pinned Mindcraft clone at $MINDCRAFT_DIR. Run scripts/minecraft/setup-mindcraft.sh first."
+        else
+            local head_sha
+            head_sha="$(git -C "$MINDCRAFT_BASE_ABS" rev-parse HEAD 2> /dev/null || true)"
+            if [ "$head_sha" != "$MINDCRAFT_COMMIT" ]; then
+                fail "Mindcraft clone is not at pinned commit $MINDCRAFT_COMMIT"
+                info "  HEAD is ${head_sha:-<unknown>}"
+            else
+                fail "$MINDCRAFT_BASE_ABS/node_modules missing. Run scripts/minecraft/setup-mindcraft.sh first."
+            fi
+        fi
+        return 1
+    fi
+
+    info "Pinned Mindcraft clone missing or incomplete; running scripts/minecraft/setup-mindcraft.sh"
+    MINDCRAFT_DIR="$MINDCRAFT_DIR" \
+        MINDCRAFT_COMMIT="$MINDCRAFT_COMMIT" \
+        bash "$SCRIPT_DIR/setup-mindcraft.sh" || return 1
+
+    resolve_mindcraft_base
+    if mindcraft_base_is_ready "$MINDCRAFT_BASE_ABS"; then
+        return 0
+    fi
+
+    fail "setup-mindcraft.sh completed but $MINDCRAFT_DIR is still not ready."
+    return 1
+}
+
 duration_seconds() {
     awk -v hours="$SOAK_DURATION_HOURS" 'BEGIN {
         if (hours !~ /^[0-9]+([.][0-9]+)?$/ || hours <= 0) exit 1;
@@ -764,6 +821,7 @@ print_plan() {
     info "bots:           $SOAK_BOTS"
     info "cost agents:    $SOAK_COST_AGENTS"
     info "Mindcraft base: $MINDCRAFT_DIR"
+    info "Mindcraft setup: auto=${SOAK_AUTO_SETUP_MINDCRAFT}"
     info "isolation:      temp local clones with node_modules symlink"
 }
 
@@ -1291,26 +1349,7 @@ case "$SOAK_MINDSERVER_BASE_PORT" in
         ;;
 esac
 check_mindserver_ports_available || exit 1
-
-if MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd)"; then
-    :
-else
-    MINDCRAFT_BASE_ABS=""
-fi
-if [ -z "$MINDCRAFT_BASE_ABS" ] || [ ! -d "$MINDCRAFT_BASE_ABS/.git" ]; then
-    fail "No pinned Mindcraft clone at $MINDCRAFT_DIR. Run scripts/minecraft/setup-mindcraft.sh first."
-    exit 1
-fi
-HEAD_SHA="$(git -C "$MINDCRAFT_BASE_ABS" rev-parse HEAD 2> /dev/null || true)"
-if [ "$HEAD_SHA" != "$MINDCRAFT_COMMIT" ]; then
-    fail "Mindcraft clone is not at pinned commit $MINDCRAFT_COMMIT"
-    info "  HEAD is ${HEAD_SHA:-<unknown>}"
-    exit 1
-fi
-if [ ! -d "$MINDCRAFT_BASE_ABS/node_modules" ]; then
-    fail "$MINDCRAFT_BASE_ABS/node_modules missing. Run scripts/minecraft/setup-mindcraft.sh first."
-    exit 1
-fi
+ensure_mindcraft_base || exit 1
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
 mkdir -p "$SOAK_LOG_ROOT"

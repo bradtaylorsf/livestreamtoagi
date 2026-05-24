@@ -130,6 +130,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_HEARTBEAT_MAX_NO_COMMAND" in proc.stdout
     assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in proc.stdout
     assert "MC_SIM_MEMORY_RECALL_LIMIT" in proc.stdout
+    assert "SOAK_AUTO_SETUP_MINDCRAFT" in proc.stdout
     assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
@@ -162,6 +163,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_HEARTBEAT_MAX_NO_COMMAND" in wrapper.stdout
     assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in wrapper.stdout
     assert "MC_SIM_MEMORY_RECALL_LIMIT" in wrapper.stdout
+    assert "MC_SIM_AUTO_SETUP_MINDCRAFT" in wrapper.stdout
     assert "timeline.ndjson" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
@@ -678,6 +680,9 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     for bot in BOT_IDS:
         assert f"connect-{bot}-bot.sh" in text
+    assert "SOAK_AUTO_SETUP_MINDCRAFT" in text
+    assert "setup-mindcraft.sh" in text
+    assert "ensure_mindcraft_base" in text
     assert "git clone --shared" in text
     assert 'dest="$SOAK_WORK_ROOT/mindcraft-$bot"' in text
     assert 'printf \'%s\\n\' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"' in text

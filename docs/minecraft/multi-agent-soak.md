@@ -78,7 +78,7 @@ Required runtime state:
 | --- | --- |
 | Node | Node 20 LTS |
 | Java | Java 21 for Paper |
-| Mindcraft | `./mindcraft` at `35be480b4cc0bca990278e6103a1426392559d96` with `node_modules/` installed |
+| Mindcraft | `./mindcraft` at `35be480b4cc0bca990278e6103a1426392559d96` with `node_modules/` installed; real soak runs invoke `scripts/minecraft/setup-mindcraft.sh` by default when this is missing or stale. |
 | Paper | `scripts/minecraft/health.sh --json` returns `"up":true`; if down, `soak.sh` starts `scripts/minecraft/supervise.sh` by default. |
 | Backend | `core.main:app` reachable on `http://127.0.0.1:8010/api/health` |
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
@@ -115,6 +115,12 @@ The runner performs both `pnpm llm:local --list-only` and a real
 `pnpm llm:local` chat warm-up before launching bots. If LM Studio lists the
 model but later reports `Model unloaded` or `Operation canceled`, reload or pin
 the selected model in LM Studio and rerun the soak.
+
+Real soak runs also check the pinned base Mindcraft clone before launching
+isolated bot worktrees. If `./mindcraft` is missing, off the pinned commit, or
+lacks `node_modules/`, the runner invokes `scripts/minecraft/setup-mindcraft.sh`
+once and rechecks the clone. Set `SOAK_AUTO_SETUP_MINDCRAFT=0` when you want the
+older fail-fast behavior instead.
 
 If you want the soak to fail instead of auto-starting Paper:
 
@@ -228,6 +234,7 @@ Useful knobs:
 | `MINECRAFT_LLM_CONCURRENCY` | `1` | Active upstream LM Studio requests allowed by the proxy. |
 | `MINECRAFT_LLM_RETRY_ATTEMPTS` | `2` | Retries for transient LM Studio model-load 400s such as `Model unloaded` or `Operation canceled`. |
 | `LOCAL_LLM_UPSTREAM_URL` | `$LOCAL_LLM_BASE_URL` | Real LM Studio upstream when the proxy is enabled. |
+| `SOAK_AUTO_SETUP_MINDCRAFT` | `1` | Auto-run `setup-mindcraft.sh` in real runs when the base `MINDCRAFT_DIR` clone is missing, unpinned, or lacks `node_modules/`. |
 
 ## Builder-Plan Mode
 
