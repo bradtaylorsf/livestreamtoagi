@@ -67,10 +67,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.9 carries the additive
-// `shared_state.*` blackboard verbs. The server only gates on the major, so
+// contract.PROTOCOL_VERSION (ADR §3). 1.10 carries the additive
+// distress/rescue shared-state fields. The server only gates on the major, so
 // this stays wire-compatible with earlier 1.x peers.
-export const PROTOCOL_VERSION = '1.9';
+export const PROTOCOL_VERSION = '1.10';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';

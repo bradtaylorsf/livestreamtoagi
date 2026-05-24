@@ -96,6 +96,26 @@ share the active group goal, build site, resource reports, claims, danger/stuck
 reports, verified recent actions, and open next steps without turning the run
 into a fixed script.
 
+## Distress And Rescue
+
+Embodied runs write structured distress reports into the same run-scoped
+blackboard. Supported danger kinds are `stuck`, `drowning`, `trapped`,
+`low_health`, `death`, and `repeated_failure`. A report stays unresolved until a
+rescuer marks it `resolved`, `escaped`, or `teleported`; unresolved distress is
+included in acceptance reports and fails soak acceptance.
+
+`RESCUE_MODE` controls how aggressive the rescue fallback may be:
+
+| Mode | Use | Allowed rescue behavior |
+| --- | --- | --- |
+| `easy` | Local/easy server smoke runs. | Navigate to the target first, then allow operator `/tp` fallback through `!rescue` when normal recovery fails. |
+| `standard` | Default embodied diagnostics. | Navigate/guide and report failure; no operator teleport fallback. |
+| `production` | Public or persistent worlds. | Non-destructive assist only unless an operator explicitly intervenes outside the bot loop. |
+
+The local easy-spawn helper defaults to `RESCUE_MODE=easy`; production launch
+configs should set `RESCUE_MODE=production` and keep destructive clearing or
+teleport rescue as operator-only actions.
+
 ## Choose A Mode
 
 | Area | Persistent | Experimental |

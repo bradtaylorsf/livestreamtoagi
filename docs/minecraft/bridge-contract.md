@@ -46,11 +46,12 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.9"` (E4-7 added the optional `trace_id`, E5-1 added
+`PROTOCOL_VERSION = "1.10"` (E4-7 added the optional `trace_id`, E5-1 added
 optional core-memory fields, E6-5 added `code.execute`, E6-6 added typed
 perception snapshot definitions, E7-2 added `errand.poll`, and E7-3 added
 `errand.complete`, E8.5-4 added `director.gate`, and E11-5 added
-`kill.status`, and E12-12 added `shared_state.*`; all are additive minor bumps). Same-major versions are
+`kill.status`, E12-12 added `shared_state.*`, and E12-13 added structured
+distress/rescue fields; all are additive minor bumps). Same-major versions are
 wire-compatible in either direction (new fields/verbs are additive). An unknown
 *major* — or any
 unparseable version — is **not

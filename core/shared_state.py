@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,23 @@ _MAX_COMPLETED_TASKS = 10
 _MAX_RECENT_DANGERS = 25
 _MAX_RECENT_VERIFIED_ACTIONS = 25
 _MAX_NEXT_STEPS = 25
+
+DANGER_KINDS = frozenset(
+    {
+        "stuck",
+        "drowning",
+        "trapped",
+        "low_health",
+        "death",
+        "repeated_failure",
+    }
+)
+OPEN_DANGER_STATUSES = frozenset({"open", "rescue_dispatched", "unresolved"})
+RESOLVED_DANGER_STATUSES = frozenset({"resolved", "escaped", "teleported", "failed"})
+
+
+def _danger_id() -> str:
+    return f"danger-{uuid.uuid4().hex[:12]}"
 
 
 def _loads(raw: str | bytes) -> dict:
@@ -82,6 +100,11 @@ class DangerReport:
     severity: int
     reported_by: str | None = None
     reported_at: float = field(default_factory=time.time)
+    danger_id: str = field(default_factory=_danger_id)
+    resolved_at: float | None = None
+    rescuer_id: str | None = None
+    recovery_status: str = "open"
+    details: str | None = None
 
 
 @dataclass
@@ -228,12 +251,112 @@ class SharedWorkingState:
         return sorted(claims, key=lambda c: c.agent_id)
 
     async def report_danger(self, report: DangerReport) -> None:
+        report.kind = _normalize_danger_kind(report.kind)
+        report.severity = max(1, min(5, int(report.severity)))
+        if not report.recovery_status:
+            report.recovery_status = "open"
         await self._redis.rpush(DANGERS_KEY, json.dumps(asdict(report)))
         await self._redis.ltrim(DANGERS_KEY, -_MAX_RECENT_DANGERS, -1)
 
     async def get_danger_reports(self, count: int = _MAX_RECENT_DANGERS) -> list[DangerReport]:
         raw = await self._redis.lrange(DANGERS_KEY, -count, -1)
         return [DangerReport(**_loads(r)) for r in raw]
+
+    async def get_unresolved_dangers(
+        self,
+        count: int = _MAX_RECENT_DANGERS,
+    ) -> list[DangerReport]:
+        dangers = await self.get_danger_reports(count)
+        return [danger for danger in dangers if _is_unresolved_danger(danger)]
+
+    async def dispatch_rescue_task(
+        self,
+        danger_id: str,
+        *,
+        rescuer_id: str,
+        strategy: str = "navigate",
+        mode: str = "standard",
+    ) -> SharedTask | None:
+        """Create a structured rescue task for an unresolved danger report."""
+
+        updated = await self._update_danger(
+            danger_id=danger_id,
+            rescuer_id=rescuer_id,
+            recovery_status="rescue_dispatched",
+        )
+        if updated is None:
+            return None
+        task = SharedTask(
+            id=f"rescue-{updated.danger_id}",
+            title=(
+                f"Rescue {updated.agent_id}: {updated.kind} severity {updated.severity} "
+                f"at {updated.location}; strategy={strategy}; mode={mode}"
+            ),
+            owner=rescuer_id,
+            status="pending",
+        )
+        await self.add_task(task)
+        return task
+
+    async def mark_danger_resolved(
+        self,
+        *,
+        danger_id: str | None = None,
+        agent_id: str | None = None,
+        rescuer_id: str | None = None,
+        recovery_status: str = "resolved",
+    ) -> DangerReport | None:
+        """Mark one danger recovered by id, or latest unresolved danger for an agent."""
+
+        return await self._update_danger(
+            danger_id=danger_id,
+            agent_id=agent_id,
+            rescuer_id=rescuer_id,
+            resolved_at=time.time(),
+            recovery_status=recovery_status,
+        )
+
+    async def _update_danger(
+        self,
+        *,
+        danger_id: str | None = None,
+        agent_id: str | None = None,
+        rescuer_id: str | None = None,
+        resolved_at: float | None = None,
+        recovery_status: str | None = None,
+    ) -> DangerReport | None:
+        raw = await self._redis.lrange(DANGERS_KEY, 0, -1)
+        dangers = [DangerReport(**_loads(r)) for r in raw]
+        matched_index: int | None = None
+        for index in range(len(dangers) - 1, -1, -1):
+            danger = dangers[index]
+            if danger_id and danger.danger_id != danger_id:
+                continue
+            if not danger_id and agent_id and danger.agent_id != agent_id:
+                continue
+            if not danger_id and agent_id and not _is_unresolved_danger(danger):
+                continue
+            matched_index = index
+            break
+        if matched_index is None:
+            return None
+
+        danger = dangers[matched_index]
+        if rescuer_id:
+            danger.rescuer_id = rescuer_id
+        if resolved_at is not None:
+            danger.resolved_at = resolved_at
+        if recovery_status:
+            danger.recovery_status = recovery_status
+        dangers[matched_index] = danger
+
+        await self._redis.delete(DANGERS_KEY)
+        if dangers:
+            await self._redis.rpush(
+                DANGERS_KEY,
+                *(json.dumps(asdict(item)) for item in dangers[-_MAX_RECENT_DANGERS:]),
+            )
+        return danger
 
     async def record_verified_action(self, action: VerifiedAction) -> None:
         await self._redis.rpush(VERIFIED_ACTIONS_KEY, json.dumps(asdict(action)))
@@ -351,10 +474,21 @@ class SharedWorkingState:
         if dangers:
             lines.append("**Danger/stuck reports:**")
             for danger in dangers[-5:]:
+                status = danger.recovery_status or "open"
                 lines.append(
                     f"  - {danger.agent_id}: {danger.kind} severity {danger.severity} "
-                    f"at {danger.location}"
+                    f"at {danger.location}; status: {status}"
+                    + (f"; rescuer: {danger.rescuer_id}" if danger.rescuer_id else "")
                     + (f" (reported by {danger.reported_by})" if danger.reported_by else "")
+                )
+
+        unresolved = await self.get_unresolved_dangers(5)
+        if unresolved:
+            lines.append("**Unresolved distress:**")
+            for danger in unresolved[-5:]:
+                lines.append(
+                    f"  - {danger.agent_id} needs rescue for {danger.kind} "
+                    f"(danger_id: {danger.danger_id}, severity: {danger.severity})"
                 )
 
         next_steps = await self.get_next_steps(8)
@@ -405,3 +539,17 @@ class SharedWorkingState:
                 lines.append(f"  - {d.summary} (by {', '.join(d.made_by)})")
 
         return "\n".join(lines) if lines else ""
+
+
+def _normalize_danger_kind(kind: str) -> str:
+    text = str(kind or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return text if text in DANGER_KINDS else "trapped"
+
+
+def _is_unresolved_danger(danger: DangerReport) -> bool:
+    if danger.resolved_at is not None:
+        return False
+    status = (danger.recovery_status or "open").strip().lower()
+    if status in RESOLVED_DANGER_STATUSES:
+        return False
+    return status in OPEN_DANGER_STATUSES or not status

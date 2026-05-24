@@ -31,8 +31,10 @@ What is covered:
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -44,10 +46,53 @@ from core.bridge import inbound
 from core.bridge.server import BRIDGE_TOKEN_ENV, BRIDGE_WS_PATH
 from core.event_bus import EventType, event_bus
 from core.main import app
+from core.redis_keys import ScopedRedis
+from core.shared_state import SharedWorkingState
 
 TOKEN = "test-bridge-secret"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "backend" / "fixtures" / "bridge"
+
+
+class _MemoryRedis:
+    def __init__(self) -> None:
+        self.hashes: dict[str, dict[str, str]] = {}
+        self.lists: dict[str, list[str]] = {}
+
+    async def hset(self, key: str, field: str, value: str) -> int:
+        self.hashes.setdefault(key, {})[field] = value
+        return 1
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return dict(self.hashes.get(key, {}))
+
+    async def rpush(self, key: str, *values: str) -> int:
+        self.lists.setdefault(key, []).extend(values)
+        return len(self.lists[key])
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        data = self.lists.get(key, [])
+        if start < 0:
+            start = max(len(data) + start, 0)
+        if stop < 0:
+            stop = len(data) + stop
+        return data[start : stop + 1]
+
+    async def ltrim(self, key: str, start: int, stop: int) -> bool:
+        data = self.lists.get(key, [])
+        if start < 0:
+            start = max(len(data) + start, 0)
+        if stop < 0:
+            stop = len(data) + stop
+        self.lists[key] = data[start : stop + 1]
+        return True
+
+    async def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            removed += int(self.hashes.pop(key, None) is not None)
+            removed += int(self.lists.pop(key, None) is not None)
+        return removed
 
 
 def _fixture(verb: str, name: str) -> dict[str, Any]:
@@ -249,6 +294,47 @@ async def test_handle_action_result_emits_validated_event(
     assert ack == {"accepted": True}
     assert len(captured["action"]) == 1
     assert captured["action"][0]["status"] == env.payload["status"]
+
+
+async def test_repeated_blocked_action_results_emit_distress_to_shared_state(
+    captured: dict[str, list[dict[str, Any]]],
+) -> None:
+    sim_id = uuid.uuid4()
+    redis = _MemoryRedis()
+    services = SimpleNamespace(redis=redis)
+    distress: list[dict[str, Any]] = []
+
+    async def on_distress(event: dict[str, Any]) -> None:
+        distress.append(event["data"])
+
+    event_bus.on(EventType.DISTRESS_REPORTED, on_distress)
+    try:
+        for idx in range(inbound.REPEATED_FAILURE_THRESHOLD):
+            env = _envelope("action.result")
+            env.simulation_id = str(sim_id)
+            env.agent_id = "Pixel"
+            env.request_id = f"req-action-blocked-{idx}"
+            env.payload = {
+                "action_id": f"path-{idx}",
+                "status": "failure",
+                "outcome_class": "blocked",
+                "detail": "path blocked by terrain",
+            }
+            assert await inbound.handle_action_result(env, services=services) == {
+                "accepted": True
+            }
+    finally:
+        event_bus.off(EventType.DISTRESS_REPORTED, on_distress)
+
+    assert len(captured["action"]) == inbound.REPEATED_FAILURE_THRESHOLD
+    assert distress
+    assert distress[0]["danger"]["kind"] == "repeated_failure"
+    state = SharedWorkingState(ScopedRedis(redis, sim_id))
+    dangers = await state.get_unresolved_dangers()
+    tasks = await state.get_tasks()
+    assert dangers[0].agent_id == "pixel"
+    assert dangers[0].recovery_status == "rescue_dispatched"
+    assert tasks[0].id == f"rescue-{dangers[0].danger_id}"
 
 
 async def test_dispatch_inbound_routes_by_verb(

@@ -944,8 +944,32 @@
           "title": "Agent Id",
           "type": "string"
         },
+        "danger_id": {
+          "title": "Danger Id",
+          "type": "string"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Details"
+        },
         "kind": {
-          "minLength": 1,
+          "default": "trapped",
+          "enum": [
+            "stuck",
+            "drowning",
+            "trapped",
+            "low_health",
+            "death",
+            "repeated_failure"
+          ],
           "title": "Kind",
           "type": "string"
         },
@@ -965,6 +989,20 @@
           "default": null,
           "title": "Location"
         },
+        "recovery_status": {
+          "default": "open",
+          "enum": [
+            "open",
+            "rescue_dispatched",
+            "resolved",
+            "escaped",
+            "teleported",
+            "failed",
+            "unresolved"
+          ],
+          "title": "Recovery Status",
+          "type": "string"
+        },
         "reported_at": {
           "title": "Reported At",
           "type": "number"
@@ -981,6 +1019,30 @@
           "default": null,
           "title": "Reported By"
         },
+        "rescuer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rescuer Id"
+        },
+        "resolved_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved At"
+        },
         "severity": {
           "maximum": 5,
           "minimum": 1,
@@ -990,10 +1052,69 @@
       },
       "required": [
         "agent_id",
-        "kind",
         "severity"
       ],
       "title": "EmbodiedDangerReport",
+      "type": "object"
+    },
+    "EmbodiedDangerResolution": {
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "danger_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Danger Id"
+        },
+        "recovery_status": {
+          "default": "resolved",
+          "enum": [
+            "resolved",
+            "escaped",
+            "teleported",
+            "failed"
+          ],
+          "title": "Recovery Status",
+          "type": "string"
+        },
+        "rescuer_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rescuer Id"
+        },
+        "resolved_at": {
+          "title": "Resolved At",
+          "type": "number"
+        }
+      },
+      "title": "EmbodiedDangerResolution",
       "type": "object"
     },
     "EmbodiedGroupGoal": {
@@ -1903,6 +2024,123 @@
       "title": "PoseObservation",
       "type": "object"
     },
+    "RescueTaskRequest": {
+      "additionalProperties": false,
+      "description": "Structured rescue request carried in shared-state tasks and bot commands.",
+      "properties": {
+        "danger_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Danger Id"
+        },
+        "mode": {
+          "default": "standard",
+          "enum": [
+            "easy",
+            "standard",
+            "production"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "rescue_id": {
+          "minLength": 1,
+          "title": "Rescue Id",
+          "type": "string"
+        },
+        "rescuer_agent_id": {
+          "minLength": 1,
+          "title": "Rescuer Agent Id",
+          "type": "string"
+        },
+        "strategy": {
+          "enum": [
+            "navigate",
+            "clear_block",
+            "place_safe_block",
+            "escort",
+            "teleport_op"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "target_agent_id": {
+          "minLength": 1,
+          "title": "Target Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rescue_id",
+        "target_agent_id",
+        "rescuer_agent_id",
+        "strategy"
+      ],
+      "title": "RescueTaskRequest",
+      "type": "object"
+    },
+    "RescueTaskResponse": {
+      "additionalProperties": false,
+      "description": "Bridge-friendly rescue outcome shape used by action.result details.",
+      "properties": {
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "recovery_status": {
+          "enum": [
+            "resolved",
+            "escaped",
+            "teleported",
+            "failed"
+          ],
+          "title": "Recovery Status",
+          "type": "string"
+        },
+        "rescue_id": {
+          "minLength": 1,
+          "title": "Rescue Id",
+          "type": "string"
+        },
+        "rescuer_agent_id": {
+          "minLength": 1,
+          "title": "Rescuer Agent Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_agent_id": {
+          "minLength": 1,
+          "title": "Target Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rescue_id",
+        "target_agent_id",
+        "rescuer_agent_id",
+        "status",
+        "recovery_status"
+      ],
+      "title": "RescueTaskResponse",
+      "type": "object"
+    },
     "SharedStateReadRequest": {
       "additionalProperties": false,
       "description": "``shared_state.read`` \u2014 read the embodied collaboration blackboard.",
@@ -1974,6 +2212,13 @@
           },
           "title": "Resources",
           "type": "array"
+        },
+        "unresolved_dangers": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedDangerReport"
+          },
+          "title": "Unresolved Dangers",
+          "type": "array"
         }
       },
       "required": [
@@ -2019,6 +2264,17 @@
           ],
           "default": null
         },
+        "danger_resolution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedDangerResolution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "goal": {
           "anyOf": [
             {
@@ -2047,6 +2303,7 @@
             "resource_upsert",
             "claim_set",
             "danger_report",
+            "danger_resolve",
             "verified_action_record",
             "build_site_set",
             "next_step_add"
@@ -2140,7 +2397,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.9",
+  "protocolVersion": "1.10",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",

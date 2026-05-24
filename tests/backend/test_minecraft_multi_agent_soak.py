@@ -958,10 +958,10 @@ def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
     assert (
         "agent\tspawn_safe\tmovement\tpublic_chat\tinter_agent_chat\tgather\tbuild\tdeaths\t"
-        "drownings\tstuck\tdig_holes\trestart_count\tbehavior_status"
+        "drownings\tstuck\tdig_holes\tunresolved_distress\trestart_count\tbehavior_status"
     ) in behavior_tsv
-    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\t0\tfail" in behavior_tsv
-    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\t0\t0\tfail" in behavior_tsv
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
     summary = (run_dir / "summary.txt").read_text(encoding="utf-8")
     assert "Behavioral acceptance" in summary
@@ -1007,7 +1007,7 @@ def test_behavior_gate_does_not_count_embodied_text_as_death(tmp_path) -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
-    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
 
 def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(tmp_path) -> None:
@@ -1059,7 +1059,7 @@ def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(t
 
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
     assert "restart_count" in behavior_tsv
-    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t2\tfail" in behavior_tsv
+    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t0\t2\tfail" in behavior_tsv
 
     totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
     assert "total_restarts=2" in totals
@@ -1113,10 +1113,56 @@ def test_behavior_gate_counts_heartbeat_halts_as_restart_failures(tmp_path) -> N
     assert "agent alpha restarts expected <= 0 got 1" in proc.stderr
 
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
-    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t1\tfail" in behavior_tsv
+    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t0\t1\tfail" in behavior_tsv
 
     totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
     assert "total_restarts=1" in totals
+
+
+def test_behavior_gate_fails_unresolved_structured_distress(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+            "!move north 0",
+            "!move north 1",
+            "!move north 2",
+            "!move north 3",
+            "!move north 4",
+        ]
+        if agent_id in {"vera", "rex"}:
+            lines.append('!place("stone", {"x": 1, "y": 64, "z": 1}, "up")')
+        if agent_id == "pixel":
+            lines.append('bridge shared_state.write {"operation":"danger_report"}')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 1
+    assert "agent pixel unresolved distress expected 0 got 1" in proc.stderr
+    totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
+    assert "total_unresolved_distress=1" in totals
 
 
 def test_package_json_exposes_soak_commands() -> None:

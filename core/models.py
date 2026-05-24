@@ -948,11 +948,39 @@ class EmbodiedAgentClaim(BaseModel):
 
 class EmbodiedDangerReport(BaseModel):
     agent_id: str = Field(min_length=1)
-    kind: str = Field(min_length=1)
+    kind: Literal[
+        "stuck",
+        "drowning",
+        "trapped",
+        "low_health",
+        "death",
+        "repeated_failure",
+    ] = "trapped"
     location: dict[str, Any] | str | None = None
     severity: int = Field(ge=1, le=5)
     reported_by: str | None = None
     reported_at: float = Field(default_factory=time.time)
+    danger_id: str = Field(default_factory=lambda: f"danger-{uuid.uuid4().hex[:12]}")
+    resolved_at: float | None = None
+    rescuer_id: str | None = None
+    recovery_status: Literal[
+        "open",
+        "rescue_dispatched",
+        "resolved",
+        "escaped",
+        "teleported",
+        "failed",
+        "unresolved",
+    ] = "open"
+    details: str | None = None
+
+
+class EmbodiedDangerResolution(BaseModel):
+    danger_id: str | None = Field(default=None, min_length=1)
+    agent_id: str | None = Field(default=None, min_length=1)
+    rescuer_id: str | None = Field(default=None, min_length=1)
+    recovery_status: Literal["resolved", "escaped", "teleported", "failed"] = "resolved"
+    resolved_at: float = Field(default_factory=time.time)
 
 
 class EmbodiedVerifiedAction(BaseModel):

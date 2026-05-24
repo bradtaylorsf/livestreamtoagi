@@ -17,6 +17,7 @@ const DEFAULT_TOOLS = Object.freeze([
     '!nearbyBlocks',
     '!inventory',
     '!searchForBlock',
+    '!rescue',
 ]);
 const LOCAL_SAFE_TOOLS = new Set([
     '!move',
@@ -26,6 +27,7 @@ const LOCAL_SAFE_TOOLS = new Set([
     '!searchForBlock',
     '!craftable',
     '!getCraftingPlan',
+    '!rescue',
 ]);
 const STANDALONE_BUILD_TOOLS = new Set(['!placeHere', '!place', '!break', '!buildFromPlan']);
 const RISKY_PROMPT_TOOLS = new Set([
@@ -207,6 +209,9 @@ function commandPolicy(verdict) {
             return 'Command policy: Only the build owner should place blocks through !planAndBuild. Use exactly one concise !planAndBuild request for the shared structure, then let buildFromPlan finish. Do not use standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
         }
         return 'Command policy: Support role only. Use ordinary chat, !inventory, !nearbyBlocks, or !searchForBlock when useful. Do not use plan/build commands, standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
+    }
+    if (String(verdict.scene_digest || '').toLowerCase().includes('distress')) {
+        return 'Command policy: Distress response. If !rescue is available and another agent is endangered, use one concise !rescue request. Otherwise use ordinary chat, !inventory, or !nearbyBlocks.';
     }
     return 'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
 }

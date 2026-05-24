@@ -63,6 +63,7 @@ ACTIONS_PLACE_PATCH_MARKER="LTAG E6-3 place action"
 ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
 ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="LTAG E9-1 plan-and-build action"
+ACTIONS_RESCUE_PATCH_MARKER="LTAG E12-13 rescue action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
@@ -73,6 +74,7 @@ AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
 AGENT_INBOX_PATCH_MARKER="LTAG E9-1 inbox queue"
 AGENT_DIRECTOR_GATE_PATCH_MARKER="LTAG E8.5-4 director gate"
 AGENT_ACTION_QUEUE_PATCH_MARKER="LTAG E9-1 action queue"
+AGENT_DISTRESS_MONITOR_PATCH_MARKER="LTAG E12-13 distress monitor"
 MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
 ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
 
@@ -89,6 +91,7 @@ PLACE_ACTION_REL="src/agent/commands/place_action.js"
 BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
 PLAN_AND_BUILD_ACTION_REL="src/agent/commands/plan_and_build_action.js"
+RESCUE_ACTION_REL="src/agent/commands/rescue_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
 PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
@@ -99,6 +102,7 @@ BUILDER_PROVIDER_SKILL_REL="src/agent/skills/builder_provider.js"
 BUILD_PLAN_GOVERNOR_SKILL_REL="src/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
+DISTRESS_MONITOR_SKILL_REL="src/agent/skills/distress_monitor.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
@@ -132,6 +136,7 @@ PLACE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/place_action.js"
 BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
 PLAN_AND_BUILD_ACTION_SRC="$FORK_SRC_DIR/agent/commands/plan_and_build_action.js"
+RESCUE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/rescue_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
 PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
@@ -142,6 +147,7 @@ BUILDER_PROVIDER_SKILL_SRC="$FORK_SRC_DIR/agent/skills/builder_provider.js"
 BUILD_PLAN_GOVERNOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
+DISTRESS_MONITOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/distress_monitor.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
@@ -483,6 +489,7 @@ stage_file "$PLACE_ACTION_SRC" "$PLACE_ACTION_REL"
 stage_file "$BREAK_ACTION_SRC" "$BREAK_ACTION_REL"
 stage_file "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_REL"
 stage_file "$PLAN_AND_BUILD_ACTION_SRC" "$PLAN_AND_BUILD_ACTION_REL"
+stage_file "$RESCUE_ACTION_SRC" "$RESCUE_ACTION_REL"
 stage_file "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_REL"
 stage_file "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_REL"
 stage_file "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_REL"
@@ -493,6 +500,7 @@ stage_file "$BUILDER_PROVIDER_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_REL"
 stage_file "$BUILD_PLAN_GOVERNOR_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_REL"
 stage_file "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_REL"
 stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
+stage_file "$DISTRESS_MONITOR_SKILL_SRC" "$DISTRESS_MONITOR_SKILL_REL"
 stage_file "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_REL"
 stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
 stage_file "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_REL"
@@ -512,7 +520,8 @@ if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_INBOX_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_DIRECTOR_GATE_PATCH_MARKER" "$AGENT_PATH" || \
-   grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH"; then
+   grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_DISTRESS_MONITOR_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
         fail "Could not restore pinned $AGENT_REL before patching."
@@ -528,6 +537,7 @@ if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_INBOX_PATCH_MARKER="$AGENT_INBOX_PATCH_MARKER" \
     AGENT_DIRECTOR_GATE_PATCH_MARKER="$AGENT_DIRECTOR_GATE_PATCH_MARKER" \
     AGENT_ACTION_QUEUE_PATCH_MARKER="$AGENT_ACTION_QUEUE_PATCH_MARKER" \
+    AGENT_DISTRESS_MONITOR_PATCH_MARKER="$AGENT_DISTRESS_MONITOR_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -538,6 +548,7 @@ const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
 const inboxMarker = process.env.AGENT_INBOX_PATCH_MARKER;
 const directorGateMarker = process.env.AGENT_DIRECTOR_GATE_PATCH_MARKER;
 const actionQueueMarker = process.env.AGENT_ACTION_QUEUE_PATCH_MARKER;
+const distressMonitorMarker = process.env.AGENT_DISTRESS_MONITOR_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 const importAnchor = "import { speak } from './speak.js';\n";
@@ -546,6 +557,7 @@ const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbea
 const inboxImportLine = `import { installInboxQueue } from './skills/inbox_queue.js'; // ${inboxMarker}\n`;
 const directorGateImportLine = `import { installDirectorGate } from './skills/director_gate.js'; // ${directorGateMarker}\n`;
 const actionQueueImportLine = `import { installActionQueue } from './skills/action_queue.js'; // ${actionQueueMarker}\n`;
+const distressMonitorImportLine = `import { installDistressMonitor } from './skills/distress_monitor.js'; // ${distressMonitorMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
         throw new Error('speak import anchor not found while applying Management chat gate');
@@ -562,6 +574,7 @@ for (const [line, label] of [
     [inboxImportLine, 'inbox queue'],
     [directorGateImportLine, 'director gate'],
     [actionQueueImportLine, 'action queue'],
+    [distressMonitorImportLine, 'distress monitor'],
 ]) {
     if (!source.includes(line)) {
         if (!source.includes(importAnchor)) {
@@ -652,6 +665,7 @@ if (source.includes(cleanExitTernaryNeedle)) {
 }
 
 const heartbeatCallNeedle = `installHeartbeat(this); // ${heartbeatMarker}`;
+const distressMonitorCallNeedle = `installDistressMonitor(this); // ${distressMonitorMarker}`;
 if (!source.includes(heartbeatCallNeedle)) {
     let startEventsNeedle = '    startEvents() {\n';
     let heartbeatCall = `        ${heartbeatCallNeedle}\n`;
@@ -663,6 +677,18 @@ if (!source.includes(heartbeatCallNeedle)) {
         throw new Error('startEvents method shape changed while applying autonomous heartbeat');
     }
     source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
+}
+if (!source.includes(distressMonitorCallNeedle)) {
+    let startEventsNeedle = '    startEvents() {\n';
+    let distressCall = `        ${distressMonitorCallNeedle}\n`;
+    if (!source.includes(startEventsNeedle)) {
+        startEventsNeedle = '        startEvents() {\n';
+        distressCall = `            ${distressMonitorCallNeedle}\n`;
+    }
+    if (!source.includes(startEventsNeedle)) {
+        throw new Error('startEvents method shape changed while applying distress monitor');
+    }
+    source = source.replace(startEventsNeedle, startEventsNeedle + distressCall);
 }
 const inboxCallNeedle = `installInboxQueue(this); // ${inboxMarker}`;
 const directorGateCallNeedle = `installDirectorGate(this); // ${directorGateMarker}`;
@@ -816,6 +842,7 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_RESCUE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH" || \
@@ -836,6 +863,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_BREAK_PATCH_MARKER="$ACTIONS_BREAK_PATCH_MARKER" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
     ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" \
+    ACTIONS_RESCUE_PATCH_MARKER="$ACTIONS_RESCUE_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
     ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
@@ -885,6 +913,7 @@ const actions = [
     ['breakAction', './break_action.js', process.env.ACTIONS_BREAK_PATCH_MARKER],
     ['buildFromPlanAction', './build_from_plan_action.js', process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER],
     ['planAndBuildAction', './plan_and_build_action.js', process.env.ACTIONS_PLAN_AND_BUILD_PATCH_MARKER],
+    ['rescueAction', './rescue_action.js', process.env.ACTIONS_RESCUE_PATCH_MARKER],
     ['executeCodeAction', './execute_code_action.js', process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER],
     ['observeAction', './observe_action.js', process.env.ACTIONS_OBSERVE_PATCH_MARKER],
 ];

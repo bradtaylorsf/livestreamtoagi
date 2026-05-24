@@ -406,6 +406,12 @@ signatures for the same agent within 300 seconds always fail the gate, even if
 as `total_restarts` and `total_restart_recurrences` in
 `behavior-totals.env` and the summary.
 
+`behavior.tsv` also includes `unresolved_distress` per agent. Structured
+distress comes from bridge shared-state `danger_report` writes and Mindcraft
+`distress.reported` telemetry. A matching `danger_resolve` write or resolved
+recovery status clears the count; otherwise `total_unresolved_distress > 0`
+fails the behavior gate.
+
 ## Structured Timeline
 
 Every embodied soak exports a canonical timeline after the reliability and
@@ -542,7 +548,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `action-reliability.json` | Per-agent generated/discarded/accepted command, execution, verification, and threshold metrics. |
 | `action-reliability.md` | Human-readable reliability report with discarded-command counters, execution failure classes, and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
-| `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, and `behavior_gate_status`. |
+| `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, `total_unresolved_distress`, and `behavior_gate_status`. |
 | `heartbeat-halts.tsv` | Bots whose autonomous heartbeat halted after repeated blank/no-command outcomes. |
 | `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, accepted action, bridge telemetry, behavior/status, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
@@ -579,6 +585,7 @@ Additional stability counters:
 | Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 | Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
 | Heartbeat halts / idle recovery | `heartbeat.fired` / `heartbeat.outcome` / `heartbeat.halted` timeline events and `heartbeat-halts.tsv`. |
+| Unresolved distress | Structured `danger_report` / `distress.reported` lines minus matching `danger_resolve` / resolved recovery statuses; nonzero counts fail the gate. |
 | Queue health | `inbox.*`, `llm.queue.*`, and action queue timeline events in `monitor.html`. |
 | Build-plan progress | `build_plan.generation.*` / `build_plan.execution.*` timeline events and the logged plan JSON. |
 

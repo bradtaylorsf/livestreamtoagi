@@ -72,6 +72,7 @@
 #   MC_SIM_MEMORY_RECALL_MAX_CHARS=1200
 #   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS=management,alpha
 #   MC_SIM_SHARED_STATE_ENABLED=1
+#   RESCUE_MODE=easy                  # easy, standard, production
 #   MC_SIM_EASY_MODE=1
 #   MC_SIM_MC_PORT=25566
 #   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
@@ -389,6 +390,13 @@ fi
 
 MC_SIM_EASY_MODE="${MC_SIM_EASY_MODE:-1}"
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
+    RESCUE_MODE="${RESCUE_MODE:-${MINECRAFT_RESCUE_MODE:-easy}}"
+else
+    RESCUE_MODE="${RESCUE_MODE:-${MINECRAFT_RESCUE_MODE:-standard}}"
+fi
+MINECRAFT_RESCUE_MODE="$RESCUE_MODE"
+export RESCUE_MODE MINECRAFT_RESCUE_MODE
+if [ "$MC_SIM_EASY_MODE" = "1" ]; then
     SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/minecraft-server-easy}"
     WORLD_CONFIG="${WORLD_CONFIG:-$SCRIPT_DIR/world-easy.config}"
     MC_HOST="${MC_HOST:-127.0.0.1}"
@@ -533,6 +541,7 @@ info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
 info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
 info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
 info "shared state: enabled=${MC_SIM_SHARED_STATE_ENABLED}"
+info "rescue mode: ${RESCUE_MODE}"
 info "easy mode: ${MC_SIM_EASY_MODE}"
 info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"

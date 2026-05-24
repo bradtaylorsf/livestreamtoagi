@@ -25,6 +25,13 @@ DIRECTOR_DECISION_EVENTS = {
 }
 MEMORY_EVENTS = {"director.scene.digest", "director.memory.compaction"}
 MACRO_EVENT_PREFIXES = ("build_plan.",)
+DISTRESS_EVENTS = {
+    "distress_reported",
+    "distress.reported",
+    "distress.resolved",
+    "rescue.action.started",
+    "rescue.action.completed",
+}
 MACRO_ACTION_HINTS = (
     "build",
     "buildfromplan",
@@ -412,6 +419,36 @@ def normalize_memory_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def normalize_distress_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        data = payload(event)
+        if event_type not in DISTRESS_EVENTS and not event_type.startswith("distress."):
+            continue
+        danger = data.get("danger") if isinstance(data.get("danger"), dict) else {}
+        rescue_task = data.get("rescue_task") if isinstance(data.get("rescue_task"), dict) else {}
+        rows.append(
+            {
+                "ts": event.get("ts"),
+                "event_type": event_type,
+                "agent": event_agent(event) or danger.get("agent_id") or data.get("target_agent_id"),
+                "danger_id": data.get("danger_id") or danger.get("danger_id"),
+                "kind": data.get("kind") or danger.get("kind"),
+                "severity": coerce_int(data.get("severity") or danger.get("severity")),
+                "rescuer_id": data.get("rescuer_id")
+                or danger.get("rescuer_id")
+                or rescue_task.get("owner"),
+                "recovery_status": data.get("recovery_status")
+                or danger.get("recovery_status")
+                or data.get("status"),
+                "rescue_task_id": rescue_task.get("id") or data.get("rescue_task_id"),
+                "detail": data.get("detail") or danger.get("details"),
+            }
+        )
+    return rows
+
+
 def queue_depth_after_warmup(
     events: list[dict[str, Any]], start: datetime, warmup_seconds: int
 ) -> tuple[int | None, int, int]:
@@ -512,6 +549,8 @@ def report_markdown(report: dict[str, Any]) -> str:
             f"- Early bot exits: `{report['metrics']['early_bot_exits']}`",
             f"- Heartbeat halts: `{report['metrics']['heartbeat_halts']}`",
             f"- Restart recurrences: `{report['metrics']['restart_recurrences']}`",
+            f"- Unresolved distress: `{report['metrics']['unresolved_distress']}`",
+            f"- Distress events: `{report['metrics']['distress_event_count']}`",
             "",
             "## Evidence Files",
             "",
@@ -551,17 +590,20 @@ def build_report(
     tool_rows = normalize_tool_rows(timeline)
     macro_rows = normalize_macro_rows(timeline)
     memory_rows = normalize_memory_rows(timeline)
+    distress_rows = normalize_distress_rows(timeline)
 
     evidence_paths = {
         "director_decisions": run_dir / "director-decisions.ndjson",
         "tool_parity": run_dir / "tool-parity.ndjson",
         "macro_evidence": run_dir / "macro-evidence.ndjson",
         "memory_digest": run_dir / "memory-digest.ndjson",
+        "distress_evidence": run_dir / "distress-evidence.ndjson",
     }
     write_ndjson(evidence_paths["director_decisions"], director_rows)
     write_ndjson(evidence_paths["tool_parity"], tool_rows)
     write_ndjson(evidence_paths["macro_evidence"], macro_rows)
     write_ndjson(evidence_paths["memory_digest"], memory_rows)
+    write_ndjson(evidence_paths["distress_evidence"], distress_rows)
 
     queue_max, queue_events_after_warmup, queue_events_total = queue_depth_after_warmup(
         timeline, start, warmup_seconds
@@ -575,6 +617,7 @@ def build_report(
     no_tool_decision_count = sum(1 for row in tool_rows if row.get("kind") == "no_tool_decision")
     structured_macro_result_count = sum(1 for row in macro_rows if row.get("structured_result"))
     restart_recurrences = coerce_int(behavior_totals.get("total_restart_recurrences"))
+    unresolved_distress = coerce_int(behavior_totals.get("total_unresolved_distress"))
     early_exits = line_count(run_dir / "early-exits.tsv")
     heartbeat_halts = line_count(run_dir / "heartbeat-halts.tsv")
 
@@ -667,6 +710,17 @@ def build_report(
             else "One or more restart-loop indicators remain; downstream epics stay blocked until the run recovers cleanly.",
         )
     )
+    criteria.append(
+        Criterion(
+            "no_unresolved_distress",
+            "pass" if unresolved_distress == 0 else "fail",
+            f"unresolved_distress={unresolved_distress}; distress_events={len(distress_rows)}",
+            ["distress-evidence.ndjson", "behavior-totals.env"],
+            None
+            if unresolved_distress == 0
+            else "At least one structured distress report remained unresolved; soak acceptance must not silently pass endangered agents.",
+        )
+    )
 
     residual_gaps = [criterion.residual_gap for criterion in criteria if criterion.residual_gap]
     if not residual_gaps:
@@ -704,6 +758,8 @@ def build_report(
             "early_bot_exits": early_exits,
             "heartbeat_halts": heartbeat_halts,
             "restart_recurrences": restart_recurrences,
+            "unresolved_distress": unresolved_distress,
+            "distress_event_count": len(distress_rows),
             "behavior_gate_status": behavior_totals.get("behavior_gate_status"),
         },
         "criteria": [criterion.to_json() for criterion in criteria],

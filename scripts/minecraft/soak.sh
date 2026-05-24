@@ -958,6 +958,16 @@ timestamp_re = re.compile(
 dig_hole_re = re.compile(r"(dig.?hole|stuck in (a )?hole|trapped)", re.IGNORECASE)
 gather_re = re.compile(r"!(collectBlocks|collectAllBlocks|consume|equip|smeltItem)\b", re.IGNORECASE)
 build_re = re.compile(r"!(place|placeHere|placeBlock|build|buildFromPlan|planAndBuild)\b", re.IGNORECASE)
+distress_re = re.compile(
+    r"(distress_reported|distress\.reported|\"operation\"\s*:\s*\"danger_report\"|"
+    r"shared_state\.write.*danger_report)",
+    re.IGNORECASE,
+)
+distress_resolved_re = re.compile(
+    r"(distress_resolved|distress\.resolved|\"operation\"\s*:\s*\"danger_resolve\"|"
+    r"recovery_status[\"']?\s*[:=]\s*[\"']?(resolved|escaped|teleported))",
+    re.IGNORECASE,
+)
 shared_text_re = re.compile(r"(shared|cohort|together).*(camp|marker|wall|chest|shelter|fire)", re.IGNORECASE)
 spawn_re = re.compile(r"(Spawned at|\bspawn(ed)?\b|joined the game|logged in)", re.IGNORECASE)
 coord_re = re.compile(
@@ -1039,6 +1049,7 @@ totals = {
     "total_drownings": 0,
     "total_stuck": 0,
     "total_dig_holes": 0,
+    "total_unresolved_distress": 0,
     "total_restarts": 0,
     "total_restart_recurrences": 0,
 }
@@ -1093,6 +1104,9 @@ for agent in agents:
     deaths = count_regex(counter_lines, death_re)
     drownings = count_regex(counter_lines, drowning_re)
     stuck = count_regex(counter_lines, stuck_re)
+    distress_reports = count_regex(counter_lines, distress_re)
+    distress_resolved = count_regex(counter_lines, distress_resolved_re)
+    unresolved_distress = max(0, distress_reports - distress_resolved)
     restart_count = count_regex(counter_lines, restart_re)
     recurrent_restarts = 1 if has_recurrent_restart(counter_lines) else 0
     dig_holes = count_regex(counter_lines, dig_hole_re)
@@ -1116,6 +1130,8 @@ for agent in agents:
         agent_unmet.append(
             f"agent {agent} restarts expected <= {max_restarts} got {restart_count}"
         )
+    if unresolved_distress:
+        agent_unmet.append(f"agent {agent} unresolved distress expected 0 got {unresolved_distress}")
     if recurrent_restarts:
         agent_unmet.append(f"agent {agent} repeated restarts within 300s")
     unmet.extend(agent_unmet)
@@ -1132,6 +1148,7 @@ for agent in agents:
         "drownings": drownings,
         "stuck": stuck,
         "dig_holes": dig_holes,
+        "unresolved_distress": unresolved_distress,
         "restart_count": restart_count,
         "behavior_status": "fail" if agent_unmet else "pass",
     }
@@ -1146,6 +1163,7 @@ for agent in agents:
     totals["total_drownings"] += drownings
     totals["total_stuck"] += stuck
     totals["total_dig_holes"] += dig_holes
+    totals["total_unresolved_distress"] += unresolved_distress
     totals["total_restarts"] += restart_count
     totals["total_restart_recurrences"] += recurrent_restarts
 
@@ -1197,6 +1215,7 @@ header = [
     "drownings",
     "stuck",
     "dig_holes",
+    "unresolved_distress",
     "restart_count",
     "behavior_status",
 ]
