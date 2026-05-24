@@ -818,6 +818,50 @@ class FactionConfig(BaseModel):
         return v
 
 
+class PersonaOverride(BaseModel):
+    """Per-run persona/backstory override for one agent.
+
+    These overrides describe runtime starting conditions only; they do not
+    mutate committed ``agents/<id>/`` files.
+    """
+
+    agent_id: str
+    display_name: str | None = None
+    backstory: str | None = None
+    system_prompt_append: str | None = None
+    system_prompt_replace: str | None = None
+
+    @field_validator("agent_id")
+    @classmethod
+    def _agent_id_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("persona override agent_id is required")
+        return v
+
+
+class WorldConfig(BaseModel):
+    """Minecraft/world starting conditions for a run spec."""
+
+    model_config = ConfigDict(extra="allow")
+
+    seed: int | None = None
+    world_type: Literal["flat", "default", "amplified", "custom"] = "default"
+    world_config_path: str | None = None
+    persistent: bool = False
+    durable_world_id: str | None = None
+
+    @model_validator(mode="after")
+    def _check_custom_world_config(self) -> WorldConfig:
+        if self.world_type == "custom" and not self.world_config_path:
+            raise ValueError("world_type='custom' requires world_config_path")
+        return self
+
+
+class RunMode(enum.StrEnum):
+    persistent = "persistent"
+    experimental = "experimental"
+
+
 class MemorySeedConfig(BaseModel):
     """Controls what each agent remembers at simulation start.
 
@@ -839,6 +883,20 @@ class MemorySeedConfig(BaseModel):
         if self.mode == "custom" and not self.custom_file:
             raise ValueError("memory_seed mode='custom' requires custom_file")
         return self
+
+
+class RunSpec(BaseModel):
+    """Typed starting-condition schema shared by simulations and Minecraft."""
+
+    model_config = ConfigDict(extra="allow")
+
+    agents: list[str] = Field(default_factory=list)
+    persona_overrides: list[PersonaOverride] = Field(default_factory=list)
+    factions: list[FactionConfig] = Field(default_factory=list)
+    agent_goals: dict[str, list[str]] = Field(default_factory=dict)
+    memory_seed: MemorySeedConfig | None = None
+    world: WorldConfig | None = None
+    run_mode: RunMode | None = None
 
 
 class SimulationCreate(BaseModel):

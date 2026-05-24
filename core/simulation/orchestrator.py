@@ -22,7 +22,15 @@ from core.event_bus import EventType
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
-from core.models import FactionConfig, MemorySeedConfig, SimulationCreate, SimulationStatus
+from core.models import (
+    FactionConfig,
+    MemorySeedConfig,
+    PersonaOverride,
+    RunMode,
+    SimulationCreate,
+    SimulationStatus,
+    WorldConfig,
+)
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
@@ -54,6 +62,26 @@ logger = logging.getLogger(__name__)
 
 class CostLimitExceededError(Exception):
     """Raised when simulation spending exceeds a configured cost limit."""
+
+
+def _normalize_agent_goals(raw: dict[str, Any] | None) -> dict[str, list[str]]:
+    """Return a stable agent_id -> goal text list mapping."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("agent_goals must be a mapping of agent_id to list of goals")
+
+    normalized: dict[str, list[str]] = {}
+    for agent_id, goals in raw.items():
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            raise ValueError("agent_goals keys must be non-empty agent ids")
+        if isinstance(goals, str):
+            normalized[agent_id] = [goals]
+            continue
+        if not isinstance(goals, list):
+            raise ValueError(f"agent_goals for {agent_id!r} must be a list of strings")
+        normalized[agent_id] = [str(goal) for goal in goals]
+    return normalized
 
 
 def parse_duration(value: str) -> timedelta:
@@ -102,6 +130,10 @@ class SimulationConfig:
         scenario_agents: list[str] | None = None,
         excluded_agents: list[str] | None = None,
         factions: list[dict[str, Any] | FactionConfig] | None = None,
+        persona_overrides: list[dict[str, Any] | PersonaOverride] | None = None,
+        agent_goals: dict[str, list[str]] | None = None,
+        world_config: dict[str, Any] | WorldConfig | None = None,
+        run_mode: str | RunMode | None = None,
         initial_agent_energy: dict[str, float] | None = None,
         conversation_cadence: float = 1.0,
         conversation_mode: str = "director",
@@ -141,6 +173,29 @@ class SimulationConfig:
             f if isinstance(f, FactionConfig) else FactionConfig(**f) for f in (factions or [])
         ]
         self._factions_override = factions is not None
+        self.persona_overrides: list[PersonaOverride] = [
+            p if isinstance(p, PersonaOverride) else PersonaOverride(**p)
+            for p in (persona_overrides or [])
+        ]
+        self._persona_overrides_override = persona_overrides is not None
+        self.agent_goals = _normalize_agent_goals(agent_goals)
+        self._agent_goals_override = agent_goals is not None
+        self.world_config = (
+            world_config
+            if isinstance(world_config, WorldConfig)
+            else WorldConfig(**world_config)
+            if world_config is not None
+            else None
+        )
+        self._world_config_override = world_config is not None
+        self.run_mode: RunMode | None = (
+            RunMode(run_mode)
+            if run_mode is not None
+            else RunMode.experimental
+            if seed_file
+            else None
+        )
+        self._run_mode_explicit = run_mode is not None
         # When provided, the orchestrator attaches to a pre-created
         # simulation row instead of inserting a new one. Used when the
         # admin dashboard pre-creates the row so it can immediately return
@@ -188,6 +243,30 @@ class SimulationConfig:
         raw_seed = data.get("memory_seed")
         if raw_seed and self.memory_seed is None:
             self.memory_seed = MemorySeedConfig(**raw_seed)
+
+        raw_persona_overrides = data.get("persona_overrides")
+        if raw_persona_overrides is not None and not self._persona_overrides_override:
+            if not isinstance(raw_persona_overrides, list):
+                raise ValueError("persona_overrides must be a list")
+            self.persona_overrides = [
+                entry if isinstance(entry, PersonaOverride) else PersonaOverride(**entry)
+                for entry in raw_persona_overrides
+            ]
+
+        raw_agent_goals = data.get("agent_goals")
+        if raw_agent_goals is not None and not self._agent_goals_override:
+            self.agent_goals = _normalize_agent_goals(raw_agent_goals)
+
+        raw_world = data.get("world")
+        if raw_world is not None and not self._world_config_override:
+            if not isinstance(raw_world, dict):
+                raise ValueError("world must be a mapping")
+            self.world_config = WorldConfig(**raw_world)
+
+        raw_run_mode = data.get("run_mode")
+        if raw_run_mode is not None and not self._run_mode_explicit:
+            self.run_mode = RunMode(raw_run_mode)
+            self._run_mode_explicit = True
 
         # Parse factions if present. Public submissions pass an explicit
         # normalized list, which intentionally overrides the scenario YAML.
@@ -277,6 +356,18 @@ class SimulationConfig:
             d["source"] = self.source
         if self.memory_seed is not None:
             d["memory_seed"] = self.memory_seed.model_dump(exclude_none=True)
+        if self.persona_overrides:
+            d["persona_overrides"] = [
+                p.model_dump(exclude_none=True) for p in self.persona_overrides
+            ]
+        if self.agent_goals:
+            d["agent_goals"] = self.agent_goals
+        if self.world_config is not None:
+            d["world"] = self.world_config.model_dump(exclude_none=True)
+        if self.run_mode is not None and (
+            self._run_mode_explicit or self.run_mode == RunMode.persistent
+        ):
+            d["run_mode"] = self.run_mode.value
         return d
 
 

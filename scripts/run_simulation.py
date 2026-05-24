@@ -93,6 +93,21 @@ def _memory_seed_from_run_config(args: argparse.Namespace, run_config: dict):
     )
 
 
+def _world_from_run_config(args: argparse.Namespace, run_config: dict) -> dict | None:
+    """Build world config from CLI flags first, then run config."""
+    if args.world_config_file:
+        return {
+            "world_type": "custom",
+            "world_config_path": args.world_config_file,
+        }
+    raw = run_config.get("world")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("run config world must be an object")
+    return raw
+
+
 async def run_simulation(args: argparse.Namespace) -> None:
     """Main async entry point."""
     verbose = getattr(args, "verbose", False)
@@ -111,10 +126,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     from core.bootstrap import bootstrap_services, shutdown_services
-    from core.conversation_mode import get_conversation_mode
     from core.conversation.proximity import ProximityManager
     from core.conversation.selection_logger import SelectionLogger
     from core.conversation.triggers import TriggerSystem
+    from core.conversation_mode import get_conversation_mode
     from core.event_bus import event_bus
     from core.memory.reflection import ReflectionManager
     from core.repos.conversation_repo import ConversationRepo
@@ -144,6 +159,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
     # Build memory_seed config from CLI flags or public run config.
     memory_seed_cfg = _memory_seed_from_run_config(args, run_config)
+    world_cfg = _world_from_run_config(args, run_config)
 
     sim_config = SimulationConfig(
         name=args.name,
@@ -163,6 +179,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
         hypothesis=getattr(args, "hypothesis", None),
         auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
         memory_seed=memory_seed_cfg,
+        persona_overrides=run_config.get("persona_overrides"),
+        agent_goals=run_config.get("agent_goals"),
+        world_config=world_cfg,
+        run_mode=args.run_mode or run_config.get("run_mode"),
         scenario_id=run_config.get("scenario_id"),
         scenario_meta=run_config.get("scenario_meta"),
         scenario_agents=run_config.get("scenario_agents"),
@@ -419,7 +439,26 @@ def main() -> None:
         default=None,
         help=(
             "Path to a JSON config file with public submission overrides "
-            "(agents, exclusions, factions, memory seed, energy, cadence)."
+            "(agents, exclusions, factions, memory seed, run-spec fields, energy, cadence)."
+        ),
+    )
+    parser.add_argument(
+        "--run-mode",
+        type=str,
+        choices=["persistent", "experimental"],
+        default=None,
+        help=(
+            "Run-mode starting condition. Seeded runs default to experimental; "
+            "persistent is only used when explicitly requested."
+        ),
+    )
+    parser.add_argument(
+        "--world-config-file",
+        type=str,
+        default=None,
+        help=(
+            "Path to a custom Minecraft world config for this run. Overrides "
+            "the run config's world block and records world_type=custom."
         ),
     )
     parser.add_argument(
