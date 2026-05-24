@@ -8,6 +8,7 @@ make the implementation look current.
 
 - [Minecraft pivot issue plan](MINECRAFT-PIVOT-ISSUE-PLAN.md)
 - [Minecraft pivot decision summary](decisions/0000-summary.md)
+- [Run modes](run-modes.md)
 
 ## Decision Records
 

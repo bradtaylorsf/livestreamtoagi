@@ -862,6 +862,13 @@ class RunMode(enum.StrEnum):
     experimental = "experimental"
 
 
+class ExperimentalGoalConfig(BaseModel):
+    """Goal-based stop condition for bounded experimental runs."""
+
+    kind: Literal["turns", "artifacts", "phases_complete"]
+    target: int = Field(ge=1)
+
+
 class MemorySeedConfig(BaseModel):
     """Controls what each agent remembers at simulation start.
 
@@ -897,6 +904,7 @@ class RunSpec(BaseModel):
     memory_seed: MemorySeedConfig | None = None
     world: WorldConfig | None = None
     run_mode: RunMode | None = None
+    experimental_goal: ExperimentalGoalConfig | None = None
 
 
 class SimulationCreate(BaseModel):

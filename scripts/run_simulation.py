@@ -31,16 +31,14 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+
 def _default_agents() -> str:
     """Build default agent list from registry (conversation participants only)."""
     from core.agent_registry import AgentRegistry
 
     registry = AgentRegistry(redis_client=None)
     agents = registry._load_all_from_yaml()
-    return ",".join(
-        a.id for a in agents.values()
-        if a.chattiness > 0 or a.initiative > 0
-    )
+    return ",".join(a.id for a in agents.values() if a.chattiness > 0 or a.initiative > 0)
 
 
 DEFAULT_AGENTS = _default_agents()
@@ -140,6 +138,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         SimulationConfig,
         SimulationOrchestrator,
         parse_duration,
+        parse_experimental_goal,
     )
     from tools.journal_image_tool import JournalImageGenerator
 
@@ -150,6 +149,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
     duration = None
     if args.duration:
         duration = parse_duration(args.duration)
+
+    experimental_goal = None
+    if getattr(args, "experimental_goal", None):
+        experimental_goal = parse_experimental_goal(args.experimental_goal)
 
     rolling_window = None
     if args.rolling_window:
@@ -183,6 +186,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         agent_goals=run_config.get("agent_goals"),
         world_config=world_cfg,
         run_mode=args.run_mode or run_config.get("run_mode"),
+        experimental_goal=experimental_goal or run_config.get("experimental_goal"),
         scenario_id=run_config.get("scenario_id"),
         scenario_meta=run_config.get("scenario_meta"),
         scenario_agents=run_config.get("scenario_agents"),
@@ -228,15 +232,19 @@ async def run_simulation(args: argparse.Namespace) -> None:
         management = svc.management
 
     proximity = ProximityManager(
-        svc.redis, cfg, event_bus,
+        svc.redis,
+        cfg,
+        event_bus,
         role_bonuses=svc.agent_registry.get_role_bonuses(),
     )
     sim_clock = SimulationClock(speed_multiplier=sim_config.speed_multiplier)
     trigger_system = TriggerSystem(
-        cfg.triggers, svc.recall_memory,
+        cfg.triggers,
+        svc.recall_memory,
         goal_manager=svc.goal_manager,
         agent_state_manager=svc.agent_state_manager,
-        clock=sim_clock, now_fn=sim_clock.now,
+        clock=sim_clock,
+        now_fn=sim_clock.now,
     )
     selection_logger = SelectionLogger(conversation_repo, cfg.logging)
 
@@ -292,6 +300,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
     def _signal_handler() -> None:
         from core.simulation.display import console
+
         console.print("\n[dim]Cancelling simulation...[/dim]")
         orchestrator.cancel()
 
@@ -339,9 +348,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run a full-day simulation of the AI reality show"
-    )
+    parser = argparse.ArgumentParser(description="Run a full-day simulation of the AI reality show")
     parser.add_argument(
         "--name",
         type=str,
@@ -382,19 +389,13 @@ def main() -> None:
         "--max-cost-rolling",
         type=float,
         default=None,
-        help=(
-            "Maximum cost in dollars within --rolling-window before stopping "
-            "(default: off)"
-        ),
+        help=("Maximum cost in dollars within --rolling-window before stopping (default: off)"),
     )
     parser.add_argument(
         "--rolling-window",
         type=str,
         default=None,
-        help=(
-            "Rolling cost window for --max-cost-rolling, e.g. '1h' or '24h' "
-            "(default: off)"
-        ),
+        help=("Rolling cost window for --max-cost-rolling, e.g. '1h' or '24h' (default: off)"),
     )
     parser.add_argument(
         "--speed",
@@ -467,6 +468,15 @@ def main() -> None:
         help=(
             "Run-mode starting condition. Seeded runs default to experimental; "
             "persistent is only used when explicitly requested."
+        ),
+    )
+    parser.add_argument(
+        "--experimental-goal",
+        type=str,
+        default=None,
+        help=(
+            "Goal stop condition for experimental autonomous runs, formatted "
+            "as '<kind>:<target>' where kind is turns, artifacts, or phases_complete."
         ),
     )
     parser.add_argument(
@@ -544,7 +554,8 @@ def main() -> None:
         help="Show what would execute without making LLM calls",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
@@ -554,12 +565,30 @@ def main() -> None:
         if args.run_mode and args.run_mode != "persistent":
             parser.error("--persistent cannot be combined with --run-mode experimental")
         args.run_mode = "persistent"
+    if args.experimental_goal and args.run_mode is None:
+        args.run_mode = "experimental"
     if args.resume_sim_id and args.sim_id and args.resume_sim_id != args.sim_id:
         parser.error("--resume-sim-id and --sim-id must match when both are provided")
     if args.run_mode == "persistent" and args.duration:
         parser.error("persistent mode is indefinite; do not set --duration")
-    if not args.seed_file and not args.duration and args.run_mode != "persistent":
-        parser.error("Either --seed-file or --duration must be provided")
+    if args.run_mode == "persistent" and args.experimental_goal:
+        parser.error("persistent mode is indefinite; do not set --experimental-goal")
+    if args.run_mode == "experimental" and args.resume_sim_id:
+        parser.error("experimental mode starts fresh; do not set --resume-sim-id")
+    if (
+        args.run_mode == "experimental"
+        and not args.seed_file
+        and not args.duration
+        and not args.experimental_goal
+    ):
+        parser.error("experimental mode requires --seed-file, --duration, or --experimental-goal")
+    if (
+        not args.seed_file
+        and not args.duration
+        and not args.experimental_goal
+        and args.run_mode != "persistent"
+    ):
+        parser.error("Either --seed-file, --duration, or --experimental-goal must be provided")
     if (args.max_cost_rolling is None) != (args.rolling_window is None):
         parser.error("--max-cost-rolling and --rolling-window must be provided together")
     if args.max_cost_rolling is not None and args.max_cost_rolling < 0:

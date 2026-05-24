@@ -25,6 +25,7 @@ from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import (
+    ExperimentalGoalConfig,
     FactionConfig,
     MemorySeedConfig,
     PersonaOverride,
@@ -103,6 +104,22 @@ def parse_duration(value: str) -> timedelta:
     return timedelta(days=days, hours=hours, minutes=minutes)
 
 
+def parse_experimental_goal(value: str) -> ExperimentalGoalConfig:
+    """Parse an experimental goal string such as 'turns:20' or 'artifacts=2'."""
+    raw = value.strip()
+    separator = ":" if ":" in raw else "=" if "=" in raw else None
+    if separator is None:
+        raise ValueError("Invalid experimental goal. Use '<kind>:<target>', e.g. 'turns:20'.")
+    kind, target = (part.strip() for part in raw.split(separator, 1))
+    if not kind or not target:
+        raise ValueError("Invalid experimental goal. Use '<kind>:<target>', e.g. 'turns:20'.")
+    try:
+        parsed_target = int(target)
+    except ValueError as exc:
+        raise ValueError("experimental goal target must be an integer") from exc
+    return ExperimentalGoalConfig(kind=kind, target=parsed_target)
+
+
 class SimulationConfig:
     """Parsed CLI arguments and seed file contents."""
 
@@ -136,6 +153,7 @@ class SimulationConfig:
         agent_goals: dict[str, list[str]] | None = None,
         world_config: dict[str, Any] | WorldConfig | None = None,
         run_mode: str | RunMode | None = None,
+        experimental_goal: dict[str, Any] | ExperimentalGoalConfig | None = None,
         initial_agent_energy: dict[str, float] | None = None,
         conversation_cadence: float = 1.0,
         conversation_mode: str = "director",
@@ -195,10 +213,18 @@ class SimulationConfig:
             RunMode(run_mode)
             if run_mode is not None
             else RunMode.experimental
-            if seed_file
+            if seed_file or experimental_goal is not None
             else None
         )
         self._run_mode_explicit = run_mode is not None
+        self.experimental_goal = (
+            experimental_goal
+            if isinstance(experimental_goal, ExperimentalGoalConfig)
+            else ExperimentalGoalConfig(**experimental_goal)
+            if experimental_goal is not None
+            else None
+        )
+        self._experimental_goal_override = experimental_goal is not None
         self._validate_run_mode_constraints()
         # When provided, the orchestrator attaches to a pre-created
         # simulation row instead of inserting a new one. Used when the
@@ -230,19 +256,33 @@ class SimulationConfig:
 
     def _validate_run_mode_constraints(self) -> None:
         """Apply run-mode invariants after CLI and seed-file fields merge."""
-        if self.run_mode != RunMode.persistent:
+        if self.run_mode == RunMode.persistent:
+            if self.duration is not None:
+                raise ValueError("persistent mode is indefinite; do not set duration")
+            if self.experimental_goal is not None:
+                raise ValueError("persistent mode is indefinite; do not set experimental_goal")
+            if self.max_cost_rolling is None or self.rolling_window is None:
+                raise ValueError(
+                    "persistent mode requires max_cost_rolling and rolling_window "
+                    "so it is bounded by a rolling cap"
+                )
+            if self.world_config is None:
+                self.world_config = WorldConfig(persistent=True)
+            else:
+                self.world_config.persistent = True
             return
-        if self.duration is not None:
-            raise ValueError("persistent mode is indefinite; do not set duration")
-        if self.max_cost_rolling is None or self.rolling_window is None:
+
+        if self.run_mode != RunMode.experimental:
+            return
+
+        if self.seed_file is None and self.duration is None and self.experimental_goal is None:
             raise ValueError(
-                "persistent mode requires max_cost_rolling and rolling_window "
-                "so it is bounded by a rolling cap"
+                "experimental mode requires a seed_file, duration, or experimental_goal"
             )
-        if self.world_config is None:
-            self.world_config = WorldConfig(persistent=True)
-        else:
-            self.world_config.persistent = True
+        if self.world_config is not None:
+            if self.world_config.durable_world_id:
+                raise ValueError("experimental mode cannot use durable_world_id")
+            self.world_config.persistent = False
 
     def load_seed_file(self, valid_agent_ids: set[str] | None = None) -> None:
         """Parse the YAML seed file into Phase objects.
@@ -289,6 +329,12 @@ class SimulationConfig:
         if raw_run_mode is not None and not self._run_mode_explicit:
             self.run_mode = RunMode(raw_run_mode)
             self._run_mode_explicit = True
+
+        raw_experimental_goal = data.get("experimental_goal")
+        if raw_experimental_goal is not None and not self._experimental_goal_override:
+            if not isinstance(raw_experimental_goal, dict):
+                raise ValueError("experimental_goal must be a mapping")
+            self.experimental_goal = ExperimentalGoalConfig(**raw_experimental_goal)
 
         self._validate_run_mode_constraints()
 
@@ -391,9 +437,13 @@ class SimulationConfig:
         if self.world_provisioned is not None:
             d["world_provisioned"] = self.world_provisioned
         if self.run_mode is not None and (
-            self._run_mode_explicit or self.run_mode == RunMode.persistent
+            self._run_mode_explicit
+            or self.run_mode == RunMode.persistent
+            or self.experimental_goal is not None
         ):
             d["run_mode"] = self.run_mode.value
+        if self.experimental_goal is not None:
+            d["experimental_goal"] = self.experimental_goal.model_dump()
         return d
 
 
@@ -461,6 +511,12 @@ class SimulationOrchestrator:
         self._cancelled = False
         self._errors: list[dict[str, Any]] = []
         self._last_persistent_heartbeat = 0.0
+        self._experimental_stop_reason: str | None = None
+        self._experimental_progress: dict[str, int] = {
+            "phases_completed": 0,
+            "turns": 0,
+            "artifacts": 0,
+        }
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
     @property
@@ -725,21 +781,31 @@ class SimulationOrchestrator:
 
     def _current_config_snapshot(self) -> dict[str, Any]:
         """Build the DB config snapshot with runtime fields included."""
-        return {
+        snapshot = {
             **self._config.to_dict(),
             "clock_state": self.clock.to_dict(),
             "llm_provider": (
                 self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
             ),
         }
+        if self._config.run_mode == RunMode.experimental:
+            progress = dict(
+                getattr(
+                    self,
+                    "_experimental_progress",
+                    {"phases_completed": 0, "turns": 0, "artifacts": 0},
+                )
+            )
+            stop_reason = getattr(self, "_experimental_stop_reason", None)
+            if any(progress.values()) or stop_reason is not None:
+                snapshot["experimental_progress"] = progress
+            if stop_reason is not None:
+                snapshot["experimental_stop_reason"] = stop_reason
+        return snapshot
 
     async def _provision_world_for_run(self) -> None:
         """Apply RunSpec.world to the Minecraft server world config."""
-        if (
-            self._config.world_config is None
-            or self._config.dry_run
-            or self._simulation_id is None
-        ):
+        if self._config.world_config is None or self._config.dry_run or self._simulation_id is None:
             return
 
         from core.minecraft.world_provisioner import provision_world
@@ -1007,6 +1073,7 @@ class SimulationOrchestrator:
                         )
 
                 self._total_cost += result.cost
+                self._record_experimental_progress(result)
                 self._display.show_phase_complete(result, phase.name)
 
                 # Advance simulated clock so reflection scheduler can track time
@@ -1042,6 +1109,9 @@ class SimulationOrchestrator:
                 # Check cost limit
                 if not self._config.dry_run:
                     await self._check_cost_limit()
+                if self._experimental_goal_reached():
+                    self._mark_experimental_stop_reason("goal_reached")
+                    break
 
             # Finalize
             if audience_sim:
@@ -1049,6 +1119,13 @@ class SimulationOrchestrator:
             if world_sim:
                 await world_sim.stop()
             status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
+            if self._cancelled:
+                self._mark_experimental_stop_reason("cancelled")
+            elif self._config.run_mode == RunMode.experimental:
+                if self._experimental_goal_reached():
+                    self._mark_experimental_stop_reason("goal_reached")
+                else:
+                    self._mark_experimental_stop_reason("phases_complete")
             await self._finalize(status)
 
         except CostLimitExceededError:
@@ -1056,6 +1133,7 @@ class SimulationOrchestrator:
                 await audience_sim.stop()
             if world_sim:
                 await world_sim.stop()
+            self._mark_experimental_stop_reason("cost_cap")
             logger.warning("Cost limit exceeded ($%s), stopping simulation", self._total_cost)
             self._display.show_cost_exceeded(self._total_cost, self._config.max_cost)
             await self._finalize(
@@ -1246,6 +1324,7 @@ class SimulationOrchestrator:
                     result.assertions = assertion_results
 
                 self._total_cost += result.cost
+                self._record_experimental_progress(result)
                 day_stats["conversations"] += 1
                 day_stats["cost"] += result.cost
                 day_stats["tools"] += result.artifacts
@@ -1277,17 +1356,22 @@ class SimulationOrchestrator:
                 # Check cost limit
                 if not self._config.dry_run:
                     await self._check_cost_limit()
+                if self._experimental_goal_reached():
+                    self._mark_experimental_stop_reason("goal_reached")
 
             # Final day stats
             self._display.show_day_boundary(self.clock.simulated_day(), day_stats)
             if world_sim:
                 await world_sim.stop()
             status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
+            if self._cancelled:
+                self._mark_experimental_stop_reason("cancelled")
             await self._finalize(status)
 
         except CostLimitExceededError:
             if world_sim:
                 await world_sim.stop()
+            self._mark_experimental_stop_reason("cost_cap")
             logger.warning(
                 "Cost limit exceeded ($%s), stopping simulation",
                 self._total_cost,
@@ -1314,6 +1398,11 @@ class SimulationOrchestrator:
     async def _terminated(self) -> bool:
         """Check all termination conditions for autonomous mode."""
         if self._cancelled:
+            self._mark_experimental_stop_reason("cancelled")
+            return True
+        if self._experimental_goal_reached():
+            logger.info("Experimental goal reached (%s)", self._config.experimental_goal)
+            self._mark_experimental_stop_reason("goal_reached")
             return True
         # Duration limit
         if (
@@ -1322,14 +1411,56 @@ class SimulationOrchestrator:
             and self.clock.elapsed() >= self._config.duration
         ):
             logger.info("Duration limit reached (%s)", self._config.duration)
+            self._mark_experimental_stop_reason("duration_reached")
             return True
         # Redis kill switch (accessible from Brad's phone)
         if self._redis:
             kill = await self._redis.get(KILL_SWITCH_KEY)
             if kill == KILL_SWITCH_ACTIVE_VALUE:
                 logger.info("Kill switch activated — stopping simulation")
+                self._mark_experimental_stop_reason("kill_switch")
                 return True
         return False
+
+    def _mark_experimental_stop_reason(self, reason: str) -> None:
+        """Record why an experimental run stopped, preserving the first terminal cause."""
+        if getattr(self._config, "run_mode", None) != RunMode.experimental:
+            return
+        if getattr(self, "_experimental_stop_reason", None) is None:
+            self._experimental_stop_reason = reason
+
+    def _record_experimental_progress(self, result: Any) -> None:
+        """Update bounded-run progress counters from a completed phase result."""
+        if getattr(self._config, "run_mode", None) != RunMode.experimental:
+            return
+        if not hasattr(self, "_experimental_progress"):
+            self._experimental_progress = {
+                "phases_completed": 0,
+                "turns": 0,
+                "artifacts": 0,
+            }
+        self._experimental_progress["phases_completed"] += 1
+        self._experimental_progress["turns"] += int(getattr(result, "turns", 0) or 0)
+        self._experimental_progress["artifacts"] += int(getattr(result, "artifacts", 0) or 0)
+
+    _GOAL_KIND_TO_PROGRESS_KEY = {
+        "phases_complete": "phases_completed",
+        "turns": "turns",
+        "artifacts": "artifacts",
+    }
+
+    def _experimental_goal_reached(self) -> bool:
+        """Return whether the configured experimental goal has been satisfied."""
+        goal = getattr(self._config, "experimental_goal", None)
+        if getattr(self._config, "run_mode", None) != RunMode.experimental or goal is None:
+            return False
+        progress = getattr(
+            self,
+            "_experimental_progress",
+            {"phases_completed": 0, "turns": 0, "artifacts": 0},
+        )
+        progress_key = self._GOAL_KIND_TO_PROGRESS_KEY.get(goal.kind, goal.kind)
+        return progress.get(progress_key, 0) >= goal.target
 
     async def _persistent_heartbeat(self, *, force: bool = False) -> None:
         """Publish the active persistent simulation id on raw Redis."""
@@ -1613,6 +1744,12 @@ class SimulationOrchestrator:
                 "total_management_flags": sim.total_management_flags,
                 "simulated_duration_seconds": simulated_duration.total_seconds(),
                 "real_duration_seconds": real_duration.total_seconds(),
+                "phases_completed": getattr(
+                    self,
+                    "_experimental_progress",
+                    {"phases_completed": len(self._config.phases)},
+                ).get("phases_completed", len(self._config.phases)),
+                "stop_reason": getattr(self, "_experimental_stop_reason", None),
             },
             "evals": evals,
             "surprises": [],
