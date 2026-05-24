@@ -7,10 +7,23 @@
 import { randomUUID } from 'node:crypto';
 
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
-import { fetchMemoryContext } from './memory_context.js';
 
 const INSTALL_FLAG = Symbol.for('livestreamtoagi.autonomousHeartbeat');
 const COMMAND_RE = /!(?<name>[A-Za-z][A-Za-z0-9_]*)\s*(?:\(|\b)/g;
+let memoryContextModulePromise = null;
+
+async function loadMemoryContextModule() {
+    if (!memoryContextModulePromise) {
+        memoryContextModulePromise = import('./memory_context.js').catch(() => null);
+    }
+    return memoryContextModulePromise;
+}
+
+async function fetchHeartbeatMemoryContext(args) {
+    const mod = await loadMemoryContextModule();
+    if (!mod || typeof mod.fetchMemoryContext !== 'function') return '';
+    return mod.fetchMemoryContext(args);
+}
 
 export const NEXT_ACTION_PROMPT = [
     'Autonomous heartbeat: you have been quiet in the Minecraft simulation.',
@@ -509,7 +522,7 @@ export class HeartbeatController {
         if (this.state.startupMemoryContextRequested) return;
         this.state.startupMemoryContextRequested = true;
         const traceId = `trace-memory-startup-${randomUUID()}`;
-        const context = await fetchMemoryContext({
+        const context = await fetchHeartbeatMemoryContext({
             agent: this.agent,
             query: 'startup Minecraft simulation context',
             traceId,
@@ -538,7 +551,7 @@ export class HeartbeatController {
                 ? { source: 'action', message: `${basePayload.action_label} age=${basePayload.action_age_ms}` }
                 : null,
         ].filter(Boolean);
-        const context = await fetchMemoryContext({
+        const context = await fetchHeartbeatMemoryContext({
             agent: this.agent,
             query: `${reason}: ${prompt}`,
             traceId,

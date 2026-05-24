@@ -8,7 +8,6 @@ import { randomUUID } from 'node:crypto';
 
 import { callBridge } from '../bridge/python_bridge.js';
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
-import { fetchMemoryContext } from './memory_context.js';
 
 const PATCH_FLAG = Symbol.for('livestreamtoagi.directorGateInstalled');
 const DEFAULT_DEADLINE_MS = 1500;
@@ -37,6 +36,20 @@ const RISKY_PROMPT_TOOLS = new Set([
     '!observe',
     '!place',
 ]);
+let memoryContextModulePromise = null;
+
+async function loadMemoryContextModule() {
+    if (!memoryContextModulePromise) {
+        memoryContextModulePromise = import('./memory_context.js').catch(() => null);
+    }
+    return memoryContextModulePromise;
+}
+
+async function fetchDirectorMemoryContext(args) {
+    const mod = await loadMemoryContextModule();
+    if (!mod || typeof mod.fetchMemoryContext !== 'function') return '';
+    return mod.fetchMemoryContext(args);
+}
 
 function isFalseLike(value) {
     return ['0', 'false', 'no', 'off', 'disabled'].includes(String(value).trim().toLowerCase());
@@ -314,7 +327,7 @@ async function askDirector(agent, turn, options, gateState) {
     };
     agent.__ltagDirectorContext = verdict;
     if (verdict.selected) {
-        const memoryContext = await fetchMemoryContext({
+        const memoryContext = await fetchDirectorMemoryContext({
             agent,
             query: currentGoalFromTurn(turn, verdict),
             traceId: response?.trace_id || response?.traceId || traceId,
