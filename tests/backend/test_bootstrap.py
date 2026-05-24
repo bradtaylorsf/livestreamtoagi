@@ -32,6 +32,7 @@ def test_services_dataclass_importable():
         "transcript_repo",
         "event_bus",
         "management",
+        "spend_alert_notifier",
         "cost_repo",
         "config_loader",
     }

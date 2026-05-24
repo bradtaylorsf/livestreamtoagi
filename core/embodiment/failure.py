@@ -12,13 +12,27 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 type FailureClass = Literal[
-    "blocked", "interrupted", "timeout", "invalid", "unreachable", "bridge-down"
+    "blocked",
+    "interrupted",
+    "timeout",
+    "invalid",
+    "unreachable",
+    "bridge-down",
+    "kill-switch-active",
 ]
 type SafeFailPolicy = Literal["idle", "retry-bounded", "abandon"]
 type SafeFailAction = Literal["idle", "retry", "abandon"]
 
 FAILURE_CLASSES: frozenset[FailureClass] = frozenset(
-    {"blocked", "interrupted", "timeout", "invalid", "unreachable", "bridge-down"}
+    {
+        "blocked",
+        "interrupted",
+        "timeout",
+        "invalid",
+        "unreachable",
+        "bridge-down",
+        "kill-switch-active",
+    }
 )
 
 SAFE_FAIL_POLICY: dict[FailureClass, SafeFailPolicy] = {
@@ -28,6 +42,7 @@ SAFE_FAIL_POLICY: dict[FailureClass, SafeFailPolicy] = {
     "invalid": "abandon",
     "unreachable": "idle",
     "bridge-down": "abandon",
+    "kill-switch-active": "idle",
 }
 
 NON_FAILURE_CLASSES = frozenset({"reached", "placed", "removed", "success", "partial"})
@@ -58,6 +73,7 @@ _ALIASES: dict[str, FailureClass] = {
     "bridge-down": "bridge-down",
     "bridge-connect-failed": "bridge-down",
     "bridge-send-failed": "bridge-down",
+    "kill-switch-active": "kill-switch-active",
 }
 
 

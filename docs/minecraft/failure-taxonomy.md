@@ -19,6 +19,7 @@ so fork actions can make the same decision without a new dependency.
 | `invalid` | The request, target, schema, block, recipe, auth, or protocol input is invalid. | `abandon` | Abandon immediately. Do not retry unchanged invalid input. |
 | `unreachable` | Pathfinding or lookup cannot reach the target or required interaction point. | `idle` | Stop and idle so a caller can re-plan from fresh perception. |
 | `bridge-down` | The Python bridge cannot be connected to or the send path failed. | `abandon` | Abandon the action rather than performing unverified or ungated work. |
+| `kill-switch-active` | The operator kill switch is active. | `idle` | Stop action attempts and idle until `kill.status` reports inactive. |
 
 `success`, `reached`, `placed`, `removed`, and `partial` are not canonical
 failure classes. The taxonomy only decides what to do after a terminal failure
@@ -39,6 +40,7 @@ mapping shapes such as `{ "class": "timed-out" }`,
 | `invalid`, `protected`, `tool-missing`, `bridge_auth_refused`, `bridge_no_token`, `bridge_no_transport`, `bridge_protocol` | `invalid` |
 | `unreachable`, `no-path`, `bridge_unreachable` | `unreachable` |
 | `bridge-down`, `bridge_connect_failed`, `bridge_send_failed` | `bridge-down` |
+| `kill_switch_active`, `kill-switch-active` | `kill-switch-active` |
 | `reached`, `placed`, `removed`, `success`, `partial` | no failure class |
 
 Unknown non-empty labels normalize to `invalid`. Ambiguous failures therefore

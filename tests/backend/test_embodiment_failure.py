@@ -53,6 +53,7 @@ def test_taxonomy_and_policy_are_exact() -> None:
         "invalid",
         "unreachable",
         "bridge-down",
+        "kill-switch-active",
     } == FAILURE_CLASSES
     assert SAFE_FAIL_POLICY == {
         "blocked": "idle",
@@ -61,6 +62,7 @@ def test_taxonomy_and_policy_are_exact() -> None:
         "invalid": "abandon",
         "unreachable": "idle",
         "bridge-down": "abandon",
+        "kill-switch-active": "idle",
     }
 
 
@@ -73,6 +75,7 @@ def test_taxonomy_and_policy_are_exact() -> None:
         ("invalid", "abandon", "abandon", False),
         ("unreachable", "idle", "idle", False),
         ("bridge-down", "abandon", "abandon", False),
+        ("kill-switch-active", "idle", "idle", False),
     ],
 )
 def test_each_failure_class_has_safe_behavior(
@@ -136,6 +139,7 @@ def test_retry_budget_uses_capped_exponential_backoff_defaults() -> None:
         ("invalid", "invalid"),
         ("unreachable", "unreachable"),
         ("bridge-down", "bridge-down"),
+        ("kill_switch_active", "kill-switch-active"),
         ("reached", None),
         ("placed", None),
         ("removed", None),
@@ -158,6 +162,7 @@ def test_classify_normalizes_skill_classes(raw: str, expected: str | None) -> No
         ("bridge_no_token", "invalid"),
         ("bridge_no_transport", "invalid"),
         ("bridge_protocol", "invalid"),
+        ("kill_switch_active", "kill-switch-active"),
     ],
 )
 def test_classify_normalizes_bridge_error_codes(raw: str, expected: str) -> None:
@@ -193,6 +198,7 @@ process.stdout.write(JSON.stringify({{
     invalid: mod.decideSafeFail('protected', 1),
     unreachable: mod.decideSafeFail('bridge_unreachable', 1),
     bridgeDown: mod.decideSafeFail('bridge_connect_failed', 1),
+    killSwitch: mod.decideSafeFail('kill_switch_active', 1),
     timeoutFirst,
     timeoutExhausted,
     nonFailure: mod.classify('placed'),
@@ -207,6 +213,7 @@ process.stdout.write(JSON.stringify({{
         "invalid",
         "unreachable",
         "bridge-down",
+        "kill-switch-active",
     ]
     assert result["policies"] == {
         "blocked": "idle",
@@ -215,12 +222,14 @@ process.stdout.write(JSON.stringify({{
         "invalid": "abandon",
         "unreachable": "idle",
         "bridge-down": "abandon",
+        "kill-switch-active": "idle",
     }
     assert result["blocked"]["action"] == "idle"
     assert result["interrupted"]["action"] == "idle"
     assert result["invalid"]["action"] == "abandon"
     assert result["unreachable"]["action"] == "idle"
     assert result["bridgeDown"]["action"] == "abandon"
+    assert result["killSwitch"]["action"] == "idle"
     assert result["timeoutFirst"]["action"] == "retry"
     assert result["timeoutFirst"]["next_backoff_ms"] == 500
     assert result["timeoutExhausted"]["action"] == "abandon"
@@ -232,6 +241,7 @@ def test_committed_safe_fail_file_and_staging_match_contract() -> None:
     assert "FAILURE_CLASSES" in helper_src
     assert "decideSafeFail" in helper_src
     assert "bridge-overloaded" in helper_src
+    assert "kill-switch-active" in helper_src
     assert "callBridge" not in helper_src
 
     script_src = CONNECT_SCRIPT.read_text()

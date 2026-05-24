@@ -8,7 +8,8 @@ point, proven end to end. E4-5 (#544) adds the resilience policy that keeps a
 [Reconnect, backpressure & safe-idle](#reconnect-backpressure--safe-idle-e4-5)).
 
 > **Issues:** E4-4 ([#543](https://github.com/bradtaylorsf/livestreamtoagi/issues/543)),
-> E4-5 ([#544](https://github.com/bradtaylorsf/livestreamtoagi/issues/544)) (epic E4).
+> E4-5 ([#544](https://github.com/bradtaylorsf/livestreamtoagi/issues/544)) (epic E4),
+> and E11-5 ([#598](https://github.com/bradtaylorsf/livestreamtoagi/issues/598)).
 > **Script:** `scripts/minecraft/connect-bridge-bot.sh` (`pnpm mc:connect-bridge`).
 > **Builds on:** the E4-1 ADR [`docs/decisions/0010-bridge-protocol.md`](../decisions/0010-bridge-protocol.md),
 > the E4-2 contract ([`docs/minecraft/bridge-contract.md`](bridge-contract.md)),
@@ -68,7 +69,7 @@ pinned tree stays clean and re-runnable.
 
 Fixed by ADR [`0010-bridge-protocol.md`](../decisions/0010-bridge-protocol.md)
 and the versioned contract (`core/bridge/contract.py`, E4-2). The client builds
-a contract-valid `BridgeRequest`: `version:"1.7"`, a unique `request_id`,
+a contract-valid `BridgeRequest`: `version:"1.8"`, a unique `request_id`,
 `agent_id`, `run_id`/`simulation_id`, `service`, `method`, `payload`,
 `deadline_ms`, `cost_context:{agent_tier:"conversation",
 budget_bucket:"bridge", estimated_cost_usd:0.0}`, and an additive `trace_id`
@@ -129,11 +130,38 @@ Mindcraft lockfile is frozen).
 - **Reachability accessor.** `bridgeStatus()` / `bridgeIsReachable()` expose the
   circuit state so an action layer can choose to safe-idle *before* it even
   attempts a call.
+- **Kill-switch watcher.** `startKillSwitchWatch()` polls `kill.status` every
+  `MINECRAFT_BRIDGE_KILL_POLL_MS` (default `2000`). `bridgeIsKillActive()`
+  exposes the sticky local cache: once `kill_switch_active` is observed, world
+  verbs safe-idle locally until a successful `kill.status` says inactive.
 
 | Error code | Meaning | Bot behavior |
 | --- | --- | --- |
 | `bridge_unreachable` | Circuit open — Python is down; failing fast (no socket, no deadline). Retryable; the background probe is auto-recovering. | **Safe-idle**, no in-world action. |
 | `bridge_overloaded` | In-flight cap (`MINECRAFT_BRIDGE_MAX_INFLIGHT`) reached — fail-closed backpressure. Retryable once load drops. | **Safe-idle**, no in-world action. |
+| `kill_switch_active` | Operator kill switch is active; the local cache or server gate rejected a world/action verb. Retryable after the switch clears. | **Safe-idle**, no in-world action. |
+
+## Kill-switch propagation (E11-5)
+
+`kill.status` is ungated, as is `bridge.ping`, so bots can keep checking health
+and clear the local cache after an operator deactivates the switch. The
+documented propagation window is:
+
+`MINECRAFT_BRIDGE_KILL_POLL_MS` (default `2000`) + at most one in-flight bridge
+call deadline (`deadline_ms`).
+
+While active, the server gates these verbs:
+
+| Verb | Server behavior while killed |
+| --- | --- |
+| `action.result`, `code.execute`, `errand.complete` | `ok=false`, `error.code="kill_switch_active"`, `retryable=true` |
+| `perception.report` | safe no-op success: `{accepted: true}`; no inbound event is emitted |
+| `errand.poll` | safe-idle success: empty errand payload |
+| `bridge.ping`, `kill.status` | ungated health/state probes |
+
+The Node client also gates the same world/action verbs from the local cache, so
+once the watcher observes the kill switch it does not open new sockets for
+those calls.
 
 ## Observability (E4-7)
 
@@ -141,8 +169,8 @@ Debugging a cross-language 24/7 system needs **correlation**: one request must
 be followable through both the Node logs and the Python logs by a single id.
 E4-7 ([#546](https://github.com/bradtaylorsf/livestreamtoagi/issues/546)) adds
 that with the additive `trace_id` introduced in protocol 1.1 and lightweight
-instrumentation. The current client speaks protocol 1.4, which also includes
-the additive E6-6 perception snapshot definitions. No new npm dependency (the
+instrumentation. The current client speaks protocol 1.8, which also includes
+the additive E6/E7 world verbs, E8.5 director gate, and E11-5 kill status. No new npm dependency (the
 lockfile is frozen): the logger is a stderr write and the metrics are a plain
 module object.
 
@@ -178,12 +206,12 @@ are always on (stderr) and the counters are in-process.
 | `MINECRAFT_BRIDGE_CIRCUIT_THRESHOLD` | no | `3` | Consecutive connect-class failures (`bridge_connect_failed`/`bridge_timeout`) before the circuit opens and calls fail-fast `bridge_unreachable` (E4-5). |
 | `MINECRAFT_BRIDGE_RECONNECT_BASE_MS` | no | `500` | First reconnect-probe backoff while the circuit is open; doubled + jittered per failed probe (E4-5). |
 | `MINECRAFT_BRIDGE_RECONNECT_MAX_MS` | no | `30000` | Reconnect-probe backoff ceiling — the probe never waits longer than this between attempts (E4-5). |
+| `MINECRAFT_BRIDGE_KILL_POLL_MS` | no | `2000` | Kill-switch poll cadence. Active kill state gates world/action verbs locally; propagation window is this value plus one in-flight `deadline_ms`. |
 | `LOCAL_LLM_MODEL` | **yes** (real run) | — | LM Studio conversation-tier model id. |
 | `LOCAL_LLM_MODEL_BUILDING` | no | `= LOCAL_LLM_MODEL` | LM Studio building-tier model id. |
 | `LTAG_RUN_ID` / `LTAG_SIMULATION_ID` / `LTAG_AGENT_ID` | no | `run-local` / zeroed UUID / `bridge-bot` | Attribution defaults for the envelope. |
 
-Both bridge vars are documented in `.env.example`. **Never commit the real
-token.**
+Bridge vars are documented in `.env.example`. **Never commit the real token.**
 
 ## Run the documented command
 
@@ -253,6 +281,7 @@ the LM Studio model id(s) and the commands run in the issue/PR.
 | `bridge ping failed [bridge_timeout]` | Server reachable but did not answer within `deadline_ms` — fail closed, not a hang. |
 | `bridge unavailable, safe-idling [bridge_unreachable]` | Circuit is open — Python is down. Expected, not an error: the bot is safe-idling and the background probe is retrying on backoff. It auto-recovers once the bridge is back; no manual step. If it never recovers, the FastAPI bridge endpoint is still down or `MINECRAFT_BRIDGE_URL` is wrong. |
 | `bridge unavailable, safe-idling [bridge_overloaded]` | More than `MINECRAFT_BRIDGE_MAX_INFLIGHT` concurrent calls — fail-closed backpressure. Transient; raise the cap if it is sustained legitimate load, otherwise it self-clears as in-flight calls settle. |
+| `kill switch active, safe-idling [kill_switch_active]` | Operator kill switch is active. The bot watcher keeps polling `kill.status`, and local action calls resume only after the switch is deactivated. |
 | `bridge ping failed [unsupported_service]` | The verb is not in the ADR §6 closed registry (a server-side typed error, passed through). |
 | Bot kicked “not whitelisted” | `whitelist add BridgeBot` in the E2 console (the script prints this). |
 

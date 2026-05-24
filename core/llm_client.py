@@ -19,12 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from core.exceptions import AgentCostCapExceeded
 from core.models import CostEventCreate, LLMResponse, StreamChunk, ToolCall
 
 if TYPE_CHECKING:
     import uuid
     from collections.abc import AsyncGenerator
 
+    from core.cost_governor import CostGovernor
     from core.repos.cost_repo import CostRepo
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,7 @@ MODEL_NAME_ALIASES = {
     "x-ai/grok-3-mini": "grok-3-mini",
     "x-ai/grok-3": "grok-3",
 }
+OFFLINE_TEST_COST_USD = Decimal("0.0001")
 
 # Canonical models that represent the "building" tier (heavier, JSON-capable).
 # Used by local providers to route reflection/dream calls to a larger local model.
@@ -267,6 +270,7 @@ class OpenRouterClient:
         local_model: str | None = None,
         local_model_building: str | None = None,
         passthrough_model: bool = False,
+        cost_governor: CostGovernor | None = None,
     ) -> None:
         self._provider = _normalize_provider(provider)
         if self._provider == "openrouter":
@@ -290,6 +294,7 @@ class OpenRouterClient:
         )
         self._passthrough_model = passthrough_model
         self._cost_repo = cost_repo
+        self._cost_governor = cost_governor
         self._langfuse = langfuse_client
         self._lost_cost_events: int = 0
         self._last_cost_failure_ts: float | None = None
@@ -435,10 +440,12 @@ class OpenRouterClient:
             simulation_id=simulation_id,
         )
         max_attempts = 4  # 1 initial + 3 retries
+        recorded = False
         for attempt in range(max_attempts):
             try:
                 await self._cost_repo.add_cost(event)
-                return
+                recorded = True
+                break
             except Exception:
                 if attempt < max_attempts - 1:
                     logger.debug(
@@ -459,6 +466,16 @@ class OpenRouterClient:
                         model,
                         agent_id,
                     )
+
+        if recorded and self._cost_governor is not None and agent_id is not None:
+            await self._cost_governor.record_and_check(agent_id, cost)
+
+    async def _raise_if_agent_capped(self, agent_id: str | None) -> None:
+        if self._cost_governor is None or agent_id is None:
+            return
+        allowed, spend, cap = await self._cost_governor.is_allowed(agent_id)
+        if not allowed:
+            raise AgentCostCapExceeded(agent_id, spend, cap)
 
     def diagnostics(self) -> dict[str, Any]:
         """Return cost tracking diagnostics."""
@@ -573,6 +590,7 @@ class OpenRouterClient:
         model_config = self._resolve_model(model)
         runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        await self._raise_if_agent_capped(effective_agent_id)
         payload: dict[str, Any] = {
             "model": runtime_model,
             "messages": messages,
@@ -680,6 +698,7 @@ class OpenRouterClient:
         model_config = self._resolve_model(model)
         runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        await self._raise_if_agent_capped(effective_agent_id)
         payload: dict[str, Any] = {
             "model": runtime_model,
             "messages": messages,
@@ -763,6 +782,165 @@ class OpenRouterClient:
             )
             trace_model = runtime_model if self.is_local_provider else model
             self._trace_langfuse(trace_model, input_tokens, output_tokens, latency_ms, cost)
+
+
+class OfflineTestLLMClient(OpenRouterClient):
+    """Deterministic non-network client for pytest bootstrap without provider credentials."""
+
+    def __init__(
+        self,
+        cost_repo: CostRepo,
+        *,
+        cost_governor: CostGovernor | None = None,
+    ) -> None:
+        self._provider = "offline-test"
+        self._api_key = ""
+        self._base_url = "offline://pytest"
+        self._local_model = "offline-test-model"
+        self._local_model_building = "offline-test-building-model"
+        self._passthrough_model = False
+        self._cost_repo = cost_repo
+        self._cost_governor = cost_governor
+        self._langfuse = None
+        self._lost_cost_events = 0
+        self._last_cost_failure_ts: float | None = None
+        self._total_cost_calls = 0
+        self._simulation_id: uuid.UUID | None = None
+        self._model_fallbacks: list[dict[str, str]] = []
+        self._owns_client = False
+        self._turn_counter = 0
+
+    async def close(self) -> None:
+        return None
+
+    def _estimate_call_cost(
+        self,
+        model_config: ModelConfig,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> Decimal:
+        estimated = estimate_cost(model_config, input_tokens, output_tokens)
+        return max(estimated, OFFLINE_TEST_COST_USD)
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        agent_id: str | None = None,
+        *,
+        timeout: float = 30.0,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        simulation_id: uuid.UUID | None = None,
+    ) -> LLMResponse:
+        _ = (timeout, temperature, tools, tool_choice)
+        model_config = self._resolve_model(model)
+        runtime_model = self.runtime_model_id(model)
+        effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        await self._raise_if_agent_capped(effective_agent_id)
+
+        start = time.monotonic()
+        content = self._content_for(messages, effective_agent_id)
+        if max_tokens is not None:
+            content = " ".join(content.split()[:max_tokens])
+        latency_ms = int((time.monotonic() - start) * 1000)
+        input_tokens = self._count_tokens(messages)
+        output_tokens = max(1, len(content.split()))
+        cost = self._estimate_call_cost(model_config, input_tokens, output_tokens)
+        openrouter_id = f"offline-test-{self._turn_counter}"
+
+        await self._log_cost(
+            effective_agent_id,
+            model,
+            input_tokens,
+            output_tokens,
+            cost,
+            latency_ms,
+            stream=False,
+            openrouter_id=openrouter_id,
+            simulation_id=simulation_id or self._simulation_id,
+            provider=self._provider,
+            runtime_model=runtime_model,
+        )
+
+        return LLMResponse(
+            content=content,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost=cost,
+            latency_ms=latency_ms,
+            openrouter_id=openrouter_id,
+            tool_calls=[],
+        )
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        agent_id: str | None = None,
+        *,
+        timeout: float = 30.0,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        simulation_id: uuid.UUID | None = None,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        response = await self.complete(
+            messages,
+            model,
+            agent_id,
+            timeout=timeout,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            simulation_id=simulation_id,
+        )
+        yield StreamChunk(delta=response.content, finish_reason="stop")
+
+    def _content_for(self, messages: list[dict[str, str]], agent_id: str | None) -> str:
+        self._turn_counter += 1
+        combined = "\n".join(str(m.get("content", "")) for m in messages)
+        lowered = combined.lower()
+
+        if "content moderation classifier" in lowered:
+            return json.dumps(
+                {
+                    "approved": True,
+                    "reason": "offline test client approved deterministic content",
+                    "severity": 1,
+                }
+            )
+        if "extract explicit commitments" in lowered:
+            return "[]"
+        if "respond with only a json object" in lowered and "severity" in lowered:
+            return json.dumps({"approved": True, "reason": "offline test", "severity": 1})
+        if "json" in lowered and "summary" in lowered:
+            return json.dumps(
+                {
+                    "summary": "The agents completed a short deterministic validation exchange.",
+                    "outcomes": ["pipeline validated"],
+                    "learnings": ["offline bootstrap can record cost and memory events"],
+                }
+            )
+        if "summary" in lowered or "summarize" in lowered or "journal" in lowered:
+            return (
+                "The exchange stayed focused on validating the pipeline, recording a "
+                "concrete next step, and preserving enough context for recall."
+            )
+
+        name = agent_id or "agent"
+        return (
+            f"{name} advances the test conversation on turn {self._turn_counter}, "
+            "names one concrete next step, and leaves room for the other participant to respond."
+        )
+
+    @staticmethod
+    def _count_tokens(messages: list[dict[str, str]]) -> int:
+        return max(
+            1,
+            sum(len(str(message.get("content", "")).split()) for message in messages),
+        )
 
 
 LLMClient = OpenRouterClient

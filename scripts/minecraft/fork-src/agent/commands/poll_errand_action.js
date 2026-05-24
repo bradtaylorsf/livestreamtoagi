@@ -6,7 +6,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
 const ALPHA_AGENT_ID = 'alpha';
@@ -29,6 +34,12 @@ export const pollErrandAction = {
     params: {},
     perform: async function (_agent) {
         const traceId = `trace-${randomUUID()}`;
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const idle = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(traceId, idle, true);
+            return idle;
+        }
 
         try {
             const response = await callBridge({
@@ -55,7 +66,11 @@ export const pollErrandAction = {
             return line;
         } catch (err) {
             const code = err instanceof BridgeClientError ? err.code : 'bridge_unknown';
-            if (code === 'bridge_unreachable' || code === 'bridge_overloaded') {
+            if (
+                code === 'bridge_unreachable' ||
+                code === 'bridge_overloaded' ||
+                code === 'kill_switch_active'
+            ) {
                 const idle = bridgeErrorLine('bridge unavailable, safe-idling', err);
                 announce(traceId, idle, true);
                 return idle;
@@ -68,4 +83,3 @@ export const pollErrandAction = {
 };
 
 export default pollErrandAction;
-

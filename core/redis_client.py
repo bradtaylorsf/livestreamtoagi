@@ -4,20 +4,47 @@ import asyncio
 import logging
 import os
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import redis.asyncio as aioredis
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_REDIS_URL = "redis://localhost:6381"
+LOCAL_REDIS_HOSTS = {"localhost", "127.0.0.1", "::1"}
+LOCAL_DEV_REDIS_PORT = 6381
+LOCAL_DEV_REDIS_PASSWORD = "devpassword"
+
+
+def _with_configured_password(url: str) -> str:
+    """Fill in the documented local Redis password when callers pass the bare dev URL."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"redis", "rediss"} or parsed.password is not None:
+        return url
+
+    password = os.getenv("REDIS_PASSWORD", "").strip()
+    if not password and parsed.hostname in LOCAL_REDIS_HOSTS:
+        port = parsed.port or 6379
+        if port == LOCAL_DEV_REDIS_PORT:
+            password = LOCAL_DEV_REDIS_PASSWORD
+    if not password:
+        return url
+
+    username = quote(parsed.username, safe="") if parsed.username else ""
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{username}:{quote(password, safe='')}@{host}"
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 class RedisClient:
     """Wraps redis.asyncio with lifecycle management and convenience methods."""
 
     def __init__(self, url: str | None = None) -> None:
-        self.url = url or os.getenv("REDIS_URL", DEFAULT_REDIS_URL)
+        self.url = _with_configured_password(url or os.getenv("REDIS_URL", DEFAULT_REDIS_URL))
         self._client: aioredis.Redis | None = None
 
     @property
@@ -63,8 +90,17 @@ class RedisClient:
     async def get(self, key: str) -> str | None:
         return await self.client.get(key)
 
-    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
-        return await self.client.set(key, value, ex=ex)
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        if nx:
+            return bool(await self.client.set(key, value, ex=ex, nx=True))
+        return bool(await self.client.set(key, value, ex=ex))
 
     async def delete(self, *keys: str) -> int:
         return await self.client.delete(*keys)

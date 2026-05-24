@@ -136,6 +136,12 @@ async def run_simulation(args: argparse.Namespace) -> None:
     if args.duration:
         duration = parse_duration(args.duration)
 
+    rolling_window = None
+    if args.rolling_window:
+        rolling_window = parse_duration(args.rolling_window)
+        if rolling_window.total_seconds() <= 0:
+            raise ValueError("--rolling-window must be greater than zero")
+
     # Build memory_seed config from CLI flags or public run config.
     memory_seed_cfg = _memory_seed_from_run_config(args, run_config)
 
@@ -145,6 +151,8 @@ async def run_simulation(args: argparse.Namespace) -> None:
         seed_file=args.seed_file,
         agents=agents,
         max_cost=args.max_cost,
+        max_cost_rolling=args.max_cost_rolling,
+        rolling_window=rolling_window,
         speed=args.speed,
         speed_multiplier=args.speed_multiplier,
         duration=duration,
@@ -343,6 +351,24 @@ def main() -> None:
         help="Maximum cost in dollars before stopping (default: 10.00)",
     )
     parser.add_argument(
+        "--max-cost-rolling",
+        type=float,
+        default=None,
+        help=(
+            "Maximum cost in dollars within --rolling-window before stopping "
+            "(default: off)"
+        ),
+    )
+    parser.add_argument(
+        "--rolling-window",
+        type=str,
+        default=None,
+        help=(
+            "Rolling cost window for --max-cost-rolling, e.g. '1h' or '24h' "
+            "(default: off)"
+        ),
+    )
+    parser.add_argument(
         "--speed",
         type=str,
         choices=["fast", "normal"],
@@ -464,6 +490,10 @@ def main() -> None:
     args = parser.parse_args()
     if not args.seed_file and not args.duration:
         parser.error("Either --seed-file or --duration must be provided")
+    if (args.max_cost_rolling is None) != (args.rolling_window is None):
+        parser.error("--max-cost-rolling and --rolling-window must be provided together")
+    if args.max_cost_rolling is not None and args.max_cost_rolling < 0:
+        parser.error("--max-cost-rolling cannot be negative")
 
     # Warn about instant-mode + duration: in instant mode (speed_multiplier=0),
     # simulated time only advances by wall-clock conversation duration, so a

@@ -7,7 +7,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 
 const DEFAULT_CODE_DEADLINE_MS = 35000;
 const DEADLINE_GRACE_MS = 5000;
@@ -74,6 +79,12 @@ export const executeCodeAction = {
         };
         const timeoutSeconds = positiveInteger(timeout);
         if (timeoutSeconds !== null) payload.timeout = timeoutSeconds;
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const line = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(agent, traceId, line, true);
+            return line;
+        }
 
         try {
             const response = await callBridge({
@@ -101,7 +112,11 @@ export const executeCodeAction = {
         } catch (err) {
             const codeValue = bridgeErrorCode(err);
             const detail = bridgeErrorDetail(err);
-            if (codeValue === 'bridge_unreachable' || codeValue === 'bridge_overloaded') {
+            if (
+                codeValue === 'bridge_unreachable' ||
+                codeValue === 'bridge_overloaded' ||
+                codeValue === 'kill_switch_active'
+            ) {
                 const line = `bridge unavailable, safe-idling [${codeValue}]: ${detail}`;
                 announce(agent, traceId, line, true);
                 return line;

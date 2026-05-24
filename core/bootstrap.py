@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import sys
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -24,10 +27,16 @@ from core.characters.voting import VotingManager
 from core.config_loader import ConfigLoader
 from core.constants import LIVE_SIMULATION_ID
 from core.context_assembly import ContextAssembler
+from core.cost_governor import CostGovernor
 from core.database import Database
-from core.event_bus import EventBus
+from core.event_bus import EventBus, EventType
 from core.events.event_generator import EventGenerator
-from core.llm_client import LOCAL_LLM_BASE_URL, OpenRouterClient, refresh_pricing
+from core.llm_client import (
+    LOCAL_LLM_BASE_URL,
+    OfflineTestLLMClient,
+    OpenRouterClient,
+    refresh_pricing,
+)
 from core.management import Management
 from core.memory.archival_memory import ArchivalMemoryManager
 from core.memory.backend import MemoryBackend, select_memory_backend
@@ -36,6 +45,7 @@ from core.memory.core_memory import CoreMemoryManager
 from core.memory.dreams import DreamManager
 from core.memory.recall_memory import RecallMemoryManager
 from core.memory.token_counter import TokenCounter
+from core.notifications.spend_kill_alerts import SpendAlertNotifier
 from core.redis_client import RedisClient
 from core.redis_keys import ScopedRedis
 from core.repos.alliance_repo import AllianceRepo
@@ -56,6 +66,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EmbeddingFn = Callable[[str], Coroutine[Any, Any, list[float]]]
+AGENT_HOURLY_CAP_ENV = "AGENT_HOURLY_CAP_USD"
+DEFAULT_AGENT_HOURLY_CAP_USD = Decimal("2.00")
 
 
 @dataclass
@@ -118,7 +130,9 @@ class Services:
     transcript_repo: TranscriptRepo | None
     event_bus: EventBus
     management: Management | None
+    spend_alert_notifier: SpendAlertNotifier | None
     cost_repo: CostRepo | None
+    cost_governor: CostGovernor | None
     artifact_repo: ArtifactRepo | None
     world_repo: WorldRepo | None
     relationship_repo: RelationshipRepo | None
@@ -178,6 +192,7 @@ def make_llm_client(
     *,
     cost_repo: CostRepo,
     http_client: httpx.AsyncClient | None = None,
+    cost_governor: CostGovernor | None = None,
 ) -> OpenRouterClient:
     """Create the configured chat LLM client.
 
@@ -190,11 +205,21 @@ def make_llm_client(
     provider_key = provider.strip().lower()
     if provider_key == "openrouter":
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not api_key.strip() and _allow_offline_test_llm():
+            logger.warning(
+                "OPENROUTER_API_KEY is unset during integration tests; "
+                "using deterministic offline LLM client"
+            )
+            return OfflineTestLLMClient(
+                cost_repo=cost_repo,
+                cost_governor=cost_governor,
+            )
         return OpenRouterClient(
             api_key=api_key,
             cost_repo=cost_repo,
             http_client=http_client,
             provider="openrouter",
+            cost_governor=cost_governor,
         )
 
     api_key = os.environ.get(
@@ -221,7 +246,45 @@ def make_llm_client(
         local_model=local_model,
         local_model_building=local_model_building,
         passthrough_model=passthrough,
+        cost_governor=cost_governor,
     )
+
+
+def _allow_offline_test_llm() -> bool:
+    if os.environ.get("ENV", "development").strip().lower() == "production":
+        return False
+    if os.environ.get("ALLOW_OFFLINE_TEST_LLM", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
+    return "tests/integration/" in current_test or (
+        "pytest" in sys.modules and os.environ.get("PYTEST_INTEGRATION_OFFLINE_LLM") == "1"
+    )
+
+
+def _parse_usd_cap_env(raw: str | None, *, key: str) -> Decimal | None:
+    if raw is None:
+        return None
+    value = raw.strip()
+    if value == "" or value.lower() in {"none", "off", "disabled"}:
+        return None
+    try:
+        return Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{key} must be a decimal USD amount, got {raw!r}") from exc
+
+
+def _agent_cap_env_key(agent_id: str) -> str:
+    env_agent_id = re.sub(r"[^A-Z0-9]", "_", agent_id.upper())
+    return f"{AGENT_HOURLY_CAP_ENV}_{env_agent_id}"
+
+
+def _per_agent_caps_from_env(agent_ids: list[str]) -> dict[str, Decimal | None]:
+    caps: dict[str, Decimal | None] = {}
+    for agent_id in agent_ids:
+        key = _agent_cap_env_key(agent_id)
+        if key in os.environ:
+            caps[agent_id] = _parse_usd_cap_env(os.environ.get(key), key=key)
+    return caps
 
 
 async def bootstrap_services(
@@ -282,9 +345,26 @@ async def bootstrap_services(
     http_client = httpx.AsyncClient()
 
     provider = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
-    if provider == "openrouter":
+    if provider == "openrouter" and (api_key.strip() or not _allow_offline_test_llm()):
         await refresh_pricing(http_client)
-    llm_client = make_llm_client(cost_repo=cost_repo)
+
+    from core.event_bus import event_bus as _module_event_bus
+
+    all_agent_ids = [a.id for a in agent_registry.get_all_agents()]
+    spend_alert_notifier = SpendAlertNotifier(redis_client=scoped_redis)
+    default_agent_cap = _parse_usd_cap_env(
+        os.environ.get(AGENT_HOURLY_CAP_ENV, str(DEFAULT_AGENT_HOURLY_CAP_USD)),
+        key=AGENT_HOURLY_CAP_ENV,
+    )
+    cost_governor = CostGovernor(
+        cost_repo,
+        redis_client,
+        default_hourly_cap_usd=default_agent_cap,
+        per_agent_caps_usd=_per_agent_caps_from_env(all_agent_ids),
+        event_bus=_module_event_bus,
+        alert_threshold_pct=str(spend_alert_notifier.threshold_pct),
+    )
+    llm_client = make_llm_client(cost_repo=cost_repo, cost_governor=cost_governor)
     embedding_fn = make_embedding_fn(http_client, api_key)
     core_memory = CoreMemoryManager(memory_repo=memory_repo, token_counter=token_counter)
     recall_memory = RecallMemoryManager(
@@ -306,13 +386,13 @@ async def bootstrap_services(
         simulation_id=LIVE_SIMULATION_ID,
     )
 
-    from core.event_bus import event_bus as _module_event_bus
-
     management = Management(
         redis_client=scoped_redis,
+        global_redis_client=redis_client,
         llm_client=llm_client,
         event_bus=_module_event_bus,
     )
+    _module_event_bus.on(EventType.BUDGET_UPDATE, spend_alert_notifier.on_budget_update)
 
     # Inject config_version_repo into config_loader for DB-backed config
     config_loader._config_repo = config_version_repo
@@ -334,7 +414,7 @@ async def bootstrap_services(
 
     # Initialize economy accounts — exclude management and alpha (non-participant agents)
     economy_excluded = {"management", "alpha"}
-    agent_ids = [a.id for a in agent_registry.get_all_agents() if a.id not in economy_excluded]
+    agent_ids = [agent_id for agent_id in all_agent_ids if agent_id not in economy_excluded]
     if agent_ids:
         try:
             await economy_manager.initialize_accounts(agent_ids)
@@ -416,7 +496,9 @@ async def bootstrap_services(
         transcript_repo=transcript_repo,
         event_bus=_module_event_bus,
         management=management,
+        spend_alert_notifier=spend_alert_notifier,
         cost_repo=cost_repo,
+        cost_governor=cost_governor,
         artifact_repo=artifact_repo,
         world_repo=world_repo,
         relationship_repo=relationship_repo,
@@ -488,7 +570,9 @@ async def _bootstrap_dry_run(
         transcript_repo=None,
         event_bus=EventBus(),
         management=None,
+        spend_alert_notifier=None,
         cost_repo=None,
+        cost_governor=None,
         artifact_repo=None,
         world_repo=None,
         relationship_repo=None,
@@ -509,6 +593,11 @@ async def _bootstrap_dry_run(
 
 async def shutdown_services(services: Services) -> None:
     """Gracefully shut down all connected services."""
+    if services.spend_alert_notifier:
+        services.event_bus.off(
+            EventType.BUDGET_UPDATE,
+            services.spend_alert_notifier.on_budget_update,
+        )
     if services.llm_client:
         await services.llm_client.close()
     if services.http_client:

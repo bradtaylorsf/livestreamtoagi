@@ -6,7 +6,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BridgeClientError, callBridge } from '../bridge/python_bridge.js';
+import {
+    BridgeClientError,
+    bridgeIsKillActive,
+    callBridge,
+    startKillSwitchWatch,
+} from '../bridge/python_bridge.js';
 import {
     DEFAULT_RADIUS_BLOCKS,
     inventorySnapshot,
@@ -129,6 +134,12 @@ export const observeAction = {
         const radius = positiveNumber(radius_blocks, DEFAULT_RADIUS_BLOCKS);
         const requestedScope = normalizedScope(scope);
         const includeAir = bool(include_air);
+        await startKillSwitchWatch();
+        if (bridgeIsKillActive()) {
+            const line = 'kill switch active, safe-idling [kill_switch_active]';
+            announce(agent, traceId, line, true);
+            return line;
+        }
 
         try {
             await ensureBridge(agent, traceId);

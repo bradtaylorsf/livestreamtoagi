@@ -46,12 +46,13 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.7"` (E4-7 added the optional `trace_id`, E5-1 added
+`PROTOCOL_VERSION = "1.8"` (E4-7 added the optional `trace_id`, E5-1 added
 optional core-memory fields, E6-5 added `code.execute`, E6-6 added typed
 perception snapshot definitions, E7-2 added `errand.poll`, and E7-3 added
-`errand.complete`, and E8.5-4 added `director.gate`; all are additive minor
-bumps). Same-major versions are wire-compatible in either direction (new
-fields/verbs are additive). An unknown *major* — or any
+`errand.complete`, E8.5-4 added `director.gate`, and E11-5 added
+`kill.status`; all are additive minor bumps). Same-major versions are
+wire-compatible in either direction (new fields/verbs are additive). An unknown
+*major* — or any
 unparseable version — is **not
 supported**; the server replies with the exact ADR §3 shape
 (`unsupported_version_response`): `ok=false`,
@@ -73,6 +74,7 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `memory.write` | Node→Python | `{content, kind, metadata}` → `{memory_id}` (idempotent on `request_id`) |
 | `management.review` | Node→Python | `{agent_id, text, context}` → `{verdict, reason, sanitized_text}` |
 | `cost.gate` | Node→Python | `{agent_id, action, estimated_cost_usd}` → `{allowed, reason, remaining_budget_usd}` |
+| `kill.status` | Node→Python | `{}` → `{active, ttl_seconds?, reason?}` |
 | `perception.report` | Node→Python | `{observations[]}` → `{accepted}`; observations may include a typed `PerceptionSnapshot` |
 | `action.result` | Node→Python | `{action_id, status, outcome_class?, detail}` → `{accepted}` |
 | `errand.poll` | Node→Python | `{agent_id}` → `{task_id?, task?, from_agent?, dispatched_at_ms?, urgency?}` |
@@ -83,9 +85,24 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 **Naming reconciliation:** issue #541's scope text says `memory.read`; ADR §6
 (authoritative) calls the same verb `memory.recall`. The contract uses
 `memory.recall` everywhere so the split is *closed*, not carried forward.
-`cost.reserve`, `journal.event`, and `kill.status` are named in ADR §6 but
-their schemas land with their owning issues — out of the current bridge
-registry.
+`cost.reserve` and `journal.event` are named in ADR §6 but their schemas land
+with their owning issues — out of the current bridge registry.
+
+## Kill switch gating (E11-5)
+
+`kill.status` and `bridge.ping` stay ungated so bots can keep probing health and
+state while the operator kill switch is active. The world/action verbs are
+gated by the Python server and mirrored by the Node client's local cache:
+
+| Verb | Active kill-switch behavior |
+| --- | --- |
+| `action.result`, `code.execute`, `errand.complete` | `ok=false`, `error.code="kill_switch_active"`, `retryable=true` |
+| `perception.report` | safe no-op success (`{accepted: true}`) and no inbound event emit |
+| `errand.poll` | safe-idle success with no task |
+
+The documented Node propagation window is
+`MINECRAFT_BRIDGE_KILL_POLL_MS` (default 2 seconds) plus at most one in-flight
+bridge `deadline_ms`.
 
 ## Perception Snapshot (E6-6)
 

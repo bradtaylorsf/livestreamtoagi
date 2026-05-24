@@ -81,6 +81,11 @@ export class BridgeClientError extends Error {
     }
 }
 
+export function startKillSwitchWatch() {}
+export function bridgeIsKillActive() {
+    return process.env.BRIDGE_KILL_ACTIVE === '1';
+}
+
 export async function callBridge(opts = {}) {
     appendFileSync(process.env.BRIDGE_CALLS_PATH, JSON.stringify(opts) + '\\n');
     if (opts.service === 'errand' && opts.method === 'poll') {
@@ -336,8 +341,8 @@ def test_connect_alpha_stages_and_injects_run_errand_action(tmp_path: Path) -> N
 
 
 def test_protocol_version_bumped_on_python_and_node_sides() -> None:
-    assert c.PROTOCOL_VERSION == "1.7"
-    assert "PROTOCOL_VERSION = '1.7'" in BRIDGE_CLIENT.read_text()
+    assert c.PROTOCOL_VERSION == "1.8"
+    assert "PROTOCOL_VERSION = '1.8'" in BRIDGE_CLIENT.read_text()
 
 
 def test_package_json_wires_alpha_errand_verifiers() -> None:

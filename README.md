@@ -187,11 +187,20 @@ EMBEDDING_PROVIDER=deterministic \
   --agents vera,rex,aurora,pixel \
   --max-cost 0.01 \
   --verbose
+
+# Persistent/autonomous runs can also enforce a rolling spend ceiling:
+#   --max-cost-rolling 0.01 --rolling-window 1h
+
+python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
 ```
 
 See [Minecraft Command Eval](docs/minecraft/command-eval.md) and the
 [Minecraft runbook](docs/minecraft/runbook.md) for the current embodiment
 workflow.
+
+Operator spend-cap and kill-switch alerts use the same email pipeline. Set
+`ALERT_EMAIL` for the operator inbox and `SPEND_ALERT_THRESHOLD_PCT` (default
+`0.8`) to choose when cap-approach alerts fire.
 
 ## Testing
 

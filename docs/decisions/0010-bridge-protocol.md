@@ -155,6 +155,14 @@ shape with a `service`/`method` the bot understands; the bot replies with the
   before the deadline, the bot must **not** publish agent speech to the
   livestream and must **not** proceed with the gated in-world action. A bridge
   failure degrades to silence/no-op, never to unfiltered or unbudgeted output.
+- **Operator kill switch.** `kill.status` and `bridge.ping` remain ungated
+  health/state probes. While the global kill switch is active,
+  `action.result`, `code.execute`, and `errand.complete` fail closed with
+  `error.code="kill_switch_active"` and `retryable=true`; `perception.report`
+  and `errand.poll` return safe-idle success payloads. Node bots poll
+  `kill.status` every `MINECRAFT_BRIDGE_KILL_POLL_MS` (default 2 seconds), so
+  the documented stop window is that poll interval plus at most one in-flight
+  `deadline_ms`.
 - **Reconnect & backpressure deferred.** Connection loss, reconnect/backoff,
   heartbeat, and queue/backpressure policy are explicitly **out of scope for
   this ADR and owned by E4-4** (and E4-5/E4-6 for the result channel). The

@@ -50,6 +50,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -62,6 +63,7 @@ from core.bridge.contract import (
     ERR_UNSUPPORTED_SERVICE,
     BridgeRequest,
     BridgeResponse,
+    CostGateRequest,
     ErrandCompleteRequest,
     ErrandPollRequest,
     MemoryRecallRequest,
@@ -79,6 +81,7 @@ from core.bridge.handlers.director import handle_director_gate
 from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.management import handle_management_review
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
+from core.redis_keys import KILL_SWITCH_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +116,6 @@ ERR_MANAGEMENT_SERVICE_UNAVAILABLE = "management_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 ERR_DIRECTOR_GATE_UNAVAILABLE = "director_gate_unavailable"
 ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
-KILL_SWITCH_KEY = "kill_switch"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 MANAGEMENT_REVIEW_VERBS = frozenset({"management.review"})
@@ -122,6 +124,11 @@ DIRECTOR_GATE_VERBS = frozenset({"director.gate"})
 ERRAND_POLL_VERBS = frozenset({"errand.poll"})
 ERRAND_COMPLETE_VERBS = frozenset({"errand.complete"})
 ERRAND_VERBS = ERRAND_POLL_VERBS | ERRAND_COMPLETE_VERBS
+COST_GATE_VERBS = frozenset({"cost.gate"})
+KILL_STATUS_VERBS = frozenset({"kill.status"})
+WORLD_ACTION_ERROR_VERBS = frozenset({"action.result", "code.execute", "errand.complete"})
+WORLD_ACTION_SAFE_IDLE_VERBS = frozenset({"perception.report", "errand.poll"})
+WORLD_ACTION_VERBS = WORLD_ACTION_ERROR_VERBS | WORLD_ACTION_SAFE_IDLE_VERBS
 
 
 # ── Stub dispatch table (no business logic — E5/E8 own the real wiring) ──────
@@ -334,13 +341,60 @@ async def _kill_switch_active(services: Any | None) -> bool:
     if redis is None:
         return False
     try:
-        return await redis.get(KILL_SWITCH_KEY) == "active"
+        raw = await redis.get(KILL_SWITCH_KEY)
+        return raw == "active" or raw == b"active"
     except Exception:
         logger.warning(
-            "Bridge kill-switch lookup failed; treating Alpha errand gate as active",
+            "Bridge kill-switch lookup failed; treating world action gate as active",
             exc_info=True,
         )
         return True
+
+
+async def _kill_switch_ttl(redis: Any) -> int | None:
+    """Best-effort Redis TTL lookup for the global kill switch key."""
+    ttl_fn = getattr(redis, "ttl", None)
+    if callable(ttl_fn):
+        raw = await ttl_fn(KILL_SWITCH_KEY)
+    else:
+        client = getattr(redis, "client", None)
+        client_ttl = getattr(client, "ttl", None)
+        if not callable(client_ttl):
+            return None
+        raw = await client_ttl(KILL_SWITCH_KEY)
+
+    if isinstance(raw, int) and raw >= 0:
+        return raw
+    return None
+
+
+async def _handle_kill_status(env: BridgeRequest, services: Any | None) -> dict[str, Any]:
+    """Return current global kill-switch state without applying the kill gate."""
+    del env
+    if services is None:
+        return {"active": False, "ttl_seconds": None, "reason": None}
+    redis = getattr(services, "redis", None)
+    if redis is None:
+        return {"active": False, "ttl_seconds": None, "reason": None}
+    try:
+        raw = await redis.get(KILL_SWITCH_KEY)
+        active = raw == "active" or raw == b"active"
+        ttl_seconds = await _kill_switch_ttl(redis)
+    except Exception:
+        logger.warning(
+            "Bridge kill-switch status lookup failed; reporting fail-safe active",
+            exc_info=True,
+        )
+        return {
+            "active": True,
+            "ttl_seconds": None,
+            "reason": "kill_switch_lookup_failed",
+        }
+    return {
+        "active": active,
+        "ttl_seconds": ttl_seconds if active else None,
+        "reason": "kill_switch_active" if active else None,
+    }
 
 
 def _errand_payload(errand: Errand | None) -> dict[str, Any]:
@@ -378,6 +432,36 @@ def _handle_errand_complete(env: BridgeRequest) -> dict[str, Any]:
     return {"accepted": True}
 
 
+async def _handle_cost_gate(env: BridgeRequest, services: Any | None) -> dict[str, Any]:
+    payload = CostGateRequest.model_validate(env.payload)
+    governor = getattr(services, "cost_governor", None) if services is not None else None
+    if governor is None:
+        logger.warning("Bridge cost.gate served by stub because CostGovernor is unavailable")
+        return STUB_HANDLERS["cost.gate"](env)
+
+    try:
+        allowed, spend, cap = await governor.is_allowed(payload.agent_id)
+    except Exception:
+        logger.warning(
+            "Bridge cost.gate failed closed for agent=%s action=%s",
+            payload.agent_id,
+            payload.action,
+            exc_info=True,
+        )
+        return {
+            "allowed": False,
+            "reason": "cost_governor_error",
+            "remaining_budget_usd": 0.0,
+        }
+
+    remaining = max(cap - spend, Decimal("0"))
+    return {
+        "allowed": allowed,
+        "reason": "ok" if allowed else "agent_hourly_cap_exceeded",
+        "remaining_budget_usd": float(remaining),
+    }
+
+
 def _errand_poll_targets_alpha(env: BridgeRequest) -> bool:
     payload = ErrandPollRequest.model_validate(env.payload)
     return env.agent_id == "alpha" or payload.agent_id == "alpha"
@@ -402,6 +486,11 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
 
     env = validated
     key = service_key(env.service, env.method)
+    if key in KILL_STATUS_VERBS:
+        return _success_response(
+            env,
+            {"active": False, "ttl_seconds": None, "reason": None},
+        )
     if key in MEMORY_HANDLER_VERBS | MEMORY_WRITE_VERBS:
         return make_error_response(
             env.request_id,
@@ -449,6 +538,20 @@ async def build_bridge_response_with_services(
 
     env = validated
     key = service_key(env.service, env.method)
+    if key in KILL_STATUS_VERBS:
+        return _success_response(env, await _handle_kill_status(env, services))
+
+    if key in WORLD_ACTION_VERBS and await _kill_switch_active(services):
+        if key in WORLD_ACTION_SAFE_IDLE_VERBS:
+            payload = {"accepted": True} if key == "perception.report" else _errand_payload(None)
+            return _success_response(env, payload)
+        return make_error_response(
+            env.request_id,
+            ERR_KILL_SWITCH_ACTIVE,
+            f"kill switch active; bridge world action {key} is paused",
+            retryable=True,
+        )
+
     if key in MEMORY_HANDLER_VERBS:
         unavailable = _memory_services_unavailable(env, services)
         if unavailable is not None:
@@ -479,19 +582,12 @@ async def build_bridge_response_with_services(
 
     if key in DIRECTOR_GATE_VERBS:
         return _success_response(env, await handle_director_gate(env, services))
+    if key in COST_GATE_VERBS:
+        return _success_response(env, await _handle_cost_gate(env, services))
 
     if key in ERRAND_POLL_VERBS:
-        if _errand_poll_targets_alpha(env) and await _kill_switch_active(services):
-            return _success_response(env, _errand_payload(None))
         return _success_response(env, _handle_errand_poll(env))
     if key in ERRAND_COMPLETE_VERBS:
-        if _errand_complete_targets_alpha(env) and await _kill_switch_active(services):
-            return make_error_response(
-                env.request_id,
-                ERR_KILL_SWITCH_ACTIVE,
-                "kill switch active; Alpha errand completion is paused",
-                retryable=True,
-            )
         return _success_response(env, await handle_errand_complete(env, services))
 
     return _success_response(env, STUB_HANDLERS[key](env))
@@ -560,10 +656,8 @@ async def bridge_ws(websocket: WebSocket) -> None:
                 )
             else:
                 started = time.perf_counter()
-                response = await build_bridge_response_with_services(
-                    raw,
-                    _services_from_websocket(websocket),
-                )
+                services = _services_from_websocket(websocket)
+                response = await build_bridge_response_with_services(raw, services)
 
             # E4-7 (#546): one correlation id per frame. Echo the caller's
             # trace_id, or mint one when the (additive) field is absent, so the
@@ -579,13 +673,16 @@ async def bridge_ws(websocket: WebSocket) -> None:
             # verb — the envelope and payload are then guaranteed already
             # validated. The resolved trace_id rides along so the emitted bus
             # event joins the same correlation id (E4-7).
-            if (
-                response.ok
-                and isinstance(raw, dict)
-                and service_key(raw.get("service", ""), raw.get("method", ""))
-                in inbound.INBOUND_VERBS
-            ):
-                await inbound.dispatch_inbound(BridgeRequest.model_validate(raw), trace_id=trace_id)
+            if response.ok and isinstance(raw, dict):
+                inbound_key = service_key(raw.get("service", ""), raw.get("method", ""))
+                if inbound_key in inbound.INBOUND_VERBS and not (
+                    inbound_key in WORLD_ACTION_SAFE_IDLE_VERBS
+                    and await _kill_switch_active(services)
+                ):
+                    await inbound.dispatch_inbound(
+                        BridgeRequest.model_validate(raw),
+                        trace_id=trace_id,
+                    )
 
             # E4-7 (#546): observe + correlate EVERY settled frame — success,
             # ok=false, and the unparseable path alike — so the counters'
@@ -629,6 +726,7 @@ def _assert_handlers_cover_registry() -> None:
         | CODE_EXECUTE_VERBS
         | DIRECTOR_GATE_VERBS
         | ERRAND_VERBS
+        | KILL_STATUS_VERBS
     )
     missing = set(SERVICE_REGISTRY) - handled
     extra = handled - set(SERVICE_REGISTRY)

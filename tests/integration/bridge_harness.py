@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -42,6 +43,47 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_CLIENT = (
     REPO_ROOT / "scripts" / "minecraft" / "fork-src" / "agent" / "bridge" / "python_bridge.js"
 )
+
+
+class InMemoryKillSwitchRedis:
+    """Tiny async Redis subset for bridge kill-switch harnesses."""
+
+    def __init__(self, *, active: bool = False, ttl_seconds: int | None = None) -> None:
+        self._value: str | None = "active" if active else None
+        self._ttl_seconds = ttl_seconds
+
+    async def get(self, key: str) -> str | None:
+        if key != "kill_switch":
+            return None
+        return self._value
+
+    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
+        if key == "kill_switch":
+            self._value = value
+            self._ttl_seconds = ex
+        return True
+
+    async def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if key == "kill_switch" and self._value is not None:
+                self._value = None
+                self._ttl_seconds = None
+                removed += 1
+        return removed
+
+    async def ttl(self, key: str) -> int:
+        if key != "kill_switch" or self._value is None:
+            return -2
+        return self._ttl_seconds if self._ttl_seconds is not None else -1
+
+    def activate(self, *, ttl_seconds: int | None = 60) -> None:
+        self._value = "active"
+        self._ttl_seconds = ttl_seconds
+
+    def deactivate(self) -> None:
+        self._value = None
+        self._ttl_seconds = None
 
 
 def make_bridge_request(
@@ -86,8 +128,9 @@ class FakeNodeBridgeClient:
     calls without booting uvicorn or Minecraft.
     """
 
-    def __init__(self, *, token: str = DEFAULT_TOKEN) -> None:
+    def __init__(self, *, token: str = DEFAULT_TOKEN, kill_switch_active: bool = False) -> None:
         self.token = token
+        self.redis = InMemoryKillSwitchRedis(active=kill_switch_active, ttl_seconds=60)
         self._previous_token: str | None = None
         self._client: TestClient | None = None
 
@@ -96,6 +139,7 @@ class FakeNodeBridgeClient:
         os.environ[BRIDGE_TOKEN_ENV] = self.token
         app = FastAPI()
         app.include_router(bridge_router)
+        app.state.services = SimpleNamespace(redis=self.redis)
         self._client = TestClient(app)
         return self
 
@@ -136,6 +180,12 @@ class FakeNodeBridgeClient:
             ws.send_json(frame)
             return ws.receive_json()
 
+    def activate_kill_switch(self, *, ttl_seconds: int | None = 60) -> None:
+        self.redis.activate(ttl_seconds=ttl_seconds)
+
+    def deactivate_kill_switch(self) -> None:
+        self.redis.deactivate()
+
 
 def free_local_port() -> int:
     """Return an available localhost TCP port."""
@@ -155,10 +205,17 @@ class FakePythonBridgeServer:
     and token can be fed directly into a Node subprocess.
     """
 
-    def __init__(self, *, token: str = DEFAULT_TOKEN, port: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        token: str = DEFAULT_TOKEN,
+        port: int | None = None,
+        kill_switch_active: bool = False,
+    ) -> None:
         self.token = token
         self.port = port or free_local_port()
         self.url = f"ws://127.0.0.1:{self.port}{BRIDGE_WS_PATH}"
+        self.redis = InMemoryKillSwitchRedis(active=kill_switch_active, ttl_seconds=60)
         self._previous_token: str | None = None
         self._server: Any = None
         self._thread: threading.Thread | None = None
@@ -171,6 +228,7 @@ class FakePythonBridgeServer:
 
         app = FastAPI()
         app.include_router(bridge_router)
+        app.state.services = SimpleNamespace(redis=self.redis)
 
         class _Server(uvicorn.Server):
             def install_signal_handlers(self) -> None:
@@ -198,6 +256,12 @@ class FakePythonBridgeServer:
             os.environ.pop(BRIDGE_TOKEN_ENV, None)
         else:
             os.environ[BRIDGE_TOKEN_ENV] = self._previous_token
+
+    def activate_kill_switch(self, *, ttl_seconds: int | None = 60) -> None:
+        self.redis.activate(ttl_seconds=ttl_seconds)
+
+    def deactivate_kill_switch(self) -> None:
+        self.redis.deactivate()
 
     def node_env(self) -> dict[str, str]:
         """Environment values a Node bridge client needs to reach this fake."""
@@ -361,10 +425,13 @@ const mod = await import(pathToFileURL(process.env.BRIDGE_MODULE).href);
 const { callBridge, BridgeClientError } = mod;
 
 try {
+    const payload = process.env.BR_PAYLOAD_JSON
+        ? JSON.parse(process.env.BR_PAYLOAD_JSON)
+        : { message: process.env.BR_MESSAGE || 'hello' };
     const response = await callBridge({
         service: process.env.BR_SERVICE || 'bridge',
         method: process.env.BR_METHOD || 'ping',
-        payload: { message: process.env.BR_MESSAGE || 'hello' },
+        payload,
         deadlineMs: Number(process.env.BR_DEADLINE_MS || '5000'),
         agentId: process.env.BR_AGENT_ID || 'fake-node',
     });
@@ -391,6 +458,7 @@ def run_node_bridge_call(
     service: str = "bridge",
     method: str = "ping",
     message: str = "hello",
+    payload: dict[str, Any] | None = None,
     deadline_ms: int = 5000,
 ) -> dict[str, Any]:
     """Run the committed Node bridge client once and return its JSON result."""
@@ -410,6 +478,8 @@ def run_node_bridge_call(
         "BR_DEADLINE_MS": str(deadline_ms),
         **env,
     }
+    if payload is not None:
+        proc_env["BR_PAYLOAD_JSON"] = json.dumps(payload)
     proc = subprocess.run(
         [node, str(harness)],
         capture_output=True,

@@ -10,6 +10,7 @@ export const FAILURE_CLASSES = Object.freeze([
     'invalid',
     'unreachable',
     'bridge-down',
+    'kill-switch-active',
 ]);
 
 export const SAFE_FAIL_POLICY = Object.freeze({
@@ -19,6 +20,7 @@ export const SAFE_FAIL_POLICY = Object.freeze({
     invalid: 'abandon',
     unreachable: 'idle',
     'bridge-down': 'abandon',
+    'kill-switch-active': 'idle',
 });
 
 export const DEFAULT_RETRY_BUDGET = Object.freeze({
@@ -56,6 +58,7 @@ const ALIASES = new Map([
     ['bridge-down', 'bridge-down'],
     ['bridge-connect-failed', 'bridge-down'],
     ['bridge-send-failed', 'bridge-down'],
+    ['kill-switch-active', 'kill-switch-active'],
 ]);
 
 function normalizeToken(value) {
