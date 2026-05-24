@@ -128,6 +128,10 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_HEARTBEAT_COOLDOWN_MS" in proc.stdout
     assert "MC_HEARTBEAT_STALE_ACTION_MS" in proc.stdout
     assert "MC_HEARTBEAT_MAX_NO_COMMAND" in proc.stdout
+    assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in proc.stdout
+    assert "MC_SIM_MEMORY_RECALL_LIMIT" in proc.stdout
+    assert "SOAK_AUTO_SETUP_MINDCRAFT" in proc.stdout
+    assert "SOAK_START_BACKEND_IF_DOWN" in proc.stdout
     assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
@@ -158,6 +162,10 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_MIN_VERIFIED_SUCCESS" in wrapper.stdout
     assert "MC_SIM_HEARTBEAT_IDLE_SEC" in wrapper.stdout
     assert "MC_SIM_HEARTBEAT_MAX_NO_COMMAND" in wrapper.stdout
+    assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in wrapper.stdout
+    assert "MC_SIM_MEMORY_RECALL_LIMIT" in wrapper.stdout
+    assert "MC_SIM_AUTO_SETUP_MINDCRAFT" in wrapper.stdout
+    assert "MC_SIM_START_BACKEND_IF_DOWN" in wrapper.stdout
     assert "timeline.ndjson" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
 
@@ -193,6 +201,10 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
         in proc.stdout
     )
     assert "behavior:       require=1; movement>=5/agent" in proc.stdout
+    assert (
+        "memory context: enabled=1 recall_limit=3 core_max=1500 recall_max=1200 exclude=management,alpha"
+        in proc.stdout
+    )
     assert "execute code:   allowed" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
     assert "keep MC alive:  0" in proc.stdout
@@ -216,6 +228,9 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
                 "MC_SIM_HEARTBEAT_COOLDOWN_SEC=7",
                 "MC_SIM_HEARTBEAT_STALE_ACTION_SEC=30",
                 "MC_SIM_HEARTBEAT_MAX_NO_COMMAND=2",
+                "MC_SIM_MEMORY_RECALL_LIMIT=2",
+                "MC_SIM_MEMORY_CORE_MAX_CHARS=900",
+                "MC_SIM_MEMORY_RECALL_MAX_CHARS=700",
             ]
         ),
         encoding="utf-8",
@@ -254,6 +269,10 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert (
         "heartbeat: enabled=1 idle=12s cooldown=7s stale_action=30s max_no_command=2" in proc.stdout
     )
+    assert (
+        "memory context: enabled=1 recall_limit=2 core_max=900 recall_max=700 exclude=management,alpha"
+        in proc.stdout
+    )
     assert "easy mode: 1" in proc.stdout
     assert "keep MC server running: 1" in proc.stdout
     assert "minecraft: 127.0.0.1:25566" in proc.stdout
@@ -282,6 +301,10 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert "safe terrain:   enabled" in proc.stdout
     assert (
         "heartbeat:      enabled=1 idle=12000ms cooldown=7000ms stale_action=30000ms max_no_command=2"
+        in proc.stdout
+    )
+    assert (
+        "memory context: enabled=1 recall_limit=2 core_max=900 recall_max=700 exclude=management,alpha"
         in proc.stdout
     )
     assert "easy spawn:     enabled" in proc.stdout
@@ -659,6 +682,13 @@ def test_script_uses_existing_launchers_and_isolated_mindcraft_clones() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     for bot in BOT_IDS:
         assert f"connect-{bot}-bot.sh" in text
+    assert "SOAK_AUTO_SETUP_MINDCRAFT" in text
+    assert "SOAK_START_BACKEND_IF_DOWN" in text
+    assert "ensure_backend_server" in text
+    assert "core.main:app" in text
+    assert "backend.pid" in text
+    assert "setup-mindcraft.sh" in text
+    assert "ensure_mindcraft_base" in text
     assert "git clone --shared" in text
     assert 'dest="$SOAK_WORK_ROOT/mindcraft-$bot"' in text
     assert 'printf \'%s\\n\' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"' in text

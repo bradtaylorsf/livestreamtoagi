@@ -67,9 +67,17 @@
 #                               Default: system temp/livestreamtoagi-soak-worktrees/<run id>.
 #   SOAK_KEEP_WORKTREES         Keep temp Mindcraft clones after cleanup for
 #                               debugging. Default: 0.
+#   SOAK_AUTO_SETUP_MINDCRAFT   Run setup-mindcraft.sh during real runs when
+#                               the base clone is missing, unpinned, or lacks
+#                               node_modules. Default: 1.
 #   SOAK_LAUNCH_STAGGER_SECONDS Default: 3.
 #   SOAK_START_MINECRAFT_IF_DOWN Start supervise.sh when health is down.
 #                               Default: 1.
+#   SOAK_START_BACKEND_IF_DOWN Start local FastAPI backend when the local
+#                               backend health URL is down. Default: 1.
+#   SOAK_BACKEND_BOOT_TIMEOUT_SECONDS
+#                               Seconds to wait for auto-started backend
+#                               health. Default: 120.
 #   SOAK_KEEP_MINECRAFT_RUNNING Keep an auto-started Paper server running after
 #                               the timed sim ends. Default: 0.
 #   SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS
@@ -135,6 +143,19 @@
 #                               as stale. Default: 180000.
 #   MC_HEARTBEAT_MAX_NO_COMMAND Repeated blank/no-command heartbeat outcomes
 #                               before `heartbeat.halted`. Default: 3.
+#   MC_SIM_MEMORY_CONTEXT_ENABLED
+#                               Fetch Python core+recall memory before runtime
+#                               prompt decisions. Default: 1.
+#   MC_SIM_MEMORY_RECALL_LIMIT  Relevant recall snippets requested per fetch.
+#                               Default: 3.
+#   MC_SIM_MEMORY_CORE_MAX_CHARS
+#                               Max core-memory characters injected. Default:
+#                               1500.
+#   MC_SIM_MEMORY_RECALL_MAX_CHARS
+#                               Max recall characters injected. Default: 1200.
+#   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+#                               Comma/space-separated agent ids skipped for
+#                               runtime memory context. Default: management,alpha.
 #   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
 #                               bootstrap: a side Paper server, peaceful rules,
 #                               a flat grass starter meadow, resource piles,
@@ -247,9 +268,12 @@ SOAK_MIN_SHARED_ARTIFACTS="${SOAK_MIN_SHARED_ARTIFACTS:-1}"
 SOAK_REQUIRE_BEHAVIOR_GATE="${SOAK_REQUIRE_BEHAVIOR_GATE:-1}"
 SOAK_LOG_ROOT="${SOAK_LOG_ROOT:-$REPO_ROOT/logs/soak}"
 SOAK_KEEP_WORKTREES="${SOAK_KEEP_WORKTREES:-0}"
+SOAK_AUTO_SETUP_MINDCRAFT="${SOAK_AUTO_SETUP_MINDCRAFT:-1}"
 SOAK_LAUNCH_STAGGER_SECONDS="${SOAK_LAUNCH_STAGGER_SECONDS:-3}"
 SOAK_MAX_LOG_LINES_PER_BOT="${SOAK_MAX_LOG_LINES_PER_BOT:-200000}"
 SOAK_START_MINECRAFT_IF_DOWN="${SOAK_START_MINECRAFT_IF_DOWN:-1}"
+SOAK_START_BACKEND_IF_DOWN="${SOAK_START_BACKEND_IF_DOWN:-1}"
+SOAK_BACKEND_BOOT_TIMEOUT_SECONDS="${SOAK_BACKEND_BOOT_TIMEOUT_SECONDS:-120}"
 SOAK_KEEP_MINECRAFT_RUNNING="${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
@@ -301,6 +325,10 @@ MC_HEARTBEAT_IDLE_MS="${MC_HEARTBEAT_IDLE_MS:-90000}"
 MC_HEARTBEAT_COOLDOWN_MS="${MC_HEARTBEAT_COOLDOWN_MS:-45000}"
 MC_HEARTBEAT_STALE_ACTION_MS="${MC_HEARTBEAT_STALE_ACTION_MS:-180000}"
 MC_HEARTBEAT_MAX_NO_COMMAND="${MC_HEARTBEAT_MAX_NO_COMMAND:-3}"
+MC_SIM_MEMORY_CONTEXT_ENABLED="${MC_SIM_MEMORY_CONTEXT_ENABLED:-1}"
+MC_SIM_MEMORY_RECALL_LIMIT="${MC_SIM_MEMORY_RECALL_LIMIT:-3}"
+MC_SIM_MEMORY_CORE_MAX_CHARS="${MC_SIM_MEMORY_CORE_MAX_CHARS:-1500}"
+MC_SIM_MEMORY_RECALL_MAX_CHARS="${MC_SIM_MEMORY_RECALL_MAX_CHARS:-1200}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -546,6 +574,59 @@ check_mindserver_ports_available() {
     fi
 }
 
+mindcraft_base_is_ready() {
+    local base="$1" head_sha
+    if [ -z "$base" ] || [ ! -d "$base/.git" ] || [ ! -d "$base/node_modules" ]; then
+        return 1
+    fi
+    head_sha="$(git -C "$base" rev-parse HEAD 2> /dev/null || true)"
+    [ "$head_sha" = "$MINDCRAFT_COMMIT" ]
+}
+
+resolve_mindcraft_base() {
+    if MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd)"; then
+        :
+    else
+        MINDCRAFT_BASE_ABS=""
+    fi
+}
+
+ensure_mindcraft_base() {
+    resolve_mindcraft_base
+    if mindcraft_base_is_ready "$MINDCRAFT_BASE_ABS"; then
+        return 0
+    fi
+
+    if [ "$SOAK_AUTO_SETUP_MINDCRAFT" != "1" ]; then
+        if [ -z "$MINDCRAFT_BASE_ABS" ] || [ ! -d "$MINDCRAFT_BASE_ABS/.git" ]; then
+            fail "No pinned Mindcraft clone at $MINDCRAFT_DIR. Run scripts/minecraft/setup-mindcraft.sh first."
+        else
+            local head_sha
+            head_sha="$(git -C "$MINDCRAFT_BASE_ABS" rev-parse HEAD 2> /dev/null || true)"
+            if [ "$head_sha" != "$MINDCRAFT_COMMIT" ]; then
+                fail "Mindcraft clone is not at pinned commit $MINDCRAFT_COMMIT"
+                info "  HEAD is ${head_sha:-<unknown>}"
+            else
+                fail "$MINDCRAFT_BASE_ABS/node_modules missing. Run scripts/minecraft/setup-mindcraft.sh first."
+            fi
+        fi
+        return 1
+    fi
+
+    info "Pinned Mindcraft clone missing or incomplete; running scripts/minecraft/setup-mindcraft.sh"
+    MINDCRAFT_DIR="$MINDCRAFT_DIR" \
+        MINDCRAFT_COMMIT="$MINDCRAFT_COMMIT" \
+        bash "$SCRIPT_DIR/setup-mindcraft.sh" || return 1
+
+    resolve_mindcraft_base
+    if mindcraft_base_is_ready "$MINDCRAFT_BASE_ABS"; then
+        return 0
+    fi
+
+    fail "setup-mindcraft.sh completed but $MINDCRAFT_DIR is still not ready."
+    return 1
+}
+
 duration_seconds() {
     awk -v hours="$SOAK_DURATION_HOURS" 'BEGIN {
         if (hours !~ /^[0-9]+([.][0-9]+)?$/ || hours <= 0) exit 1;
@@ -695,6 +776,8 @@ print_plan() {
     info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
+    info "auto-start API: $SOAK_START_BACKEND_IF_DOWN"
+    info "API boot wait:  ${SOAK_BACKEND_BOOT_TIMEOUT_SECONDS}s"
     info "keep MC alive:  $SOAK_KEEP_MINECRAFT_RUNNING"
     info "MC boot wait:   ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s"
     info "MC target:      ${MC_HOST:-127.0.0.1}:${MC_PORT:-${SERVER_PORT:-25565}}"
@@ -704,6 +787,7 @@ print_plan() {
     info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; restarts<=${SOAK_MAX_RESTARTS_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
+    info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_PROFILE" = "director_v2" ]; then
@@ -746,6 +830,7 @@ print_plan() {
     info "bots:           $SOAK_BOTS"
     info "cost agents:    $SOAK_COST_AGENTS"
     info "Mindcraft base: $MINDCRAFT_DIR"
+    info "Mindcraft setup: auto=${SOAK_AUTO_SETUP_MINDCRAFT}"
     info "isolation:      temp local clones with node_modules symlink"
 }
 
@@ -1273,26 +1358,7 @@ case "$SOAK_MINDSERVER_BASE_PORT" in
         ;;
 esac
 check_mindserver_ports_available || exit 1
-
-if MINDCRAFT_BASE_ABS="$(cd -- "$MINDCRAFT_DIR" 2> /dev/null && pwd)"; then
-    :
-else
-    MINDCRAFT_BASE_ABS=""
-fi
-if [ -z "$MINDCRAFT_BASE_ABS" ] || [ ! -d "$MINDCRAFT_BASE_ABS/.git" ]; then
-    fail "No pinned Mindcraft clone at $MINDCRAFT_DIR. Run scripts/minecraft/setup-mindcraft.sh first."
-    exit 1
-fi
-HEAD_SHA="$(git -C "$MINDCRAFT_BASE_ABS" rev-parse HEAD 2> /dev/null || true)"
-if [ "$HEAD_SHA" != "$MINDCRAFT_COMMIT" ]; then
-    fail "Mindcraft clone is not at pinned commit $MINDCRAFT_COMMIT"
-    info "  HEAD is ${HEAD_SHA:-<unknown>}"
-    exit 1
-fi
-if [ ! -d "$MINDCRAFT_BASE_ABS/node_modules" ]; then
-    fail "$MINDCRAFT_BASE_ABS/node_modules missing. Run scripts/minecraft/setup-mindcraft.sh first."
-    exit 1
-fi
+ensure_mindcraft_base || exit 1
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
 mkdir -p "$SOAK_LOG_ROOT"
@@ -1306,6 +1372,7 @@ printf '%s\n' "$SOAK_WORK_ROOT" > "$RUN_DIR/worktrees.path"
 PID_FILE="$RUN_DIR/pids.tsv"
 TAIL_PID_FILE="$RUN_DIR/tail-pids.txt"
 LLM_PROXY_PID_FILE="$RUN_DIR/lmstudio-queue-proxy.pid"
+BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 EARLY_EXIT_FILE="$RUN_DIR/early-exits.tsv"
 HEARTBEAT_HALT_FILE="$RUN_DIR/heartbeat-halts.tsv"
 : > "$PID_FILE"
@@ -1413,6 +1480,11 @@ write_metadata() {
         echo "heartbeat_cooldown_ms=$MC_HEARTBEAT_COOLDOWN_MS"
         echo "heartbeat_stale_action_ms=$MC_HEARTBEAT_STALE_ACTION_MS"
         echo "heartbeat_max_no_command=$MC_HEARTBEAT_MAX_NO_COMMAND"
+        echo "memory_context_enabled=$MC_SIM_MEMORY_CONTEXT_ENABLED"
+        echo "memory_context_recall_limit=$MC_SIM_MEMORY_RECALL_LIMIT"
+        echo "memory_context_core_max_chars=$MC_SIM_MEMORY_CORE_MAX_CHARS"
+        echo "memory_context_recall_max_chars=$MC_SIM_MEMORY_RECALL_MAX_CHARS"
+        echo "memory_context_exclude_agents=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
         echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
@@ -1554,6 +1626,85 @@ ensure_minecraft_server() {
 
     fail "Minecraft server did not become healthy within ${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS}s."
     tail -40 "$RUN_DIR/logs/minecraft-supervisor-stdout.log" >&2 || true
+    return 1
+}
+
+backend_health_available() {
+    curl --connect-timeout 1 --max-time 2 -fsS "$BACKEND_HEALTH_URL" > /dev/null 2>&1
+}
+
+backend_start_port() {
+    local without_scheme host_port port
+    case "$BACKEND_HEALTH_URL" in
+        http://127.0.0.1:*/*|http://localhost:*/*) ;;
+        *) return 1 ;;
+    esac
+    without_scheme="${BACKEND_HEALTH_URL#http://}"
+    host_port="${without_scheme%%/*}"
+    port="${host_port##*:}"
+    case "$port" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s\n' "$port"
+}
+
+ensure_backend_server() {
+    if backend_health_available; then
+        ok "Backend already healthy"
+        return 0
+    fi
+
+    if [ "$SOAK_START_BACKEND_IF_DOWN" != "1" ]; then
+        fail "Backend is down and SOAK_START_BACKEND_IF_DOWN is not 1."
+        info "  Start it with pnpm dev:backend or enable auto-start."
+        return 1
+    fi
+
+    local backend_port uvicorn_bin waited backend_pid
+    backend_port="$(backend_start_port || true)"
+    if [ -z "$backend_port" ]; then
+        fail "Backend health is down and $BACKEND_HEALTH_URL is not a local auto-start URL."
+        info "  Start the backend manually or set BACKEND_HEALTH_URL to http://127.0.0.1:<port>/api/health."
+        return 1
+    fi
+
+    uvicorn_bin="${UVICORN_BIN:-$REPO_ROOT/.venv/bin/uvicorn}"
+    if [ ! -x "$uvicorn_bin" ]; then
+        uvicorn_bin="$(command -v uvicorn 2> /dev/null || true)"
+    fi
+    if [ -z "$uvicorn_bin" ]; then
+        fail "uvicorn not found. Install backend dependencies or start pnpm dev:backend manually."
+        return 1
+    fi
+
+    info "Backend down; starting FastAPI backend for the soak on 127.0.0.1:${backend_port}"
+    if [ -f "$REPO_ROOT/.env" ]; then
+        "$uvicorn_bin" core.main:app --host 127.0.0.1 --port "$backend_port" --env-file "$REPO_ROOT/.env" \
+            > "$RUN_DIR/logs/backend-stdout.log" 2> "$RUN_DIR/logs/backend-stderr.log" &
+    else
+        "$uvicorn_bin" core.main:app --host 127.0.0.1 --port "$backend_port" \
+            > "$RUN_DIR/logs/backend-stdout.log" 2> "$RUN_DIR/logs/backend-stderr.log" &
+    fi
+    backend_pid="$!"
+    echo "$backend_pid" > "$BACKEND_PID_FILE"
+
+    waited=0
+    while [ "$waited" -lt "$SOAK_BACKEND_BOOT_TIMEOUT_SECONDS" ]; do
+        if backend_health_available; then
+            ok "Backend became healthy after ${waited}s"
+            return 0
+        fi
+        if ! kill -0 "$backend_pid" 2> /dev/null; then
+            fail "Backend exited before health became reachable."
+            tail -40 "$RUN_DIR/logs/backend-stderr.log" >&2 || true
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    fail "Backend did not become healthy within ${SOAK_BACKEND_BOOT_TIMEOUT_SECONDS}s."
+    tail -40 "$RUN_DIR/logs/backend-stderr.log" >&2 || true
     return 1
 }
 
@@ -1760,6 +1911,11 @@ launch_bot() {
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        export MC_SIM_MEMORY_CONTEXT_ENABLED MC_SIM_MEMORY_RECALL_LIMIT
+        export MC_SIM_MEMORY_CORE_MAX_CHARS MC_SIM_MEMORY_RECALL_MAX_CHARS
+        if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS+x}" ]; then
+            export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+        fi
         export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
         export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
         export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
@@ -1951,6 +2107,7 @@ cleanup() {
     local status=$?
     stop_bots
     stop_minecraft_supervisor
+    stop_process_file "$BACKEND_PID_FILE"
     stop_process_file "$LLM_PROXY_PID_FILE"
     stop_process_file "$TAIL_PID_FILE"
     cleanup_worktrees
@@ -2356,6 +2513,7 @@ if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     run_checked "easy spawn terrain" "$RUN_DIR/preflight/easy-spawn-terrain.txt" \
         node "$SCRIPT_DIR/setup-easy-spawn.mjs" --terrain-only
 fi
+ensure_backend_server || exit 1
 run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS "$BACKEND_HEALTH_URL"
 
 start_log_capture

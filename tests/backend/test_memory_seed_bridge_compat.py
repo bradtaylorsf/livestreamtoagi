@@ -7,6 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -38,6 +39,7 @@ class InMemoryCoreMemoryStore:
 
     def __init__(self) -> None:
         self.records: dict[tuple[str, uuid.UUID | None], CoreMemory] = {}
+        self.recall_records: dict[tuple[str, uuid.UUID | None], list[str]] = {}
 
     async def get_core_memory(
         self,
@@ -79,6 +81,26 @@ class InMemoryCoreMemoryStore:
         self.records[(agent_id, simulation_id)] = record
         return record
 
+    async def add_recall(self, create: Any) -> Any:
+        key = (create.agent_id, create.simulation_id)
+        self.recall_records.setdefault(key, []).append(create.summary)
+        return SimpleNamespace(
+            id=len(self.recall_records[key]),
+            agent_id=create.agent_id,
+            summary=create.summary,
+            simulation_id=create.simulation_id,
+        )
+
+    async def retrieve_recall_memories(
+        self,
+        agent_id: str,
+        query_text: str,
+        limit: int = 3,
+        simulation_id: uuid.UUID | None = None,
+    ) -> str:
+        memories = self.recall_records.get((agent_id, simulation_id), [])
+        return "\n".join(f"- {memory}" for memory in memories[:limit])
+
     @staticmethod
     def _count_tokens(content: str) -> int:
         return max(1, int(len(content.split()) * 1.3))
@@ -98,7 +120,7 @@ class FakeRecallMemory:
 @dataclass
 class FakeServices:
     core_memory: InMemoryCoreMemoryStore
-    recall_memory: FakeRecallMemory
+    recall_memory: Any
 
 
 @pytest.fixture
@@ -123,6 +145,9 @@ def _memory_request(
     *,
     agent_id: str,
     simulation_id: uuid.UUID,
+    tier: str = "core",
+    query: str = "ignored for core reads",
+    limit: int = 5,
     request_id: str = "req-memory-seed-bridge",
 ) -> dict[str, Any]:
     return c.BridgeRequest(
@@ -133,7 +158,7 @@ def _memory_request(
         simulation_id=str(simulation_id),
         service="memory",
         method="recall",
-        payload={"query": "ignored for core reads", "tier": "core"},
+        payload={"query": query, "tier": tier, "limit": limit},
         deadline_ms=5000,
         cost_context=c.CostContext(
             agent_tier="conversation",
@@ -215,3 +240,91 @@ def test_blank_slate_seed_core_memory_is_visible_through_bridge(token_env: str) 
     scoped_payload = c.validate_response(scoped_response, service="memory", method="recall")
     assert isinstance(scoped_payload, c.MemoryRecallResponse)
     assert scoped_payload.core_memory is None
+
+
+def test_custom_seed_recall_memory_is_visible_through_runtime_bridge_path(
+    token_env: str,
+    tmp_path: Path,
+) -> None:
+    seed_path = tmp_path / "runtime-recall-seed.json"
+    seeded_summary = "Vera learned Rex hid torches near the starter oak for the camp marker."
+    seed_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "source_simulation_id": None,
+                "snapshot_at": "2026-05-19T00:00:00+00:00",
+                "agents": {
+                    "vera": {
+                        "core_memory": "Vera is starting with a torch-related recall seed.",
+                        "recall_memories": [
+                            {
+                                "summary": seeded_summary,
+                                "embedding": [0.1, 0.2, 0.3],
+                                "event_type": "minecraft_scene",
+                                "participants": ["vera", "rex"],
+                                "importance_score": 0.8,
+                            }
+                        ],
+                        "journal_entries": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    target_simulation_id = uuid.uuid4()
+    other_simulation_id = uuid.uuid4()
+    memory_store = InMemoryCoreMemoryStore()
+    registry = MagicMock()
+    registry.get_all_agents = MagicMock(return_value=[_make_agent("vera")])
+    applier = MemorySeedApplier(
+        db=AsyncMock(),
+        memory_repo=memory_store,
+        core_memory_mgr=memory_store,
+        recall_memory_mgr=FakeRecallMemory(),
+        agent_registry=registry,
+    )
+
+    result = asyncio.run(
+        applier.apply(
+            MemorySeedConfig(mode="custom", custom_file=str(seed_path)),
+            target_simulation_id,
+        )
+    )
+
+    assert result.recall_memories_restored == 1
+    services = FakeServices(core_memory=memory_store, recall_memory=memory_store)
+    response = _send_memory_request(
+        _client(services),
+        _memory_request(
+            agent_id="vera",
+            simulation_id=target_simulation_id,
+            tier="recall",
+            query="where are the torches",
+            limit=3,
+            request_id="req-memory-seed-bridge-runtime-recall",
+        ),
+    )
+
+    assert response.ok is True
+    payload = c.validate_response(response, service="memory", method="recall")
+    assert isinstance(payload, c.MemoryRecallResponse)
+    assert payload.formatted is not None
+    assert seeded_summary in payload.formatted
+
+    scoped_response = _send_memory_request(
+        _client(services),
+        _memory_request(
+            agent_id="vera",
+            simulation_id=other_simulation_id,
+            tier="recall",
+            query="where are the torches",
+            request_id="req-memory-seed-bridge-runtime-recall-other-sim",
+        ),
+    )
+
+    assert scoped_response.ok is True
+    scoped_payload = c.validate_response(scoped_response, service="memory", method="recall")
+    assert isinstance(scoped_payload, c.MemoryRecallResponse)
+    assert scoped_payload.formatted == ""
