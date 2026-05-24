@@ -6,6 +6,10 @@
 # It loads the same repo `.env` that the FastAPI backend uses, adds the common
 # macOS Java 21 / Node 20 Homebrew paths, and delegates to soak.sh.
 #
+# Lifecycle note: this wrapper remains a lower-level Minecraft diagnostic
+# launcher. Use scripts/run_simulation.py --conversation-mode embodied for the
+# E12 embodied supervisor that owns durable simulation/run ids and end hooks.
+#
 # Usage:
 #   scripts/minecraft/run-local-sim.sh smoke
 #   scripts/minecraft/run-local-sim.sh smoke-director
@@ -61,6 +65,11 @@
 #   MC_SIM_HEARTBEAT_COOLDOWN_SEC=45
 #   MC_SIM_HEARTBEAT_STALE_ACTION_SEC=180
 #   MC_SIM_HEARTBEAT_MAX_NO_COMMAND=3
+#   MC_SIM_MEMORY_CONTEXT_ENABLED=1
+#   MC_SIM_MEMORY_RECALL_LIMIT=3
+#   MC_SIM_MEMORY_CORE_MAX_CHARS=1500
+#   MC_SIM_MEMORY_RECALL_MAX_CHARS=1200
+#   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS=management,alpha
 #   MC_SIM_EASY_MODE=1
 #   MC_SIM_MC_PORT=25566
 #   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
@@ -344,6 +353,15 @@ fi
 MC_HEARTBEAT_MAX_NO_COMMAND="$MC_SIM_HEARTBEAT_MAX_NO_COMMAND"
 export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
 export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
+MC_SIM_MEMORY_CONTEXT_ENABLED="${MC_SIM_MEMORY_CONTEXT_ENABLED:-1}"
+MC_SIM_MEMORY_RECALL_LIMIT="${MC_SIM_MEMORY_RECALL_LIMIT:-3}"
+MC_SIM_MEMORY_CORE_MAX_CHARS="${MC_SIM_MEMORY_CORE_MAX_CHARS:-1500}"
+MC_SIM_MEMORY_RECALL_MAX_CHARS="${MC_SIM_MEMORY_RECALL_MAX_CHARS:-1200}"
+export MC_SIM_MEMORY_CONTEXT_ENABLED MC_SIM_MEMORY_RECALL_LIMIT
+export MC_SIM_MEMORY_CORE_MAX_CHARS MC_SIM_MEMORY_RECALL_MAX_CHARS
+if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-}" ]; then
+    export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+fi
 
 MC_SIM_EASY_MODE="${MC_SIM_EASY_MODE:-1}"
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
@@ -489,6 +507,7 @@ info "execute code actions: ${SOAK_BLOCK_EXECUTE_CODE_ACTIONS}"
 info "suppress action chat: ${MINECRAFT_SUPPRESS_ACTION_CHAT}"
 info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
 info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
+info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
 info "easy mode: ${MC_SIM_EASY_MODE}"
 info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"

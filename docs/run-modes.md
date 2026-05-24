@@ -35,6 +35,40 @@ Set `LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id>` when the run exercises
 building, reflection, dream, or Minecraft code-generation paths and a stronger
 local model is loaded.
 
+## Embodied Supervisor
+
+Minecraft runs that use `--conversation-mode embodied` or `--conversation-mode
+director_v2` are owned by the embodied supervisor in `scripts/run_simulation.py`.
+The supervisor creates or attaches to one simulation row, derives one `run_id`,
+exports `LTAG_RUN_ID`, `LTAG_SIMULATION_ID`, and `MC_RUN_DIR` to the Minecraft
+harness, polls kill/cost hooks, and runs eval/report hooks when the run ends.
+
+Experimental embodied run:
+
+```bash
+.venv/bin/python scripts/run_simulation.py \
+  --name "embodied-short-a" \
+  --conversation-mode embodied \
+  --run-mode experimental \
+  --duration-hours 0.25 \
+  --max-cost 0.01
+```
+
+Persistent embodied run:
+
+```bash
+.venv/bin/python scripts/run_simulation.py \
+  --name "live-embodied" \
+  --conversation-mode embodied \
+  --persistent \
+  --max-cost-rolling 5 \
+  --rolling-window 1h
+```
+
+`scripts/minecraft/run-local-sim.sh` and `scripts/minecraft/soak.sh` remain
+lower-level diagnostics. The supervisor delegates Minecraft launch work to the
+soak harness after it owns lifecycle state.
+
 ## Choose A Mode
 
 | Area | Persistent | Experimental |

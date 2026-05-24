@@ -200,6 +200,17 @@ with `--world-config-file <path>`.
 python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
 ```
 
+Embodied Minecraft lifecycle runs use the supervisor path:
+
+```bash
+.venv/bin/python scripts/run_simulation.py \
+  --name "embodied-short-a" \
+  --conversation-mode embodied \
+  --run-mode experimental \
+  --duration-hours 0.25 \
+  --max-cost 0.01
+```
+
 See [Minecraft Command Eval](docs/minecraft/command-eval.md) and the
 [Minecraft runbook](docs/minecraft/runbook.md) for the current embodiment
 workflow. For seeded, inherited, and blank-slate memory starts in embodied

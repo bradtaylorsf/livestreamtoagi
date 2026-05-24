@@ -562,7 +562,7 @@ class PhaseRunner:
 
             embodied_run = is_embodied_run()
         else:
-            embodied_run = self._conversation_mode == "embodied"
+            embodied_run = self._conversation_mode in {"embodied", "director_v2"}
 
         if embodied_run:
             logger.info(
