@@ -120,6 +120,24 @@ def applier(mock_db, mock_memory_repo, mock_core_memory_mgr, mock_recall_memory_
     )
 
 
+def _make_applier_for_agents(
+    agent_ids: list[str],
+    mock_db,
+    mock_memory_repo,
+    mock_core_memory_mgr,
+    mock_recall_memory_mgr,
+) -> MemorySeedApplier:
+    registry = MagicMock()
+    registry.get_all_agents = MagicMock(return_value=[_make_agent(agent_id) for agent_id in agent_ids])
+    return MemorySeedApplier(
+        db=mock_db,
+        memory_repo=mock_memory_repo,
+        core_memory_mgr=mock_core_memory_mgr,
+        recall_memory_mgr=mock_recall_memory_mgr,
+        agent_registry=registry,
+    )
+
+
 # ── mode=none ──────────────────────────────────────────────────
 
 
@@ -222,6 +240,78 @@ async def test_apply_custom_missing_file_raises(applier):
     cfg = MemorySeedConfig(mode="custom", custom_file="/nonexistent/seed.json")
     with pytest.raises(FileNotFoundError):
         await applier.apply(cfg, uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_apply_custom_blank_slate_restores_embodied_state(
+    mock_db,
+    mock_memory_repo,
+    mock_core_memory_mgr,
+    mock_recall_memory_mgr,
+):
+    agent_ids = ["vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"]
+    seed_applier = _make_applier_for_agents(
+        agent_ids,
+        mock_db,
+        mock_memory_repo,
+        mock_core_memory_mgr,
+        mock_recall_memory_mgr,
+    )
+    target_sim = uuid.uuid4()
+
+    result = await seed_applier.apply(
+        MemorySeedConfig(mode="custom", custom_file="scenarios/seeds/blank-slate.json"),
+        target_sim,
+    )
+
+    assert result.core_memories_restored == len(agent_ids)
+    assert result.agent_states_restored == len(agent_ids)
+    assert result.agent_accounts_restored == len(agent_ids)
+    assert sorted(result.agents_restored) == sorted(agent_ids)
+
+    state_calls = [
+        call for call in mock_db.execute.await_args_list
+        if "INSERT INTO agent_internal_state" in call.args[0]
+    ]
+    account_calls = [
+        call for call in mock_db.execute.await_args_list
+        if "INSERT INTO agent_accounts" in call.args[0]
+    ]
+    assert {call.args[1] for call in state_calls} == set(agent_ids)
+    assert {call.args[1] for call in account_calls} == set(agent_ids)
+    assert all(call.args[-1] == target_sim for call in state_calls + account_calls)
+
+
+@pytest.mark.asyncio
+async def test_apply_custom_conflict_seed_restores_seeded_goals(
+    mock_db,
+    mock_memory_repo,
+    mock_core_memory_mgr,
+    mock_recall_memory_mgr,
+):
+    seed_applier = _make_applier_for_agents(
+        ["vera", "rex", "fork", "aurora", "sentinel"],
+        mock_db,
+        mock_memory_repo,
+        mock_core_memory_mgr,
+        mock_recall_memory_mgr,
+    )
+    target_sim = uuid.uuid4()
+
+    result = await seed_applier.apply(
+        MemorySeedConfig(mode="custom", custom_file="scenarios/seeds/conflict-scenario.json"),
+        target_sim,
+    )
+
+    assert result.goals_restored == 6
+    mock_core_memory_mgr.initialize_agent_memory.assert_not_called()
+    goal_calls = [
+        call for call in mock_db.execute.await_args_list
+        if "INSERT INTO agent_goals" in call.args[0]
+    ]
+    assert len(goal_calls) == 6
+    assert {call.args[1] for call in goal_calls} == {"vera", "rex", "fork"}
+    assert all(call.args[-1] == target_sim for call in goal_calls)
 
 
 # ── mode=inherit ───────────────────────────────────────────────
@@ -348,3 +438,19 @@ def test_simulation_config_cli_override_wins(tmp_path):
     cfg.load_seed_file(valid_agent_ids={"vera"})
     assert cfg.memory_seed is cli_seed
     assert cfg.memory_seed.mode == "custom"
+
+
+def test_simulation_config_embodied_accepts_blank_slate_memory_mode():
+    """Embodied simulations use the same memory_seed config path."""
+    from core.simulation.orchestrator import SimulationConfig
+
+    cfg = SimulationConfig(
+        name="embodied-blank",
+        agents=["vera"],
+        conversation_mode="embodied",
+        memory_seed=MemorySeedConfig(mode="none"),
+    )
+
+    assert cfg.conversation_mode == "embodied"
+    assert cfg.memory_seed is not None
+    assert cfg.memory_seed.mode == "none"

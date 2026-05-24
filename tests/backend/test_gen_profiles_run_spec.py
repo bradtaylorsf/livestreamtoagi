@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "gen_profiles.py"
 VERA_PROMPT = REPO_ROOT / "agents" / "vera" / "system_prompt.md"
@@ -62,6 +64,45 @@ def test_build_all_profiles_applies_only_named_persona_overrides() -> None:
     assert "persona" not in profiles["vera"]
 
 
+def test_build_all_profiles_applies_factions_and_goals_from_run_spec() -> None:
+    profiles = gen.build_all_profiles(
+        factions=[
+            {
+                "name": "builders",
+                "members": ["vera", "rex"],
+                "goal": "Raise a shared workshop.",
+                "stance": "practical",
+            }
+        ],
+        agent_goals={
+            "vera": ["Survey the valley.", "Pick a safe build site."],
+            "rex": ["Craft the first tool rack."],
+        },
+    )
+
+    assert profiles["vera"]["faction"] == {
+        "name": "builders",
+        "role": "member",
+        "goal": "Raise a shared workshop.",
+        "members": ["vera", "rex"],
+        "stance": "practical",
+    }
+    assert profiles["vera"]["goals"] == [
+        "Survey the valley.",
+        "Pick a safe build site.",
+    ]
+    assert profiles["rex"]["faction"]["name"] == "builders"
+    assert profiles["rex"]["goals"] == ["Craft the first tool rack."]
+
+
+def test_build_profile_without_faction_or_goals_keeps_baseline_shape() -> None:
+    profile = gen.build_profile("vera", faction=None, goals=None)
+
+    assert set(profile) == BASELINE_PROFILE_KEYS
+    assert "faction" not in profile
+    assert "goals" not in profile
+
+
 def test_cli_run_spec_all_writes_profiles_with_override_backstory(tmp_path: Path) -> None:
     proc = subprocess.run(
         [
@@ -88,7 +129,12 @@ def test_cli_run_spec_all_writes_profiles_with_override_backstory(tmp_path: Path
 
     assert "precise memory of rain" in vera["backstory"]
     assert vera["persona"]["display_name"] == "Vera Prime"
-    assert set(rex) == BASELINE_PROFILE_KEYS
+    assert vera["faction"]["name"] == "planners"
+    assert vera["goals"] == ["Stabilize the settlement before nightfall."]
+    assert rex["faction"]["name"] == "planners"
+    assert rex["goals"] == ["Build a shared workshop."]
+    assert "backstory" not in rex
+    assert "persona" not in rex
 
 
 def test_build_profile_without_override_keeps_baseline_shape() -> None:
@@ -96,3 +142,22 @@ def test_build_profile_without_override_keeps_baseline_shape() -> None:
 
     assert gen.build_profile("vera", persona_override=None) == baseline
     assert set(baseline) == BASELINE_PROFILE_KEYS
+
+
+def test_build_all_profiles_rejects_duplicate_faction_names() -> None:
+    with pytest.raises(ValueError, match="duplicate faction name"):
+        gen.build_all_profiles(
+            factions=[
+                {"name": "builders", "members": ["vera"], "goal": "Build"},
+                {"name": "builders", "members": ["rex"], "goal": "Also build"},
+            ]
+        )
+
+
+def test_build_all_profiles_rejects_unknown_faction_member() -> None:
+    with pytest.raises(ValueError, match="unknown members"):
+        gen.build_all_profiles(
+            factions=[
+                {"name": "builders", "members": ["nosuch"], "goal": "Build"},
+            ]
+        )

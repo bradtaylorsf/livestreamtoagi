@@ -492,6 +492,25 @@ class AgentGoalManager:
                     simulation_id=simulation_id,
                 )
 
+    async def seed_agent_goals(
+        self,
+        agent_goals: dict[str, list[str]],
+        simulation_id: uuid_mod.UUID | None = None,
+    ) -> None:
+        """Seed run-spec goals for agents through the normal goal queue."""
+        for agent_id, goals in agent_goals.items():
+            for priority, goal_text in enumerate(goals, start=1):
+                if not goal_text.strip():
+                    continue
+                await self.add_goal(
+                    agent_id,
+                    goal_text,
+                    priority=priority,
+                    source="run_spec",
+                    category="starting_conditions",
+                    simulation_id=simulation_id,
+                )
+
 
 def _db_status_to_legacy(status: str) -> str:
     """Convert DB status to legacy Redis-compatible status."""
