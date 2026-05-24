@@ -86,3 +86,28 @@ async def test_experimental_goal_records_goal_reached_stop_reason() -> None:
     assert await orchestrator._terminated() is True
     assert orchestrator._experimental_stop_reason == "goal_reached"
     orchestrator._redis.get.assert_not_awaited()
+
+
+def test_phases_complete_goal_matches_progress_counter() -> None:
+    """`phases_complete` goal kind reads the `phases_completed` progress counter."""
+    cfg = SimulationConfig(
+        name="phases-complete-goal",
+        agents=["vera"],
+        experimental_goal={"kind": "phases_complete", "target": 3},
+        dry_run=True,
+    )
+    orchestrator = SimulationOrchestrator.__new__(SimulationOrchestrator)
+    orchestrator._config = cfg
+    orchestrator._experimental_stop_reason = None
+    orchestrator._experimental_progress = {
+        "phases_completed": 0,
+        "turns": 0,
+        "artifacts": 0,
+    }
+
+    for _ in range(2):
+        orchestrator._record_experimental_progress(PhaseResult(turns=1))
+    assert orchestrator._experimental_goal_reached() is False
+
+    orchestrator._record_experimental_progress(PhaseResult(turns=1))
+    assert orchestrator._experimental_goal_reached() is True

@@ -53,8 +53,8 @@ Run two experimental specs or the same spec with different `--run-config-file`
 starting-condition overrides, then compare the completed simulation IDs:
 
 ```bash
-.venv/bin/python scripts/report_simulation.py <run-a-uuid> \
-  --compare <run-b-uuid> \
+.venv/bin/python scripts/report_simulation.py \
+  --compare <run-a-uuid> <run-b-uuid> \
   --format json
 ```
 

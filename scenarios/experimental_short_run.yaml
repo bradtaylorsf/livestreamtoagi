@@ -28,7 +28,7 @@
 #     --max-cost 0.01
 #
 # Compare after both runs complete:
-#   python scripts/report_simulation.py <run-a-uuid> --compare <run-b-uuid> --format json
+#   python scripts/report_simulation.py --compare <run-a-uuid> <run-b-uuid> --format json
 
 meta:
   name: "Experimental Short Run"

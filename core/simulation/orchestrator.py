@@ -1443,6 +1443,12 @@ class SimulationOrchestrator:
         self._experimental_progress["turns"] += int(getattr(result, "turns", 0) or 0)
         self._experimental_progress["artifacts"] += int(getattr(result, "artifacts", 0) or 0)
 
+    _GOAL_KIND_TO_PROGRESS_KEY = {
+        "phases_complete": "phases_completed",
+        "turns": "turns",
+        "artifacts": "artifacts",
+    }
+
     def _experimental_goal_reached(self) -> bool:
         """Return whether the configured experimental goal has been satisfied."""
         goal = getattr(self._config, "experimental_goal", None)
@@ -1453,7 +1459,8 @@ class SimulationOrchestrator:
             "_experimental_progress",
             {"phases_completed": 0, "turns": 0, "artifacts": 0},
         )
-        return progress.get(goal.kind, 0) >= goal.target
+        progress_key = self._GOAL_KIND_TO_PROGRESS_KEY.get(goal.kind, goal.kind)
+        return progress.get(progress_key, 0) >= goal.target
 
     async def _persistent_heartbeat(self, *, force: bool = False) -> None:
         """Publish the active persistent simulation id on raw Redis."""

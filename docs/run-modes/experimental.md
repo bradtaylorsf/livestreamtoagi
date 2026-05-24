@@ -82,8 +82,8 @@ EMBEDDING_PROVIDER=deterministic \
 Compare the completed runs:
 
 ```bash
-.venv/bin/python scripts/report_simulation.py <run-a-uuid> \
-  --compare <run-b-uuid> \
+.venv/bin/python scripts/report_simulation.py \
+  --compare <run-a-uuid> <run-b-uuid> \
   --format json
 ```
 
