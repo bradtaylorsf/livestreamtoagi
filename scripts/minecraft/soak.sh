@@ -1783,7 +1783,7 @@ launch_bot() {
         export MC_RUN_DIR="$RUN_DIR"
         export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
-        export LTAG_RUN_ID="$RUN_ID"
+        export LTAG_RUN_ID="${LTAG_RUN_ID:-$RUN_ID}"
         export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
