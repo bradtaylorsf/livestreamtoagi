@@ -7,23 +7,19 @@ duration/cost/kill-switch limits are reached.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import random
 import re
-import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from core.event_bus import EventType
-from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
-from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
-from core.memory.reflection_scheduler import ReflectionScheduler
-from core.models import FactionConfig, MemorySeedConfig, SimulationCreate, SimulationStatus
+from core.llm_client import OpenRouterClient
+from core.models import FactionConfig, MemorySeedConfig, SimulationStatus
 from core.simulation.clock import SimulationClock
+from core.simulation.lifecycle import CostLimitExceededError, SimulationLifecycleBase
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 if TYPE_CHECKING:
@@ -50,10 +46,6 @@ if TYPE_CHECKING:
     from core.simulation.display import SimulationDisplay
 
 logger = logging.getLogger(__name__)
-
-
-class CostLimitExceededError(Exception):
-    """Raised when simulation spending exceeds a configured cost limit."""
 
 
 def parse_duration(value: str) -> timedelta:
@@ -280,7 +272,7 @@ class SimulationConfig:
         return d
 
 
-class SimulationOrchestrator:
+class SimulationOrchestrator(SimulationLifecycleBase):
     """Drives a full-day simulation through sequential phases."""
 
     def __init__(
@@ -345,99 +337,17 @@ class SimulationOrchestrator:
         self._errors: list[dict[str, Any]] = []
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
-    @property
-    def simulation_id(self) -> uuid.UUID | None:
-        return self._simulation_id
-
-    def _build_reflection_scheduler(self) -> ReflectionScheduler:
-        """Create a ReflectionScheduler from config, falling back to defaults."""
-        kwargs: dict[str, int] = {}
-        try:
-            rc = self._config_loader.config.reflection
-            if hasattr(rc, "six_hour_interval_hours") and isinstance(
-                rc.six_hour_interval_hours, int
-            ):
-                kwargs = {
-                    "six_hour_interval_hours": rc.six_hour_interval_hours,
-                    "daily_hour": rc.daily_hour,
-                    "weekly_day": rc.weekly_day,
-                }
-        except (AttributeError, TypeError):
-            pass
-        return ReflectionScheduler(self.clock, self._reflection, **kwargs)
-
-    def _rescope_redis(self, sim_id: uuid.UUID) -> None:
-        """Create a simulation-scoped Redis and re-wire all services.
-
-        Every service created at bootstrap holds a reference to a ScopedRedis
-        with the ``live:`` prefix.  When running a non-live simulation we must
-        swap that reference so Redis keys are namespaced under
-        ``sim:<uuid>:`` — giving true isolation between live and simulated
-        runs.
-        """
-        from core.redis_keys import ScopedRedis
-
-        scoped = ScopedRedis(self._redis, sim_id)
-
-        # Services that hold a direct _redis reference
-        if self._services:
-            if self._services.agent_state_manager is not None:
-                self._services.agent_state_manager._redis = scoped
-                self._services.agent_state_manager._cache.clear()
-            if self._services.shared_working_state is not None:
-                self._services.shared_working_state._redis = scoped
-            if self._services.goal_manager is not None:
-                self._services.goal_manager._redis = scoped
-            if self._services.agent_registry is not None:
-                self._services.agent_registry._redis = scoped
-            if self._services.scoped_redis is not None:
-                # Update the canonical reference so anything that reads it later
-                # picks up the sim-scoped instance.
-                self._services.scoped_redis = scoped
-
-        # Services held directly by the orchestrator
-        if self._proximity is not None:
-            self._proximity._redis = scoped
-        if self._context is not None:
-            self._context._redis = scoped
-        if self._management is not None:
-            self._management._redis = scoped
-
-        logger.info(
-            "Re-scoped Redis for simulation %s (prefix: %s)",
-            sim_id,
-            scoped._prefix,
-        )
-
     def _build_phase_runner(
         self,
         sim_id: uuid.UUID,
         relationship_tracker: Any | None = None,
     ) -> PhaseRunner:
         """Create a PhaseRunner with all dependencies wired."""
-        # Re-scope Redis so all services use sim:<uuid>: key prefix
-        self._rescope_redis(sim_id)
-
-        # Override simulation_id on all shared service objects to match this simulation.
-        # These are created once at bootstrap with LIVE_SIMULATION_ID and must be
-        # repointed when running a non-live simulation.
-        if self._compactor is not None:
-            self._compactor._simulation_id = sim_id
-        if self._reflection is not None:
-            self._reflection._simulation_id = sim_id
-        if self._management is not None:
-            self._management._simulation_id = sim_id
-        if self._services:
-            if self._services.economy_manager is not None:
-                self._services.economy_manager.simulation_id = sim_id
-            if self._services.alliance_manager is not None:
-                self._services.alliance_manager.simulation_id = sim_id
-            if self._services.dream_manager is not None:
-                self._services.dream_manager._simulation_id = sim_id
-            if self._services.event_generator is not None:
-                self._services.event_generator.simulation_id = sim_id
-            if self._services.agent_state_manager is not None:
-                self._services.agent_state_manager.simulation_id = sim_id
+        # Keep sim isolation here: event_generator.simulation_id = sim_id and
+        # agent_state_manager.simulation_id = sim_id are assigned in the shared
+        # lifecycle helper before any phase emits events or writes state. That
+        # helper also performs the historical _rescope_redis(sim_id) step.
+        self._scope_services_to_simulation(sim_id)
         return PhaseRunner(
             config_loader=self._config_loader,
             agent_registry=self._agents,
@@ -482,87 +392,6 @@ class SimulationOrchestrator:
         gap = gap / self._config.conversation_cadence
         return timedelta(seconds=gap)
 
-    def _build_model_versions(self) -> dict[str, dict[str, str]]:
-        """Build a map of agent_id → {conversation, building} resolved model IDs."""
-        versions: dict[str, dict[str, str]] = {}
-        for agent_id in self._config.agents:
-            agent = self._agents.get_agent(agent_id)
-            if agent is None:
-                continue
-            conv_model = agent.model_conversation
-            build_model = agent.model_building
-            if isinstance(self._llm, OpenRouterClient):
-                versions[agent_id] = {
-                    "conversation": self._llm.model_provenance(conv_model),
-                    "building": self._llm.model_provenance(build_model),
-                }
-                continue
-            # Fallback for non-OpenRouterClient mocks/stubs in tests: resolve
-            # to OpenRouter IDs from the local registry.
-            conv_canonical = MODEL_NAME_ALIASES.get(conv_model, conv_model)
-            build_canonical = MODEL_NAME_ALIASES.get(build_model, build_model)
-            conv_openrouter = (
-                MODEL_REGISTRY[conv_canonical].openrouter_id
-                if conv_canonical in MODEL_REGISTRY
-                else conv_model
-            )
-            build_openrouter = (
-                MODEL_REGISTRY[build_canonical].openrouter_id
-                if build_canonical in MODEL_REGISTRY
-                else build_model
-            )
-            versions[agent_id] = {
-                "conversation": conv_openrouter,
-                "building": build_openrouter,
-            }
-        return versions
-
-    def _seed_rng(self, simulation_id: uuid.UUID) -> None:
-        """Seed the global RNG from the simulation ID for reproducibility."""
-        seed = int(hashlib.sha256(str(simulation_id).encode()).hexdigest()[:8], 16)
-        random.seed(seed)
-        logger.info("RNG seeded with %d (from simulation %s)", seed, simulation_id)
-
-    async def _apply_memory_seed(self, sim_id: uuid.UUID) -> None:
-        """If the config carries a ``memory_seed`` block, apply it to ``sim_id``.
-
-        Called immediately after the simulation row exists, before the
-        regular ``init_core_memories`` pass. Any seeded core memory satisfies
-        the existence check there, so default identity prompts are skipped.
-        """
-        if (
-            self._config.memory_seed is None
-            or self._config.dry_run
-            or self._services is None
-            or self._services.core_memory is None
-            or self._services.recall_memory is None
-            or self._memory_repo is None
-        ):
-            return
-
-        from core.memory.memory_seed import MemorySeedApplier
-
-        applier = MemorySeedApplier(
-            db=self._db,
-            memory_repo=self._memory_repo,
-            core_memory_mgr=self._services.core_memory,
-            recall_memory_mgr=self._services.recall_memory,
-            agent_registry=self._agents,
-            token_counter=self._services.token_counter,
-            relationship_repo=self._relationship_repo,
-        )
-        seed_result = await applier.apply(self._config.memory_seed, sim_id)
-        logger.info(
-            "Applied memory_seed mode=%s: %d core, %d recall, %d journal for agents %s",
-            self._config.memory_seed.mode,
-            seed_result.core_memories_restored,
-            seed_result.recall_memories_restored,
-            seed_result.journal_entries_restored,
-            seed_result.agents_restored,
-        )
-        for w in seed_result.warnings:
-            logger.warning("memory_seed: %s", w)
-
     async def _apply_initial_agent_energy(self) -> None:
         """Apply public-submission initial energy to active agent states."""
         if (
@@ -584,102 +413,10 @@ class SimulationOrchestrator:
             state.energy = max(0.0, min(1.0, normalized))
             await manager.save_state(state)
 
-    async def _create_or_attach_simulation(
-        self,
-        config_snapshot: dict[str, Any],
-        model_versions: dict[str, dict[str, str]],
-    ) -> Any:
-        """Create a new simulation row, or attach to one pre-created by the API.
-
-        When ``config.existing_sim_id`` is set the row was inserted by the
-        admin dashboard so the client could be redirected immediately;
-        we fetch it, refresh its config / agents / status, and reuse it.
-        """
-        import uuid as _uuid
-
-        if self._config.existing_sim_id:
-            sim_uuid = _uuid.UUID(self._config.existing_sim_id)
-            sim = await self._sim_repo.get(sim_uuid)
-            if sim is None:
-                raise RuntimeError(f"existing_sim_id {sim_uuid} not found in simulations table")
-            await self._sim_repo.update_config(sim_uuid, config_snapshot)
-            await self._sim_repo.update_agents_participated(sim_uuid, self._config.agents)
-            await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
-            if self._config.factions:
-                await self._sim_repo.update_factions(
-                    sim_uuid, [f.model_dump() for f in self._config.factions]
-                )
-            # Re-read so we have fresh config/agents/status fields
-            sim = await self._sim_repo.get(sim_uuid)
-            return sim
-
-        return await self._sim_repo.create(
-            SimulationCreate(
-                name=self._config.name,
-                description=self._config.description,
-                config=config_snapshot,
-                status=SimulationStatus.running,
-                agents_participated=self._config.agents,
-                model_versions=model_versions,
-                hypothesis=self._config.hypothesis,
-                factions=[f.model_dump() for f in self._config.factions],
-            )
-        )
-
     async def run(self) -> None:
         """Execute the seeded simulation — create record, run phases, finalize."""
-        self._start_time = time.monotonic()
-
-        # Create simulation record (include clock state in config snapshot)
-        config_snapshot = {
-            **self._config.to_dict(),
-            "clock_state": self.clock.to_dict(),
-            "llm_provider": (
-                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
-            ),
-        }
-        model_versions = self._build_model_versions()
-        sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
-        self._simulation_id = sim.id
-        self._started_at = sim.started_at or datetime.now(UTC)
-        self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
-        self._selection_logger.simulation_id = sim.id
-        self._seed_rng(sim.id)
-
-        # Collect runtime errors for error_log persistence
-        self._errors.clear()
-        self._event_bus.on(
-            EventType.SIMULATION_ERROR,
-            self._on_simulation_error,
-        )
-
-        logger.info(
-            "Created simulation %s (%s) with model versions: %s",
-            sim.id,
-            sim.name,
-            model_versions,
-        )
-
-        self._display.show_simulation_start(sim, self._config)
-
-        # Apply memory seed BEFORE init_core_memories so seeded values win.
-        await self._apply_memory_seed(sim.id)
-
-        # Initialize core memory for all agents in this simulation
-        if self._services and self._services.core_memory:
-            from core.bootstrap import init_core_memories
-
-            initialized = await init_core_memories(
-                self._agents,
-                self._services.core_memory,
-                simulation_id=sim.id,
-            )
-            if initialized:
-                logger.info(
-                    "Initialized core memory for %d agents: %s",
-                    len(initialized),
-                    initialized,
-                )
+        # _start_lifecycle creates/attaches the run and calls init_core_memories.
+        sim = await self._start_lifecycle(label="seeded")
 
         # Create RelationshipTracker and AssertionEngine now that sim_id is known
         relationship_tracker = self._build_relationship_tracker(sim.id)
@@ -870,57 +607,7 @@ class SimulationOrchestrator:
 
     async def run_autonomous(self) -> None:
         """Run in autonomous mode — trigger system drives all conversations."""
-        self._start_time = time.monotonic()
-
-        config_snapshot = {
-            **self._config.to_dict(),
-            "clock_state": self.clock.to_dict(),
-            "llm_provider": (
-                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
-            ),
-        }
-        model_versions = self._build_model_versions()
-        sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
-        self._simulation_id = sim.id
-        self._started_at = sim.started_at or datetime.now(UTC)
-        self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
-        self._selection_logger.simulation_id = sim.id
-        self._seed_rng(sim.id)
-
-        # Collect runtime errors for error_log persistence
-        self._errors.clear()
-        self._event_bus.on(
-            EventType.SIMULATION_ERROR,
-            self._on_simulation_error,
-        )
-
-        logger.info(
-            "Created autonomous simulation %s (%s) with model versions: %s",
-            sim.id,
-            sim.name,
-            model_versions,
-        )
-
-        self._display.show_simulation_start(sim, self._config)
-
-        # Apply memory seed BEFORE init_core_memories so seeded values win.
-        await self._apply_memory_seed(sim.id)
-
-        # Initialize core memory for all agents in this simulation
-        if self._services and self._services.core_memory:
-            from core.bootstrap import init_core_memories
-
-            initialized = await init_core_memories(
-                self._agents,
-                self._services.core_memory,
-                simulation_id=sim.id,
-            )
-            if initialized:
-                logger.info(
-                    "Initialized core memory for %d agents: %s",
-                    len(initialized),
-                    initialized,
-                )
+        sim = await self._start_lifecycle(label="autonomous")
 
         # Create RelationshipTracker and AssertionEngine now that sim_id is known
         relationship_tracker = self._build_relationship_tracker(sim.id)
@@ -1096,22 +783,6 @@ class SimulationOrchestrator:
             )
             raise
 
-    async def _terminated(self) -> bool:
-        """Check all termination conditions for autonomous mode."""
-        if self._cancelled:
-            return True
-        # Duration limit
-        if self._config.duration and self.clock.elapsed() >= self._config.duration:
-            logger.info("Duration limit reached (%s)", self._config.duration)
-            return True
-        # Redis kill switch (accessible from Brad's phone)
-        if self._redis:
-            kill = await self._redis.get(KILL_SWITCH_KEY)
-            if kill == KILL_SWITCH_ACTIVE_VALUE:
-                logger.info("Kill switch activated — stopping simulation")
-                return True
-        return False
-
     @staticmethod
     def _trigger_to_phase_type(trigger_type: str) -> PhaseType:
         """Map a trigger type string to a PhaseType for autonomous conversations."""
@@ -1144,293 +815,3 @@ class SimulationOrchestrator:
 
         repo = AssertionRepo(self._db) if self._db else None
         return AssertionEngine(assertion_repo=repo)
-
-    def cancel(self) -> None:
-        """Signal the orchestrator to stop after the current phase."""
-        self._cancelled = True
-
-    async def _check_cost_limit(self) -> None:
-        """Reconcile cost from cost_events and raise if over limit.
-
-        Queries the authoritative cost_events table so the limit check
-        accounts for ALL LLM calls (management, compaction, reflections, etc.),
-        not just conversation turns from agent_speak events.  Also persists
-        the reconciled total to the simulation record so it stays accurate
-        even if the process crashes before _finalize().
-        """
-        if self._simulation_id is None:
-            return
-        try:
-            actual_cost = await self._sim_repo.get_total_cost_from_events(self._simulation_id)
-            if actual_cost > 0 and actual_cost != self._total_cost:
-                # Sync the in-memory total and persist to DB
-                await self._sim_repo.increment_stats(
-                    self._simulation_id,
-                    cost=actual_cost - self._total_cost,
-                )
-                self._total_cost = actual_cost
-        except Exception:
-            logger.warning(
-                "Cost reconciliation failed for %s, using in-memory total $%s",
-                self._simulation_id,
-                self._total_cost,
-                exc_info=True,
-            )
-        if self._total_cost > self._config.max_cost:
-            raise CostLimitExceededError(
-                f"Total cost ${self._total_cost} exceeds limit ${self._config.max_cost}"
-            )
-        if self._config.max_cost_rolling is not None and self._config.rolling_window is not None:
-            rolling_cost = await self._sim_repo.get_rolling_cost_from_events(
-                self._simulation_id,
-                self._config.rolling_window,
-            )
-            if rolling_cost > self._config.max_cost_rolling:
-                raise CostLimitExceededError(
-                    f"Rolling spend ${rolling_cost} over {self._config.rolling_window} "
-                    f"exceeds limit ${self._config.max_cost_rolling}"
-                )
-
-    async def _on_simulation_error(self, event: dict[str, Any]) -> None:
-        """Collect runtime errors emitted via SIMULATION_ERROR events."""
-        self._errors.append(event)
-
-    async def _finalize(
-        self,
-        status: SimulationStatus,
-        *,
-        error_log: dict[str, Any] | None = None,
-    ) -> None:
-        """Update the simulation record with final status and durations."""
-        if self._simulation_id is None:
-            return
-
-        # Merge explicit error_log with accumulated runtime errors
-        combined_log: dict[str, Any] | list[Any] | None = None
-        if error_log and self._errors:
-            combined_log = {**error_log, "runtime_errors": self._errors}
-        elif error_log:
-            combined_log = error_log
-        elif self._errors:
-            combined_log = {"runtime_errors": self._errors}
-
-        # Unsubscribe error listener
-        self._event_bus.off(
-            EventType.SIMULATION_ERROR,
-            self._on_simulation_error,
-        )
-
-        completed_at = datetime.now(UTC)
-        # Wall-clock duration between start and completion. Falls back to
-        # monotonic delta only if started_at was never captured (defensive).
-        if self._started_at is not None:
-            real_duration = completed_at - self._started_at
-        else:
-            real_duration = timedelta(seconds=time.monotonic() - self._start_time)
-        # Use clock elapsed time if speed_multiplier > 0, else fallback to phase count
-        if self._config.speed_multiplier > 0 or self._config.mode == "autonomous":
-            simulated_duration = self.clock.elapsed()
-        else:
-            simulated_duration = timedelta(hours=len(self._config.phases))
-
-        await self._sim_repo.update_status(
-            self._simulation_id,
-            status.value,
-            completed_at=completed_at,
-            error_log=combined_log,
-        )
-        await self._sim_repo.update_durations(
-            self._simulation_id,
-            simulated_duration=simulated_duration,
-            real_duration=real_duration,
-        )
-
-        # Reconcile total_cost from cost_events (authoritative source)
-        try:
-            actual_cost = await self._sim_repo.get_total_cost_from_events(self._simulation_id)
-            if actual_cost > 0:
-                await self._sim_repo.increment_stats(
-                    self._simulation_id,
-                    cost=actual_cost - self._total_cost,
-                )
-                self._total_cost = actual_cost
-        except Exception:
-            logger.warning(
-                "Failed to reconcile cost from cost_events for %s",
-                self._simulation_id,
-                exc_info=True,
-            )
-
-        # Persist final clock state into config
-        final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
-        await self._sim_repo.update_config(self._simulation_id, final_config)
-
-        # Build a baseline outcomes object (research artifact) so the
-        # simulation is comparable post-run without requiring manual edits.
-        try:
-            await self._write_baseline_outcomes(real_duration, simulated_duration)
-        except Exception:
-            logger.warning(
-                "Failed to persist baseline outcomes for %s",
-                self._simulation_id,
-                exc_info=True,
-            )
-
-        # Fetch final record for summary
-        sim = await self._sim_repo.get(self._simulation_id)
-        if sim:
-            self._display.show_summary(sim, real_duration)
-
-        # Kick off MP4 rendering for completed/failed runs. Best-effort:
-        # never block finalize on a video render, and gracefully skip when
-        # there's nothing to render (no transcripts, no events).
-        if sim is not None and sim.status in {"completed", "failed"}:
-            try:
-                await self._enqueue_video_render(sim)
-            except Exception:
-                logger.warning(
-                    "Failed to enqueue video render for %s",
-                    self._simulation_id,
-                    exc_info=True,
-                )
-
-        # Notify the public submitter (if any) that their run finished.
-        # Wrapped: notification failures must never block finalize.
-        if sim is not None and sim.submitted_by_user_id is not None:
-            try:
-                await self._notify_submitter(sim)
-            except Exception:
-                logger.warning(
-                    "Failed to send completion notification for %s",
-                    self._simulation_id,
-                    exc_info=True,
-                )
-
-    async def _enqueue_video_render(self, sim: Any) -> None:
-        """Enqueue the headless video render for ``sim``."""
-        from core.video.worker import enqueue_render, mark_unrenderable
-
-        if sim.total_turns <= 0 or sim.total_conversations <= 0:
-            await mark_unrenderable(
-                sim.id,
-                sim_repo=self._sim_repo,
-                reason="no transcript turns",
-            )
-            return
-        await enqueue_render(sim.id, sim_repo=self._sim_repo)
-
-    async def _notify_submitter(self, sim: Any) -> None:
-        """Email the public submitter that their simulation finished."""
-        from core.notifications import send_completion_email
-        from core.repos.user_repo import UserRepo
-
-        user_repo = UserRepo(self._db)
-        user = await user_repo.get_by_id(sim.submitted_by_user_id)
-        if user is None:
-            logger.info(
-                "[notify] submitter %s no longer exists; skipping email",
-                sim.submitted_by_user_id,
-            )
-            return
-
-        video_url = getattr(sim, "video_url", None)
-        await send_completion_email(
-            sim,
-            user,
-            user_repo=user_repo,
-            video_url=video_url,
-        )
-
-    async def _write_baseline_outcomes(
-        self,
-        real_duration: timedelta,
-        simulated_duration: timedelta,
-    ) -> None:
-        """Populate a baseline outcomes JSONB and (optionally) draft a learning."""
-        if self._simulation_id is None:
-            return
-        sim = await self._sim_repo.get(self._simulation_id)
-        if sim is None:
-            return
-
-        # Pull eval scores if any exist for this run.
-        evals: dict[str, Any] = {}
-        try:
-            from core.repos.eval_repo import EvalRepo
-
-            eval_repo = EvalRepo(self._db)
-            latest = await eval_repo.get_latest_eval_run(self._simulation_id)
-            if latest is not None:
-                evals["eval_run_id"] = str(latest.id)
-                evals["eval_suite"] = latest.eval_suite
-                evals["overall_score"] = (
-                    str(latest.overall_score) if latest.overall_score is not None else None
-                )
-                results = await eval_repo.get_eval_results(latest.id)
-                evals["category_scores"] = {
-                    r.category: (str(r.score) if r.score is not None else None) for r in results
-                }
-        except Exception:
-            logger.debug("No eval data attached to simulation", exc_info=True)
-
-        outcomes: dict[str, Any] = {
-            "key_metrics": {
-                "total_conversations": sim.total_conversations,
-                "total_turns": sim.total_turns,
-                "total_tokens": sim.total_tokens,
-                "total_cost": str(sim.total_cost),
-                "total_artifacts": sim.total_artifacts,
-                "total_management_flags": sim.total_management_flags,
-                "simulated_duration_seconds": simulated_duration.total_seconds(),
-                "real_duration_seconds": real_duration.total_seconds(),
-            },
-            "evals": evals,
-            "surprises": [],
-            "failures": list(self._errors),
-        }
-
-        await self._sim_repo.update_research_fields(self._simulation_id, outcomes=outcomes)
-
-        if self._config.auto_draft_learnings and not self._config.dry_run:
-            try:
-                draft = await self._draft_learning_summary(sim, outcomes)
-                if draft:
-                    await self._sim_repo.append_learning(
-                        self._simulation_id, author="system", text=draft
-                    )
-            except Exception:
-                logger.warning(
-                    "Auto-draft learnings failed for %s",
-                    self._simulation_id,
-                    exc_info=True,
-                )
-
-    async def _draft_learning_summary(
-        self,
-        sim: Any,
-        outcomes: dict[str, Any],
-    ) -> str | None:
-        """Ask the LLM to summarize the run in 2-3 sentences."""
-        prompt = (
-            "Summarize this simulation run in 2-3 sentences as a research learning. "
-            f"Hypothesis: {sim.hypothesis or '(none provided)'}. "
-            f"Key metrics: {outcomes['key_metrics']}. "
-            f"Eval data: {outcomes['evals']}. "
-            f"Failures: {len(outcomes['failures'])}."
-        )
-        try:
-            resp = await self._llm.complete(
-                messages=[{"role": "user", "content": prompt}],
-                model="claude-haiku-4-5",
-                max_tokens=200,
-            )
-        except Exception:
-            logger.debug("LLM draft learnings call failed", exc_info=True)
-            return None
-        content = getattr(resp, "content", None)
-        if content is None and isinstance(resp, dict):
-            content = resp.get("content")
-        if content is None:
-            return None
-        text = str(content).strip()
-        return text or None

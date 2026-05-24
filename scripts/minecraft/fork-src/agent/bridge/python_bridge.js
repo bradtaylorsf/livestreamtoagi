@@ -67,10 +67,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.8 carries the additive `director.gate`
-// and `kill.status` verbs. The server only gates on the major, so this stays
-// wire-compatible with earlier 1.x peers.
-export const PROTOCOL_VERSION = '1.8';
+// contract.PROTOCOL_VERSION (ADR §3). 1.9 keeps the simulation_id envelope
+// and uses supervisor-propagated env for embodied lifecycle scoping. The server
+// only gates on the major, so this stays wire-compatible with earlier 1.x peers.
+export const PROTOCOL_VERSION = '1.9';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';
@@ -493,7 +493,10 @@ function buildEnvelope({ service, method, payload, deadlineMs, agentId, traceId,
         request_id: `bridge-${randomUUID()}`, // unique correlation + idempotency key (ADR §5)
         agent_id: agentId || process.env.LTAG_AGENT_ID || DEFAULT_AGENT_ID,
         run_id: process.env.LTAG_RUN_ID || DEFAULT_RUN_ID,
-        simulation_id: process.env.LTAG_SIMULATION_ID || DEFAULT_SIMULATION_ID,
+        simulation_id:
+            process.env.LTAG_SIMULATION_ID ||
+            process.env.MINECRAFT_SIMULATION_ID ||
+            DEFAULT_SIMULATION_ID,
         service,
         method,
         payload: payload || {},

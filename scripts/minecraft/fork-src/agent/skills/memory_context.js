@@ -66,7 +66,12 @@ function runId() {
 }
 
 function simulationId() {
-    return process.env.LTAG_SIMULATION_ID || process.env.MC_SIMULATION_ID || DEFAULT_SIMULATION_ID;
+    return (
+        process.env.LTAG_SIMULATION_ID ||
+        process.env.MINECRAFT_SIMULATION_ID ||
+        process.env.MC_SIMULATION_ID ||
+        DEFAULT_SIMULATION_ID
+    );
 }
 
 function runMode(value) {

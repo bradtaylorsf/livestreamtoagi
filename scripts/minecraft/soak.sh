@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Run the E8-8 multi-agent Minecraft stability soak.
 #
-# This is a thin ops orchestrator around the existing single-bot launchers. A
-# real run expects the backend bridge, Docker services, LM Studio, and the
-# pinned Mindcraft checkout to already be up. If Paper is down locally, it
-# starts the portable Minecraft supervisor before launching BridgeBot plus
-# Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. Evidence lands
-# under logs/soak/<UTC timestamp>/.
+# This is now the low-level Minecraft diagnostic harness. Real runs delegate
+# to scripts/run_simulation.py --mode embodied unless MC_SIM_LOWLEVEL=1 is set;
+# the embodied supervisor allocates the simulation id and then relaunches this
+# script as the child runtime. A low-level run expects the backend bridge,
+# Docker services, LM Studio, and the pinned Mindcraft checkout to already be
+# up. If Paper is down locally, it starts the portable Minecraft supervisor
+# before launching BridgeBot plus Alpha, Vera, Rex, Aurora, Pixel, Fork,
+# Sentinel, and Grok. Evidence lands under logs/soak/<UTC timestamp>/.
 #
 # Usage:
 #   scripts/minecraft/soak.sh
@@ -39,6 +41,16 @@
 #                               Timeout for the preflight LM Studio chat
 #                               warm-up. Default: 120.
 #   SOAK_DURATION_HOURS         Default: 2.
+#   MC_SIM_LOWLEVEL             Set to 1 to bypass the embodied simulation
+#                               supervisor and run this shell harness directly
+#                               as a diagnostic. Default: delegate real runs.
+#   MC_SIM_RUN_MODE             Supervisor mode when delegating: experimental
+#                               or persistent. Default: experimental.
+#   MC_SIM_NAME                 Optional simulation name for delegated runs.
+#   MC_SIM_MAX_COST             Supervisor max-cost cap. Default: 10.
+#   MC_SIM_MAX_COST_ROLLING     Optional rolling cap for delegated runs.
+#   MC_SIM_ROLLING_WINDOW       Required with MC_SIM_MAX_COST_ROLLING.
+#   MC_SIM_SKIP_END_HOOKS       Set to 1 to skip supervisor eval/report hooks.
 #   SOAK_PROFILE                default or director_v2. The director_v2
 #                               profile forces CONVERSATION_MODE=director_v2,
 #                               DIRECTOR_V2_GATE=1, the LM queue proxy, and
@@ -344,6 +356,7 @@ fi
 
 MODE="run"
 BEHAVIOR_RUN_DIR=""
+SUPERVISOR_RUNTIME_ARGS=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --duration-hours)
@@ -354,11 +367,13 @@ while [ "$#" -gt 0 ]; do
         --profile)
             [ "$#" -ge 2 ] || { echo "x --profile needs a value" >&2; exit 2; }
             SOAK_PROFILE="$2"
+            SUPERVISOR_RUNTIME_ARGS+=("--profile" "$2")
             shift 2
             ;;
         --log-dir)
             [ "$#" -ge 2 ] || { echo "x --log-dir needs a value" >&2; exit 2; }
             SOAK_LOG_ROOT="$2"
+            SUPERVISOR_RUNTIME_ARGS+=("--log-dir" "$2")
             shift 2
             ;;
         --dry-run)
@@ -416,6 +431,58 @@ DEFAULT_SOAK_BOTS="bridge alpha vera rex aurora pixel fork sentinel grok"
 DEFAULT_SOAK_COST_AGENTS="alpha vera rex aurora pixel fork sentinel grok"
 SOAK_BOTS="${SOAK_BOTS:-$DEFAULT_SOAK_BOTS}"
 SOAK_COST_AGENTS="${SOAK_COST_AGENTS:-$DEFAULT_SOAK_COST_AGENTS}"
+
+delegate_to_embodied_supervisor() {
+    [ "${MC_SIM_LOWLEVEL:-0}" = "1" ] && return 1
+
+    local run_mode="${MC_SIM_RUN_MODE:-experimental}"
+    case "$run_mode" in
+        persistent|experimental) ;;
+        *)
+            fail "MC_SIM_RUN_MODE must be persistent or experimental."
+            exit 2
+            ;;
+    esac
+
+    local sim_name="${MC_SIM_NAME:-minecraft-${SOAK_PROFILE}-$(date -u '+%Y%m%dT%H%M%SZ')}"
+    local agents_csv="${MC_SIM_AGENTS:-alpha,vera,rex,aurora,pixel,fork,sentinel,grok}"
+    local max_cost="${MC_SIM_MAX_COST:-10}"
+    local tick_seconds="${MC_SIM_SUPERVISOR_TICK_SECONDS:-5}"
+    local -a cmd
+    cmd=(
+        "$PYTHON" "$REPO_ROOT/scripts/run_simulation.py"
+        --mode embodied
+        --run-mode "$run_mode"
+        --name "$sim_name"
+        --agents "$agents_csv"
+        --max-cost "$max_cost"
+        --tick-seconds "$tick_seconds"
+    )
+    if [ "$run_mode" = "experimental" ]; then
+        cmd+=(--duration-hours "$SOAK_DURATION_HOURS")
+    fi
+    if [ -n "${MC_SIM_EXISTING_ID:-}" ]; then
+        cmd+=(--sim-id "$MC_SIM_EXISTING_ID")
+    fi
+    if [ -n "${MC_SIM_MAX_COST_ROLLING:-}" ] || [ -n "${MC_SIM_ROLLING_WINDOW:-}" ]; then
+        if [ -z "${MC_SIM_MAX_COST_ROLLING:-}" ] || [ -z "${MC_SIM_ROLLING_WINDOW:-}" ]; then
+            fail "MC_SIM_MAX_COST_ROLLING and MC_SIM_ROLLING_WINDOW must be set together."
+            exit 2
+        fi
+        cmd+=(--max-cost-rolling "$MC_SIM_MAX_COST_ROLLING" --rolling-window "$MC_SIM_ROLLING_WINDOW")
+    fi
+    if [ "${MC_SIM_SKIP_END_HOOKS:-0}" = "1" ]; then
+        cmd+=(--no-embodied-end-hooks)
+    fi
+    local arg
+    for arg in "${SUPERVISOR_RUNTIME_ARGS[@]}"; do
+        cmd+=(--embodied-runtime-arg "$arg")
+    done
+
+    info "Delegating Minecraft run lifecycle to embodied simulation supervisor"
+    info "Set MC_SIM_LOWLEVEL=1 to run this shell harness as a lower-level diagnostic."
+    exec "${cmd[@]}"
+}
 
 script_for_bot() {
     case "$1" in
@@ -757,6 +824,7 @@ print_plan() {
     seconds="$(duration_seconds 2> /dev/null || true)"
 
     ok "E8-8 multi-agent soak plan"
+    info "lifecycle:      low-level diagnostic (real runs delegate unless MC_SIM_LOWLEVEL=1)"
     info "duration:       ${SOAK_DURATION_HOURS}h (${seconds:-invalid} seconds)"
     info "profile:        $SOAK_PROFILE"
     info "log root:       $SOAK_LOG_ROOT"
@@ -1324,6 +1392,20 @@ if [ "$MODE" = "dry-run" ]; then
     exit 0
 fi
 
+if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
+    fail "LOCAL_LLM_MODEL is not set. List local ids with: pnpm llm:local --list-only"
+    exit 1
+fi
+
+if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
+    fail "MINECRAFT_BRIDGE_TOKEN is not set; bridge auth is fail-closed."
+    exit 1
+fi
+
+if delegate_to_embodied_supervisor; then
+    :
+fi
+
 verify_static || { fail "Refusing to run with invalid committed soak assets."; exit 1; }
 
 DURATION_SECONDS="$(duration_seconds 2> /dev/null || true)"
@@ -1332,17 +1414,8 @@ if [ -z "$DURATION_SECONDS" ]; then
     exit 2
 fi
 
-if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
-    fail "LOCAL_LLM_MODEL is not set. List local ids with: pnpm llm:local --list-only"
-    exit 1
-fi
 export LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LOCAL_LLM_MODEL}"
 preflight_builder_routing || exit $?
-
-if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
-    fail "MINECRAFT_BRIDGE_TOKEN is not set; bridge auth is fail-closed."
-    exit 1
-fi
 
 NODE_MAJOR="$(node_major || true)"
 if [ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]; then

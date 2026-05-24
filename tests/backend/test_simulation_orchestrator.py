@@ -15,6 +15,7 @@ import yaml
 
 from core.models import Simulation, SimulationStatus
 from core.simulation.display import SimulationDisplay
+from core.simulation.lifecycle import SimulationLifecycleBase
 from core.simulation.orchestrator import (
     CostLimitExceededError,
     SimulationConfig,
@@ -174,9 +175,7 @@ class TestSimulationConfig:
             os.unlink(path)
 
     def test_required_agents_extracted_from_phase(self):
-        phases = [
-            {"name": "standup", "type": "scheduled", "required_agents": ["vera", "rex"]}
-        ]
+        phases = [{"name": "standup", "type": "scheduled", "required_agents": ["vera", "rex"]}]
         path = make_seed_file(phases)
         try:
             config = SimulationConfig(name="test", seed_file=path, agents=["vera"])
@@ -303,9 +302,7 @@ class TestPhaseRunner:
     @pytest.mark.asyncio
     async def test_phase_runner_catches_exceptions(self):
         runner = self._make_runner(dry_run=False)
-        runner._reflection.run_6hour_reflection = AsyncMock(
-            side_effect=RuntimeError("LLM down")
-        )
+        runner._reflection.run_6hour_reflection = AsyncMock(side_effect=RuntimeError("LLM down"))
         phase = Phase(
             name="reflect",
             type=PhaseType.reflection,
@@ -362,6 +359,7 @@ class TestSimulationOrchestrator:
             [{"name": "standup", "type": "scheduled"}],
             dry_run=True,
         )
+        assert isinstance(orchestrator, SimulationLifecycleBase)
         await orchestrator.run()
         services["simulation_repo"].create.assert_awaited_once()
         call_args = services["simulation_repo"].create.call_args
@@ -454,7 +452,8 @@ class TestSimulationOrchestrator:
         )
         # Simulate a phase that costs money by patching the phase runner
         with patch.object(
-            PhaseRunner, "run_phase",
+            PhaseRunner,
+            "run_phase",
             new_callable=AsyncMock,
             return_value=PhaseResult(cost=Decimal("1.00"), turns=5),
         ):
@@ -472,7 +471,8 @@ class TestSimulationOrchestrator:
         )
         with (
             patch.object(
-                PhaseRunner, "run_phase",
+                PhaseRunner,
+                "run_phase",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("boom"),
             ),
@@ -759,12 +759,14 @@ class TestSimulationDisplay:
 
     def test_show_summary_no_crash(self):
         d = SimulationDisplay()
-        sim = Simulation(**make_simulation_row(
-            total_conversations=5,
-            total_turns=42,
-            total_tokens=12000,
-            total_cost=Decimal("1.25"),
-        ))
+        sim = Simulation(
+            **make_simulation_row(
+                total_conversations=5,
+                total_turns=42,
+                total_tokens=12000,
+                total_cost=Decimal("1.25"),
+            )
+        )
         d.show_summary(sim, timedelta(seconds=120))
 
 
@@ -1027,11 +1029,10 @@ class TestAutonomousOrchestrator:
         services["trigger_system"].check = AsyncMock(side_effect=mock_check)
 
         with patch.object(
-            PhaseRunner, "run_phase",
+            PhaseRunner,
+            "run_phase",
             new_callable=AsyncMock,
-            return_value=PhaseResult(
-                turns=5, cost=Decimal("0.01"), duration_seconds=10.0
-            ),
+            return_value=PhaseResult(turns=5, cost=Decimal("0.01"), duration_seconds=10.0),
         ):
             await orchestrator.run_autonomous()
 
@@ -1152,17 +1153,36 @@ class TestAwakeningSeedFile:
 class TestToolCoverageSeedFile:
     # All 30 tools that the scenario should exercise
     ALL_TOOLS = {
-        "send_message", "get_world_state", "get_audience_status",
-        "send_chat_message", "create_poll", "get_poll_results",
-        "recall_memory", "retrieve_transcript", "update_core_memory",
-        "execute_code", "generate_tilemap",
-        "web_search", "fetch_url", "draft_social_post", "draft_email",
-        "get_revenue_status", "check_post_performance", "check_email_responses",
-        "transfer_budget", "view_account",
-        "propose_alliance", "vote_alliance", "leave_alliance", "view_alliances",
+        "send_message",
+        "get_world_state",
+        "get_audience_status",
+        "send_chat_message",
+        "create_poll",
+        "get_poll_results",
+        "recall_memory",
+        "retrieve_transcript",
+        "update_core_memory",
+        "execute_code",
+        "generate_tilemap",
+        "web_search",
+        "fetch_url",
+        "draft_social_post",
+        "draft_email",
+        "get_revenue_status",
+        "check_post_performance",
+        "check_email_responses",
+        "transfer_budget",
+        "view_account",
+        "propose_alliance",
+        "vote_alliance",
+        "leave_alliance",
+        "view_alliances",
         "manage_task",
-        "propose_character", "vote_character",
-        "dispatch_alpha", "propose_self_modification", "view_evolution_log",
+        "propose_character",
+        "vote_character",
+        "dispatch_alpha",
+        "propose_self_modification",
+        "view_evolution_log",
     }
 
     def _load_tool_coverage(self) -> SimulationConfig:
@@ -1185,9 +1205,7 @@ class TestToolCoverageSeedFile:
 
     def test_tool_coverage_exercises_all_tools(self):
         config = self._load_tool_coverage()
-        tool_exercise_phases = [
-            p for p in config.phases if p.type == PhaseType.tool_exercise
-        ]
+        tool_exercise_phases = [p for p in config.phases if p.type == PhaseType.tool_exercise]
         exercised_tools = {p.config.get("tool") for p in tool_exercise_phases}
         missing = self.ALL_TOOLS - exercised_tools
         assert not missing, f"Missing tools: {missing}"

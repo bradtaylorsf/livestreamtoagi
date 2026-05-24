@@ -42,11 +42,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.8 is a
-# minor bump over main's 1.7: the collapsed E11 session includes both
-# `director.gate` and `kill.status` in the live registry. Earlier 1.x peers
-# remain wire-compatible because `is_supported_version` gates only on the major.
-PROTOCOL_VERSION = "1.8"
+# additive-compatible within a major and fail-closed across majors. 1.9 keeps
+# the existing required `simulation_id` envelope field and documents that
+# embodied supervisors provide it through runtime env so bridge-originated
+# memory, action, errand, and journal events share one durable simulation id.
+# Earlier 1.x peers remain wire-compatible because `is_supported_version` gates
+# only on the major.
+PROTOCOL_VERSION = "1.9"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -165,7 +167,12 @@ class BridgeRequest(BaseModel):
     )
     run_id: str = Field(min_length=1, description="Run this message belongs to (attribution).")
     simulation_id: str = Field(
-        min_length=1, description="Simulation this message belongs to (journal + cost)."
+        min_length=1,
+        description=(
+            "Simulation this message belongs to (journal + cost). Embodied "
+            "supervisors propagate this from LTAG_SIMULATION_ID / "
+            "MINECRAFT_SIMULATION_ID so all bridge events share the run id."
+        ),
     )
     service: str = Field(min_length=1, description="Typed service name (ADR §6 closed set).")
     method: str = Field(min_length=1, description="Method within the service.")
