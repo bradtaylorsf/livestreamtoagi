@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import random
 import re
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -187,6 +189,7 @@ class SimulationConfig:
             if world_config is not None
             else None
         )
+        self.world_provisioned: dict[str, Any] | None = None
         self._world_config_override = world_config is not None
         self.run_mode: RunMode | None = (
             RunMode(run_mode)
@@ -196,6 +199,7 @@ class SimulationConfig:
             else None
         )
         self._run_mode_explicit = run_mode is not None
+        self._validate_run_mode_constraints()
         # When provided, the orchestrator attaches to a pre-created
         # simulation row instead of inserting a new one. Used when the
         # admin dashboard pre-creates the row so it can immediately return
@@ -220,7 +224,25 @@ class SimulationConfig:
     @property
     def mode(self) -> str:
         """Return 'seeded' if a seed file is set, otherwise 'autonomous'."""
+        if self.run_mode == RunMode.persistent:
+            return "autonomous"
         return "seeded" if self.seed_file else "autonomous"
+
+    def _validate_run_mode_constraints(self) -> None:
+        """Apply run-mode invariants after CLI and seed-file fields merge."""
+        if self.run_mode != RunMode.persistent:
+            return
+        if self.duration is not None:
+            raise ValueError("persistent mode is indefinite; do not set duration")
+        if self.max_cost_rolling is None or self.rolling_window is None:
+            raise ValueError(
+                "persistent mode requires max_cost_rolling and rolling_window "
+                "so it is bounded by a rolling cap"
+            )
+        if self.world_config is None:
+            self.world_config = WorldConfig(persistent=True)
+        else:
+            self.world_config.persistent = True
 
     def load_seed_file(self, valid_agent_ids: set[str] | None = None) -> None:
         """Parse the YAML seed file into Phase objects.
@@ -267,6 +289,8 @@ class SimulationConfig:
         if raw_run_mode is not None and not self._run_mode_explicit:
             self.run_mode = RunMode(raw_run_mode)
             self._run_mode_explicit = True
+
+        self._validate_run_mode_constraints()
 
         # Parse factions if present. Public submissions pass an explicit
         # normalized list, which intentionally overrides the scenario YAML.
@@ -364,6 +388,8 @@ class SimulationConfig:
             d["agent_goals"] = self.agent_goals
         if self.world_config is not None:
             d["world"] = self.world_config.model_dump(exclude_none=True)
+        if self.world_provisioned is not None:
+            d["world_provisioned"] = self.world_provisioned
         if self.run_mode is not None and (
             self._run_mode_explicit or self.run_mode == RunMode.persistent
         ):
@@ -434,6 +460,7 @@ class SimulationOrchestrator:
         self._total_cost = Decimal("0")
         self._cancelled = False
         self._errors: list[dict[str, Any]] = []
+        self._last_persistent_heartbeat = 0.0
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
     @property
@@ -690,6 +717,70 @@ class SimulationOrchestrator:
         )
         logger.info("Seeded run-spec goals for %d agents", len(self._config.agent_goals))
 
+    async def _persist_config_snapshot(self) -> None:
+        """Persist the current config snapshot after runtime setup mutates it."""
+        if self._simulation_id is None or self._config.dry_run:
+            return
+        await self._sim_repo.update_config(self._simulation_id, self._current_config_snapshot())
+
+    def _current_config_snapshot(self) -> dict[str, Any]:
+        """Build the DB config snapshot with runtime fields included."""
+        return {
+            **self._config.to_dict(),
+            "clock_state": self.clock.to_dict(),
+            "llm_provider": (
+                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
+            ),
+        }
+
+    async def _provision_world_for_run(self) -> None:
+        """Apply RunSpec.world to the Minecraft server world config."""
+        if (
+            self._config.world_config is None
+            or self._config.dry_run
+            or self._simulation_id is None
+        ):
+            return
+
+        from core.minecraft.world_provisioner import provision_world
+
+        run_mode = self._config.run_mode or RunMode.experimental
+        project_root = Path(__file__).resolve().parents[2]
+        server_dir = Path(os.environ.get("SERVER_DIR", project_root / "minecraft-server"))
+        script_dir = project_root / "scripts" / "minecraft"
+        persistent = self._config.world_config.persistent or run_mode == RunMode.persistent
+
+        try:
+            result = provision_world(
+                self._config.world_config,
+                run_mode,
+                server_dir=server_dir,
+                script_dir=script_dir,
+                dry_run=self._config.dry_run,
+            )
+        except FileNotFoundError as exc:
+            if persistent:
+                logger.warning("Persistent Minecraft world is not present yet: %s", exc)
+                self._config.world_provisioned = {
+                    "run_mode": run_mode.value,
+                    "persistent": True,
+                    "action": "missing_existing_world",
+                    "error": str(exc),
+                }
+                await self._persist_config_snapshot()
+                return
+            raise
+
+        self._config.world_provisioned = result.to_dict()
+        logger.info(
+            "Provisioned Minecraft world for run_mode=%s: action=%s level_name=%s config=%s",
+            run_mode.value,
+            result.action,
+            result.level_name,
+            result.world_config_path,
+        )
+        await self._persist_config_snapshot()
+
     async def _create_or_attach_simulation(
         self,
         config_snapshot: dict[str, Any],
@@ -708,6 +799,11 @@ class SimulationOrchestrator:
             sim = await self._sim_repo.get(sim_uuid)
             if sim is None:
                 raise RuntimeError(f"existing_sim_id {sim_uuid} not found in simulations table")
+            if (
+                self._config.run_mode == RunMode.persistent
+                and sim.status == SimulationStatus.running
+            ):
+                self._total_cost = await self._sim_repo.get_total_cost_from_events(sim_uuid)
             await self._sim_repo.update_config(sim_uuid, config_snapshot)
             await self._sim_repo.update_agents_participated(sim_uuid, self._config.agents)
             await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
@@ -737,13 +833,7 @@ class SimulationOrchestrator:
         self._start_time = time.monotonic()
 
         # Create simulation record (include clock state in config snapshot)
-        config_snapshot = {
-            **self._config.to_dict(),
-            "clock_state": self.clock.to_dict(),
-            "llm_provider": (
-                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
-            ),
-        }
+        config_snapshot = self._current_config_snapshot()
         model_versions = self._build_model_versions()
         sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
@@ -751,6 +841,8 @@ class SimulationOrchestrator:
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
+        if self._config.run_mode == RunMode.persistent:
+            await self._persistent_heartbeat(force=True)
 
         # Collect runtime errors for error_log persistence
         self._errors.clear()
@@ -765,6 +857,12 @@ class SimulationOrchestrator:
             sim.name,
             model_versions,
         )
+
+        try:
+            await self._provision_world_for_run()
+        except Exception as exc:
+            await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
+            raise
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -823,9 +921,11 @@ class SimulationOrchestrator:
             await audience_sim.seed_initial_state()
             audience_sim.start()
 
+        persistent_mode = self._config.run_mode == RunMode.persistent
+
         # Start world simulator if enabled
         world_sim = None
-        if self._config.world_sim and not self._config.dry_run:
+        if self._config.world_sim and not self._config.dry_run and not persistent_mode:
             from core.simulation.recurring_personas import PersonaManager
             from core.simulation.world_simulator import WorldSimulator
 
@@ -979,13 +1079,7 @@ class SimulationOrchestrator:
         """Run in autonomous mode — trigger system drives all conversations."""
         self._start_time = time.monotonic()
 
-        config_snapshot = {
-            **self._config.to_dict(),
-            "clock_state": self.clock.to_dict(),
-            "llm_provider": (
-                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
-            ),
-        }
+        config_snapshot = self._current_config_snapshot()
         model_versions = self._build_model_versions()
         sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
@@ -1007,6 +1101,12 @@ class SimulationOrchestrator:
             sim.name,
             model_versions,
         )
+
+        try:
+            await self._provision_world_for_run()
+        except Exception as exc:
+            await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
+            raise
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -1040,9 +1140,11 @@ class SimulationOrchestrator:
         runner = self._build_phase_runner(sim.id, relationship_tracker)
         await self._apply_initial_agent_energy()
 
+        persistent_mode = self._config.run_mode == RunMode.persistent
+
         # Start world simulator if enabled
         world_sim = None
-        if self._config.world_sim and not self._config.dry_run:
+        if self._config.world_sim and not self._config.dry_run and not persistent_mode:
             from core.simulation.recurring_personas import PersonaManager
             from core.simulation.world_simulator import WorldSimulator
 
@@ -1067,6 +1169,10 @@ class SimulationOrchestrator:
 
         try:
             while not await self._terminated():
+                if persistent_mode and not self._config.dry_run:
+                    await self._persistent_heartbeat()
+                    await self._check_cost_limit()
+
                 # Check for day boundary
                 new_day = self.clock.simulated_day()
                 if new_day != current_day:
@@ -1210,7 +1316,11 @@ class SimulationOrchestrator:
         if self._cancelled:
             return True
         # Duration limit
-        if self._config.duration and self.clock.elapsed() >= self._config.duration:
+        if (
+            getattr(self._config, "run_mode", None) != RunMode.persistent
+            and self._config.duration
+            and self.clock.elapsed() >= self._config.duration
+        ):
             logger.info("Duration limit reached (%s)", self._config.duration)
             return True
         # Redis kill switch (accessible from Brad's phone)
@@ -1220,6 +1330,17 @@ class SimulationOrchestrator:
                 logger.info("Kill switch activated — stopping simulation")
                 return True
         return False
+
+    async def _persistent_heartbeat(self, *, force: bool = False) -> None:
+        """Publish the active persistent simulation id on raw Redis."""
+        if self._simulation_id is None or self._config.run_mode != RunMode.persistent:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_persistent_heartbeat < 30:
+            return
+        await self._redis.set("live:simulation_id", str(self._simulation_id))
+        await self._redis.set("live:simulation_heartbeat", datetime.now(UTC).isoformat())
+        self._last_persistent_heartbeat = now
 
     @staticmethod
     def _trigger_to_phase_type(trigger_type: str) -> PhaseType:
@@ -1371,7 +1492,7 @@ class SimulationOrchestrator:
             )
 
         # Persist final clock state into config
-        final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        final_config = self._current_config_snapshot()
         await self._sim_repo.update_config(self._simulation_id, final_config)
 
         # Build a baseline outcomes object (research artifact) so the

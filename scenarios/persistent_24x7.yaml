@@ -1,0 +1,22 @@
+meta:
+  name: "Persistent 24/7"
+  description: "Indefinite livestream mode using the durable Minecraft world, rolling cost caps, and the kill switch instead of a fixed duration."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 5.0
+  expected_runtime_minutes: 0
+
+run_mode: persistent
+agents:
+  - vera
+  - rex
+  - aurora
+  - pixel
+  - fork
+  - sentinel
+  - grok
+world:
+  world_type: default
+  persistent: true
+  durable_world_id: world
+factions: []
+phases: []

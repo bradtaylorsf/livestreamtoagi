@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
 
+from core.minecraft.world_provisioner import WorldProvisionResult
 from core.models import PersonaOverride, RunMode, RunSpec, WorldConfig
 from core.run_spec import load_run_spec
-from core.simulation.orchestrator import SimulationConfig
+from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS_DIR = PROJECT_ROOT / "scenarios"
@@ -61,6 +64,8 @@ def test_simulation_config_load_seed_file_populates_run_spec_fields() -> None:
         name="run-spec-fixture",
         seed_file=str(FIXTURE),
         agents=["vera", "rex"],
+        max_cost_rolling=1.0,
+        rolling_window="1h",
         dry_run=True,
     )
 
@@ -172,3 +177,44 @@ def test_existing_scenario_loads_without_run_spec_snapshot_drift() -> None:
     assert "agent_goals" not in snapshot
     assert "world" not in snapshot
     assert "run_mode" not in snapshot
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_records_world_provisioned_metadata(tmp_path: Path) -> None:
+    cfg = SimulationConfig(
+        name="world-provisioned",
+        seed_file=str(SCENARIOS_DIR / "awakening.yaml"),
+        agents=["vera"],
+        world_config={"world_type": "default", "seed": 605},
+        run_mode="experimental",
+        dry_run=False,
+    )
+    sim_id = uuid.uuid4()
+    orchestrator = SimulationOrchestrator.__new__(SimulationOrchestrator)
+    orchestrator._config = cfg
+    orchestrator._simulation_id = sim_id
+    orchestrator._sim_repo = MagicMock(update_config=AsyncMock())
+    orchestrator._llm = MagicMock()
+    orchestrator.clock = MagicMock()
+    orchestrator.clock.to_dict.return_value = {"speed_multiplier": 0}
+
+    result = WorldProvisionResult(
+        world_config_path=tmp_path / "run-world.config",
+        level_name="world",
+        run_mode=RunMode.experimental,
+        persistent=False,
+        action="reset_fresh",
+    )
+    with patch("core.minecraft.world_provisioner.provision_world", return_value=result):
+        await orchestrator._provision_world_for_run()
+
+    snapshot = cfg.to_dict()
+    assert snapshot["world_provisioned"] == result.to_dict()
+    orchestrator._sim_repo.update_config.assert_awaited_once_with(
+        sim_id,
+        {
+            **snapshot,
+            "clock_state": {"speed_multiplier": 0},
+            "llm_provider": "openrouter",
+        },
+    )
