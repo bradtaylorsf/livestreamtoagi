@@ -10,7 +10,7 @@ A 24/7 livestreamed AI reality show featuring 9 AI agents living in a pixel art 
 Python Backend (FastAPI + CrewAI)
   ↕ WebSocket
 TypeScript Frontend (Phaser.js — pixel art world renderer)
-  ↕ OBS/ffmpeg → Restream.io → Twitch + YouTube
+  ↕ OBS/ffmpeg → Twitch + YouTube
 
 TypeScript Website (Next.js on Vercel)
   ← FastAPI REST API
@@ -163,7 +163,12 @@ OPENROUTER_API_KEY=
 TWITCH_CLIENT_ID=
 TWITCH_CLIENT_SECRET=
 TWITCH_BOT_TOKEN=
+TWITCH_STREAM_KEY=
+TWITCH_RTMP_URL=
 YOUTUBE_API_KEY=
+YOUTUBE_STREAM_KEY=
+YOUTUBE_RTMP_URL=
+RTMP_SMOKE_URL=
 PIXELLAB_API_KEY=
 LANGFUSE_SECRET_KEY=
 LANGFUSE_PUBLIC_KEY=
@@ -176,6 +181,24 @@ Optional runtime safety knobs:
 ```
 AGENT_HOURLY_CAP_USD=2.00
 AGENT_HOURLY_CAP_USD_VERA=0.50
+```
+
+Optional livestream audio:
+```
+TTS_STREAM_ENABLED=0
+TTS_STREAM_FIFO=/tmp/livestream_tts.fifo
+TTS_STREAM_SAMPLE_RATE=44100
+TTS_STREAM_CHANNELS=2
+TTS_AUDIO_FIFO=/tmp/livestream_tts.fifo
+TTS_AUDIO_VOLUME=1.0
+```
+
+Optional livestream kill-path variables:
+```
+LIVESTREAM_ENABLED=false
+LIVESTREAM_KILL_MODE=holding_card
+LIVESTREAM_HOLDING_CARD=
+LIVESTREAM_SAFE_TRANSITION_SECONDS=0
 ```
 
 ## Specs Reference

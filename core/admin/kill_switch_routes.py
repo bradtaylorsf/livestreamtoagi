@@ -16,7 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPExcep
 from pydantic import BaseModel
 
 from core.admin.dependencies import get_redis
-from core.redis_keys import KILL_SWITCH_KEY
+from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 
 if TYPE_CHECKING:
     from core.redis_client import RedisClient
@@ -74,7 +74,7 @@ async def activate_kill_switch(
         ttl_seconds = payload.ttl
     else:
         ttl_seconds = DEFAULT_KILL_SWITCH_TTL
-    await redis.set(KILL_SWITCH_KEY, "active", ex=ttl_seconds)
+    await redis.set(KILL_SWITCH_KEY, KILL_SWITCH_ACTIVE_VALUE, ex=ttl_seconds)
     background_tasks.add_task(_send_activation_alert, ttl_seconds)
     return {"status": "active", "ttl_seconds": ttl_seconds}
 

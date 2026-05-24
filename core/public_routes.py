@@ -10,14 +10,16 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any, Literal
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from core.auth.dependencies import get_current_user
 from core.constants import LIVE_SIMULATION_ID
+from core.event_bus import EventType
 from core.models import (
     Challenge,
     Conversation,
@@ -139,6 +141,22 @@ class AgentPublicProfile(BaseModel):
     message_count: int = 0
     conversation_count: int = 0
     artifact_count: int = 0
+
+
+StreamAgentStatus = Literal["idle", "talking", "building", "active", "waiting", "error"]
+
+
+class StreamAgentStatusItem(BaseModel):
+    id: str
+    display_name: str
+    status: StreamAgentStatus
+    last_action_at: str | None = None
+    current_topic: str | None = None
+
+
+class StreamAgentStatusResponse(BaseModel):
+    agents: list[StreamAgentStatusItem]
+    updated_at: str
 
 
 class StatsResponse(BaseModel):
@@ -529,6 +547,271 @@ async def _build_agent_profile(
         conversation_count=conversation_count,
         artifact_count=artifact_count,
     )
+
+
+_STREAM_AGENT_STATUS_VALUES: set[str] = {
+    "idle",
+    "talking",
+    "building",
+    "active",
+    "waiting",
+    "error",
+}
+_STREAM_STATUS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Cache-Control": "no-store, max-age=0",
+}
+
+
+def _stream_now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _set_stream_status_headers(response: Response) -> None:
+    for key, value in _STREAM_STATUS_HEADERS.items():
+        response.headers[key] = value
+
+
+def _coerce_stream_status(value: str | None) -> StreamAgentStatus:
+    if value in _STREAM_AGENT_STATUS_VALUES:
+        return cast("StreamAgentStatus", value)
+    return "idle"
+
+
+def _event_type_value(event_type: Any) -> str:
+    if hasattr(event_type, "value"):
+        return str(event_type.value)
+    return str(event_type)
+
+
+def _timestamp_to_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat()
+    if isinstance(value, int | float):
+        return datetime.fromtimestamp(value, UTC).isoformat()
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat()
+    return None
+
+
+def _stream_status_from_registry(agent: Any) -> StreamAgentStatus:
+    raw_status = getattr(agent, "status", "active")
+    if hasattr(raw_status, "value"):
+        raw_status = raw_status.value
+    return "idle" if str(raw_status) == "active" else "waiting"
+
+
+def _stream_status_from_state(state: Any) -> StreamAgentStatus | None:
+    energy = getattr(state, "energy", None)
+    try:
+        if energy is not None and float(energy) <= 0.2:
+            return "waiting"
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _stream_status_from_event(
+    event_type: Any,
+    data: dict[str, Any],
+) -> StreamAgentStatus | None:
+    event_type = _event_type_value(event_type)
+    if event_type == EventType.AGENT_SPEAK.value:
+        return "talking"
+    if event_type == EventType.AGENT_ACTION.value:
+        action = str(data.get("action") or "").lower()
+        return "building" if action in {"building", "coding"} else "idle"
+    if event_type == EventType.TOOL_EXECUTED.value:
+        return "active"
+    if event_type in {
+        EventType.MANAGEMENT_SHADOW.value,
+        EventType.MANAGEMENT_WARNING.value,
+    }:
+        return "waiting"
+    if event_type in {
+        EventType.MANAGEMENT_INTERVENTION.value,
+        EventType.SIMULATION_ERROR.value,
+    }:
+        return "error"
+    if event_type == EventType.BRIDGE_ACTION_RESULT.value:
+        bridge_status = str(data.get("status") or "").lower()
+        if bridge_status in {"error", "failed", "failure", "rejected"}:
+            return "error"
+        return "active"
+    if event_type == EventType.BRIDGE_PERCEPTION.value:
+        return "active"
+    return None
+
+
+def _stream_status_from_transcript(event_type: Any) -> StreamAgentStatus | None:
+    event_type = _event_type_value(event_type)
+    if event_type in {"building", "coding"}:
+        return "building"
+    if event_type in {
+        EventType.MANAGEMENT_SHADOW.value,
+        EventType.MANAGEMENT_WARNING.value,
+    }:
+        return "waiting"
+    if event_type in {
+        EventType.MANAGEMENT_INTERVENTION.value,
+        EventType.SIMULATION_ERROR.value,
+    }:
+        return "error"
+    if event_type in {"agent_action", "tool_executed", "bridge_action_result"}:
+        return "active"
+    if event_type in {"conversation", "conversation_segment", "idle", "agent_speak"}:
+        return "talking"
+    return None
+
+
+def _topic_from_event(data: dict[str, Any]) -> str | None:
+    topic = data.get("topic") or data.get("current_topic")
+    return str(topic) if topic else None
+
+
+async def _load_stream_agent_states(
+    services: Any,
+    agent_ids: list[str],
+) -> dict[str, Any]:
+    manager = getattr(services, "agent_state_manager", None)
+    if manager is None or not hasattr(manager, "get_state"):
+        return {}
+
+    states: dict[str, Any] = {}
+    for agent_id in agent_ids:
+        try:
+            state = await manager.get_state(agent_id)
+        except Exception:
+            logger.debug("stream overlay: failed to read agent state for %s", agent_id)
+            continue
+        states[agent_id] = state
+    return states
+
+
+async def _load_stream_agent_transcripts(
+    db: Any,
+    agent_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    if db is None or not hasattr(db, "fetch") or not agent_ids:
+        return {}
+    try:
+        rows = await db.fetch(
+            """WITH recent AS (
+                   SELECT unnest(participants) AS agent_id,
+                          event_type,
+                          content,
+                          created_at
+                     FROM transcripts
+                    WHERE participants && $1::varchar[]
+                    ORDER BY created_at DESC
+                    LIMIT 100
+               )
+               SELECT DISTINCT ON (agent_id)
+                      agent_id,
+                      event_type,
+                      content,
+                      created_at
+                 FROM recent
+                ORDER BY agent_id, created_at DESC""",
+            agent_ids,
+        )
+    except Exception:
+        logger.debug("stream overlay: failed to read transcript status rows", exc_info=True)
+        return {}
+
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        agent_id = data.get("agent_id")
+        if isinstance(agent_id, str):
+            latest[agent_id] = data
+    return latest
+
+
+def _latest_stream_events_by_agent(event_bus: Any) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for event in list(getattr(event_bus, "_history", [])):
+        data = event.get("data") if isinstance(event, dict) else None
+        if not isinstance(data, dict):
+            continue
+        agent_id = data.get("agent_id")
+        if not isinstance(agent_id, str):
+            continue
+        status = _stream_status_from_event(event.get("event_type"), data)
+        if status is None:
+            continue
+        latest[agent_id] = {
+            "status": status,
+            "last_action_at": _timestamp_to_iso(event.get("timestamp")),
+            "current_topic": _topic_from_event(data),
+        }
+    return latest
+
+
+@router.options("/stream/agent-status")
+async def options_stream_agent_status() -> Response:
+    return Response(status_code=204, headers=_STREAM_STATUS_HEADERS)
+
+
+@router.get("/stream/agent-status", response_model=StreamAgentStatusResponse)
+async def get_stream_agent_status(response: Response) -> StreamAgentStatusResponse:
+    """Agent status feed for the OBS browser-source overlay."""
+    _set_stream_status_headers(response)
+    services = _get_services()
+    registry = _get_registry()
+    db = _get_db()
+    agents = list(registry.get_all_agents())
+    agent_ids = [agent.id for agent in agents]
+
+    states = await _load_stream_agent_states(services, agent_ids)
+    transcripts = await _load_stream_agent_transcripts(db, agent_ids)
+    recent_events = _latest_stream_events_by_agent(getattr(services, "event_bus", None))
+
+    items: list[StreamAgentStatusItem] = []
+    for agent in agents:
+        status = _stream_status_from_registry(agent)
+        last_action_at: str | None = None
+        current_topic: str | None = None
+
+        state = states.get(agent.id)
+        if state is not None:
+            status = _stream_status_from_state(state) or status
+            last_action_at = _timestamp_to_iso(getattr(state, "updated_at", None))
+
+        transcript = transcripts.get(agent.id)
+        if transcript is not None:
+            transcript_status = _stream_status_from_transcript(transcript.get("event_type"))
+            status = transcript_status or status
+            last_action_at = _timestamp_to_iso(transcript.get("created_at")) or last_action_at
+
+        event_status = recent_events.get(agent.id)
+        if event_status is not None:
+            status = event_status["status"]
+            last_action_at = event_status.get("last_action_at") or last_action_at
+            current_topic = event_status.get("current_topic")
+
+        items.append(
+            StreamAgentStatusItem(
+                id=agent.id,
+                display_name=agent.display_name,
+                status=_coerce_stream_status(status),
+                last_action_at=last_action_at,
+                current_topic=current_topic,
+            )
+        )
+
+    return StreamAgentStatusResponse(agents=items, updated_at=_stream_now_iso())
 
 
 @router.get("/agents")

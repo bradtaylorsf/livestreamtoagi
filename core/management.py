@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from core.event_bus import EventType
+from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.models import ContentReviewResult
-from core.redis_keys import KILL_SWITCH_KEY
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -213,7 +213,7 @@ class Management:
             )
         else:  # severity 5
             await self.mute(agent_id)
-            await self._global_redis.set(KILL_SWITCH_KEY, "active", ex=14400)
+            await self._global_redis.set(KILL_SWITCH_KEY, KILL_SWITCH_ACTIVE_VALUE, ex=14400)
             await self._event_bus.emit(
                 EventType.MANAGEMENT_INTERVENTION.value,
                 {

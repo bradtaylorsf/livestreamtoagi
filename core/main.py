@@ -3,7 +3,7 @@ import logging
 import os
 import time as _time
 import uuid as _uuid_mod
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -45,10 +45,12 @@ async def lifespan(app: FastAPI):
     from tools.journal_image_tool import JournalImageGenerator
 
     tts_pipeline = TTSPipeline()
+    tts_stream_bridge: Any | None = None
     idle_behavior: IdleBehaviorSystem | None = None
     svc: Services | None = None
     memory_consumer_registered = False
     scene_memory_consumer_registered = False
+    livestream_monitor_task: asyncio.Task[None] | None = None
 
     svc = None
     try:
@@ -66,6 +68,18 @@ async def lifespan(app: FastAPI):
         # TTSPipeline is created before bootstrap (to get its audio_dir for
         # the static mount), so the registry must be injected afterward.
         tts_pipeline._agent_registry = svc.agent_registry
+
+        from core.streaming.tts_stream_bridge import TTSStreamBridge, TTSStreamBridgeConfig
+
+        tts_stream_config = TTSStreamBridgeConfig.from_env()
+        if tts_stream_config.enabled:
+            tts_stream_bridge = TTSStreamBridge(
+                event_bus=svc.event_bus,
+                audio_dir=tts_pipeline.audio_dir,
+                config=tts_stream_config,
+            )
+            await tts_stream_bridge.start()
+            app.state.tts_stream_bridge = tts_stream_bridge
 
         # Initialize core memory for all agents at startup
         if svc.core_memory:
@@ -88,6 +102,32 @@ async def lifespan(app: FastAPI):
                     logger.warning("Agent %s still missing core memory after init", agent.id)
 
         await svc.config_loader.start_watching()
+
+        from core.livestream.kill_switch_monitor import KillSwitchMonitor
+        from core.livestream.safe_state import (
+            livestream_enabled_from_env,
+            load_safe_state_config,
+        )
+        from core.livestream.stream_controller import NullStreamController
+
+        if livestream_enabled_from_env():
+            if svc.redis is None:
+                logger.warning(
+                    "livestream.kill_switch.monitor_unavailable",
+                    extra={
+                        "event": "livestream.kill_switch.monitor_unavailable",
+                        "reason": "redis_unavailable",
+                    },
+                )
+            else:
+                livestream_controller = NullStreamController(load_safe_state_config())
+                livestream_monitor = KillSwitchMonitor(svc.redis, livestream_controller)
+                app.state.livestream_controller = livestream_controller
+                app.state.livestream_kill_switch_monitor = livestream_monitor
+                livestream_monitor_task = asyncio.create_task(
+                    livestream_monitor.run(),
+                    name="livestream-kill-switch-monitor",
+                )
 
         journal_image_gen = JournalImageGenerator(cost_repo=svc.cost_repo)
 
@@ -115,6 +155,10 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
+        if livestream_monitor_task is not None:
+            livestream_monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await livestream_monitor_task
         if idle_behavior is not None:
             idle_behavior.stop()
         # Wait for background eval tasks to finish before closing services
@@ -126,6 +170,8 @@ async def lifespan(app: FastAPI):
             )
             await asyncio.gather(*_background_tasks, return_exceptions=True)
 
+        if tts_stream_bridge is not None:
+            await tts_stream_bridge.stop()
         await tts_pipeline.shutdown()
         if svc is not None:
             await svc.config_loader.stop_watching()

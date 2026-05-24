@@ -1,0 +1,17 @@
+{
+  "name": "livestream-capture-prototype",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway E13-1 Minecraft capture prototype using Mineflayer and Prismarine Viewer.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node camera-bot.mjs"
+  },
+  "dependencies": {
+    "canvas": "^3.1.0",
+    "mineflayer": "^4.33.0",
+    "prismarine-viewer": "^1.32.0"
+  }
+}
