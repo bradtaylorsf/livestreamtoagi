@@ -1,0 +1,6 @@
+interface:
+  display_name: "Minecraft Eval Loop"
+  short_description: "Run recursive E17/E18 Minecraft eval triage"
+  default_prompt: "Use $minecraft-eval-loop to validate a collaborative Minecraft command eval, classify failures, and rerun after focused fixes."
+policy:
+  allow_implicit_invocation: true
