@@ -40,7 +40,7 @@
 #   MC_SIM_DISABLE_MANAGEMENT=1       # deprecated alias for policy=off
 #   MC_SIM_INCLUDE_BRIDGE_BOT=0
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
-#   MC_SIM_BUILD_MODE=single          # set to plan for !planAndBuild mode
+#   MC_SIM_BUILD_MODE=single          # single, plan, or settlement for phased !planAndBuild
 #   MC_SIM_BUILDER_PROVIDER=local     # local or openrouter; plan generation only
 #                                      # optional OpenRouter-builder mode is scoped
 #                                      # to !planAndBuild; chat remains local.
@@ -56,6 +56,7 @@
 #   MC_SIM_BUILD_COOLDOWN_SEC=300
 #   MC_SIM_BUILD_ZONE_STRIDE=12
 #   MC_SIM_BUILD_CACHE_TTL_SEC=3600
+#   MC_SIM_SETTLEMENT_OBJECTIVES="starter cabin|perimeter wall|workshop station|garden plot"
 #   MC_SIM_ALLOW_NEW_ACTION=0
 #   MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS=1
 #   MC_SIM_SUPPRESS_ACTION_CHAT=1
@@ -72,6 +73,7 @@
 #   MC_SIM_MEMORY_RECALL_MAX_CHARS=1200
 #   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS=management,alpha
 #   MC_SIM_SHARED_STATE_ENABLED=1
+#   RESCUE_MODE=easy                  # easy, standard, production
 #   MC_SIM_EASY_MODE=1
 #   MC_SIM_MC_PORT=25566
 #   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
@@ -262,6 +264,7 @@ MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
 MC_SIM_BUILD_CACHE_TTL_SEC="${MC_SIM_BUILD_CACHE_TTL_SEC:-3600}"
+MC_SIM_SETTLEMENT_OBJECTIVES="${MC_SIM_SETTLEMENT_OBJECTIVES:-starter cabin|perimeter wall|workshop station|garden plot}"
 case "$MC_SIM_BUILDER_PROVIDER" in
     local|openrouter) ;;
     *)
@@ -289,6 +292,7 @@ export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
 export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
 export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUILDER_USD_PER_1K_OUTPUT
 export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
+export MC_SIM_SETTLEMENT_OBJECTIVES
 MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS="${MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS:-10000}"
 export MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
 if [ -z "${MC_SIM_MANAGEMENT_POLICY:-}" ]; then
@@ -326,7 +330,7 @@ fi
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-${MC_SIM_BLOCK_PRIVATE_CONVERSATIONS:-1}}"
 MC_SIM_ALLOW_NEW_ACTION="${MC_SIM_ALLOW_NEW_ACTION:-0}"
 if [ -z "${SOAK_BLOCK_SLOW_SIM_ACTIONS+x}" ]; then
-    if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+    if [ "$MC_SIM_BUILD_MODE" = "plan" ] || [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
         SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
     elif [ "$MC_SIM_ALLOW_NEW_ACTION" = "1" ]; then
         SOAK_BLOCK_SLOW_SIM_ACTIONS="0"
@@ -389,6 +393,13 @@ fi
 
 MC_SIM_EASY_MODE="${MC_SIM_EASY_MODE:-1}"
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
+    RESCUE_MODE="${RESCUE_MODE:-${MINECRAFT_RESCUE_MODE:-easy}}"
+else
+    RESCUE_MODE="${RESCUE_MODE:-${MINECRAFT_RESCUE_MODE:-standard}}"
+fi
+MINECRAFT_RESCUE_MODE="$RESCUE_MODE"
+export RESCUE_MODE MINECRAFT_RESCUE_MODE
+if [ "$MC_SIM_EASY_MODE" = "1" ]; then
     SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/minecraft-server-easy}"
     WORLD_CONFIG="${WORLD_CONFIG:-$SCRIPT_DIR/world-easy.config}"
     MC_HOST="${MC_HOST:-127.0.0.1}"
@@ -418,6 +429,9 @@ DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft reality-show sm
 if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
     DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft plan-build simulation in an easy starter meadow. Coordinate in ordinary public chat, choose one compact shared structure, and use !planAndBuild(\"small shared cabin\") or another concise !planAndBuild request to generate a bounded JSON plan with the builder model and execute it through !buildFromPlan. Good starter requests are \"marker camp\", \"3x3 hut\", \"simple wall\", and \"torch-lit storage corner\". Keep arbitrary code execution out of the run; !executeCode remains blocked. After a plan starts, let the build finish before issuing another embodied action."
 fi
+if [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
+    DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft multi-phase settlement build in an easy starter meadow. Complete these settlement objectives in order: ${MC_SIM_SETTLEMENT_OBJECTIVES}. Use exactly one !planAndBuild request per active phase. Rotate the build owner after a completed, blocked, cooldown, stale, or capped phase; non-owners should only support through chat, inventory/resource checks, guarding, or clearing instructions from the owner. Good phase requests are \"small shared cabin\", \"simple wall\", \"workshop station\", and \"garden plot\". Do not repeat the starter cabin for later non-cabin additions."
+fi
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
 if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
@@ -429,7 +443,7 @@ if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
     esac
 fi
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
-    if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+    if [ "$MC_SIM_BUILD_MODE" = "plan" ] || [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
         EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build one coherent shared structure before doing more resource collection. Only the build owner should place blocks through !planAndBuild; support agents should coordinate in ordinary public Minecraft chat, check inventory or nearby resources when useful, and avoid standalone block placement unless the owner asks for help. Do not use !place, !placeHere, !break, !observe, or JSON/object command arguments in this local smoke."
     else
         EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\") and !placeHere(\"cobblestone\"). Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke."
@@ -447,11 +461,11 @@ if [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" = "1" ]; then
             ;;
     esac
 fi
-if [ "$MC_SIM_BUILD_MODE" = "plan" ]; then
+if [ "$MC_SIM_BUILD_MODE" = "plan" ] || [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
     case "$SOAK_INIT_MESSAGE" in
         *"!planAndBuild"*|*"plan-build simulation"*) ;;
         *)
-            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Build mode is plan: prefer !planAndBuild(\"small shared cabin\") and let buildFromPlan finish before issuing another embodied action."
+            SOAK_INIT_MESSAGE="$SOAK_INIT_MESSAGE Build mode is ${MC_SIM_BUILD_MODE}: prefer one active !planAndBuild phase at a time and let buildFromPlan finish before issuing another embodied action."
             ;;
     esac
 fi
@@ -533,6 +547,7 @@ info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
 info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
 info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
 info "shared state: enabled=${MC_SIM_SHARED_STATE_ENABLED}"
+info "rescue mode: ${RESCUE_MODE}"
 info "easy mode: ${MC_SIM_EASY_MODE}"
 info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"

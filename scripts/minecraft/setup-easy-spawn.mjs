@@ -27,6 +27,7 @@ Environment:
   EASY_SETUP_OBSERVERS Extra human names to teleport into the safe meadow
   EASY_SETUP_OPERATORS Human names to op for gamemode/tp commands
   EASY_SETUP_SPECTATORS Human names to switch into spectator mode
+  RESCUE_MODE      Rescue fallback policy       (easy permits op teleport fallback)
 `);
     process.exit(0);
 }
@@ -47,6 +48,9 @@ const players = parseNames(
 const observers = parseNames(process.env.EASY_SETUP_OBSERVERS || '');
 const operators = parseNames(process.env.EASY_SETUP_OPERATORS || '');
 const spectators = parseNames(process.env.EASY_SETUP_SPECTATORS || '');
+if (!process.env.RESCUE_MODE && !process.env.MINECRAFT_RESCUE_MODE) {
+    process.env.RESCUE_MODE = 'easy';
+}
 
 if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`Invalid MC_PORT/SERVER_PORT: ${process.env.MC_PORT || process.env.SERVER_PORT}`);
@@ -115,6 +119,9 @@ function writeAccessFiles() {
     writeJsonArray(path.join(serverDir, 'ops.json'), ops);
 
     console.log(`[easy-spawn] wrote ops.json/whitelist.json in ${serverDir}`);
+    console.log(
+        `[easy-spawn] rescue mode: ${process.env.RESCUE_MODE || process.env.MINECRAFT_RESCUE_MODE}`,
+    );
 }
 
 function delay(ms) {

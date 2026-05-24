@@ -169,3 +169,76 @@ def test_non_retryable_failure_holds_scene_lock_until_cooldown() -> None:
     assert blocked.granted is False
     assert blocked.reason == "scene_locked"
     assert after_cooldown.granted is True
+
+
+def test_settlement_objective_reassigns_stale_or_capped_owner() -> None:
+    scheduler = BuildMacroScheduler(cooldown_ms=10_000)
+    objective = {
+        "objective_id": "phase-wall",
+        "phase_index": 1,
+        "description": "simple perimeter wall",
+        "owner_agent_id": "rex",
+        "status": "owner_cap_reached",
+        "previous_owner_agent_ids": ["rex"],
+    }
+    owner, reason = scheduler.select_phase_owner(
+        active_objective=objective,
+        candidates=[
+            _candidate("rex", "builder"),
+            _candidate("fork", "architect engineer"),
+            _candidate("vera", "host facilitator"),
+        ],
+        fallback_owner="rex",
+        now_ms=2_000,
+    )
+
+    assert owner == "fork"
+    assert reason == "settlement_phase_owner_reassigned"
+
+    acquisition = scheduler.try_acquire_plan(
+        scene_id="mcscene-build-1",
+        agent_id="fork",
+        description="build a duplicate starter cabin",
+        origin={"x": 0, "y": 64, "z": 0},
+        scene=_scene(),
+        candidates=[
+            _candidate("rex", "builder"),
+            _candidate("fork", "architect engineer"),
+            _candidate("vera", "host facilitator"),
+        ],
+        active_objective=objective,
+        now_ms=2_100,
+    )
+
+    assert acquisition.granted is True
+    assert acquisition.owner == "fork"
+    assert acquisition.objective_id == "phase-wall"
+    assert acquisition.phase_index == 1
+    assert acquisition.phase_owner == "fork"
+    assert acquisition.support_assignments["rex"].phase_owner == "fork"
+
+
+def test_settlement_objective_denies_non_phase_owner() -> None:
+    scheduler = BuildMacroScheduler(cooldown_ms=10_000)
+
+    denied = scheduler.try_acquire_plan(
+        scene_id="mcscene-build-2",
+        agent_id="vera",
+        description="simple perimeter wall",
+        origin={"x": 0, "y": 64, "z": 0},
+        scene=_scene(),
+        candidates=[_candidate("fork", "architect engineer"), _candidate("vera", "host")],
+        active_objective={
+            "objective_id": "phase-wall",
+            "phase_index": 1,
+            "description": "simple perimeter wall",
+            "owner_agent_id": "fork",
+            "status": "in_progress",
+        },
+        now_ms=1_000,
+    )
+
+    assert denied.granted is False
+    assert denied.reason == "settlement_phase_owner"
+    assert denied.owner == "fork"
+    assert denied.objective_id == "phase-wall"

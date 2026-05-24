@@ -10,6 +10,7 @@ import pytest
 
 from core.bridge import contract as c
 from core.bridge.server import build_bridge_response_with_services
+from core.event_bus import EventType, event_bus
 from core.redis_keys import ScopedRedis
 from core.shared_state import (
     AgentClaim,
@@ -18,6 +19,7 @@ from core.shared_state import (
     GroupGoal,
     NextStep,
     ResourceEntry,
+    SettlementObjective,
     SharedWorkingState,
     VerifiedAction,
 )
@@ -137,7 +139,7 @@ async def test_embodied_blackboard_round_trips_all_entity_types() -> None:
         AgentClaim(agent_id="rex", target="camp-frame", role="builder", claimed_by="rex")
     )
     await state.report_danger(
-        DangerReport(agent_id="aurora", kind="nightfall", location="east ridge", severity=2)
+        DangerReport(agent_id="aurora", kind="stuck", location="east ridge", severity=2)
     )
     await state.record_verified_action(
         VerifiedAction(agent_id="rex", action="placed oak frame", result="verified")
@@ -150,7 +152,7 @@ async def test_embodied_blackboard_round_trips_all_entity_types() -> None:
     assert (await state.get_group_goal()).text == "Build a safe camp"  # type: ignore[union-attr]
     assert (await state.get_resources())[0].reported_by == "rex"
     assert (await state.get_agent_claims())[0].target == "camp-frame"
-    assert (await state.get_danger_reports())[0].kind == "nightfall"
+    assert (await state.get_danger_reports())[0].kind == "stuck"
     assert (await state.get_recent_verified_actions())[0].result == "verified"
     assert (await state.get_build_site()).site_id == "camp"  # type: ignore[union-attr]
     assert (await state.get_next_steps())[0].added_by == "pixel"
@@ -160,6 +162,44 @@ async def test_embodied_blackboard_round_trips_all_entity_types() -> None:
     assert "Known resources" in summary
     assert "Agent claims" in summary
     assert "Recent verified actions" in summary
+
+
+@pytest.mark.asyncio
+async def test_danger_reports_dispatch_rescue_task_and_resolve() -> None:
+    state, _, _ = _state()
+
+    await state.report_danger(
+        DangerReport(
+            agent_id="aurora",
+            kind="drowning",
+            location={"x": 1, "y": 62, "z": 2},
+            severity=5,
+        )
+    )
+    danger = (await state.get_unresolved_dangers())[0]
+
+    task = await state.dispatch_rescue_task(
+        danger.danger_id,
+        rescuer_id="rex",
+        strategy="navigate",
+        mode="standard",
+    )
+    assert task is not None
+    assert task.owner == "rex"
+    assert task.id == f"rescue-{danger.danger_id}"
+
+    unresolved = await state.get_unresolved_dangers()
+    assert unresolved[0].recovery_status == "rescue_dispatched"
+    assert unresolved[0].rescuer_id == "rex"
+
+    resolved = await state.mark_danger_resolved(
+        danger_id=danger.danger_id,
+        rescuer_id="rex",
+        recovery_status="resolved",
+    )
+    assert resolved is not None
+    assert resolved.resolved_at is not None
+    assert await state.get_unresolved_dangers() == []
 
 
 @pytest.mark.asyncio
@@ -281,6 +321,164 @@ async def test_bridge_read_write_returns_run_scoped_blackboard_summary() -> None
     assert read.ok is True
     assert read.payload["goal"]["set_by"] == "vera"  # type: ignore[index]
     assert "Active group goal" in read.payload["formatted"]  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_bridge_danger_report_emits_distress_and_rescue_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = _MemoryRedis()
+    sim_id = uuid.uuid4()
+    services = SimpleNamespace(redis=redis)
+    seen: list[dict] = []
+
+    async def on_distress(event: dict) -> None:
+        seen.append(event["data"])
+
+    monkeypatch.setenv("RESCUE_MODE", "easy")
+    event_bus.on(EventType.DISTRESS_REPORTED, on_distress)
+    try:
+        response = await build_bridge_response_with_services(
+            _bridge_request(
+                agent_id="aurora",
+                simulation_id=sim_id,
+                method="write",
+                payload={
+                    "operation": "danger_report",
+                    "danger": {
+                        "agent_id": "aurora",
+                        "kind": "stuck",
+                        "location": {"x": 3, "y": 63, "z": -4},
+                        "severity": 4,
+                    },
+                },
+            ),
+            services,
+        )
+    finally:
+        event_bus.off(EventType.DISTRESS_REPORTED, on_distress)
+
+    assert response.ok is True
+    assert seen
+    assert seen[0]["rescue_mode"] == "easy"
+    assert seen[0]["rescue_strategy"] == "teleport_op"
+    c.RescueTaskRequest.model_validate(seen[0]["rescue_request"])
+    assert seen[0]["rescue_request"]["target_agent_id"] == "aurora"
+    assert seen[0]["rescue_task"]["owner"] != "aurora"
+
+    state = SharedWorkingState(ScopedRedis(redis, sim_id))
+    dangers = await state.get_unresolved_dangers()
+    tasks = await state.get_tasks()
+    assert dangers[0].kind == "stuck"
+    assert dangers[0].recovery_status == "rescue_dispatched"
+    assert tasks[0].id == f"rescue-{dangers[0].danger_id}"
+
+
+@pytest.mark.asyncio
+async def test_bridge_danger_resolve_clears_unresolved_distress() -> None:
+    redis = _MemoryRedis()
+    sim_id = uuid.uuid4()
+    services = SimpleNamespace(redis=redis)
+    state = SharedWorkingState(ScopedRedis(redis, sim_id))
+    await state.report_danger(
+        DangerReport(agent_id="pixel", kind="trapped", location="pit", severity=4)
+    )
+    danger = (await state.get_unresolved_dangers())[0]
+
+    response = await build_bridge_response_with_services(
+        _bridge_request(
+            agent_id="rex",
+            simulation_id=sim_id,
+            method="write",
+            payload={
+                "operation": "danger_resolve",
+                "danger_resolution": {
+                    "danger_id": danger.danger_id,
+                    "rescuer_id": "rex",
+                    "recovery_status": "escaped",
+                },
+            },
+        ),
+        services,
+    )
+
+    assert response.ok is True
+    assert await state.get_unresolved_dangers() == []
+
+
+@pytest.mark.asyncio
+async def test_bridge_shared_state_settlement_objectives_round_trip() -> None:
+    redis = _MemoryRedis()
+    sim_id = uuid.uuid4()
+    services = SimpleNamespace(redis=redis)
+
+    response = await build_bridge_response_with_services(
+        _bridge_request(
+            agent_id="alpha",
+            simulation_id=sim_id,
+            method="write",
+            payload={
+                "operation": "settlement_objectives_set",
+                "settlement_objectives": [
+                    {
+                        "objective_id": "phase-cabin",
+                        "phase_index": 0,
+                        "description": "small shared cabin",
+                    },
+                    {
+                        "objective_id": "phase-wall",
+                        "phase_index": 1,
+                        "description": "simple perimeter wall",
+                    },
+                ],
+            },
+        ),
+        services,
+    )
+    assert response.ok is True
+
+    assign = await build_bridge_response_with_services(
+        _bridge_request(
+            agent_id="fork",
+            simulation_id=sim_id,
+            method="write",
+            payload={
+                "operation": "settlement_objective_assign",
+                "settlement_objective": {
+                    "objective_id": "phase-cabin",
+                    "phase_index": 0,
+                    "description": "small shared cabin",
+                    "owner_agent_id": "fork",
+                    "status": "in_progress",
+                    "reassign_reason": "initial_phase_owner",
+                },
+            },
+        ),
+        services,
+    )
+    assert assign.ok is True
+
+    state = SharedWorkingState(ScopedRedis(redis, sim_id))
+    active = await state.get_active_settlement_objective()
+    assert isinstance(active, SettlementObjective)
+    assert active.objective_id == "phase-cabin"
+    assert active.owner_agent_id == "fork"
+    assert active.status == "in_progress"
+    assert active.reassign_reason == "initial_phase_owner"
+
+    read = await build_bridge_response_with_services(
+        _bridge_request(
+            agent_id="vera",
+            simulation_id=sim_id,
+            method="read",
+            payload={},
+        ),
+        services,
+    )
+
+    assert read.ok is True
+    assert read.payload["active_objective"]["objective_id"] == "phase-cabin"  # type: ignore[index]
+    assert "Active settlement objective" in read.payload["formatted"]  # type: ignore[index]
 
 
 @pytest.mark.asyncio

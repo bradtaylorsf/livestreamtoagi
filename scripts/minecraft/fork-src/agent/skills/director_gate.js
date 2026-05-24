@@ -17,6 +17,7 @@ const DEFAULT_TOOLS = Object.freeze([
     '!nearbyBlocks',
     '!inventory',
     '!searchForBlock',
+    '!rescue',
 ]);
 const LOCAL_SAFE_TOOLS = new Set([
     '!move',
@@ -26,6 +27,7 @@ const LOCAL_SAFE_TOOLS = new Set([
     '!searchForBlock',
     '!craftable',
     '!getCraftingPlan',
+    '!rescue',
 ]);
 const STANDALONE_BUILD_TOOLS = new Set(['!placeHere', '!place', '!break', '!buildFromPlan']);
 const RISKY_PROMPT_TOOLS = new Set([
@@ -102,7 +104,7 @@ function position(agent) {
 }
 
 function availableTools(agent) {
-    const planMode = process.env.MC_SIM_BUILD_MODE === 'plan';
+    const planMode = ['plan', 'settlement'].includes(process.env.MC_SIM_BUILD_MODE);
     const tools = new Set(planMode ? DEFAULT_TOOLS.filter((tool) => !STANDALONE_BUILD_TOOLS.has(tool)) : DEFAULT_TOOLS);
     if (planMode) {
         tools.add('!planAndBuild');
@@ -120,6 +122,21 @@ function availableTools(agent) {
         }
     }
     return [...tools].filter((tool) => !RISKY_PROMPT_TOOLS.has(tool)).sort();
+}
+
+function activeSettlementObjective(agent) {
+    const raw =
+        agent?.__ltagSettlementObjective ||
+        globalThis.__ltagSettlementObjective ||
+        process.env.MC_SIM_ACTIVE_OBJECTIVE_JSON;
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try {
+        const parsed = JSON.parse(String(raw));
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
 }
 
 function sceneHint({ source, message, batch }) {
@@ -208,6 +225,9 @@ function commandPolicy(verdict) {
         }
         return 'Command policy: Support role only. Use ordinary chat, !inventory, !nearbyBlocks, or !searchForBlock when useful. Do not use plan/build commands, standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
     }
+    if (String(verdict.scene_digest || '').toLowerCase().includes('distress')) {
+        return 'Command policy: Distress response. If !rescue is available and another agent is endangered, use one concise !rescue request. Otherwise use ordinary chat, !inventory, or !nearbyBlocks.';
+    }
     return 'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
 }
 
@@ -272,6 +292,7 @@ async function askDirector(agent, turn, options, gateState) {
         position: position(agent),
         scene_hint: sceneHint(turn),
         available_tools: availableTools(agent),
+        active_objective: activeSettlementObjective(agent),
     };
     const deadlineMs = options.deadlineMs ?? intEnv('DIRECTOR_V2_GATE_DEADLINE_MS', DEFAULT_DEADLINE_MS);
 

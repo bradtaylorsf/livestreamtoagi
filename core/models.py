@@ -948,11 +948,68 @@ class EmbodiedAgentClaim(BaseModel):
 
 class EmbodiedDangerReport(BaseModel):
     agent_id: str = Field(min_length=1)
-    kind: str = Field(min_length=1)
+    kind: Literal[
+        "stuck",
+        "drowning",
+        "trapped",
+        "low_health",
+        "death",
+        "repeated_failure",
+    ] = "trapped"
     location: dict[str, Any] | str | None = None
     severity: int = Field(ge=1, le=5)
     reported_by: str | None = None
     reported_at: float = Field(default_factory=time.time)
+    danger_id: str = Field(default_factory=lambda: f"danger-{uuid.uuid4().hex[:12]}")
+    resolved_at: float | None = None
+    rescuer_id: str | None = None
+    recovery_status: Literal[
+        "open",
+        "rescue_dispatched",
+        "resolved",
+        "escaped",
+        "teleported",
+        "failed",
+        "unresolved",
+    ] = "open"
+    details: str | None = None
+
+
+class EmbodiedDangerResolution(BaseModel):
+    danger_id: str | None = Field(default=None, min_length=1)
+    agent_id: str | None = Field(default=None, min_length=1)
+    rescuer_id: str | None = Field(default=None, min_length=1)
+    recovery_status: Literal["resolved", "escaped", "teleported", "failed"] = "resolved"
+    resolved_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedSettlementObjective(BaseModel):
+    objective_id: str = Field(min_length=1)
+    phase_index: int = Field(ge=0)
+    description: str = Field(min_length=1)
+    owner_agent_id: str | None = Field(default=None, min_length=1)
+    status: Literal[
+        "pending",
+        "in_progress",
+        "blocked",
+        "owner_cap_reached",
+        "cooldown",
+        "stale",
+        "completed",
+        "failed",
+    ] = "pending"
+    plan_id: str | None = Field(default=None, min_length=1)
+    intended_blocks: int = Field(default=0, ge=0)
+    verified_blocks: int = Field(default=0, ge=0)
+    completion_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    started_at: float | None = None
+    completed_at: float | None = None
+    reassign_reason: str | None = None
+    previous_owner_agent_ids: list[str] = Field(default_factory=list)
+    owner_started_at_ms: int | None = Field(default=None, ge=0)
+    stale_after_ms: int | None = Field(default=None, ge=0)
+    cooldown_until_ms: int | None = Field(default=None, ge=0)
+    evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class EmbodiedVerifiedAction(BaseModel):

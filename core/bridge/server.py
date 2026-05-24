@@ -733,6 +733,7 @@ async def bridge_ws(websocket: WebSocket) -> None:
                     await inbound.dispatch_inbound(
                         BridgeRequest.model_validate(raw),
                         trace_id=trace_id,
+                        services=services,
                     )
 
             # E4-7 (#546): observe + correlate EVERY settled frame — success,

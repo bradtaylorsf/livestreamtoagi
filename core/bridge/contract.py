@@ -45,17 +45,20 @@ from core.models import (
     EmbodiedAgentClaim,
     EmbodiedBuildSite,
     EmbodiedDangerReport,
+    EmbodiedDangerResolution,
     EmbodiedGroupGoal,
     EmbodiedNextStep,
     EmbodiedResourceEntry,
+    EmbodiedSettlementObjective,
     EmbodiedVerifiedAction,
 )
 
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.9 adds
-# the embodied shared-state blackboard verbs. Earlier 1.x peers remain
-# wire-compatible because `is_supported_version` gates only on the major.
-PROTOCOL_VERSION = "1.9"
+# additive-compatible within a major and fail-closed across majors. 1.10 adds
+# embodied distress/rescue fields to the shared-state blackboard. Earlier 1.x
+# peers remain wire-compatible because `is_supported_version` gates only on the
+# major.
+PROTOCOL_VERSION = "1.10"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -329,9 +332,12 @@ class SharedStateReadResponse(BaseModel):
     resources: list[EmbodiedResourceEntry] = Field(default_factory=list)
     claims: list[EmbodiedAgentClaim] = Field(default_factory=list)
     dangers: list[EmbodiedDangerReport] = Field(default_factory=list)
+    unresolved_dangers: list[EmbodiedDangerReport] = Field(default_factory=list)
     recent_actions: list[EmbodiedVerifiedAction] = Field(default_factory=list)
     build_site: EmbodiedBuildSite | None = None
     next_steps: list[EmbodiedNextStep] = Field(default_factory=list)
+    settlement_objectives: list[EmbodiedSettlementObjective] = Field(default_factory=list)
+    active_objective: EmbodiedSettlementObjective | None = None
     formatted: str = Field(description="Prompt-friendly blackboard summary.")
 
 
@@ -344,23 +350,54 @@ class SharedStateWriteRequest(BaseModel):
         "resource_upsert",
         "claim_set",
         "danger_report",
+        "danger_resolve",
         "verified_action_record",
         "build_site_set",
         "next_step_add",
+        "settlement_objectives_set",
+        "settlement_objective_assign",
+        "settlement_objective_advance",
     ]
     goal: EmbodiedGroupGoal | None = None
     resource: EmbodiedResourceEntry | None = None
     claim: EmbodiedAgentClaim | None = None
     danger: EmbodiedDangerReport | None = None
+    danger_resolution: EmbodiedDangerResolution | None = None
     verified_action: EmbodiedVerifiedAction | None = None
     build_site: EmbodiedBuildSite | None = None
     next_step: EmbodiedNextStep | None = None
+    settlement_objective: EmbodiedSettlementObjective | None = None
+    settlement_objectives: list[EmbodiedSettlementObjective] = Field(default_factory=list)
 
 
 class SharedStateWriteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     accepted: bool = Field(description="Whether the update was accepted.")
     formatted: str = Field(description="Updated prompt-friendly blackboard summary.")
+
+
+class RescueTaskRequest(BaseModel):
+    """Structured rescue request carried in shared-state tasks and bot commands."""
+
+    model_config = ConfigDict(extra="forbid")
+    rescue_id: str = Field(min_length=1)
+    target_agent_id: str = Field(min_length=1)
+    rescuer_agent_id: str = Field(min_length=1)
+    strategy: Literal["navigate", "clear_block", "place_safe_block", "escort", "teleport_op"]
+    mode: Literal["easy", "standard", "production"] = "standard"
+    danger_id: str | None = Field(default=None, min_length=1)
+
+
+class RescueTaskResponse(BaseModel):
+    """Bridge-friendly rescue outcome shape used by action.result details."""
+
+    model_config = ConfigDict(extra="forbid")
+    rescue_id: str = Field(min_length=1)
+    target_agent_id: str = Field(min_length=1)
+    rescuer_agent_id: str = Field(min_length=1)
+    status: Literal["success", "failure", "partial"]
+    recovery_status: Literal["resolved", "escaped", "teleported", "failed"]
+    detail: str = ""
 
 
 class CostGateRequest(BaseModel):
@@ -644,6 +681,10 @@ class DirectorGateRequest(BaseModel):
         default_factory=list,
         description="Mindcraft action/tool affordances available to the selected prompt.",
     )
+    active_objective: EmbodiedSettlementObjective | None = Field(
+        default=None,
+        description="Current settlement phase objective when a multi-phase build is active.",
+    )
 
 
 class DirectorBuildMacro(BaseModel):
@@ -671,6 +712,9 @@ class DirectorBuildMacro(BaseModel):
     )
     status: str | None = Field(default=None, description="Current Director build plan status.")
     cache_key: str | None = Field(default=None, description="Stable build-goal cache key.")
+    objective_id: str | None = Field(default=None, description="Settlement objective id.")
+    phase_index: int | None = Field(default=None, ge=0, description="Settlement phase index.")
+    phase_owner: str | None = Field(default=None, description="Current phase owner.")
 
 
 class DirectorGateResponse(BaseModel):
@@ -848,10 +892,13 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     EmbodiedBuildSite,
     EmbodiedGroupGoal,
     EmbodiedNextStep,
+    EmbodiedSettlementObjective,
     SharedStateReadRequest,
     SharedStateReadResponse,
     SharedStateWriteRequest,
     SharedStateWriteResponse,
+    RescueTaskRequest,
+    RescueTaskResponse,
     CostGateRequest,
     CostGateResponse,
     KillStatusRequest,

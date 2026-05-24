@@ -77,6 +77,9 @@ function directorBuildContext(agent) {
         owner: macro.owner || null,
         role: macro.role || null,
         supportTask: macro.support_task || null,
+        objectiveId: macro.objective_id || null,
+        phaseIndex: Number.isInteger(macro.phase_index) ? macro.phase_index : null,
+        phaseOwner: macro.phase_owner || macro.owner || null,
     };
 }
 
@@ -89,6 +92,10 @@ function commonBuildPayload(acquisition, context = {}) {
         build_plan_owner: owner,
         director_role: context.role || null,
         director_support_task: context.supportTask || null,
+        objective_id: context.objectiveId || acquisition?.objective_id || null,
+        phase_index:
+            Number.isInteger(context.phaseIndex) ? context.phaseIndex : acquisition?.phase_index ?? null,
+        phase_owner: context.phaseOwner || acquisition?.phase_owner || owner,
     };
 }
 
@@ -239,15 +246,69 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
             ],
         };
     }
-    return {
-        blocks: [
-            { dx: 0, dy: 0, dz: 0, block_type: 'oak_log' },
-            { dx: 0, dy: 1, dz: 0, block_type: 'oak_log' },
-            { dx: 0, dy: 2, dz: 0, block_type: 'torch' },
-            { dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' },
-            { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
-        ],
-    };
+    if (text.includes('workshop') || text.includes('work table') || text.includes('crafting')) {
+        return {
+            blocks: [
+                { dx: 0, dy: 0, dz: 0, block_type: 'crafting_table' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'chest' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'oak_planks' },
+                { dx: 0, dy: 1, dz: -1, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('garden') || text.includes('farm')) {
+        return {
+            blocks: [
+                { dx: -1, dy: 0, dz: -1, block_type: 'dirt' },
+                { dx: 0, dy: 0, dz: -1, block_type: 'dirt' },
+                { dx: 1, dy: 0, dz: -1, block_type: 'dirt' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'dirt' },
+                { dx: 0, dy: 0, dz: 0, block_type: 'torch' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'dirt' },
+            ],
+        };
+    }
+    if (text.includes('marker') || text.includes('camp')) {
+        return {
+            blocks: [
+                { dx: 0, dy: 0, dz: 0, block_type: 'oak_log' },
+                { dx: 0, dy: 1, dz: 0, block_type: 'oak_log' },
+                { dx: 0, dy: 2, dz: 0, block_type: 'torch' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
+            ],
+        };
+    }
+    return null;
+}
+
+function starterBlueprintOrNull(description, maxSteps = DEFAULT_MAX_STEPS) {
+    return starterBlueprint(description, maxSteps);
+}
+
+function noStarterBlueprintMessage(description) {
+    return `no starter blueprint matches non-cabin build request: ${String(description || '').slice(0, 80)}`;
+}
+
+function skippedPlanResult(agent, traceId, actionId, acquisition, buildPayload, description, origin, reason) {
+    emit(agent, 'build_plan.generation.skipped', traceId, {
+        action_id: actionId,
+        plan_id: acquisition.plan_id || null,
+        ...buildPayload,
+        description,
+        origin,
+        reason,
+        fallback_reason: reason,
+        cache_key: acquisition.cache_key,
+        cache_hit: Boolean(acquisition.cache_hit),
+        active_build_owner: acquisition.active_build_owner,
+        active_build: governorSnapshot(agent).active_build,
+        builder_call_count: governorSnapshot(agent).builder_call_count,
+        max_builder_calls_per_agent: acquisition.max_builder_calls_per_agent,
+        skipped_repeat_count: acquisition.skipped_repeat_count || 0,
+    });
+    recordBuildFailed(agent, actionId, noStarterBlueprintMessage(description), { reason });
+    return `plan-and-build skipped: ${reason}`;
 }
 
 function assertPlanMatchesRequest(plan, description, maxSteps) {
@@ -397,7 +458,13 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
     }
 
     if (!resolved.available) {
-        return { source: 'starter_blueprint', plan: starterBlueprint(description, maxSteps), raw: '' };
+        const fallbackPlan = starterBlueprintOrNull(description, maxSteps);
+        return {
+            source: 'starter_blueprint',
+            plan: fallbackPlan,
+            raw: '',
+            fallback_reason: fallbackPlan ? 'starter_blueprint' : 'no_starter_blueprint',
+        };
     }
 
     const systemMessage = [
@@ -491,6 +558,10 @@ export const planAndBuildAction = {
             allowed_materials: [...ALLOWED_MATERIALS].sort(),
         };
         const directorContext = directorBuildContext(agent);
+        if (directorContext.objectiveId) {
+            buildSettings.objective_id = directorContext.objectiveId;
+            buildSettings.phase_index = directorContext.phaseIndex;
+        }
         const acquisition = directorContext.sceneId
             ? tryAcquireSceneBuild(
                   directorContext.sceneId,
@@ -501,6 +572,9 @@ export const planAndBuildAction = {
                   {
                       planId: directorContext.planId || undefined,
                       ownerAgentId: directorContext.owner || undefined,
+                      objectiveId: directorContext.objectiveId || undefined,
+                      phaseIndex: directorContext.phaseIndex ?? undefined,
+                      phaseOwner: directorContext.phaseOwner || undefined,
                   },
               )
             : tryAcquireBuild(agent, description, baseOrigin, buildSettings);
@@ -623,10 +697,24 @@ export const planAndBuildAction = {
                     err && err.message ? err.message : String(err)
                 }`;
             }
+            const fallbackPlan = starterBlueprintOrNull(description, stepLimit);
+            if (!fallbackPlan) {
+                return skippedPlanResult(
+                    agent,
+                    traceId,
+                    actionId,
+                    acquisition,
+                    buildPayload,
+                    description,
+                    origin,
+                    'no_starter_blueprint',
+                );
+            }
             generated = {
                 source: 'starter_blueprint_after_rejection',
                 raw: '',
-                plan: starterBlueprint(description, stepLimit),
+                plan: fallbackPlan,
+                fallback_reason: 'starter_blueprint_after_rejection',
             };
             plan = validateGeneratedPlan(generated.plan, origin, stepLimit);
             recordPlanGenerated(agent, acquisition, plan);

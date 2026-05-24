@@ -477,6 +477,63 @@ async def test_explicit_build_owner_overrides_builder_role_weight() -> None:
     assert "!planAndBuild" not in by_agent["rex"].available_tools
 
 
+async def test_settlement_active_objective_controls_build_owner() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Build the next settlement phase.",
+        active_objective={
+            "objective_id": "phase-workshop",
+            "phase_index": 2,
+            "description": "workshop station",
+            "owner_agent_id": "vera",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    owner = by_agent["vera"]
+    assert owner.selected is True
+    assert owner.turn_kind == "planner"
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner == "vera"
+    assert owner.build_macro.objective_id == "phase-workshop"
+    assert owner.build_macro.phase_index == 2
+    assert "!planAndBuild" in owner.available_tools
+
+    assert by_agent["rex"].build_macro is not None
+    assert by_agent["rex"].build_macro.role == "support"
+    assert by_agent["rex"].build_macro.objective_id == "phase-workshop"
+    assert "!planAndBuild" not in by_agent["rex"].available_tools
+
+
+async def test_settlement_active_objective_reassigns_capped_owner() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Build the next settlement phase.",
+        active_objective={
+            "objective_id": "phase-wall",
+            "phase_index": 1,
+            "description": "simple perimeter wall",
+            "owner_agent_id": "rex",
+            "status": "owner_cap_reached",
+            "previous_owner_agent_ids": ["rex"],
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    selected = [decision for decision in decisions if decision.selected]
+
+    assert len(selected) == 1
+    assert selected[0].build_macro is not None
+    assert selected[0].build_macro.owner == "fork"
+    assert selected[0].build_macro.reason == "settlement_phase_owner_reassigned"
+    assert selected[0].build_macro.objective_id == "phase-wall"
+
+
 async def test_selection_starvation_guard_eventually_selects_every_agent() -> None:
     gate = _gate()
     selected_counts: Counter[str] = Counter()

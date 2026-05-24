@@ -124,9 +124,9 @@ def test_client_carries_the_full_request_envelope() -> None:
     assert "agent_tier" in src and "conversation" in src
     assert "budget_bucket" in src and "'bridge'" in src
     assert "estimated_cost_usd" in src
-    # 1.9 carries the additive shared_state.* verbs, still
+    # 1.10 carries additive shared-state distress/rescue fields, still
     # wire-compatible with earlier 1.x peers.
-    assert "PROTOCOL_VERSION = '1.9'" in src, "protocol version must be 1.9"
+    assert "PROTOCOL_VERSION = '1.10'" in src, "protocol version must be 1.10"
 
 
 def test_client_uses_bearer_auth_and_the_bridge_endpoint() -> None:

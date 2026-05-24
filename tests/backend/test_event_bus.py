@@ -359,6 +359,7 @@ class TestEventTypeEnum:
             "bridge_action_result",
             "bridge_scene_update",
             "bridge_scene_digest",
+            "distress_reported",
         }
         actual = {e.value for e in EventType}
         assert actual == expected
