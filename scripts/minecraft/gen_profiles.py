@@ -48,7 +48,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "agents"
@@ -104,7 +104,7 @@ yaml = _load_yaml_module()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.models import PersonaOverride  # noqa: E402
+from core.models import FactionConfig, PersonaOverride  # noqa: E402
 
 # Agents that are deliberately never spawned as world bots, so no Mindcraft
 # profile is generated for them. Management is a content filter applied
@@ -129,6 +129,12 @@ PERSONALITY_PROFILE_KEYS = (
     "eavesdrop_probability",
     "adjacency",
 )
+
+
+class RunSpecStartingConditions(NamedTuple):
+    persona_overrides: dict[str, dict[str, Any]]
+    factions: list[FactionConfig]
+    agent_goals: dict[str, list[str]]
 
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
@@ -314,6 +320,73 @@ def _persona_override_mapping(
     return normalized
 
 
+def _normalize_factions(
+    factions: list[dict[str, Any] | FactionConfig] | None,
+    *,
+    valid_agent_ids: set[str] | None = None,
+) -> list[FactionConfig]:
+    if not factions:
+        return []
+
+    normalized: list[FactionConfig] = []
+    seen_names: set[str] = set()
+    for entry in factions:
+        faction = entry if isinstance(entry, FactionConfig) else FactionConfig(**entry)
+        if faction.name in seen_names:
+            raise ValueError(f"duplicate faction name: {faction.name}")
+        seen_names.add(faction.name)
+        if valid_agent_ids is not None:
+            unknown = [member for member in faction.members if member not in valid_agent_ids]
+            if unknown:
+                raise ValueError(f"faction '{faction.name}' has unknown members: {unknown}")
+        normalized.append(faction)
+    return normalized
+
+
+def _normalize_agent_goal_mapping(agent_goals: dict[str, Any] | None) -> dict[str, list[str]]:
+    if not agent_goals:
+        return {}
+
+    normalized: dict[str, list[str]] = {}
+    for agent_id, goals in agent_goals.items():
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            raise ValueError("agent_goals keys must be non-empty agent ids")
+        if isinstance(goals, str):
+            values = [goals]
+        elif isinstance(goals, list):
+            values = goals
+        else:
+            raise ValueError(f"agent_goals for {agent_id!r} must be a list of strings")
+        normalized[agent_id] = [str(goal) for goal in values if str(goal).strip()]
+    return normalized
+
+
+def _profile_faction(agent_id: str, faction: FactionConfig | dict[str, Any] | None) -> dict[str, Any] | None:
+    if faction is None:
+        return None
+    parsed = faction if isinstance(faction, FactionConfig) else FactionConfig(**faction)
+    if agent_id not in parsed.members:
+        return None
+
+    profile_faction: dict[str, Any] = {
+        "name": parsed.name,
+        "role": "member",
+        "goal": parsed.goal,
+        "members": list(parsed.members),
+    }
+    if parsed.stance:
+        profile_faction["stance"] = parsed.stance
+    return profile_faction
+
+
+def _faction_for_agent(agent_id: str, factions: list[FactionConfig]) -> FactionConfig | None:
+    return next((faction for faction in factions if agent_id in faction.members), None)
+
+
+def _goals_for_agent(agent_id: str, agent_goals: dict[str, list[str]]) -> list[str]:
+    return [goal for goal in agent_goals.get(agent_id, []) if goal.strip()]
+
+
 def _backstory_excerpt(backstory: str, limit: int = 240) -> str:
     """Return a compact single-line backstory preview for profile inspection."""
     compact = " ".join(backstory.split())
@@ -375,6 +448,8 @@ def build_profile(
     local_code: str | None = None,
     agents_dir: Path = AGENTS_DIR,
     persona_override: PersonaOverride | dict[str, Any] | None = None,
+    faction: FactionConfig | dict[str, Any] | None = None,
+    goals: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the Mindcraft profile dict for one agent.
 
@@ -443,6 +518,12 @@ def build_profile(
     }
     if persona_override is not None:
         profile.update(_persona_profile_fields(cfg))
+    profile_faction = _profile_faction(agent_id, faction)
+    if profile_faction is not None:
+        profile["faction"] = profile_faction
+    profile_goals = [str(goal) for goal in (goals or []) if str(goal).strip()]
+    if profile_goals:
+        profile["goals"] = profile_goals
     return profile
 
 
@@ -456,11 +537,16 @@ def build_all_profiles(
         | list[dict[str, Any] | PersonaOverride]
         | None
     ) = None,
+    factions: list[dict[str, Any] | FactionConfig] | None = None,
+    agent_goals: dict[str, list[str]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build profiles for every discovered conversational agent."""
     profiles: dict[str, dict[str, Any]] = {}
     overrides_by_agent = _persona_override_mapping(persona_overrides)
-    for agent_id in discover_agent_ids(agents_dir=agents_dir):
+    agent_ids = discover_agent_ids(agents_dir=agents_dir)
+    normalized_factions = _normalize_factions(factions, valid_agent_ids=set(agent_ids))
+    normalized_goals = _normalize_agent_goal_mapping(agent_goals)
+    for agent_id in agent_ids:
         try:
             profiles[agent_id] = build_profile(
                 agent_id,
@@ -469,6 +555,8 @@ def build_all_profiles(
                 local_code=local_code,
                 agents_dir=agents_dir,
                 persona_override=overrides_by_agent.get(agent_id),
+                faction=_faction_for_agent(agent_id, normalized_factions),
+                goals=_goals_for_agent(agent_id, normalized_goals),
             )
         except ValueError as exc:
             raise ValueError(f"Failed to build profile for {agent_id!r}: {exc}") from exc
@@ -538,19 +626,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def _load_run_spec_persona_overrides(path: str | None) -> dict[str, dict[str, Any]]:
+def _load_run_spec_starting_conditions(path: str | None) -> RunSpecStartingConditions:
     if not path:
-        return {}
+        return RunSpecStartingConditions(persona_overrides={}, factions=[], agent_goals={})
     from core.run_spec import load_run_spec
 
     spec = load_run_spec(path)
-    return _persona_override_mapping(spec.persona_overrides)
+    valid_agent_ids = set(spec.agents) if spec.agents else None
+    return RunSpecStartingConditions(
+        persona_overrides=_persona_override_mapping(spec.persona_overrides),
+        factions=_normalize_factions(spec.factions, valid_agent_ids=valid_agent_ids),
+        agent_goals=_normalize_agent_goal_mapping(spec.agent_goals),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
-        persona_overrides = _load_run_spec_persona_overrides(args.run_spec)
+        starting_conditions = _load_run_spec_starting_conditions(args.run_spec)
     except (OSError, ValueError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 1
@@ -561,7 +654,9 @@ def main(argv: list[str] | None = None) -> int:
                 provider=args.provider,
                 local_chat=args.local_chat,
                 local_code=args.local_code,
-                persona_overrides=persona_overrides,
+                persona_overrides=starting_conditions.persona_overrides,
+                factions=starting_conditions.factions,
+                agent_goals=starting_conditions.agent_goals,
             )
         except (FileNotFoundError, ValueError) as exc:
             print(f"✗ {exc}", file=sys.stderr)
@@ -585,7 +680,9 @@ def main(argv: list[str] | None = None) -> int:
             provider=args.provider,
             local_chat=args.local_chat,
             local_code=args.local_code,
-            persona_override=persona_overrides.get(args.agent_id),
+            persona_override=starting_conditions.persona_overrides.get(args.agent_id),
+            faction=_faction_for_agent(args.agent_id, starting_conditions.factions),
+            goals=_goals_for_agent(args.agent_id, starting_conditions.agent_goals),
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"✗ {exc}", file=sys.stderr)

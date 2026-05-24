@@ -20,6 +20,13 @@ Run-spec persona overrides are applied only at generation time. Passing
 to only the affected profile JSON files. The committed `agents/<id>/` files
 are not edited, and profiles without overrides keep the baseline schema.
 
+The same run spec also feeds embodied starting conditions. If a generated bot
+belongs to a `factions` entry, its profile gets a `faction` block with the
+faction name, role, goal, members, and stance when present. If
+`agent_goals[agent_id]` is configured, the profile gets a `goals` list with
+those seeded objectives. Profiles without configured factions or goals keep the
+baseline schema.
+
 ## Mapping
 
 | Agent config knob | Generated profile surface | Formula / value |

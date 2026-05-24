@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 SNAPSHOT_VERSION = 1
 
+# Mirrors the agent_goals CHECK constraints (see migrations 018, 023, 030).
+# Snapshot inputs outside these sets get normalized so the seed insert does
+# not violate the DB constraints.
+_ALLOWED_GOAL_SOURCES = {"self", "assigned", "eval_loop", "reflection", "dream"}
+_ALLOWED_GOAL_CATEGORIES = {"creative", "social", "economic", "personal", "competitive"}
+
 
 # ── Snapshot schema models ────────────────────────────────────
 
@@ -39,6 +45,38 @@ class AgentSnapshot(BaseModel):
     journal_entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class AgentStateSeedSnapshot(BaseModel):
+    """Embodied internal state for a single agent."""
+
+    energy: float = 0.7
+    satisfaction: float = 0.5
+    boredom: float = 0.2
+    frustration: float = 0.0
+    creativity: float = 0.5
+    social_need: float = 0.5
+    focus: float = 0.5
+
+
+class AgentAccountSeedSnapshot(BaseModel):
+    """Embodied budget/account state for a single agent."""
+
+    balance: float = 0.0
+    weekly_allocation: float = 0.0
+    total_earned: float = 0.0
+    total_spent: float = 0.0
+
+
+class AgentGoalSeedSnapshot(BaseModel):
+    """Seeded goal state for a single agent."""
+
+    goal: str
+    priority: int = 5
+    status: str = "active"
+    source: str = "snapshot"
+    category: str | None = None
+    progress_notes: str | None = None
+
+
 class MemorySnapshot(BaseModel):
     """Complete memory snapshot for a simulation."""
 
@@ -46,6 +84,9 @@ class MemorySnapshot(BaseModel):
     source_simulation_id: str | None = None
     snapshot_at: str = ""
     agents: dict[str, AgentSnapshot] = Field(default_factory=dict)
+    agent_states: dict[str, AgentStateSeedSnapshot] = Field(default_factory=dict)
+    agent_accounts: dict[str, AgentAccountSeedSnapshot] = Field(default_factory=dict)
+    agent_goals: dict[str, list[AgentGoalSeedSnapshot]] = Field(default_factory=dict)
     relationships: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -58,6 +99,9 @@ class RestoreResult:
     recall_memories_restored: int = 0
     journal_entries_restored: int = 0
     relationships_restored: int = 0
+    goals_restored: int = 0
+    agent_states_restored: int = 0
+    agent_accounts_restored: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -237,7 +281,7 @@ class MemorySnapshotImporter:
         result = RestoreResult()
         sim_uuid = uuid_mod.UUID(simulation_id) if simulation_id else None
 
-        if snapshot.version != SNAPSHOT_VERSION:
+        if snapshot.version not in (1, 2, 3):
             result.warnings.append(
                 f"Snapshot version {snapshot.version} != expected {SNAPSHOT_VERSION}"
             )
@@ -320,6 +364,84 @@ class MemorySnapshotImporter:
 
             result.agents_restored.append(agent_id)
 
+        # Restore embodied state used by Minecraft/runtime context.
+        if sim_uuid is not None:
+            for agent_id, state in snapshot.agent_states.items():
+                if agents and agent_id not in agents:
+                    continue
+                try:
+                    await self._db.execute(
+                        """INSERT INTO agent_internal_state
+                           (agent_id, energy, satisfaction, boredom, frustration,
+                            social_need, creative_need, simulation_id)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                           ON CONFLICT (agent_id, simulation_id)
+                           DO UPDATE SET energy = $2, satisfaction = $3, boredom = $4,
+                                         frustration = $5, social_need = $6,
+                                         creative_need = $7""",
+                        agent_id,
+                        state.energy,
+                        state.satisfaction,
+                        state.boredom,
+                        state.frustration,
+                        state.social_need,
+                        state.creativity,
+                        sim_uuid,
+                    )
+                    result.agent_states_restored += 1
+                except Exception as exc:
+                    result.warnings.append(f"Failed to restore agent state for {agent_id}: {exc}")
+
+            for agent_id, account in snapshot.agent_accounts.items():
+                if agents and agent_id not in agents:
+                    continue
+                try:
+                    await self._db.execute(
+                        """INSERT INTO agent_accounts
+                           (agent_id, balance, weekly_allocation, total_earned,
+                            total_spent, simulation_id)
+                           VALUES ($1, $2, $3, $4, $5, $6)
+                           ON CONFLICT (agent_id, simulation_id)
+                           DO UPDATE SET balance = $2, weekly_allocation = $3,
+                                         total_earned = $4, total_spent = $5""",
+                        agent_id,
+                        account.balance,
+                        account.weekly_allocation,
+                        account.total_earned,
+                        account.total_spent,
+                        sim_uuid,
+                    )
+                    result.agent_accounts_restored += 1
+                except Exception as exc:
+                    result.warnings.append(f"Failed to restore account for {agent_id}: {exc}")
+
+            for agent_id, goals in snapshot.agent_goals.items():
+                if agents and agent_id not in agents:
+                    continue
+                for goal in goals:
+                    source = goal.source if goal.source in _ALLOWED_GOAL_SOURCES else "assigned"
+                    category = (
+                        goal.category if goal.category in _ALLOWED_GOAL_CATEGORIES else None
+                    )
+                    try:
+                        await self._db.execute(
+                            """INSERT INTO agent_goals
+                               (agent_id, goal, priority, status, source, category,
+                                progress_notes, simulation_id)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                            agent_id,
+                            goal.goal,
+                            goal.priority,
+                            goal.status,
+                            source,
+                            category,
+                            goal.progress_notes,
+                            sim_uuid,
+                        )
+                        result.goals_restored += 1
+                    except Exception as exc:
+                        result.warnings.append(f"Failed to restore goal for {agent_id}: {exc}")
+
         # Restore relationships
         if simulation_id and self._relationship_repo and snapshot.relationships:
             for rel_data in snapshot.relationships:
@@ -364,9 +486,30 @@ class MemorySnapshotImporter:
                     agent_id,
                     simulation_id,
                 )
+                await self._db.execute(
+                    "DELETE FROM agent_internal_state WHERE agent_id = $1 AND simulation_id = $2",
+                    agent_id,
+                    simulation_id,
+                )
+                await self._db.execute(
+                    "DELETE FROM agent_accounts WHERE agent_id = $1 AND simulation_id = $2",
+                    agent_id,
+                    simulation_id,
+                )
+                await self._db.execute(
+                    "DELETE FROM agent_goals WHERE agent_id = $1 AND simulation_id = $2",
+                    agent_id,
+                    simulation_id,
+                )
             else:
                 await self._db.execute("DELETE FROM recall_memory WHERE agent_id = $1", agent_id)
                 await self._db.execute("DELETE FROM journal_entries WHERE agent_id = $1", agent_id)
+                await self._db.execute(
+                    "DELETE FROM agent_internal_state WHERE agent_id = $1",
+                    agent_id,
+                )
+                await self._db.execute("DELETE FROM agent_accounts WHERE agent_id = $1", agent_id)
+                await self._db.execute("DELETE FROM agent_goals WHERE agent_id = $1", agent_id)
             # Don't delete core_memory — it will be overwritten
         except Exception:
             logger.warning("Failed to clear state for %s", agent_id, exc_info=True)

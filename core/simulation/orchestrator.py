@@ -675,6 +675,21 @@ class SimulationOrchestrator:
             state.energy = max(0.0, min(1.0, normalized))
             await manager.save_state(state)
 
+    async def _seed_configured_agent_goals(self) -> None:
+        """Seed run-spec agent goals after the simulation id is known."""
+        if (
+            not self._config.agent_goals
+            or self._config.dry_run
+            or self._services is None
+            or self._services.goal_manager is None
+        ):
+            return
+        await self._services.goal_manager.seed_agent_goals(
+            self._config.agent_goals,
+            simulation_id=self._simulation_id,
+        )
+        logger.info("Seeded run-spec goals for %d agents", len(self._config.agent_goals))
+
     async def _create_or_attach_simulation(
         self,
         config_snapshot: dict[str, Any],
@@ -835,6 +850,7 @@ class SimulationOrchestrator:
                     simulation_id=self._simulation_id,
                 )
                 logger.info("Seeded story goals for agents")
+            await self._seed_configured_agent_goals()
 
         phases = self._config.phases
         total_phases = len(phases)
@@ -1040,6 +1056,8 @@ class SimulationOrchestrator:
                 persona_manager=persona_mgr,
             )
             world_sim.start()
+
+        await self._seed_configured_agent_goals()
 
         conversation_num = 0
         current_day = self.clock.simulated_day()

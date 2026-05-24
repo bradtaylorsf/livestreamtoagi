@@ -6,7 +6,6 @@ from pathlib import Path
 
 import yaml
 
-
 SCENARIOS_DIR = Path(__file__).resolve().parent.parent.parent / "scenarios"
 
 NEW_SCENARIOS = [
@@ -184,6 +183,56 @@ def test_load_seed_file_parses_factions():
     builders = next(f for f in cfg.factions if f.name == "builders")
     assert builders.members == ["rex", "aurora"]
     assert builders.goal
+
+
+def test_embodied_seed_file_serializes_factions_and_agent_goals(tmp_path):
+    """Embodied run configs keep factions and goals in the simulation snapshot."""
+    from core.simulation.orchestrator import SimulationConfig
+
+    scenario = tmp_path / "embodied.yaml"
+    scenario.write_text(
+        yaml.safe_dump(
+            {
+                "factions": [
+                    {
+                        "name": "builders",
+                        "members": ["vera", "rex"],
+                        "goal": "Raise the first shared shelter.",
+                        "stance": "practical",
+                    },
+                ],
+                "agent_goals": {
+                    "vera": ["Mark the build site."],
+                    "rex": ["Gather starter materials."],
+                },
+                "phases": [],
+            }
+        )
+    )
+
+    cfg = SimulationConfig(
+        name="embodied-factions",
+        seed_file=str(scenario),
+        agents=["vera", "rex"],
+        conversation_mode="embodied",
+        dry_run=True,
+    )
+    cfg.load_seed_file(valid_agent_ids={"vera", "rex"})
+
+    snapshot = cfg.to_dict()
+    assert cfg.conversation_mode == "embodied"
+    assert snapshot["factions"] == [
+        {
+            "name": "builders",
+            "members": ["vera", "rex"],
+            "goal": "Raise the first shared shelter.",
+            "stance": "practical",
+        }
+    ]
+    assert snapshot["agent_goals"] == {
+        "vera": ["Mark the build site."],
+        "rex": ["Gather starter materials."],
+    }
 
 
 def test_load_seed_file_rejects_unknown_member(tmp_path):

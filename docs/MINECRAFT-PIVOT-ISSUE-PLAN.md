@@ -1017,6 +1017,7 @@ E12-1 sequential; E12-2..E12-5 parallel; E12-6..E12-8 sequential.
     ("no backstory, see what emerges") is an explicit required mode.
   - Scope: confirm seeded, inherited, and blank-slate memory modes all work for
     embodied agents via E5-5; document the blank-slate embodied flow.
+  - Doc: `docs/run-modes/blank-slate-embodied.md`
   - Acceptance: blank-slate and seeded embodied runs both start correctly;
     `test_memory_seed.py` green.
   - Deps: E12-1, E5-5. Track: parallelizable. Labels: `area:run-modes`,`preserve-no-regress`
