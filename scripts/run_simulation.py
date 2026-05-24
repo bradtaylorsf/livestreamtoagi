@@ -175,7 +175,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         verbose=verbose,
         management_shadow=args.management_shadow,
-        existing_sim_id=getattr(args, "sim_id", None),
+        existing_sim_id=getattr(args, "resume_sim_id", None) or getattr(args, "sim_id", None),
         hypothesis=getattr(args, "hypothesis", None),
         auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
         memory_seed=memory_seed_cfg,
@@ -198,6 +198,14 @@ async def run_simulation(args: argparse.Namespace) -> None:
     # Validate faction membership against the participating-agents set so
     # misconfigured scenarios fail loudly at load time.
     sim_config.load_seed_file(valid_agent_ids=set(agents))
+    if sim_config.world_config is not None:
+        world_path = sim_config.world_config.world_config_path or "(derived from run spec)"
+        logging.getLogger(__name__).info(
+            "Run world: path=%s run_mode=%s persistent=%s",
+            world_path,
+            sim_config.run_mode.value if sim_config.run_mode is not None else "unspecified",
+            sim_config.world_config.persistent,
+        )
 
     # ── Connect services ──────────────────────────────────
     svc = await bootstrap_services(auto_migrate=True)
@@ -434,6 +442,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--resume-sim-id",
+        type=str,
+        default=None,
+        help=(
+            "Resume an existing persistent simulation row after a supervisor "
+            "restart. Alias for --sim-id in the persistent restart path."
+        ),
+    )
+    parser.add_argument(
         "--run-config-file",
         type=str,
         default=None,
@@ -451,6 +468,12 @@ def main() -> None:
             "Run-mode starting condition. Seeded runs default to experimental; "
             "persistent is only used when explicitly requested."
         ),
+    )
+    parser.add_argument(
+        "--persistent",
+        action="store_true",
+        default=False,
+        help="Convenience flag for --run-mode persistent.",
     )
     parser.add_argument(
         "--world-config-file",
@@ -527,12 +550,28 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    if not args.seed_file and not args.duration:
+    if args.persistent:
+        if args.run_mode and args.run_mode != "persistent":
+            parser.error("--persistent cannot be combined with --run-mode experimental")
+        args.run_mode = "persistent"
+    if args.resume_sim_id and args.sim_id and args.resume_sim_id != args.sim_id:
+        parser.error("--resume-sim-id and --sim-id must match when both are provided")
+    if args.run_mode == "persistent" and args.duration:
+        parser.error("persistent mode is indefinite; do not set --duration")
+    if not args.seed_file and not args.duration and args.run_mode != "persistent":
         parser.error("Either --seed-file or --duration must be provided")
     if (args.max_cost_rolling is None) != (args.rolling_window is None):
         parser.error("--max-cost-rolling and --rolling-window must be provided together")
     if args.max_cost_rolling is not None and args.max_cost_rolling < 0:
         parser.error("--max-cost-rolling cannot be negative")
+    if args.run_mode == "persistent" and (
+        args.max_cost_rolling is None or args.rolling_window is None
+    ):
+        print(
+            "WARNING: persistent mode requires --max-cost-rolling and --rolling-window; "
+            "SimulationConfig will reject this run.",
+            file=sys.stderr,
+        )
 
     # Warn about instant-mode + duration: in instant mode (speed_multiplier=0),
     # simulated time only advances by wall-clock conversation duration, so a
