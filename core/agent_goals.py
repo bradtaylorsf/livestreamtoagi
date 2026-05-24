@@ -497,7 +497,13 @@ class AgentGoalManager:
         agent_goals: dict[str, list[str]],
         simulation_id: uuid_mod.UUID | None = None,
     ) -> None:
-        """Seed run-spec goals for agents through the normal goal queue."""
+        """Seed run-spec goals for agents through the normal goal queue.
+
+        Uses source='assigned' since run-spec goals are externally assigned
+        starting conditions. category is left unset because the run-spec text
+        is free-form and won't reliably map onto the agent_goals.category
+        CHECK whitelist (creative/social/economic/personal/competitive).
+        """
         for agent_id, goals in agent_goals.items():
             for priority, goal_text in enumerate(goals, start=1):
                 if not goal_text.strip():
@@ -506,8 +512,7 @@ class AgentGoalManager:
                     agent_id,
                     goal_text,
                     priority=priority,
-                    source="run_spec",
-                    category="starting_conditions",
+                    source="assigned",
                     simulation_id=simulation_id,
                 )
 

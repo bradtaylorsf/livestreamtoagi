@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 SNAPSHOT_VERSION = 1
 
+# Mirrors the agent_goals CHECK constraints (see migrations 018, 023, 030).
+# Snapshot inputs outside these sets get normalized so the seed insert does
+# not violate the DB constraints.
+_ALLOWED_GOAL_SOURCES = {"self", "assigned", "eval_loop", "reflection", "dream"}
+_ALLOWED_GOAL_CATEGORIES = {"creative", "social", "economic", "personal", "competitive"}
+
 
 # ── Snapshot schema models ────────────────────────────────────
 
@@ -367,20 +373,19 @@ class MemorySnapshotImporter:
                     await self._db.execute(
                         """INSERT INTO agent_internal_state
                            (agent_id, energy, satisfaction, boredom, frustration,
-                            creativity, social_need, focus, simulation_id)
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            social_need, creative_need, simulation_id)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                            ON CONFLICT (agent_id, simulation_id)
                            DO UPDATE SET energy = $2, satisfaction = $3, boredom = $4,
-                                         frustration = $5, creativity = $6,
-                                         social_need = $7, focus = $8""",
+                                         frustration = $5, social_need = $6,
+                                         creative_need = $7""",
                         agent_id,
                         state.energy,
                         state.satisfaction,
                         state.boredom,
                         state.frustration,
-                        state.creativity,
                         state.social_need,
-                        state.focus,
+                        state.creativity,
                         sim_uuid,
                     )
                     result.agent_states_restored += 1
@@ -414,6 +419,10 @@ class MemorySnapshotImporter:
                 if agents and agent_id not in agents:
                     continue
                 for goal in goals:
+                    source = goal.source if goal.source in _ALLOWED_GOAL_SOURCES else "assigned"
+                    category = (
+                        goal.category if goal.category in _ALLOWED_GOAL_CATEGORIES else None
+                    )
                     try:
                         await self._db.execute(
                             """INSERT INTO agent_goals
@@ -424,8 +433,8 @@ class MemorySnapshotImporter:
                             goal.goal,
                             goal.priority,
                             goal.status,
-                            goal.source,
-                            goal.category,
+                            source,
+                            category,
                             goal.progress_notes,
                             sim_uuid,
                         )
