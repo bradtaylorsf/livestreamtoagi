@@ -1,6 +1,6 @@
 ---
 name: alpha-loop-runner
-description: Run and monitor ../alpha-loop sessions or epics from this repo. Use when the user asks to run alpha-loop, run the loop, run an epic, monitor loop progress, verify an alpha-loop session, or validate completed epic issues.
+description: Run and monitor ../alpha-loop sessions or epics from this repo safely. Use whenever the user asks to run alpha-loop, start the loop on an epic, prepare an epic run, monitor loop progress, verify an alpha-loop session, or validate completed epic issues. This skill must dry-run/validate epic queues, check ready labels, sync skills/agents, choose or recommend batch/test/verify settings, and stop on skipped checklist items.
 auto_load: true
 priority: high
 ---
@@ -21,25 +21,89 @@ From the repo root, prefer the adjacent checkout:
 
 Fallbacks: `alpha-loop <command>` if installed globally, or `npx @bradtaylorsf/alpha-loop <command>` only when the adjacent checkout is unavailable.
 
+## Skill Sync Source Of Truth
+
+This repo uses `.alpha-loop/templates/skills` as the canonical project skill directory. `.agents/skills` and `.claude/skills` are generated harness outputs.
+
+When adding or changing a project skill:
+- Edit or create it under `.alpha-loop/templates/skills/<skill-name>/`.
+- Run `../alpha-loop/dist/cli.js sync` before any real alpha-loop run.
+- Confirm the skill appears in every configured harness output.
+- If sync deletes a useful skill that existed only under `.agents/skills` or `.claude/skills`, restore it and copy it into `.alpha-loop/templates/skills` before running sync again.
+
 Before a real run, check:
-- `git status --short`
+- `git status --short --branch`
 - `gh auth status`
 - `../alpha-loop/dist/cli.js --version`
-- `.alpha-loop.yaml` for `repo`, `agent`, `test_command`, `dev_command`, `auto_merge`, and duration limits
+- `../alpha-loop/dist/cli.js run --help`
+- `.alpha-loop.yaml` for `repo`, `agent`, `setup_command`, `test_command`, `smoke_test`, `skip_verify`, `auto_merge`, `batch`, `batch_size`, `max_issues`, and duration limits
+- `ps -axo pid,ppid,etime,command | rg 'alpha-loop|dist/cli.js' | rg -v 'rg '` to ensure no duplicate loop is running
 
 ## Running An Epic
 
 1. Confirm the epic issue number and verify it has the `epic` label:
    `gh issue view <N> --json number,title,state,labels,body --repo bradtaylorsf/livestreamtoagi`
-2. Confirm the epic body has one `## Ordered Work` task-list queue. Treat task-list issue refs as the exact execution order.
-3. Set a 5-minute monitor before starting:
+2. Confirm the epic body has one `## Ordered Work` task-list queue. Treat task-list issue refs as the exact execution order. Never let alpha-loop silently skip unchecked children.
+3. Inspect every unchecked child issue in ordered position. Confirm each is open and has the configured ready label unless the epic explicitly says it is intentionally skipped. If the user asks to "get it ready", add the ready label to all intended children; otherwise stop and ask before changing labels.
+4. Check for abandoned state before starting:
+   - Open or closed session PRs for the same epic.
+   - Local/remote `session/epic-<N>-...` branches.
+   - Local/remote `agent/issue-<child>` branches for the ordered children.
+   - Existing worktrees under `.worktrees/issue-*`.
+   Clean abandoned branches/PRs only when the user has asked for cleanup or it is clearly from the current interrupted run; otherwise report and ask.
+5. Run alpha-loop sync before the dry-run so all harnesses see the same skills and agents:
+   `../alpha-loop/dist/cli.js sync`
+   Then inspect `git status --short`. If sync deletes or mutates unexpected project-owned skill files, restore or report them before continuing.
+6. Choose the run shape before the real run:
+   - Default to `--batch --batch-size 2` for backend/Minecraft orchestration epics with ordered dependencies.
+   - Use batch size 1 for high-risk migrations, security/auth, destructive data changes, or when adjacent issues cannot be reasoned about together.
+   - Use batch size 3-5 only for small independent docs, tests, or frontend polish with little file overlap.
+   - Prefer backend-only `test_command` such as `make test-backend` for backend/Minecraft orchestration. Use the full frontend/website gate only when those layers are touched.
+   - Set `skip_verify: true` for per-child coding passes when the epic has a final integrated scenario/eval child. Run live/full verification after that final child instead.
+7. Always run a dry-run validation with the intended command shape before the real run:
+   `../alpha-loop/dist/cli.js run --epic <N> --dry-run --validate [--batch --batch-size <n>]`
+   The dry run must show:
+   - `Skip Verify` matches the intended posture.
+   - `Batch Mode` and `Batch Size` match the intended posture.
+   - The first batch starts at the first unchecked ordered child.
+   - No unchecked child is skipped.
+   - The total issue count matches the ordered unchecked checklist.
+   - Validation warnings are understood; file-overlap warnings are acceptable only if batching is still coherent.
+8. Set a 5-minute monitor before starting:
    - In Codex, create a thread heartbeat every 5 minutes that checks loop progress and resumes validation when the process exits.
    - If no heartbeat/reminder tool exists, keep the terminal session open and poll it roughly every 5 minutes.
-4. Start the run in a long-running terminal session:
-   `../alpha-loop/dist/cli.js run --epic <N>`
-5. Watch for skip warnings, failed tests, transient rate limits, checklist update errors, and the final session PR.
+9. Start the run in a long-running terminal session with the exact dry-run shape, for example:
+   `../alpha-loop/dist/cli.js run --epic <N> --validate --batch --batch-size 2`
+10. Watch for skip warnings, failed tests, transient rate limits, checklist update errors, and the final session PR.
 
 Do not run two `alpha-loop run --epic <N>` processes against the same epic. The parent checklist is a single-writer queue.
+
+## Stop Conditions
+
+Interrupt the run immediately and report status if any of these happen:
+- A child issue is skipped unexpectedly.
+- The run starts at any child other than the first unchecked ordered child.
+- The test command is broader than the agreed gate (for example frontend/website tests during a backend-only E12 run).
+- Live Minecraft/Mindcraft verification runs before the agreed final validation phase.
+- A duplicate alpha-loop process appears for the same epic.
+- A merge conflict, service startup failure, or repeated verification loop indicates the issue is no longer a coding-only pass.
+- The user says stop, pause, wait, or questions the queue order.
+
+When interrupted, pause any heartbeat automation, wait for alpha-loop cleanup/finalization, inspect `git status`, restore accidental skill-sync deletions, and summarize the exact PRs/branches/issues touched.
+
+## E12 / Minecraft Run-Mode Posture
+
+For E12-style run-mode / starting-conditions work:
+- Process all ordered children from the beginning. Do not start at later children just because early prerequisites are missing `ready`.
+- Use batch size 2 unless the user says otherwise.
+- Use backend-only tests during implementation: `make test-backend`.
+- Disable per-child live verification with `skip_verify: true`.
+- Defer full Minecraft/Mindcraft simulation validation until the final integrated scenario child, such as #775, and post-epic validation.
+- After the final child lands, run final validation explicitly with verification enabled, for example:
+  `SKIP_VERIFY=false ../alpha-loop/dist/cli.js run --verify-only <N>`
+- For Minecraft post-epic checks, prefer E17/E18 tooling first:
+  `pnpm mc:eval:commands --dry-run --list-only`
+  and a dry-run multi-agent live eval before any expensive real soak.
 
 ## Running The Next Work
 
@@ -53,7 +117,9 @@ When the loop stops, do not just report that it exited. Validate completion:
 
 1. Inspect the session output and session PR.
 2. Inspect the epic and children with `gh issue view` / `gh pr list`; confirm completed child issues have merged PRs and checked boxes.
-3. Run epic verification:
+3. If per-child verification was disabled for the coding pass, run final epic verification with env override:
+   `SKIP_VERIFY=false ../alpha-loop/dist/cli.js run --verify-only <N>`
+   Otherwise run:
    `../alpha-loop/dist/cli.js run --verify-only <N>`
 4. Run the most relevant local checks:
    - Backend/scripts: CLI tests or targeted Python tests.
@@ -62,4 +128,3 @@ When the loop stops, do not just report that it exited. Validate completion:
 5. For Minecraft pivot work, prefer local LM Studio validation. Record model IDs and commands. Do not require OpenRouter spend unless the issue explicitly asks for it.
 
 If validation is partial, name the unchecked issue numbers, failed criteria, and next command to run.
-

@@ -41,46 +41,42 @@ auto_cleanup: true            # Remove worktrees after each issue
 
 # === Commands (one distinct command per task) ===============================
 # setup_command  — one-time bootstrap per fresh worktree (idempotent).
-#                  Creates the Python 3.13 venv, installs backend deps, and
-#                  installs frontend + website node deps. `npm ci` is used so
-#                  lockfiles are respected and runs are reproducible.
-setup_command: "/opt/homebrew/bin/uv venv --python 3.13 .venv && /opt/homebrew/bin/uv pip install --python .venv/bin/python -r requirements.txt && npm ci --silent --prefix frontend && npm ci --silent --prefix website"
+#                  E12 run-mode work is backend/Minecraft orchestration work,
+#                  so do not reinstall frontend + website dependencies per
+#                  batch.
+setup_command: "/opt/homebrew/bin/uv venv --python 3.13 .venv && /opt/homebrew/bin/uv pip install --python .venv/bin/python -r requirements.txt"
 
-# test_command   — the validation GATE run after every issue (and as preflight
-#                  against `main` before the session). Full three-layer suite:
-#                  backend pytest + frontend vitest + website vitest. All three
-#                  pnpm scripts pin `.venv/bin/pytest` / `npm --prefix`, so they
-#                  are PATH-safe under `/bin/sh` in the runner.
-test_command: pnpm test:python && pnpm test:frontend && pnpm test:website
+# test_command   — the validation GATE run after every issue/batch (and as
+#                  preflight against `main` before the session). E12 run-mode
+#                  work is backend/Minecraft orchestration work, so keep the
+#                  per-batch gate backend-only and defer frontend/website and
+#                  full Minecraft simulation validation until post-#775 epic
+#                  validation.
+test_command: make test-backend
 
 # dev_command    — boots the full stack (docker + backend + frontend + website)
 #                  so the `verify` stage / Playwright has a live target.
 dev_command: pnpm dev
 
-# smoke_test     — FAST post-session sanity check (distinct from the full
-#                  test gate above). Brings the docker services up, asserts all
-#                  5 service checks pass (Redis/PG/pgvector/pg_trgm/Langfuse),
-#                  then runs the python<->node bridge contract tests — the most
-#                  recently shipped epic (#506) and the integration seam most
-#                  likely to regress. Real signal, ~1 min, not the 3-suite gate.
-smoke_test: |
-  docker compose up -d --wait && \
-  bash scripts/check-services.sh && \
-  .venv/bin/pytest -q tests/backend/test_bridge_contract.py tests/backend/test_bridge_server.py 2>&1 | tail -5
+# smoke_test     — Disabled for E12 per-batch runs. The integrated Minecraft
+#                  smoke belongs after #775, when the run-spec, starting
+#                  conditions, supervisor, policy, blackboard, rescue loop, and
+#                  plan-build settlement scenario all exist together.
+# smoke_test: ""
 
 # === Testing toggles ========================================================
 max_test_retries: 3           # Times the agent may retry failing tests
 skip_preflight: false         # Run test_command against main before starting
 # skip_tests: false           # Never skip the gate (not recommended)
 # skip_review: false          # Keep the Claude review stage
-# skip_verify: false          # Keep live verification (epic mode)
+skip_verify: true             # Defer live/full Minecraft verification until #775
 # skip_learn: false           # Keep learning extraction
 # skip_e2e: false             # Keep Playwright/E2E
 # skip_install: false         # Keep auto-running setup_command on new worktrees
 
 # === Safety limits (0 = unlimited) ==========================================
-# Posture: "open caps, batch off" — long unattended overnight backlog drains
-# with strict one-issue-at-a-time isolation (no batch cross-contamination).
+# Posture: E12 run-mode epic uses small batches to reduce per-issue ceremony
+# while keeping review scope small enough to understand.
 max_issues: 60                # Cap per session (well above current backlog)
 max_session_duration: 0       # Unlimited — exits when the queue drains
 poll_interval: 60             # Seconds between queue polls when running long
@@ -115,10 +111,8 @@ pipeline:
     agent: codex
 
 # === Batch mode =============================================================
-# OFF by design (chosen posture). One issue per agent call -> full isolation;
-# safer for an unattended overnight drain on a complex monorepo.
-batch: false
-# batch_size: 5
+batch: true
+batch_size: 2
 
 # === Post-session review ====================================================
 # Holistic review + security scan of the full session diff (uses `review_model`
