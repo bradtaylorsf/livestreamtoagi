@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
+import { fetchMemoryContext } from './memory_context.js';
 
 const INSTALL_FLAG = Symbol.for('livestreamtoagi.autonomousHeartbeat');
 const COMMAND_RE = /!(?<name>[A-Za-z][A-Za-z0-9_]*)\s*(?:\(|\b)/g;
@@ -310,6 +311,7 @@ export class HeartbeatController {
             lastSkipReason: null,
             lastSkipTs: 0,
             lastResponseExcerpt: '',
+            startupMemoryContextRequested: false,
         };
         this.timer = null;
         this.agentName = agentId(agent);
@@ -326,6 +328,7 @@ export class HeartbeatController {
             this.tick().catch((err) => this._emitError(err));
         }, Math.max(100, this.options.tickMs));
         if (typeof this.timer.unref === 'function') this.timer.unref();
+        void this._fetchStartupMemoryContext();
         return this;
     }
 
@@ -502,6 +505,50 @@ export class HeartbeatController {
         });
     }
 
+    async _fetchStartupMemoryContext() {
+        if (this.state.startupMemoryContextRequested) return;
+        this.state.startupMemoryContextRequested = true;
+        const traceId = `trace-memory-startup-${randomUUID()}`;
+        const context = await fetchMemoryContext({
+            agent: this.agent,
+            query: 'startup Minecraft simulation context',
+            traceId,
+            runMode: process.env.SOAK_PROFILE || process.env.CONVERSATION_MODE || 'heartbeat',
+            currentGoal: this.options.prompt,
+            recentEvents: [{ source: 'startup', message: this.options.prompt }],
+        });
+        this._emit(
+            'memory_context.startup',
+            {
+                fetched: Boolean(context),
+                context_chars: context.length,
+            },
+            traceId,
+        );
+    }
+
+    async _promptWithMemoryContext(prompt, reason, traceId, basePayload) {
+        if (this.agent?.__ltagDirectorGate) return prompt;
+        const recentEvents = [
+            { source: 'heartbeat', message: reason },
+            this.state.lastResponseExcerpt
+                ? { source: 'last_response', message: this.state.lastResponseExcerpt }
+                : null,
+            basePayload?.action_label
+                ? { source: 'action', message: `${basePayload.action_label} age=${basePayload.action_age_ms}` }
+                : null,
+        ].filter(Boolean);
+        const context = await fetchMemoryContext({
+            agent: this.agent,
+            query: `${reason}: ${prompt}`,
+            traceId,
+            runMode: process.env.SOAK_PROFILE || process.env.CONVERSATION_MODE || 'heartbeat',
+            currentGoal: prompt,
+            recentEvents,
+        });
+        return context ? `${context}\n\n${prompt}` : prompt;
+    }
+
     async _fire(reason, basePayload) {
         if (!this.agent || typeof this.agent.handleMessage !== 'function') {
             this._emitSkipped('missing-handle-message', basePayload);
@@ -536,7 +583,13 @@ export class HeartbeatController {
         let result;
         let error = null;
         try {
-            result = await this.agent.handleMessage('system', this.options.prompt, 1);
+            const prompt = await this._promptWithMemoryContext(
+                this.options.prompt,
+                reason,
+                traceId,
+                basePayload,
+            );
+            result = await this.agent.handleMessage('system', prompt, 1);
         } catch (err) {
             error = err;
         } finally {

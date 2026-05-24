@@ -481,6 +481,29 @@ Expected timeline events:
 counts the line in restart/stability checks, and fails the soak. The summary also
 prints `heartbeat_counts` from `timeline-totals.json`.
 
+## Runtime Memory Context
+
+Embodied decisions can include Python memory immediately before the Mindcraft
+prompt. The staged `memory_context.js` helper fetches Tier 1 core memory and a
+small Tier 2 recall query through `memory.recall`, then prepends a bounded
+`[Python memory context]` block to Director-selected prompts and legacy
+heartbeat prompts. Alpha and Management are excluded by default.
+
+Configuration:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MC_SIM_MEMORY_CONTEXT_ENABLED` | `1` | Set `0`/`false`/`off` to disable runtime memory context injection. |
+| `MC_SIM_MEMORY_RECALL_LIMIT` | `3` | Relevant recall snippets requested for the current scene/goal query. |
+| `MC_SIM_MEMORY_CORE_MAX_CHARS` | `1500` | Maximum core-memory characters injected into one prompt. |
+| `MC_SIM_MEMORY_RECALL_MAX_CHARS` | `1200` | Maximum recall-memory characters injected into one prompt. |
+| `MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS` | `management,alpha` | Comma- or space-separated agent ids that must not fetch/inject this context. |
+
+Timeline evidence is content-free: `memory_context.startup`,
+`memory_context.fetched`, `memory_context.skipped`, and `memory_context.error`
+record agent id, run/simulation id, limits, and character counts, not memory
+content.
+
 ## Live Cohort Monitor
 
 Every embodied soak also renders `monitor.html` in the evidence directory after

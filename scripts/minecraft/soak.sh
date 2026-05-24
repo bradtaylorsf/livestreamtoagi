@@ -135,6 +135,19 @@
 #                               as stale. Default: 180000.
 #   MC_HEARTBEAT_MAX_NO_COMMAND Repeated blank/no-command heartbeat outcomes
 #                               before `heartbeat.halted`. Default: 3.
+#   MC_SIM_MEMORY_CONTEXT_ENABLED
+#                               Fetch Python core+recall memory before runtime
+#                               prompt decisions. Default: 1.
+#   MC_SIM_MEMORY_RECALL_LIMIT  Relevant recall snippets requested per fetch.
+#                               Default: 3.
+#   MC_SIM_MEMORY_CORE_MAX_CHARS
+#                               Max core-memory characters injected. Default:
+#                               1500.
+#   MC_SIM_MEMORY_RECALL_MAX_CHARS
+#                               Max recall characters injected. Default: 1200.
+#   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+#                               Comma/space-separated agent ids skipped for
+#                               runtime memory context. Default: management,alpha.
 #   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
 #                               bootstrap: a side Paper server, peaceful rules,
 #                               a flat grass starter meadow, resource piles,
@@ -301,6 +314,10 @@ MC_HEARTBEAT_IDLE_MS="${MC_HEARTBEAT_IDLE_MS:-90000}"
 MC_HEARTBEAT_COOLDOWN_MS="${MC_HEARTBEAT_COOLDOWN_MS:-45000}"
 MC_HEARTBEAT_STALE_ACTION_MS="${MC_HEARTBEAT_STALE_ACTION_MS:-180000}"
 MC_HEARTBEAT_MAX_NO_COMMAND="${MC_HEARTBEAT_MAX_NO_COMMAND:-3}"
+MC_SIM_MEMORY_CONTEXT_ENABLED="${MC_SIM_MEMORY_CONTEXT_ENABLED:-1}"
+MC_SIM_MEMORY_RECALL_LIMIT="${MC_SIM_MEMORY_RECALL_LIMIT:-3}"
+MC_SIM_MEMORY_CORE_MAX_CHARS="${MC_SIM_MEMORY_CORE_MAX_CHARS:-1500}"
+MC_SIM_MEMORY_RECALL_MAX_CHARS="${MC_SIM_MEMORY_RECALL_MAX_CHARS:-1200}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -704,6 +721,7 @@ print_plan() {
     info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; restarts<=${SOAK_MAX_RESTARTS_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
+    info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_PROFILE" = "director_v2" ]; then
@@ -1413,6 +1431,11 @@ write_metadata() {
         echo "heartbeat_cooldown_ms=$MC_HEARTBEAT_COOLDOWN_MS"
         echo "heartbeat_stale_action_ms=$MC_HEARTBEAT_STALE_ACTION_MS"
         echo "heartbeat_max_no_command=$MC_HEARTBEAT_MAX_NO_COMMAND"
+        echo "memory_context_enabled=$MC_SIM_MEMORY_CONTEXT_ENABLED"
+        echo "memory_context_recall_limit=$MC_SIM_MEMORY_RECALL_LIMIT"
+        echo "memory_context_core_max_chars=$MC_SIM_MEMORY_CORE_MAX_CHARS"
+        echo "memory_context_recall_max_chars=$MC_SIM_MEMORY_RECALL_MAX_CHARS"
+        echo "memory_context_exclude_agents=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
         echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
@@ -1760,6 +1783,11 @@ launch_bot() {
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        export MC_SIM_MEMORY_CONTEXT_ENABLED MC_SIM_MEMORY_RECALL_LIMIT
+        export MC_SIM_MEMORY_CORE_MAX_CHARS MC_SIM_MEMORY_RECALL_MAX_CHARS
+        if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS+x}" ]; then
+            export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+        fi
         export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
         export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
         export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT

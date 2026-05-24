@@ -118,6 +118,7 @@ SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
+MEMORY_CONTEXT_SKILL_REL="src/agent/skills/memory_context.js"
 INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
 DIRECTOR_GATE_SKILL_REL="src/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
@@ -156,6 +157,7 @@ SAFE_FAIL_SKILL_DEST=""
 ACTION_INTERRUPTION_SKILL_DEST=""
 LMSTUDIO_USAGE_SKILL_DEST=""
 HEARTBEAT_SKILL_DEST=""
+MEMORY_CONTEXT_SKILL_DEST=""
 INBOX_QUEUE_SKILL_DEST=""
 DIRECTOR_GATE_SKILL_DEST=""
 ACTION_QUEUE_SKILL_DEST=""
@@ -189,6 +191,7 @@ SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
+MEMORY_CONTEXT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/memory_context.js"
 INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
 DIRECTOR_GATE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
@@ -258,6 +261,7 @@ restore_clone_patches() {
     [ -n "${ACTION_INTERRUPTION_SKILL_DEST:-}" ] && rm -f "$ACTION_INTERRUPTION_SKILL_DEST" 2> /dev/null || true
     [ -n "${LMSTUDIO_USAGE_SKILL_DEST:-}" ] && rm -f "$LMSTUDIO_USAGE_SKILL_DEST" 2> /dev/null || true
     [ -n "${HEARTBEAT_SKILL_DEST:-}" ] && rm -f "$HEARTBEAT_SKILL_DEST" 2> /dev/null || true
+    [ -n "${MEMORY_CONTEXT_SKILL_DEST:-}" ] && rm -f "$MEMORY_CONTEXT_SKILL_DEST" 2> /dev/null || true
 }
 
 # ── Node / npm check (identical posture to connect-stock-bot.sh) ──
@@ -357,6 +361,14 @@ verify_committed_assets() {
         grep -q 'heartbeat.outcome' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill does not emit heartbeat.outcome"; problems=1; }
         grep -q 'heartbeat.halted' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill does not emit heartbeat.halted"; problems=1; }
         grep -q 'MC_HEARTBEAT_IDLE_MS' "$HEARTBEAT_SKILL_SRC" || { fail "heartbeat skill missing idle env"; problems=1; }
+    fi
+
+    if [ ! -s "$MEMORY_CONTEXT_SKILL_SRC" ]; then
+        fail "Memory context skill missing or empty: $MEMORY_CONTEXT_SKILL_SRC"; problems=1
+    else
+        grep -q 'memory_context.fetched' "$MEMORY_CONTEXT_SKILL_SRC" || { fail "memory context missing fetched telemetry"; problems=1; }
+        grep -q "service: 'memory'" "$MEMORY_CONTEXT_SKILL_SRC" || { fail "memory context does not call memory.recall"; problems=1; }
+        grep -q 'MC_SIM_MEMORY_CONTEXT_ENABLED' "$MEMORY_CONTEXT_SKILL_SRC" || { fail "memory context missing enabled env"; problems=1; }
     fi
 
     if [ ! -s "$INBOX_QUEUE_SKILL_SRC" ]; then
@@ -670,7 +682,8 @@ if [ "$MODE" = "dry-run" ]; then
     info "              $BUILD_PLAN_GOVERNOR_SKILL_REL + $PERCEPTION_SKILL_REL +"
     info "              $SAFE_FAIL_SKILL_REL + $ACTION_INTERRUPTION_SKILL_REL +"
     info "              $PLACE_HERE_GUARD_REL + $HEARTBEAT_SKILL_REL +"
-    info "              $INBOX_QUEUE_SKILL_REL + $DIRECTOR_GATE_SKILL_REL + $ACTION_QUEUE_SKILL_REL"
+    info "              $MEMORY_CONTEXT_SKILL_REL + $INBOX_QUEUE_SKILL_REL +"
+    info "              $DIRECTOR_GATE_SKILL_REL + $ACTION_QUEUE_SKILL_REL"
     info "Would patch:  inject bridgePingAction, moveAction, navigateAction,"
     info "              placeAction, breakAction, buildFromPlanAction, planAndBuildAction, executeCodeAction"
     info "              and observeAction into $MINDCRAFT_DIR/$ACTIONS_REL (restored on exit)"
@@ -809,6 +822,7 @@ SAFE_FAIL_SKILL_DEST="$MINDCRAFT_DIR_ABS/$SAFE_FAIL_SKILL_REL"
 ACTION_INTERRUPTION_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_INTERRUPTION_SKILL_REL"
 LMSTUDIO_USAGE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$LMSTUDIO_USAGE_SKILL_REL"
 HEARTBEAT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$HEARTBEAT_SKILL_REL"
+MEMORY_CONTEXT_SKILL_DEST="$MINDCRAFT_DIR_ABS/$MEMORY_CONTEXT_SKILL_REL"
 INBOX_QUEUE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$INBOX_QUEUE_SKILL_REL"
 DIRECTOR_GATE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$DIRECTOR_GATE_SKILL_REL"
 ACTION_QUEUE_SKILL_DEST="$MINDCRAFT_DIR_ABS/$ACTION_QUEUE_SKILL_REL"
@@ -836,6 +850,7 @@ mkdir -p \
     "$(dirname -- "$ACTION_INTERRUPTION_SKILL_DEST")" \
     "$(dirname -- "$LMSTUDIO_USAGE_SKILL_DEST")" \
     "$(dirname -- "$HEARTBEAT_SKILL_DEST")" \
+    "$(dirname -- "$MEMORY_CONTEXT_SKILL_DEST")" \
     "$(dirname -- "$INBOX_QUEUE_SKILL_DEST")" \
     "$(dirname -- "$DIRECTOR_GATE_SKILL_DEST")" \
     "$(dirname -- "$ACTION_QUEUE_SKILL_DEST")"
@@ -862,6 +877,7 @@ cp "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_DEST"
 cp "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_DEST"
 cp "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_DEST"
 cp "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_DEST"
+cp "$MEMORY_CONTEXT_SKILL_SRC" "$MEMORY_CONTEXT_SKILL_DEST"
 cp "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_DEST"
 cp "$DIRECTOR_GATE_SKILL_SRC" "$DIRECTOR_GATE_SKILL_DEST"
 cp "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_DEST"
@@ -888,6 +904,7 @@ ok "Copied safe-fail helpers → $SAFE_FAIL_SKILL_REL"
 ok "Copied action interruption helpers → $ACTION_INTERRUPTION_SKILL_REL"
 ok "Copied LM Studio usage shim → $LMSTUDIO_USAGE_SKILL_REL"
 ok "Copied autonomous heartbeat skill → $HEARTBEAT_SKILL_REL"
+ok "Copied memory context skill → $MEMORY_CONTEXT_SKILL_REL"
 ok "Copied inbox queue skill → $INBOX_QUEUE_SKILL_REL"
 ok "Copied Director gate skill → $DIRECTOR_GATE_SKILL_REL"
 ok "Copied action queue skill → $ACTION_QUEUE_SKILL_REL"

@@ -4,8 +4,11 @@
 // through the Python Director scheduler before the stock Mindcraft
 // shouldRespond/conversation path can enqueue an LLM call.
 
+import { randomUUID } from 'node:crypto';
+
 import { callBridge } from '../bridge/python_bridge.js';
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
+import { fetchMemoryContext } from './memory_context.js';
 
 const PATCH_FLAG = Symbol.for('livestreamtoagi.directorGateInstalled');
 const DEFAULT_DEADLINE_MS = 1500;
@@ -195,7 +198,7 @@ function commandPolicy(verdict) {
     return 'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
 }
 
-function enrichMessage(message, verdict) {
+function enrichMessage(message, verdict, memoryContext = '') {
     const observations = JSON.stringify(verdict.local_observations || {});
     const tools = filteredGrantedTools(verdict);
     const macro = verdict.build_macro || null;
@@ -223,12 +226,26 @@ function enrichMessage(message, verdict) {
         '',
         String(message || ''),
     );
-    return lines.join('\n');
+    const context = String(memoryContext || '').trim();
+    return context ? `${context}\n\n${lines.join('\n')}` : lines.join('\n');
+}
+
+function currentGoalFromTurn(turn, verdict) {
+    const macro = verdict.build_macro || null;
+    const parts = [
+        verdict.scene_digest || verdict.scene_id || '',
+        verdict.role || '',
+        macro?.support_task || '',
+        macro?.role ? `build role ${macro.role}` : '',
+        turn.message || '',
+    ].filter(Boolean);
+    return clip(parts.join(' | '), 500);
 }
 
 async function askDirector(agent, turn, options, gateState) {
     const gateSeq = ++gateState.sequence;
     gateState.latestSequence = gateSeq;
+    const traceId = `trace-director-${randomUUID()}`;
     const payload = {
         agent_id: agentId(agent),
         event_kind: 'chat',
@@ -249,6 +266,7 @@ async function askDirector(agent, turn, options, gateState) {
             payload,
             deadlineMs,
             agentId: agentId(agent),
+            traceId,
             costContext: {
                 agent_tier: 'conversation',
                 budget_bucket: 'director-gate',
@@ -262,6 +280,7 @@ async function askDirector(agent, turn, options, gateState) {
             outcome: 'bridge_error',
         };
         emit(agent, 'director_gate.error', {
+            trace_id: traceId,
             outcome: err && err.code ? err.code : 'bridge_error',
             error: err && err.message ? err.message : String(err),
             queue_depth: turn.queueDepth || 0,
@@ -276,6 +295,7 @@ async function askDirector(agent, turn, options, gateState) {
             outcome: 'director_stale_discarded',
         };
         emit(agent, 'director_gate.stale_discarded', {
+            trace_id: traceId,
             scene_id: response?.payload?.scene_id,
             queue_depth: response?.payload?.queue_depth ?? turn.queueDepth ?? 0,
         });
@@ -294,7 +314,16 @@ async function askDirector(agent, turn, options, gateState) {
     };
     agent.__ltagDirectorContext = verdict;
     if (verdict.selected) {
+        const memoryContext = await fetchMemoryContext({
+            agent,
+            query: currentGoalFromTurn(turn, verdict),
+            traceId: response?.trace_id || response?.traceId || traceId,
+            runMode: process.env.SOAK_PROFILE || process.env.CONVERSATION_MODE || 'director_v2',
+            currentGoal: currentGoalFromTurn(turn, verdict),
+            recentEvents: turn.batch && turn.batch.length ? turn.batch : [{ source: turn.source, message: turn.message }],
+        });
         emit(agent, 'director_gate.selected', {
+            trace_id: response?.trace_id || response?.traceId || traceId,
             scene_id: verdict.scene_id,
             turn_kind: verdict.turn_kind,
             reason: verdict.reason,
@@ -306,12 +335,13 @@ async function askDirector(agent, turn, options, gateState) {
         return {
             selected: true,
             source: 'system',
-            message: enrichMessage(turn.message, verdict),
+            message: enrichMessage(turn.message, verdict, memoryContext),
             maxResponses: turn.maxResponses,
         };
     }
 
     emit(agent, 'director_gate.suppressed', {
+        trace_id: response?.trace_id || response?.traceId || traceId,
         scene_id: verdict.scene_id,
         suppression_reason: verdict.suppression_reason || 'fanout_capped',
         build_plan_id: verdict.build_macro?.plan_id,

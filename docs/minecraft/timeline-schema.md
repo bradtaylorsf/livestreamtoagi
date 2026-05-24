@@ -69,6 +69,10 @@ Each `timeline.ndjson` line is one JSON object:
 | `build_plan.generation.skipped` | The build governor avoided a new builder call because a scene was locked, an active build exists, an equivalent build is cooling down, the per-agent cap was reached, or a cached plan was reused. |
 | `build_plan.execution.started` | The validated plan began execution through `!buildFromPlan`. Payload includes `scene_id`, `plan_id`, owner, and step count. |
 | `build_plan.execution.completed` | Plan execution finished with the terminal build result string plus parsed verification counters such as `verified_blocks` and `verified_block_changes`. |
+| `memory_context.startup` | Startup memory-context fetch completed or skipped for a bot. Payload includes `fetched` and content-free character counts. |
+| `memory_context.fetched` | Python core/recall memory context was fetched for a runtime prompt. Payload includes run/simulation id, limits, and character counts, not memory text. |
+| `memory_context.skipped` | Runtime memory context was intentionally skipped, usually disabled or excluded-agent handling. |
+| `memory_context.error` | Runtime memory context fetch failed; the bot continues without injected memory. Payload includes error class/message only. |
 | `heartbeat.fired` | Autonomous idle/stall heartbeat prompt was sent. Payload includes reason, idle window, action state, cooldown, and prompt excerpt. |
 | `heartbeat.skipped` | Heartbeat considered an idle/stall check but did not prompt, such as active action, cooldown, disabled, or max no-command state. |
 | `heartbeat.outcome` | Result of a heartbeat prompt. Payload includes command detection, no-command streak, response excerpt, and error status when applicable. |
@@ -147,6 +151,7 @@ The committed Mindcraft overlay stages:
 - `scripts/minecraft/fork-src/agent/skills/director_gate.js`
 - `scripts/minecraft/fork-src/agent/skills/action_queue.js`
 - `scripts/minecraft/fork-src/agent/skills/heartbeat.js`
+- `scripts/minecraft/fork-src/agent/skills/memory_context.js`
 - `scripts/minecraft/fork-src/agent/commands/plan_and_build_action.js`
 
 Launchers inject the usage shim into staged `settings.js` and patch `agent.js`
