@@ -188,6 +188,12 @@ EMBEDDING_PROVIDER=deterministic \
   --max-cost 0.01 \
   --verbose
 
+Seed files and public run-config JSON can also carry run-spec starting
+conditions: `run_mode`, `persona_overrides`, `agent_goals`, `memory_seed`,
+`factions`, and `world`. The CLI can override run mode with
+`--run-mode {experimental,persistent}` and a custom Minecraft world config
+with `--world-config-file <path>`.
+
 # Persistent/autonomous runs can also enforce a rolling spend ceiling:
 #   --max-cost-rolling 0.01 --rolling-window 1h
 
