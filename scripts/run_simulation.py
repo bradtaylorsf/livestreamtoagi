@@ -30,6 +30,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
 
+from core.models import ManagementPolicy  # noqa: E402
+
 load_dotenv(PROJECT_ROOT / ".env")
 
 
@@ -189,6 +191,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         verbose=verbose,
         management_shadow=args.management_shadow,
+        management_policy=args.management_policy or run_config.get("management_policy"),
         existing_sim_id=getattr(args, "resume_sim_id", None) or getattr(args, "sim_id", None),
         hypothesis=getattr(args, "hypothesis", None),
         auto_draft_learnings=getattr(args, "auto_draft_learnings", False),
@@ -257,14 +260,14 @@ async def run_simulation(args: argparse.Namespace) -> None:
         finally:
             await shutdown_services(svc)
 
-    if sim_config.management_shadow:
+    if sim_config.management_policy is not None:
         from core.management import Management
 
         management = Management(
             redis_client=svc.redis,
             llm_client=svc.llm_client,
             event_bus=event_bus,
-            shadow_mode=True,
+            policy=sim_config.management_policy,
             db=svc.db,
         )
     else:
@@ -462,14 +465,20 @@ def main() -> None:
     parser.add_argument(
         "--management-shadow",
         action="store_true",
-        default=True,
-        help="Run Management in shadow/log-only mode (default: True)",
+        default=None,
+        help="Deprecated alias for --management-policy shadow",
     )
     parser.add_argument(
         "--no-management-shadow",
         action="store_false",
         dest="management_shadow",
-        help="Run Management in full enforcement mode",
+        help="Deprecated alias for --management-policy enforce",
+    )
+    parser.add_argument(
+        "--management-policy",
+        choices=[policy.value for policy in ManagementPolicy],
+        default=None,
+        help="Management policy for this run: off, shadow, or enforce",
     )
     parser.add_argument(
         "--restore-snapshot",

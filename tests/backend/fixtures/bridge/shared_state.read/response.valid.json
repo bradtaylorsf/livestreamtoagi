@@ -1,0 +1,52 @@
+{
+  "ok": true,
+  "payload": {
+    "build_site": {
+      "location": {
+        "x": 1,
+        "y": 64,
+        "z": 2
+      },
+      "name": "Camp",
+      "site_id": "camp",
+      "status": "open"
+    },
+    "claims": [
+      {
+        "agent_id": "rex",
+        "claimed_at": 1.0,
+        "claimed_by": "rex",
+        "expires_at": null,
+        "role": "builder",
+        "target": "camp"
+      }
+    ],
+    "dangers": [],
+    "formatted": "**Active group goal** (set by vera): Build camp",
+    "goal": {
+      "set_at": 1.0,
+      "set_by": "vera",
+      "text": "Build camp"
+    },
+    "next_steps": [
+      {
+        "added_at": 1.0,
+        "added_by": "pixel",
+        "text": "Light the entrance"
+      }
+    ],
+    "recent_actions": [],
+    "resources": [
+      {
+        "id": "woodpile",
+        "kind": "oak_log",
+        "location": "starter chest",
+        "quantity": 12,
+        "reported_by": "vera",
+        "updated_at": 1.0
+      }
+    ]
+  },
+  "request_id": "req-shared-state-read-0001",
+  "retryable": false
+}

@@ -1,0 +1,16 @@
+{
+  "agent_id": "vera",
+  "cost_context": {
+    "agent_tier": "conversation",
+    "budget_bucket": "shared-state",
+    "estimated_cost_usd": 0.0
+  },
+  "deadline_ms": 3000,
+  "method": "read",
+  "payload": {},
+  "request_id": "req-shared-state-read-0001",
+  "run_id": "run-0001",
+  "service": "shared_state",
+  "simulation_id": "11111111-1111-1111-1111-111111111111",
+  "version": "1.0"
+}

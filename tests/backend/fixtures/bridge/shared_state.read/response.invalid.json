@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "payload": {
+    "formatted": 42,
+    "goal": null
+  },
+  "request_id": "req-shared-state-read-0001",
+  "retryable": false
+}

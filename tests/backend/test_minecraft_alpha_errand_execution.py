@@ -341,8 +341,8 @@ def test_connect_alpha_stages_and_injects_run_errand_action(tmp_path: Path) -> N
 
 
 def test_protocol_version_bumped_on_python_and_node_sides() -> None:
-    assert c.PROTOCOL_VERSION == "1.8"
-    assert "PROTOCOL_VERSION = '1.8'" in BRIDGE_CLIENT.read_text()
+    assert c.PROTOCOL_VERSION == "1.9"
+    assert "PROTOCOL_VERSION = '1.9'" in BRIDGE_CLIENT.read_text()
 
 
 def test_package_json_wires_alpha_errand_verifiers() -> None:

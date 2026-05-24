@@ -102,6 +102,10 @@
 #                               Set to 1 to block arbitrary !executeCode
 #                               separately from build-plan actions. Default:
 #                               SOAK_BLOCK_SLOW_SIM_ACTIONS.
+#   MC_SIM_MANAGEMENT_POLICY    Management review policy for bot chat:
+#                               off, shadow, or enforce. Default: off.
+#   MC_SIM_DISABLE_MANAGEMENT   Deprecated alias; 1 maps to policy=off,
+#                               0 maps to policy=enforce when policy is unset.
 #   MC_SIM_BUILDER_PROVIDER     Builder-plan provider for !planAndBuild only:
 #                               local or openrouter. Default: local.
 #   MC_SIM_BUILDER_OPENROUTER_API_KEY
@@ -153,6 +157,8 @@
 #   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
 #                               Comma/space-separated agent ids skipped for
 #                               runtime memory context. Default: management,alpha.
+#   MC_SIM_SHARED_STATE_ENABLED Fetch the embodied shared-state blackboard for
+#                               prompt context. Default: 1.
 #   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
 #                               bootstrap: a side Paper server, peaceful rules,
 #                               a flat grass starter meadow, resource piles,
@@ -274,6 +280,30 @@ SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-0}"
 SOAK_BLOCK_SLOW_SIM_ACTIONS="${SOAK_BLOCK_SLOW_SIM_ACTIONS:-0}"
 SOAK_BLOCK_EXECUTE_CODE_ACTIONS="${SOAK_BLOCK_EXECUTE_CODE_ACTIONS:-$SOAK_BLOCK_SLOW_SIM_ACTIONS}"
+if [ -z "${MC_SIM_MANAGEMENT_POLICY:-}" ]; then
+    if [ "${MC_SIM_DISABLE_MANAGEMENT:-1}" = "0" ]; then
+        MC_SIM_MANAGEMENT_POLICY="enforce"
+    else
+        MC_SIM_MANAGEMENT_POLICY="off"
+    fi
+fi
+case "$(printf '%s' "$MC_SIM_MANAGEMENT_POLICY" | tr '[:upper:]' '[:lower:]')" in
+    off|disabled|0)
+        MC_SIM_MANAGEMENT_POLICY="off"
+        ;;
+    shadow)
+        MC_SIM_MANAGEMENT_POLICY="shadow"
+        ;;
+    enforce|enabled|on|1)
+        MC_SIM_MANAGEMENT_POLICY="enforce"
+        ;;
+    *)
+        echo "x MC_SIM_MANAGEMENT_POLICY must be off, shadow, or enforce." >&2
+        exit 2
+        ;;
+esac
+MINECRAFT_MANAGEMENT_REVIEW_MODE="$MC_SIM_MANAGEMENT_POLICY"
+export MC_SIM_MANAGEMENT_POLICY MINECRAFT_MANAGEMENT_REVIEW_MODE
 MC_SIM_BUILDER_PROVIDER="${MC_SIM_BUILDER_PROVIDER:-local}"
 MC_SIM_BUILDER_FALLBACK="${MC_SIM_BUILDER_FALLBACK:-fail}"
 MC_SIM_BUILDER_OPENROUTER_API_KEY="${MC_SIM_BUILDER_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}"
@@ -323,6 +353,7 @@ MC_SIM_MEMORY_CONTEXT_ENABLED="${MC_SIM_MEMORY_CONTEXT_ENABLED:-1}"
 MC_SIM_MEMORY_RECALL_LIMIT="${MC_SIM_MEMORY_RECALL_LIMIT:-3}"
 MC_SIM_MEMORY_CORE_MAX_CHARS="${MC_SIM_MEMORY_CORE_MAX_CHARS:-1500}"
 MC_SIM_MEMORY_RECALL_MAX_CHARS="${MC_SIM_MEMORY_RECALL_MAX_CHARS:-1200}"
+MC_SIM_SHARED_STATE_ENABLED="${MC_SIM_SHARED_STATE_ENABLED:-1}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -715,6 +746,7 @@ print_plan() {
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
     info "builder route:  provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
     info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
+    info "management:    policy=${MC_SIM_MANAGEMENT_POLICY}"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "keep MC alive:  $SOAK_KEEP_MINECRAFT_RUNNING"
@@ -727,6 +759,7 @@ print_plan() {
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
     info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
+    info "shared state:  enabled=${MC_SIM_SHARED_STATE_ENABLED}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_PROFILE" = "director_v2" ]; then
@@ -1381,6 +1414,8 @@ write_metadata() {
         echo "llm_smoke_timeout_seconds=$SOAK_LLM_SMOKE_TIMEOUT_SECONDS"
         echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
+        echo "management_policy=$MC_SIM_MANAGEMENT_POLICY"
+        echo "minecraft_management_review_mode=$MINECRAFT_MANAGEMENT_REVIEW_MODE"
         echo "builder_openrouter_model=$MC_SIM_BUILDER_OPENROUTER_MODEL"
         echo "builder_openrouter_key_set=$([ -n "$MC_SIM_BUILDER_OPENROUTER_API_KEY" ] && echo yes || echo no)"
         echo "builder_fallback=$MC_SIM_BUILDER_FALLBACK"
@@ -1441,6 +1476,7 @@ write_metadata() {
         echo "memory_context_core_max_chars=$MC_SIM_MEMORY_CORE_MAX_CHARS"
         echo "memory_context_recall_max_chars=$MC_SIM_MEMORY_RECALL_MAX_CHARS"
         echo "memory_context_exclude_agents=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
+        echo "shared_state_enabled=$MC_SIM_SHARED_STATE_ENABLED"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
         echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
@@ -1787,9 +1823,11 @@ launch_bot() {
         export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
+        export MC_SIM_MANAGEMENT_POLICY
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
         export MC_SIM_MEMORY_CONTEXT_ENABLED MC_SIM_MEMORY_RECALL_LIMIT
         export MC_SIM_MEMORY_CORE_MAX_CHARS MC_SIM_MEMORY_RECALL_MAX_CHARS
+        export MC_SIM_SHARED_STATE_ENABLED
         if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS+x}" ]; then
             export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
         fi

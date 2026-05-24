@@ -12,6 +12,27 @@ Use [persistent 24/7 runs](run-modes/persistent.md) for the live channel,
 tests, and [blank-slate embodied runs](run-modes/blank-slate-embodied.md) for
 memory seed details that apply to either mode.
 
+## Management Policy
+
+Run specs may set `management_policy` to choose how Management reviews agent
+speech for that run:
+
+- `off`: approve speech without filter calls, while emitting an audit event.
+- `shadow`: run the filter, approve speech, and record would-be interventions.
+- `enforce`: run the filter and apply warnings, replacements, mutes, and the
+  kill-switch path when rules require it.
+
+Persistent livestream runs default to `enforce`. Experimental runs default to
+`shadow`. The lower-level local Minecraft wrappers default to `off` through
+`MC_SIM_MANAGEMENT_POLICY=off` so dry local collaboration can run without paid
+filter calls; set `MC_SIM_MANAGEMENT_POLICY=shadow` or `enforce` when collecting
+safety evidence. `MC_SIM_DISABLE_MANAGEMENT=1` is still accepted as a deprecated
+alias for `off`.
+
+Public or persistent livestream deployments should keep `enforce` unless a
+human-controlled run config explicitly overrides it. Management remains
+out-of-band: it is never generated as a Mindcraft bot profile.
+
 ## Local LM Studio
 
 All Minecraft-pivot run-mode validation should use LM Studio or another local
@@ -69,6 +90,12 @@ Persistent embodied run:
 lower-level diagnostics. The supervisor delegates Minecraft launch work to the
 soak harness after it owns lifecycle state.
 
+Embodied local wrappers export `MC_SIM_SHARED_STATE_ENABLED=1` by default. That
+adds a run-scoped, advisory blackboard to Mindcraft prompt context so agents can
+share the active group goal, build site, resource reports, claims, danger/stuck
+reports, verified recent actions, and open next steps without turning the run
+into a fixed script.
+
 ## Choose A Mode
 
 | Area | Persistent | Experimental |
@@ -77,6 +104,7 @@ soak harness after it owns lifecycle state.
 | Stop conditions | Kill switch, process cancel, or rolling cost cap. No duration. | Seed-file phases, `--duration`, `experimental_goal`, cancel, kill switch, or cost cap. |
 | World | Durable Minecraft world. `persistent: true` is forced. | Fresh Minecraft world. `persistent: false` is forced and durable world IDs are rejected. |
 | Cost cap | Requires `--max-cost-rolling` and `--rolling-window`. | Uses normal `--max-cost`; keep caps small for local experiments. |
+| Management policy | Defaults to `enforce`; override only through operator-controlled config. | Defaults to `shadow`; local Minecraft wrappers default to `off` unless `MC_SIM_MANAGEMENT_POLICY` is set. |
 | Memory seed | Can inherit the live namespace only through explicit memory seed config. | Supports `none`, `custom`, or `inherit`; the setting is recorded for comparison. |
 | Example spec | `scenarios/persistent_24x7.yaml` | `scenarios/experimental_short_run.yaml` |
 | Example command | `.venv/bin/python scripts/run_simulation.py --persistent --seed-file scenarios/persistent_24x7.yaml --max-cost-rolling 5 --rolling-window 1h` | `.venv/bin/python scripts/run_simulation.py --name "experimental-short-a" --seed-file scenarios/experimental_short_run.yaml --run-mode experimental --max-cost 0.01` |

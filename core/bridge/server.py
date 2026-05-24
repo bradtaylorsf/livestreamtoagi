@@ -81,6 +81,10 @@ from core.bridge.handlers.director import handle_director_gate
 from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.management import handle_management_review
 from core.bridge.handlers.memory import handle_memory_read, handle_memory_write
+from core.bridge.handlers.shared_state import (
+    handle_shared_state_read,
+    handle_shared_state_write,
+)
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 
 logger = logging.getLogger(__name__)
@@ -113,12 +117,16 @@ UNKNOWN_REQUEST_ID = "unknown"
 
 ERR_MEMORY_SERVICE_UNAVAILABLE = "memory_service_unavailable"
 ERR_MANAGEMENT_SERVICE_UNAVAILABLE = "management_service_unavailable"
+ERR_SHARED_STATE_SERVICE_UNAVAILABLE = "shared_state_service_unavailable"
 ERR_CODE_SERVICE_UNAVAILABLE = "code_service_unavailable"
 ERR_DIRECTOR_GATE_UNAVAILABLE = "director_gate_unavailable"
 ERR_KILL_SWITCH_ACTIVE = "kill_switch_active"
 MEMORY_HANDLER_VERBS = frozenset({"memory.recall"})
 MEMORY_WRITE_VERBS = frozenset({"memory.write"})
 MANAGEMENT_REVIEW_VERBS = frozenset({"management.review"})
+SHARED_STATE_READ_VERBS = frozenset({"shared_state.read"})
+SHARED_STATE_WRITE_VERBS = frozenset({"shared_state.write"})
+SHARED_STATE_VERBS = SHARED_STATE_READ_VERBS | SHARED_STATE_WRITE_VERBS
 CODE_EXECUTE_VERBS = frozenset({"code.execute"})
 DIRECTOR_GATE_VERBS = frozenset({"director.gate"})
 ERRAND_POLL_VERBS = frozenset({"errand.poll"})
@@ -306,6 +314,26 @@ def _management_services_unavailable(
     return make_error_response(
         env.request_id,
         ERR_MANAGEMENT_SERVICE_UNAVAILABLE,
+        message,
+        retryable=True,
+    )
+
+
+def _shared_state_services_unavailable(
+    env: BridgeRequest, services: Any | None
+) -> BridgeResponse | None:
+    if services is None:
+        message = "shared-state services are unavailable; application lifespan has not initialized"
+    elif getattr(services, "redis", None) is None and getattr(
+        services, "shared_working_state", None
+    ) is None:
+        message = "shared working state is unavailable"
+    else:
+        return None
+
+    return make_error_response(
+        env.request_id,
+        ERR_SHARED_STATE_SERVICE_UNAVAILABLE,
         message,
         retryable=True,
     )
@@ -505,6 +533,13 @@ def build_bridge_response(raw: Any) -> BridgeResponse:
             f"{key} requires initialized management services",
             retryable=True,
         )
+    if key in SHARED_STATE_VERBS:
+        return make_error_response(
+            env.request_id,
+            ERR_SHARED_STATE_SERVICE_UNAVAILABLE,
+            f"{key} requires initialized shared-state services",
+            retryable=True,
+        )
     if key in CODE_EXECUTE_VERBS:
         return make_error_response(
             env.request_id,
@@ -573,6 +608,22 @@ async def build_bridge_response_with_services(
         if unavailable is not None:
             return unavailable
         return _success_response(env, await handle_management_review(env, services))
+
+    if key in SHARED_STATE_READ_VERBS:
+        unavailable = _shared_state_services_unavailable(env, services)
+        if unavailable is not None:
+            return unavailable
+        return _success_response(env, await handle_shared_state_read(env, services))
+
+    if key in SHARED_STATE_WRITE_VERBS:
+        unavailable = _shared_state_services_unavailable(env, services)
+        if unavailable is not None:
+            return unavailable
+        try:
+            payload = await handle_shared_state_write(env, services)
+        except ValueError as exc:
+            return make_error_response(env.request_id, ERR_INVALID_PAYLOAD, str(exc))
+        return _success_response(env, payload)
 
     if key in CODE_EXECUTE_VERBS:
         unavailable = _code_services_unavailable(env, services)
@@ -723,6 +774,7 @@ def _assert_handlers_cover_registry() -> None:
         | MEMORY_HANDLER_VERBS
         | MEMORY_WRITE_VERBS
         | MANAGEMENT_REVIEW_VERBS
+        | SHARED_STATE_VERBS
         | CODE_EXECUTE_VERBS
         | DIRECTOR_GATE_VERBS
         | ERRAND_VERBS

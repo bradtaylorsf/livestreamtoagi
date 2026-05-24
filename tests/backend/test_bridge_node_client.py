@@ -124,9 +124,9 @@ def test_client_carries_the_full_request_envelope() -> None:
     assert "agent_tier" in src and "conversation" in src
     assert "budget_bucket" in src and "'bridge'" in src
     assert "estimated_cost_usd" in src
-    # 1.8 carries the additive director.gate and kill.status verbs, still
+    # 1.9 carries the additive shared_state.* verbs, still
     # wire-compatible with earlier 1.x peers.
-    assert "PROTOCOL_VERSION = '1.8'" in src, "protocol version must be 1.8"
+    assert "PROTOCOL_VERSION = '1.9'" in src, "protocol version must be 1.9"
 
 
 def test_client_uses_bearer_auth_and_the_bridge_endpoint() -> None:
@@ -166,10 +166,20 @@ def test_management_review_helper_fails_closed_and_uses_filter_tier() -> None:
     assert "method: 'review'" in src
     assert "DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS = 10000" in src
     assert "MINECRAFT_MANAGEMENT_REVIEW_MODE" in src
-    assert "management review disabled for local simulation" in src
+    assert "management policy=off" in src
     assert "agent_id: agentId" in src
     assert "agent_tier: 'filter'" in src
     assert "allow: false" in src, "bridge failures must block chat"
+
+
+def test_client_exposes_shared_state_blackboard_helpers() -> None:
+    src = BRIDGE_CLIENT.read_text()
+    assert "readSharedState" in src
+    assert "writeSharedState" in src
+    assert "service: 'shared_state'" in src
+    assert "method: 'read'" in src
+    assert "method: 'write'" in src
+    assert "budget_bucket: 'shared-state'" in src
 
 
 def test_ping_action_matches_mindcraft_shape_and_never_crashes() -> None:

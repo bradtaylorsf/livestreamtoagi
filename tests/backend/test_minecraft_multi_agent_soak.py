@@ -216,6 +216,7 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
         "memory context: enabled=1 recall_limit=3 core_max=1500 recall_max=1200 exclude=management,alpha"
         in proc.stdout
     )
+    assert "shared state:  enabled=1" in proc.stdout
     assert "behavior:       require=1; movement>=5/agent" in proc.stdout
     assert "execute code:   allowed" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
@@ -271,7 +272,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
         "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s"
         in proc.stdout
     )
-    assert "management review: disabled" in proc.stdout
+    assert "management review: off" in proc.stdout
     assert "build mode: single" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
     assert "slow sim actions: 1" in proc.stdout
@@ -285,6 +286,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
         "memory context: enabled=1 recall_limit=2 core_max=900 recall_max=700 exclude=management,alpha"
         in proc.stdout
     )
+    assert "shared state: enabled=1" in proc.stdout
     assert "easy mode: 1" in proc.stdout
     assert "keep MC server running: 1" in proc.stdout
     assert "minecraft: 127.0.0.1:25566" in proc.stdout
@@ -319,6 +321,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
         "memory context: enabled=1 recall_limit=2 core_max=900 recall_max=700 exclude=management,alpha"
         in proc.stdout
     )
+    assert "shared state:  enabled=1" in proc.stdout
     assert "easy spawn:     enabled" in proc.stdout
     assert "keep MC alive:  1" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
@@ -526,7 +529,34 @@ def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "management review: enabled" in proc.stdout
+    assert "management review: enforce" in proc.stdout
+
+
+def test_local_sim_wrapper_accepts_management_policy_shadow(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_MANAGEMENT_POLICY=shadow",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "management review: shadow" in proc.stdout
 
 
 def test_local_sim_wrapper_env_file_management_toggle_wins_over_pollution(tmp_path) -> None:
@@ -559,7 +589,7 @@ def test_local_sim_wrapper_env_file_management_toggle_wins_over_pollution(tmp_pa
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "management review: enabled" in proc.stdout
+    assert "management review: enforce" in proc.stdout
 
 
 def test_local_sim_wrapper_can_include_bridge_bot_when_requested(tmp_path) -> None:

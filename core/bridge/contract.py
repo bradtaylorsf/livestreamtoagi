@@ -41,12 +41,21 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.json_schema import models_json_schema
 
+from core.models import (
+    EmbodiedAgentClaim,
+    EmbodiedBuildSite,
+    EmbodiedDangerReport,
+    EmbodiedGroupGoal,
+    EmbodiedNextStep,
+    EmbodiedResourceEntry,
+    EmbodiedVerifiedAction,
+)
+
 # Protocol semver. ADR §3: every message carries this; the contract is
-# additive-compatible within a major and fail-closed across majors. 1.8 is a
-# minor bump over main's 1.7: the collapsed E11 session includes both
-# `director.gate` and `kill.status` in the live registry. Earlier 1.x peers
-# remain wire-compatible because `is_supported_version` gates only on the major.
-PROTOCOL_VERSION = "1.8"
+# additive-compatible within a major and fail-closed across majors. 1.9 adds
+# the embodied shared-state blackboard verbs. Earlier 1.x peers remain
+# wire-compatible because `is_supported_version` gates only on the major.
+PROTOCOL_VERSION = "1.9"
 
 # JSON Schema dialect the exported Node-side artifact targets. Pydantic v2
 # emits 2020-12, so the committed schema and the Node validator agree.
@@ -306,6 +315,52 @@ class ManagementReviewResponse(BaseModel):
     sanitized_text: str | None = Field(
         default=None, description="Cleaned text when the filter rewrote rather than vetoed."
     )
+
+
+class SharedStateReadRequest(BaseModel):
+    """``shared_state.read`` — read the embodied collaboration blackboard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SharedStateReadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    goal: EmbodiedGroupGoal | None = None
+    resources: list[EmbodiedResourceEntry] = Field(default_factory=list)
+    claims: list[EmbodiedAgentClaim] = Field(default_factory=list)
+    dangers: list[EmbodiedDangerReport] = Field(default_factory=list)
+    recent_actions: list[EmbodiedVerifiedAction] = Field(default_factory=list)
+    build_site: EmbodiedBuildSite | None = None
+    next_steps: list[EmbodiedNextStep] = Field(default_factory=list)
+    formatted: str = Field(description="Prompt-friendly blackboard summary.")
+
+
+class SharedStateWriteRequest(BaseModel):
+    """``shared_state.write`` — advisory update to the embodied blackboard."""
+
+    model_config = ConfigDict(extra="forbid")
+    operation: Literal[
+        "goal_set",
+        "resource_upsert",
+        "claim_set",
+        "danger_report",
+        "verified_action_record",
+        "build_site_set",
+        "next_step_add",
+    ]
+    goal: EmbodiedGroupGoal | None = None
+    resource: EmbodiedResourceEntry | None = None
+    claim: EmbodiedAgentClaim | None = None
+    danger: EmbodiedDangerReport | None = None
+    verified_action: EmbodiedVerifiedAction | None = None
+    build_site: EmbodiedBuildSite | None = None
+    next_step: EmbodiedNextStep | None = None
+
+
+class SharedStateWriteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool = Field(description="Whether the update was accepted.")
+    formatted: str = Field(description="Updated prompt-friendly blackboard summary.")
 
 
 class CostGateRequest(BaseModel):
@@ -666,6 +721,8 @@ SERVICE_REGISTRY: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "memory.recall": (MemoryRecallRequest, MemoryRecallResponse),
     "memory.write": (MemoryWriteRequest, MemoryWriteResponse),
     "management.review": (ManagementReviewRequest, ManagementReviewResponse),
+    "shared_state.read": (SharedStateReadRequest, SharedStateReadResponse),
+    "shared_state.write": (SharedStateWriteRequest, SharedStateWriteResponse),
     "cost.gate": (CostGateRequest, CostGateResponse),
     "kill.status": (KillStatusRequest, KillStatusResponse),
     "perception.report": (PerceptionReportRequest, PerceptionReportResponse),
@@ -784,6 +841,17 @@ _SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     MemoryWriteResponse,
     ManagementReviewRequest,
     ManagementReviewResponse,
+    EmbodiedResourceEntry,
+    EmbodiedAgentClaim,
+    EmbodiedDangerReport,
+    EmbodiedVerifiedAction,
+    EmbodiedBuildSite,
+    EmbodiedGroupGoal,
+    EmbodiedNextStep,
+    SharedStateReadRequest,
+    SharedStateReadResponse,
+    SharedStateWriteRequest,
+    SharedStateWriteResponse,
     CostGateRequest,
     CostGateResponse,
     KillStatusRequest,

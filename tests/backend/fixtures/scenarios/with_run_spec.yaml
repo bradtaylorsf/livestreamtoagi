@@ -1,4 +1,5 @@
 run_mode: persistent
+management_policy: enforce
 agents: [vera, rex]
 persona_overrides:
   - agent_id: vera

@@ -18,7 +18,7 @@ import yaml
 
 from core.event_bus import EventType
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
-from core.models import ContentReviewResult
+from core.models import ContentReviewResult, ManagementPolicy
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -49,7 +49,8 @@ class Management:
         event_bus: EventBus,
         *,
         rules_path: Path | None = None,
-        shadow_mode: bool = False,
+        policy: ManagementPolicy = ManagementPolicy.enforce,
+        shadow_mode: bool | None = None,
         db: Database | None = None,
         simulation_id: UUID | None = None,
         global_redis_client: RedisClient | None = None,
@@ -58,7 +59,13 @@ class Management:
         self._global_redis = global_redis_client or redis_client
         self._llm = llm_client
         self._event_bus = event_bus
-        self._shadow_mode = shadow_mode
+        self._policy = (
+            ManagementPolicy.shadow
+            if shadow_mode is True
+            else ManagementPolicy.enforce
+            if shadow_mode is False
+            else ManagementPolicy(policy)
+        )
         self._db = db
         self._simulation_id = simulation_id
 
@@ -80,6 +87,11 @@ class Management:
 
     # -- Public API -------------------------------------------------
 
+    @property
+    def policy(self) -> ManagementPolicy:
+        """Current run-mode Management policy."""
+        return self._policy
+
     async def review(
         self,
         agent_id: str,
@@ -90,10 +102,23 @@ class Management:
     ) -> ContentReviewResult:
         """Review agent output through the three-layer filter.
 
-        In shadow mode, all filters run but content is never blocked.
-        Would-be actions are logged to management_shadow_log instead.
+        In ``off`` mode, content is approved and an audit event is emitted
+        without invoking the LLM. In ``shadow`` mode, all filters run but
+        content is never blocked; would-be actions are logged.
         """
-        if not self._shadow_mode:
+        if self._policy == ManagementPolicy.off:
+            await self._log_off(
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                simulation_id=simulation_id,
+            )
+            return ContentReviewResult(
+                approved=True,
+                reason="management policy=off",
+                severity=1,
+            )
+
+        if self._policy == ManagementPolicy.enforce:
             return await self._review_normal(agent_id, content)
 
         return await self._review_shadow(
@@ -170,6 +195,28 @@ class Management:
             reason="shadow mode -- no intervention",
             severity=1,
         )
+
+    async def _log_off(
+        self,
+        *,
+        agent_id: str,
+        conversation_id: UUID | None,
+        simulation_id: UUID | None,
+    ) -> None:
+        """Emit an audit event that Management was bypassed by run policy."""
+        shadow_data = {
+            "agent_id": agent_id,
+            "filter_layer": 0,
+            "severity": 1,
+            "action_would_take": "off",
+            "reason": "management policy=off",
+            "flagged_keywords": None,
+            "conversation_id": str(conversation_id) if conversation_id is not None else None,
+            "simulation_id": str(simulation_id) if simulation_id is not None else None,
+            "policy": ManagementPolicy.off.value,
+        }
+        await self._event_bus.emit(EventType.MANAGEMENT_SHADOW.value, shadow_data)
+        logger.info("Management policy=off: approved agent %s without review", agent_id)
 
     async def intervene(
         self,

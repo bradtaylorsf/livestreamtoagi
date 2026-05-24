@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { callBridge } from '../bridge/python_bridge.js';
+import { callBridge, sharedState } from '../bridge/python_bridge.js';
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
 
 const DEFAULT_RECALL_LIMIT = 3;
@@ -13,6 +13,8 @@ const DEFAULT_CORE_MAX_CHARS = 1500;
 const DEFAULT_RECALL_MAX_CHARS = 1200;
 const DEFAULT_RECENT_EVENTS = 5;
 const DEFAULT_DEADLINE_MS = 1500;
+const DEFAULT_SHARED_STATE_DEADLINE_MS = 1000;
+const DEFAULT_SHARED_STATE_MAX_CHARS = 1600;
 const DEFAULT_RUN_ID = 'run-local';
 const DEFAULT_SIMULATION_ID = '00000000-0000-0000-0000-000000000000';
 const DEFAULT_EXCLUDED_AGENTS = Object.freeze(['management', 'alpha']);
@@ -28,6 +30,11 @@ function isFalseLike(value) {
 function enabledByEnv() {
     if (!hasEnv('MC_SIM_MEMORY_CONTEXT_ENABLED')) return true;
     return !isFalseLike(process.env.MC_SIM_MEMORY_CONTEXT_ENABLED);
+}
+
+function sharedStateEnabledByEnv() {
+    if (!hasEnv('MC_SIM_SHARED_STATE_ENABLED')) return false;
+    return !isFalseLike(process.env.MC_SIM_SHARED_STATE_ENABLED);
 }
 
 function intEnv(name, fallback) {
@@ -192,6 +199,41 @@ async function fetchTier({ id, tier, query, limit, traceId, deadlineMs }) {
     return response && response.payload ? response.payload : {};
 }
 
+async function fetchSharedStateSummary({ agent, id, traceId }) {
+    if (!sharedStateEnabledByEnv()) return '';
+    const deadlineMs = intEnv('MC_SIM_SHARED_STATE_DEADLINE_MS', DEFAULT_SHARED_STATE_DEADLINE_MS);
+    try {
+        const payload = await sharedState.read({ agentId: id, traceId, deadlineMs });
+        const formatted = typeof payload.formatted === 'string' ? payload.formatted : '';
+        emit(
+            agent,
+            'shared_state_context.fetched',
+            {
+                agent_id: id,
+                run_id: runId(),
+                simulation_id: simulationId(),
+                context_chars: formatted.length,
+            },
+            traceId,
+        );
+        return formatted;
+    } catch (err) {
+        emit(
+            agent,
+            'shared_state_context.error',
+            {
+                agent_id: id,
+                run_id: runId(),
+                simulation_id: simulationId(),
+                error_code: err && err.code ? String(err.code) : 'shared_state_context_error',
+                error: clip(err && err.message ? err.message : String(err), 180),
+            },
+            traceId,
+        );
+        return '';
+    }
+}
+
 export function memoryContextEligibility(agent) {
     const id = agentId(agent);
     if (!enabledByEnv()) return { eligible: false, agentId: id, reason: 'disabled' };
@@ -210,8 +252,10 @@ export function buildMemoryContextBlock({
     recentEvents,
     coreMemory,
     recallMemory,
+    sharedStateSummary = '',
     coreMaxChars,
     recallMaxChars,
+    sharedStateMaxChars = DEFAULT_SHARED_STATE_MAX_CHARS,
 }) {
     const lines = [
         '[Python memory context]',
@@ -226,6 +270,12 @@ export function buildMemoryContextBlock({
         for (const event of recentEvents) lines.push(`- ${clip(event, 260)}`);
     } else {
         lines.push('- none supplied');
+    }
+    if (sharedStateSummary) {
+        lines.push(
+            'Shared embodied blackboard:',
+            clip(sharedStateSummary, sharedStateMaxChars) || '(none supplied)',
+        );
     }
     lines.push(
         'Core memory excerpt:',
@@ -290,6 +340,11 @@ export async function fetchMemoryContext({
         });
         const coreMemory = typeof corePayload.core_memory === 'string' ? corePayload.core_memory : '';
         const recallMemory = formattedRecall(recallPayload);
+        const sharedStateSummary = await fetchSharedStateSummary({
+            agent,
+            id: eligibility.agentId,
+            traceId: trace,
+        });
         const block = buildMemoryContextBlock({
             id: eligibility.agentId,
             run: runId(),
@@ -299,8 +354,13 @@ export async function fetchMemoryContext({
             recentEvents,
             coreMemory,
             recallMemory,
+            sharedStateSummary,
             coreMaxChars,
             recallMaxChars,
+            sharedStateMaxChars: intEnv(
+                'MC_SIM_SHARED_STATE_MAX_CHARS',
+                DEFAULT_SHARED_STATE_MAX_CHARS,
+            ),
         });
         emit(
             agent,
