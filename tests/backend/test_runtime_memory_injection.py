@@ -242,6 +242,15 @@ export async function callBridge(opts = {}) {
             },
         };
     }
+    if (opts.service === 'shared_state' && opts.method === 'read') {
+        return {
+            ok: true,
+            trace_id: opts.traceId,
+            payload: {
+                formatted: '**Agent claims:**\\n  - rex: builder on camp (claimed by rex)',
+            },
+        };
+    }
     if (opts.service === 'memory' && opts.method === 'recall' && opts.payload?.tier === 'core') {
         return {
             ok: true,
@@ -264,6 +273,12 @@ export async function callBridge(opts = {}) {
     }
     throw new Error(`unexpected bridge call ${opts.service}.${opts.method}`);
 }
+export const sharedState = Object.freeze({
+    read: async (opts = {}) => {
+        const response = await callBridge({ ...opts, service: 'shared_state', method: 'read', payload: {} });
+        return response.payload || {};
+    },
+});
 export class BridgeClientError extends Error {}
 """,
         encoding="utf-8",
@@ -351,6 +366,37 @@ process.stdout.write(JSON.stringify({{
     assert len({call["traceId"] for call in result["calls"]}) == 1
     assert "memory_context.fetched" in [event["type"] for event in result["events"]]
     assert "torches under the oak" not in json.dumps(result["events"])
+
+
+@requires_node
+def test_memory_context_includes_shared_blackboard_when_enabled(tmp_path: Path) -> None:
+    root = _stage_node_runtime(tmp_path)
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.LTAG_RUN_ID = 'run-shared-context';
+process.env.LTAG_SIMULATION_ID = '33333333-3333-3333-3333-333333333333';
+process.env.MC_SIM_SHARED_STATE_ENABLED = '1';
+
+const memory = await import(pathToFileURL({json.dumps(str(root / "agent" / "skills" / "memory_context.js"))}).href);
+const bridge = await import(pathToFileURL({json.dumps(str(root / "agent" / "bridge" / "python_bridge.js"))}).href);
+const timeline = await import(pathToFileURL({json.dumps(str(root / "agent" / "bridge" / "timeline_emitter.js"))}).href);
+
+const context = await memory.fetchMemoryContext({{ agent: {{ name: 'vera' }}, query: 'camp coordination' }});
+
+process.stdout.write(JSON.stringify({{
+    context,
+    calls: bridge.calls.map((call) => call.service + '.' + call.method),
+    events: timeline.events.map((event) => event.type),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert "Shared embodied blackboard" in result["context"]
+    assert "rex: builder on camp" in result["context"]
+    assert result["calls"] == ["memory.recall", "memory.recall", "shared_state.read"]
+    assert "shared_state_context.fetched" in result["events"]
 
 
 @requires_node

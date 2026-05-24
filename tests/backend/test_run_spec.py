@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from core.minecraft.world_provisioner import WorldProvisionResult
-from core.models import PersonaOverride, RunMode, RunSpec, WorldConfig
+from core.models import ManagementPolicy, PersonaOverride, RunMode, RunSpec, WorldConfig
 from core.run_spec import load_run_spec
 from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
 
@@ -24,6 +24,7 @@ def test_run_spec_loader_validates_all_starting_condition_sections() -> None:
 
     assert isinstance(spec, RunSpec)
     assert spec.run_mode == RunMode.persistent
+    assert spec.management_policy == ManagementPolicy.enforce
     assert spec.agents == ["vera", "rex"]
     assert spec.persona_overrides[0].agent_id == "vera"
     assert "rain" in spec.persona_overrides[0].backstory
@@ -47,6 +48,7 @@ def test_run_spec_missing_sections_default_to_empty_or_none() -> None:
     assert spec.memory_seed is None
     assert spec.world is None
     assert spec.run_mode is None
+    assert spec.management_policy is None
 
 
 def test_world_config_requires_path_for_custom_world() -> None:
@@ -120,6 +122,7 @@ def test_simulation_config_to_dict_serializes_explicit_run_spec_fields() -> None
         "terrain_pack": "test",
     }
     assert snapshot["run_mode"] == "experimental"
+    assert snapshot["management_policy"] == "shadow"
 
 
 def test_seed_yaml_does_not_override_explicit_run_config_fields(tmp_path: Path) -> None:

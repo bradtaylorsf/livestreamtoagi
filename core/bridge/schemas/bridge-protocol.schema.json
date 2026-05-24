@@ -844,6 +844,294 @@
       "title": "DirectorGateResponse",
       "type": "object"
     },
+    "EmbodiedAgentClaim": {
+      "properties": {
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "claimed_at": {
+          "title": "Claimed At",
+          "type": "number"
+        },
+        "claimed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claimed By"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "target",
+        "role"
+      ],
+      "title": "EmbodiedAgentClaim",
+      "type": "object"
+    },
+    "EmbodiedBuildSite": {
+      "properties": {
+        "location": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Location"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "site_id": {
+          "minLength": 1,
+          "title": "Site Id",
+          "type": "string"
+        },
+        "status": {
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "site_id",
+        "location",
+        "name",
+        "status"
+      ],
+      "title": "EmbodiedBuildSite",
+      "type": "object"
+    },
+    "EmbodiedDangerReport": {
+      "properties": {
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "reported_at": {
+          "title": "Reported At",
+          "type": "number"
+        },
+        "reported_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reported By"
+        },
+        "severity": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Severity",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "agent_id",
+        "kind",
+        "severity"
+      ],
+      "title": "EmbodiedDangerReport",
+      "type": "object"
+    },
+    "EmbodiedGroupGoal": {
+      "properties": {
+        "set_at": {
+          "title": "Set At",
+          "type": "number"
+        },
+        "set_by": {
+          "minLength": 1,
+          "title": "Set By",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "set_by"
+      ],
+      "title": "EmbodiedGroupGoal",
+      "type": "object"
+    },
+    "EmbodiedNextStep": {
+      "properties": {
+        "added_at": {
+          "title": "Added At",
+          "type": "number"
+        },
+        "added_by": {
+          "minLength": 1,
+          "title": "Added By",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "added_by"
+      ],
+      "title": "EmbodiedNextStep",
+      "type": "object"
+    },
+    "EmbodiedResourceEntry": {
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Location"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity"
+        },
+        "reported_by": {
+          "minLength": 1,
+          "title": "Reported By",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location",
+        "reported_by"
+      ],
+      "title": "EmbodiedResourceEntry",
+      "type": "object"
+    },
+    "EmbodiedVerifiedAction": {
+      "properties": {
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "observed_at": {
+          "title": "Observed At",
+          "type": "number"
+        },
+        "result": {
+          "minLength": 1,
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "action",
+        "result"
+      ],
+      "title": "EmbodiedVerifiedAction",
+      "type": "object"
+    },
     "EntityObservation": {
       "additionalProperties": false,
       "description": "Observed entity near the bot.",
@@ -1615,6 +1903,207 @@
       "title": "PoseObservation",
       "type": "object"
     },
+    "SharedStateReadRequest": {
+      "additionalProperties": false,
+      "description": "``shared_state.read`` \u2014 read the embodied collaboration blackboard.",
+      "properties": {},
+      "title": "SharedStateReadRequest",
+      "type": "object"
+    },
+    "SharedStateReadResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "build_site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedBuildSite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedAgentClaim"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "dangers": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedDangerReport"
+          },
+          "title": "Dangers",
+          "type": "array"
+        },
+        "formatted": {
+          "description": "Prompt-friendly blackboard summary.",
+          "title": "Formatted",
+          "type": "string"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedGroupGoal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_steps": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedNextStep"
+          },
+          "title": "Next Steps",
+          "type": "array"
+        },
+        "recent_actions": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedVerifiedAction"
+          },
+          "title": "Recent Actions",
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedResourceEntry"
+          },
+          "title": "Resources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "formatted"
+      ],
+      "title": "SharedStateReadResponse",
+      "type": "object"
+    },
+    "SharedStateWriteRequest": {
+      "additionalProperties": false,
+      "description": "``shared_state.write`` \u2014 advisory update to the embodied blackboard.",
+      "properties": {
+        "build_site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedBuildSite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "claim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedAgentClaim"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "danger": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedDangerReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedGroupGoal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_step": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedNextStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation": {
+          "enum": [
+            "goal_set",
+            "resource_upsert",
+            "claim_set",
+            "danger_report",
+            "verified_action_record",
+            "build_site_set",
+            "next_step_add"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedResourceEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verified_action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedVerifiedAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "SharedStateWriteRequest",
+      "type": "object"
+    },
+    "SharedStateWriteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "description": "Whether the update was accepted.",
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "formatted": {
+          "description": "Updated prompt-friendly blackboard summary.",
+          "title": "Formatted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "formatted"
+      ],
+      "title": "SharedStateWriteResponse",
+      "type": "object"
+    },
     "Vec3": {
       "additionalProperties": false,
       "description": "3D coordinate in world space or a block cell.",
@@ -1651,7 +2140,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.8",
+  "protocolVersion": "1.9",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -1700,6 +2189,14 @@
     "perception.report": {
       "request": "#/$defs/PerceptionReportRequest",
       "response": "#/$defs/PerceptionReportResponse"
+    },
+    "shared_state.read": {
+      "request": "#/$defs/SharedStateReadRequest",
+      "response": "#/$defs/SharedStateReadResponse"
+    },
+    "shared_state.write": {
+      "request": "#/$defs/SharedStateWriteRequest",
+      "response": "#/$defs/SharedStateWriteResponse"
     }
   },
   "title": "Livestream-to-AGI bridge protocol"

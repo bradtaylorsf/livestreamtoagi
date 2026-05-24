@@ -36,7 +36,8 @@
 #   MINECRAFT_BRIDGE_TOKEN=<same secret the backend reads>
 #
 # Optional in .env:
-#   MC_SIM_DISABLE_MANAGEMENT=1
+#   MC_SIM_MANAGEMENT_POLICY=off      # off, shadow, enforce
+#   MC_SIM_DISABLE_MANAGEMENT=1       # deprecated alias for policy=off
 #   MC_SIM_INCLUDE_BRIDGE_BOT=0
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
 #   MC_SIM_BUILD_MODE=single          # set to plan for !planAndBuild mode
@@ -70,6 +71,7 @@
 #   MC_SIM_MEMORY_CORE_MAX_CHARS=1500
 #   MC_SIM_MEMORY_RECALL_MAX_CHARS=1200
 #   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS=management,alpha
+#   MC_SIM_SHARED_STATE_ENABLED=1
 #   MC_SIM_EASY_MODE=1
 #   MC_SIM_MC_PORT=25566
 #   MC_SIM_MINDSERVER_BASE_PORT=<base port for per-bot MindServer processes>
@@ -135,9 +137,12 @@ load_env_file() {
                 ;;
         esac
 
-        # The management toggle must be bidirectional for hermetic sim tests:
+        # The management policy must be bidirectional for hermetic sim tests:
         # a stale parent-shell value should not override an explicit .env value.
-        if [ "$key" = "MC_SIM_DISABLE_MANAGEMENT" ] || [ -z "${!key+x}" ]; then
+        if [ "$key" = "MC_SIM_DISABLE_MANAGEMENT" ] \
+           || [ "$key" = "MC_SIM_MANAGEMENT_POLICY" ] \
+           || [ "$key" = "MINECRAFT_MANAGEMENT_REVIEW_MODE" ] \
+           || [ -z "${!key+x}" ]; then
             case "$value" in
                 \"*\")
                     value="${value#\"}"
@@ -286,13 +291,30 @@ export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUI
 export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
 MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS="${MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS:-10000}"
 export MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
-MC_SIM_DISABLE_MANAGEMENT="${MC_SIM_DISABLE_MANAGEMENT:-1}"
-if [ "$MC_SIM_DISABLE_MANAGEMENT" = "1" ]; then
-    MINECRAFT_MANAGEMENT_REVIEW_MODE="disabled"
-else
-    MINECRAFT_MANAGEMENT_REVIEW_MODE="enabled"
+if [ -z "${MC_SIM_MANAGEMENT_POLICY:-}" ]; then
+    if [ "${MC_SIM_DISABLE_MANAGEMENT:-1}" = "0" ]; then
+        MC_SIM_MANAGEMENT_POLICY="enforce"
+    else
+        MC_SIM_MANAGEMENT_POLICY="off"
+    fi
 fi
-export MINECRAFT_MANAGEMENT_REVIEW_MODE
+case "$(printf '%s' "$MC_SIM_MANAGEMENT_POLICY" | tr '[:upper:]' '[:lower:]')" in
+    off|disabled|0)
+        MC_SIM_MANAGEMENT_POLICY="off"
+        ;;
+    shadow)
+        MC_SIM_MANAGEMENT_POLICY="shadow"
+        ;;
+    enforce|enabled|on|1)
+        MC_SIM_MANAGEMENT_POLICY="enforce"
+        ;;
+    *)
+        fail "MC_SIM_MANAGEMENT_POLICY must be off, shadow, or enforce."
+        exit 2
+        ;;
+esac
+MINECRAFT_MANAGEMENT_REVIEW_MODE="$MC_SIM_MANAGEMENT_POLICY"
+export MC_SIM_MANAGEMENT_POLICY MINECRAFT_MANAGEMENT_REVIEW_MODE
 MC_SIM_INCLUDE_BRIDGE_BOT="${MC_SIM_INCLUDE_BRIDGE_BOT:-0}"
 if [ -z "${SOAK_BOTS+x}" ]; then
     if [ "$MC_SIM_INCLUDE_BRIDGE_BOT" = "1" ]; then
@@ -357,8 +379,10 @@ MC_SIM_MEMORY_CONTEXT_ENABLED="${MC_SIM_MEMORY_CONTEXT_ENABLED:-1}"
 MC_SIM_MEMORY_RECALL_LIMIT="${MC_SIM_MEMORY_RECALL_LIMIT:-3}"
 MC_SIM_MEMORY_CORE_MAX_CHARS="${MC_SIM_MEMORY_CORE_MAX_CHARS:-1500}"
 MC_SIM_MEMORY_RECALL_MAX_CHARS="${MC_SIM_MEMORY_RECALL_MAX_CHARS:-1200}"
+MC_SIM_SHARED_STATE_ENABLED="${MC_SIM_SHARED_STATE_ENABLED:-1}"
 export MC_SIM_MEMORY_CONTEXT_ENABLED MC_SIM_MEMORY_RECALL_LIMIT
 export MC_SIM_MEMORY_CORE_MAX_CHARS MC_SIM_MEMORY_RECALL_MAX_CHARS
+export MC_SIM_SHARED_STATE_ENABLED
 if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-}" ]; then
     export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
 fi
@@ -508,6 +532,7 @@ info "suppress action chat: ${MINECRAFT_SUPPRESS_ACTION_CHAT}"
 info "safe terrain actions: ${SOAK_SAFE_TERRAIN_ACTIONS}"
 info "heartbeat: enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_SIM_HEARTBEAT_IDLE_SEC}s cooldown=${MC_SIM_HEARTBEAT_COOLDOWN_SEC}s stale_action=${MC_SIM_HEARTBEAT_STALE_ACTION_SEC}s max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
 info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
+info "shared state: enabled=${MC_SIM_SHARED_STATE_ENABLED}"
 info "easy mode: ${MC_SIM_EASY_MODE}"
 info "keep MC server running: ${SOAK_KEEP_MINECRAFT_RUNNING:-0}"
 info "minecraft: ${MC_HOST:-127.0.0.1}:${MC_PORT:-25565}"

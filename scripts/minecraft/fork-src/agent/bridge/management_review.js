@@ -15,6 +15,14 @@ function managementReviewDisabled() {
     return raw === 'disabled' || raw === 'off' || raw === '0';
 }
 
+function managementReviewMode() {
+    const raw = (process.env[MANAGEMENT_REVIEW_MODE_ENV] || '').trim().toLowerCase();
+    if (raw === 'shadow' || raw === 'enforce') return raw;
+    if (raw === 'enabled' || raw === 'on' || raw === '1') return 'enforce';
+    if (raw === 'disabled' || raw === 'off' || raw === '0') return 'off';
+    return 'enforce';
+}
+
 function managementReviewDeadlineMs() {
     const raw = process.env[MANAGEMENT_REVIEW_DEADLINE_MS_ENV];
     if (raw === undefined || raw === null || raw === '') {
@@ -45,7 +53,7 @@ export async function reviewChat({ agentId, text, context = {} } = {}) {
         return {
             allow: true,
             sanitized: null,
-            reason: 'management review disabled for local simulation',
+            reason: 'management policy=off',
             retryable: false,
         };
     }
@@ -57,7 +65,7 @@ export async function reviewChat({ agentId, text, context = {} } = {}) {
             payload: {
                 agent_id: agentId,
                 text,
-                context,
+                context: { ...context, management_policy: managementReviewMode() },
             },
             deadlineMs: MANAGEMENT_REVIEW_DEADLINE_MS,
             agentId,

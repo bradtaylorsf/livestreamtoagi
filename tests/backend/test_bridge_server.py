@@ -54,10 +54,13 @@ from core.bridge.server import (
     ERRAND_COMPLETE_VERBS,
     ERRAND_POLL_VERBS,
     ERRAND_VERBS,
-    MANAGEMENT_REVIEW_VERBS,
     KILL_STATUS_VERBS,
+    MANAGEMENT_REVIEW_VERBS,
     MEMORY_HANDLER_VERBS,
     MEMORY_WRITE_VERBS,
+    SHARED_STATE_READ_VERBS,
+    SHARED_STATE_VERBS,
+    SHARED_STATE_WRITE_VERBS,
     STUB_HANDLERS,
     UNKNOWN_REQUEST_ID,
     WORLD_ACTION_ERROR_VERBS,
@@ -634,6 +637,9 @@ def test_handlers_match_closed_registry_exactly() -> None:
     assert {"memory.recall"} == MEMORY_HANDLER_VERBS
     assert {"memory.write"} == MEMORY_WRITE_VERBS
     assert {"management.review"} == MANAGEMENT_REVIEW_VERBS
+    assert {"shared_state.read"} == SHARED_STATE_READ_VERBS
+    assert {"shared_state.write"} == SHARED_STATE_WRITE_VERBS
+    assert {"shared_state.read", "shared_state.write"} == SHARED_STATE_VERBS
     assert {"code.execute"} == CODE_EXECUTE_VERBS
     assert {"director.gate"} == DIRECTOR_GATE_VERBS
     assert {"kill.status"} == KILL_STATUS_VERBS
@@ -643,6 +649,8 @@ def test_handlers_match_closed_registry_exactly() -> None:
     assert "memory.recall" not in STUB_HANDLERS
     assert "memory.write" not in STUB_HANDLERS
     assert "management.review" not in STUB_HANDLERS
+    assert "shared_state.read" not in STUB_HANDLERS
+    assert "shared_state.write" not in STUB_HANDLERS
     assert "code.execute" not in STUB_HANDLERS
     assert "director.gate" not in STUB_HANDLERS
     assert "kill.status" not in STUB_HANDLERS
@@ -653,6 +661,7 @@ def test_handlers_match_closed_registry_exactly() -> None:
         | set(MEMORY_HANDLER_VERBS)
         | set(MEMORY_WRITE_VERBS)
         | set(MANAGEMENT_REVIEW_VERBS)
+        | set(SHARED_STATE_VERBS)
         | set(CODE_EXECUTE_VERBS)
         | set(DIRECTOR_GATE_VERBS)
         | set(KILL_STATUS_VERBS)

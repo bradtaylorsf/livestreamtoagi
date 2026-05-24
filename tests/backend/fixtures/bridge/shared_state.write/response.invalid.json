@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "payload": {
+    "accepted": "maybe",
+    "formatted": "**Active group goal**"
+  },
+  "request_id": "req-shared-state-write-0001",
+  "retryable": false
+}

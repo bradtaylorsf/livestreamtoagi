@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import time
 import uuid  # noqa: TC003
 from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
@@ -862,6 +863,41 @@ class RunMode(enum.StrEnum):
     experimental = "experimental"
 
 
+class ManagementPolicy(enum.StrEnum):
+    """Run-mode Management policy."""
+
+    off = "off"
+    shadow = "shadow"
+    enforce = "enforce"
+
+
+def default_management_policy_for_run_mode(
+    run_mode: RunMode | str | None,
+) -> ManagementPolicy | None:
+    """Return the safety default for a run mode when no policy is explicit."""
+    if run_mode is None:
+        return None
+    mode = run_mode if isinstance(run_mode, RunMode) else RunMode(run_mode)
+    if mode == RunMode.persistent:
+        return ManagementPolicy.enforce
+    if mode == RunMode.experimental:
+        return ManagementPolicy.shadow
+    return None
+
+
+def resolve_management_policy(
+    policy: ManagementPolicy | str | None,
+    run_mode: RunMode | str | None,
+    *,
+    default: ManagementPolicy | None = None,
+) -> ManagementPolicy | None:
+    """Resolve explicit policy, run-mode default, then optional caller default."""
+    if policy is not None:
+        return policy if isinstance(policy, ManagementPolicy) else ManagementPolicy(policy)
+    run_default = default_management_policy_for_run_mode(run_mode)
+    return run_default if run_default is not None else default
+
+
 class ExperimentalGoalConfig(BaseModel):
     """Goal-based stop condition for bounded experimental runs."""
 
@@ -892,6 +928,59 @@ class MemorySeedConfig(BaseModel):
         return self
 
 
+class EmbodiedResourceEntry(BaseModel):
+    id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    location: dict[str, Any] | str
+    quantity: int | float | None = None
+    reported_by: str = Field(min_length=1)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedAgentClaim(BaseModel):
+    agent_id: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    claimed_by: str | None = None
+    claimed_at: float = Field(default_factory=time.time)
+    expires_at: float | None = None
+
+
+class EmbodiedDangerReport(BaseModel):
+    agent_id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    location: dict[str, Any] | str | None = None
+    severity: int = Field(ge=1, le=5)
+    reported_by: str | None = None
+    reported_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedVerifiedAction(BaseModel):
+    agent_id: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    result: str = Field(min_length=1)
+    observed_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedBuildSite(BaseModel):
+    site_id: str = Field(min_length=1)
+    location: dict[str, Any] | str
+    name: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+
+
+class EmbodiedGroupGoal(BaseModel):
+    text: str = Field(min_length=1)
+    set_by: str = Field(min_length=1)
+    set_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedNextStep(BaseModel):
+    text: str = Field(min_length=1)
+    added_by: str = Field(min_length=1)
+    added_at: float = Field(default_factory=time.time)
+
+
 class RunSpec(BaseModel):
     """Typed starting-condition schema shared by simulations and Minecraft."""
 
@@ -904,6 +993,7 @@ class RunSpec(BaseModel):
     memory_seed: MemorySeedConfig | None = None
     world: WorldConfig | None = None
     run_mode: RunMode | None = None
+    management_policy: ManagementPolicy | None = None
     experimental_goal: ExperimentalGoalConfig | None = None
 
 

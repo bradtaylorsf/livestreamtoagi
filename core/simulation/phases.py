@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from core.models import ManagementPolicy
+
 if TYPE_CHECKING:
     import uuid
 
@@ -680,7 +682,10 @@ class PhaseRunner:
                 ),
                 options=ConversationOptions(
                     speed_multiplier=0,  # No delays in simulation
-                    management_enabled=False,  # Skip LLM review during sims; eval covers this
+                    management_enabled=(
+                        getattr(self._management, "policy", ManagementPolicy.enforce)
+                        != ManagementPolicy.off
+                    ),
                     simulation_id=self._simulation_id,
                     recent_conversation_summaries=list(self._conversation_summaries),
                     recent_outputs=list(self._recent_outputs),

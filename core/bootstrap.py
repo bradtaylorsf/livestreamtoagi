@@ -45,6 +45,7 @@ from core.memory.core_memory import CoreMemoryManager
 from core.memory.dreams import DreamManager
 from core.memory.recall_memory import RecallMemoryManager
 from core.memory.token_counter import TokenCounter
+from core.models import ManagementPolicy
 from core.notifications.spend_kill_alerts import SpendAlertNotifier
 from core.redis_client import RedisClient
 from core.redis_keys import ScopedRedis
@@ -391,6 +392,7 @@ async def bootstrap_services(
         global_redis_client=redis_client,
         llm_client=llm_client,
         event_bus=_module_event_bus,
+        policy=ManagementPolicy.enforce,
     )
     _module_event_bus.on(EventType.BUDGET_UPDATE, spend_alert_notifier.on_budget_update)
 

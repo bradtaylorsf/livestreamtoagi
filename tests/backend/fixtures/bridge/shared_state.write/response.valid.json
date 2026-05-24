@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "payload": {
+    "accepted": true,
+    "formatted": "**Active group goal** (set by vera): Build a safe camp"
+  },
+  "request_id": "req-shared-state-write-0001",
+  "retryable": false
+}

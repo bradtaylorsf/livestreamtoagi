@@ -46,11 +46,11 @@ both the Node and Python logs by one id.
 
 ## Versioning (fail-closed)
 
-`PROTOCOL_VERSION = "1.8"` (E4-7 added the optional `trace_id`, E5-1 added
+`PROTOCOL_VERSION = "1.9"` (E4-7 added the optional `trace_id`, E5-1 added
 optional core-memory fields, E6-5 added `code.execute`, E6-6 added typed
 perception snapshot definitions, E7-2 added `errand.poll`, and E7-3 added
 `errand.complete`, E8.5-4 added `director.gate`, and E11-5 added
-`kill.status`; all are additive minor bumps). Same-major versions are
+`kill.status`, and E12-12 added `shared_state.*`; all are additive minor bumps). Same-major versions are
 wire-compatible in either direction (new fields/verbs are additive). An unknown
 *major* — or any
 unparseable version — is **not
@@ -73,6 +73,8 @@ arbitrary Python" verb. The frozen six initial verbs from issue #541 remain in
 | `memory.recall` | Node→Python | `{query, scope, limit}` → `{results[]}` |
 | `memory.write` | Node→Python | `{content, kind, metadata}` → `{memory_id}` (idempotent on `request_id`) |
 | `management.review` | Node→Python | `{agent_id, text, context}` → `{verdict, reason, sanitized_text}` |
+| `shared_state.read` | Node→Python | `{}` → current embodied blackboard plus `formatted` prompt summary |
+| `shared_state.write` | Node→Python | `{operation, ...typed entity}` → `{accepted, formatted}` |
 | `cost.gate` | Node→Python | `{agent_id, action, estimated_cost_usd}` → `{allowed, reason, remaining_budget_usd}` |
 | `kill.status` | Node→Python | `{}` → `{active, ttl_seconds?, reason?}` |
 | `perception.report` | Node→Python | `{observations[]}` → `{accepted}`; observations may include a typed `PerceptionSnapshot` |

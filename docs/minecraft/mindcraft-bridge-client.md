@@ -69,7 +69,7 @@ pinned tree stays clean and re-runnable.
 
 Fixed by ADR [`0010-bridge-protocol.md`](../decisions/0010-bridge-protocol.md)
 and the versioned contract (`core/bridge/contract.py`, E4-2). The client builds
-a contract-valid `BridgeRequest`: `version:"1.8"`, a unique `request_id`,
+a contract-valid `BridgeRequest`: `version:"1.9"`, a unique `request_id`,
 `agent_id`, `run_id`/`simulation_id`, `service`, `method`, `payload`,
 `deadline_ms`, `cost_context:{agent_tier:"conversation",
 budget_bucket:"bridge", estimated_cost_usd:0.0}`, and an additive `trace_id`
@@ -169,8 +169,9 @@ Debugging a cross-language 24/7 system needs **correlation**: one request must
 be followable through both the Node logs and the Python logs by a single id.
 E4-7 ([#546](https://github.com/bradtaylorsf/livestreamtoagi/issues/546)) adds
 that with the additive `trace_id` introduced in protocol 1.1 and lightweight
-instrumentation. The current client speaks protocol 1.8, which also includes
-the additive E6/E7 world verbs, E8.5 director gate, and E11-5 kill status. No new npm dependency (the
+instrumentation. The current client speaks protocol 1.9, which also includes
+the additive E6/E7 world verbs, E8.5 director gate, E11-5 kill status, and
+E12-12 shared-state blackboard verbs. No new npm dependency (the
 lockfile is frozen): the logger is a stderr write and the metrics are a plain
 module object.
 

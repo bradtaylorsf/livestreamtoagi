@@ -27,12 +27,14 @@ from core.memory.reflection_scheduler import ReflectionScheduler
 from core.models import (
     ExperimentalGoalConfig,
     FactionConfig,
+    ManagementPolicy,
     MemorySeedConfig,
     PersonaOverride,
     RunMode,
     SimulationCreate,
     SimulationStatus,
     WorldConfig,
+    resolve_management_policy,
 )
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
@@ -138,7 +140,8 @@ class SimulationConfig:
         duration: timedelta | None = None,
         dry_run: bool = False,
         verbose: bool = False,
-        management_shadow: bool = True,
+        management_shadow: bool | None = None,
+        management_policy: str | ManagementPolicy | None = None,
         debug_prompts: bool = False,
         existing_sim_id: str | None = None,
         hypothesis: str | None = None,
@@ -182,7 +185,7 @@ class SimulationConfig:
         self.duration = duration
         self.dry_run = dry_run
         self.verbose = verbose
-        self.management_shadow = management_shadow
+        self._management_policy_override = management_policy is not None
         self.debug_prompts = debug_prompts
         self.world_sim: bool = False
         self.phases: list[Phase] = []
@@ -217,6 +220,13 @@ class SimulationConfig:
             else None
         )
         self._run_mode_explicit = run_mode is not None
+        if management_policy is None and management_shadow is not None:
+            management_policy = (
+                ManagementPolicy.shadow if management_shadow else ManagementPolicy.enforce
+            )
+            self._management_policy_override = True
+        self.management_policy = resolve_management_policy(management_policy, self.run_mode)
+        self.management_shadow = self.management_policy == ManagementPolicy.shadow
         self.experimental_goal = (
             experimental_goal
             if isinstance(experimental_goal, ExperimentalGoalConfig)
@@ -330,6 +340,14 @@ class SimulationConfig:
             self.run_mode = RunMode(raw_run_mode)
             self._run_mode_explicit = True
 
+        raw_management_policy = data.get("management_policy")
+        if raw_management_policy is not None and not self._management_policy_override:
+            self.management_policy = ManagementPolicy(raw_management_policy)
+            self._management_policy_override = True
+        elif not self._management_policy_override:
+            self.management_policy = resolve_management_policy(None, self.run_mode)
+        self.management_shadow = self.management_policy == ManagementPolicy.shadow
+
         raw_experimental_goal = data.get("experimental_goal")
         if raw_experimental_goal is not None and not self._experimental_goal_override:
             if not isinstance(raw_experimental_goal, dict):
@@ -395,6 +413,13 @@ class SimulationConfig:
             "management_shadow": self.management_shadow,
             "world_sim": self.world_sim,
         }
+        if self.management_policy is not None and (
+            self._management_policy_override
+            or self._run_mode_explicit
+            or self.run_mode == RunMode.persistent
+            or self.experimental_goal is not None
+        ):
+            d["management_policy"] = self.management_policy.value
         if self.duration is not None:
             d["duration_seconds"] = self.duration.total_seconds()
         if self.max_cost_rolling is not None:
