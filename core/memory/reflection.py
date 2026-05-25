@@ -644,6 +644,10 @@ class ReflectionManager:
     ) -> int:
         """Generate autonomous goals during reflection.
 
+        Reflection promotions are surfaced to embodied turns through Tier 1 core
+        memory reads. Generated goals remain in AgentGoalManager so existing
+        agenda injection, not a duplicate memory protocol, owns active goals.
+
         Returns the number of goals successfully created.
         """
         if self._goal_manager is None:
