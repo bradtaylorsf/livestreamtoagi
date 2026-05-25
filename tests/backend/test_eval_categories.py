@@ -163,6 +163,8 @@ def test_eval_suites_defined():
     assert "economy" in EVAL_SUITES
     assert "creative" in EVAL_SUITES
     assert "build" in EVAL_SUITES
+    assert "persistent" in EVAL_SUITES
+    assert "experimental" in EVAL_SUITES
     assert "full" in EVAL_SUITES
 
 
@@ -186,8 +188,34 @@ def test_eval_suites_contents():
         "build_verification",
     }
     assert EVAL_SUITES["build"] == ["build_verification", "world_evolution", "productivity"]
+    assert EVAL_SUITES["persistent"] == [
+        "entertainment",
+        "safety",
+        "dialogue_quality",
+        "social_dynamics",
+        "agency",
+        "internal_state",
+        "errors",
+    ]
+    assert EVAL_SUITES["experimental"] == [
+        "build_verification",
+        "creativity",
+        "world_evolution",
+        "productivity",
+        "simulation_narrative",
+        "agency",
+    ]
     # full is empty (means all available at runtime)
     assert EVAL_SUITES["full"] == []
+
+
+def test_eval_suite_categories_are_discoverable():
+    """Every concrete suite member should have a prompt category."""
+    discovered = set(discover_categories())
+    for suite, categories in EVAL_SUITES.items():
+        if suite == "full":
+            continue
+        assert set(categories).issubset(discovered), suite
 
 
 # ── organize_by_category ────────────────────────────────────

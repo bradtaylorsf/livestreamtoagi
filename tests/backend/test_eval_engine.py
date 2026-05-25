@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.eval.engine import EvalEngine, _parse_eval_response
+from core.eval.engine import EVAL_SUITES, EvalEngine, _parse_eval_response
 from core.eval.loader import _build_transcript_text, load_simulation_data, organize_by_category
 from core.eval.prompt_loader import (
     discover_categories,
@@ -432,6 +432,89 @@ async def test_eval_engine_run_success():
     # Check the score was parsed correctly
     call_kwargs = eval_repo.save_eval_result.call_args
     assert call_kwargs.kwargs["score"] == Decimal("82")
+
+
+@pytest.mark.parametrize("suite", ["persistent", "experimental"])
+async def test_eval_engine_resolves_run_mode_suites(suite: str):
+    """Run-mode suite names should dispatch to their mapped category lists."""
+    db = MagicMock()
+    llm = MagicMock()
+    eval_repo = MagicMock()
+
+    run_id = uuid.uuid4()
+    sim_id = uuid.uuid4()
+    now = datetime(2026, 5, 25)
+
+    db.fetchrow = AsyncMock(
+        return_value={
+            "id": sim_id,
+            "name": "run mode suite sample",
+            "description": None,
+            "config": "{}",
+            "status": "completed",
+            "started_at": now,
+            "ended_at": None,
+            "wall_time_seconds": None,
+            "simulated_duration": None,
+            "total_conversations": 0,
+            "total_turns": 0,
+            "total_tokens": 0,
+            "total_cost": 0,
+            "total_management_flags": 0,
+            "agents_participated": [],
+            "error_log": None,
+            "model_versions": "{}",
+            "created_at": now,
+        }
+    )
+    eval_repo.create_eval_run = AsyncMock(
+        return_value=EvalRun(
+            id=run_id,
+            simulation_id=sim_id,
+            eval_suite=suite,
+            status="running",
+            started_at=now,
+        )
+    )
+    eval_repo.update_eval_run = AsyncMock(return_value=None)
+    eval_repo.save_eval_result = AsyncMock(return_value=None)
+
+    mock_data = {
+        "simulation": {"id": str(sim_id)},
+        "conversations": [],
+        "transcript_text": "",
+        "artifacts": [],
+        "management_logs": [],
+        "agent_turns": {},
+        "total_conversations": 0,
+        "total_artifacts": 0,
+        "total_management_flags": 0,
+    }
+    run_category = AsyncMock(
+        return_value={
+            "score": Decimal("1"),
+            "cost": Decimal("0"),
+            "tokens_used": 0,
+        }
+    )
+
+    engine = EvalEngine(db=db, llm_client=llm, eval_repo=eval_repo)
+    with (
+        patch(
+            "core.eval.engine.load_simulation_data",
+            new_callable=AsyncMock,
+            return_value=mock_data,
+        ),
+        patch(
+            "core.eval.engine.discover_categories",
+            return_value=[*EVAL_SUITES[suite], "economic_behavior"],
+        ),
+        patch.object(engine, "_run_category", run_category),
+    ):
+        result_id = await engine.run(sim_id, suite=suite)
+
+    assert result_id == run_id
+    assert [call.args[1] for call in run_category.call_args_list] == EVAL_SUITES[suite]
 
 
 async def test_eval_engine_scores_build_verification_sample_run():

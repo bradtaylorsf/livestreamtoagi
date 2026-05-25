@@ -1,4 +1,9 @@
-"""Eval engine — runs LLM-based evaluations against simulation data."""
+"""Eval engine — runs LLM-based evaluations against simulation data.
+
+Named suites include general-purpose suites plus run-mode suites:
+``persistent`` for 24/7 live-show runs and ``experimental`` for bounded
+comparison runs.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +29,23 @@ EVAL_SUITES: dict[str, list[str]] = {
     "creative": ["creativity", "world_evolution", "entertainment", "build_verification"],
     "build": ["build_verification", "world_evolution", "productivity"],
     "narrative": ["simulation_narrative", "entertainment", "dialogue_quality"],
+    "persistent": [
+        "entertainment",
+        "safety",
+        "dialogue_quality",
+        "social_dynamics",
+        "agency",
+        "internal_state",
+        "errors",
+    ],
+    "experimental": [
+        "build_verification",
+        "creativity",
+        "world_evolution",
+        "productivity",
+        "simulation_narrative",
+        "agency",
+    ],
     "full": [],  # Empty means "all available" — resolved at runtime
 }
 

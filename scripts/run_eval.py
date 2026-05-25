@@ -11,6 +11,12 @@ Usage:
     # Run quick eval (subset of data, faster/cheaper)
     python scripts/run_eval.py --simulation-id <uuid> --suite quick
 
+    # Run the 24/7 persistent-mode suite
+    python scripts/run_eval.py --simulation-id <uuid> --suite persistent
+
+    # Run the bounded experimental-mode suite
+    python scripts/run_eval.py --simulation-id <uuid> --suite experimental
+
     # List available eval categories
     python scripts/run_eval.py --list-categories
 
@@ -40,6 +46,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
+
+from core.eval.engine import EVAL_SUITES  # noqa: E402
 
 
 def _score_color(score: float) -> str:
@@ -224,7 +232,7 @@ def main() -> None:
     parser.add_argument(
         "--suite",
         type=str,
-        choices=["full", "quick", "autonomy", "economy", "creative", "narrative"],
+        choices=list(EVAL_SUITES),
         default="full",
         help="Eval suite to run (default: full)",
     )
