@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,7 +15,6 @@ from core.memory.dreams import (
     DreamManager,
     DreamResult,
 )
-
 
 # ── DreamResult Model Tests ──────────────────────────────────────
 
@@ -179,6 +178,38 @@ class TestDreamManager:
         llm.complete.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_dream_recombines_embodied_and_conversational_recall(self) -> None:
+        llm = self._make_llm(self._default_dream_response())
+        repo = AsyncMock()
+        repo.get_recent_journal_entries.return_value = [
+            MagicMock(content="Journal: Vera promised Rex a better storage plan."),
+        ]
+        repo.get_recent_recall_memories.return_value = [
+            MagicMock(
+                event_type="bridge_action_result",
+                summary="Vera placed torches around the shared storage chest.",
+            ),
+            MagicMock(
+                event_type="bridge_perception",
+                summary="Vera noticed Aurora sketching beside the workshop.",
+            ),
+            MagicMock(
+                event_type="conversation",
+                summary="Rex asked whether the storage chest needs labels.",
+            ),
+        ]
+        mgr = DreamManager(llm_client=llm, memory_repo=repo)
+
+        result = await mgr.run_dream("vera")
+
+        assert result is not None
+        prompt = llm.complete.call_args.kwargs["messages"][0]["content"]
+        assert "Journal: Vera promised Rex a better storage plan." in prompt
+        assert "[bridge_action_result] Vera placed torches" in prompt
+        assert "[bridge_perception] Vera noticed Aurora" in prompt
+        assert "[conversation] Rex asked whether the storage chest needs labels" in prompt
+
+    @pytest.mark.asyncio
     async def test_dream_with_state_context(self) -> None:
         from core.agent_state import AgentState, AgentStateManager
 
@@ -334,6 +365,28 @@ class TestReflectionSchedulerDreamIntegration:
         dream_mgr.run_dream.assert_called_once_with("vera")
 
     @pytest.mark.asyncio
+    async def test_dream_triggers_in_embodied_idle_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from core.memory.reflection_scheduler import ReflectionScheduler
+
+        monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+        clock = self._make_clock(0)
+        reflection_mgr = MagicMock()
+        dream_mgr = AsyncMock()
+
+        scheduler = ReflectionScheduler(
+            clock=clock,
+            reflection_manager=reflection_mgr,
+            dream_manager=dream_mgr,
+            dream_interval_hours=14,
+        )
+        scheduler._ensure_tracking("vera")
+
+        clock.now.return_value = datetime(2024, 1, 1, 15, 0, 0)
+        await scheduler._check_and_run_dream("vera", clock.now())
+
+        dream_mgr.run_dream.assert_called_once_with("vera")
+
+    @pytest.mark.asyncio
     async def test_no_dream_without_manager(self) -> None:
         from core.memory.reflection_scheduler import ReflectionScheduler
 
@@ -361,7 +414,9 @@ class TestContextAssemblyDreamIntegration:
     def test_assemble_context_accepts_dream_param(self) -> None:
         """Verify the assemble_context method accepts recent_dream parameter."""
         import inspect
+
         from core.context_assembly import ContextAssembler
+
         sig = inspect.signature(ContextAssembler.assemble_context)
         assert "recent_dream" in sig.parameters
 
