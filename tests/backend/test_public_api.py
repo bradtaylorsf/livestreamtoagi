@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from core.models import AgentConfig, AgentStatus
-
 
 # ── Fixtures ───────────────────────────────────────────────────
 
@@ -239,6 +238,43 @@ class TestAgentEndpoints:
         assert data[0]["agent_id"] == "vera"
         assert data[0]["content"] == "A good day."
         assert data[0]["image_url"] == "https://example.com/journals/vera.png"
+
+    def test_get_agent_journal_returns_embodied_entries(self, mock_app, monkeypatch):
+        """Journal publishing returns embodied-run reflections and dreams unchanged."""
+        monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+        client, mock_db, *_ = mock_app
+        mock_db.fetch = AsyncMock(
+            return_value=[
+                {
+                    "id": 2,
+                    "agent_id": "vera",
+                    "reflection_type": "6hour",
+                    "content": "Placed oak planks to finish the workshop doorway.",
+                    "token_count": 18,
+                    "image_url": "data:image/png;base64,embodied",
+                    "created_at": datetime(2026, 4, 2, 8, 0, tzinfo=UTC),
+                },
+                {
+                    "id": 3,
+                    "agent_id": "vera",
+                    "reflection_type": "dream",
+                    "content": "Dreamed of expanding the workshop into a theater.",
+                    "token_count": 14,
+                    "image_url": None,
+                    "created_at": datetime(2026, 4, 2, 2, 0, tzinfo=UTC),
+                },
+            ]
+        )
+
+        resp = client.get("/api/agents/vera/journal")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [entry["reflection_type"] for entry in data] == ["6hour", "dream"]
+        assert data[0]["content"] == "Placed oak planks to finish the workshop doorway."
+        assert data[0]["image_url"] == "data:image/png;base64,embodied"
+        assert data[1]["content"] == "Dreamed of expanding the workshop into a theater."
+        assert data[1]["image_url"] is None
 
     def test_get_agent_relationships_empty(self, mock_app):
         client, *_ = mock_app
