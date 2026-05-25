@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING, Any
 from core.eval.loader import EMBODIED_EVENT_TYPES, _split_embodied_events
 from core.reporting.sections.cost_analysis import generate_cost_analysis
 from core.reporting.sections.daily_breakdown import generate_daily_breakdown
-from core.reporting.sections.embodied_activity import generate_embodied_activity
+from core.reporting.sections.embodied_activity import (
+    extract_build_feedback_artifacts,
+    generate_embodied_activity,
+)
 from core.reporting.sections.executive_summary import generate_executive_summary
 from core.reporting.sections.key_moments import generate_key_moments
 from core.reporting.sections.memory_evolution import generate_memory_evolution
@@ -128,6 +131,7 @@ class TimelineReporter:
             embodied_actions,
             perception_reports,
             world_chunks,
+            extract_build_feedback_artifacts(artifacts),
         )
 
         # 1. Executive Summary

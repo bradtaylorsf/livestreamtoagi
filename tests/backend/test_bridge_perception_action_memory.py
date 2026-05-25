@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from core.bridge.consumers import (
     register_memory_consumer,
     unregister_memory_consumer,
 )
+from core.embodiment.build_feedback import BUILD_FEEDBACK_ARTIFACT_TYPE
 from core.event_bus import EventType, event_bus
 from core.memory.archival_memory import ArchivalMemoryManager
 from core.memory.compaction import MemoryCompactor
@@ -140,6 +142,15 @@ class FakeLLMClient:
         return SimpleNamespace(content="Rex observed action act-7 succeed: placed 10 blocks.")
 
 
+class FakeArtifactRepo:
+    def __init__(self) -> None:
+        self.saved: list[Any] = []
+
+    async def save_artifact(self, artifact: object) -> object:
+        self.saved.append(artifact)
+        return artifact
+
+
 async def deterministic_embedding(text: str) -> list[float]:
     return generate_deterministic_embedding(text, EMBEDDING_DIMENSION)
 
@@ -260,6 +271,82 @@ async def test_action_result_event_compacts_to_existing_memory_path() -> None:
             "conversation_id": None,
         }
     ]
+
+
+async def test_build_action_and_next_perception_produce_feedback_memory_and_artifact() -> None:
+    compactor = FakeCompactor()
+    artifact_repo = FakeArtifactRepo()
+    sim_id = uuid.uuid4()
+    feedback_events: list[dict[str, Any]] = []
+
+    async def on_feedback(event: dict[str, Any]) -> None:
+        feedback_events.append(event)
+
+    event_bus.on(EventType.BUILD_FEEDBACK, on_feedback)
+    register_memory_consumer(event_bus, compactor, artifact_repo=artifact_repo)
+    try:
+        await event_bus.emit(
+            EventType.BRIDGE_ACTION_RESULT,
+            {
+                "trace_id": "trace-build-1",
+                "request_id": "req-build-1",
+                "agent_id": "rex",
+                "run_id": "run-1",
+                "simulation_id": str(sim_id),
+                "action_id": "build-plan-7",
+                "status": "partial",
+                "outcome_class": "partial",
+                "detail": (
+                    "buildFromPlan partial: intended=2; present=1; missing=1; completion=0.5"
+                ),
+                "goal": "Build a two-block marker",
+            },
+        )
+        await event_bus.emit(
+            EventType.BRIDGE_PERCEPTION,
+            {
+                "trace_id": "trace-build-2",
+                "request_id": "req-build-2",
+                "agent_id": "rex",
+                "run_id": "run-1",
+                "simulation_id": str(sim_id),
+                "observations": [
+                    {
+                        "type": "structure",
+                        "action_id": "build-plan-7",
+                        "metric": {
+                            "intended_count": 2,
+                            "blocks_present": 1,
+                            "blocks_missing": 1,
+                            "completion_ratio": 0.5,
+                        },
+                    }
+                ],
+            },
+        )
+
+        await _wait_for(
+            lambda: any(call["event_type"] == "build_feedback" for call in compactor.calls)
+        )
+        await _wait_for(lambda: len(artifact_repo.saved) == 1)
+        await _wait_for(lambda: len(feedback_events) == 1)
+    finally:
+        event_bus.off(EventType.BUILD_FEEDBACK, on_feedback)
+
+    feedback_call = next(call for call in compactor.calls if call["event_type"] == "build_feedback")
+    assert feedback_call["agent_id"] == "rex"
+    assert "Repair missing intended block or step" in feedback_call["interaction"]
+    assert "suggested_next_step" in feedback_call["interaction"]
+
+    artifact = artifact_repo.saved[0]
+    assert artifact.simulation_id == sim_id
+    assert artifact.agent_id == "rex"
+    assert artifact.artifact_type == BUILD_FEEDBACK_ARTIFACT_TYPE
+    assert artifact.tool_output["classification"] == "needs_repair"
+    assert artifact.tool_output["missing"]["count"] == 1
+
+    assert feedback_events[0]["data"]["attempt_id"] == "build-plan-7"
+    assert feedback_events[0]["data"]["suggested_next_step"].startswith("Repair missing")
 
 
 async def test_action_result_event_creates_retrievable_recall_with_embedding() -> None:

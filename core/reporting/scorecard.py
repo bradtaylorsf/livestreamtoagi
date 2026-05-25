@@ -100,6 +100,9 @@ class LaunchScorecard:
         # 8. Build verification signal for embodied runs
         criteria.append(await self._check_build_verification())
 
+        # 9. Build-quality feedback loop for embodied runs
+        criteria.append(await self._check_build_quality_feedback())
+
         # Overall: READY if all required criteria pass
         ready = all(c.passed for c in criteria if c.required)
         return ScorecardResult(ready=ready, criteria=criteria)
@@ -311,6 +314,26 @@ class LaunchScorecard:
             required=False,
         )
 
+    async def _check_build_quality_feedback(self) -> ScorecardCriterion:
+        """Check embodied build attempts produce repair-oriented feedback."""
+        summary = self._embodied_summary_from_report_sections()
+        if summary is None:
+            summary = await self._load_build_feedback_summary()
+
+        attempted = int(summary.get("builds_attempted") or 0)
+        feedback_records = int(summary.get("build_feedback_records") or 0)
+        passed = attempted == 0 or feedback_records > 0
+        next_step = str(summary.get("latest_suggested_next_step") or "").strip()
+        evidence = f"{feedback_records} build-quality feedback records"
+        if next_step:
+            evidence += f"; latest next step: {next_step}"
+        return ScorecardCriterion(
+            name="build_quality_feedback",
+            passed=passed,
+            evidence=evidence,
+            required=False,
+        )
+
     def _embodied_summary_from_report_sections(self) -> dict[str, Any] | None:
         for section in self._report_sections:
             title = str(section.get("title") or "").lower()
@@ -357,3 +380,20 @@ class LaunchScorecard:
             }
         except Exception:
             return {"total_actions": 0, "builds_attempted": 0, "builds_verified": 0}
+
+    async def _load_build_feedback_summary(self) -> dict[str, Any]:
+        try:
+            build_summary = await self._load_embodied_build_summary()
+            row = await self._db.fetchrow(
+                """SELECT COUNT(*) as cnt
+                   FROM artifacts
+                   WHERE simulation_id = $1 AND artifact_type = 'build_feedback'""",
+                self._sim_uuid,
+            )
+            count = int(row["cnt"] if row else 0)
+            return {
+                "builds_attempted": int(build_summary.get("builds_attempted") or 0),
+                "build_feedback_records": count,
+            }
+        except Exception:
+            return {"builds_attempted": 0, "build_feedback_records": 0}

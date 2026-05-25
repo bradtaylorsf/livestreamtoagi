@@ -5,16 +5,18 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
-from core.eval.loader import _derive_build_outcomes
+from core.eval.loader import _derive_build_outcomes, _extract_build_feedback_artifacts
 
 
 def generate_embodied_activity(
     actions: list[dict[str, Any]],
     perception_reports: list[dict[str, Any]],
     world_chunks: list[dict[str, Any]],
+    build_feedback: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Summarize embodied actions, perceptions, and verified build outcomes."""
     build_outcomes = _derive_build_outcomes(actions, perception_reports)
+    feedback_records = build_feedback or []
     status_counts = Counter(str(action.get("status") or "unknown") for action in actions)
 
     completions = [
@@ -32,6 +34,7 @@ def generate_embodied_activity(
             "perception_reports": 0,
             "builds_attempted": 0,
             "builds_verified": 0,
+            "build_feedback_records": 0,
             "avg_completion": None,
             "_completion_total": 0.0,
             "_completion_count": 0,
@@ -56,6 +59,10 @@ def generate_embodied_activity(
             by_agent[agent_id]["_completion_total"] += float(completion)
             by_agent[agent_id]["_completion_count"] += 1
 
+    for feedback in feedback_records:
+        agent_id = str(feedback.get("agent_id") or "unknown")
+        by_agent[agent_id]["build_feedback_records"] += 1
+
     clean_by_agent = {}
     for agent_id, stats in by_agent.items():
         count = stats.pop("_completion_count")
@@ -73,9 +80,22 @@ def generate_embodied_activity(
         "builds_partial": builds_partial,
         "builds_failed": builds_failed,
         "avg_completion": round(sum(completions) / len(completions), 4) if completions else None,
+        "build_feedback_records": len(feedback_records),
+        "build_feedback_missing": sum(
+            _feedback_bucket_count(item.get("missing")) for item in feedback_records
+        ),
+        "build_feedback_unsafe": sum(
+            _feedback_bucket_count(item.get("unsafe")) for item in feedback_records
+        ),
+        "latest_suggested_next_step": _latest_suggested_next_step(feedback_records),
         "world_chunks": len(world_chunks),
         "by_agent": clean_by_agent,
     }
+
+
+def extract_build_feedback_artifacts(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return structured build-feedback records from report artifact rows."""
+    return _extract_build_feedback_artifacts(artifacts)
 
 
 def _is_partial_build(outcome: dict[str, Any]) -> bool:
@@ -96,3 +116,22 @@ def _is_failed_build(outcome: dict[str, Any]) -> bool:
         return True
     completion = outcome.get("completion")
     return completion is not None and float(completion) == 0
+
+
+def _feedback_bucket_count(value: Any) -> int:
+    if isinstance(value, dict):
+        raw = value.get("count")
+    else:
+        raw = value
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _latest_suggested_next_step(feedback_records: list[dict[str, Any]]) -> str | None:
+    for feedback in reversed(feedback_records):
+        next_step = str(feedback.get("suggested_next_step") or "").strip()
+        if next_step:
+            return next_step
+    return None

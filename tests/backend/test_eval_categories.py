@@ -277,6 +277,18 @@ def _make_full_data():
                 "created_at": datetime(2026, 1, 1, 10, 30, tzinfo=UTC),
             },
         ],
+        "build_feedback": [
+            {
+                "agent_id": "rex",
+                "attempt_id": "build-plan-1",
+                "classification": "needs_repair",
+                "completion": 0.75,
+                "missing": {"count": 1, "items": []},
+                "unsafe": {"count": 0, "items": []},
+                "suggested_next_step": "Repair missing block at x=0, y=64, z=0.",
+                "created_at": datetime(2026, 1, 1, 10, 32, tzinfo=UTC),
+            },
+        ],
         "perception_reports": [
             {
                 "agent_id": "rex",
@@ -291,6 +303,7 @@ def _make_full_data():
             "total_actions": 1,
             "total_perception_reports": 1,
             "total_build_outcomes": 1,
+            "total_build_feedback": 1,
         },
     }
 
@@ -336,10 +349,12 @@ def _make_embodied_only_data():
                 "created_at": created_at,
             },
         ],
+        "build_feedback": [],
         "embodied_summary": {
             "total_actions": 1,
             "total_perception_reports": 1,
             "total_build_outcomes": 1,
+            "total_build_feedback": 0,
         },
     }
 
@@ -358,11 +373,13 @@ def test_organize_includes_build_verification_category():
     assert "build_verification" in result
     cat = result["build_verification"]
     assert "build_outcomes" in cat
+    assert "build_feedback" in cat
     assert "embodied_actions" in cat
     assert "world_chunks" in cat
     assert "artifacts" in cat
     assert cat["total_artifacts"] == 2
     assert cat["total_conversations"] == 1
+    assert len(cat["build_feedback"]) == 1
 
 
 def test_organize_internal_state_has_state_data():
@@ -445,6 +462,7 @@ def test_legacy_categories_render_for_embodied_only_run():
     assert "verified=True class=success intended=2 present=2 missing=0 completion=1.0" in (
         build_verification
     )
+    assert "Build Quality Feedback (0 records)" in build_verification
 
 
 # ── render_user_prompt with new data types ──────────────────

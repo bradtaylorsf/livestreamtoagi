@@ -327,6 +327,32 @@ async def test_scorecard_build_verification_passes_or_fails_by_ratio():
     assert "2/4 builds verified" in failed_result.evidence
 
 
+@pytest.mark.asyncio
+async def test_scorecard_build_quality_feedback_uses_report_section():
+    scorecard = LaunchScorecard(
+        db=AsyncMock(),
+        simulation_id=str(uuid.uuid4()),
+        report_sections=[
+            {
+                "title": "Embodied Activity",
+                "data": {
+                    "builds_attempted": 1,
+                    "build_feedback_records": 1,
+                    "latest_suggested_next_step": "Repair missing wall blocks.",
+                },
+            }
+        ],
+    )
+
+    result = await scorecard._check_build_quality_feedback()
+
+    assert result.name == "build_quality_feedback"
+    assert result.passed is True
+    assert result.required is False
+    assert "1 build-quality feedback records" in result.evidence
+    assert "Repair missing wall blocks" in result.evidence
+
+
 # ── CrossRunComparison mock test ───────────────────────────────
 
 
