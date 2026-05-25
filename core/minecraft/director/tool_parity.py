@@ -276,6 +276,17 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         linked_issue="#712",
         minecraft_replacement="Minecraft perception snapshot plus shared world/task blackboard.",
     ),
+    "propose_build": ToolParityEntry(
+        name="propose_build",
+        module="tools.build_tools",
+        category="world_state",
+        classification="callable_now",
+        rationale=(
+            "Structured BuildIntent submission is the first-class signal for "
+            "building; Director V2 routes it to the build macro scheduler."
+        ),
+        linked_issue="#855",
+    ),
 }
 
 

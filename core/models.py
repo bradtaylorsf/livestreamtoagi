@@ -748,6 +748,7 @@ ARTIFACT_TYPE_MAP: dict[str, str] = {
     "propose_self_modification": "self_modification",
     "view_evolution_log": "self_modification",
     "send_message": "message",
+    "propose_build": "build_intent",
 }
 
 # Tools whose artifacts should default to pending_approval status
