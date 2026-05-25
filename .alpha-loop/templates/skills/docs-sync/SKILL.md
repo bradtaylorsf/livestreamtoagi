@@ -40,3 +40,16 @@ When making changes that affect user-facing behavior, always update the correspo
 - Never leave README or CLAUDE.md referencing commands, options, or paths that no longer exist
 - When removing a feature, search docs for all references before committing
 - Keep README under 300 lines, CLAUDE.md under 200 lines
+
+## CLI Example Validation
+
+Any CLI command example written into docs MUST be checked against the current argparse / Commander definition before commit. Past issues (#607, #608) documented run-mode flags and goal-kind syntax that did not exist in the CLI.
+
+For every documented command:
+
+1. Locate the actual definition (`grep -n "add_argument\|.option(" path/to/cli.py path/to/cli.ts`).
+2. Confirm every flag, positional arg, and value shape in the doc example matches the definition (including required vs optional, choices, defaults).
+3. Run the documented command with `--help` or against a fixture to confirm it parses. A 1-line CLI smoke is enough; don't ship un-run examples.
+4. If the doc example shows output, regenerate from the real command — don't paraphrase.
+
+Reject any doc PR whose command examples were not run.

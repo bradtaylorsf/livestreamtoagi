@@ -10,15 +10,18 @@ import os
 
 import asyncpg
 import pytest
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: F401 (imported for the fixture below)
 
 from db.migrate import down, up
 
-load_dotenv()
 
-DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
-)
+def _database_url() -> str:
+    # Defer load_dotenv to fixture time so test collection does not pollute
+    # os.environ with the operator's local Minecraft soak config.
+    load_dotenv()
+    return os.environ.get(
+        "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
+    )
 
 # Well-known live simulation UUID (seeded by migration 035)
 _LIVE_SIM_ID = "00000000-0000-0000-0000-000000000001"
@@ -84,7 +87,7 @@ AGENT_IDS = _discover_agent_ids()
 @pytest.fixture()
 async def conn():
     """Provide a database connection and clean up migrations after each test."""
-    c = await asyncpg.connect(DATABASE_URL)
+    c = await asyncpg.connect(_database_url())
     yield c
     # Drop all tables directly (faster and avoids FK ordering issues from test data)
     await c.execute("""

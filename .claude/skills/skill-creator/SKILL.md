@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy. In alpha-loop-managed repos, create project skills under `.alpha-loop/templates/skills/` and sync them to harness outputs.
+description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
 ---
 
 # Skill Creator
@@ -43,16 +43,6 @@ It's OK to briefly explain terms if you're in doubt, and feel free to clarify te
 ---
 
 ## Creating a skill
-
-### Project Skill Location
-
-Before creating or editing a repo-local skill, inspect the repo layout:
-
-- If `.alpha-loop/templates/skills/` exists, treat it as the canonical project skill directory. Create and edit skills there.
-- Do not create repo-local skills under root `skills/`, `.agents/skills/`, or `.claude/skills/` in an alpha-loop-managed repo unless the user explicitly asks for a harness-specific experiment.
-- After editing `.alpha-loop/templates/skills/<skill-name>/`, run `../alpha-loop/dist/cli.js sync` from the repo root so Codex, Claude, and any configured harness outputs receive the same skill.
-- After sync, inspect `git status --short` and confirm the expected harness copies changed. If sync would delete a useful skill that exists only in a harness output, restore it, copy it into `.alpha-loop/templates/skills/`, and sync again.
-- Use root `skills/` only for legacy repos that do not have `.alpha-loop/templates/`.
 
 ### Capture Intent
 

@@ -16,6 +16,8 @@ Use this skill to drive a local Minecraft simulation from launch through evidenc
 - For long-running work, start named terminal sessions and keep them open until they are no longer needed.
 - Use a Codex heartbeat/reminder for runs longer than a few minutes when automation tools are available; otherwise poll the terminal and logs.
 - Keep the user posted when launching, waiting, killing, fixing, and rerunning.
+- **Preserve caller-supplied `LTAG_RUN_ID`.** `scripts/minecraft/soak.sh` and any wrapper must respect an existing `LTAG_RUN_ID`; only generate a timestamp fallback when the caller did not supply one. Issues #708 / #710 had soak.sh unconditionally overwriting the caller's ID, breaking lifecycle tracking and run-correlation.
+- **Default `--management-policy` explicitly for local runs.** Silent default shifts have added cloud-LLM bridge review cost to scripts that were intended to be free local runs (issue #711). When invoking the orchestrator from a local script, pass an explicit policy (`local-only`, `bridge-off`, or whatever matches the run's intent) instead of relying on the framework default.
 
 ## Preflight
 

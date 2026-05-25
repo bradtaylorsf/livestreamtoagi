@@ -861,6 +861,7 @@ class WorldConfig(BaseModel):
 class RunMode(enum.StrEnum):
     persistent = "persistent"
     experimental = "experimental"
+    headless = "headless"
 
 
 class ManagementPolicy(enum.StrEnum):
@@ -881,6 +882,8 @@ def default_management_policy_for_run_mode(
     if mode == RunMode.persistent:
         return ManagementPolicy.enforce
     if mode == RunMode.experimental:
+        return ManagementPolicy.shadow
+    if mode == RunMode.headless:
         return ManagementPolicy.shadow
     return None
 

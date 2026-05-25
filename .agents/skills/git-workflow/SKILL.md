@@ -51,3 +51,24 @@ Rules:
 - Commit directly to master/main
 - Commit .env files or secrets
 - Create merge commits (use squash merge)
+- Commit `.venv` symlinks — `.gitignore`'s `.venv/` directory entry does not cover a same-name symlink. Run `git ls-files | grep -E '(^|/)\.?venv($|/)'` before committing and `git rm --cached .venv` if any appear.
+
+## Retry Commit Hygiene
+
+When fixing review findings or re-running tests in the loop, each retry commit must NAME the specific fix. Past sessions had three identical `fix: resolve verification failures` messages on the same PR, making the retry log unreadable.
+
+Good:
+```
+fix: address review findings for #410 — populate PublicEvalRunDetail.status
+fix: address review findings for #410 — wire scenario_id into initial fetch
+fix: address review findings for #410 — replace — with em-dash in JSX
+```
+
+Bad:
+```
+fix: resolve verification failures
+fix: resolve verification failures
+fix: resolve verification failures
+```
+
+If you genuinely can't summarize what changed in a retry, you don't yet understand the fix — stop and re-read the diff before committing.
