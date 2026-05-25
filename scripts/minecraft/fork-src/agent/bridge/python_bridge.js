@@ -67,10 +67,10 @@ import { randomUUID } from 'node:crypto';
 
 // ── Protocol / env constants (kept identical to the Python side) ─────────────
 
-// contract.PROTOCOL_VERSION (ADR §3). 1.8 carries the additive `director.gate`
-// and `kill.status` verbs. The server only gates on the major, so this stays
-// wire-compatible with earlier 1.x peers.
-export const PROTOCOL_VERSION = '1.8';
+// contract.PROTOCOL_VERSION (ADR §3). 1.10 carries the additive
+// distress/rescue shared-state fields. The server only gates on the major, so
+// this stays wire-compatible with earlier 1.x peers.
+export const PROTOCOL_VERSION = '1.10';
 export const BRIDGE_URL_ENV = 'MINECRAFT_BRIDGE_URL';
 export const BRIDGE_TOKEN_ENV = 'MINECRAFT_BRIDGE_TOKEN'; // ADR §4 / server.BRIDGE_TOKEN_ENV
 export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:8010/api/minecraft/bridge/ws';
@@ -1005,8 +1005,71 @@ export async function callBridge(opts = {}) {
     }
 }
 
+export async function readSharedState({ agentId, traceId, deadlineMs = DEFAULT_DEADLINE_MS } = {}) {
+    const response = await callBridge({
+        service: 'shared_state',
+        method: 'read',
+        payload: {},
+        deadlineMs,
+        agentId,
+        traceId,
+        costContext: {
+            agent_tier: 'conversation',
+            budget_bucket: 'shared-state',
+            estimated_cost_usd: 0.0,
+        },
+    });
+    return response && response.payload ? response.payload : {};
+}
+
+export async function writeSharedState({
+    operation,
+    goal = null,
+    resource = null,
+    claim = null,
+    danger = null,
+    verifiedAction = null,
+    buildSite = null,
+    nextStep = null,
+    agentId,
+    traceId,
+    deadlineMs = DEFAULT_DEADLINE_MS,
+} = {}) {
+    const response = await callBridge({
+        service: 'shared_state',
+        method: 'write',
+        payload: {
+            operation,
+            goal,
+            resource,
+            claim,
+            danger,
+            verified_action: verifiedAction,
+            build_site: buildSite,
+            next_step: nextStep,
+        },
+        deadlineMs,
+        agentId,
+        traceId,
+        costContext: {
+            agent_tier: 'conversation',
+            budget_bucket: 'shared-state',
+            estimated_cost_usd: 0.0,
+        },
+    });
+    return response && response.payload ? response.payload : {};
+}
+
+export const sharedState = Object.freeze({
+    read: readSharedState,
+    write: writeSharedState,
+});
+
 export default {
     callBridge,
+    sharedState,
+    readSharedState,
+    writeSharedState,
     bridgeStatus,
     bridgeIsReachable,
     bridgeIsKillActive,

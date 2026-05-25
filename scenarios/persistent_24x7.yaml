@@ -1,0 +1,47 @@
+# Persistent 24/7 - durable livestream mode.
+#
+# Confirm local model availability:
+#   python scripts/check_local_llm.py --list-only
+#
+# Run with LM Studio:
+#   LLM_PROVIDER=lmstudio \
+#   LOCAL_LLM_BASE_URL=http://localhost:1234/v1 \
+#   LOCAL_LLM_MODEL=<model-id-from-LM-Studio> \
+#   EMBEDDING_PROVIDER=deterministic \
+#   python scripts/run_simulation.py \
+#     --persistent \
+#     --seed-file scenarios/persistent_24x7.yaml \
+#     --max-cost-rolling 5 \
+#     --rolling-window 1h
+#
+# Resume after supervisor restart:
+#   live_id="$(redis-cli -p 6381 -a devpassword GET live:simulation_id)"
+#   python scripts/run_simulation.py \
+#     --persistent \
+#     --seed-file scenarios/persistent_24x7.yaml \
+#     --resume-sim-id "$live_id" \
+#     --max-cost-rolling 5 \
+#     --rolling-window 1h
+
+meta:
+  name: "Persistent 24/7"
+  description: "Indefinite livestream mode using the durable Minecraft world, rolling cost caps, and the kill switch instead of a fixed duration."
+  agents: [vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 5.0
+  expected_runtime_minutes: 0
+
+run_mode: persistent
+agents:
+  - vera
+  - rex
+  - aurora
+  - pixel
+  - fork
+  - sentinel
+  - grok
+world:
+  world_type: default
+  persistent: true
+  durable_world_id: world
+factions: []
+phases: []

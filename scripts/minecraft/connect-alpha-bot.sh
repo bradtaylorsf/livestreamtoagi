@@ -46,6 +46,9 @@ MINDCRAFT_PROFILE="${MINDCRAFT_PROFILE:-./profiles/alpha-bot.json}"
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 MINDCRAFT_LLM_URL="$LOCAL_LLM_BASE_URL"
 ALPHA_BOT_NAME="Alpha"
+MC_SIM_ALPHA_TOWN_PLANNER="${MC_SIM_ALPHA_TOWN_PLANNER:-0}"
+MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER="${MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER:-local}"
+MC_SIM_ALPHA_TOWN_PLANNER_MODEL="${MC_SIM_ALPHA_TOWN_PLANNER_MODEL:-google/gemini-3.5-flash}"
 
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
 
@@ -59,6 +62,7 @@ ACTIONS_PLACE_PATCH_MARKER="LTAG E6-3 place action"
 ACTIONS_BREAK_PATCH_MARKER="LTAG E6-3 break action"
 ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="LTAG E6-4 build-from-plan action"
 ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="LTAG E9-1 plan-and-build action"
+ACTIONS_RESCUE_PATCH_MARKER="LTAG E12-13 rescue action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_POLL_ERRAND_PATCH_MARKER="LTAG E7-2 poll errand action"
@@ -71,6 +75,7 @@ AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
 AGENT_INBOX_PATCH_MARKER="LTAG E9-1 inbox queue"
 AGENT_DIRECTOR_GATE_PATCH_MARKER="LTAG E8.5-4 director gate"
 AGENT_ACTION_QUEUE_PATCH_MARKER="LTAG E9-1 action queue"
+AGENT_DISTRESS_MONITOR_PATCH_MARKER="LTAG E12-13 distress monitor"
 MODES_UNSTUCK_PATCH_MARKER="LTAG E8-16 unstuck no-kill"
 ACTION_MANAGER_NO_KILL_PATCH_MARKER="LTAG E8-17 action stop no-kill"
 
@@ -87,6 +92,7 @@ PLACE_ACTION_REL="src/agent/commands/place_action.js"
 BREAK_ACTION_REL="src/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_REL="src/agent/commands/build_from_plan_action.js"
 PLAN_AND_BUILD_ACTION_REL="src/agent/commands/plan_and_build_action.js"
+RESCUE_ACTION_REL="src/agent/commands/rescue_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
 PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
@@ -99,10 +105,12 @@ BUILDER_PROVIDER_SKILL_REL="src/agent/skills/builder_provider.js"
 BUILD_PLAN_GOVERNOR_SKILL_REL="src/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_REL="src/agent/skills/perception.js"
 SAFE_FAIL_SKILL_REL="src/agent/skills/safe_fail.js"
+DISTRESS_MONITOR_SKILL_REL="src/agent/skills/distress_monitor.js"
 ACTION_INTERRUPTION_SKILL_REL="src/agent/skills/action_interruption.js"
 ERRAND_PLAN_SKILL_REL="src/agent/skills/errand_plan.js"
 LMSTUDIO_USAGE_SKILL_REL="src/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_REL="src/agent/skills/heartbeat.js"
+MEMORY_CONTEXT_SKILL_REL="src/agent/skills/memory_context.js"
 INBOX_QUEUE_SKILL_REL="src/agent/skills/inbox_queue.js"
 DIRECTOR_GATE_SKILL_REL="src/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
@@ -134,6 +142,7 @@ PLACE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/place_action.js"
 BREAK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/break_action.js"
 BUILD_FROM_PLAN_ACTION_SRC="$FORK_SRC_DIR/agent/commands/build_from_plan_action.js"
 PLAN_AND_BUILD_ACTION_SRC="$FORK_SRC_DIR/agent/commands/plan_and_build_action.js"
+RESCUE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/rescue_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
 PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
@@ -146,10 +155,12 @@ BUILDER_PROVIDER_SKILL_SRC="$FORK_SRC_DIR/agent/skills/builder_provider.js"
 BUILD_PLAN_GOVERNOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/build_plan_governor.js"
 PERCEPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/perception.js"
 SAFE_FAIL_SKILL_SRC="$FORK_SRC_DIR/agent/skills/safe_fail.js"
+DISTRESS_MONITOR_SKILL_SRC="$FORK_SRC_DIR/agent/skills/distress_monitor.js"
 ACTION_INTERRUPTION_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_interruption.js"
 ERRAND_PLAN_SKILL_SRC="$FORK_SRC_DIR/agent/skills/errand_plan.js"
 LMSTUDIO_USAGE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/lmstudio_usage.js"
 HEARTBEAT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/heartbeat.js"
+MEMORY_CONTEXT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/memory_context.js"
 INBOX_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/inbox_queue.js"
 DIRECTOR_GATE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/director_gate.js"
 ACTION_QUEUE_SKILL_SRC="$FORK_SRC_DIR/agent/skills/action_queue.js"
@@ -259,13 +270,14 @@ verify_committed_assets() {
 
     for required in \
         "$BRIDGE_CLIENT_SRC" "$MANAGEMENT_REVIEW_SRC" "$BRIDGE_ACTION_SRC" \
-        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" "$DIRECTOR_GATE_SKILL_SRC" \
+        "$TIMELINE_EMITTER_SRC" "$LMSTUDIO_USAGE_SKILL_SRC" "$HEARTBEAT_SKILL_SRC" "$MEMORY_CONTEXT_SKILL_SRC" "$DIRECTOR_GATE_SKILL_SRC" \
         "$MOVE_ACTION_SRC" "$NAVIGATE_ACTION_SRC" \
         "$PLACE_ACTION_SRC" "$BREAK_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_SRC" \
+        "$RESCUE_ACTION_SRC" \
         "$EXECUTE_CODE_ACTION_SRC" "$OBSERVE_ACTION_SRC" "$PLACE_HERE_GUARD_SRC" "$POLL_ERRAND_ACTION_SRC" \
         "$RUN_ERRAND_ACTION_SRC" \
         "$MOVEMENT_SKILL_SRC" "$BUILDING_SKILL_SRC" "$BUILD_PLAN_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_SRC" \
-        "$PERCEPTION_SKILL_SRC" "$SAFE_FAIL_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_SRC" "$ERRAND_PLAN_SKILL_SRC"
+        "$PERCEPTION_SKILL_SRC" "$SAFE_FAIL_SKILL_SRC" "$DISTRESS_MONITOR_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_SRC" "$ERRAND_PLAN_SKILL_SRC"
     do
         if [ ! -s "$required" ]; then
             fail "Committed bridge asset missing or empty: $required"; problems=1
@@ -309,10 +321,21 @@ info "server:    ${MC_HOST}:${MC_PORT}  auth=${MC_AUTH}  minecraft=${MC_VERSION}
 info "bridge:    ${MINECRAFT_BRIDGE_URL}  (bearer token via MINECRAFT_BRIDGE_TOKEN)"
 info "clone:     $MINDCRAFT_DIR  (pinned $MINDCRAFT_COMMIT)"
 info "profile:   $MINDCRAFT_PROFILE  (staged from $PROFILE_TEMPLATE)"
-info "settings:  non-verbal Alpha template (chat_ingame=false, narrate_behavior=false,"
-info "           chat_bot_messages=false, init_message empty, speak=false,"
-info "           only_chat_with=[])"
-info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (local only, decision 0003)"
+if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
+    info "settings:  town planner mode (chat_ingame=true, narrate_behavior=true,"
+    info "           chat_bot_messages=true, init_message empty, speak=false,"
+    info "           only_chat_with=[])"
+    if [ "$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" = "openrouter" ]; then
+        info "OpenRouter: Alpha model ${MC_SIM_ALPHA_TOWN_PLANNER_MODEL}"
+    else
+        info "LM Studio: Alpha town planner uses ${MINDCRAFT_LLM_URL} (local chat/code)"
+    fi
+else
+    info "settings:  non-verbal Alpha template (chat_ingame=false, narrate_behavior=false,"
+    info "           chat_bot_messages=false, init_message empty, speak=false,"
+    info "           only_chat_with=[])"
+    info "LM Studio: bot connects to ${MINDCRAFT_LLM_URL}  (local only, decision 0003)"
+fi
 
 if [ "$MODE" = "verify" ]; then
     if verify_committed_assets; then
@@ -348,16 +371,32 @@ if [ "$MODE" = "dry-run" ]; then
         info "bridge token: (MINECRAFT_BRIDGE_TOKEN unset - REQUIRED for a real run)"
     fi
     info "profile:     $MINDCRAFT_PROFILE  (bot name $ALPHA_BOT_NAME)"
-    if [ -n "$LLM_MODEL" ]; then
+    if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
+        if [ "$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" = "openrouter" ]; then
+            info "model:       openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL}  (town planner)"
+            info "code_model:  openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL}  (town planner)"
+        elif [ -n "$LLM_MODEL" ]; then
+            info "model:       lmstudio/$LLM_MODEL  (local town planner)"
+            info "code_model:  lmstudio/$LLM_MODEL_BUILDING  (local town planner)"
+        else
+            info "model:       (LOCAL_LLM_MODEL unset - REQUIRED for local town planner runs)"
+        fi
+    elif [ -n "$LLM_MODEL" ]; then
         info "model:       lmstudio/$LLM_MODEL  (conversation tier)"
         info "code_model:  lmstudio/$LLM_MODEL_BUILDING  (building tier)"
     else
         info "model:       (LOCAL_LLM_MODEL unset - REQUIRED for a real run;"
         info "             list ids with: pnpm llm:local --list-only)"
     fi
-    info "non-verbal:  chat_ingame=false, narrate_behavior=false,"
-    info "             chat_bot_messages=false, init_message='', speak=false,"
-    info "             only_chat_with=[]"
+    if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
+        info "town planner: chat_ingame=true, narrate_behavior=true,"
+        info "              chat_bot_messages=true, init_message='', speak=false,"
+        info "              only_chat_with=[]"
+    else
+        info "non-verbal:  chat_ingame=false, narrate_behavior=false,"
+        info "             chat_bot_messages=false, init_message='', speak=false,"
+        info "             only_chat_with=[]"
+    fi
     info "Would assert: $MINDCRAFT_DIR HEAD == $MINDCRAFT_COMMIT"
     info "Would stage:  $SETTINGS_TEMPLATE -> $MINDCRAFT_DIR/settings.js"
     info "Would stage:  $PROFILE_TEMPLATE  -> $MINDCRAFT_DIR/${MINDCRAFT_PROFILE#./}"
@@ -365,6 +404,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would wrap:   upstream action interruptions via $PLACE_HERE_GUARD_REL"
     info "Would copy:   fork-src/ timeline telemetry and LM Studio usage shim"
     info "Would copy:   fork-src/ autonomous heartbeat skill"
+    info "Would copy:   fork-src/ memory context skill"
     info "Would copy:   fork-src/ Director V2 gate skill"
     info "Would inject: !pollErrand and !runErrand for Alpha errands"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
@@ -377,10 +417,22 @@ verify_committed_assets || { fail "Refusing to launch with bad committed assets.
 check_node || exit 1
 command -v git > /dev/null 2>&1 || { fail "git not found on PATH."; exit 1; }
 
+case "$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" in
+    local|openrouter) ;;
+    *)
+        fail "MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER must be local or openrouter."
+        exit 1
+        ;;
+esac
+
 if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
     fail "MINECRAFT_BRIDGE_TOKEN is not set - the bridge has NO unauthenticated path."
     info "  Export the SAME shared secret the FastAPI bridge server uses:"
     info "    export MINECRAFT_BRIDGE_TOKEN=<the-server-secret>"
+    exit 1
+fi
+if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ] && [ "$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" = "openrouter" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
+    fail "MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER=openrouter requires OPENROUTER_API_KEY."
     exit 1
 fi
 
@@ -418,21 +470,33 @@ if ! sed -E \
     exit 1
 fi
 ok "Staged settings.js -> $DEST_SETTINGS (host=${MC_HOST} port=${MC_PORT} profile=${MINDCRAFT_PROFILE})"
-SETTINGS_PATH="$DEST_SETTINGS" node --input-type=module <<'NODE'
+SETTINGS_PATH="$DEST_SETTINGS" MC_SIM_ALPHA_TOWN_PLANNER="$MC_SIM_ALPHA_TOWN_PLANNER" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = process.env.SETTINGS_PATH;
 const importLine = "import './src/agent/skills/lmstudio_usage.js'; // LTAG E8-12 timeline telemetry\n";
+const townPlanner = process.env.MC_SIM_ALPHA_TOWN_PLANNER === '1';
 let source = readFileSync(path, 'utf8');
-if (!source.includes('lmstudio_usage.js')) {
-    writeFileSync(path, importLine + source);
+if (townPlanner) {
+    source = source
+        .replace('"chat_ingame": false,', '"chat_ingame": true,')
+        .replace('"narrate_behavior": false,', '"narrate_behavior": true,')
+        .replace('"chat_bot_messages": false,', '"chat_bot_messages": true,');
+    source = source.replace(
+        '"blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel"]',
+        '"blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel", "!planAndBuild", "!buildFromPlan", "!newAction", "!executeCode"]',
+    );
 }
+if (!source.includes('lmstudio_usage.js')) {
+    source = importLine + source;
+}
+writeFileSync(path, source);
 NODE
 ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" node --input-type=module <<'NODE'
+if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" MC_SIM_ALPHA_TOWN_PLANNER="$MC_SIM_ALPHA_TOWN_PLANNER" MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER="$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" MC_SIM_ALPHA_TOWN_PLANNER_MODEL="$MC_SIM_ALPHA_TOWN_PLANNER_MODEL" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const templatePath = process.env.TEMPLATE_PATH;
@@ -441,6 +505,9 @@ const chatModel = process.env.CHAT_MODEL;
 const codeModel = process.env.CODE_MODEL;
 const llmUrl = process.env.LLM_URL || 'http://localhost:1234/v1';
 const embeddingUrl = process.env.EMBEDDING_URL || llmUrl;
+const townPlanner = process.env.MC_SIM_ALPHA_TOWN_PLANNER === '1';
+const townPlannerProvider = process.env.MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER || 'local';
+const townPlannerModel = process.env.MC_SIM_ALPHA_TOWN_PLANNER_MODEL || 'google/gemini-3.5-flash';
 const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
 
 if (
@@ -451,8 +518,70 @@ if (
     throw new Error('alpha-bot profile template lost its local model placeholders');
 }
 
-profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl };
-profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
+if (townPlanner) {
+    if (townPlannerProvider === 'openrouter') {
+        profile.model = { api: 'openrouter', model: townPlannerModel };
+        profile.code_model = { api: 'openrouter', model: townPlannerModel };
+    } else {
+        profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl };
+        profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
+    }
+    profile.bot_responder = [
+        'You are Alpha, the town planner for this Minecraft settlement experiment.',
+        'Return exactly one word: respond or ignore.',
+        'Respond when the group needs a plan, a team assignment, a design correction,',
+        'or a progress checkpoint. Ignore routine chatter while builders are executing.',
+    ].join(' ');
+    profile.personality = {
+        chattiness: 0.85,
+        initiative: 1.0,
+        interrupt_tendency: 0.35,
+        eavesdrop_tendency: 1.0,
+        closing_weight: 0.25,
+        role_priority_bonus: 1.0,
+        respond_probability: 0.82,
+        initiate_probability: 0.75,
+        interrupt_bias: 0.35,
+        eavesdrop_probability: 1.0,
+        adjacency: {
+            vera: 0.9,
+            rex: 0.9,
+            aurora: 0.9,
+            pixel: 0.9,
+            fork: 0.9,
+            sentinel: 0.9,
+            grok: 0.9,
+        },
+    };
+    profile.conversing = [
+        'You are Alpha, the Town Planner for an open Minecraft settlement test.',
+        'You may speak in words in this run. Use concise public chat to assign teams,',
+        'write/announce settlement plan files in plain text, split work into build/gather/explore tasks,',
+        'and ask local-model agents to execute their available build, navigation, observation,',
+        'inventory, nearby-block, and resource-search tools.',
+        'Do not write command syntax that begins with an exclamation mark in your own messages.',
+        'Do not execute world-changing build/code commands yourself; delegate builds to Rex, Fork, and Pixel.',
+        'Do not micromanage every block. Prefer high-level plans, reviews, and next tasks.',
+        'Keep the settlement coherent: multiple distinct buildings, paths, farms, animal pens,',
+        'lighting, storage/workshop, and perimeter. When a task finishes, observe, reflect,',
+        'then issue the next plan. Be brief and action-oriented.',
+        '$SELF_PROMPT',
+        'Summarized memory:\'$MEMORY\'',
+        '$STATS',
+        '$INVENTORY',
+        '$COMMAND_DOCS',
+        '$CONVO',
+        'Conversation Begin:',
+    ].join('\n');
+    profile.goal_setting = [
+        'You are Alpha, the Town Planner. Set one concise next planning goal for the settlement.',
+        'Favor assigning teams and producing executable build/gather/scout tasks.',
+        '$CONVO',
+    ].join('\n');
+} else {
+    profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl };
+    profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
+}
 profile.embedding = {
     api: 'lmstudio',
     model: 'lmstudio/text-embedding-nomic-embed-text-v1.5',
@@ -465,9 +594,20 @@ then
     exit 1
 fi
 ok "Staged profile -> $DEST_PROFILE"
-info "  model:      lmstudio/${LLM_MODEL}"
-info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
-info "  url:        ${LOCAL_LLM_BASE_URL}"
+if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
+    if [ "$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" = "openrouter" ]; then
+        info "  model:      openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL}"
+        info "  code_model: openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL}"
+    else
+        info "  model:      lmstudio/${LLM_MODEL}"
+        info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
+    fi
+    info "  embedding:  lmstudio/text-embedding-nomic-embed-text-v1.5"
+else
+    info "  model:      lmstudio/${LLM_MODEL}"
+    info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
+    info "  url:        ${LOCAL_LLM_BASE_URL}"
+fi
 
 stage_file() {
     local src="$1"
@@ -488,6 +628,7 @@ stage_file "$PLACE_ACTION_SRC" "$PLACE_ACTION_REL"
 stage_file "$BREAK_ACTION_SRC" "$BREAK_ACTION_REL"
 stage_file "$BUILD_FROM_PLAN_ACTION_SRC" "$BUILD_FROM_PLAN_ACTION_REL"
 stage_file "$PLAN_AND_BUILD_ACTION_SRC" "$PLAN_AND_BUILD_ACTION_REL"
+stage_file "$RESCUE_ACTION_SRC" "$RESCUE_ACTION_REL"
 stage_file "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_REL"
 stage_file "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_REL"
 stage_file "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_REL"
@@ -500,10 +641,12 @@ stage_file "$BUILDER_PROVIDER_SKILL_SRC" "$BUILDER_PROVIDER_SKILL_REL"
 stage_file "$BUILD_PLAN_GOVERNOR_SKILL_SRC" "$BUILD_PLAN_GOVERNOR_SKILL_REL"
 stage_file "$PERCEPTION_SKILL_SRC" "$PERCEPTION_SKILL_REL"
 stage_file "$SAFE_FAIL_SKILL_SRC" "$SAFE_FAIL_SKILL_REL"
+stage_file "$DISTRESS_MONITOR_SKILL_SRC" "$DISTRESS_MONITOR_SKILL_REL"
 stage_file "$ACTION_INTERRUPTION_SKILL_SRC" "$ACTION_INTERRUPTION_SKILL_REL"
 stage_file "$ERRAND_PLAN_SKILL_SRC" "$ERRAND_PLAN_SKILL_REL"
 stage_file "$LMSTUDIO_USAGE_SKILL_SRC" "$LMSTUDIO_USAGE_SKILL_REL"
 stage_file "$HEARTBEAT_SKILL_SRC" "$HEARTBEAT_SKILL_REL"
+stage_file "$MEMORY_CONTEXT_SKILL_SRC" "$MEMORY_CONTEXT_SKILL_REL"
 stage_file "$INBOX_QUEUE_SKILL_SRC" "$INBOX_QUEUE_SKILL_REL"
 stage_file "$DIRECTOR_GATE_SKILL_SRC" "$DIRECTOR_GATE_SKILL_REL"
 stage_file "$ACTION_QUEUE_SKILL_SRC" "$ACTION_QUEUE_SKILL_REL"
@@ -519,7 +662,8 @@ if grep -q "$AGENT_MANAGEMENT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_HEARTBEAT_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_INBOX_PATCH_MARKER" "$AGENT_PATH" || \
    grep -q "$AGENT_DIRECTOR_GATE_PATCH_MARKER" "$AGENT_PATH" || \
-   grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH"; then
+   grep -q "$AGENT_ACTION_QUEUE_PATCH_MARKER" "$AGENT_PATH" || \
+   grep -q "$AGENT_DISTRESS_MONITOR_PATCH_MARKER" "$AGENT_PATH"; then
     info "Found a previous Management chat gate in $AGENT_REL; restoring pinned source first."
     if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$AGENT_REL" > "$AGENT_PATH"; then
         fail "Could not restore pinned $AGENT_REL before patching."
@@ -535,6 +679,7 @@ if ! AGENT_PATH="$AGENT_PATH" \
     AGENT_INBOX_PATCH_MARKER="$AGENT_INBOX_PATCH_MARKER" \
     AGENT_DIRECTOR_GATE_PATCH_MARKER="$AGENT_DIRECTOR_GATE_PATCH_MARKER" \
     AGENT_ACTION_QUEUE_PATCH_MARKER="$AGENT_ACTION_QUEUE_PATCH_MARKER" \
+    AGENT_DISTRESS_MONITOR_PATCH_MARKER="$AGENT_DISTRESS_MONITOR_PATCH_MARKER" \
     node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -545,6 +690,7 @@ const heartbeatMarker = process.env.AGENT_HEARTBEAT_PATCH_MARKER;
 const inboxMarker = process.env.AGENT_INBOX_PATCH_MARKER;
 const directorGateMarker = process.env.AGENT_DIRECTOR_GATE_PATCH_MARKER;
 const actionQueueMarker = process.env.AGENT_ACTION_QUEUE_PATCH_MARKER;
+const distressMonitorMarker = process.env.AGENT_DISTRESS_MONITOR_PATCH_MARKER;
 let source = readFileSync(path, 'utf8');
 
 const importAnchor = "import { speak } from './speak.js';\n";
@@ -553,6 +699,7 @@ const heartbeatImportLine = `import { installHeartbeat } from './skills/heartbea
 const inboxImportLine = `import { installInboxQueue } from './skills/inbox_queue.js'; // ${inboxMarker}\n`;
 const directorGateImportLine = `import { installDirectorGate } from './skills/director_gate.js'; // ${directorGateMarker}\n`;
 const actionQueueImportLine = `import { installActionQueue } from './skills/action_queue.js'; // ${actionQueueMarker}\n`;
+const distressMonitorImportLine = `import { installDistressMonitor } from './skills/distress_monitor.js'; // ${distressMonitorMarker}\n`;
 if (!source.includes(importLine)) {
     if (!source.includes(importAnchor)) {
         throw new Error('speak import anchor not found while applying Management chat gate');
@@ -569,6 +716,7 @@ for (const [line, label] of [
     [inboxImportLine, 'inbox queue'],
     [directorGateImportLine, 'director gate'],
     [actionQueueImportLine, 'action queue'],
+    [distressMonitorImportLine, 'distress monitor'],
 ]) {
     if (!source.includes(line)) {
         if (!source.includes(importAnchor)) {
@@ -659,6 +807,7 @@ if (source.includes(cleanExitTernaryNeedle)) {
 }
 
 const heartbeatCallNeedle = `installHeartbeat(this); // ${heartbeatMarker}`;
+const distressMonitorCallNeedle = `installDistressMonitor(this); // ${distressMonitorMarker}`;
 if (!source.includes(heartbeatCallNeedle)) {
     let startEventsNeedle = '    startEvents() {\n';
     let heartbeatCall = `        ${heartbeatCallNeedle}\n`;
@@ -670,6 +819,18 @@ if (!source.includes(heartbeatCallNeedle)) {
         throw new Error('startEvents method shape changed while applying autonomous heartbeat');
     }
     source = source.replace(startEventsNeedle, startEventsNeedle + heartbeatCall);
+}
+if (!source.includes(distressMonitorCallNeedle)) {
+    let startEventsNeedle = '    startEvents() {\n';
+    let distressCall = `        ${distressMonitorCallNeedle}\n`;
+    if (!source.includes(startEventsNeedle)) {
+        startEventsNeedle = '        startEvents() {\n';
+        distressCall = `            ${distressMonitorCallNeedle}\n`;
+    }
+    if (!source.includes(startEventsNeedle)) {
+        throw new Error('startEvents method shape changed while applying distress monitor');
+    }
+    source = source.replace(startEventsNeedle, startEventsNeedle + distressCall);
 }
 const inboxCallNeedle = `installInboxQueue(this); // ${inboxMarker}`;
 const directorGateCallNeedle = `installDirectorGate(this); // ${directorGateMarker}`;
@@ -823,6 +984,7 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BREAK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_RESCUE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_POLL_ERRAND_PATCH_MARKER" "$ACTIONS_PATH" || \
@@ -848,6 +1010,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_BREAK_PATCH_MARKER="$ACTIONS_BREAK_PATCH_MARKER" \
     ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER="$ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER" \
     ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="$ACTIONS_PLAN_AND_BUILD_PATCH_MARKER" \
+    ACTIONS_RESCUE_PATCH_MARKER="$ACTIONS_RESCUE_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
     ACTIONS_POLL_ERRAND_PATCH_MARKER="$ACTIONS_POLL_ERRAND_PATCH_MARKER" \
@@ -899,6 +1062,7 @@ const actions = [
     ['breakAction', './break_action.js', process.env.ACTIONS_BREAK_PATCH_MARKER],
     ['buildFromPlanAction', './build_from_plan_action.js', process.env.ACTIONS_BUILD_FROM_PLAN_PATCH_MARKER],
     ['planAndBuildAction', './plan_and_build_action.js', process.env.ACTIONS_PLAN_AND_BUILD_PATCH_MARKER],
+    ['rescueAction', './rescue_action.js', process.env.ACTIONS_RESCUE_PATCH_MARKER],
     ['executeCodeAction', './execute_code_action.js', process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER],
     ['observeAction', './observe_action.js', process.env.ACTIONS_OBSERVE_PATCH_MARKER],
     ['pollErrandAction', './poll_errand_action.js', process.env.ACTIONS_POLL_ERRAND_PATCH_MARKER],
@@ -974,9 +1138,18 @@ info "Skipping this -> Alpha connects then is kicked with 'not whitelisted'."
 echo
 
 ok "Launching ${ALPHA_BOT_NAME} -> ${MC_HOST}:${MC_PORT} ... (Ctrl+C to stop)"
-info "Alpha is non-verbal: no init chat, no in-game chat, no narration, no bot messages."
-info "Errand smoke: ${ALPHA_BOT_NAME} !pollErrand()"
-info "Errand smoke: ${ALPHA_BOT_NAME} !runErrand()"
+if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
+    info "Alpha is verbal town planner for this run: public chat enabled, speech disabled."
+    if [ "$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" = "openrouter" ]; then
+        info "Town planner model: openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL}"
+    else
+        info "Town planner model: lmstudio/${LLM_MODEL}"
+    fi
+else
+    info "Alpha is non-verbal: no init chat, no in-game chat, no narration, no bot messages."
+    info "Errand smoke: ${ALPHA_BOT_NAME} !pollErrand()"
+    info "Errand smoke: ${ALPHA_BOT_NAME} !runErrand()"
+fi
 info "Bridge action smoke: ${ALPHA_BOT_NAME} !observe(6, \"all\", false)"
 cd "$MINDCRAFT_DIR_ABS"
 node main.js --profiles "$MINDCRAFT_PROFILE"

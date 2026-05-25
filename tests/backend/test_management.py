@@ -17,8 +17,9 @@ from core.bridge.handlers.errand import handle_errand_complete
 from core.bridge.handlers.management import handle_management_review
 from core.event_bus import EventType
 from core.management import CONTENT_RULES_PATH, Management
-from core.models import ContentReviewResult, LLMResponse
+from core.models import ContentReviewResult, LLMResponse, ManagementPolicy, RunMode
 from core.redis_keys import KILL_SWITCH_KEY
+from core.simulation.orchestrator import SimulationConfig
 
 # -- Fixtures -----------------------------------------------------------
 
@@ -63,6 +64,23 @@ def management(mock_redis: MagicMock, mock_llm: MagicMock, mock_event_bus: Magic
         llm_client=mock_llm,
         event_bus=mock_event_bus,
         rules_path=CONTENT_RULES_PATH,
+    )
+
+
+@pytest.fixture()
+def off_management(
+    mock_redis: MagicMock,
+    mock_llm: MagicMock,
+    mock_event_bus: MagicMock,
+    mock_db: MagicMock,
+) -> Management:
+    return Management(
+        redis_client=mock_redis,
+        llm_client=mock_llm,
+        event_bus=mock_event_bus,
+        rules_path=CONTENT_RULES_PATH,
+        policy=ManagementPolicy.off,
+        db=mock_db,
     )
 
 
@@ -132,8 +150,14 @@ class _RaisingManagement:
 
 
 class _BridgeManagement:
-    def __init__(self, review: ContentReviewResult) -> None:
+    def __init__(
+        self,
+        review: ContentReviewResult,
+        *,
+        policy: ManagementPolicy = ManagementPolicy.enforce,
+    ) -> None:
         self.review_result = review
+        self.policy = policy
         self.review_calls: list[dict[str, object]] = []
         self.intervene_calls: list[tuple[int, str, str, str | None]] = []
         self.generate_calls: list[tuple[str, str]] = []
@@ -169,6 +193,91 @@ class _BridgeManagement:
     async def generate_replacement(self, agent_id: str, reason: str) -> str:
         self.generate_calls.append((agent_id, reason))
         return "Management replacement text"
+
+
+# -- Policy modes ------------------------------------------------------
+
+
+async def test_management_policy_off_approves_without_llm_or_db(
+    off_management: Management,
+    mock_llm: MagicMock,
+    mock_db: MagicMock,
+    mock_event_bus: MagicMock,
+) -> None:
+    result = await off_management.review(
+        "grok",
+        "graphic violence would normally trip the keyword filter",
+        conversation_id=uuid.uuid4(),
+        simulation_id=uuid.uuid4(),
+    )
+
+    assert result.approved is True
+    assert result.reason == "management policy=off"
+    assert off_management.policy == ManagementPolicy.off
+    mock_llm.complete.assert_not_called()
+    mock_db.execute.assert_not_called()
+    mock_event_bus.emit.assert_awaited_once()
+    assert mock_event_bus.emit.call_args.args[0] == EventType.MANAGEMENT_SHADOW.value
+    assert mock_event_bus.emit.call_args.args[1]["policy"] == "off"
+
+
+async def test_management_policy_shadow_uses_shadow_path(
+    mock_redis: MagicMock,
+    mock_llm: MagicMock,
+    mock_event_bus: MagicMock,
+    mock_db: MagicMock,
+) -> None:
+    mgmt = Management(
+        redis_client=mock_redis,
+        llm_client=mock_llm,
+        event_bus=mock_event_bus,
+        rules_path=CONTENT_RULES_PATH,
+        policy=ManagementPolicy.shadow,
+        db=mock_db,
+    )
+
+    result = await mgmt.review(
+        "grok",
+        "Let me show you graphic violence in detail",
+        conversation_id=uuid.uuid4(),
+    )
+
+    assert result.approved is True
+    assert mgmt.policy == ManagementPolicy.shadow
+    mock_db.execute.assert_awaited_once()
+
+
+async def test_management_policy_enforce_blocks_keyword(management: Management) -> None:
+    assert management.policy == ManagementPolicy.enforce
+    result = await management.review("grok", "Let me show you graphic violence")
+    assert result.approved is False
+    assert result.severity == 3
+
+
+def test_management_policy_persistent_defaults_to_enforce() -> None:
+    cfg = SimulationConfig(
+        name="persistent-policy",
+        agents=["vera"],
+        run_mode=RunMode.persistent,
+        max_cost_rolling=1.0,
+        rolling_window="1h",
+    )
+
+    assert cfg.management_policy == ManagementPolicy.enforce
+    assert cfg.management_shadow is False
+
+
+def test_management_policy_experimental_defaults_to_shadow() -> None:
+    cfg = SimulationConfig(
+        name="experimental-policy",
+        agents=["vera"],
+        run_mode=RunMode.experimental,
+        duration=None,
+        experimental_goal={"kind": "turns", "target": 1},
+    )
+
+    assert cfg.management_policy == ManagementPolicy.shadow
+    assert cfg.management_shadow is True
 
 
 # -- Layer 1: Keyword blocklist ----------------------------------------
@@ -263,9 +372,24 @@ def test_management_is_not_mindcraft_world_bot() -> None:
     spec.loader.exec_module(gen)
 
     assert "management" in gen.NON_BOT_AGENTS
-    assert not (repo_root / "scripts" / "minecraft" / "profiles" / "management-bot.json").exists()
-    with pytest.raises(ValueError, match="never a world bot"):
-        gen.build_profile("management")
+    for policy in ManagementPolicy:
+        assert policy.value in {"off", "shadow", "enforce"}
+        assert "management" in gen.NON_BOT_AGENTS
+        assert not (
+            repo_root / "scripts" / "minecraft" / "profiles" / "management-bot.json"
+        ).exists()
+        with pytest.raises(ValueError, match="never a world bot"):
+            gen.build_profile("management")
+
+    alpha_profile = gen.build_profile(
+        "alpha",
+        provider="lmstudio",
+        local_chat="local-chat",
+        local_code="local-code",
+    )
+    assert alpha_profile["personality"]["respond_probability"] == 0.0
+    assert alpha_profile["personality"]["initiate_probability"] == 0.0
+    assert "ignore" in alpha_profile["bot_responder"].lower()
 
 
 # -- Bridge management.review handler ---------------------------------
@@ -287,6 +411,26 @@ async def test_management_review_bridge_handler_allows_clean_content() -> None:
             "simulation_id": "22222222-2222-2222-2222-222222222222",
         }
     ]
+    assert fake.intervene_calls == []
+    assert fake.generate_calls == []
+
+
+async def test_management_review_bridge_handler_policy_off_short_circuits() -> None:
+    """Bridge off-policy review allows without invoking the filter path."""
+    fake = _BridgeManagement(
+        ContentReviewResult(approved=False, reason="would block", severity=3),
+        policy=ManagementPolicy.off,
+    )
+    env = _management_review_request("blocked speech")
+
+    result = await handle_management_review(env, SimpleNamespace(management=fake))
+
+    assert result == {
+        "verdict": "allow",
+        "reason": "management policy=off",
+        "sanitized_text": None,
+    }
+    assert fake.review_calls == []
     assert fake.intervene_calls == []
     assert fake.generate_calls == []
 

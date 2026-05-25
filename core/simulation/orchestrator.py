@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import random
 import re
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -22,7 +24,19 @@ from core.event_bus import EventType
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
-from core.models import FactionConfig, MemorySeedConfig, SimulationCreate, SimulationStatus
+from core.model_config import resolve_internal_model
+from core.models import (
+    ExperimentalGoalConfig,
+    FactionConfig,
+    ManagementPolicy,
+    MemorySeedConfig,
+    PersonaOverride,
+    RunMode,
+    SimulationCreate,
+    SimulationStatus,
+    WorldConfig,
+    resolve_management_policy,
+)
 from core.simulation.clock import SimulationClock
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
@@ -56,6 +70,26 @@ class CostLimitExceededError(Exception):
     """Raised when simulation spending exceeds a configured cost limit."""
 
 
+def _normalize_agent_goals(raw: dict[str, Any] | None) -> dict[str, list[str]]:
+    """Return a stable agent_id -> goal text list mapping."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("agent_goals must be a mapping of agent_id to list of goals")
+
+    normalized: dict[str, list[str]] = {}
+    for agent_id, goals in raw.items():
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            raise ValueError("agent_goals keys must be non-empty agent ids")
+        if isinstance(goals, str):
+            normalized[agent_id] = [goals]
+            continue
+        if not isinstance(goals, list):
+            raise ValueError(f"agent_goals for {agent_id!r} must be a list of strings")
+        normalized[agent_id] = [str(goal) for goal in goals]
+    return normalized
+
+
 def parse_duration(value: str) -> timedelta:
     """Parse a human-readable duration string into a timedelta.
 
@@ -71,6 +105,22 @@ def parse_duration(value: str) -> timedelta:
     hours = int(match.group(2) or 0)
     minutes = int(match.group(3) or 0)
     return timedelta(days=days, hours=hours, minutes=minutes)
+
+
+def parse_experimental_goal(value: str) -> ExperimentalGoalConfig:
+    """Parse an experimental goal string such as 'turns:20' or 'artifacts=2'."""
+    raw = value.strip()
+    separator = ":" if ":" in raw else "=" if "=" in raw else None
+    if separator is None:
+        raise ValueError("Invalid experimental goal. Use '<kind>:<target>', e.g. 'turns:20'.")
+    kind, target = (part.strip() for part in raw.split(separator, 1))
+    if not kind or not target:
+        raise ValueError("Invalid experimental goal. Use '<kind>:<target>', e.g. 'turns:20'.")
+    try:
+        parsed_target = int(target)
+    except ValueError as exc:
+        raise ValueError("experimental goal target must be an integer") from exc
+    return ExperimentalGoalConfig(kind=kind, target=parsed_target)
 
 
 class SimulationConfig:
@@ -91,7 +141,8 @@ class SimulationConfig:
         duration: timedelta | None = None,
         dry_run: bool = False,
         verbose: bool = False,
-        management_shadow: bool = True,
+        management_shadow: bool | None = None,
+        management_policy: str | ManagementPolicy | None = None,
         debug_prompts: bool = False,
         existing_sim_id: str | None = None,
         hypothesis: str | None = None,
@@ -102,6 +153,11 @@ class SimulationConfig:
         scenario_agents: list[str] | None = None,
         excluded_agents: list[str] | None = None,
         factions: list[dict[str, Any] | FactionConfig] | None = None,
+        persona_overrides: list[dict[str, Any] | PersonaOverride] | None = None,
+        agent_goals: dict[str, list[str]] | None = None,
+        world_config: dict[str, Any] | WorldConfig | None = None,
+        run_mode: str | RunMode | None = None,
+        experimental_goal: dict[str, Any] | ExperimentalGoalConfig | None = None,
         initial_agent_energy: dict[str, float] | None = None,
         conversation_cadence: float = 1.0,
         conversation_mode: str = "director",
@@ -130,7 +186,7 @@ class SimulationConfig:
         self.duration = duration
         self.dry_run = dry_run
         self.verbose = verbose
-        self.management_shadow = management_shadow
+        self._management_policy_override = management_policy is not None
         self.debug_prompts = debug_prompts
         self.world_sim: bool = False
         self.phases: list[Phase] = []
@@ -141,6 +197,46 @@ class SimulationConfig:
             f if isinstance(f, FactionConfig) else FactionConfig(**f) for f in (factions or [])
         ]
         self._factions_override = factions is not None
+        self.persona_overrides: list[PersonaOverride] = [
+            p if isinstance(p, PersonaOverride) else PersonaOverride(**p)
+            for p in (persona_overrides or [])
+        ]
+        self._persona_overrides_override = persona_overrides is not None
+        self.agent_goals = _normalize_agent_goals(agent_goals)
+        self._agent_goals_override = agent_goals is not None
+        self.world_config = (
+            world_config
+            if isinstance(world_config, WorldConfig)
+            else WorldConfig(**world_config)
+            if world_config is not None
+            else None
+        )
+        self.world_provisioned: dict[str, Any] | None = None
+        self._world_config_override = world_config is not None
+        self.run_mode: RunMode | None = (
+            RunMode(run_mode)
+            if run_mode is not None
+            else RunMode.experimental
+            if seed_file or experimental_goal is not None
+            else None
+        )
+        self._run_mode_explicit = run_mode is not None
+        if management_policy is None and management_shadow is not None:
+            management_policy = (
+                ManagementPolicy.shadow if management_shadow else ManagementPolicy.enforce
+            )
+            self._management_policy_override = True
+        self.management_policy = resolve_management_policy(management_policy, self.run_mode)
+        self.management_shadow = self.management_policy == ManagementPolicy.shadow
+        self.experimental_goal = (
+            experimental_goal
+            if isinstance(experimental_goal, ExperimentalGoalConfig)
+            else ExperimentalGoalConfig(**experimental_goal)
+            if experimental_goal is not None
+            else None
+        )
+        self._experimental_goal_override = experimental_goal is not None
+        self._validate_run_mode_constraints()
         # When provided, the orchestrator attaches to a pre-created
         # simulation row instead of inserting a new one. Used when the
         # admin dashboard pre-creates the row so it can immediately return
@@ -156,8 +252,8 @@ class SimulationConfig:
         self.initial_agent_energy = dict(initial_agent_energy or {})
         self.conversation_cadence = max(0.1, float(conversation_cadence or 1.0))
         normalized_conversation_mode = conversation_mode.strip().lower()
-        if normalized_conversation_mode not in {"director", "embodied"}:
-            raise ValueError("conversation_mode must be one of: director, embodied")
+        if normalized_conversation_mode not in {"director", "embodied", "director_v2"}:
+            raise ValueError("conversation_mode must be one of: director, embodied, director_v2")
         self.conversation_mode = normalized_conversation_mode
         self.submitted_params = dict(submitted_params or {})
         self.source = source
@@ -165,7 +261,39 @@ class SimulationConfig:
     @property
     def mode(self) -> str:
         """Return 'seeded' if a seed file is set, otherwise 'autonomous'."""
+        if self.run_mode == RunMode.persistent:
+            return "autonomous"
         return "seeded" if self.seed_file else "autonomous"
+
+    def _validate_run_mode_constraints(self) -> None:
+        """Apply run-mode invariants after CLI and seed-file fields merge."""
+        if self.run_mode == RunMode.persistent:
+            if self.duration is not None:
+                raise ValueError("persistent mode is indefinite; do not set duration")
+            if self.experimental_goal is not None:
+                raise ValueError("persistent mode is indefinite; do not set experimental_goal")
+            if self.max_cost_rolling is None or self.rolling_window is None:
+                raise ValueError(
+                    "persistent mode requires max_cost_rolling and rolling_window "
+                    "so it is bounded by a rolling cap"
+                )
+            if self.world_config is None:
+                self.world_config = WorldConfig(persistent=True)
+            else:
+                self.world_config.persistent = True
+            return
+
+        if self.run_mode != RunMode.experimental:
+            return
+
+        if self.seed_file is None and self.duration is None and self.experimental_goal is None:
+            raise ValueError(
+                "experimental mode requires a seed_file, duration, or experimental_goal"
+            )
+        if self.world_config is not None:
+            if self.world_config.durable_world_id:
+                raise ValueError("experimental mode cannot use durable_world_id")
+            self.world_config.persistent = False
 
     def load_seed_file(self, valid_agent_ids: set[str] | None = None) -> None:
         """Parse the YAML seed file into Phase objects.
@@ -188,6 +316,46 @@ class SimulationConfig:
         raw_seed = data.get("memory_seed")
         if raw_seed and self.memory_seed is None:
             self.memory_seed = MemorySeedConfig(**raw_seed)
+
+        raw_persona_overrides = data.get("persona_overrides")
+        if raw_persona_overrides is not None and not self._persona_overrides_override:
+            if not isinstance(raw_persona_overrides, list):
+                raise ValueError("persona_overrides must be a list")
+            self.persona_overrides = [
+                entry if isinstance(entry, PersonaOverride) else PersonaOverride(**entry)
+                for entry in raw_persona_overrides
+            ]
+
+        raw_agent_goals = data.get("agent_goals")
+        if raw_agent_goals is not None and not self._agent_goals_override:
+            self.agent_goals = _normalize_agent_goals(raw_agent_goals)
+
+        raw_world = data.get("world")
+        if raw_world is not None and not self._world_config_override:
+            if not isinstance(raw_world, dict):
+                raise ValueError("world must be a mapping")
+            self.world_config = WorldConfig(**raw_world)
+
+        raw_run_mode = data.get("run_mode")
+        if raw_run_mode is not None and not self._run_mode_explicit:
+            self.run_mode = RunMode(raw_run_mode)
+            self._run_mode_explicit = True
+
+        raw_management_policy = data.get("management_policy")
+        if raw_management_policy is not None and not self._management_policy_override:
+            self.management_policy = ManagementPolicy(raw_management_policy)
+            self._management_policy_override = True
+        elif not self._management_policy_override:
+            self.management_policy = resolve_management_policy(None, self.run_mode)
+        self.management_shadow = self.management_policy == ManagementPolicy.shadow
+
+        raw_experimental_goal = data.get("experimental_goal")
+        if raw_experimental_goal is not None and not self._experimental_goal_override:
+            if not isinstance(raw_experimental_goal, dict):
+                raise ValueError("experimental_goal must be a mapping")
+            self.experimental_goal = ExperimentalGoalConfig(**raw_experimental_goal)
+
+        self._validate_run_mode_constraints()
 
         # Parse factions if present. Public submissions pass an explicit
         # normalized list, which intentionally overrides the scenario YAML.
@@ -246,6 +414,13 @@ class SimulationConfig:
             "management_shadow": self.management_shadow,
             "world_sim": self.world_sim,
         }
+        if self.management_policy is not None and (
+            self._management_policy_override
+            or self._run_mode_explicit
+            or self.run_mode == RunMode.persistent
+            or self.experimental_goal is not None
+        ):
+            d["management_policy"] = self.management_policy.value
         if self.duration is not None:
             d["duration_seconds"] = self.duration.total_seconds()
         if self.max_cost_rolling is not None:
@@ -277,6 +452,24 @@ class SimulationConfig:
             d["source"] = self.source
         if self.memory_seed is not None:
             d["memory_seed"] = self.memory_seed.model_dump(exclude_none=True)
+        if self.persona_overrides:
+            d["persona_overrides"] = [
+                p.model_dump(exclude_none=True) for p in self.persona_overrides
+            ]
+        if self.agent_goals:
+            d["agent_goals"] = self.agent_goals
+        if self.world_config is not None:
+            d["world"] = self.world_config.model_dump(exclude_none=True)
+        if self.world_provisioned is not None:
+            d["world_provisioned"] = self.world_provisioned
+        if self.run_mode is not None and (
+            self._run_mode_explicit
+            or self.run_mode == RunMode.persistent
+            or self.experimental_goal is not None
+        ):
+            d["run_mode"] = self.run_mode.value
+        if self.experimental_goal is not None:
+            d["experimental_goal"] = self.experimental_goal.model_dump()
         return d
 
 
@@ -343,6 +536,13 @@ class SimulationOrchestrator:
         self._total_cost = Decimal("0")
         self._cancelled = False
         self._errors: list[dict[str, Any]] = []
+        self._last_persistent_heartbeat = 0.0
+        self._experimental_stop_reason: str | None = None
+        self._experimental_progress: dict[str, int] = {
+            "phases_completed": 0,
+            "turns": 0,
+            "artifacts": 0,
+        }
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
     @property
@@ -584,6 +784,95 @@ class SimulationOrchestrator:
             state.energy = max(0.0, min(1.0, normalized))
             await manager.save_state(state)
 
+    async def _seed_configured_agent_goals(self) -> None:
+        """Seed run-spec agent goals after the simulation id is known."""
+        if (
+            not self._config.agent_goals
+            or self._config.dry_run
+            or self._services is None
+            or self._services.goal_manager is None
+        ):
+            return
+        await self._services.goal_manager.seed_agent_goals(
+            self._config.agent_goals,
+            simulation_id=self._simulation_id,
+        )
+        logger.info("Seeded run-spec goals for %d agents", len(self._config.agent_goals))
+
+    async def _persist_config_snapshot(self) -> None:
+        """Persist the current config snapshot after runtime setup mutates it."""
+        if self._simulation_id is None or self._config.dry_run:
+            return
+        await self._sim_repo.update_config(self._simulation_id, self._current_config_snapshot())
+
+    def _current_config_snapshot(self) -> dict[str, Any]:
+        """Build the DB config snapshot with runtime fields included."""
+        snapshot = {
+            **self._config.to_dict(),
+            "clock_state": self.clock.to_dict(),
+            "llm_provider": (
+                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
+            ),
+        }
+        if self._config.run_mode == RunMode.experimental:
+            progress = dict(
+                getattr(
+                    self,
+                    "_experimental_progress",
+                    {"phases_completed": 0, "turns": 0, "artifacts": 0},
+                )
+            )
+            stop_reason = getattr(self, "_experimental_stop_reason", None)
+            if any(progress.values()) or stop_reason is not None:
+                snapshot["experimental_progress"] = progress
+            if stop_reason is not None:
+                snapshot["experimental_stop_reason"] = stop_reason
+        return snapshot
+
+    async def _provision_world_for_run(self) -> None:
+        """Apply RunSpec.world to the Minecraft server world config."""
+        if self._config.world_config is None or self._config.dry_run or self._simulation_id is None:
+            return
+
+        from core.minecraft.world_provisioner import provision_world
+
+        run_mode = self._config.run_mode or RunMode.experimental
+        project_root = Path(__file__).resolve().parents[2]
+        server_dir = Path(os.environ.get("SERVER_DIR", project_root / "minecraft-server"))
+        script_dir = project_root / "scripts" / "minecraft"
+        persistent = self._config.world_config.persistent or run_mode == RunMode.persistent
+
+        try:
+            result = provision_world(
+                self._config.world_config,
+                run_mode,
+                server_dir=server_dir,
+                script_dir=script_dir,
+                dry_run=self._config.dry_run,
+            )
+        except FileNotFoundError as exc:
+            if persistent:
+                logger.warning("Persistent Minecraft world is not present yet: %s", exc)
+                self._config.world_provisioned = {
+                    "run_mode": run_mode.value,
+                    "persistent": True,
+                    "action": "missing_existing_world",
+                    "error": str(exc),
+                }
+                await self._persist_config_snapshot()
+                return
+            raise
+
+        self._config.world_provisioned = result.to_dict()
+        logger.info(
+            "Provisioned Minecraft world for run_mode=%s: action=%s level_name=%s config=%s",
+            run_mode.value,
+            result.action,
+            result.level_name,
+            result.world_config_path,
+        )
+        await self._persist_config_snapshot()
+
     async def _create_or_attach_simulation(
         self,
         config_snapshot: dict[str, Any],
@@ -602,6 +891,11 @@ class SimulationOrchestrator:
             sim = await self._sim_repo.get(sim_uuid)
             if sim is None:
                 raise RuntimeError(f"existing_sim_id {sim_uuid} not found in simulations table")
+            if (
+                self._config.run_mode == RunMode.persistent
+                and sim.status == SimulationStatus.running
+            ):
+                self._total_cost = await self._sim_repo.get_total_cost_from_events(sim_uuid)
             await self._sim_repo.update_config(sim_uuid, config_snapshot)
             await self._sim_repo.update_agents_participated(sim_uuid, self._config.agents)
             await self._sim_repo.update_status(sim_uuid, SimulationStatus.running)
@@ -631,13 +925,7 @@ class SimulationOrchestrator:
         self._start_time = time.monotonic()
 
         # Create simulation record (include clock state in config snapshot)
-        config_snapshot = {
-            **self._config.to_dict(),
-            "clock_state": self.clock.to_dict(),
-            "llm_provider": (
-                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
-            ),
-        }
+        config_snapshot = self._current_config_snapshot()
         model_versions = self._build_model_versions()
         sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
@@ -645,6 +933,8 @@ class SimulationOrchestrator:
         self._llm._simulation_id = sim.id  # All LLM calls now tracked to this simulation
         self._selection_logger.simulation_id = sim.id
         self._seed_rng(sim.id)
+        if self._config.run_mode == RunMode.persistent:
+            await self._persistent_heartbeat(force=True)
 
         # Collect runtime errors for error_log persistence
         self._errors.clear()
@@ -659,6 +949,12 @@ class SimulationOrchestrator:
             sim.name,
             model_versions,
         )
+
+        try:
+            await self._provision_world_for_run()
+        except Exception as exc:
+            await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
+            raise
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -717,9 +1013,11 @@ class SimulationOrchestrator:
             await audience_sim.seed_initial_state()
             audience_sim.start()
 
+        persistent_mode = self._config.run_mode == RunMode.persistent
+
         # Start world simulator if enabled
         world_sim = None
-        if self._config.world_sim and not self._config.dry_run:
+        if self._config.world_sim and not self._config.dry_run and not persistent_mode:
             from core.simulation.recurring_personas import PersonaManager
             from core.simulation.world_simulator import WorldSimulator
 
@@ -744,6 +1042,7 @@ class SimulationOrchestrator:
                     simulation_id=self._simulation_id,
                 )
                 logger.info("Seeded story goals for agents")
+            await self._seed_configured_agent_goals()
 
         phases = self._config.phases
         total_phases = len(phases)
@@ -800,6 +1099,7 @@ class SimulationOrchestrator:
                         )
 
                 self._total_cost += result.cost
+                self._record_experimental_progress(result)
                 self._display.show_phase_complete(result, phase.name)
 
                 # Advance simulated clock so reflection scheduler can track time
@@ -835,6 +1135,9 @@ class SimulationOrchestrator:
                 # Check cost limit
                 if not self._config.dry_run:
                     await self._check_cost_limit()
+                if self._experimental_goal_reached():
+                    self._mark_experimental_stop_reason("goal_reached")
+                    break
 
             # Finalize
             if audience_sim:
@@ -842,6 +1145,13 @@ class SimulationOrchestrator:
             if world_sim:
                 await world_sim.stop()
             status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
+            if self._cancelled:
+                self._mark_experimental_stop_reason("cancelled")
+            elif self._config.run_mode == RunMode.experimental:
+                if self._experimental_goal_reached():
+                    self._mark_experimental_stop_reason("goal_reached")
+                else:
+                    self._mark_experimental_stop_reason("phases_complete")
             await self._finalize(status)
 
         except CostLimitExceededError:
@@ -849,6 +1159,7 @@ class SimulationOrchestrator:
                 await audience_sim.stop()
             if world_sim:
                 await world_sim.stop()
+            self._mark_experimental_stop_reason("cost_cap")
             logger.warning("Cost limit exceeded ($%s), stopping simulation", self._total_cost)
             self._display.show_cost_exceeded(self._total_cost, self._config.max_cost)
             await self._finalize(
@@ -872,13 +1183,7 @@ class SimulationOrchestrator:
         """Run in autonomous mode — trigger system drives all conversations."""
         self._start_time = time.monotonic()
 
-        config_snapshot = {
-            **self._config.to_dict(),
-            "clock_state": self.clock.to_dict(),
-            "llm_provider": (
-                self._llm.provider if isinstance(self._llm, OpenRouterClient) else "openrouter"
-            ),
-        }
+        config_snapshot = self._current_config_snapshot()
         model_versions = self._build_model_versions()
         sim = await self._create_or_attach_simulation(config_snapshot, model_versions)
         self._simulation_id = sim.id
@@ -900,6 +1205,12 @@ class SimulationOrchestrator:
             sim.name,
             model_versions,
         )
+
+        try:
+            await self._provision_world_for_run()
+        except Exception as exc:
+            await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
+            raise
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -933,9 +1244,11 @@ class SimulationOrchestrator:
         runner = self._build_phase_runner(sim.id, relationship_tracker)
         await self._apply_initial_agent_energy()
 
+        persistent_mode = self._config.run_mode == RunMode.persistent
+
         # Start world simulator if enabled
         world_sim = None
-        if self._config.world_sim and not self._config.dry_run:
+        if self._config.world_sim and not self._config.dry_run and not persistent_mode:
             from core.simulation.recurring_personas import PersonaManager
             from core.simulation.world_simulator import WorldSimulator
 
@@ -950,6 +1263,8 @@ class SimulationOrchestrator:
             )
             world_sim.start()
 
+        await self._seed_configured_agent_goals()
+
         conversation_num = 0
         current_day = self.clock.simulated_day()
         day_stats: dict[str, Any] = {"conversations": 0, "cost": Decimal("0"), "tools": 0}
@@ -958,6 +1273,10 @@ class SimulationOrchestrator:
 
         try:
             while not await self._terminated():
+                if persistent_mode and not self._config.dry_run:
+                    await self._persistent_heartbeat()
+                    await self._check_cost_limit()
+
                 # Check for day boundary
                 new_day = self.clock.simulated_day()
                 if new_day != current_day:
@@ -1031,6 +1350,7 @@ class SimulationOrchestrator:
                     result.assertions = assertion_results
 
                 self._total_cost += result.cost
+                self._record_experimental_progress(result)
                 day_stats["conversations"] += 1
                 day_stats["cost"] += result.cost
                 day_stats["tools"] += result.artifacts
@@ -1062,17 +1382,22 @@ class SimulationOrchestrator:
                 # Check cost limit
                 if not self._config.dry_run:
                     await self._check_cost_limit()
+                if self._experimental_goal_reached():
+                    self._mark_experimental_stop_reason("goal_reached")
 
             # Final day stats
             self._display.show_day_boundary(self.clock.simulated_day(), day_stats)
             if world_sim:
                 await world_sim.stop()
             status = SimulationStatus.cancelled if self._cancelled else SimulationStatus.completed
+            if self._cancelled:
+                self._mark_experimental_stop_reason("cancelled")
             await self._finalize(status)
 
         except CostLimitExceededError:
             if world_sim:
                 await world_sim.stop()
+            self._mark_experimental_stop_reason("cost_cap")
             logger.warning(
                 "Cost limit exceeded ($%s), stopping simulation",
                 self._total_cost,
@@ -1099,18 +1424,80 @@ class SimulationOrchestrator:
     async def _terminated(self) -> bool:
         """Check all termination conditions for autonomous mode."""
         if self._cancelled:
+            self._mark_experimental_stop_reason("cancelled")
+            return True
+        if self._experimental_goal_reached():
+            logger.info("Experimental goal reached (%s)", self._config.experimental_goal)
+            self._mark_experimental_stop_reason("goal_reached")
             return True
         # Duration limit
-        if self._config.duration and self.clock.elapsed() >= self._config.duration:
+        if (
+            getattr(self._config, "run_mode", None) != RunMode.persistent
+            and self._config.duration
+            and self.clock.elapsed() >= self._config.duration
+        ):
             logger.info("Duration limit reached (%s)", self._config.duration)
+            self._mark_experimental_stop_reason("duration_reached")
             return True
         # Redis kill switch (accessible from Brad's phone)
         if self._redis:
             kill = await self._redis.get(KILL_SWITCH_KEY)
             if kill == KILL_SWITCH_ACTIVE_VALUE:
                 logger.info("Kill switch activated — stopping simulation")
+                self._mark_experimental_stop_reason("kill_switch")
                 return True
         return False
+
+    def _mark_experimental_stop_reason(self, reason: str) -> None:
+        """Record why an experimental run stopped, preserving the first terminal cause."""
+        if getattr(self._config, "run_mode", None) != RunMode.experimental:
+            return
+        if getattr(self, "_experimental_stop_reason", None) is None:
+            self._experimental_stop_reason = reason
+
+    def _record_experimental_progress(self, result: Any) -> None:
+        """Update bounded-run progress counters from a completed phase result."""
+        if getattr(self._config, "run_mode", None) != RunMode.experimental:
+            return
+        if not hasattr(self, "_experimental_progress"):
+            self._experimental_progress = {
+                "phases_completed": 0,
+                "turns": 0,
+                "artifacts": 0,
+            }
+        self._experimental_progress["phases_completed"] += 1
+        self._experimental_progress["turns"] += int(getattr(result, "turns", 0) or 0)
+        self._experimental_progress["artifacts"] += int(getattr(result, "artifacts", 0) or 0)
+
+    _GOAL_KIND_TO_PROGRESS_KEY = {
+        "phases_complete": "phases_completed",
+        "turns": "turns",
+        "artifacts": "artifacts",
+    }
+
+    def _experimental_goal_reached(self) -> bool:
+        """Return whether the configured experimental goal has been satisfied."""
+        goal = getattr(self._config, "experimental_goal", None)
+        if getattr(self._config, "run_mode", None) != RunMode.experimental or goal is None:
+            return False
+        progress = getattr(
+            self,
+            "_experimental_progress",
+            {"phases_completed": 0, "turns": 0, "artifacts": 0},
+        )
+        progress_key = self._GOAL_KIND_TO_PROGRESS_KEY.get(goal.kind, goal.kind)
+        return progress.get(progress_key, 0) >= goal.target
+
+    async def _persistent_heartbeat(self, *, force: bool = False) -> None:
+        """Publish the active persistent simulation id on raw Redis."""
+        if self._simulation_id is None or self._config.run_mode != RunMode.persistent:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_persistent_heartbeat < 30:
+            return
+        await self._redis.set("live:simulation_id", str(self._simulation_id))
+        await self._redis.set("live:simulation_heartbeat", datetime.now(UTC).isoformat())
+        self._last_persistent_heartbeat = now
 
     @staticmethod
     def _trigger_to_phase_type(trigger_type: str) -> PhaseType:
@@ -1262,7 +1649,7 @@ class SimulationOrchestrator:
             )
 
         # Persist final clock state into config
-        final_config = {**self._config.to_dict(), "clock_state": self.clock.to_dict()}
+        final_config = self._current_config_snapshot()
         await self._sim_repo.update_config(self._simulation_id, final_config)
 
         # Build a baseline outcomes object (research artifact) so the
@@ -1383,6 +1770,12 @@ class SimulationOrchestrator:
                 "total_management_flags": sim.total_management_flags,
                 "simulated_duration_seconds": simulated_duration.total_seconds(),
                 "real_duration_seconds": real_duration.total_seconds(),
+                "phases_completed": getattr(
+                    self,
+                    "_experimental_progress",
+                    {"phases_completed": len(self._config.phases)},
+                ).get("phases_completed", len(self._config.phases)),
+                "stop_reason": getattr(self, "_experimental_stop_reason", None),
             },
             "evals": evals,
             "surprises": [],
@@ -1421,7 +1814,7 @@ class SimulationOrchestrator:
         try:
             resp = await self._llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                model="claude-haiku-4-5",
+                model=resolve_internal_model("simulation_learning_summary"),
                 max_tokens=200,
             )
         except Exception:

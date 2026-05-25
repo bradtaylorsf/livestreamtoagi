@@ -88,6 +88,29 @@ async def _cache_memory_write_id(services: Any, key: str, memory_id: str) -> Non
     _local_memory_write_cache(services)[key] = memory_id
 
 
+def _log_memory_read(
+    *,
+    agent_id: str,
+    tier: str,
+    simulation_id: uuid.UUID | None,
+    result_size: int,
+) -> None:
+    fields = {
+        "agent_id": agent_id,
+        "tier": tier,
+        "simulation_id": str(simulation_id) if simulation_id is not None else None,
+        "result_size": result_size,
+    }
+    logger.info(
+        "bridge_memory_read agent_id=%s tier=%s simulation_id=%s result_size=%s",
+        fields["agent_id"],
+        fields["tier"],
+        fields["simulation_id"] or "-",
+        fields["result_size"],
+        extra={"bridge_memory": fields},
+    )
+
+
 async def handle_memory_read(env: BridgeRequest, services: Any) -> dict[str, Any]:
     """Read core or recall memory through the existing memory managers only."""
     payload = MemoryRecallRequest.model_validate(env.payload)
@@ -98,6 +121,12 @@ async def handle_memory_read(env: BridgeRequest, services: Any) -> dict[str, Any
             env.agent_id,
             simulation_id=simulation_id,
         )
+        _log_memory_read(
+            agent_id=env.agent_id,
+            tier=payload.tier,
+            simulation_id=simulation_id,
+            result_size=len(core_memory or ""),
+        )
         return {"results": [], "core_memory": core_memory}
 
     recall_backend = getattr(services, "memory_backend", None) or services.recall_memory
@@ -106,6 +135,12 @@ async def handle_memory_read(env: BridgeRequest, services: Any) -> dict[str, Any
         payload.query,
         limit=payload.limit,
         simulation_id=simulation_id,
+    )
+    _log_memory_read(
+        agent_id=env.agent_id,
+        tier=payload.tier,
+        simulation_id=simulation_id,
+        result_size=len(formatted or ""),
     )
     return {"results": [], "formatted": formatted}
 

@@ -1,0 +1,28 @@
+run_mode: persistent
+management_policy: enforce
+agents: [vera, rex]
+persona_overrides:
+  - agent_id: vera
+    display_name: Vera Prime
+    backstory: "Vera woke up in a test settlement with a precise memory of rain."
+    system_prompt_append: "Favor practical checklists in this run."
+agent_goals:
+  vera:
+    - "Stabilize the settlement before nightfall."
+  rex:
+    - "Build a shared workshop."
+memory_seed:
+  mode: none
+factions:
+  - name: planners
+    members: [vera, rex]
+    goal: "Coordinate the first build."
+    stance: "pragmatic"
+world:
+  seed: 601
+  world_type: custom
+  world_config_path: scripts/minecraft/world-flat-eval.config
+  persistent: true
+  durable_world_id: e12-test-world
+  biome_hint: plains
+phases: []

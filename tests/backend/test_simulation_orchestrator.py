@@ -7,6 +7,7 @@ import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -172,6 +173,17 @@ class TestSimulationConfig:
             assert d["phase_names"] == ["standup"]
         finally:
             os.unlink(path)
+
+    def test_director_v2_conversation_mode_is_valid_for_embodied_supervisor(self):
+        config = SimulationConfig(
+            name="director-v2-embodied",
+            agents=["vera"],
+            run_mode="experimental",
+            duration=timedelta(minutes=15),
+            conversation_mode="director_v2",
+        )
+
+        assert config.conversation_mode == "director_v2"
 
     def test_required_agents_extracted_from_phase(self):
         phases = [
@@ -655,6 +667,69 @@ class TestSimulationOrchestrator:
         assert len(sim_create.factions) == 1
         assert sim_create.factions[0]["name"] == "builders"
         assert sim_create.factions[0]["goal"] == "ship"
+
+    @pytest.mark.asyncio
+    async def test_embodied_run_seeds_configured_agent_goals(self):
+        """Run-spec agent goals are seeded for embodied runs at startup."""
+        path = make_seed_file([])
+        services = make_mock_services()
+        goal_manager = MagicMock()
+        goal_manager.seed_agent_goals = AsyncMock()
+        services_obj = SimpleNamespace(
+            core_memory=None,
+            recall_memory=None,
+            token_counter=None,
+            agent_state_manager=None,
+            shared_working_state=None,
+            goal_manager=goal_manager,
+            agent_registry=None,
+            scoped_redis=None,
+            economy_manager=None,
+            alliance_manager=None,
+            dream_manager=None,
+            event_generator=None,
+        )
+        agent_goals = {
+            "vera": ["Mark the build site."],
+            "rex": ["Gather starter materials."],
+        }
+        config = SimulationConfig(
+            name="goal-test",
+            seed_file=path,
+            agents=["vera", "rex"],
+            dry_run=False,
+            agent_goals=agent_goals,
+            conversation_mode="embodied",
+        )
+        config.load_seed_file()
+
+        orchestrator = SimulationOrchestrator(
+            config=config,
+            db=services["db"],
+            redis_client=services["redis_client"],
+            simulation_repo=services["simulation_repo"],
+            config_loader=services["config_loader"],
+            agent_registry=services["agent_registry"],
+            event_bus=services["event_bus"],
+            llm_client=services["llm_client"],
+            management=services["management"],
+            context_assembler=services["context_assembler"],
+            conversation_repo=services["conversation_repo"],
+            archival_memory=services["archival_memory"],
+            proximity=services["proximity"],
+            trigger_system=services["trigger_system"],
+            selection_logger=services["selection_logger"],
+            reflection_manager=services["reflection_manager"],
+            display=services["display"],
+            services=services_obj,
+        )
+
+        await orchestrator.run()
+
+        goal_manager.seed_agent_goals.assert_awaited_once_with(
+            agent_goals,
+            simulation_id=services["sim_id"],
+        )
 
     @pytest.mark.asyncio
     async def test_hypothesis_passed_to_simulation_create(self):

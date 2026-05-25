@@ -1,0 +1,81 @@
+# Open Settlement 90m - exploratory Minecraft settlement run.
+#
+# This is intentionally less constrained than the Director V2 acceptance soak:
+# Alpha is expected to act as a local town planner while capped OpenRouter calls
+# are reserved for builder-plan JSON generation.
+
+meta:
+  name: "Open Settlement 90m"
+  description: "Fresh-world, open-tool Minecraft settlement experiment with teams."
+  agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 0.25
+  expected_runtime_minutes: 90
+
+run_mode: experimental
+experimental_goal:
+  kind: artifacts
+  target: 99
+agents:
+  - alpha
+  - vera
+  - rex
+  - aurora
+  - pixel
+  - fork
+  - sentinel
+  - grok
+world:
+  world_type: default
+  seed: 51490
+  persistent: false
+memory_seed:
+  mode: none
+management_policy: shadow
+persona_overrides:
+  - agent_id: alpha
+    backstory: "Alpha starts this run as the local town planner for a larger settlement experiment."
+    system_prompt_append: "Speak plainly in this run, assign teams, review progress, and create the next settlement plan."
+agent_goals:
+  alpha:
+    - "Create and revise a town plan with distinct buildings, paths, farm/garden, animal pen, workshop/storage, lighting, and perimeter."
+    - "Assign concrete tasks to each team, then observe and adjust after progress."
+  rex:
+    - "Lead fast visible building for houses, paths, and perimeter features."
+  fork:
+    - "Implement robust build plans and recover from tool or placement failures."
+  pixel:
+    - "Keep builds visually coherent and mark useful settlement details."
+  vera:
+    - "Coordinate logistics, inventory checks, food, and shared supplies."
+  aurora:
+    - "Shape gardens, animal areas, and visually pleasant common spaces."
+  sentinel:
+    - "Scout the wider area, light hazards, and protect the settlement footprint."
+  grok:
+    - "Explore, test odd ideas safely, and report useful terrain/resources."
+factions:
+  - name: town_planning
+    members: [alpha]
+    goal: "Keep one coherent settlement plan and update assignments after evidence."
+    stance: planner
+  - name: builders
+    members: [rex, fork, pixel]
+    goal: "Build multiple distinct structures and connect them with paths."
+    stance: action-first
+  - name: logistics_garden
+    members: [vera, aurora]
+    goal: "Gather resources, organize supplies, create gardens, and tend animals."
+    stance: support-and-growth
+  - name: safety_exploration
+    members: [sentinel, grok]
+    goal: "Scout, light, expand, and keep the settlement safe while roaming."
+    stance: exploratory
+
+phases:
+  - name: open_settlement_launch
+    type: scheduled
+    trigger: standup
+    required_agents: [alpha, rex, fork, pixel, vera, aurora, sentinel, grok]
+    topic: "Alpha assigns teams and the group starts a large open settlement."
+    location: starter_meadow
+    max_turns: 8

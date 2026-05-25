@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { callBridge } from '../bridge/python_bridge.js';
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
 import {
     BuilderBudgetError,
@@ -27,6 +28,7 @@ const DEFAULT_TIMEOUT_MS = 60000;
 const MAX_RADIUS = 6;
 const MAX_HEIGHT = 5;
 const MIN_CABIN_BLOCKS = 32;
+const DEFAULT_MODEL_MAX_STEPS = 32;
 const ALLOWED_MATERIALS = new Set([
     'oak_log',
     'oak_planks',
@@ -47,6 +49,25 @@ function getBot(agent) {
 function agentId(agent) {
     const bot = getBot(agent);
     return (agent && agent.name) || (bot && bot.username) || 'bridge-bot';
+}
+
+function planBuildAllowedAgents() {
+    const raw = String(
+        process.env.MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST || process.env.SOAK_PLAN_BUILD_BOTS || '',
+    ).trim();
+    if (!raw || ['*', 'all', 'any'].includes(raw.toLowerCase())) return null;
+    return new Set(
+        raw
+            .split(/[\s,]+/)
+            .map((item) => item.trim().toLowerCase())
+            .filter(Boolean),
+    );
+}
+
+function planBuildAllowedForAgent(agent) {
+    const allowed = planBuildAllowedAgents();
+    if (!allowed) return true;
+    return allowed.has(String(agentId(agent) || '').trim().toLowerCase());
 }
 
 function emit(agent, type, traceId, payload = {}) {
@@ -77,6 +98,9 @@ function directorBuildContext(agent) {
         owner: macro.owner || null,
         role: macro.role || null,
         supportTask: macro.support_task || null,
+        objectiveId: macro.objective_id || null,
+        phaseIndex: Number.isInteger(macro.phase_index) ? macro.phase_index : null,
+        phaseOwner: macro.phase_owner || macro.owner || null,
     };
 }
 
@@ -89,7 +113,70 @@ function commonBuildPayload(acquisition, context = {}) {
         build_plan_owner: owner,
         director_role: context.role || null,
         director_support_task: context.supportTask || null,
+        objective_id: context.objectiveId || acquisition?.objective_id || null,
+        phase_index:
+            Number.isInteger(context.phaseIndex) ? context.phaseIndex : acquisition?.phase_index ?? null,
+        phase_owner: context.phaseOwner || acquisition?.phase_owner || owner,
     };
+}
+
+async function writeSettlementObjective(agent, operation, context, traceId, fields = {}) {
+    if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !context.objectiveId) return;
+    const owner =
+        fields.owner ||
+        context.phaseOwner ||
+        context.owner ||
+        (agentId(agent) ? String(agentId(agent)).toLowerCase() : null);
+    const objective = {
+        objective_id: context.objectiveId,
+        phase_index: Number.isInteger(context.phaseIndex) ? context.phaseIndex : 0,
+        description: fields.description || context.description || 'settlement objective',
+        owner_agent_id: owner,
+        status: fields.status || 'in_progress',
+        plan_id: fields.planId || context.planId || null,
+        intended_blocks: Number.isFinite(fields.intendedBlocks) ? fields.intendedBlocks : 0,
+        verified_blocks: Number.isFinite(fields.verifiedBlocks) ? fields.verifiedBlocks : 0,
+        completion_ratio: Number.isFinite(fields.completionRatio) ? fields.completionRatio : 0,
+        reassign_reason: fields.reason || null,
+        previous_owner_agent_ids: [],
+        owner_started_at_ms: fields.ownerStartedAtMs || null,
+        evidence: fields.evidence || {},
+    };
+    try {
+        await callBridge({
+            service: 'shared_state',
+            method: 'write',
+            payload: {
+                operation,
+                settlement_objective: objective,
+            },
+            deadlineMs: Number.parseInt(process.env.MC_SIM_SHARED_STATE_DEADLINE_MS || '1000', 10),
+            agentId: agentId(agent),
+            traceId,
+            costContext: {
+                agent_tier: 'conversation',
+                budget_bucket: 'shared-state',
+                estimated_cost_usd: 0.0,
+            },
+        });
+        emit(agent, 'settlement_objective.updated', traceId, {
+            operation,
+            objective_id: objective.objective_id,
+            phase_index: objective.phase_index,
+            owner_agent_id: objective.owner_agent_id,
+            status: objective.status,
+            plan_id: objective.plan_id,
+            verified_blocks: objective.verified_blocks,
+            completion_ratio: objective.completion_ratio,
+        });
+    } catch (err) {
+        emit(agent, 'settlement_objective.error', traceId, {
+            operation,
+            objective_id: objective.objective_id,
+            error_code: err && err.code ? String(err.code) : 'shared_state_write_failed',
+            error: err && err.message ? err.message : String(err),
+        });
+    }
 }
 
 function executionMetrics(result) {
@@ -109,6 +196,98 @@ function executionMetrics(result) {
         steps_abandoned: valueFor('abandoned'),
         completion_ratio: valueFor('completion'),
     };
+}
+
+function isFalseLike(value) {
+    return ['0', 'false', 'no', 'off', 'disabled'].includes(String(value).trim().toLowerCase());
+}
+
+function sharedStateEnabledByEnv() {
+    return !isFalseLike(process.env.MC_SIM_SHARED_STATE_ENABLED || '1');
+}
+
+async function readActiveSettlementObjective(agent, traceId) {
+    if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !sharedStateEnabledByEnv()) {
+        return null;
+    }
+    try {
+        const response = await callBridge({
+            service: 'shared_state',
+            method: 'read',
+            payload: {},
+            deadlineMs: Number.parseInt(process.env.MC_SIM_SHARED_STATE_DEADLINE_MS || '1000', 10),
+            agentId: agentId(agent),
+            traceId,
+            costContext: {
+                agent_tier: 'conversation',
+                budget_bucket: 'shared-state',
+                estimated_cost_usd: 0.0,
+            },
+        });
+        const active = response?.payload?.active_objective;
+        return active && typeof active === 'object' ? active : null;
+    } catch (err) {
+        emit(agent, 'settlement_objective.error', traceId, {
+            operation: 'settlement_objective_read',
+            error_code: err && err.code ? String(err.code) : 'shared_state_read_failed',
+            error: err && err.message ? err.message : String(err),
+        });
+        return null;
+    }
+}
+
+function normalizedId(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+const REASSIGNABLE_SETTLEMENT_STATUSES = new Set([
+    'blocked',
+    'owner_cap_reached',
+    'cooldown',
+    'stale',
+    'abandoned',
+]);
+
+function directorAuthorizedReassignment(activeObjective, context, agent) {
+    const actor = normalizedId(agentId(agent));
+    const directorOwner = normalizedId(context.phaseOwner || context.owner);
+    if (!actor || directorOwner !== actor || context.role !== 'planner_owner') return false;
+    const status = normalizedId(activeObjective.status);
+    if (REASSIGNABLE_SETTLEMENT_STATUSES.has(status)) return true;
+    const cooldownUntil = Number(activeObjective.cooldown_until_ms || 0);
+    return Number.isFinite(cooldownUntil) && cooldownUntil > Date.now();
+}
+
+function staleSettlementReason(activeObjective, context, agent) {
+    if (!activeObjective || typeof activeObjective !== 'object') return '';
+    const activeObjectiveId = normalizedId(activeObjective.objective_id || activeObjective.id);
+    const contextObjectiveId = normalizedId(context.objectiveId);
+    if (activeObjectiveId && contextObjectiveId && activeObjectiveId !== contextObjectiveId) {
+        return 'stale_settlement_objective';
+    }
+    const activeOwner = normalizedId(activeObjective.owner_agent_id);
+    const actor = normalizedId(agentId(agent));
+    if (activeOwner && actor && activeOwner !== actor) {
+        if (directorAuthorizedReassignment(activeObjective, context, agent)) {
+            return '';
+        }
+        return 'settlement_owner_mismatch';
+    }
+    if (
+        activeObjectiveId &&
+        contextObjectiveId &&
+        activeObjectiveId === contextObjectiveId &&
+        normalizedId(activeObjective.status) === 'completed'
+    ) {
+        return 'settlement_objective_completed';
+    }
+    return '';
+}
+
+function settlementStatusForSkippedAcquisition(reason) {
+    if (reason === 'per_agent_cap') return 'owner_cap_reached';
+    if (reason === 'cooldown') return 'cooldown';
+    return null;
 }
 
 function localBuilderModel(agent) {
@@ -149,13 +328,37 @@ function hutBlueprint() {
     return { blocks };
 }
 
+function compactCabinBlueprint(maxSteps = DEFAULT_MAX_STEPS) {
+    const limit = Math.max(1, Math.min(maxSteps, DEFAULT_MAX_STEPS));
+    const blocks = [
+        { dx: 1, dy: 0, dz: -2, block_type: 'oak_planks' },
+        { dx: 2, dy: 0, dz: -2, block_type: 'oak_planks' },
+        { dx: 1, dy: 0, dz: -1, block_type: 'oak_planks' },
+        { dx: 2, dy: 0, dz: -1, block_type: 'oak_planks' },
+        { dx: 1, dy: 1, dz: -2, block_type: 'oak_log' },
+        { dx: 2, dy: 1, dz: -2, block_type: 'oak_log' },
+        { dx: 1, dy: 1, dz: -1, block_type: 'oak_log' },
+        { dx: 2, dy: 1, dz: -1, block_type: 'oak_log' },
+        { dx: 1, dy: 2, dz: -2, block_type: 'oak_planks' },
+        { dx: 2, dy: 2, dz: -2, block_type: 'oak_planks' },
+        { dx: 1, dy: 2, dz: -1, block_type: 'oak_planks' },
+        { dx: 2, dy: 2, dz: -1, block_type: 'oak_planks' },
+    ];
+    return { blocks: blocks.slice(0, limit) };
+}
+
 function isCabinRequest(description) {
     const text = String(description || '').toLowerCase();
     return text.includes('cabin') || text.includes('house') || text.includes('shelter');
 }
 
+function isWallRequest(description) {
+    const text = String(description || '').toLowerCase();
+    return text.includes('wall');
+}
+
 function cabinBlueprint(maxSteps = DEFAULT_MAX_STEPS) {
-    if (maxSteps < MIN_CABIN_BLOCKS) return hutBlueprint();
+    if (maxSteps < MIN_CABIN_BLOCKS) return compactCabinBlueprint(maxSteps);
     const blocks = [];
     const corners = [
         [-1, -1],
@@ -239,29 +442,135 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
             ],
         };
     }
-    return {
-        blocks: [
-            { dx: 0, dy: 0, dz: 0, block_type: 'oak_log' },
-            { dx: 0, dy: 1, dz: 0, block_type: 'oak_log' },
-            { dx: 0, dy: 2, dz: 0, block_type: 'torch' },
-            { dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' },
-            { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
-        ],
-    };
+    if (
+        text.includes('workshop') ||
+        text.includes('workbench') ||
+        text.includes('work table') ||
+        text.includes('crafting') ||
+        text.includes('station')
+    ) {
+        return {
+            blocks: [
+                { dx: 1, dy: 0, dz: 1, block_type: 'oak_planks' },
+                { dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' },
+                { dx: 1, dy: 0, dz: 2, block_type: 'crafting_table' },
+                { dx: 2, dy: 0, dz: 2, block_type: 'oak_planks' },
+                { dx: 2, dy: 1, dz: 2, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('garden') || text.includes('farm')) {
+        return {
+            blocks: [
+                { dx: -1, dy: 0, dz: -1, block_type: 'dirt' },
+                { dx: 0, dy: 0, dz: -1, block_type: 'dirt' },
+                { dx: 1, dy: 0, dz: -1, block_type: 'dirt' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'dirt' },
+                { dx: 0, dy: 0, dz: 0, block_type: 'torch' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'dirt' },
+            ],
+        };
+    }
+    if (text.includes('marker') || text.includes('camp')) {
+        return {
+            blocks: [
+                { dx: 0, dy: 0, dz: 0, block_type: 'oak_log' },
+                { dx: 0, dy: 1, dz: 0, block_type: 'oak_log' },
+                { dx: 0, dy: 2, dz: 0, block_type: 'torch' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
+            ],
+        };
+    }
+    return null;
+}
+
+function starterBlueprintOrNull(description, maxSteps = DEFAULT_MAX_STEPS) {
+    return starterBlueprint(description, maxSteps);
+}
+
+function noStarterBlueprintMessage(description) {
+    return `no starter blueprint matches non-cabin build request: ${String(description || '').slice(0, 80)}`;
+}
+
+function skippedPlanResult(agent, traceId, actionId, acquisition, buildPayload, description, origin, reason) {
+    emit(agent, 'build_plan.generation.skipped', traceId, {
+        action_id: actionId,
+        plan_id: acquisition.plan_id || null,
+        ...buildPayload,
+        description,
+        origin,
+        reason,
+        fallback_reason: reason,
+        cache_key: acquisition.cache_key,
+        cache_hit: Boolean(acquisition.cache_hit),
+        active_build_owner: acquisition.active_build_owner,
+        active_build: governorSnapshot(agent).active_build,
+        builder_call_count: governorSnapshot(agent).builder_call_count,
+        max_builder_calls_per_agent: acquisition.max_builder_calls_per_agent,
+        skipped_repeat_count: acquisition.skipped_repeat_count || 0,
+    });
+    recordBuildFailed(agent, actionId, noStarterBlueprintMessage(description), { reason });
+    return `plan-and-build skipped: ${reason}`;
+}
+
+function hasBuildablePlaceOrder(blocks) {
+    const placed = new Set();
+    for (const block of blocks) {
+        const key = `${block.dx},${block.dy},${block.dz}`;
+        if (block.dy > 0 && !placed.has(`${block.dx},${block.dy - 1},${block.dz}`)) {
+            return false;
+        }
+        placed.add(key);
+    }
+    return true;
+}
+
+function orderBlocksForPlacement(blocks) {
+    return [...blocks].sort((a, b) => {
+        const dy = a.dy - b.dy;
+        if (dy !== 0) return dy;
+        const dz = a.dz - b.dz;
+        if (dz !== 0) return dz;
+        return a.dx - b.dx;
+    });
+}
+
+function positiveIntEnv(name, fallback) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function plannerStepLimit(maxSteps) {
+    return Math.max(1, Math.min(maxSteps, positiveIntEnv('MINECRAFT_PLAN_BUILD_MODEL_MAX_STEPS', DEFAULT_MODEL_MAX_STEPS)));
 }
 
 function assertPlanMatchesRequest(plan, description, maxSteps) {
-    if (!isCabinRequest(description) || maxSteps < MIN_CABIN_BLOCKS) return;
     const blocks = Array.isArray(plan?.blocks) ? plan.blocks : [];
+    const materials = new Set(blocks.map((block) => normalizeBlockType(block.block_type)));
+    if (!hasBuildablePlaceOrder(blocks)) {
+        throw new TypeError('build plan places unsupported upper blocks before foundations');
+    }
+    if (!isCabinRequest(description) && isWallRequest(description) && !materials.has('cobblestone')) {
+        throw new TypeError('wall plan must use cobblestone from the easy starter kit');
+    }
+    if (!isCabinRequest(description)) return;
+    const xs = new Set(blocks.map((block) => block.dx));
+    const zs = new Set(blocks.map((block) => block.dz));
+    if (xs.size < 2 || zs.size < 2) {
+        throw new TypeError('cabin plan lacks a recognizable footprint');
+    }
+    if (maxSteps < MIN_CABIN_BLOCKS) {
+        return;
+    }
     if (blocks.length < MIN_CABIN_BLOCKS) {
         throw new TypeError(`cabin plan too small: expected at least ${MIN_CABIN_BLOCKS} blocks`);
     }
-    const materials = new Set(blocks.map((block) => normalizeBlockType(block.block_type)));
     for (const required of ['oak_log', 'oak_planks', 'cobblestone', 'torch']) {
         if (!materials.has(required)) throw new TypeError(`cabin plan missing ${required}`);
     }
-    const xs = new Set(blocks.map((block) => block.dx));
-    const zs = new Set(blocks.map((block) => block.dz));
     const maxDy = Math.max(...blocks.map((block) => block.dy));
     if (xs.size < 3 || zs.size < 3) {
         throw new TypeError('cabin plan lacks a recognizable footprint');
@@ -321,6 +630,7 @@ function validateGeneratedPlan(rawPlan, origin, maxSteps) {
         }
         block.block_type = blockType;
     }
+    plan.blocks = orderBlocksForPlacement(plan.blocks);
     for (const [index, item] of clear.entries()) {
         assertBoundedDelta(item, `plan.clear[${index}]`);
     }
@@ -397,15 +707,26 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
     }
 
     if (!resolved.available) {
-        return { source: 'starter_blueprint', plan: starterBlueprint(description, maxSteps), raw: '' };
+        const fallbackPlan = starterBlueprintOrNull(description, maxSteps);
+        return {
+            source: 'starter_blueprint',
+            plan: fallbackPlan,
+            raw: '',
+            fallback_reason: fallbackPlan ? 'starter_blueprint' : 'no_starter_blueprint',
+        };
     }
 
+    const modelMaxSteps = plannerStepLimit(maxSteps);
     const systemMessage = [
         'You are a Minecraft building planner.',
         'Output only strict JSON with shape {"blocks":[{"dx":0,"dy":0,"dz":0,"block_type":"oak_log"}],"clear":[]}.',
-        `Use at most ${maxSteps} total clear+block steps.`,
+        `Use at most ${modelMaxSteps} total clear+block steps for this single phase.`,
+        'Prefer compact 6-24 block phases over one large complete structure.',
         `Keep dx/dz within ${MAX_RADIUS} blocks and dy between 0 and ${MAX_HEIGHT}.`,
         `Allowed block_type values: ${[...ALLOWED_MATERIALS].join(', ')}.`,
+        'Order blocks from lowest dy to highest dy, and include a same-column support block before every dy>0 block.',
+        'Stay within starter supplies: at most 24 oak_planks, 16 cobblestone, 16 dirt, 12 oak_log, 8 torch, 1 chest, and 1 crafting_table.',
+        'Avoid placing the first block at dx=0,dz=0 when another nearby offset would work.',
         'Do not include markdown, comments, narration, or code fences.',
     ].join('\n');
     const userMessage = [
@@ -425,7 +746,7 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
                 agentId: agentId(agent),
                 purpose: 'plan_generation',
                 description,
-                maxSteps,
+                maxSteps: modelMaxSteps,
             });
             return {
                 source: 'builder_model',
@@ -484,13 +805,54 @@ export const planAndBuildAction = {
         const traceId = `trace-${randomUUID()}`;
         let actionId = `plan-build-${randomUUID()}`;
         const baseOrigin = originFromAgent(agent);
+        if (!planBuildAllowedForAgent(agent)) {
+            emit(agent, 'build_plan.generation.skipped', traceId, {
+                action_id: actionId,
+                description,
+                origin: baseOrigin,
+                reason: 'plan_build_agent_not_allowed',
+                allowed_agents:
+                    process.env.MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST ||
+                    process.env.SOAK_PLAN_BUILD_BOTS ||
+                    '',
+            });
+            return 'plan-and-build skipped: plan_build_agent_not_allowed';
+        }
         const maxSteps = Number.parseInt(process.env.MINECRAFT_PLAN_BUILD_MAX_STEPS || '', 10);
         const stepLimit = Number.isInteger(maxSteps) && maxSteps > 0 ? maxSteps : DEFAULT_MAX_STEPS;
+        const modelStepLimit = plannerStepLimit(stepLimit);
         const buildSettings = {
             max_steps: stepLimit,
+            planner_max_steps: modelStepLimit,
             allowed_materials: [...ALLOWED_MATERIALS].sort(),
         };
         const directorContext = directorBuildContext(agent);
+        if (directorContext.objectiveId) {
+            buildSettings.objective_id = directorContext.objectiveId;
+            buildSettings.phase_index = directorContext.phaseIndex;
+        }
+        const activeObjective = await readActiveSettlementObjective(agent, traceId);
+        const staleReason = staleSettlementReason(activeObjective, directorContext, agent);
+        if (staleReason) {
+            emit(agent, 'build_plan.generation.skipped', traceId, {
+                action_id: actionId,
+                plan_id: directorContext.planId || null,
+                ...commonBuildPayload(null, directorContext),
+                description,
+                origin: baseOrigin,
+                reason: staleReason,
+                active_objective_id: activeObjective.objective_id || activeObjective.id || null,
+                active_objective_owner: activeObjective.owner_agent_id || null,
+                active_objective_status: activeObjective.status || null,
+                active_objective_phase_index: Number.isInteger(activeObjective.phase_index)
+                    ? activeObjective.phase_index
+                    : null,
+            });
+            return `plan-and-build skipped: ${staleReason}`;
+        }
+        if (activeObjective?.description) {
+            description = String(activeObjective.description);
+        }
         const acquisition = directorContext.sceneId
             ? tryAcquireSceneBuild(
                   directorContext.sceneId,
@@ -501,6 +863,9 @@ export const planAndBuildAction = {
                   {
                       planId: directorContext.planId || undefined,
                       ownerAgentId: directorContext.owner || undefined,
+                      objectiveId: directorContext.objectiveId || undefined,
+                      phaseIndex: directorContext.phaseIndex ?? undefined,
+                      phaseOwner: directorContext.phaseOwner || undefined,
                   },
               )
             : tryAcquireBuild(agent, description, baseOrigin, buildSettings);
@@ -509,6 +874,30 @@ export const planAndBuildAction = {
         const buildPayload = commonBuildPayload(acquisition, directorContext);
 
         if (!acquisition.allowed) {
+            const skippedStatus = settlementStatusForSkippedAcquisition(acquisition.reason);
+            if (skippedStatus) {
+                await writeSettlementObjective(
+                    agent,
+                    'settlement_objective_advance',
+                    directorContext,
+                    traceId,
+                    {
+                        description,
+                        owner:
+                            acquisition.active_build_owner ||
+                            directorContext.phaseOwner ||
+                            directorContext.owner,
+                        planId: actionId,
+                        status: skippedStatus,
+                        reason: acquisition.reason,
+                        evidence: {
+                            action_id: actionId,
+                            scene_id: buildPayload.scene_id,
+                            skipped_reason: acquisition.reason,
+                        },
+                    },
+                );
+            }
             emit(agent, 'build_plan.generation.skipped', traceId, {
                 action_id: actionId,
                 plan_id: acquisition.plan_id || null,
@@ -528,6 +917,14 @@ export const planAndBuildAction = {
             return `plan-and-build skipped: ${acquisition.reason}`;
         }
 
+        await writeSettlementObjective(agent, 'settlement_objective_assign', directorContext, traceId, {
+            description,
+            owner: acquisition.active_build_owner || directorContext.phaseOwner || directorContext.owner,
+            planId: actionId,
+            reason: 'plan_and_build_started',
+            ownerStartedAtMs: Date.now(),
+        });
+
         emit(agent, 'build_plan.generation.started', traceId, {
             action_id: actionId,
             plan_id: actionId,
@@ -536,6 +933,7 @@ export const planAndBuildAction = {
             origin,
             base_origin: baseOrigin,
             max_steps: stepLimit,
+            planner_max_steps: modelStepLimit,
             purpose: 'plan_generation',
             cache_key: acquisition.cache_key,
             cache_hit: Boolean(acquisition.cache_hit),
@@ -589,7 +987,7 @@ export const planAndBuildAction = {
                 generated.builder_call_count = callState.builder_call_count;
                 generated.max_builder_calls_per_agent = callState.max_builder_calls_per_agent;
             }
-            plan = validateGeneratedPlan(generated.plan, origin, stepLimit);
+            plan = validateGeneratedPlan(generated.plan, origin, modelStepLimit);
             assertPlanMatchesRequest(plan, description, stepLimit);
             if (!acquisition.cache_hit) {
                 recordPlanGenerated(agent, acquisition, plan);
@@ -623,10 +1021,24 @@ export const planAndBuildAction = {
                     err && err.message ? err.message : String(err)
                 }`;
             }
+            const fallbackPlan = starterBlueprintOrNull(description, stepLimit);
+            if (!fallbackPlan) {
+                return skippedPlanResult(
+                    agent,
+                    traceId,
+                    actionId,
+                    acquisition,
+                    buildPayload,
+                    description,
+                    origin,
+                    'no_starter_blueprint',
+                );
+            }
             generated = {
                 source: 'starter_blueprint_after_rejection',
                 raw: '',
-                plan: starterBlueprint(description, stepLimit),
+                plan: fallbackPlan,
+                fallback_reason: 'starter_blueprint_after_rejection',
             };
             plan = validateGeneratedPlan(generated.plan, origin, stepLimit);
             recordPlanGenerated(agent, acquisition, plan);
@@ -670,6 +1082,7 @@ export const planAndBuildAction = {
             plan,
             plan_json: JSON.stringify(plan),
             max_steps: stepLimit,
+            planner_max_steps: modelStepLimit,
         });
 
         emit(agent, 'build_plan.execution.started', traceId, {
@@ -698,10 +1111,12 @@ export const planAndBuildAction = {
             });
             throw err;
         }
-        const buildState = /\bsuccess\b/i.test(String(result || ''))
+        const metrics = executionMetrics(result);
+        const effectiveSuccess =
+            /\bsuccess\b/i.test(String(result || '')) || (metrics.completion_ratio || 0) >= 0.8;
+        const buildState = effectiveSuccess
             ? recordBuildCompleted(agent, actionId, result)
             : recordBuildFailed(agent, actionId, result);
-        const metrics = executionMetrics(result);
         emit(agent, 'build_plan.execution.completed', traceId, {
             action_id: actionId,
             plan_id: actionId,
@@ -724,6 +1139,20 @@ export const planAndBuildAction = {
             active_build: buildState.active_build,
             status: buildState.status,
             cooldown_remaining_sec: buildState.cooldown_remaining_sec || 0,
+        });
+        await writeSettlementObjective(agent, 'settlement_objective_advance', directorContext, traceId, {
+            description,
+            owner: acquisition.active_build_owner || directorContext.phaseOwner || directorContext.owner,
+            planId: actionId,
+            status: effectiveSuccess ? 'completed' : 'blocked',
+            intendedBlocks: metrics.intended_blocks || 0,
+            verifiedBlocks: metrics.verified_blocks || 0,
+            completionRatio: metrics.completion_ratio || 0,
+            evidence: {
+                action_id: actionId,
+                scene_id: buildPayload.scene_id,
+                result_excerpt: String(result || '').slice(0, 240),
+            },
         });
         return `plan-and-build ${actionId}: ${result}`;
     },

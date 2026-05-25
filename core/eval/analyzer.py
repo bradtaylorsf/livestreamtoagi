@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from core.model_config import resolve_internal_model
 from core.models import AnalysisResult, ProposedChange
 
 if TYPE_CHECKING:
@@ -107,7 +108,7 @@ class EvalAnalyzer:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_data},
             ],
-            model=prompt_config.get("model", "claude-sonnet-4-6"),
+            model=resolve_internal_model("eval_analyzer", prompt_config.get("model")),
             agent_id="eval_analyzer",
             temperature=prompt_config.get("temperature", 0.3),
             max_tokens=prompt_config.get("max_tokens", 8192),

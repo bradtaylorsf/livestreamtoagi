@@ -16,6 +16,7 @@ from core.memory.compaction import (
     MemoryCompactor,
 )
 from core.memory.embeddings import EMBEDDING_DIMENSION
+from core.model_config import resolve_model_reference
 from core.models import LLMResponse, RecallMemory, Transcript
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -199,7 +200,7 @@ class TestCompactInteraction:
         assert "perspective" in messages[0]["content"].lower()
 
         # Uses cheap model
-        assert call_kwargs["model"] == SUMMARY_MODEL
+        assert call_kwargs["model"] == resolve_model_reference(SUMMARY_MODEL)
         assert call_kwargs["max_tokens"] == SUMMARY_MAX_TOKENS
 
     @pytest.mark.asyncio

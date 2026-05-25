@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import time
 import uuid  # noqa: TC003
 from datetime import datetime, timedelta  # noqa: TC003
 from decimal import Decimal  # noqa: TC003
@@ -818,6 +819,92 @@ class FactionConfig(BaseModel):
         return v
 
 
+class PersonaOverride(BaseModel):
+    """Per-run persona/backstory override for one agent.
+
+    These overrides describe runtime starting conditions only; they do not
+    mutate committed ``agents/<id>/`` files.
+    """
+
+    agent_id: str
+    display_name: str | None = None
+    backstory: str | None = None
+    system_prompt_append: str | None = None
+    system_prompt_replace: str | None = None
+
+    @field_validator("agent_id")
+    @classmethod
+    def _agent_id_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("persona override agent_id is required")
+        return v
+
+
+class WorldConfig(BaseModel):
+    """Minecraft/world starting conditions for a run spec."""
+
+    model_config = ConfigDict(extra="allow")
+
+    seed: int | None = None
+    world_type: Literal["flat", "default", "amplified", "custom"] = "default"
+    world_config_path: str | None = None
+    persistent: bool = False
+    durable_world_id: str | None = None
+
+    @model_validator(mode="after")
+    def _check_custom_world_config(self) -> WorldConfig:
+        if self.world_type == "custom" and not self.world_config_path:
+            raise ValueError("world_type='custom' requires world_config_path")
+        return self
+
+
+class RunMode(enum.StrEnum):
+    persistent = "persistent"
+    experimental = "experimental"
+
+
+class ManagementPolicy(enum.StrEnum):
+    """Run-mode Management policy."""
+
+    off = "off"
+    shadow = "shadow"
+    enforce = "enforce"
+
+
+def default_management_policy_for_run_mode(
+    run_mode: RunMode | str | None,
+) -> ManagementPolicy | None:
+    """Return the safety default for a run mode when no policy is explicit."""
+    if run_mode is None:
+        return None
+    mode = run_mode if isinstance(run_mode, RunMode) else RunMode(run_mode)
+    if mode == RunMode.persistent:
+        return ManagementPolicy.enforce
+    if mode == RunMode.experimental:
+        return ManagementPolicy.shadow
+    return None
+
+
+def resolve_management_policy(
+    policy: ManagementPolicy | str | None,
+    run_mode: RunMode | str | None,
+    *,
+    default: ManagementPolicy | None = None,
+) -> ManagementPolicy | None:
+    """Resolve explicit policy, run-mode default, then optional caller default."""
+    if policy is not None:
+        return policy if isinstance(policy, ManagementPolicy) else ManagementPolicy(policy)
+    run_default = default_management_policy_for_run_mode(run_mode)
+    return run_default if run_default is not None else default
+
+
+class ExperimentalGoalConfig(BaseModel):
+    """Goal-based stop condition for bounded experimental runs."""
+
+    kind: Literal["turns", "artifacts", "phases_complete"]
+    target: int = Field(ge=1)
+
+
 class MemorySeedConfig(BaseModel):
     """Controls what each agent remembers at simulation start.
 
@@ -839,6 +926,132 @@ class MemorySeedConfig(BaseModel):
         if self.mode == "custom" and not self.custom_file:
             raise ValueError("memory_seed mode='custom' requires custom_file")
         return self
+
+
+class EmbodiedResourceEntry(BaseModel):
+    id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    location: dict[str, Any] | str
+    quantity: int | float | None = None
+    reported_by: str = Field(min_length=1)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedAgentClaim(BaseModel):
+    agent_id: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    claimed_by: str | None = None
+    claimed_at: float = Field(default_factory=time.time)
+    expires_at: float | None = None
+
+
+class EmbodiedDangerReport(BaseModel):
+    agent_id: str = Field(min_length=1)
+    kind: Literal[
+        "stuck",
+        "drowning",
+        "trapped",
+        "low_health",
+        "death",
+        "repeated_failure",
+    ] = "trapped"
+    location: dict[str, Any] | str | None = None
+    severity: int = Field(ge=1, le=5)
+    reported_by: str | None = None
+    reported_at: float = Field(default_factory=time.time)
+    danger_id: str = Field(default_factory=lambda: f"danger-{uuid.uuid4().hex[:12]}")
+    resolved_at: float | None = None
+    rescuer_id: str | None = None
+    recovery_status: Literal[
+        "open",
+        "rescue_dispatched",
+        "resolved",
+        "escaped",
+        "teleported",
+        "failed",
+        "unresolved",
+    ] = "open"
+    details: str | None = None
+
+
+class EmbodiedDangerResolution(BaseModel):
+    danger_id: str | None = Field(default=None, min_length=1)
+    agent_id: str | None = Field(default=None, min_length=1)
+    rescuer_id: str | None = Field(default=None, min_length=1)
+    recovery_status: Literal["resolved", "escaped", "teleported", "failed"] = "resolved"
+    resolved_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedSettlementObjective(BaseModel):
+    objective_id: str = Field(min_length=1)
+    phase_index: int = Field(ge=0)
+    description: str = Field(min_length=1)
+    owner_agent_id: str | None = Field(default=None, min_length=1)
+    status: Literal[
+        "pending",
+        "in_progress",
+        "blocked",
+        "owner_cap_reached",
+        "cooldown",
+        "stale",
+        "completed",
+        "failed",
+    ] = "pending"
+    plan_id: str | None = Field(default=None, min_length=1)
+    intended_blocks: int = Field(default=0, ge=0)
+    verified_blocks: int = Field(default=0, ge=0)
+    completion_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    started_at: float | None = None
+    completed_at: float | None = None
+    reassign_reason: str | None = None
+    previous_owner_agent_ids: list[str] = Field(default_factory=list)
+    owner_started_at_ms: int | None = Field(default=None, ge=0)
+    stale_after_ms: int | None = Field(default=None, ge=0)
+    cooldown_until_ms: int | None = Field(default=None, ge=0)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmbodiedVerifiedAction(BaseModel):
+    agent_id: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    result: str = Field(min_length=1)
+    observed_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedBuildSite(BaseModel):
+    site_id: str = Field(min_length=1)
+    location: dict[str, Any] | str
+    name: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+
+
+class EmbodiedGroupGoal(BaseModel):
+    text: str = Field(min_length=1)
+    set_by: str = Field(min_length=1)
+    set_at: float = Field(default_factory=time.time)
+
+
+class EmbodiedNextStep(BaseModel):
+    text: str = Field(min_length=1)
+    added_by: str = Field(min_length=1)
+    added_at: float = Field(default_factory=time.time)
+
+
+class RunSpec(BaseModel):
+    """Typed starting-condition schema shared by simulations and Minecraft."""
+
+    model_config = ConfigDict(extra="allow")
+
+    agents: list[str] = Field(default_factory=list)
+    persona_overrides: list[PersonaOverride] = Field(default_factory=list)
+    factions: list[FactionConfig] = Field(default_factory=list)
+    agent_goals: dict[str, list[str]] = Field(default_factory=dict)
+    memory_seed: MemorySeedConfig | None = None
+    world: WorldConfig | None = None
+    run_mode: RunMode | None = None
+    management_policy: ManagementPolicy | None = None
+    experimental_goal: ExperimentalGoalConfig | None = None
 
 
 class SimulationCreate(BaseModel):

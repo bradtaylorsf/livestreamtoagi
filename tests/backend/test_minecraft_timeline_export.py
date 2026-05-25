@@ -19,6 +19,7 @@ FIXTURE = REPO_ROOT / "tests" / "backend" / "fixtures" / "minecraft_timeline"
 TIMELINE_EMITTER = SCRIPT_DIR / "fork-src" / "agent" / "bridge" / "timeline_emitter.js"
 LMSTUDIO_USAGE = SCRIPT_DIR / "fork-src" / "agent" / "skills" / "lmstudio_usage.js"
 HEARTBEAT = SCRIPT_DIR / "fork-src" / "agent" / "skills" / "heartbeat.js"
+MEMORY_CONTEXT = SCRIPT_DIR / "fork-src" / "agent" / "skills" / "memory_context.js"
 
 
 def _load_builder() -> ModuleType:
@@ -495,6 +496,52 @@ def test_heartbeat_events_are_preserved_and_counted(tmp_path: Path) -> None:
     assert totals["counts_by_event_type"]["heartbeat.halted"] == 1
 
 
+def test_memory_context_events_are_preserved_and_counted(tmp_path: Path) -> None:
+    builder = _load_builder()
+    run_dir = tmp_path / "run"
+    raw_dir = run_dir / "timeline-raw"
+    raw_dir.mkdir(parents=True)
+    (run_dir / "metadata.env").write_text("start_utc=2026-05-20T22:00:00Z\n", encoding="utf-8")
+    events = [
+        {
+            "ts": "2026-05-20T22:00:01Z",
+            "event_type": "memory_context.startup",
+            "agent": "vera",
+            "trace_id": "trace-memory-1",
+            "payload": {"fetched": True, "context_chars": 200},
+        },
+        {
+            "ts": "2026-05-20T22:00:02Z",
+            "event_type": "memory_context.fetched",
+            "agent": "vera",
+            "trace_id": "trace-memory-1",
+            "payload": {
+                "run_id": "run-memory",
+                "simulation_id": "11111111-1111-1111-1111-111111111111",
+                "core_chars": 120,
+                "recall_chars": 80,
+                "recall_limit": 3,
+            },
+        },
+    ]
+    (raw_dir / "vera.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    result = builder.build_timeline(run_dir)
+    builder.write_artifacts(run_dir, result)
+
+    exported = _events(run_dir / "timeline.ndjson")
+    assert [event["event_type"] for event in exported] == [
+        "memory_context.startup",
+        "memory_context.fetched",
+    ]
+    totals = json.loads((run_dir / "timeline-totals.json").read_text(encoding="utf-8"))
+    assert totals["counts_by_event_type"]["memory_context.startup"] == 1
+    assert totals["counts_by_event_type"]["memory_context.fetched"] == 1
+
+
 def test_trace_id_correlates_intent_start_and_result_chain(tmp_path: Path) -> None:
     builder = _load_builder()
     run_dir = _copy_fixture(tmp_path)
@@ -562,6 +609,7 @@ def test_node_timeline_shims_are_dependency_free_and_emit_expected_events() -> N
     emitter = TIMELINE_EMITTER.read_text(encoding="utf-8")
     usage = LMSTUDIO_USAGE.read_text(encoding="utf-8")
     heartbeat = HEARTBEAT.read_text(encoding="utf-8")
+    memory_context = MEMORY_CONTEXT.read_text(encoding="utf-8")
 
     assert "MC_TIMELINE_NDJSON" in emitter
     assert "MC_RUN_DIR" in emitter
@@ -577,3 +625,6 @@ def test_node_timeline_shims_are_dependency_free_and_emit_expected_events() -> N
     assert "heartbeat.outcome" in heartbeat
     assert "MC_HEARTBEAT_IDLE_MS" in heartbeat
     assert "from '../bridge/timeline_emitter.js'" in heartbeat
+    assert "memory_context.fetched" in memory_context
+    assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in memory_context
+    assert "from '../bridge/timeline_emitter.js'" in memory_context

@@ -4,8 +4,8 @@
 id: alpha
 display_name: "Alpha — The Wolf"
 role: "Errand Runner"
-model_conversation: deepseek/deepseek-v3.2
-model_building: deepseek/deepseek-v3.2
+model_conversation: model:agent:alpha:conversation
+model_building: model:agent:alpha:building
 voice_id: null
 color_hex: "#8e44ad"
 color_rich: "grey70"

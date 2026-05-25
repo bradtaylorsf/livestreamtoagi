@@ -84,6 +84,11 @@ Required runtime state:
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
 | LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1`, with `LOCAL_LLM_MODEL` loaded enough to complete a chat request |
 
+Model role overrides are documented in [../model-configuration.md](../model-configuration.md).
+For local soaks, `LTAG_MODEL_*` controls logical role selection while
+`LOCAL_LLM_MODEL` and `LOCAL_LLM_MODEL_BUILDING` control the actual LM Studio
+runtime model IDs.
+
 ## Live Soak Command
 
 Use local models only:
@@ -158,6 +163,10 @@ to `0` when you want the runner to stop its auto-started server. Local sims
 also choose a high run-specific MindServer base port by default to avoid stale
 `8080+` listeners from previous experiments; set
 `MC_SIM_MINDSERVER_BASE_PORT=<port>` if you need a fixed range.
+For open settlement experiments, `setup-easy-spawn.mjs` also supports
+`EASY_SETUP_MEADOW_RADIUS=<23..96>`, `EASY_SETUP_BOUNDARY=none`, and
+`EASY_SETUP_ANIMALS=1` so the same disposable easy world can be expanded beyond
+the fenced validation arena without touching the normal server.
 The sim wrapper defaults to the real character cast only:
 Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. BridgeBot is excluded
 unless `MC_SIM_INCLUDE_BRIDGE_BOT=1` is set, because it is a technical bridge
@@ -242,9 +251,11 @@ In this mode the local wrapper lets agents call
 `!planAndBuild("small shared cabin")`. By default the action asks the profile
 `code_model` (the `LOCAL_LLM_MODEL_BUILDING` tier) for strict JSON, validates
 allowed materials, bounds, and max steps, logs the plan as JSON evidence, and
-executes it through the verified `!buildFromPlan` path. Invalid local model
-plans are rejected and replaced with a starter blueprint such as marker camp,
-3x3 hut, simple wall, or torch-lit storage corner.
+executes it through the verified `!buildFromPlan` path. Generated plans are
+normalized into bottom-up placement order before execution, so a model that
+lists supported upper blocks before their foundations does not force a fallback.
+Invalid local model plans are rejected and replaced with a starter blueprint
+such as marker camp, 3x3 hut, simple wall, or torch-lit storage corner.
 
 OpenRouter builder routing is opt-in and applies only to this
 `purpose=plan_generation` path:
@@ -277,6 +288,16 @@ placement/build commands are removed from non-owner tool menus and blocked at
 the command parser. The Node governor mirrors that scene lock so stale direct
 commands are skipped with `reason=scene_locked` before any provider call.
 
+For exploratory civilization runs, `SOAK_PLAN_BUILD_BOTS` or
+`MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` can restrict builder-plan eligibility to
+the agents currently assigned or elected into builder duty. This is a run
+policy, not a permanent character role: leave it unset for unrestricted
+ownership, set it to `all`/`any`/`*` for explicit unrestricted ownership, or set
+it to a comma/space-separated list such as `rex fork` for one experiment. The
+Director will prefer eligible phase owners and the runtime command guard blocks
+non-eligible direct `!planAndBuild` attempts before a builder-model request is
+made.
+
 The build governor runs before any provider call. Each agent may have one
 active build at a time, each scene may have one active plan owner, equivalent
 completed builds are cooled down for `MC_SIM_BUILD_COOLDOWN_SEC` seconds, and
@@ -288,6 +309,8 @@ cached plans are reused without a new builder-model call. Defaults:
 | `MC_SIM_BUILD_COOLDOWN_SEC` | `300` | Cooldown for equivalent completed build requests. |
 | `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks. |
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
+| `MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` / `SOAK_PLAN_BUILD_BOTS` | unset | Optional current builder-duty allowlist for `!planAndBuild`; unset means any agent may become owner. |
+| `MINECRAFT_PLAN_BUILD_MODEL_MAX_STEPS` | `32` | Planner-facing cap for one generated phase. Keep this lower than `MINECRAFT_PLAN_BUILD_MAX_STEPS` in open-settlement shakeouts so agents build several compact structures instead of one oversized wall. |
 
 When the local smoke auto-starts the easy Paper server and applies the safe
 starter inventory, `MC_SIM_INIT_MESSAGE` is delivered after that starter-kit
@@ -300,9 +323,32 @@ provider/model, paid/local request counts, token usage, estimated USD,
 `fallback_reason`, execution result, and parsed verified block counts are
 included in `timeline.ndjson`, `timeline-totals.json`, `summary.txt`, and
 `monitor.html`. `build_plan.generation.skipped` records `scene_locked`,
-`active_build_exists`, `cache_hit`, `cooldown`, and `per_agent_cap` outcomes.
+`active_build_exists`, `cache_hit`, `cooldown`, `per_agent_cap`, and
+`plan_build_agent_not_allowed` outcomes.
 `!executeCode` remains separately gated by
 `SOAK_BLOCK_EXECUTE_CODE_ACTIONS` / `MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS`.
+
+Alpha remains non-verbal by default. Set `MC_SIM_ALPHA_TOWN_PLANNER=1` for
+disposable open settlement runs where Alpha should participate in public chat as
+a planning agent. In that mode `connect-alpha-bot.sh` stages only the temporary
+Mindcraft clone with a verbal Alpha profile. The committed Alpha profile stays
+local-only and action-only. By default the town planner uses the local LM Studio
+chat/code models; set `MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER=openrouter` to route
+Alpha's own chat/code model through
+`openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL:-google/gemini-3.5-flash}`. For
+cost-controlled open settlement tests, prefer local Alpha plus capped
+OpenRouter builder-plan calls. Alpha's staged planner prompt and per-clone
+blocked-actions list make it delegate world-changing build/code commands to the
+builder team instead of running `!planAndBuild`, `!buildFromPlan`, `!newAction`,
+or `!executeCode` itself.
+
+`!newAction` is still disabled by Mindcraft's default
+`allow_insecure_coding=false`. Set `SOAK_ALLOW_BUILDER_NEW_ACTIONS=1` to enable
+it only for `SOAK_BUILDER_BOTS` (default: `rex fork pixel`) in a disposable run.
+Leave that off for plan-build shakeouts so Gemini/OpenRouter is used only by the
+capped `!planAndBuild` builder provider. Set `SOAK_BLOCK_NEW_ACTIONS=1` when a
+shakeout should hide `!newAction` from command docs while keeping
+`!planAndBuild` available.
 
 Local-only builder smoke:
 
@@ -382,7 +428,7 @@ The default behavioral thresholds are env-overridable:
 
 | Env var | Default | Gate |
 | --- | ---: | --- |
-| `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. |
+| `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. In `MC_SIM_BUILD_MODE=settlement`, gather/build commands can satisfy this per-agent liveness threshold when a builder stays mostly stationary. |
 | `SOAK_MAX_DEATHS_PER_AGENT` | `2` | Any agent above this death/respawn count fails. |
 | `SOAK_MAX_STUCK_PER_AGENT` | `5` | Any agent above this stuck/path-failure count fails. |
 | `SOAK_MAX_RESTARTS_PER_AGENT` | `1` | Any agent above this restart/disconnect/exit signature count fails. |
@@ -405,6 +451,12 @@ signatures for the same agent within 300 seconds always fail the gate, even if
 `SOAK_MAX_RESTARTS_PER_AGENT` is raised for exploratory runs. Totals are written
 as `total_restarts` and `total_restart_recurrences` in
 `behavior-totals.env` and the summary.
+
+`behavior.tsv` also includes `unresolved_distress` per agent. Structured
+distress comes from bridge shared-state `danger_report` writes and Mindcraft
+`distress.reported` telemetry. A matching `danger_resolve` write or resolved
+recovery status clears the count; otherwise `total_unresolved_distress > 0`
+fails the behavior gate.
 
 ## Structured Timeline
 
@@ -481,6 +533,29 @@ Expected timeline events:
 counts the line in restart/stability checks, and fails the soak. The summary also
 prints `heartbeat_counts` from `timeline-totals.json`.
 
+## Runtime Memory Context
+
+Embodied decisions can include Python memory immediately before the Mindcraft
+prompt. The staged `memory_context.js` helper fetches Tier 1 core memory and a
+small Tier 2 recall query through `memory.recall`, then prepends a bounded
+`[Python memory context]` block to Director-selected prompts and legacy
+heartbeat prompts. Alpha and Management are excluded by default.
+
+Configuration:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MC_SIM_MEMORY_CONTEXT_ENABLED` | `1` | Set `0`/`false`/`off` to disable runtime memory context injection. |
+| `MC_SIM_MEMORY_RECALL_LIMIT` | `3` | Relevant recall snippets requested for the current scene/goal query. |
+| `MC_SIM_MEMORY_CORE_MAX_CHARS` | `1500` | Maximum core-memory characters injected into one prompt. |
+| `MC_SIM_MEMORY_RECALL_MAX_CHARS` | `1200` | Maximum recall-memory characters injected into one prompt. |
+| `MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS` | `management,alpha` | Comma- or space-separated agent ids that must not fetch/inject this context. |
+
+Timeline evidence is content-free: `memory_context.startup`,
+`memory_context.fetched`, `memory_context.skipped`, and `memory_context.error`
+record agent id, run/simulation id, limits, and character counts, not memory
+content.
+
 ## Live Cohort Monitor
 
 Every embodied soak also renders `monitor.html` in the evidence directory after
@@ -519,7 +594,7 @@ Outputs are written to `logs/soak/<UTC timestamp>/`:
 | `action-reliability.json` | Per-agent generated/discarded/accepted command, execution, verification, and threshold metrics. |
 | `action-reliability.md` | Human-readable reliability report with discarded-command counters, execution failure classes, and verified-action examples. |
 | `behavior.tsv` | Per-agent behavioral counters and pass/fail status for the collaborative acceptance gate. |
-| `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, and `behavior_gate_status`. |
+| `behavior-totals.env` | Cohort behavioral totals, including `total_restarts`, `total_restart_recurrences`, `total_unresolved_distress`, and `behavior_gate_status`. |
 | `heartbeat-halts.tsv` | Bots whose autonomous heartbeat halted after repeated blank/no-command outcomes. |
 | `timeline.ndjson` | Canonical structured run timeline covering chat, LLM, accepted action, bridge telemetry, behavior/status, state, error, and lifecycle events. |
 | `timeline-totals.json` | Counts by event type, agent, model, plus provider-reported vs estimated token totals. |
@@ -556,6 +631,7 @@ Additional stability counters:
 | Action-command reliability | `action-reliability.json`, `action-reliability.md`, and the `summary.txt` reliability block. |
 | Behavioral acceptance | `behavior.tsv`, `behavior-totals.env`, and the `summary.txt` behavioral block. |
 | Heartbeat halts / idle recovery | `heartbeat.fired` / `heartbeat.outcome` / `heartbeat.halted` timeline events and `heartbeat-halts.tsv`. |
+| Unresolved distress | Structured `danger_report` / `distress.reported` lines minus matching `danger_resolve` / resolved recovery statuses; nonzero counts fail the gate. |
 | Queue health | `inbox.*`, `llm.queue.*`, and action queue timeline events in `monitor.html`. |
 | Build-plan progress | `build_plan.generation.*` / `build_plan.execution.*` timeline events and the logged plan JSON. |
 

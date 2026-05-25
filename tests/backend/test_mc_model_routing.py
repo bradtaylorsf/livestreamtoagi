@@ -30,6 +30,7 @@ import pytest
 import yaml
 
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+from core.model_config import resolve_model_reference
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "verify-model-routing.sh"
@@ -93,6 +94,12 @@ def _resolve_canonical(openrouter_id: str) -> str:
         f"via MODEL_NAME_ALIASES (got {canonical!r})"
     )
     return canonical
+
+
+def _clear_model_role_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("LTAG_MODEL_"):
+            monkeypatch.delenv(key, raising=False)
 
 
 # ── Script hygiene ──────────────────────────────────────────────────────────
@@ -343,15 +350,20 @@ def test_routing_doc_records_the_prod_openrouter_reference_mapping():
     ("config_path", "bot"),
     [(VERA_CONFIG, BOT_A_NAME), (AURORA_CONFIG, BOT_B_NAME)],
 )
-def test_agent_model_assignments_resolve_unchanged_and_match_prod_ref(config_path, bot):
+def test_agent_model_assignments_resolve_unchanged_and_match_prod_ref(
+    config_path,
+    bot,
+    monkeypatch: pytest.MonkeyPatch,
+):
     """agents/<id>/config.yaml model assignments still resolve, unchanged.
 
     Also locks the documented prod reference to the actual agent config so the
     doc cannot silently drift from agents/vera + agents/aurora.
     """
     cfg = yaml.safe_load(config_path.read_text())
-    conv = cfg["model_conversation"]
-    build = cfg["model_building"]
+    _clear_model_role_env(monkeypatch)
+    conv = resolve_model_reference(cfg["model_conversation"])
+    build = resolve_model_reference(cfg["model_building"])
 
     # Resolve through the SAME alias/registry path the prod refs use.
     conv_canonical = _resolve_canonical(conv)

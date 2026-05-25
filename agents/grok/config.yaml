@@ -1,8 +1,8 @@
 id: grok
 display_name: "Grok — The Wild Card"
 role: "Wild Card/Provocateur"
-model_conversation: x-ai/grok-3-mini
-model_building: x-ai/grok-3
+model_conversation: model:agent:grok:conversation
+model_building: model:agent:grok:building
 voice_id: en-US-ChristopherNeural
 color_hex: "#1abc9c"
 color_rich: "dark_orange"

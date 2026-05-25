@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from core.model_config import resolve_internal_model
+
 if TYPE_CHECKING:
     from core.llm_client import OpenRouterClient
     from core.simulation.clock import SimulationClock
@@ -106,7 +108,7 @@ class PersonaManager:
                     {"role": "system", "content": system},
                     {"role": "user", "content": f"Context: {context[:500]}"},
                 ],
-                model="claude-haiku-4-5",
+                model=resolve_internal_model("recurring_persona_comment"),
                 agent_id="world_simulator",
                 temperature=0.8,
                 max_tokens=100,
@@ -145,7 +147,7 @@ class PersonaManager:
                     {"role": "system", "content": system},
                     {"role": "user", "content": user_content},
                 ],
-                model="claude-haiku-4-5",
+                model=resolve_internal_model("recurring_persona_chat"),
                 agent_id="world_simulator",
                 temperature=0.9,
                 max_tokens=60,

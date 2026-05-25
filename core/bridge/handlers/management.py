@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from core.bridge.contract import BridgeRequest, ManagementReviewRequest
+from core.models import ManagementPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,13 @@ async def handle_management_review(env: BridgeRequest, services: Any) -> dict[st
     """Review candidate bot speech before any Minecraft-visible emission."""
     payload = ManagementReviewRequest.model_validate(env.payload)
     management = services.management
+
+    if getattr(management, "policy", None) == ManagementPolicy.off:
+        return {
+            "verdict": "allow",
+            "reason": "management policy=off",
+            "sanitized_text": None,
+        }
 
     review = await management.review(
         agent_id=payload.agent_id,

@@ -8,6 +8,11 @@
 # Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. Evidence lands
 # under logs/soak/<UTC timestamp>/.
 #
+# Lifecycle note: this remains a lower-level diagnostic harness. The E12
+# embodied simulation supervisor in scripts/run_simulation.py owns durable
+# run/simulation ids, stop conditions, and eval/report hooks, then delegates
+# Minecraft launch work to this script.
+#
 # Usage:
 #   scripts/minecraft/soak.sh
 #   scripts/minecraft/soak.sh --duration-hours 2
@@ -93,10 +98,24 @@
 #                               plan building. Basic
 #                               !place/!break stay available for quick builds.
 #                               Default: 0.
+#   SOAK_BLOCK_NEW_ACTIONS      Set to 1 to hide only Mindcraft !newAction
+#                               while leaving !planAndBuild available.
+#                               Default: 0.
 #   SOAK_BLOCK_EXECUTE_CODE_ACTIONS
 #                               Set to 1 to block arbitrary !executeCode
 #                               separately from build-plan actions. Default:
 #                               SOAK_BLOCK_SLOW_SIM_ACTIONS.
+#   SOAK_ALLOW_BUILDER_NEW_ACTIONS
+#                               Set to 1 to enable Mindcraft !newAction code
+#                               generation only for SOAK_BUILDER_BOTS. Default:
+#                               0.
+#   SOAK_BUILDER_BOTS           Space-separated bot ids allowed to use
+#                               builder-only code generation when enabled.
+#                               Default: "rex fork pixel".
+#   MC_SIM_MANAGEMENT_POLICY    Management review policy for bot chat:
+#                               off, shadow, or enforce. Default: off.
+#   MC_SIM_DISABLE_MANAGEMENT   Deprecated alias; 1 maps to policy=off,
+#                               0 maps to policy=enforce when policy is unset.
 #   MC_SIM_BUILDER_PROVIDER     Builder-plan provider for !planAndBuild only:
 #                               local or openrouter. Default: local.
 #   MC_SIM_BUILDER_OPENROUTER_API_KEY
@@ -118,6 +137,10 @@
 #                               Default: 300.
 #   MC_SIM_BUILD_ZONE_STRIDE    Per-agent build origin offset stride. Default: 12.
 #   MC_SIM_BUILD_CACHE_TTL_SEC  Plan cache TTL. Default: 3600.
+#   SOAK_PLAN_BUILD_BOTS        Optional comma/space-separated agent ids that
+#                               may receive/use !planAndBuild for this run.
+#                               Default: unrestricted. Alias for
+#                               MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST.
 #   SOAK_BUILDER_PROVIDER      Builder smoke selector: local or openrouter.
 #                               Defaults to MC_SIM_BUILDER_PROVIDER.
 #   SOAK_SAFE_TERRAIN_ACTIONS   Set to 1 to stage local-sim terrain guards:
@@ -135,6 +158,21 @@
 #                               as stale. Default: 180000.
 #   MC_HEARTBEAT_MAX_NO_COMMAND Repeated blank/no-command heartbeat outcomes
 #                               before `heartbeat.halted`. Default: 3.
+#   MC_SIM_MEMORY_CONTEXT_ENABLED
+#                               Fetch Python core+recall memory before runtime
+#                               prompt decisions. Default: 1.
+#   MC_SIM_MEMORY_RECALL_LIMIT  Relevant recall snippets requested per fetch.
+#                               Default: 3.
+#   MC_SIM_MEMORY_CORE_MAX_CHARS
+#                               Max core-memory characters injected. Default:
+#                               1500.
+#   MC_SIM_MEMORY_RECALL_MAX_CHARS
+#                               Max recall characters injected. Default: 1200.
+#   MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+#                               Comma/space-separated agent ids skipped for
+#                               runtime memory context. Default: management,alpha.
+#   MC_SIM_SHARED_STATE_ENABLED Fetch the embodied shared-state blackboard for
+#                               prompt context. Default: 1.
 #   SOAK_EASY_SPAWN             Set to 1 to use the local easy-mode spawn
 #                               bootstrap: a side Paper server, peaceful rules,
 #                               a flat grass starter meadow, resource piles,
@@ -255,7 +293,34 @@ SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS="${SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS:-180}
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-}"
 SOAK_BLOCK_PRIVATE_CONVERSATIONS="${SOAK_BLOCK_PRIVATE_CONVERSATIONS:-0}"
 SOAK_BLOCK_SLOW_SIM_ACTIONS="${SOAK_BLOCK_SLOW_SIM_ACTIONS:-0}"
+SOAK_BLOCK_NEW_ACTIONS="${SOAK_BLOCK_NEW_ACTIONS:-0}"
 SOAK_BLOCK_EXECUTE_CODE_ACTIONS="${SOAK_BLOCK_EXECUTE_CODE_ACTIONS:-$SOAK_BLOCK_SLOW_SIM_ACTIONS}"
+SOAK_ALLOW_BUILDER_NEW_ACTIONS="${SOAK_ALLOW_BUILDER_NEW_ACTIONS:-0}"
+SOAK_BUILDER_BOTS="${SOAK_BUILDER_BOTS:-rex fork pixel}"
+if [ -z "${MC_SIM_MANAGEMENT_POLICY:-}" ]; then
+    if [ "${MC_SIM_DISABLE_MANAGEMENT:-1}" = "0" ]; then
+        MC_SIM_MANAGEMENT_POLICY="enforce"
+    else
+        MC_SIM_MANAGEMENT_POLICY="off"
+    fi
+fi
+case "$(printf '%s' "$MC_SIM_MANAGEMENT_POLICY" | tr '[:upper:]' '[:lower:]')" in
+    off|disabled|0)
+        MC_SIM_MANAGEMENT_POLICY="off"
+        ;;
+    shadow)
+        MC_SIM_MANAGEMENT_POLICY="shadow"
+        ;;
+    enforce|enabled|on|1)
+        MC_SIM_MANAGEMENT_POLICY="enforce"
+        ;;
+    *)
+        echo "x MC_SIM_MANAGEMENT_POLICY must be off, shadow, or enforce." >&2
+        exit 2
+        ;;
+esac
+MINECRAFT_MANAGEMENT_REVIEW_MODE="$MC_SIM_MANAGEMENT_POLICY"
+export MC_SIM_MANAGEMENT_POLICY MINECRAFT_MANAGEMENT_REVIEW_MODE
 MC_SIM_BUILDER_PROVIDER="${MC_SIM_BUILDER_PROVIDER:-local}"
 MC_SIM_BUILDER_FALLBACK="${MC_SIM_BUILDER_FALLBACK:-fail}"
 MC_SIM_BUILDER_OPENROUTER_API_KEY="${MC_SIM_BUILDER_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}"
@@ -270,6 +335,8 @@ MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
 MC_SIM_BUILD_CACHE_TTL_SEC="${MC_SIM_BUILD_CACHE_TTL_SEC:-3600}"
+SOAK_PLAN_BUILD_BOTS="${SOAK_PLAN_BUILD_BOTS:-${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-}}"
+MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST="${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-$SOAK_PLAN_BUILD_BOTS}"
 SOAK_BUILDER_PROVIDER="${SOAK_BUILDER_PROVIDER:-$MC_SIM_BUILDER_PROVIDER}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
@@ -301,6 +368,11 @@ MC_HEARTBEAT_IDLE_MS="${MC_HEARTBEAT_IDLE_MS:-90000}"
 MC_HEARTBEAT_COOLDOWN_MS="${MC_HEARTBEAT_COOLDOWN_MS:-45000}"
 MC_HEARTBEAT_STALE_ACTION_MS="${MC_HEARTBEAT_STALE_ACTION_MS:-180000}"
 MC_HEARTBEAT_MAX_NO_COMMAND="${MC_HEARTBEAT_MAX_NO_COMMAND:-3}"
+MC_SIM_MEMORY_CONTEXT_ENABLED="${MC_SIM_MEMORY_CONTEXT_ENABLED:-1}"
+MC_SIM_MEMORY_RECALL_LIMIT="${MC_SIM_MEMORY_RECALL_LIMIT:-3}"
+MC_SIM_MEMORY_CORE_MAX_CHARS="${MC_SIM_MEMORY_CORE_MAX_CHARS:-1500}"
+MC_SIM_MEMORY_RECALL_MAX_CHARS="${MC_SIM_MEMORY_RECALL_MAX_CHARS:-1200}"
+MC_SIM_SHARED_STATE_ENABLED="${MC_SIM_SHARED_STATE_ENABLED:-1}"
 SOAK_MINDSERVER_BASE_PORT="${SOAK_MINDSERVER_BASE_PORT:-8080}"
 REQUIRED_NODE_MAJOR="20"
 
@@ -693,6 +765,8 @@ print_plan() {
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
     info "builder route:  provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
     info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
+    info "plan builders:  ${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-<unrestricted>}"
+    info "management:    policy=${MC_SIM_MANAGEMENT_POLICY}"
     info "hourly cap:     \$${SOAK_AGENT_HOURLY_CAP_USD} per agent"
     info "auto-start MC:  $SOAK_START_MINECRAFT_IF_DOWN"
     info "keep MC alive:  $SOAK_KEEP_MINECRAFT_RUNNING"
@@ -704,6 +778,8 @@ print_plan() {
     info "behavior:       require=${SOAK_REQUIRE_BEHAVIOR_GATE}; movement>=${SOAK_MIN_MOVEMENT_PER_AGENT}/agent; deaths<=${SOAK_MAX_DEATHS_PER_AGENT}/agent; stuck<=${SOAK_MAX_STUCK_PER_AGENT}/agent; restarts<=${SOAK_MAX_RESTARTS_PER_AGENT}/agent; chat>=${SOAK_MIN_PUBLIC_CHAT_COHORT}; gather+build>=${SOAK_MIN_GATHER_OR_BUILD_COHORT}; shared>=${SOAK_MIN_SHARED_ARTIFACTS}"
     info "reliability:    intent>=${SOAK_MIN_INTENT_TO_COMMAND_RATIO} parse>=${SOAK_MIN_PARSE_SUCCESS} exec>=${SOAK_MIN_EXECUTION_RATE} verified>=${SOAK_MIN_VERIFIED_SUCCESS} min_intents=${SOAK_RELIABILITY_MIN_INTENTS} fail=${SOAK_RELIABILITY_FAIL_ON_VIOLATION}"
     info "heartbeat:      enabled=${MC_HEARTBEAT_ENABLED} idle=${MC_HEARTBEAT_IDLE_MS}ms cooldown=${MC_HEARTBEAT_COOLDOWN_MS}ms stale_action=${MC_HEARTBEAT_STALE_ACTION_MS}ms max_no_command=${MC_HEARTBEAT_MAX_NO_COMMAND}"
+    info "memory context: enabled=${MC_SIM_MEMORY_CONTEXT_ENABLED} recall_limit=${MC_SIM_MEMORY_RECALL_LIMIT} core_max=${MC_SIM_MEMORY_CORE_MAX_CHARS} recall_max=${MC_SIM_MEMORY_RECALL_MAX_CHARS} exclude=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
+    info "shared state:  enabled=${MC_SIM_SHARED_STATE_ENABLED}"
     info "timeline:       timeline.ndjson + timeline-totals.json"
     info "monitor:        monitor.html (stall>${SOAK_MONITOR_STALL_SECONDS}s llm_idle>${SOAK_MONITOR_LLM_IDLE_SECONDS}s)"
     if [ "$SOAK_PROFILE" = "director_v2" ]; then
@@ -720,10 +796,18 @@ print_plan() {
     else
         info "slow actions:   allowed"
     fi
+    if [ "$SOAK_BLOCK_NEW_ACTIONS" = "1" ]; then
+        info "newAction:      blocked (!newAction only; plan actions still available)"
+    fi
     if [ "$SOAK_BLOCK_EXECUTE_CODE_ACTIONS" = "1" ]; then
         info "execute code:   blocked (!executeCode)"
     else
         info "execute code:   allowed"
+    fi
+    if [ "$SOAK_ALLOW_BUILDER_NEW_ACTIONS" = "1" ]; then
+        info "newAction:      builder-only enabled ($SOAK_BUILDER_BOTS)"
+    else
+        info "newAction:      normal Mindcraft setting (allow_insecure_coding remains unchanged)"
     fi
     if [ "$SOAK_SAFE_TERRAIN_ACTIONS" = "1" ]; then
         info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing; blocks !place/!break/!observe)"
@@ -753,6 +837,7 @@ build_settings_json() {
     if [ -z "$SOAK_SETTINGS_INIT_MESSAGE" ] \
         && [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" != "1" ] \
         && [ "$SOAK_BLOCK_SLOW_SIM_ACTIONS" != "1" ] \
+        && [ "$SOAK_BLOCK_NEW_ACTIONS" != "1" ] \
         && [ "$SOAK_SAFE_TERRAIN_ACTIONS" != "1" ]; then
         return 0
     fi
@@ -761,6 +846,7 @@ build_settings_json() {
         SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" \
         SOAK_BLOCK_PRIVATE_CONVERSATIONS="$SOAK_BLOCK_PRIVATE_CONVERSATIONS" \
         SOAK_BLOCK_SLOW_SIM_ACTIONS="$SOAK_BLOCK_SLOW_SIM_ACTIONS" \
+        SOAK_BLOCK_NEW_ACTIONS="$SOAK_BLOCK_NEW_ACTIONS" \
         SOAK_SAFE_TERRAIN_ACTIONS="$SOAK_SAFE_TERRAIN_ACTIONS" \
         SOAK_BLOCK_EXECUTE_CODE_ACTIONS="$SOAK_BLOCK_EXECUTE_CODE_ACTIONS" \
         node --input-type=module <<'NODE'
@@ -809,6 +895,14 @@ if (process.env.SOAK_BLOCK_SLOW_SIM_ACTIONS === '1') {
     settings.blocked_actions = blocked;
 }
 
+if (process.env.SOAK_BLOCK_NEW_ACTIONS === '1') {
+    const blocked = Array.isArray(settings.blocked_actions)
+        ? [...settings.blocked_actions]
+        : [...baseBlockedActions];
+    if (!blocked.includes('!newAction')) blocked.push('!newAction');
+    settings.blocked_actions = blocked;
+}
+
 if (process.env.SOAK_SAFE_TERRAIN_ACTIONS === '1') {
     const blocked = Array.isArray(settings.blocked_actions)
         ? [...settings.blocked_actions]
@@ -836,11 +930,30 @@ NODE
 settings_json_for_bot() {
     local bot="$1"
     [ -n "${SETTINGS_JSON:-}" ] || return 1
-    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" \
+    SETTINGS_JSON_INPUT="$SETTINGS_JSON" BOT_ID="$bot" SOAK_SETTINGS_INIT_MESSAGE="$SOAK_SETTINGS_INIT_MESSAGE" SOAK_ALLOW_BUILDER_NEW_ACTIONS="$SOAK_ALLOW_BUILDER_NEW_ACTIONS" SOAK_BUILDER_BOTS="$SOAK_BUILDER_BOTS" \
         node --input-type=module <<'NODE'
 const settings = JSON.parse(process.env.SETTINGS_JSON_INPUT);
 if (process.env.BOT_ID === 'bridge' && process.env.SOAK_SETTINGS_INIT_MESSAGE) {
     settings.init_message = '';
+}
+if (process.env.SOAK_ALLOW_BUILDER_NEW_ACTIONS === '1') {
+    const botId = String(process.env.BOT_ID || '').toLowerCase();
+    const builderBots = new Set(
+        String(process.env.SOAK_BUILDER_BOTS || '')
+            .split(/\s+/)
+            .map((item) => item.trim().toLowerCase())
+            .filter(Boolean),
+    );
+    const blocked = Array.isArray(settings.blocked_actions)
+        ? [...settings.blocked_actions]
+        : [];
+    if (builderBots.has(botId)) {
+        settings.allow_insecure_coding = true;
+    } else {
+        settings.allow_insecure_coding = false;
+        if (!blocked.includes('!newAction')) blocked.push('!newAction');
+    }
+    settings.blocked_actions = blocked;
 }
 process.stdout.write(JSON.stringify(settings));
 NODE
@@ -872,10 +985,16 @@ def int_env(name: str, default: int) -> int:
 
 
 run_dir = Path(sys.argv[1])
+agent_source = (
+    os.environ.get("SOAK_BEHAVIOR_AGENTS")
+    or os.environ.get("SOAK_BOTS")
+    or os.environ.get("SOAK_COST_AGENTS")
+    or DEFAULT_AGENTS
+)
 agents = [
     agent.strip().lower()
-    for agent in os.environ.get("SOAK_COST_AGENTS", DEFAULT_AGENTS).split()
-    if agent.strip()
+    for agent in agent_source.split()
+    if agent.strip() and agent.strip().lower() != "bridge"
 ]
 agent_set = set(agents)
 
@@ -886,11 +1005,16 @@ max_restarts = int_env("SOAK_MAX_RESTARTS_PER_AGENT", 1)
 min_public_chat = int_env("SOAK_MIN_PUBLIC_CHAT_COHORT", 10)
 min_gather_or_build = int_env("SOAK_MIN_GATHER_OR_BUILD_COHORT", 3)
 min_shared_artifacts = int_env("SOAK_MIN_SHARED_ARTIFACTS", 1)
+settlement_mode = os.environ.get("MC_SIM_BUILD_MODE", "").strip().lower() == "settlement"
 
 movement_re = re.compile(r"!(move|goToPlayer|goToCoordinates|searchForBlock|searchForEntity|navigate)\b", re.IGNORECASE)
 death_re = re.compile(r"\b(died|death|respawn(?:ed)?)\b", re.IGNORECASE)
 drowning_re = re.compile(r"\bdrown(?:ed|ing)?\b", re.IGNORECASE)
 stuck_re = re.compile(r"\b(stuck|cannot reach|path.*failed|unable to (move|reach))\b", re.IGNORECASE)
+stuck_prompt_context_re = re.compile(
+    r"^\s*(?:\*\*\s*Danger/stuck reports\s*:\s*\*\*|Memory updated to:|Local observations:)",
+    re.IGNORECASE,
+)
 restart_re = re.compile(
     r"(Exiting\.|\bprocess exited with code\s+[1-9]\d*\b|\brejoining\b|\bbot disconnected\b|"
     r"\bsupervisor.*restart\b|\brestart(?:ed|ing)?\b|heartbeat\.halted|heartbeat.*max-no-command)",
@@ -902,6 +1026,16 @@ timestamp_re = re.compile(
 dig_hole_re = re.compile(r"(dig.?hole|stuck in (a )?hole|trapped)", re.IGNORECASE)
 gather_re = re.compile(r"!(collectBlocks|collectAllBlocks|consume|equip|smeltItem)\b", re.IGNORECASE)
 build_re = re.compile(r"!(place|placeHere|placeBlock|build|buildFromPlan|planAndBuild)\b", re.IGNORECASE)
+distress_re = re.compile(
+    r"(distress_reported|distress\.reported|\"operation\"\s*:\s*\"danger_report\"|"
+    r"shared_state\.write.*danger_report)",
+    re.IGNORECASE,
+)
+distress_resolved_re = re.compile(
+    r"(distress_resolved|distress\.resolved|\"operation\"\s*:\s*\"danger_resolve\"|"
+    r"recovery_status[\"']?\s*[:=]\s*[\"']?(resolved|escaped|teleported))",
+    re.IGNORECASE,
+)
 shared_text_re = re.compile(r"(shared|cohort|together).*(camp|marker|wall|chest|shelter|fire)", re.IGNORECASE)
 spawn_re = re.compile(r"(Spawned at|\bspawn(ed)?\b|joined the game|logged in)", re.IGNORECASE)
 coord_re = re.compile(
@@ -963,6 +1097,14 @@ def count_regex(lines: list[str], pattern: re.Pattern[str]) -> int:
     return sum(1 for line in lines if pattern.search(line))
 
 
+def count_stuck(lines: list[str]) -> int:
+    return sum(
+        1
+        for line in lines
+        if stuck_re.search(line) and not stuck_prompt_context_re.search(line)
+    )
+
+
 def spawn_safe(lines: list[str]) -> int:
     for index, line in enumerate(lines):
         if spawn_re.search(line):
@@ -983,6 +1125,7 @@ totals = {
     "total_drownings": 0,
     "total_stuck": 0,
     "total_dig_holes": 0,
+    "total_unresolved_distress": 0,
     "total_restarts": 0,
     "total_restart_recurrences": 0,
 }
@@ -1036,7 +1179,10 @@ for agent in agents:
     build = count_regex(counter_lines, build_re)
     deaths = count_regex(counter_lines, death_re)
     drownings = count_regex(counter_lines, drowning_re)
-    stuck = count_regex(counter_lines, stuck_re)
+    stuck = count_stuck(counter_lines)
+    distress_reports = count_regex(counter_lines, distress_re)
+    distress_resolved = count_regex(counter_lines, distress_resolved_re)
+    unresolved_distress = max(0, distress_reports - distress_resolved)
     restart_count = count_regex(counter_lines, restart_re)
     recurrent_restarts = 1 if has_recurrent_restart(counter_lines) else 0
     dig_holes = count_regex(counter_lines, dig_hole_re)
@@ -1050,7 +1196,9 @@ for agent in agents:
     agent_unmet: list[str] = []
     if safe_spawn != 1:
         agent_unmet.append(f"agent {agent} safe spawn expected 1 got {safe_spawn}")
-    if movement < min_movement:
+    active_actions = movement + gather + build
+    settlement_builder_active = settlement_mode and build > 0 and active_actions >= min_movement
+    if movement < min_movement and not settlement_builder_active:
         agent_unmet.append(f"agent {agent} movement expected >= {min_movement} got {movement}")
     if deaths > max_deaths:
         agent_unmet.append(f"agent {agent} deaths expected <= {max_deaths} got {deaths}")
@@ -1060,6 +1208,8 @@ for agent in agents:
         agent_unmet.append(
             f"agent {agent} restarts expected <= {max_restarts} got {restart_count}"
         )
+    if unresolved_distress:
+        agent_unmet.append(f"agent {agent} unresolved distress expected 0 got {unresolved_distress}")
     if recurrent_restarts:
         agent_unmet.append(f"agent {agent} repeated restarts within 300s")
     unmet.extend(agent_unmet)
@@ -1076,6 +1226,7 @@ for agent in agents:
         "drownings": drownings,
         "stuck": stuck,
         "dig_holes": dig_holes,
+        "unresolved_distress": unresolved_distress,
         "restart_count": restart_count,
         "behavior_status": "fail" if agent_unmet else "pass",
     }
@@ -1090,6 +1241,7 @@ for agent in agents:
     totals["total_drownings"] += drownings
     totals["total_stuck"] += stuck
     totals["total_dig_holes"] += dig_holes
+    totals["total_unresolved_distress"] += unresolved_distress
     totals["total_restarts"] += restart_count
     totals["total_restart_recurrences"] += recurrent_restarts
 
@@ -1141,6 +1293,7 @@ header = [
     "drownings",
     "stuck",
     "dig_holes",
+    "unresolved_distress",
     "restart_count",
     "behavior_status",
 ]
@@ -1358,6 +1511,8 @@ write_metadata() {
         echo "llm_smoke_timeout_seconds=$SOAK_LLM_SMOKE_TIMEOUT_SECONDS"
         echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
+        echo "management_policy=$MC_SIM_MANAGEMENT_POLICY"
+        echo "minecraft_management_review_mode=$MINECRAFT_MANAGEMENT_REVIEW_MODE"
         echo "builder_openrouter_model=$MC_SIM_BUILDER_OPENROUTER_MODEL"
         echo "builder_openrouter_key_set=$([ -n "$MC_SIM_BUILDER_OPENROUTER_API_KEY" ] && echo yes || echo no)"
         echo "builder_fallback=$MC_SIM_BUILDER_FALLBACK"
@@ -1369,6 +1524,8 @@ write_metadata() {
         echo "build_cooldown_sec=$MC_SIM_BUILD_COOLDOWN_SEC"
         echo "build_zone_stride=$MC_SIM_BUILD_ZONE_STRIDE"
         echo "build_cache_ttl_sec=$MC_SIM_BUILD_CACHE_TTL_SEC"
+        echo "settlement_owner_order=$MC_SIM_SETTLEMENT_OWNER_ORDER"
+        echo "plan_build_agent_allowlist=$MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST"
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
         echo "conversation_mode=$CONVERSATION_MODE"
@@ -1389,7 +1546,10 @@ write_metadata() {
         echo "minecraft_boot_timeout_seconds=$SOAK_MINECRAFT_BOOT_TIMEOUT_SECONDS"
         echo "block_private_conversations=$SOAK_BLOCK_PRIVATE_CONVERSATIONS"
         echo "block_slow_sim_actions=$SOAK_BLOCK_SLOW_SIM_ACTIONS"
+        echo "block_new_actions=$SOAK_BLOCK_NEW_ACTIONS"
         echo "block_execute_code_actions=$SOAK_BLOCK_EXECUTE_CODE_ACTIONS"
+        echo "allow_builder_new_actions=$SOAK_ALLOW_BUILDER_NEW_ACTIONS"
+        echo "builder_bots=$SOAK_BUILDER_BOTS"
         echo "safe_terrain_actions=$SOAK_SAFE_TERRAIN_ACTIONS"
         echo "suppress_empty_init_chat=$MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT"
         echo "easy_spawn=$SOAK_EASY_SPAWN"
@@ -1413,6 +1573,12 @@ write_metadata() {
         echo "heartbeat_cooldown_ms=$MC_HEARTBEAT_COOLDOWN_MS"
         echo "heartbeat_stale_action_ms=$MC_HEARTBEAT_STALE_ACTION_MS"
         echo "heartbeat_max_no_command=$MC_HEARTBEAT_MAX_NO_COMMAND"
+        echo "memory_context_enabled=$MC_SIM_MEMORY_CONTEXT_ENABLED"
+        echo "memory_context_recall_limit=$MC_SIM_MEMORY_RECALL_LIMIT"
+        echo "memory_context_core_max_chars=$MC_SIM_MEMORY_CORE_MAX_CHARS"
+        echo "memory_context_recall_max_chars=$MC_SIM_MEMORY_RECALL_MAX_CHARS"
+        echo "memory_context_exclude_agents=${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS:-management,alpha}"
+        echo "shared_state_enabled=$MC_SIM_SHARED_STATE_ENABLED"
         echo "minecraft_host=${MC_HOST:-127.0.0.1}"
         echo "minecraft_port=${MC_PORT:-${SERVER_PORT:-25565}}"
         echo "server_dir=${SERVER_DIR:-$REPO_ROOT/minecraft-server}"
@@ -1755,17 +1921,25 @@ launch_bot() {
         export MC_RUN_DIR="$RUN_DIR"
         export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
-        export LTAG_RUN_ID="$RUN_ID"
+        export LTAG_RUN_ID="${LTAG_RUN_ID:-$RUN_ID}"
         export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
+        export MC_SIM_MANAGEMENT_POLICY
         export MINECRAFT_MANAGEMENT_REVIEW_MODE MINECRAFT_MANAGEMENT_REVIEW_DEADLINE_MS
+        export MC_SIM_MEMORY_CONTEXT_ENABLED MC_SIM_MEMORY_RECALL_LIMIT
+        export MC_SIM_MEMORY_CORE_MAX_CHARS MC_SIM_MEMORY_RECALL_MAX_CHARS
+        export MC_SIM_SHARED_STATE_ENABLED
+        if [ -n "${MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS+x}" ]; then
+            export MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS
+        fi
         export MC_SIM_BUILDER_PROVIDER MC_SIM_BUILDER_FALLBACK
         export MC_SIM_BUILDER_OPENROUTER_API_KEY MC_SIM_BUILDER_OPENROUTER_MODEL
         export MC_SIM_BUILDER_MAX_CALLS_PER_RUN MC_SIM_BUILDER_MAX_CALLS_PER_AGENT
         export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUILDER_USD_PER_1K_OUTPUT
         export MC_SIM_BUILD_MODE
         export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
+        export MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST SOAK_PLAN_BUILD_BOTS
         export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
         export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"

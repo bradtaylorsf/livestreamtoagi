@@ -1,8 +1,8 @@
 id: pixel
 display_name: "Pixel — The Enthusiast"
 role: "Researcher/Audience Liaison"
-model_conversation: openai/gpt-4o-mini
-model_building: openai/gpt-5.2
+model_conversation: model:agent:pixel:conversation
+model_building: model:agent:pixel:building
 voice_id: en-US-EricNeural
 color_hex: "#3498db"
 color_rich: "bright_yellow"

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.shared_state import Decision, SharedTask, SharedWorkingState
-
+from core.shared_state import (
+    Decision,
+    SettlementObjective,
+    SharedTask,
+    SharedWorkingState,
+)
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -39,7 +42,7 @@ def _make_mock_redis() -> MagicMock:
         data = lists.get(key, [])
         if stop == -1:
             return data[start:]
-        return data[start:stop + 1]
+        return data[start : stop + 1]
 
     async def set_str(key: str, value: str) -> bool:
         strings[key] = value
@@ -123,9 +126,7 @@ class TestDecisionCRUD:
         state = SharedWorkingState(redis)
 
         for i in range(10):
-            await state.add_decision(
-                Decision(summary=f"Decision {i}", made_by=["vera"])
-            )
+            await state.add_decision(Decision(summary=f"Decision {i}", made_by=["vera"]))
 
         decisions = await state.get_recent_decisions(3)
         assert len(decisions) == 3
@@ -179,6 +180,75 @@ class TestSeedInitialTasks:
 
         tasks = await state.get_tasks()
         assert len(tasks) == 7
+
+
+class TestSettlementObjectives:
+    """SharedWorkingState settlement objective operations."""
+
+    @pytest.mark.asyncio
+    async def test_completed_objective_does_not_regress_on_stale_assign(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(
+                    objective_id="phase-1-starter-cabin",
+                    phase_index=0,
+                    description="starter cabin",
+                    status="completed",
+                    owner_agent_id="fork",
+                    verified_blocks=12,
+                    completion_ratio=1.0,
+                )
+            ]
+        )
+
+        updated = await state.assign_settlement_objective_owner(
+            "phase-1-starter-cabin",
+            "rex",
+            reason="stale_director_context",
+        )
+
+        assert updated is not None
+        assert updated.status == "completed"
+        assert updated.owner_agent_id == "fork"
+        objectives = await state.get_settlement_objectives()
+        assert objectives[0].status == "completed"
+        assert objectives[0].verified_blocks == 12
+
+    @pytest.mark.asyncio
+    async def test_completed_objective_does_not_regress_on_stale_blocked_advance(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(
+                    objective_id="phase-1-starter-cabin",
+                    phase_index=0,
+                    description="starter cabin",
+                    status="completed",
+                    owner_agent_id="fork",
+                    verified_blocks=12,
+                    completion_ratio=1.0,
+                )
+            ]
+        )
+
+        updated = await state.advance_settlement_objective(
+            "phase-1-starter-cabin",
+            status="blocked",
+            verified_blocks=2,
+            completion_ratio=0.5,
+            evidence={"action_id": "stale-plan"},
+        )
+
+        assert updated is not None
+        assert updated.status == "completed"
+        objectives = await state.get_settlement_objectives()
+        assert objectives[0].status == "completed"
+        assert objectives[0].verified_blocks == 12
+        assert objectives[0].completion_ratio == 1.0
+        assert "action_id" not in objectives[0].evidence
 
 
 class TestGetSummaryForContext:

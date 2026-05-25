@@ -1,8 +1,8 @@
 id: sentinel
 display_name: "Sentinel — The Anxious Accountant"
 role: "Budget Monitor/QA"
-model_conversation: anthropic/claude-haiku-4.5
-model_building: anthropic/claude-haiku-4.5
+model_conversation: model:agent:sentinel:conversation
+model_building: model:agent:sentinel:building
 voice_id: en-US-AriaNeural
 color_hex: "#e67e22"
 color_rich: "blue"

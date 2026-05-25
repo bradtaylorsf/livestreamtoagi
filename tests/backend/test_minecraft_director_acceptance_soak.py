@@ -287,15 +287,14 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
         },
         {
             "ts": "2026-05-21T00:05:16Z",
-            "event_type": "director.scene.digest",
+            "event_type": "memory_context.fetched",
             "agent": "alpha",
             "payload": {
                 "scene_id": "scene-1",
-                "participants": ["alpha", "vera"],
-                "distributed_to": ["alpha", "vera"],
-                "entries_count": 4,
-                "tokens": 38,
-                "summary": "Alpha and Vera agreed to build a torch-lit marker.",
+                "agent_id": "alpha",
+                "recent_event_count": 4,
+                "context_chars": 180,
+                "run_mode": "director_v2",
             },
         },
         {
@@ -305,10 +304,18 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
             "payload": {
                 "scene_id": "scene-1",
                 "owner": "alpha",
+                "objective_id": "phase-cabin",
+                "phase_index": 0,
+                "phase_owner": "alpha",
                 "plan_id": "plan-1",
                 "provider": "local",
                 "status": "completed",
                 "plan": {"blocks": [{"dx": 0, "dy": 0, "dz": 0, "block_type": "torch"}]},
+                "metric": {
+                    "intended_count": 1,
+                    "steps_verified": 1,
+                    "completion_ratio": 1.0,
+                },
             },
         },
     ]
@@ -335,6 +342,10 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
     assert report["metrics"]["useful_memory_digest_count"] == 1
     assert report["metrics"]["tool_call_count"] == 1
     assert report["metrics"]["macro_attempt_count"] == 1
+    assert report["metrics"]["settlement_objective_count"] == 1
+    assert report["metrics"]["settlement_objectives_with_structured_results"] == 1
+    assert report["metrics"]["settlement_objectives"][0]["objective_id"] == "phase-cabin"
+    assert report["metrics"]["settlement_objectives"][0]["verified_blocks"] == 1
     assert (
         "None. Evidence is sufficient to unblock #511, #512, and #514." in report["residual_gaps"]
     )
@@ -342,10 +353,13 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
         "director-decisions.ndjson",
         "tool-parity.ndjson",
         "macro-evidence.ndjson",
+        "settlement-objectives.ndjson",
         "memory-digest.ndjson",
+        "distress-evidence.ndjson",
         "acceptance-report.md",
     ):
         assert (run_dir / artifact).is_file()
+    assert report["metrics"]["unresolved_distress"] == 0
 
 
 def test_acceptance_report_counts_distinct_selected_agents_for_storm_ratio(
@@ -425,3 +439,54 @@ def test_acceptance_report_counts_distinct_selected_agents_for_storm_ratio(
     report = json.loads((run_dir / "acceptance-report.json").read_text(encoding="utf-8"))
     assert report["overall_status"] == "pass"
     assert report["metrics"]["max_selected_agent_scene_ratio"] == 0.125
+
+
+def test_acceptance_report_fails_when_distress_is_unresolved(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metadata.env").write_text(
+        "start_utc=2026-05-21T00:00:00Z\ncost_agents=alpha vera rex aurora pixel fork sentinel grok\n",
+        encoding="utf-8",
+    )
+    (run_dir / "behavior-totals.env").write_text(
+        "behavior_gate_status=fail\ntotal_restart_recurrences=0\ntotal_unresolved_distress=1\n",
+        encoding="utf-8",
+    )
+    (run_dir / "early-exits.tsv").write_text("", encoding="utf-8")
+    (run_dir / "heartbeat-halts.tsv").write_text("", encoding="utf-8")
+    events = [
+        {
+            "ts": "2026-05-21T00:05:10Z",
+            "event_type": "distress.reported",
+            "agent": "pixel",
+            "payload": {
+                "danger_id": "danger-1",
+                "kind": "drowning",
+                "severity": 5,
+                "recovery_status": "open",
+            },
+        }
+    ]
+    (run_dir / "timeline.ndjson").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [sys.executable, str(REPORT_BUILDER), "--run-dir", str(run_dir)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 1
+    report = json.loads((run_dir / "acceptance-report.json").read_text(encoding="utf-8"))
+    assert report["overall_status"] == "fail"
+    assert report["metrics"]["unresolved_distress"] == 1
+    assert any(item["id"] == "no_unresolved_distress" for item in report["criteria"])
+    distress_rows = [
+        json.loads(line)
+        for line in (run_dir / "distress-evidence.ndjson").read_text(encoding="utf-8").splitlines()
+    ]
+    assert distress_rows[0]["kind"] == "drowning"

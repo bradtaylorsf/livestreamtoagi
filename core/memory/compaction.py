@@ -13,6 +13,7 @@ from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Literal
 
 from core.memory.embeddings import generate_embedding
+from core.model_config import model_ref, resolve_model_reference
 
 if TYPE_CHECKING:
     import uuid
@@ -27,8 +28,7 @@ if TYPE_CHECKING:
 EmbeddingFn = Callable[[str], Coroutine[object, object, list[float]]]
 SummaryStyle = Literal["default", "scene"]
 
-# Cheap model for summary generation (~$0.001 per call)
-SUMMARY_MODEL = "anthropic/claude-haiku-4.5"
+SUMMARY_MODEL = model_ref("memory_summary")
 SUMMARY_MAX_TOKENS = 300
 
 # Buffer management thresholds
@@ -230,7 +230,7 @@ class MemoryCompactor:
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_msg},
             ],
-            model=SUMMARY_MODEL,
+            model=resolve_model_reference(SUMMARY_MODEL),
             agent_id=agent_id,
             max_tokens=SUMMARY_MAX_TOKENS,
             temperature=0.3,

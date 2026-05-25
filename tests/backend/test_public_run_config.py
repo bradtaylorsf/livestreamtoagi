@@ -6,7 +6,11 @@ import argparse
 
 from core.simulation.orchestrator import SimulationConfig
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
-from scripts.run_simulation import _agents_from_run_config, _memory_seed_from_run_config
+from scripts.run_simulation import (
+    _agents_from_run_config,
+    _memory_seed_from_run_config,
+    _world_from_run_config,
+)
 
 
 def _args(**overrides) -> argparse.Namespace:
@@ -15,6 +19,7 @@ def _args(**overrides) -> argparse.Namespace:
         "memory_seed_mode": None,
         "memory_seed_file": None,
         "memory_seed_inherit_from": None,
+        "world_config_file": None,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -38,6 +43,18 @@ def test_run_config_memory_seed_translates_public_inherit_shape() -> None:
     assert seed is not None
     assert seed.mode == "inherit"
     assert seed.inherit_from == "sim-123"
+
+
+def test_cli_world_config_file_overrides_run_config_world_block() -> None:
+    world = _world_from_run_config(
+        _args(world_config_file="scripts/minecraft/world-flat-eval.config"),
+        {"world": {"world_type": "default", "seed": 123}},
+    )
+
+    assert world == {
+        "world_type": "custom",
+        "world_config_path": "scripts/minecraft/world-flat-eval.config",
+    }
 
 
 def test_simulation_config_snapshot_preserves_public_roster_fields() -> None:

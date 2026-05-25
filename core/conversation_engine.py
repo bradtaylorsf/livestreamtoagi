@@ -23,6 +23,7 @@ from core.conversation.topic_detector import TopicDetector
 from core.event_bus import EventType
 from core.exceptions import AgentError, TransientError
 from core.llm_client import LLMError
+from core.model_config import resolve_internal_model
 from core.models import ConversationCreate, ConversationRecord, SelectionResult
 from core.speech_parser import parse_speech
 from core.tool_executor import (
@@ -842,7 +843,7 @@ class ConversationEngine:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": "Analyze now."},
                 ],
-                model="anthropic/claude-haiku-4.5",
+                model=resolve_internal_model("conversation_summary"),
                 agent_id="system",
                 temperature=0.3,
                 simulation_id=self._simulation_id,
@@ -1012,7 +1013,7 @@ class ConversationEngine:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": "Extract commitments now."},
                 ],
-                model="anthropic/claude-haiku-4.5",
+                model=resolve_internal_model("conversation_commitments"),
                 agent_id="system",
                 temperature=0.1,
                 max_tokens=800,

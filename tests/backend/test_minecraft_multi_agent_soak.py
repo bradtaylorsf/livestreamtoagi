@@ -12,13 +12,16 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
+COHORT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-cohort-bot.sh"
 RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
+RUN_SIMULATION = REPO_ROOT / "scripts" / "run_simulation.py"
 EASY_SETUP_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "setup-easy-spawn.mjs"
 DOC = REPO_ROOT / "docs" / "minecraft" / "multi-agent-soak.md"
 ACTION_DOC = REPO_ROOT / "docs" / "minecraft" / "action-command-reliability.md"
@@ -128,6 +131,9 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_HEARTBEAT_COOLDOWN_MS" in proc.stdout
     assert "MC_HEARTBEAT_STALE_ACTION_MS" in proc.stdout
     assert "MC_HEARTBEAT_MAX_NO_COMMAND" in proc.stdout
+    assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in proc.stdout
+    assert "MC_SIM_MEMORY_RECALL_LIMIT" in proc.stdout
+    assert "lower-level diagnostic harness" in proc.stdout
     assert "--verify-behavior" in proc.stdout
     assert "logs/soak" in proc.stdout
     assert "set -euo pipefail" not in proc.stdout
@@ -158,8 +164,24 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "MC_SIM_MIN_VERIFIED_SUCCESS" in wrapper.stdout
     assert "MC_SIM_HEARTBEAT_IDLE_SEC" in wrapper.stdout
     assert "MC_SIM_HEARTBEAT_MAX_NO_COMMAND" in wrapper.stdout
+    assert "MC_SIM_MEMORY_CONTEXT_ENABLED" in wrapper.stdout
+    assert "MC_SIM_MEMORY_RECALL_LIMIT" in wrapper.stdout
+    assert "lower-level Minecraft diagnostic" in wrapper.stdout
     assert "timeline.ndjson" in wrapper.stdout
     assert "set -euo pipefail" not in wrapper.stdout
+
+    supervisor = subprocess.run(
+        [sys.executable, str(RUN_SIMULATION), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert supervisor.returncode == 0
+    assert "--conversation-mode" in supervisor.stdout
+    assert "--duration-hours" in supervisor.stdout
+    assert "--minecraft-log-dir" in supervisor.stdout
+    assert "--no-embodied-supervisor" in supervisor.stdout
 
 
 def test_unknown_argument_is_rejected() -> None:
@@ -192,6 +214,11 @@ def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
         "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s"
         in proc.stdout
     )
+    assert (
+        "memory context: enabled=1 recall_limit=3 core_max=1500 recall_max=1200 exclude=management,alpha"
+        in proc.stdout
+    )
+    assert "shared state:  enabled=1" in proc.stdout
     assert "behavior:       require=1; movement>=5/agent" in proc.stdout
     assert "execute code:   allowed" in proc.stdout
     assert "auto-start MC:  1" in proc.stdout
@@ -216,6 +243,9 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
                 "MC_SIM_HEARTBEAT_COOLDOWN_SEC=7",
                 "MC_SIM_HEARTBEAT_STALE_ACTION_SEC=30",
                 "MC_SIM_HEARTBEAT_MAX_NO_COMMAND=2",
+                "MC_SIM_MEMORY_RECALL_LIMIT=2",
+                "MC_SIM_MEMORY_CORE_MAX_CHARS=900",
+                "MC_SIM_MEMORY_RECALL_MAX_CHARS=700",
             ]
         ),
         encoding="utf-8",
@@ -244,7 +274,7 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
         "build governor: max_per_agent=6 cooldown=300s zone_stride=12 cache_ttl=3600s"
         in proc.stdout
     )
-    assert "management review: disabled" in proc.stdout
+    assert "management review: off" in proc.stdout
     assert "build mode: single" in proc.stdout
     assert "private bot conversations: 1" in proc.stdout
     assert "slow sim actions: 1" in proc.stdout
@@ -254,6 +284,11 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert (
         "heartbeat: enabled=1 idle=12s cooldown=7s stale_action=30s max_no_command=2" in proc.stdout
     )
+    assert (
+        "memory context: enabled=1 recall_limit=2 core_max=900 recall_max=700 exclude=management,alpha"
+        in proc.stdout
+    )
+    assert "shared state: enabled=1" in proc.stdout
     assert "easy mode: 1" in proc.stdout
     assert "keep MC server running: 1" in proc.stdout
     assert "minecraft: 127.0.0.1:25566" in proc.stdout
@@ -284,6 +319,11 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
         "heartbeat:      enabled=1 idle=12000ms cooldown=7000ms stale_action=30000ms max_no_command=2"
         in proc.stdout
     )
+    assert (
+        "memory context: enabled=1 recall_limit=2 core_max=900 recall_max=700 exclude=management,alpha"
+        in proc.stdout
+    )
+    assert "shared state:  enabled=1" in proc.stdout
     assert "easy spawn:     enabled" in proc.stdout
     assert "keep MC alive:  1" in proc.stdout
     assert SIM_BOTS_LINE in proc.stdout
@@ -491,7 +531,34 @@ def test_local_sim_wrapper_can_keep_management_enabled(tmp_path) -> None:
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "management review: enabled" in proc.stdout
+    assert "management review: enforce" in proc.stdout
+
+
+def test_local_sim_wrapper_accepts_management_policy_shadow(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_MANAGEMENT_POLICY=shadow",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "management review: shadow" in proc.stdout
 
 
 def test_local_sim_wrapper_env_file_management_toggle_wins_over_pollution(tmp_path) -> None:
@@ -524,7 +591,7 @@ def test_local_sim_wrapper_env_file_management_toggle_wins_over_pollution(tmp_pa
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "management review: enabled" in proc.stdout
+    assert "management review: enforce" in proc.stdout
 
 
 def test_local_sim_wrapper_can_include_bridge_bot_when_requested(tmp_path) -> None:
@@ -684,6 +751,10 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "MC_SIM_BUILD_MODE" in text
     assert "export MC_SIM_BUILD_MODE" in text
     assert "build_mode=$MC_SIM_BUILD_MODE" in text
+    assert "SOAK_PLAN_BUILD_BOTS" in text
+    assert "MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST" in text
+    assert "settlement_owner_order=$MC_SIM_SETTLEMENT_OWNER_ORDER" in text
+    assert "plan_build_agent_allowlist=$MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST" in text
     assert "MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT" in text
     assert "apply_suppress_empty_init_chat_patch" in text
     assert "waiting for deferred init message" in text
@@ -693,7 +764,11 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "is not available for this Director V2 turn" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
     assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
+    assert "SOAK_BLOCK_NEW_ACTIONS" in text
     assert "SOAK_BLOCK_EXECUTE_CODE_ACTIONS" in text
+    assert "SOAK_ALLOW_BUILDER_NEW_ACTIONS" in text
+    assert "SOAK_BUILDER_BOTS" in text
+    assert "settings.allow_insecure_coding = true" in text
     assert "MINECRAFT_LLM_QUEUE_PROXY" in text
     assert "MINECRAFT_LLM_CONCURRENCY" in text
     assert "lmstudio_queue_proxy.py" in text
@@ -718,6 +793,7 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "max-no-command" in text
     assert "MC_TIMELINE_NDJSON" in text
     assert "MC_RUN_DIR" in text
+
     assert "setup-easy-spawn.mjs" in text
     assert "world-easy.config" in text
     assert "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS" in text
@@ -739,6 +815,13 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert '"$SCRIPT_DIR/supervise.sh"' in text
     assert "minecraft-supervisor.pid" in text
     assert "minecraft-supervisor-stdout.log" in text
+
+
+def test_cohort_launcher_folds_multi_arg_plan_and_build_commands() -> None:
+    text = COHORT_SCRIPT.read_text(encoding="utf-8")
+    assert "PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" in text
+    assert "commandName === '!planAndBuild' && args.length > 1" in text
+    assert "args.map(cleanArg).filter(Boolean).join(': ')" in text
 
 
 def test_easy_spawn_access_writer_is_offline_safe(tmp_path) -> None:
@@ -792,6 +875,10 @@ def test_easy_spawn_script_builds_safe_starter_arena() -> None:
     assert "EASY_SETUP_OBSERVERS" in text
     assert "EASY_SETUP_OPERATORS" in text
     assert "EASY_SETUP_SPECTATORS" in text
+    assert "EASY_SETUP_MEADOW_RADIUS" in text
+    assert "EASY_SETUP_BOUNDARY" in text
+    assert "EASY_SETUP_ANIMALS" in text
+    assert "/summon minecraft:cow" in text
     assert "/gamemode spectator" in text
     assert "/clear @a" in text
     assert "minecraft:oak_log 32" in text
@@ -893,10 +980,10 @@ def test_behavior_gate_verification_mode_fails_for_synthetic_threshold_miss(tmp_
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
     assert (
         "agent\tspawn_safe\tmovement\tpublic_chat\tinter_agent_chat\tgather\tbuild\tdeaths\t"
-        "drownings\tstuck\tdig_holes\trestart_count\tbehavior_status"
+        "drownings\tstuck\tdig_holes\tunresolved_distress\trestart_count\tbehavior_status"
     ) in behavior_tsv
-    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\t0\tfail" in behavior_tsv
-    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "alpha\t1\t1\t1\t1\t1\t0\t0\t0\t0\t0\t0\t0\tfail" in behavior_tsv
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
     summary = (run_dir / "summary.txt").read_text(encoding="utf-8")
     assert "Behavioral acceptance" in summary
@@ -942,7 +1029,140 @@ def test_behavior_gate_does_not_count_embodied_text_as_death(tmp_path) -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
-    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+
+
+def test_behavior_gate_ignores_stuck_prompt_headings(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for agent_id, other in (("vera", "rex"), ("rex", "vera")):
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(5))
+        lines.append('!planAndBuild("shared cabin")')
+        if agent_id == "vera":
+            lines.extend("**Danger/stuck reports:**" for _ in range(6))
+            lines.append(
+                "Memory updated to: prior rescue context mentioned Grok was stuck, "
+                "but this is prompt memory rather than a live path failure."
+            )
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_BOTS": "vera rex",
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+
+
+def test_behavior_gate_uses_launched_soak_bots_over_cost_agents(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for agent_id, other in (("vera", "rex"), ("rex", "vera")):
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+        ]
+        lines.extend(f"!move north {step}" for step in range(5))
+        lines.append('!planAndBuild("shared cabin")')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_BOTS": "vera rex",
+            "SOAK_COST_AGENTS": "alpha vera rex",
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "\nalpha\t" not in behavior_tsv
+    assert "vera\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+
+
+def test_behavior_gate_allows_settlement_build_activity_as_liveness(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    vera_lines = [
+        "Spawned at x=0 y=64 z=0",
+        "vera: building the shared cabin with rex",
+        "!move north",
+        '!planAndBuild("starter cabin")',
+        '!buildFromPlan("starter cabin")',
+        '!placeHere("oak_planks")',
+        '!place("oak_planks", {"x": 1, "y": 64, "z": 1}, "up")',
+    ]
+    rex_lines = [
+        "Spawned at x=1 y=64 z=1",
+        "rex: keeping the shared site moving with vera",
+    ]
+    rex_lines.extend(f"!move north {step}" for step in range(5))
+    rex_lines.append('!planAndBuild("perimeter wall")')
+    (bots_dir / "vera.log").write_text("\n".join(vera_lines), encoding="utf-8")
+    (bots_dir / "rex.log").write_text("\n".join(rex_lines), encoding="utf-8")
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "MC_SIM_BUILD_MODE": "settlement",
+            "SOAK_BOTS": "vera rex",
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
+    assert "vera\t1\t1\t1\t1\t0\t4\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
+    assert "rex\t1\t5\t1\t1\t0\t1\t0\t0\t0\t0\t0\t0\tpass" in behavior_tsv
 
 
 def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(tmp_path) -> None:
@@ -994,7 +1214,7 @@ def test_behavior_gate_counts_restarts_and_fails_repeated_pathstopped_restarts(t
 
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
     assert "restart_count" in behavior_tsv
-    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t2\tfail" in behavior_tsv
+    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t0\t2\tfail" in behavior_tsv
 
     totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
     assert "total_restarts=2" in totals
@@ -1048,10 +1268,56 @@ def test_behavior_gate_counts_heartbeat_halts_as_restart_failures(tmp_path) -> N
     assert "agent alpha restarts expected <= 0 got 1" in proc.stderr
 
     behavior_tsv = (run_dir / "behavior.tsv").read_text(encoding="utf-8")
-    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t1\tfail" in behavior_tsv
+    assert "alpha\t1\t5\t1\t1\t0\t0\t0\t0\t0\t0\t0\t1\tfail" in behavior_tsv
 
     totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
     assert "total_restarts=1" in totals
+
+
+def test_behavior_gate_fails_unresolved_structured_distress(tmp_path) -> None:
+    run_dir = tmp_path / "soak-run"
+    bots_dir = run_dir / "bots"
+    logs_dir = run_dir / "logs"
+    bots_dir.mkdir(parents=True)
+    logs_dir.mkdir()
+
+    for index, agent_id in enumerate(AGENT_IDS):
+        other = AGENT_IDS[(index + 1) % len(AGENT_IDS)]
+        lines = [
+            "Spawned at x=0 y=64 z=0",
+            f"{agent_id}: ready to work with {other}",
+            "!move north 0",
+            "!move north 1",
+            "!move north 2",
+            "!move north 3",
+            "!move north 4",
+        ]
+        if agent_id in {"vera", "rex"}:
+            lines.append('!place("stone", {"x": 1, "y": 64, "z": 1}, "up")')
+        if agent_id == "pixel":
+            lines.append('bridge shared_state.write {"operation":"danger_report"}')
+        (bots_dir / f"{agent_id}.log").write_text("\n".join(lines), encoding="utf-8")
+
+    (logs_dir / "bridge.log").write_text(
+        "vera and rex worked together on a shared camp marker\n",
+        encoding="utf-8",
+    )
+
+    proc = _run(
+        "--verify-behavior",
+        str(run_dir),
+        env={
+            "SOAK_MIN_PUBLIC_CHAT_COHORT": "1",
+            "SOAK_MIN_GATHER_OR_BUILD_COHORT": "1",
+            "SOAK_MIN_SHARED_ARTIFACTS": "1",
+            "SOAK_REQUIRE_BEHAVIOR_GATE": "1",
+        },
+    )
+
+    assert proc.returncode == 1
+    assert "agent pixel unresolved distress expected 0 got 1" in proc.stderr
+    totals = (run_dir / "behavior-totals.env").read_text(encoding="utf-8")
+    assert "total_unresolved_distress=1" in totals
 
 
 def test_package_json_exposes_soak_commands() -> None:

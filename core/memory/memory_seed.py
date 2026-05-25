@@ -157,7 +157,13 @@ class MemorySeedApplier:
         snapshot = MemorySnapshot(**raw)
 
         known_ids = {a.id for a in self._agents.get_all_agents()}
-        unknown = [aid for aid in snapshot.agents if aid not in known_ids]
+        referenced_ids = (
+            set(snapshot.agents)
+            | set(snapshot.agent_states)
+            | set(snapshot.agent_accounts)
+            | set(snapshot.agent_goals)
+        )
+        unknown = [aid for aid in referenced_ids if aid not in known_ids]
         if unknown:
             raise ValueError(
                 f"memory_seed custom_file references unknown agent_ids: "

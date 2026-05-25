@@ -5,6 +5,17 @@
 // generation without affecting ordinary chat/action selection.
 
 import { randomUUID } from 'node:crypto';
+import {
+    closeSync,
+    existsSync,
+    mkdirSync,
+    openSync,
+    readFileSync,
+    renameSync,
+    unlinkSync,
+    writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
 
 import { emitTimelineEvent } from '../bridge/timeline_emitter.js';
 
@@ -19,6 +30,84 @@ const providerState = {
     agentCalls: new Map(),
     failures: 0,
 };
+
+function sleepSync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function sharedBudgetFiles() {
+    const runDir = normalizedEnv('MC_RUN_DIR');
+    if (!runDir) return null;
+    mkdirSync(runDir, { recursive: true });
+    return {
+        statePath: path.join(runDir, 'builder-provider-budget.json'),
+        lockPath: path.join(runDir, 'builder-provider-budget.lock'),
+    };
+}
+
+function emptySharedBudget() {
+    return { runCalls: 0, runEstimatedUsd: 0, agentCalls: {} };
+}
+
+function readSharedBudget(statePath) {
+    if (!existsSync(statePath)) return emptySharedBudget();
+    try {
+        const parsed = JSON.parse(readFileSync(statePath, 'utf8'));
+        return {
+            runCalls: Number.isFinite(Number(parsed.runCalls)) ? Number(parsed.runCalls) : 0,
+            runEstimatedUsd: Number.isFinite(Number(parsed.runEstimatedUsd))
+                ? Number(parsed.runEstimatedUsd)
+                : 0,
+            agentCalls:
+                parsed.agentCalls && typeof parsed.agentCalls === 'object'
+                    ? parsed.agentCalls
+                    : {},
+        };
+    } catch {
+        return emptySharedBudget();
+    }
+}
+
+function writeSharedBudget(statePath, state) {
+    const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmpPath, `${JSON.stringify(state)}\n`, 'utf8');
+    renameSync(tmpPath, statePath);
+}
+
+function withSharedBudgetLock(files, fn) {
+    const deadline = Date.now() + nonNegativeIntEnv('MC_SIM_BUILDER_BUDGET_LOCK_TIMEOUT_MS', 5000);
+    let fd = null;
+    while (fd === null) {
+        try {
+            fd = openSync(files.lockPath, 'wx');
+            writeFileSync(fd, `${process.pid}\n`, 'utf8');
+        } catch (err) {
+            if (err && err.code !== 'EEXIST') throw err;
+            if (Date.now() > deadline) {
+                throw new BuilderBudgetError(
+                    'budget_lock_timeout',
+                    'builder OpenRouter shared budget lock timed out',
+                    { lock_path: files.lockPath },
+                );
+            }
+            sleepSync(25);
+        }
+    }
+    try {
+        return fn();
+    } finally {
+        try {
+            closeSync(fd);
+        } catch {
+            /* ignore */
+        }
+        try {
+            unlinkSync(files.lockPath);
+        } catch {
+            /* ignore */
+        }
+    }
+}
 
 export class BuilderProviderError extends Error {
     constructor(code, message, options = {}) {
@@ -147,6 +236,69 @@ function currentBudgetConfig() {
 
 function reserveOpenRouterCall(agentKey, estimatedUsd) {
     const budget = currentBudgetConfig();
+    const sharedFiles = sharedBudgetFiles();
+    if (sharedFiles) {
+        return withSharedBudgetLock(sharedFiles, () => {
+            const shared = readSharedBudget(sharedFiles.statePath);
+            const sharedAgent = shared.agentCalls[agentKey] || { calls: 0, estimatedUsd: 0 };
+            if (shared.runCalls >= budget.max_calls_per_run) {
+                throw new BuilderBudgetError(
+                    'run_call_cap',
+                    `builder OpenRouter run call cap reached (${budget.max_calls_per_run})`,
+                    { ...budget, request_count_run: shared.runCalls, shared: true },
+                );
+            }
+            if (sharedAgent.calls >= budget.max_calls_per_agent) {
+                throw new BuilderBudgetError(
+                    'agent_call_cap',
+                    `builder OpenRouter agent call cap reached (${budget.max_calls_per_agent})`,
+                    {
+                        ...budget,
+                        request_count_run: shared.runCalls,
+                        request_count_agent: sharedAgent.calls,
+                        shared: true,
+                    },
+                );
+            }
+            if (
+                budget.max_estimated_usd_per_run !== null &&
+                shared.runEstimatedUsd + estimatedUsd > budget.max_estimated_usd_per_run
+            ) {
+                throw new BuilderBudgetError(
+                    'run_usd_cap',
+                    `builder OpenRouter estimated USD cap would be exceeded (${budget.max_estimated_usd_per_run})`,
+                    {
+                        ...budget,
+                        estimated_usd_run: roundedUsd(shared.runEstimatedUsd),
+                        next_estimated_usd: roundedUsd(estimatedUsd),
+                        shared: true,
+                    },
+                );
+            }
+
+            shared.runCalls += 1;
+            shared.runEstimatedUsd += estimatedUsd;
+            sharedAgent.calls += 1;
+            sharedAgent.estimatedUsd = Number(sharedAgent.estimatedUsd || 0) + estimatedUsd;
+            shared.agentCalls[agentKey] = sharedAgent;
+            writeSharedBudget(sharedFiles.statePath, shared);
+
+            providerState.runCalls = shared.runCalls;
+            providerState.runEstimatedUsd = shared.runEstimatedUsd;
+            const localAgentBudget = agentCounter(agentKey);
+            localAgentBudget.calls = sharedAgent.calls;
+            localAgentBudget.estimatedUsd = sharedAgent.estimatedUsd;
+            return {
+                ...budget,
+                request_count_run: shared.runCalls,
+                request_count_agent: sharedAgent.calls,
+                estimated_usd_run: roundedUsd(shared.runEstimatedUsd),
+                estimated_usd_agent: roundedUsd(sharedAgent.estimatedUsd),
+                reserved_estimated_usd: roundedUsd(estimatedUsd),
+                shared: true,
+            };
+        });
+    }
     const agentBudget = agentCounter(agentKey);
     if (providerState.runCalls >= budget.max_calls_per_run) {
         throw new BuilderBudgetError(
@@ -198,6 +350,21 @@ function reserveOpenRouterCall(agentKey, estimatedUsd) {
 function adjustOpenRouterCost(agentKey, reservation, actualUsd) {
     const delta = actualUsd - reservation.reserved_estimated_usd;
     if (!Number.isFinite(delta) || Math.abs(delta) < 1e-12) return;
+    const sharedFiles = reservation.shared ? sharedBudgetFiles() : null;
+    if (sharedFiles) {
+        withSharedBudgetLock(sharedFiles, () => {
+            const shared = readSharedBudget(sharedFiles.statePath);
+            const sharedAgent = shared.agentCalls[agentKey] || { calls: 0, estimatedUsd: 0 };
+            shared.runEstimatedUsd += delta;
+            sharedAgent.estimatedUsd = Number(sharedAgent.estimatedUsd || 0) + delta;
+            shared.agentCalls[agentKey] = sharedAgent;
+            writeSharedBudget(sharedFiles.statePath, shared);
+            providerState.runEstimatedUsd = shared.runEstimatedUsd;
+            const localAgentBudget = agentCounter(agentKey);
+            localAgentBudget.estimatedUsd = sharedAgent.estimatedUsd;
+        });
+        return;
+    }
     providerState.runEstimatedUsd += delta;
     const agentBudget = agentCounter(agentKey);
     agentBudget.estimatedUsd += delta;
@@ -251,14 +418,25 @@ function usageFromOpenRouterResponse(data, promptTokens, fallbackCompletionToken
     const completion = Number.isFinite(Number(usage.completion_tokens))
         ? Number(usage.completion_tokens)
         : fallbackCompletionTokens;
+    const reasoning = Number.isFinite(Number(usage.reasoning_tokens))
+        ? Number(usage.reasoning_tokens)
+        : Number.isFinite(Number(usage.completion_tokens_details?.reasoning_tokens))
+          ? Number(usage.completion_tokens_details.reasoning_tokens)
+          : 0;
     const total = Number.isFinite(Number(usage.total_tokens))
         ? Number(usage.total_tokens)
         : prompt + completion;
-    const providerReported = usage.prompt_tokens !== undefined || usage.total_tokens !== undefined;
+    const providerReported =
+        usage.prompt_tokens !== undefined ||
+        usage.total_tokens !== undefined ||
+        usage.reasoning_tokens !== undefined ||
+        usage.completion_tokens_details?.reasoning_tokens !== undefined;
     return {
         prompt_tokens: Math.max(0, Math.floor(prompt)),
         completion_tokens: Math.max(0, Math.floor(completion)),
+        reasoning_tokens: Math.max(0, Math.floor(reasoning)),
         total_tokens: Math.max(0, Math.floor(total)),
+        billable_total_tokens: Math.max(0, Math.floor(total + reasoning)),
         estimated: !providerReported,
         usage_source: providerReported ? 'provider_reported' : 'estimated',
     };
@@ -375,6 +553,7 @@ function openRouterResolved(agent, apiKey, modelName) {
                         'Content-Type': 'application/json',
                         'HTTP-Referer': 'https://github.com/bradtaylor/livestreamtoagi',
                         'X-Title': 'Livestream to AGI Minecraft builder plan',
+                        'X-LTAG-Skip-Usage-Capture': '1',
                     },
                     body: JSON.stringify({
                         model: modelName,
@@ -477,6 +656,22 @@ export function resolveBuilderModel(agent) {
 
 export function builderProviderSnapshot(agent) {
     const key = agentId(agent).toLowerCase();
+    const sharedFiles = sharedBudgetFiles();
+    if (sharedFiles) {
+        const shared = readSharedBudget(sharedFiles.statePath);
+        const sharedAgent = shared.agentCalls[key] || { calls: 0, estimatedUsd: 0 };
+        return {
+            provider: normalizedProvider(),
+            fallback: fallbackMode(),
+            request_count_run: shared.runCalls,
+            request_count_agent: Number(sharedAgent.calls || 0),
+            estimated_usd_run: roundedUsd(shared.runEstimatedUsd),
+            estimated_usd_agent: roundedUsd(Number(sharedAgent.estimatedUsd || 0)),
+            failures: providerState.failures,
+            shared_budget: true,
+            ...currentBudgetConfig(),
+        };
+    }
     const agentBudget = agentCounter(key);
     return {
         provider: normalizedProvider(),
@@ -495,5 +690,6 @@ export function resetBuilderProviderState() {
     providerState.runEstimatedUsd = 0;
     providerState.agentCalls.clear();
     providerState.failures = 0;
+    const sharedFiles = sharedBudgetFiles();
+    if (sharedFiles && existsSync(sharedFiles.statePath)) unlinkSync(sharedFiles.statePath);
 }
-

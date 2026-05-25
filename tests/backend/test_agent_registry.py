@@ -125,6 +125,21 @@ async def test_get_agent_by_id():
 
 
 @pytest.mark.asyncio
+async def test_agent_models_can_be_overridden_by_environment(monkeypatch: pytest.MonkeyPatch):
+    """Per-agent env vars override checked-in model role references."""
+    monkeypatch.setenv("LTAG_MODEL_AGENT_REX_CONVERSATION", "openai/gpt-4o-mini")
+    monkeypatch.setenv("LTAG_MODEL_AGENT_REX_BUILDING", "deepseek/deepseek-v3.2")
+
+    registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)
+    await registry.load_all()
+
+    rex = registry.get_agent("rex")
+    assert rex is not None
+    assert rex.model_conversation == "openai/gpt-4o-mini"
+    assert rex.model_building == "deepseek/deepseek-v3.2"
+
+
+@pytest.mark.asyncio
 async def test_get_agent_not_found():
     """get_agent returns None for an unknown agent ID."""
     registry = AgentRegistry(redis_client=None, agents_dir=AGENTS_DIR)

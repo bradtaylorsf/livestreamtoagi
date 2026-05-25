@@ -132,6 +132,21 @@ async def test_llm_fallback_called_when_no_keywords(config_with_llm: TopicConfig
 
 
 @pytest.mark.asyncio
+async def test_llm_fallback_uses_topic_classifier_env(
+    config_with_llm: TopicConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LTAG_MODEL_TOPIC_CLASSIFIER", "google/gemini-flash")
+    mock_llm = AsyncMock()
+    mock_llm.complete.return_value = AsyncMock(content="philosophy")
+    detector = TopicDetector(config_with_llm, llm_client=mock_llm)
+
+    await detector.detect_topic([{"content": "Hello there"}])
+
+    assert mock_llm.complete.call_args.kwargs["model"] == "google/gemini-flash"
+
+
+@pytest.mark.asyncio
 async def test_llm_fallback_returns_general_for_invalid(config_with_llm: TopicConfig) -> None:
     """LLM returns something not in the allowed topic list -> 'general'."""
     mock_llm = AsyncMock()

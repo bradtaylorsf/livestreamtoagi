@@ -188,15 +188,33 @@ EMBEDDING_PROVIDER=deterministic \
   --max-cost 0.01 \
   --verbose
 
+Seed files and public run-config JSON can also carry run-spec starting
+conditions: `run_mode`, `persona_overrides`, `agent_goals`, `memory_seed`,
+`factions`, and `world`. The CLI can override run mode with
+`--run-mode {experimental,persistent}` and a custom Minecraft world config
+with `--world-config-file <path>`.
+
 # Persistent/autonomous runs can also enforce a rolling spend ceiling:
 #   --max-cost-rolling 0.01 --rolling-window 1h
 
 python scripts/verify_simulation.py --name "local-llm-validation" --profile local-smoke
 ```
 
+Embodied Minecraft lifecycle runs use the supervisor path:
+
+```bash
+.venv/bin/python scripts/run_simulation.py \
+  --name "embodied-short-a" \
+  --conversation-mode embodied \
+  --run-mode experimental \
+  --duration-hours 0.25 \
+  --max-cost 0.01
+```
+
 See [Minecraft Command Eval](docs/minecraft/command-eval.md) and the
 [Minecraft runbook](docs/minecraft/runbook.md) for the current embodiment
-workflow.
+workflow. For seeded, inherited, and blank-slate memory starts in embodied
+runs, see [Blank-Slate Embodied Runs](docs/run-modes/blank-slate-embodied.md).
 
 Operator spend-cap and kill-switch alerts use the same email pipeline. Set
 `ALERT_EMAIL` for the operator inbox and `SPEND_ALERT_THRESHOLD_PCT` (default

@@ -22,7 +22,13 @@ SETTINGS_TEMPLATE = REPO_ROOT / "scripts" / "minecraft" / "mindcraft-settings-al
 STOCK_SETTINGS_TEMPLATE = REPO_ROOT / "scripts" / "minecraft" / "mindcraft-settings.js"
 PROFILE_TEMPLATE = REPO_ROOT / "scripts" / "minecraft" / "profiles" / "alpha-bot.json"
 POLL_ERRAND_ACTION = (
-    REPO_ROOT / "scripts" / "minecraft" / "fork-src" / "agent" / "commands" / "poll_errand_action.js"
+    REPO_ROOT
+    / "scripts"
+    / "minecraft"
+    / "fork-src"
+    / "agent"
+    / "commands"
+    / "poll_errand_action.js"
 )
 ALPHA_DOC = REPO_ROOT / "docs" / "minecraft" / "alpha-profile.md"
 CONNECT_DOC = REPO_ROOT / "docs" / "minecraft" / "mindcraft-connect.md"
@@ -170,6 +176,55 @@ def test_dry_run_prints_resolved_e2_target_and_local_model(tmp_path: Path) -> No
     assert "chat_ingame=false" in out
 
 
+def test_dry_run_can_stage_local_alpha_town_planner_without_changing_default_profile(
+    tmp_path: Path,
+) -> None:
+    proc = _run(
+        ["--dry-run"],
+        tmp_path,
+        {
+            "LOCAL_LLM_MODEL": "qwen3-8b",
+            "LOCAL_LLM_MODEL_BUILDING": "qwen3-30b",
+            "MINECRAFT_BRIDGE_TOKEN": "test-token",
+            "MC_SIM_ALPHA_TOWN_PLANNER": "1",
+        },
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    out = proc.stdout
+    assert "lmstudio/qwen3-8b" in out
+    assert "lmstudio/qwen3-30b" in out
+    assert "openrouter/" not in out
+    assert "chat_ingame=true" in out
+    assert "chat_bot_messages=true" in out
+    assert "speak=false" in out
+    assert json.loads(PROFILE_TEMPLATE.read_text())["model"] == "lmstudio/__LOCAL_LLM_MODEL__"
+
+
+def test_dry_run_can_stage_openrouter_alpha_town_planner_without_changing_default_profile(
+    tmp_path: Path,
+) -> None:
+    proc = _run(
+        ["--dry-run"],
+        tmp_path,
+        {
+            "LOCAL_LLM_MODEL": "qwen3-8b",
+            "LOCAL_LLM_MODEL_BUILDING": "qwen3-30b",
+            "MINECRAFT_BRIDGE_TOKEN": "test-token",
+            "MC_SIM_ALPHA_TOWN_PLANNER": "1",
+            "MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER": "openrouter",
+            "MC_SIM_ALPHA_TOWN_PLANNER_MODEL": "google/gemini-3.5-flash",
+        },
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    out = proc.stdout
+    assert "openrouter/google/gemini-3.5-flash" in out
+    assert "chat_ingame=true" in out
+    assert "chat_bot_messages=true" in out
+    assert "speak=false" in out
+    assert "lmstudio/qwen3-8b" not in out
+    assert json.loads(PROFILE_TEMPLATE.read_text())["model"] == "lmstudio/__LOCAL_LLM_MODEL__"
+
+
 def test_alpha_profile_is_lmstudio_local_only_with_fixed_name() -> None:
     data = json.loads(PROFILE_TEMPLATE.read_text())
     assert set(data) == {"name", "model", "code_model", "bot_responder", "personality"}
@@ -245,7 +300,11 @@ def test_script_real_run_guards_and_staging_contract() -> None:
     assert "whitelist add ${ALPHA_BOT_NAME}" in src
     assert "JSON.parse(readFileSync" in src
     assert "JSON.stringify(profile" in src
-    assert "openrouter/" not in src
+    assert "MC_SIM_ALPHA_TOWN_PLANNER" in src
+    assert "MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" in src
+    assert "MC_SIM_ALPHA_TOWN_PLANNER_MODEL" in src
+    assert "google/gemini-3.5-flash" in src
+    assert '"!planAndBuild", "!buildFromPlan", "!newAction", "!executeCode"' in src
 
 
 def test_alpha_poll_errand_action_is_non_verbal_and_bridge_backed() -> None:

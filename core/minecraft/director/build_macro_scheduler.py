@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -44,6 +45,9 @@ class BuildMacroAssignment(BaseModel):
     granted: bool = False
     status: str | None = None
     cache_key: str | None = None
+    objective_id: str | None = None
+    phase_index: int | None = None
+    phase_owner: str | None = None
 
 
 class BuildMacroAcquireResult(BaseModel):
@@ -59,6 +63,26 @@ class BuildMacroAcquireResult(BaseModel):
     status: str | None = None
     cache_key: str
     support_assignments: dict[str, BuildMacroAssignment] = Field(default_factory=dict)
+    objective_id: str | None = None
+    phase_index: int | None = None
+    phase_owner: str | None = None
+
+
+class SettlementObjectiveContext(BaseModel):
+    """Active multi-phase settlement build objective used by the Director gate."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    objective_id: str
+    phase_index: int = 0
+    description: str | None = None
+    owner_agent_id: str | None = None
+    status: str | None = None
+    previous_owner_agent_ids: list[str] = Field(default_factory=list)
+    owner_started_at_ms: int | None = None
+    stale_after_ms: int | None = None
+    cooldown_until_ms: int | None = None
+    reassign_reason: str | None = None
 
 
 @dataclass
@@ -75,6 +99,9 @@ class _ScenePlanState:
     result: str | None = None
     verified_blocks: int = 0
     cooldown_until_ms: int | None = None
+    objective_id: str | None = None
+    phase_index: int | None = None
+    phase_owner: str | None = None
 
 
 @dataclass
@@ -95,6 +122,8 @@ class BuildMacroScheduler:
         origin: Mapping[str, Any] | None = None,
         scene: Scene | None = None,
         candidates: Sequence[Any] = (),
+        active_objective: Mapping[str, Any] | SettlementObjectiveContext | None = None,
+        plan_build_agent_allowlist: Sequence[Any] | str | None = None,
         now_ms: int | None = None,
     ) -> BuildMacroAcquireResult:
         """Reserve one active build plan for a scene if no equivalent plan owns it."""
@@ -102,9 +131,51 @@ class BuildMacroScheduler:
         now = now_ms if now_ms is not None else _now_ms()
         scene_key = _text(scene_id) or "unknown-scene"
         owner = _agent_id(agent_id)
-        desc = _normalize_description(description)
+        objective = _objective_context(active_objective)
+        eligible_owner_ids = _plan_build_allowed_agents(plan_build_agent_allowlist)
+        phase_owner, phase_reason = self.select_phase_owner(
+            active_objective=objective,
+            candidates=candidates,
+            fallback_owner=owner,
+            plan_build_agent_allowlist=eligible_owner_ids,
+            now_ms=now,
+        )
+        if objective is not None and phase_owner and phase_owner != owner:
+            cache_desc = _objective_cache_description(objective, description)
+            origin_payload = _origin_dict(origin)
+            cache_key = _cache_key(scene_key, phase_owner, cache_desc, origin_payload)
+            support_assignments = self.assign_support_roles(
+                scene=scene,
+                owner=phase_owner,
+                candidates=candidates,
+                scene_id=scene_key,
+                plan_id=None,
+                cache_key=cache_key,
+                active_objective=objective,
+            )
+            return BuildMacroAcquireResult(
+                granted=False,
+                scene_id=scene_key,
+                plan_id=None,
+                owner=phase_owner,
+                reason=phase_reason,
+                status="support",
+                cache_key=cache_key,
+                support_assignments=support_assignments,
+                objective_id=objective.objective_id,
+                phase_index=objective.phase_index,
+                phase_owner=phase_owner,
+            )
+
+        if phase_owner:
+            owner = phase_owner
+        acquisition_reason = phase_reason if objective is not None else "acquired"
+        desc = _normalize_description(
+            objective.description if objective and objective.description else description
+        )
         origin_payload = _origin_dict(origin)
-        cache_key = _cache_key(scene_key, owner, desc, origin_payload)
+        cache_desc = _objective_cache_description(objective, desc)
+        cache_key = _cache_key(scene_key, owner, cache_desc, origin_payload)
         self._expire_scene_if_ready(scene_key, now)
 
         support_assignments = self.assign_support_roles(
@@ -114,9 +185,33 @@ class BuildMacroScheduler:
             scene_id=scene_key,
             plan_id=None,
             cache_key=cache_key,
+            active_objective=objective,
         )
 
+        if not _plan_build_agent_allowed(owner, eligible_owner_ids):
+            return BuildMacroAcquireResult(
+                granted=False,
+                scene_id=scene_key,
+                plan_id=None,
+                owner=owner,
+                reason="plan_build_agent_not_allowed",
+                status="support",
+                cache_key=cache_key,
+                support_assignments=support_assignments,
+                objective_id=objective.objective_id if objective else None,
+                phase_index=objective.phase_index if objective else None,
+                phase_owner=phase_owner,
+            )
+
         existing = self._scene_state.get(scene_key)
+        if (
+            existing is not None
+            and objective is not None
+            and existing.objective_id != objective.objective_id
+        ):
+            self._active_agent_goals.pop((existing.owner_agent_id, existing.cache_key), None)
+            self._scene_state.pop(scene_key, None)
+            existing = None
         if existing is not None:
             reason = "already_owned" if existing.owner_agent_id == owner else "scene_locked"
             return BuildMacroAcquireResult(
@@ -135,6 +230,9 @@ class BuildMacroScheduler:
                     cache_key=existing.cache_key,
                     reason=reason,
                 ),
+                objective_id=existing.objective_id,
+                phase_index=existing.phase_index,
+                phase_owner=existing.phase_owner,
             )
 
         agent_goal = (owner, cache_key)
@@ -149,6 +247,9 @@ class BuildMacroScheduler:
                 status="active",
                 cache_key=cache_key,
                 support_assignments=support_assignments,
+                objective_id=objective.objective_id if objective else None,
+                phase_index=objective.phase_index if objective else None,
+                phase_owner=phase_owner,
             )
 
         plan_id = (
@@ -172,6 +273,9 @@ class BuildMacroScheduler:
             started_ms=now,
             status="acquired",
             support_assignments=support_assignments,
+            objective_id=objective.objective_id if objective else None,
+            phase_index=objective.phase_index if objective else None,
+            phase_owner=phase_owner,
         )
         self._active_agent_goals[agent_goal] = plan_id
         return BuildMacroAcquireResult(
@@ -179,11 +283,60 @@ class BuildMacroScheduler:
             scene_id=scene_key,
             plan_id=plan_id,
             owner=owner,
-            reason="acquired",
+            reason=acquisition_reason,
             status="acquired",
             cache_key=cache_key,
             support_assignments=support_assignments,
+            objective_id=objective.objective_id if objective else None,
+            phase_index=objective.phase_index if objective else None,
+            phase_owner=phase_owner,
         )
+
+    def select_phase_owner(
+        self,
+        *,
+        active_objective: Mapping[str, Any] | SettlementObjectiveContext | None,
+        candidates: Sequence[Any],
+        fallback_owner: str | None = None,
+        plan_build_agent_allowlist: Sequence[Any] | str | set[str] | None = None,
+        now_ms: int | None = None,
+    ) -> tuple[str | None, str]:
+        """Resolve the effective owner for a settlement objective phase."""
+
+        objective = _objective_context(active_objective)
+        current = _agent_id(objective.owner_agent_id) if objective else None
+        eligible_owner_ids = _plan_build_allowed_agents(plan_build_agent_allowlist)
+
+        def allowed(agent_id: str | None) -> bool:
+            return _plan_build_agent_allowed(agent_id, eligible_owner_ids)
+
+        if objective is None:
+            fallback = _agent_id(fallback_owner)
+            if fallback and allowed(fallback):
+                return fallback, "acquired"
+            return None, "plan_build_no_eligible_agent"
+        if current and allowed(current) and not _objective_needs_reassignment(objective, now_ms):
+            return current, "settlement_phase_owner"
+
+        candidate_ids = _candidate_roles(candidates)
+        excluded = {current, *(_agent_id(item) for item in objective.previous_owner_agent_ids)}
+        preferred = _preferred_phase_owners(candidates, candidate_ids)
+        for candidate_id in preferred:
+            if candidate_id and candidate_id not in excluded and allowed(candidate_id):
+                return candidate_id, (
+                    "settlement_phase_owner_reassigned"
+                    if current
+                    else "settlement_phase_owner_assigned"
+                )
+        for candidate_id in preferred:
+            if candidate_id and candidate_id != current and allowed(candidate_id):
+                return candidate_id, "settlement_phase_owner_reassigned"
+        if current and allowed(current):
+            return current, "settlement_phase_owner"
+        fallback = _agent_id(fallback_owner)
+        if fallback and allowed(fallback):
+            return fallback, "settlement_phase_owner_assigned"
+        return None, "plan_build_no_eligible_agent"
 
     def mark_started(self, scene_id: str, plan_id: str, *, now_ms: int | None = None) -> bool:
         """Mark a reserved scene plan as executing."""
@@ -258,10 +411,12 @@ class BuildMacroScheduler:
         scene_id: str | None = None,
         plan_id: str | None = None,
         cache_key: str | None = None,
+        active_objective: Mapping[str, Any] | SettlementObjectiveContext | None = None,
     ) -> dict[str, BuildMacroAssignment]:
         """Assign non-owner scene agents normal support roles."""
 
         scene_key = scene.scene_id if scene is not None else (_text(scene_id) or "unknown-scene")
+        objective = _objective_context(active_objective)
         agent_roles = _candidate_roles(candidates)
         agent_ids = set(agent_roles)
         if scene is not None:
@@ -284,6 +439,9 @@ class BuildMacroScheduler:
                 granted=False,
                 status="support",
                 cache_key=cache_key,
+                objective_id=objective.objective_id if objective else None,
+                phase_index=objective.phase_index if objective else None,
+                phase_owner=owner if objective else None,
             )
         return assignments
 
@@ -302,6 +460,9 @@ class BuildMacroScheduler:
             status=state.status,
             cache_key=state.cache_key,
             support_assignments=state.support_assignments,
+            objective_id=state.objective_id,
+            phase_index=state.phase_index,
+            phase_owner=state.phase_owner,
         )
 
     def _expire_scene_if_ready(self, scene_id: str, now_ms: int) -> None:
@@ -329,6 +490,7 @@ def _assignments_for_plan(
                 "plan_id": plan_id,
                 "cache_key": cache_key,
                 "reason": reason if assignment.role == "support" else assignment.reason,
+                "phase_owner": owner if assignment.objective_id else assignment.phase_owner,
             }
         )
         for agent_id, assignment in assignments.items()
@@ -374,6 +536,97 @@ def _support_task(role: SupportRole, owner: str) -> str:
     if role == "guard":
         return f"Watch for mobs, hazards, or blocked paths while {owner} owns the build plan."
     return f"Keep the scene coordinated in chat while {owner} handles the build plan."
+
+
+def _objective_context(
+    value: Mapping[str, Any] | SettlementObjectiveContext | None,
+) -> SettlementObjectiveContext | None:
+    if value is None:
+        return None
+    if isinstance(value, SettlementObjectiveContext):
+        return value
+    try:
+        return SettlementObjectiveContext.model_validate(value)
+    except ValueError:
+        return None
+
+
+def _objective_cache_description(
+    objective: SettlementObjectiveContext | None,
+    description: str,
+) -> str:
+    if objective is None:
+        return _normalize_description(description)
+    return _normalize_description(
+        f"{objective.objective_id}:{objective.description or description}"
+    )
+
+
+def _objective_needs_reassignment(
+    objective: SettlementObjectiveContext,
+    now_ms: int | None,
+) -> bool:
+    status = (objective.status or "").strip().lower()
+    if status in {"blocked", "owner_cap_reached", "cooldown", "stale", "abandoned"}:
+        return True
+    now = now_ms if now_ms is not None else _now_ms()
+    if objective.cooldown_until_ms is not None and objective.cooldown_until_ms > now:
+        return True
+    if objective.owner_started_at_ms is None or objective.stale_after_ms is None:
+        return False
+    return now - objective.owner_started_at_ms >= objective.stale_after_ms
+
+
+def _preferred_phase_owners(
+    candidates: Sequence[Any],
+    roles: Mapping[str, str | None],
+) -> list[str]:
+    scored: list[tuple[int, str]] = []
+    for candidate_id, role in roles.items():
+        lowered = f"{candidate_id} {role or ''}".lower()
+        priority = 0
+        if any(token in lowered for token in ("builder", "architect", "engineer", "maker")):
+            priority = -2
+        elif any(token in lowered for token in ("explorer", "resource", "gather")):
+            priority = -1
+        scored.append((priority, candidate_id))
+    if not scored:
+        return sorted({_agent_id(item) for item in candidates if _agent_id(item)})
+    return [candidate_id for _priority, candidate_id in sorted(scored)]
+
+
+def _plan_build_allowed_agents(
+    value: Sequence[Any] | str | set[str] | None = None,
+) -> set[str] | None:
+    if isinstance(value, set):
+        parsed = {_agent_id(item) for item in value}
+        parsed.discard("")
+        return parsed or None
+    if value is None:
+        raw = (
+            os.environ.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST")
+            or os.environ.get("SOAK_PLAN_BUILD_BOTS")
+            or ""
+        ).strip()
+    elif isinstance(value, str):
+        raw = value.strip()
+    else:
+        raw = " ".join(str(item) for item in value)
+    if not raw:
+        return None
+    if raw.lower() in {"*", "all", "any"}:
+        return None
+    parsed = {_agent_id(item) for item in raw.replace(",", " ").split()}
+    parsed.discard("")
+    return parsed or None
+
+
+def _plan_build_agent_allowed(agent_id: str | None, allowed_agents: set[str] | None = None) -> bool:
+    normalized = _agent_id(agent_id)
+    if not normalized:
+        return False
+    allowed = _plan_build_allowed_agents() if allowed_agents is None else allowed_agents
+    return allowed is None or normalized in allowed
 
 
 def _cache_key(scene_id: str, owner: str, description: str, origin: Mapping[str, Any]) -> str:

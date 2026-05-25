@@ -129,12 +129,25 @@ scripts/minecraft/start-server.sh --dry-run
 It prints the resolved `seed` / `type` / `name` and writes them into a
 freshly generated `server.properties` (only if one doesn't already exist).
 
+## Driven By Run-Spec
+
+E12 run specs can now provide a `world:` block. At run start,
+`core/minecraft/world_provisioner.py` resolves that block into the active
+`WORLD_CONFIG` path that the Minecraft scripts consume.
+
+- `run_mode: experimental` with `world.persistent: false` creates a derived
+  temporary `world.config` from the run spec (or uses `world_config_path` when
+  `world_type: custom`) and runs `scripts/minecraft/restore.sh --reset --yes`.
+  The next `start-server.sh` boot generates a fresh world from that config.
+- `run_mode: persistent` or `world.persistent: true` never resets the server
+  directory. It verifies the durable world folder already exists, records the
+  resolved `WORLD_CONFIG`, and lets the supervisor/server reuse that world.
+
+The orchestrator records the resolved config path, `LEVEL_NAME`, run mode, and
+action in simulation metadata under `world_provisioned`.
+
 ## What this does NOT cover (on purpose)
 
-- **Wiring world generation into the run-mode system** (persistent vs
-  experimental runs choosing worlds programmatically) — that's **E12**
-  (`E12-5 — World as an input wired to E2`). This issue makes the world a
-  *file-based input*; connecting it to run specs is later work.
 - **Backups, restore, and the clean reset workflow** — that's
   **E2-5** ([backup-restore.md](./backup-restore.md),
   [issue #530](https://github.com/bradtaylorsf/livestreamtoagi/issues/530)).

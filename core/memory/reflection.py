@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from core.memory.core_memory import TOKEN_LIMIT, VALID_SECTIONS
 from core.memory.validation import validate_agent_id
+from core.model_config import resolve_internal_model
 from core.models import (
     JournalEntry,
     JournalEntryCreate,
@@ -555,8 +556,8 @@ class ReflectionManager:
         """Look up the agent's building model from registry config."""
         agent = self._registry.get_agent(agent_id)
         if agent is None:
-            logger.warning("Agent %s not found in registry, using claude-sonnet-4-6", agent_id)
-            return "claude-sonnet-4-6"
+            logger.warning("Agent %s not found in registry, using reflection fallback", agent_id)
+            return resolve_internal_model("reflection_fallback")
         return agent.model_building
 
     async def _generate_journal_entry(

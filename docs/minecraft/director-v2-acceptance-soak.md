@@ -101,6 +101,11 @@ The acceptance report records provider, model, paid/local call counts, token
 usage, estimated USD, and fallback reasons in `macro-evidence.ndjson` and
 `acceptance-report.json`.
 
+Structured distress and rescue events are written to `distress-evidence.ndjson`.
+The acceptance report fails when `behavior-totals.env` records any unresolved
+distress, so a stuck, drowning, trapped, low-health, dead, or repeatedly blocked
+agent cannot silently pass the soak.
+
 ## Evidence: Monitor
 
 `monitor.html` is the local visual review surface. It shows:
@@ -193,6 +198,22 @@ This prevents a passing soak from silently skipping tool parity evidence.
 At least one build, gather, or support macro attempt must have a structured
 result.
 
+## Evidence: Distress Rescue
+
+`distress-evidence.ndjson` captures structured distress and rescue telemetry:
+
+| Column | Meaning |
+| --- | --- |
+| `event_type` | `distress_reported`, `distress.reported`, `rescue.action.started`, or `rescue.action.completed`. |
+| `agent` | Endangered agent when known. |
+| `danger_id` | Shared-state danger id. |
+| `kind` | `stuck`, `drowning`, `trapped`, `low_health`, `death`, or `repeated_failure`. |
+| `rescuer_id` | Assigned or acting rescuer. |
+| `recovery_status` | `open`, `rescue_dispatched`, `resolved`, `escaped`, `teleported`, or `failed`. |
+
+The `no_unresolved_distress` criterion requires
+`total_unresolved_distress=0` in `behavior-totals.env`.
+
 ## Evidence: Memory Digest
 
 `memory-digest.ndjson` captures `director.scene.digest` and
@@ -240,6 +261,7 @@ summary.
 | Soak includes a build/gather/support macro attempt with structured result. | `macro-evidence.ndjson`; at least one macro row exists and at least one row has `structured_result=true`. |
 | LLM queue depth remains below threshold after warm-up. | `acceptance-report.json.metrics.queue_depth_after_warmup_max` is below `thresholds.queue_depth_after_warmup`. |
 | No unrecovered bot restart loop occurs. | `early-exits.tsv`, `heartbeat-halts.tsv`, and `behavior-totals.env`; early exits, heartbeat halts, and restart recurrences must be zero. |
+| No unresolved distress remains. | `distress-evidence.ndjson` and `behavior-totals.env`; `total_unresolved_distress` must be zero. |
 | Evidence unblocks #511, #512, and #514 or documents blockers. | `acceptance-report.json.residual_gaps` and `downstream_epics` explicitly name #511, #512, and #514. |
 
 ## Residual Gaps

@@ -249,10 +249,7 @@ process.stdout.write(JSON.stringify({{
         event for event in result["events"] if event["type"] == "inbox.telemetry_ignored"
     ]
     assert len(telemetry_events) == 3
-    assert {
-        event["payload"]["message"]
-        for event in telemetry_events
-    } == {
+    assert {event["payload"]["message"] for event in telemetry_events} == {
         "*Pixel used break*",
         "Command !break was given 0 args, but requires 4 args.",
         "!break",
@@ -507,3 +504,108 @@ process.stdout.write(JSON.stringify({{
     assert "prefer one visible safe command" not in message
     assert "!placeHere" not in result["bridgeCalls"][0]["payload"]["available_tools"]
     assert "!buildFromPlan" not in result["bridgeCalls"][0]["payload"]["available_tools"]
+
+
+@requires_node
+def test_director_gate_settlement_mode_reads_active_objective_from_shared_state(
+    tmp_path: Path,
+) -> None:
+    director_gate = _stage_skill_tree(tmp_path, DIRECTOR_GATE)
+    bridge = director_gate.parent.parent / "bridge"
+    (bridge / "python_bridge.js").write_text(
+        """
+export async function callBridge(opts = {}) {
+    globalThis.__bridgeCalls = globalThis.__bridgeCalls || [];
+    globalThis.__bridgeCalls.push(opts);
+    if (opts.service === 'shared_state') {
+        return {
+            ok: true,
+            payload: {
+                active_objective: {
+                    objective_id: 'phase-workshop',
+                    phase_index: 2,
+                    description: 'workshop station',
+                    owner_agent_id: 'vera',
+                    status: 'pending',
+                },
+            },
+        };
+    }
+    return {
+        ok: true,
+        payload: {
+            selected: true,
+            turn_kind: 'planner',
+            reason: 'settlement_phase_owner',
+            scene_id: 'scene-workshop',
+            scene_digest: 'build the next settlement phase',
+            role: 'builder',
+            local_observations: {},
+            granted_tools: ['!inventory', '!planAndBuild'],
+            build_macro: {
+                role: 'planner_owner',
+                owner: 'vera',
+                plan_id: 'plan-workshop',
+                granted: true,
+                objective_id: 'phase-workshop',
+                phase_index: 2,
+                phase_owner: 'vera',
+            },
+            queue_depth: 1,
+            suppressed_agents: [],
+        },
+    };
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'settlement';
+process.env.MC_SIM_SHARED_STATE_ENABLED = '1';
+const gate = await import(pathToFileURL({json.dumps(str(director_gate))}).href);
+const calls = [];
+const agent = {{
+    name: 'vera',
+    bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+    actions: {{
+        actionList: ['!inventory', '!planAndBuild'],
+    }},
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'planning';
+    }},
+}};
+
+gate.installDirectorGate(agent, {{ enabled: true, deadlineMs: 100 }});
+await agent.handleMessage('system', 'Autonomous heartbeat: you have been quiet.');
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    bridgeCalls: globalThis.__bridgeCalls,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert [call["service"] for call in result["bridgeCalls"]] == ["shared_state", "director"]
+    director_payload = result["bridgeCalls"][1]["payload"]
+    assert director_payload["active_objective"]["objective_id"] == "phase-workshop"
+    assert director_payload["active_objective"]["phase_index"] == 2
+    assert director_payload["event_text"].startswith(
+        'Build the active settlement phase "workshop station".'
+    )
+    assert "!planAndBuild" in director_payload["available_tools"]
+    assert "Build macro: planner_owner owner=vera" in result["calls"][0]["message"]
+    assert (
+        'Include exactly one concise !planAndBuild("...") command' in result["calls"][0]["message"]
+    )
+    fetched = [
+        event for event in result["events"] if event["type"] == "settlement_objective.fetched"
+    ]
+    assert fetched and fetched[0]["payload"]["objective_id"] == "phase-workshop"

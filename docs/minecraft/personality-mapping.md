@@ -14,6 +14,19 @@ those numeric fields without re-parsing YAML.
 `name`, `model`, and `code_model` remain the required Mindcraft routing keys.
 `bot_responder` and `personality` are additive E8 metadata.
 
+Run-spec persona overrides are applied only at generation time. Passing
+`--run-spec <path>` to `scripts/minecraft/gen_profiles.py` reads the
+`persona_overrides` block and adds `backstory` plus a compact `persona` block
+to only the affected profile JSON files. The committed `agents/<id>/` files
+are not edited, and profiles without overrides keep the baseline schema.
+
+The same run spec also feeds embodied starting conditions. If a generated bot
+belongs to a `factions` entry, its profile gets a `faction` block with the
+faction name, role, goal, members, and stance when present. If
+`agent_goals[agent_id]` is configured, the profile gets a `goals` list with
+those seeded objectives. Profiles without configured factions or goals keep the
+baseline schema.
+
 ## Mapping
 
 | Agent config knob | Generated profile surface | Formula / value |
@@ -64,6 +77,8 @@ profile templates. Validate the nearest local path with:
 
 ```bash
 pnpm llm:local --list-only
+pnpm mc:gen-profiles --all --provider lmstudio --local-chat <model-id> \
+  --run-spec tests/backend/fixtures/scenarios/with_run_spec.yaml --out /tmp/profiles
 pnpm verify:mindcraft-profiles
 ```
 

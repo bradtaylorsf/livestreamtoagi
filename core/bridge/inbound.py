@@ -38,6 +38,8 @@ pose ``perception.report`` followed by a terminal ``action.result``.
 from __future__ import annotations
 
 import logging
+import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
@@ -49,9 +51,11 @@ from core.bridge.contract import (
     PerceptionReportRequest,
     service_key,
 )
+from core.bridge.handlers.shared_state import record_distress_report
 from core.bridge.observability import log_bridge_inbound_event
 from core.embodiment import build_perception_snapshot
 from core.event_bus import EventType, event_bus
+from core.shared_state import DangerReport
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,11 @@ logger = logging.getLogger(__name__)
 # (E4-3) and is NOT routed here. These names match the contract's closed
 # registry (ADR §6); the parity check below proves it.
 INBOUND_VERBS: frozenset[str] = frozenset({"perception.report", "action.result"})
+REPEATED_FAILURE_OUTCOMES = frozenset({"interrupted", "blocked"})
+REPEATED_FAILURE_THRESHOLD = 3
+REPEATED_FAILURE_WINDOW_SECONDS = 90
+MAX_FAILURE_WINDOWS = 4096
+_failure_windows: dict[tuple[str, str, str], deque[float]] = {}
 
 
 def _resolve_trace_id(env: BridgeRequest, trace_id: str | None) -> str:
@@ -96,7 +105,9 @@ def _attribution(env: BridgeRequest, trace_id: str) -> dict[str, str]:
 
 
 async def handle_perception_report(
-    env: BridgeRequest, trace_id: str | None = None
+    env: BridgeRequest,
+    trace_id: str | None = None,
+    services: Any | None = None,
 ) -> dict[str, Any]:
     """Emit a schema-validated ``BRIDGE_PERCEPTION`` event; ack the report.
 
@@ -107,6 +118,7 @@ async def handle_perception_report(
     response schema stays satisfied. ``trace_id`` (E4-7, #546) is carried on
     the event and logged so this emit joins the frame's correlation id.
     """
+    del services
     payload = PerceptionReportRequest.model_validate(env.payload)
     tid = _resolve_trace_id(env, trace_id)
     event_payload: dict[str, Any] = {
@@ -130,7 +142,11 @@ async def handle_perception_report(
     return {"accepted": True}
 
 
-async def handle_action_result(env: BridgeRequest, trace_id: str | None = None) -> dict[str, Any]:
+async def handle_action_result(
+    env: BridgeRequest,
+    trace_id: str | None = None,
+    services: Any | None = None,
+) -> dict[str, Any]:
     """Emit a schema-validated ``BRIDGE_ACTION_RESULT`` event; ack the result.
 
     ``model_dump()`` spreads the validated ``action_id``/``status``/``detail``
@@ -144,6 +160,7 @@ async def handle_action_result(env: BridgeRequest, trace_id: str | None = None) 
         EventType.BRIDGE_ACTION_RESULT,
         {**_attribution(env, tid), **payload.model_dump()},
     )
+    await _maybe_emit_repeated_failure_distress(env, payload, services)
     log_bridge_inbound_event(
         logger,
         trace_id=tid,
@@ -155,14 +172,18 @@ async def handle_action_result(env: BridgeRequest, trace_id: str | None = None) 
 
 
 # Keyed by the canonical "<service>.<method>" registry key (ADR §6).
-InboundHandler = Callable[[BridgeRequest, str | None], Awaitable[dict[str, Any]]]
+InboundHandler = Callable[[BridgeRequest, str | None, Any | None], Awaitable[dict[str, Any]]]
 INBOUND_HANDLERS: dict[str, InboundHandler] = {
     "perception.report": handle_perception_report,
     "action.result": handle_action_result,
 }
 
 
-async def dispatch_inbound(env: BridgeRequest, trace_id: str | None = None) -> dict[str, Any]:
+async def dispatch_inbound(
+    env: BridgeRequest,
+    trace_id: str | None = None,
+    services: Any | None = None,
+) -> dict[str, Any]:
     """Route an inbound report envelope to its handler and return the ack.
 
     The caller (the server receive loop) only invokes this for an ``ok``
@@ -171,7 +192,53 @@ async def dispatch_inbound(env: BridgeRequest, trace_id: str | None = None) -> d
     is the frame's resolved correlation id (E4-7, #546) — threaded through so
     the emitted bus event shares the id the server logged and echoed.
     """
-    return await INBOUND_HANDLERS[service_key(env.service, env.method)](env, trace_id)
+    return await INBOUND_HANDLERS[service_key(env.service, env.method)](env, trace_id, services)
+
+
+async def _maybe_emit_repeated_failure_distress(
+    env: BridgeRequest,
+    payload: ActionResultRequest,
+    services: Any | None,
+) -> None:
+    outcome = (payload.outcome_class or "").strip().lower()
+    if outcome not in REPEATED_FAILURE_OUTCOMES:
+        return
+    key = (env.simulation_id, _canonical_agent_id(env.agent_id), outcome)
+    now = time.time()
+    window = _failure_windows.setdefault(key, deque())
+    window.append(now)
+    while window and now - window[0] > REPEATED_FAILURE_WINDOW_SECONDS:
+        window.popleft()
+    _prune_failure_windows(now)
+    if len(window) < REPEATED_FAILURE_THRESHOLD:
+        return
+    window.clear()
+    if services is None:
+        return
+    report = DangerReport(
+        agent_id=_canonical_agent_id(env.agent_id),
+        kind="repeated_failure",
+        location=None,
+        severity=3,
+        details=payload.detail or f"Repeated {outcome} action results",
+    )
+    await record_distress_report(env, services, report, writer="bridge_action_result")
+
+
+def _prune_failure_windows(now: float) -> None:
+    for key, window in list(_failure_windows.items()):
+        while window and now - window[0] > REPEATED_FAILURE_WINDOW_SECONDS:
+            window.popleft()
+        if not window:
+            _failure_windows.pop(key, None)
+    if len(_failure_windows) <= MAX_FAILURE_WINDOWS:
+        return
+    oldest = sorted(
+        _failure_windows.items(),
+        key=lambda item: item[1][-1] if item[1] else 0.0,
+    )
+    for key, _window in oldest[: max(0, len(_failure_windows) - MAX_FAILURE_WINDOWS)]:
+        _failure_windows.pop(key, None)
 
 
 # Defensive parity: the inbound handler set, the public verb set, and the

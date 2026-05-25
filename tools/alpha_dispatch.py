@@ -8,6 +8,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
 from core.event_bus import EventType
+from core.model_config import model_ref, resolve_model_reference
 from core.redis_keys import KILL_SWITCH_KEY
 
 from .base import BaseTool
@@ -19,8 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Alpha uses the configured LLM provider; OpenRouter maps this to DeepSeek V3.2.
-ALPHA_MODEL = "deepseek/deepseek-v3.2"
+ALPHA_MODEL = model_ref("alpha_dispatch")
 
 # Hard timeout for Alpha tasks
 ALPHA_TIMEOUT_SECONDS = 60
@@ -144,7 +144,7 @@ class DispatchAlphaTool(BaseTool):
                         {"role": "system", "content": ALPHA_SYSTEM_PROMPT},
                         {"role": "user", "content": task},
                     ],
-                    model=ALPHA_MODEL,
+                    model=resolve_model_reference(ALPHA_MODEL),
                     agent_id="alpha",
                     timeout=ALPHA_TIMEOUT_SECONDS,
                     max_tokens=512,

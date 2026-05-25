@@ -33,6 +33,7 @@ import pytest
 import yaml
 
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+from core.model_config import resolve_model_reference
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "gen_profiles.py"
@@ -79,11 +80,16 @@ gen = _load_gen_module()
 
 def _resolve_canonical(raw_id: str) -> str:
     """Same drift guard as test_mc_model_routing._resolve_canonical."""
-    canonical = MODEL_NAME_ALIASES.get(raw_id, raw_id)
+    resolved = resolve_model_reference(raw_id)
+    canonical = MODEL_NAME_ALIASES.get(resolved, resolved)
     assert canonical in MODEL_REGISTRY, (
         f"{raw_id!r} does not resolve into MODEL_REGISTRY (got {canonical!r})"
     )
     return canonical
+
+
+def _resolved_config_model(raw_id: str) -> str:
+    return resolve_model_reference(raw_id)
 
 
 def _real_agent_ids() -> list[str]:
@@ -111,8 +117,8 @@ def _assert_openrouter_profile_matches_config(agent_id: str, profile: dict[str, 
     cfg = yaml.safe_load((AGENTS_DIR / agent_id / "config.yaml").read_text())
     _assert_profile_shape(profile)
     assert profile["name"] == gen._bot_name(agent_id)
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
-    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
+    assert profile["model"] == f"openrouter/{_resolved_config_model(cfg['model_conversation'])}"
+    assert profile["code_model"] == f"openrouter/{_resolved_config_model(cfg['model_building'])}"
     assert profile["personality"]["adjacency"] == {
         str(key): float(value) for key, value in (cfg.get("adjacency") or {}).items()
     }
@@ -128,8 +134,8 @@ def test_vera_openrouter_profile_matches_config():
     profile = gen.build_profile("vera")  # default provider=openrouter
 
     assert profile["name"] == "Vera"
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
-    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
+    assert profile["model"] == f"openrouter/{_resolved_config_model(cfg['model_conversation'])}"
+    assert profile["code_model"] == f"openrouter/{_resolved_config_model(cfg['model_building'])}"
     _assert_profile_shape(profile)
 
 
@@ -219,8 +225,8 @@ def test_cli_stdout_emits_valid_profile():
     cfg = yaml.safe_load(VERA_CONFIG.read_text())
     _assert_profile_shape(profile)
     assert profile["name"] == "Vera"
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
-    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
+    assert profile["model"] == f"openrouter/{_resolved_config_model(cfg['model_conversation'])}"
+    assert profile["code_model"] == f"openrouter/{_resolved_config_model(cfg['model_building'])}"
 
 
 def test_cli_lmstudio_stdout():
@@ -310,9 +316,7 @@ def test_cli_all_writes_directory(tmp_path):
     )
 
     assert proc.returncode == 0, proc.stderr
-    expected_files = {
-        f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS
-    }
+    expected_files = {f"{agent_id}-bot.json" for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS}
     assert {path.name for path in tmp_path.iterdir()} == expected_files
 
     for agent_id in EXPECTED_CONVERSATIONAL_AGENT_IDS:
@@ -433,17 +437,11 @@ def test_alpha_generates_single_tier_profile():
     profile = gen.build_profile("alpha")
     assert profile["name"] == "Alpha"
     # Alpha's config sets both tiers to the same model — expected.
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
+    assert profile["model"] == f"openrouter/{_resolved_config_model(cfg['model_conversation'])}"
     assert profile["model"] == profile["code_model"]
 
     committed_local_template = json.loads(
-        (
-            REPO_ROOT
-            / "scripts"
-            / "minecraft"
-            / "profiles"
-            / "alpha-bot.json"
-        ).read_text()
+        (REPO_ROOT / "scripts" / "minecraft" / "profiles" / "alpha-bot.json").read_text()
     )
     generated_local_template = gen.build_profile(
         "alpha",

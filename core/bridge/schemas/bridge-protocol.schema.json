@@ -547,6 +547,19 @@
           "title": "Granted",
           "type": "boolean"
         },
+        "objective_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Settlement objective id.",
+          "title": "Objective Id"
+        },
         "owner": {
           "anyOf": [
             {
@@ -559,6 +572,33 @@
           "default": null,
           "description": "Agent that owns the build plan.",
           "title": "Owner"
+        },
+        "phase_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Settlement phase index.",
+          "title": "Phase Index"
+        },
+        "phase_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Current phase owner.",
+          "title": "Phase Owner"
         },
         "plan_id": {
           "anyOf": [
@@ -650,6 +690,18 @@
       "additionalProperties": false,
       "description": "``director.gate`` \u2014 Director V2 prompt eligibility check for Mindcraft.",
       "properties": {
+        "active_objective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedSettlementObjective"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Current settlement phase objective when a multi-phase build is active."
+        },
         "agent_id": {
           "description": "Bot requesting prompt permission.",
           "minLength": 1,
@@ -685,6 +737,14 @@
             "type": "string"
           },
           "title": "Mentions",
+          "type": "array"
+        },
+        "plan_build_agent_allowlist": {
+          "description": "Run-scoped agent ids allowed to own !planAndBuild phases.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Plan Build Agent Allowlist",
           "type": "array"
         },
         "position": {
@@ -842,6 +902,588 @@
         "queue_depth"
       ],
       "title": "DirectorGateResponse",
+      "type": "object"
+    },
+    "EmbodiedAgentClaim": {
+      "properties": {
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "claimed_at": {
+          "title": "Claimed At",
+          "type": "number"
+        },
+        "claimed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claimed By"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "target",
+        "role"
+      ],
+      "title": "EmbodiedAgentClaim",
+      "type": "object"
+    },
+    "EmbodiedBuildSite": {
+      "properties": {
+        "location": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Location"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "site_id": {
+          "minLength": 1,
+          "title": "Site Id",
+          "type": "string"
+        },
+        "status": {
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "site_id",
+        "location",
+        "name",
+        "status"
+      ],
+      "title": "EmbodiedBuildSite",
+      "type": "object"
+    },
+    "EmbodiedDangerReport": {
+      "properties": {
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "danger_id": {
+          "title": "Danger Id",
+          "type": "string"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Details"
+        },
+        "kind": {
+          "default": "trapped",
+          "enum": [
+            "stuck",
+            "drowning",
+            "trapped",
+            "low_health",
+            "death",
+            "repeated_failure"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "recovery_status": {
+          "default": "open",
+          "enum": [
+            "open",
+            "rescue_dispatched",
+            "resolved",
+            "escaped",
+            "teleported",
+            "failed",
+            "unresolved"
+          ],
+          "title": "Recovery Status",
+          "type": "string"
+        },
+        "reported_at": {
+          "title": "Reported At",
+          "type": "number"
+        },
+        "reported_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reported By"
+        },
+        "rescuer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rescuer Id"
+        },
+        "resolved_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved At"
+        },
+        "severity": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Severity",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "agent_id",
+        "severity"
+      ],
+      "title": "EmbodiedDangerReport",
+      "type": "object"
+    },
+    "EmbodiedDangerResolution": {
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "danger_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Danger Id"
+        },
+        "recovery_status": {
+          "default": "resolved",
+          "enum": [
+            "resolved",
+            "escaped",
+            "teleported",
+            "failed"
+          ],
+          "title": "Recovery Status",
+          "type": "string"
+        },
+        "rescuer_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rescuer Id"
+        },
+        "resolved_at": {
+          "title": "Resolved At",
+          "type": "number"
+        }
+      },
+      "title": "EmbodiedDangerResolution",
+      "type": "object"
+    },
+    "EmbodiedGroupGoal": {
+      "properties": {
+        "set_at": {
+          "title": "Set At",
+          "type": "number"
+        },
+        "set_by": {
+          "minLength": 1,
+          "title": "Set By",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "set_by"
+      ],
+      "title": "EmbodiedGroupGoal",
+      "type": "object"
+    },
+    "EmbodiedNextStep": {
+      "properties": {
+        "added_at": {
+          "title": "Added At",
+          "type": "number"
+        },
+        "added_by": {
+          "minLength": 1,
+          "title": "Added By",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "added_by"
+      ],
+      "title": "EmbodiedNextStep",
+      "type": "object"
+    },
+    "EmbodiedResourceEntry": {
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Location"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity"
+        },
+        "reported_by": {
+          "minLength": 1,
+          "title": "Reported By",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location",
+        "reported_by"
+      ],
+      "title": "EmbodiedResourceEntry",
+      "type": "object"
+    },
+    "EmbodiedSettlementObjective": {
+      "properties": {
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "completion_ratio": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Completion Ratio",
+          "type": "number"
+        },
+        "cooldown_until_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cooldown Until Ms"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "additionalProperties": true,
+          "title": "Evidence",
+          "type": "object"
+        },
+        "intended_blocks": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Intended Blocks",
+          "type": "integer"
+        },
+        "objective_id": {
+          "minLength": 1,
+          "title": "Objective Id",
+          "type": "string"
+        },
+        "owner_agent_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Agent Id"
+        },
+        "owner_started_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Started At Ms"
+        },
+        "phase_index": {
+          "minimum": 0,
+          "title": "Phase Index",
+          "type": "integer"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Id"
+        },
+        "previous_owner_agent_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Previous Owner Agent Ids",
+          "type": "array"
+        },
+        "reassign_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reassign Reason"
+        },
+        "stale_after_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stale After Ms"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "in_progress",
+            "blocked",
+            "owner_cap_reached",
+            "cooldown",
+            "stale",
+            "completed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "verified_blocks": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Verified Blocks",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "objective_id",
+        "phase_index",
+        "description"
+      ],
+      "title": "EmbodiedSettlementObjective",
+      "type": "object"
+    },
+    "EmbodiedVerifiedAction": {
+      "properties": {
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "observed_at": {
+          "title": "Observed At",
+          "type": "number"
+        },
+        "result": {
+          "minLength": 1,
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "action",
+        "result"
+      ],
+      "title": "EmbodiedVerifiedAction",
       "type": "object"
     },
     "EntityObservation": {
@@ -1615,6 +2257,382 @@
       "title": "PoseObservation",
       "type": "object"
     },
+    "RescueTaskRequest": {
+      "additionalProperties": false,
+      "description": "Structured rescue request carried in shared-state tasks and bot commands.",
+      "properties": {
+        "danger_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Danger Id"
+        },
+        "mode": {
+          "default": "standard",
+          "enum": [
+            "easy",
+            "standard",
+            "production"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "rescue_id": {
+          "minLength": 1,
+          "title": "Rescue Id",
+          "type": "string"
+        },
+        "rescuer_agent_id": {
+          "minLength": 1,
+          "title": "Rescuer Agent Id",
+          "type": "string"
+        },
+        "strategy": {
+          "enum": [
+            "navigate",
+            "clear_block",
+            "place_safe_block",
+            "escort",
+            "teleport_op"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "target_agent_id": {
+          "minLength": 1,
+          "title": "Target Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rescue_id",
+        "target_agent_id",
+        "rescuer_agent_id",
+        "strategy"
+      ],
+      "title": "RescueTaskRequest",
+      "type": "object"
+    },
+    "RescueTaskResponse": {
+      "additionalProperties": false,
+      "description": "Bridge-friendly rescue outcome shape used by action.result details.",
+      "properties": {
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "recovery_status": {
+          "enum": [
+            "resolved",
+            "escaped",
+            "teleported",
+            "failed"
+          ],
+          "title": "Recovery Status",
+          "type": "string"
+        },
+        "rescue_id": {
+          "minLength": 1,
+          "title": "Rescue Id",
+          "type": "string"
+        },
+        "rescuer_agent_id": {
+          "minLength": 1,
+          "title": "Rescuer Agent Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_agent_id": {
+          "minLength": 1,
+          "title": "Target Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rescue_id",
+        "target_agent_id",
+        "rescuer_agent_id",
+        "status",
+        "recovery_status"
+      ],
+      "title": "RescueTaskResponse",
+      "type": "object"
+    },
+    "SharedStateReadRequest": {
+      "additionalProperties": false,
+      "description": "``shared_state.read`` \u2014 read the embodied collaboration blackboard.",
+      "properties": {},
+      "title": "SharedStateReadRequest",
+      "type": "object"
+    },
+    "SharedStateReadResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "active_objective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedSettlementObjective"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "build_site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedBuildSite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedAgentClaim"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "dangers": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedDangerReport"
+          },
+          "title": "Dangers",
+          "type": "array"
+        },
+        "formatted": {
+          "description": "Prompt-friendly blackboard summary.",
+          "title": "Formatted",
+          "type": "string"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedGroupGoal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_steps": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedNextStep"
+          },
+          "title": "Next Steps",
+          "type": "array"
+        },
+        "recent_actions": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedVerifiedAction"
+          },
+          "title": "Recent Actions",
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedResourceEntry"
+          },
+          "title": "Resources",
+          "type": "array"
+        },
+        "settlement_objectives": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedSettlementObjective"
+          },
+          "title": "Settlement Objectives",
+          "type": "array"
+        },
+        "unresolved_dangers": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedDangerReport"
+          },
+          "title": "Unresolved Dangers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "formatted"
+      ],
+      "title": "SharedStateReadResponse",
+      "type": "object"
+    },
+    "SharedStateWriteRequest": {
+      "additionalProperties": false,
+      "description": "``shared_state.write`` \u2014 advisory update to the embodied blackboard.",
+      "properties": {
+        "build_site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedBuildSite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "claim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedAgentClaim"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "danger": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedDangerReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "danger_resolution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedDangerResolution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedGroupGoal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_step": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedNextStep"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation": {
+          "enum": [
+            "goal_set",
+            "resource_upsert",
+            "claim_set",
+            "danger_report",
+            "danger_resolve",
+            "verified_action_record",
+            "build_site_set",
+            "next_step_add",
+            "settlement_objectives_set",
+            "settlement_objective_assign",
+            "settlement_objective_advance"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedResourceEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settlement_objective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedSettlementObjective"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settlement_objectives": {
+          "items": {
+            "$ref": "#/$defs/EmbodiedSettlementObjective"
+          },
+          "title": "Settlement Objectives",
+          "type": "array"
+        },
+        "verified_action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EmbodiedVerifiedAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "SharedStateWriteRequest",
+      "type": "object"
+    },
+    "SharedStateWriteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "description": "Whether the update was accepted.",
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "formatted": {
+          "description": "Updated prompt-friendly blackboard summary.",
+          "title": "Formatted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "formatted"
+      ],
+      "title": "SharedStateWriteResponse",
+      "type": "object"
+    },
     "Vec3": {
       "additionalProperties": false,
       "description": "3D coordinate in world space or a block cell.",
@@ -1651,7 +2669,7 @@
     "request": "#/$defs/BridgeRequest",
     "response": "#/$defs/BridgeResponse"
   },
-  "protocolVersion": "1.8",
+  "protocolVersion": "1.10",
   "services": {
     "action.result": {
       "request": "#/$defs/ActionResultRequest",
@@ -1700,6 +2718,14 @@
     "perception.report": {
       "request": "#/$defs/PerceptionReportRequest",
       "response": "#/$defs/PerceptionReportResponse"
+    },
+    "shared_state.read": {
+      "request": "#/$defs/SharedStateReadRequest",
+      "response": "#/$defs/SharedStateReadResponse"
+    },
+    "shared_state.write": {
+      "request": "#/$defs/SharedStateWriteRequest",
+      "response": "#/$defs/SharedStateWriteResponse"
     }
   },
   "title": "Livestream-to-AGI bridge protocol"

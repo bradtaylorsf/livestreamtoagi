@@ -19,6 +19,7 @@ from core.bridge.contract import Vec3
 from core.minecraft.director.build_macro_scheduler import (
     BuildMacroAssignment,
     BuildMacroScheduler,
+    SettlementObjectiveContext,
 )
 from core.minecraft.director.scene_inbox import Scene, SceneEventType, SceneInbox
 from core.minecraft.director.spatial_hearing import (
@@ -90,6 +91,7 @@ class _CachedVerdict:
     selected_turns: dict[str, SchedulerTurn]
     available_tools: list[str]
     build_macros: dict[str, BuildMacroAssignment]
+    active_objective: SettlementObjectiveContext | None
     provider: str | None
     model: str | None
     estimated_usd: float | None
@@ -223,6 +225,8 @@ class DirectorPromptGate:
         scene_hint = _text(event.get("scene_hint"))
         event_text = _text(event.get("event_text")) or ""
         available_tools = _tool_list(event.get("available_tools"))
+        plan_build_agent_allowlist = _agent_list(event.get("plan_build_agent_allowlist"))
+        active_objective = _settlement_objective_context(event)
         raw_event = {
             "event_id": f"director-gate-{event_key[:16]}",
             "type": event_type.value,
@@ -236,6 +240,10 @@ class DirectorPromptGate:
                 "message": event_text,
                 "scene_hint": scene_hint,
                 "available_tools": available_tools,
+                "plan_build_agent_allowlist": plan_build_agent_allowlist,
+                "active_objective": active_objective.model_dump()
+                if active_objective is not None
+                else None,
             },
         }
         update = await state.inbox.ingest(raw_event)
@@ -256,7 +264,7 @@ class DirectorPromptGate:
         seed = _stable_seed(scene.scene_id, state.event_sequence)
         if _is_successful_build_plan_status_notice(event_text.lower()):
             state.plan_mode_build_completed = True
-        if _should_quiesce_after_plan_build(state, event_type):
+        if _should_quiesce_after_plan_build(state, event_type, active_objective=active_objective):
             scheduler_decision = _suppressed_scheduler_decision(
                 scene=scene,
                 candidates=candidates,
@@ -277,6 +285,15 @@ class DirectorPromptGate:
             event_text=event_text,
             scene_event_type=event_type,
         )
+        scheduler_decision = _apply_settlement_phase_owner(
+            state.build_scheduler,
+            scheduler_decision,
+            active_objective=active_objective,
+            plan_build_agent_allowlist=plan_build_agent_allowlist,
+            candidates=candidates,
+            scene_event_type=event_type,
+            now_ms=now_ms,
+        )
         scheduler_decision = self._limit_scene_selected_agents(
             scene=scene,
             scheduler_decision=scheduler_decision,
@@ -289,6 +306,8 @@ class DirectorPromptGate:
             event_text=event_text,
             origin=origin,
             available_tools=available_tools,
+            active_objective=active_objective,
+            plan_build_agent_allowlist=plan_build_agent_allowlist,
             now_ms=now_ms,
         )
         return _CachedVerdict(
@@ -302,6 +321,7 @@ class DirectorPromptGate:
             selected_turns={turn.agent_id: turn for turn in scheduler_decision.selected},
             available_tools=available_tools,
             build_macros=build_macros,
+            active_objective=active_objective,
             provider=_text(event.get("provider")),
             model=_text(event.get("model")),
             estimated_usd=_float_or_none(event.get("estimated_usd")),
@@ -373,9 +393,11 @@ class DirectorPromptGate:
         event_text: str,
         origin: Vec3,
         available_tools: Sequence[str],
+        active_objective: SettlementObjectiveContext | None,
         now_ms: int,
+        plan_build_agent_allowlist: Sequence[str] = (),
     ) -> dict[str, BuildMacroAssignment]:
-        if _is_plan_mode_single_build_closed(self._state):
+        if active_objective is None and _is_plan_mode_single_build_closed(self._state):
             return {}
         if not _is_build_macro_intent(event_text, available_tools):
             return {}
@@ -393,6 +415,8 @@ class DirectorPromptGate:
             origin=origin.model_dump(),
             scene=scene,
             candidates=candidates,
+            active_objective=active_objective,
+            plan_build_agent_allowlist=plan_build_agent_allowlist,
             now_ms=now_ms,
         )
         assignments = dict(acquisition.support_assignments)
@@ -405,6 +429,9 @@ class DirectorPromptGate:
             granted=acquisition.granted,
             status=acquisition.status,
             cache_key=acquisition.cache_key,
+            objective_id=acquisition.objective_id,
+            phase_index=acquisition.phase_index,
+            phase_owner=acquisition.phase_owner,
         )
         return assignments
 
@@ -560,6 +587,7 @@ def _event_key(event: Mapping[str, Any]) -> str:
         "source": _canonical_agent_id(event.get("source_agent")),
         "mentions": sorted(_agent_list(event.get("mentions"))),
         "scene_hint": _text(event.get("scene_hint")) or "",
+        "objective": _settlement_objective_key(event),
     }
     raw = "|".join(f"{key}={value}" for key, value in payload.items())
     return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
@@ -668,6 +696,9 @@ def _local_observations(
         "scene_participants": cached.scene.participants,
         "scene_observers": cached.scene.observers,
         "recent_speakers": list(state.recent_speakers),
+        "active_objective": cached.active_objective.model_dump()
+        if cached.active_objective is not None
+        else None,
     }
 
 
@@ -764,6 +795,50 @@ def _apply_explicit_build_owner(
     )
 
 
+def _apply_settlement_phase_owner(
+    scheduler: BuildMacroScheduler,
+    scheduler_decision: SchedulerDecision,
+    *,
+    active_objective: SettlementObjectiveContext | None,
+    plan_build_agent_allowlist: Sequence[str],
+    candidates: Sequence[SchedulerCandidate],
+    scene_event_type: SceneEventType,
+    now_ms: int,
+) -> SchedulerDecision:
+    if active_objective is None or scene_event_type != SceneEventType.BUILD_ACTION:
+        return scheduler_decision
+    owner, reason = scheduler.select_phase_owner(
+        active_objective=active_objective,
+        candidates=candidates,
+        fallback_owner=scheduler_decision.selected_planner_agent_id,
+        plan_build_agent_allowlist=plan_build_agent_allowlist,
+        now_ms=now_ms,
+    )
+    if owner is None:
+        return scheduler_decision
+    if scheduler_decision.selected_planner_agent_id == owner:
+        return scheduler_decision
+
+    suppressed_agents = sorted(
+        candidate.agent_id for candidate in candidates if candidate.agent_id != owner
+    )
+    return scheduler_decision.model_copy(
+        update={
+            "selected": [
+                SchedulerTurn(
+                    agent_id=owner,
+                    kind="planner",
+                    score=1.0,
+                    reason=reason,
+                    factor_breakdown={"settlement_phase_owner": 1.0},
+                )
+            ],
+            "suppressed_agents": suppressed_agents,
+            "suppression_reason": reason if suppressed_agents else None,
+        }
+    )
+
+
 def _explicit_build_owner(
     event_text: str,
     candidates: Sequence[SchedulerCandidate],
@@ -788,14 +863,12 @@ def _explicit_build_owner(
 
 def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> bool:
     lowered = str(event_text or "").lower()
-    if (
-        lowered.startswith("autonomous heartbeat:")
-        or _is_build_plan_status_notice(lowered)
-        or _is_build_completion_chatter(lowered)
-    ):
+    if lowered.startswith("autonomous heartbeat:") or _is_build_plan_status_notice(lowered):
         return False
     if "!planandbuild" in lowered or "planandbuild" in lowered:
         return True
+    if _is_build_completion_chatter(lowered):
+        return False
     return _has_build_request_intent(lowered)
 
 
@@ -856,7 +929,11 @@ def _is_plan_mode_single_build_closed(state: _GateState) -> bool:
 def _should_quiesce_after_plan_build(
     state: _GateState,
     event_type: SceneEventType,
+    *,
+    active_objective: SettlementObjectiveContext | None = None,
 ) -> bool:
+    if active_objective is not None:
+        return False
     if not _is_plan_mode_single_build_closed(state):
         return False
     return event_type not in {
@@ -881,6 +958,28 @@ def _build_macro_description(event_text: str) -> str:
     if match:
         text = match.group("arg").strip().strip("\"'")
     return _clip(text, 180) or "scene build"
+
+
+def _settlement_objective_context(
+    event: Mapping[str, Any],
+) -> SettlementObjectiveContext | None:
+    raw = event.get("active_objective") or event.get("settlement_objective")
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        return SettlementObjectiveContext.model_validate(raw)
+    except ValueError:
+        return None
+
+
+def _settlement_objective_key(event: Mapping[str, Any]) -> str:
+    objective = _settlement_objective_context(event)
+    if objective is None:
+        return ""
+    return (
+        f"{objective.objective_id}:{objective.phase_index}:"
+        f"{objective.owner_agent_id or ''}:{objective.status or ''}"
+    )
 
 
 def _available_tools_for_agent(
@@ -992,6 +1091,8 @@ def _log_prompt_decision(decision: PromptDecision, *, agent_id: str) -> None:
                 "build_plan_id": decision.build_macro.plan_id if decision.build_macro else None,
                 "build_owner": decision.build_macro.owner if decision.build_macro else None,
                 "build_role": decision.build_macro.role if decision.build_macro else None,
+                "objective_id": decision.build_macro.objective_id if decision.build_macro else None,
+                "phase_index": decision.build_macro.phase_index if decision.build_macro else None,
                 "queue_depth": decision.queue_depth,
                 "suppressed_agents_count": len(decision.suppressed_agents),
             }
@@ -1034,6 +1135,9 @@ def _emit_prompt_decision(
         "build_owner": build_macro.owner if build_macro else None,
         "build_role": build_macro.role if build_macro else None,
         "build_support_role": build_macro.support_role if build_macro else None,
+        "objective_id": build_macro.objective_id if build_macro else None,
+        "phase_index": build_macro.phase_index if build_macro else None,
+        "phase_owner": build_macro.phase_owner if build_macro else None,
         "provider": cached.provider,
         "model": cached.model,
         "estimated_usd": cached.estimated_usd,

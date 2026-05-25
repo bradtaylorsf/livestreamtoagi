@@ -23,8 +23,19 @@ DIRECTOR_DECISION_EVENTS = {
     "director.scene.opened",
     "director.scene.closed",
 }
-MEMORY_EVENTS = {"director.scene.digest", "director.memory.compaction"}
+MEMORY_EVENTS = {
+    "director.scene.digest",
+    "director.memory.compaction",
+    "memory_context.fetched",
+}
 MACRO_EVENT_PREFIXES = ("build_plan.",)
+DISTRESS_EVENTS = {
+    "distress_reported",
+    "distress.reported",
+    "distress.resolved",
+    "rescue.action.started",
+    "rescue.action.completed",
+}
 MACRO_ACTION_HINTS = (
     "build",
     "buildfromplan",
@@ -315,11 +326,33 @@ def normalize_macro_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     or data.get("build_plan_owner")
                     or data.get("active_build_owner")
                     or event_agent(event),
+                    "objective_id": data.get("objective_id"),
+                    "phase_index": data.get("phase_index"),
+                    "phase_owner": data.get("phase_owner"),
                     "plan_id": data.get("plan_id") or data.get("action_id"),
                     "provider": data.get("builder_provider") or data.get("provider"),
                     "model": data.get("builder_model") or data.get("model"),
                     "status": data.get("status") or data.get("reason") or data.get("outcome"),
                     "result": data.get("result"),
+                    "intended_blocks": coerce_int(
+                        data.get("metric", {}).get("intended_count")
+                        if isinstance(data.get("metric"), dict)
+                        else data.get("intended_blocks")
+                    ),
+                    "verified_blocks": coerce_int(
+                        data.get("verified_blocks")
+                        or data.get("verified_block_changes")
+                        or (
+                            data.get("metric", {}).get("steps_verified")
+                            if isinstance(data.get("metric"), dict)
+                            else None
+                        )
+                    ),
+                    "completion_ratio": coerce_float(
+                        data.get("metric", {}).get("completion_ratio")
+                        if isinstance(data.get("metric"), dict)
+                        else data.get("completion_ratio")
+                    ),
                     "structured_result": event_type.endswith(".completed")
                     or event_type.endswith(".skipped")
                     or event_type.endswith(".provider_failed")
@@ -336,11 +369,17 @@ def normalize_macro_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "scene_id": event_scene_id(event),
                     "agent": event_agent(event),
                     "owner": data.get("build_owner"),
+                    "objective_id": data.get("objective_id"),
+                    "phase_index": data.get("phase_index"),
+                    "phase_owner": data.get("phase_owner"),
                     "plan_id": data.get("build_plan_id"),
                     "provider": data.get("provider"),
                     "model": data.get("model"),
                     "status": data.get("build_role"),
                     "result": data.get("build_role"),
+                    "intended_blocks": 0,
+                    "verified_blocks": 0,
+                    "completion_ratio": 0.0,
                     "structured_result": bool(data.get("build_plan_id") and data.get("build_role")),
                     "estimated_usd": coerce_float(data.get("estimated_usd")),
                 }
@@ -354,11 +393,17 @@ def normalize_macro_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "scene_id": event_scene_id(event),
                     "agent": event_agent(event),
                     "owner": event_agent(event),
+                    "objective_id": data.get("objective_id"),
+                    "phase_index": data.get("phase_index"),
+                    "phase_owner": data.get("phase_owner"),
                     "plan_id": data.get("plan_id") or data.get("action_id"),
                     "provider": None,
                     "model": None,
                     "status": data.get("outcome") or data.get("status") or "intended",
                     "result": data.get("detail") or data.get("result") or data.get("text"),
+                    "intended_blocks": 0,
+                    "verified_blocks": 0,
+                    "completion_ratio": 0.0,
                     "structured_result": event_type == "action.result",
                     "commands": command_names_from_event(event),
                     "estimated_usd": 0.0,
@@ -367,11 +412,64 @@ def normalize_macro_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def normalize_objective_rows(macro_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in macro_rows:
+        objective_id = row.get("objective_id")
+        if not objective_id:
+            continue
+        key = str(objective_id)
+        current = grouped.setdefault(
+            key,
+            {
+                "objective_id": key,
+                "phase_index": row.get("phase_index"),
+                "phase_owner": row.get("phase_owner") or row.get("owner"),
+                "owners": [],
+                "plan_ids": [],
+                "events": 0,
+                "structured_results": 0,
+                "intended_blocks": 0,
+                "verified_blocks": 0,
+                "completion_ratio": 0.0,
+                "statuses": [],
+            },
+        )
+        current["events"] += 1
+        owner = row.get("owner")
+        if owner and owner not in current["owners"]:
+            current["owners"].append(owner)
+        plan_id = row.get("plan_id")
+        if plan_id and plan_id not in current["plan_ids"]:
+            current["plan_ids"].append(plan_id)
+        if row.get("structured_result"):
+            current["structured_results"] += 1
+        current["intended_blocks"] = max(
+            current["intended_blocks"], coerce_int(row.get("intended_blocks"))
+        )
+        current["verified_blocks"] = max(
+            current["verified_blocks"], coerce_int(row.get("verified_blocks"))
+        )
+        current["completion_ratio"] = max(
+            current["completion_ratio"], coerce_float(row.get("completion_ratio"))
+        )
+        status = row.get("status")
+        if status and status not in current["statuses"]:
+            current["statuses"].append(status)
+    return sorted(
+        grouped.values(),
+        key=lambda row: (coerce_int(row.get("phase_index"), 9999), row["objective_id"]),
+    )
+
+
 def useful_memory_digest(row: dict[str, Any]) -> bool:
     event_type = str(row.get("event_type") or "")
     entries = coerce_int(row.get("entries_count"))
+    context_chars = coerce_int(row.get("context_chars"))
     distributed = row.get("distributed_to")
     summary = str(row.get("summary") or "")
+    if event_type == "memory_context.fetched":
+        return context_chars > 0 and row.get("ok") is not False
     if event_type == "director.scene.digest":
         return (
             entries > 0
@@ -400,6 +498,7 @@ def normalize_memory_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if isinstance(data.get("distributed_to"), list)
             else [],
             "entries_count": coerce_int(data.get("entries_count")),
+            "context_chars": coerce_int(data.get("context_chars")),
             "tokens": coerce_int(data.get("tokens")),
             "latency_ms": coerce_int(data.get("latency_ms")),
             "transcript_id": data.get("transcript_id"),
@@ -409,6 +508,38 @@ def normalize_memory_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         row["useful"] = useful_memory_digest(row)
         rows.append(row)
+    return rows
+
+
+def normalize_distress_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        data = payload(event)
+        if event_type not in DISTRESS_EVENTS and not event_type.startswith("distress."):
+            continue
+        danger = data.get("danger") if isinstance(data.get("danger"), dict) else {}
+        rescue_task = data.get("rescue_task") if isinstance(data.get("rescue_task"), dict) else {}
+        rows.append(
+            {
+                "ts": event.get("ts"),
+                "event_type": event_type,
+                "agent": event_agent(event)
+                or danger.get("agent_id")
+                or data.get("target_agent_id"),
+                "danger_id": data.get("danger_id") or danger.get("danger_id"),
+                "kind": data.get("kind") or danger.get("kind"),
+                "severity": coerce_int(data.get("severity") or danger.get("severity")),
+                "rescuer_id": data.get("rescuer_id")
+                or danger.get("rescuer_id")
+                or rescue_task.get("owner"),
+                "recovery_status": data.get("recovery_status")
+                or danger.get("recovery_status")
+                or data.get("status"),
+                "rescue_task_id": rescue_task.get("id") or data.get("rescue_task_id"),
+                "detail": data.get("detail") or danger.get("details"),
+            }
+        )
     return rows
 
 
@@ -509,9 +640,13 @@ def report_markdown(report: dict[str, Any]) -> str:
             f"- Documented no-tool decisions: `{report['metrics']['no_tool_decision_count']}`",
             f"- Macro attempts: `{report['metrics']['macro_attempt_count']}`",
             f"- Structured macro results: `{report['metrics']['structured_macro_result_count']}`",
+            f"- Settlement objectives: `{report['metrics']['settlement_objective_count']}`",
+            f"- Settlement objectives with structured results: `{report['metrics']['settlement_objectives_with_structured_results']}`",
             f"- Early bot exits: `{report['metrics']['early_bot_exits']}`",
             f"- Heartbeat halts: `{report['metrics']['heartbeat_halts']}`",
             f"- Restart recurrences: `{report['metrics']['restart_recurrences']}`",
+            f"- Unresolved distress: `{report['metrics']['unresolved_distress']}`",
+            f"- Distress events: `{report['metrics']['distress_event_count']}`",
             "",
             "## Evidence Files",
             "",
@@ -550,18 +685,24 @@ def build_report(
     ]
     tool_rows = normalize_tool_rows(timeline)
     macro_rows = normalize_macro_rows(timeline)
+    objective_rows = normalize_objective_rows(macro_rows)
     memory_rows = normalize_memory_rows(timeline)
+    distress_rows = normalize_distress_rows(timeline)
 
     evidence_paths = {
         "director_decisions": run_dir / "director-decisions.ndjson",
         "tool_parity": run_dir / "tool-parity.ndjson",
         "macro_evidence": run_dir / "macro-evidence.ndjson",
+        "settlement_objectives": run_dir / "settlement-objectives.ndjson",
         "memory_digest": run_dir / "memory-digest.ndjson",
+        "distress_evidence": run_dir / "distress-evidence.ndjson",
     }
     write_ndjson(evidence_paths["director_decisions"], director_rows)
     write_ndjson(evidence_paths["tool_parity"], tool_rows)
     write_ndjson(evidence_paths["macro_evidence"], macro_rows)
+    write_ndjson(evidence_paths["settlement_objectives"], objective_rows)
     write_ndjson(evidence_paths["memory_digest"], memory_rows)
+    write_ndjson(evidence_paths["distress_evidence"], distress_rows)
 
     queue_max, queue_events_after_warmup, queue_events_total = queue_depth_after_warmup(
         timeline, start, warmup_seconds
@@ -574,7 +715,11 @@ def build_report(
     tool_call_count = sum(1 for row in tool_rows if row.get("kind") == "tool_call")
     no_tool_decision_count = sum(1 for row in tool_rows if row.get("kind") == "no_tool_decision")
     structured_macro_result_count = sum(1 for row in macro_rows if row.get("structured_result"))
+    structured_objective_count = sum(
+        1 for row in objective_rows if coerce_int(row.get("structured_results")) > 0
+    )
     restart_recurrences = coerce_int(behavior_totals.get("total_restart_recurrences"))
+    unresolved_distress = coerce_int(behavior_totals.get("total_unresolved_distress"))
     early_exits = line_count(run_dir / "early-exits.tsv")
     heartbeat_halts = line_count(run_dir / "heartbeat-halts.tsv")
 
@@ -640,6 +785,21 @@ def build_report(
             else "No build/gather/support macro reached a structured result; #514 should keep run-mode blockers explicit.",
         )
     )
+    if objective_rows:
+        criteria.append(
+            Criterion(
+                "settlement_objectives_have_structured_results",
+                "pass" if structured_objective_count == len(objective_rows) else "fail",
+                (
+                    f"settlement_objectives={len(objective_rows)}; "
+                    f"structured_objectives={structured_objective_count}"
+                ),
+                ["settlement-objectives.ndjson", "macro-evidence.ndjson"],
+                None
+                if structured_objective_count == len(objective_rows)
+                else "At least one settlement objective lacked a structured macro result.",
+            )
+        )
     criteria.append(
         Criterion(
             "llm_queue_depth_after_warmup",
@@ -665,6 +825,17 @@ def build_report(
             None
             if early_exits == 0 and heartbeat_halts == 0 and restart_recurrences == 0
             else "One or more restart-loop indicators remain; downstream epics stay blocked until the run recovers cleanly.",
+        )
+    )
+    criteria.append(
+        Criterion(
+            "no_unresolved_distress",
+            "pass" if unresolved_distress == 0 else "fail",
+            f"unresolved_distress={unresolved_distress}; distress_events={len(distress_rows)}",
+            ["distress-evidence.ndjson", "behavior-totals.env"],
+            None
+            if unresolved_distress == 0
+            else "At least one structured distress report remained unresolved; soak acceptance must not silently pass endangered agents.",
         )
     )
 
@@ -701,9 +872,14 @@ def build_report(
             "no_tool_decision_count": no_tool_decision_count,
             "macro_attempt_count": len(macro_rows),
             "structured_macro_result_count": structured_macro_result_count,
+            "settlement_objective_count": len(objective_rows),
+            "settlement_objectives_with_structured_results": structured_objective_count,
+            "settlement_objectives": objective_rows,
             "early_bot_exits": early_exits,
             "heartbeat_halts": heartbeat_halts,
             "restart_recurrences": restart_recurrences,
+            "unresolved_distress": unresolved_distress,
+            "distress_event_count": len(distress_rows),
             "behavior_gate_status": behavior_totals.get("behavior_gate_status"),
         },
         "criteria": [criterion.to_json() for criterion in criteria],

@@ -1,8 +1,8 @@
 id: fork
 display_name: "Fork — The Contrarian"
 role: "Contrarian/Code Reviewer"
-model_conversation: deepseek/deepseek-v3.2
-model_building: deepseek/deepseek-v3.2
+model_conversation: model:agent:fork:conversation
+model_building: model:agent:fork:building
 voice_id: en-AU-WilliamNeural
 color_hex: "#2ecc71"
 color_rich: "bright_red"
