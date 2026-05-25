@@ -380,6 +380,41 @@ def _scenarios_dir() -> Any:
     return Path(__file__).resolve().parent.parent / "scenarios"
 
 
+def _headless_snapshots_dir() -> Any:
+    """Return the root folder under which headless sim artifacts are written."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "snapshots" / "headless"
+
+
+def _resolve_headless_sim_folder(sim_id: str) -> Any | None:
+    """Find a headless sim folder by simulation_id (matches metadata.json).
+
+    The scorer/replay tools write artifacts under ``snapshots/headless/<ts>_<name>/``.
+    This helper scans those folders for the matching ``metadata.json`` so the
+    public API can serve the JSON without a DB lookup.
+    """
+    import json as _json
+    from pathlib import Path
+
+    root = _headless_snapshots_dir()
+    if not root.is_dir():
+        return None
+    for entry in sorted(root.iterdir(), reverse=True):
+        if not entry.is_dir():
+            continue
+        meta_path = entry / "metadata.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = _json.loads(meta_path.read_text())
+        except (OSError, _json.JSONDecodeError):
+            continue
+        if meta.get("simulation_id") == sim_id or entry.name == sim_id:
+            return Path(entry)
+    return None
+
+
 def _extract_leading_comment_block(text: str) -> str:
     """Best-effort description from the first contiguous block of ``# ...`` lines."""
     lines: list[str] = []
@@ -2487,6 +2522,28 @@ async def get_simulation_evals(sim_id: str) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+@router.get("/simulations/{sim_id}/eval-scores")
+async def get_simulation_eval_scores(sim_id: str) -> dict[str, Any]:
+    """Headless eval scores for a simulation (issue #859).
+
+    Reads ``<sim-folder>/eval_scores.json`` produced by
+    :class:`core.eval.headless_scorer.HeadlessScorer`. Returns 404 if the
+    simulation has no headless artifacts.
+    """
+    import json as _json
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="headless sim folder not found")
+    scores_path = folder / "eval_scores.json"
+    if not scores_path.is_file():
+        raise HTTPException(status_code=404, detail="eval_scores.json not found")
+    try:
+        return _json.loads(scores_path.read_text())
+    except (OSError, _json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=f"failed to read eval scores: {exc}")
 
 
 @router.get("/simulations/{sim_id}/social-graph")

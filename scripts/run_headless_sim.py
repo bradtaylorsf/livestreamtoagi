@@ -258,6 +258,23 @@ async def run_headless(args: argparse.Namespace) -> None:
         metadata["completed_at"] = datetime.utcnow().isoformat() + "Z"
         metadata["simulation_id"] = str(orchestrator.simulation_id) if orchestrator.simulation_id else None
         _write_metadata(sim_folder, metadata)
+
+        if not args.skip_eval:
+            try:
+                from core.eval.headless_scorer import HeadlessScorer
+
+                scorer = HeadlessScorer(sim_folder, llm_client=svc.llm_client)
+                await scorer.score()
+            except FileNotFoundError:
+                # decision_log.jsonl never written — nothing to score.
+                logging.getLogger(__name__).warning(
+                    "headless eval scoring skipped: decision log missing"
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "headless eval scoring failed (sim artifacts intact)"
+                )
+
         await shutdown_services(svc)
 
     print(f"Headless simulation complete. Artifacts: {sim_folder}")
@@ -301,6 +318,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Free-form description stored on the simulation row.",
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--skip-eval",
+        action="store_true",
+        help="Skip post-run headless eval scoring (decision log still written).",
+    )
     return parser
 
 
