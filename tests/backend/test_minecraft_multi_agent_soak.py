@@ -93,6 +93,13 @@ def test_soak_script_bash_syntax_is_valid() -> None:
     assert proc.returncode == 0, proc.stderr
 
 
+def test_soak_summary_surfaces_build_quality_feedback_count() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "build_quality_feedback_records" in source
+    assert "build_feedback|Build quality feedback|build-quality feedback" in source
+
+
 @pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck not installed")
 def test_soak_script_shellcheck_clean() -> None:
     proc = subprocess.run(["shellcheck", str(SCRIPT)], capture_output=True, text=True)

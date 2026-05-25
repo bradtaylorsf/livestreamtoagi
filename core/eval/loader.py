@@ -30,6 +30,7 @@ BUILD_METRIC_RE = re.compile(
     r"\b(?P<name>intended|present|missing|unexpected|verified|abandoned|completion)="
     r"(?P<value>-?\d+(?:\.\d+)?)\b"
 )
+BUILD_FEEDBACK_ARTIFACT_TYPE = "build_feedback"
 
 
 async def load_simulation_data(
@@ -76,6 +77,7 @@ async def load_simulation_data(
         simulation_id,
     )
     artifacts = [dict(r) for r in artifact_rows]
+    build_feedback = _extract_build_feedback_artifacts(artifacts)
 
     # Management shadow logs
     management_rows = await db.fetch(
@@ -252,10 +254,12 @@ async def load_simulation_data(
         "embodied_actions": embodied_actions,
         "perception_reports": perception_reports,
         "build_outcomes": build_outcomes,
+        "build_feedback": build_feedback,
         "embodied_summary": {
             "total_actions": len(embodied_actions),
             "total_perception_reports": len(perception_reports),
             "total_build_outcomes": len(build_outcomes),
+            "total_build_feedback": len(build_feedback),
         },
         "total_conversations": len(conversations),
         "total_artifacts": len(artifacts),
@@ -299,6 +303,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "total_artifacts": total_artifacts,
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
+            "build_feedback": data.get("build_feedback", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "errors": {
@@ -322,6 +327,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "tool_usage": data.get("tool_usage", []),
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
+            "build_feedback": data.get("build_feedback", []),
             "perception_reports": data.get("perception_reports", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
@@ -342,6 +348,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "dream_entries": data.get("dream_entries", []),
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
+            "build_feedback": data.get("build_feedback", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "social_dynamics": {
@@ -356,11 +363,13 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "world_chunks": data.get("world_chunks", []),
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
+            "build_feedback": data.get("build_feedback", []),
             "perception_reports": data.get("perception_reports", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "build_verification": {
             "build_outcomes": data.get("build_outcomes", []),
+            "build_feedback": data.get("build_feedback", []),
             "embodied_actions": data.get("embodied_actions", []),
             "world_chunks": data.get("world_chunks", []),
             "artifacts": artifacts,
@@ -379,6 +388,7 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "world_chunks": data.get("world_chunks", []),
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
+            "build_feedback": data.get("build_feedback", []),
             "perception_reports": data.get("perception_reports", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
@@ -493,6 +503,23 @@ def _build_timeline(data: dict[str, Any]) -> str:
             }
         )
 
+    # Build-quality feedback artifacts
+    for feedback in data.get("build_feedback", []):
+        created_at = feedback.get("created_at")
+        if created_at is None:
+            continue
+        events.append(
+            {
+                "time": created_at,
+                "type": "build_feedback",
+                "agent": feedback.get("agent_id"),
+                "attempt_id": feedback.get("attempt_id"),
+                "classification": feedback.get("classification"),
+                "completion": feedback.get("completion"),
+                "suggested_next_step": str(feedback.get("suggested_next_step", ""))[:300],
+            }
+        )
+
     # Embodied perceptions and scene digests
     for report in data.get("perception_reports", []):
         created_at = report.get("created_at")
@@ -565,6 +592,15 @@ def _render_timeline_markdown(events: list[dict[str, Any]]) -> str:
             )
             if event.get("detail"):
                 line += f"\n  > {event.get('detail')}"
+        elif etype == "build_feedback":
+            line = (
+                f"- **[{timestamp}] Build Feedback**: {event.get('agent')} — "
+                f"attempt_id: {event.get('attempt_id')}, "
+                f"classification: {event.get('classification')}, "
+                f"completion: {event.get('completion')}"
+            )
+            if event.get("suggested_next_step"):
+                line += f"\n  > {event.get('suggested_next_step')}"
         elif etype == "embodied_perception":
             line = (
                 f"- **[{timestamp}] Embodied Perception**: {event.get('agent')} — "
@@ -592,6 +628,24 @@ def _build_transcript_text(conversations: list[dict[str, Any]]) -> str:
                 f"--- Conversation (trigger={trigger}, agents={agents}) ---\n{transcript}\n"
             )
     return "\n".join(parts) if parts else "(No transcripts available)"
+
+
+def _extract_build_feedback_artifacts(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    feedback_records: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        if artifact.get("artifact_type") != BUILD_FEEDBACK_ARTIFACT_TYPE:
+            continue
+        payload = _parsed_payload(artifact.get("tool_output"))
+        if not payload:
+            payload = _parsed_payload(artifact.get("metadata"))
+        if not payload:
+            continue
+        payload.setdefault("artifact_id", artifact.get("id"))
+        payload.setdefault("agent_id", artifact.get("agent_id"))
+        payload.setdefault("created_at", artifact.get("created_at"))
+        payload.setdefault("status", artifact.get("status"))
+        feedback_records.append(payload)
+    return feedback_records
 
 
 def _split_embodied_events(

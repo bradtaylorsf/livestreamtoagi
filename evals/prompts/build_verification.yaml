@@ -57,6 +57,7 @@ output_schema:
 
 input_data:
   - build_outcomes
+  - build_feedback
   - embodied_actions
   - world_chunks
   - artifacts

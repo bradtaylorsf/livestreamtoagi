@@ -357,6 +357,7 @@ class TestEventTypeEnum:
             "simulation_error",
             "bridge_perception",
             "bridge_action_result",
+            "build_feedback",
             "bridge_scene_update",
             "bridge_scene_digest",
             "distress_reported",

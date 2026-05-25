@@ -264,6 +264,7 @@ def test_embodied_activity_empty():
     assert result["builds_attempted"] == 0
     assert result["builds_verified"] == 0
     assert result["avg_completion"] is None
+    assert result["build_feedback_records"] == 0
     assert result["by_agent"] == {}
 
 
@@ -312,6 +313,27 @@ def test_embodied_activity_counts_verified_partial_and_failed_builds():
     assert result["world_chunks"] == 1
     assert result["by_agent"]["rex"]["actions"] == 2
     assert result["by_agent"]["rex"]["builds_verified"] == 1
+
+
+def test_embodied_activity_includes_build_quality_feedback():
+    feedback = [
+        {
+            "agent_id": "rex",
+            "attempt_id": "build-2",
+            "classification": "needs_repair",
+            "missing": {"count": 2, "items": []},
+            "unsafe": {"count": 1, "items": []},
+            "suggested_next_step": "Repair missing wall blocks.",
+        }
+    ]
+
+    result = generate_embodied_activity([], [], [], feedback)
+
+    assert result["build_feedback_records"] == 1
+    assert result["build_feedback_missing"] == 2
+    assert result["build_feedback_unsafe"] == 1
+    assert result["latest_suggested_next_step"] == "Repair missing wall blocks."
+    assert result["by_agent"]["rex"]["build_feedback_records"] == 1
 
 
 # ── Cost Analysis tests ───────────────────────────────────────

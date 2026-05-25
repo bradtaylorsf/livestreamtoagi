@@ -58,7 +58,11 @@ async def lifespan(app: FastAPI):
         app.state.services = svc
 
         if svc.event_bus and svc.compactor:
-            register_memory_consumer(svc.event_bus, svc.compactor)
+            register_memory_consumer(
+                svc.event_bus,
+                svc.compactor,
+                artifact_repo=svc.artifact_repo,
+            )
             memory_consumer_registered = True
             if is_director_v2_run():
                 register_scene_memory_consumer(svc.event_bus, svc.compactor)

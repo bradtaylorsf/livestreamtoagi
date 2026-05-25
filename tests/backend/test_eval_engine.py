@@ -115,6 +115,29 @@ async def test_load_simulation_data_includes_embodied_events():
             return {"id": sim_id, "started_at": started, "completed_at": completed}
 
         async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+            if "FROM artifacts" in query and "SELECT id, agent_id" in query:
+                return [
+                    {
+                        "id": uuid.uuid4(),
+                        "agent_id": "rex",
+                        "tool_name": "build_quality_feedback",
+                        "tool_input": {"attempt_id": "build-plan-1"},
+                        "tool_output": {
+                            "attempt_id": "build-plan-1",
+                            "agent_id": "rex",
+                            "goal": "Repair starter shelter",
+                            "classification": "needs_repair",
+                            "completion": 0.75,
+                            "missing": {"count": 1, "items": []},
+                            "unsafe": {"count": 0, "items": []},
+                            "suggested_next_step": "Repair missing block at x=0, y=64, z=0.",
+                        },
+                        "artifact_type": "build_feedback",
+                        "status": "executed",
+                        "metadata": {},
+                        "created_at": datetime(2026, 5, 20, 10, 7),
+                    }
+                ]
             if "FROM transcripts" in query and "event_type = ANY" in query:
                 assert args == (
                     ["bridge_perception", "bridge_action_result", "minecraft_scene"],
@@ -185,6 +208,7 @@ async def test_load_simulation_data_includes_embodied_events():
         "total_actions": 1,
         "total_perception_reports": 2,
         "total_build_outcomes": 1,
+        "total_build_feedback": 1,
     }
     assert data["embodied_actions"][0]["action_id"] == "build-plan-1"
     assert data["embodied_actions"][0]["outcome_class"] == "partial"
@@ -194,6 +218,8 @@ async def test_load_simulation_data_includes_embodied_events():
     assert data["build_outcomes"][0]["present"] == 3
     assert data["build_outcomes"][0]["missing"] == 1
     assert data["build_outcomes"][0]["completion"] == 0.75
+    assert data["build_feedback"][0]["classification"] == "needs_repair"
+    assert data["build_feedback"][0]["suggested_next_step"].startswith("Repair missing")
 
 
 # ── _build_transcript_text ───────────────────────────────────

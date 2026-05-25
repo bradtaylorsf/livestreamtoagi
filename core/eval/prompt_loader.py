@@ -315,6 +315,23 @@ def render_user_prompt(
         else:
             parts.append("(No build outcomes recorded)")
 
+    if "build_feedback" in category_data:
+        feedback_records = _list_or_empty(category_data.get("build_feedback"))
+        parts.append(f"\n### Build Quality Feedback ({len(feedback_records)} records)")
+        if feedback_records:
+            for feedback in feedback_records[:50]:
+                parts.append(
+                    f"- Agent: {feedback.get('agent_id')}, "
+                    f"Attempt ID: {feedback.get('attempt_id')}, "
+                    f"Class: {feedback.get('classification')}, "
+                    f"Completion: {feedback.get('completion')}, "
+                    f"Missing: {_feedback_count(feedback.get('missing'))}, "
+                    f"Unsafe: {_feedback_count(feedback.get('unsafe'))}, "
+                    f"Next: {str(feedback.get('suggested_next_step', ''))[:300]}"
+                )
+        else:
+            parts.append("(No build-quality feedback recorded)")
+
     if "perception_reports" in category_data:
         reports = _list_or_empty(category_data.get("perception_reports"))
         parts.append(f"\n### Perception Reports ({len(reports)} reports)")
@@ -334,3 +351,9 @@ def render_user_prompt(
             parts.append("(No perception reports recorded)")
 
     return "\n".join(parts)
+
+
+def _feedback_count(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return value.get("count", 0)
+    return value

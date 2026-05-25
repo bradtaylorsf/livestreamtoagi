@@ -50,6 +50,7 @@ class EventType(str, Enum):
     # bridge, attributed by request_id/agent_id/run_id/simulation_id.
     BRIDGE_PERCEPTION = "bridge_perception"
     BRIDGE_ACTION_RESULT = "bridge_action_result"
+    BUILD_FEEDBACK = "build_feedback"
     BRIDGE_SCENE_UPDATE = "bridge_scene_update"
     BRIDGE_SCENE_DIGEST = "bridge_scene_digest"
     DISTRESS_REPORTED = "distress_reported"
