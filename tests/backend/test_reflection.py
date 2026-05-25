@@ -261,6 +261,54 @@ class TestSixHourReflection:
         assert result.promoted_count == 1
 
     @pytest.mark.asyncio
+    async def test_journal_image_generated_in_embodied_mode(
+        self,
+        memory_repo: AsyncMock,
+        llm_client: AsyncMock,
+        core_memory_mgr: AsyncMock,
+        token_counter: MagicMock,
+        agent_registry: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """6-hour embodied reflection attaches generated image URLs to journals."""
+        monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+        fake_image_url = "https://example.test/journal-image.png"
+        journal_image_generator = AsyncMock()
+        journal_image_generator.generate.return_value = fake_image_url
+        llm_client.complete.side_effect = [
+            _make_llm_response(
+                json.dumps({
+                    "importance_scores": {"1": 0.8, "2": 0.3},
+                    "promotions": [],
+                })
+            ),
+            _make_llm_response("I placed oak planks and finished the workshop doorway."),
+        ]
+        reflection_mgr = ReflectionManager(
+            memory_repo=memory_repo,
+            llm_client=llm_client,
+            core_memory_mgr=core_memory_mgr,
+            token_counter=token_counter,
+            agent_registry=agent_registry,
+            journal_image_generator=journal_image_generator,
+        )
+
+        result = await reflection_mgr.run_6hour_reflection("vera")
+
+        journal_image_generator.generate.assert_awaited_once_with(
+            "I placed oak planks and finished the workshop doorway.",
+            "vera",
+            simulation_id=None,
+        )
+        memory_repo.update_journal_entry_image.assert_awaited_once_with(
+            1,
+            fake_image_url,
+            simulation_id=None,
+        )
+        assert result.journal_entry is not None
+        assert result.journal_entry.image_url == fake_image_url
+
+    @pytest.mark.asyncio
     async def test_uses_building_model(
         self, reflection_mgr: ReflectionManager, llm_client: AsyncMock
     ) -> None:
