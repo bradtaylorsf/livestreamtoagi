@@ -769,7 +769,8 @@ def _build_metrics_by_action_id(
 
 
 def _extract_build_verification(source: Mapping[str, Any]) -> dict[str, Any] | None:
-    payload = source.get("payload") if isinstance(source.get("payload"), Mapping) else source
+    raw_payload = source.get("payload")
+    payload: Mapping[str, Any] = raw_payload if isinstance(raw_payload, Mapping) else source
     detail = str(source.get("detail") or payload.get("detail") or payload.get("result") or "")
 
     candidates: list[Mapping[str, Any]] = [payload]

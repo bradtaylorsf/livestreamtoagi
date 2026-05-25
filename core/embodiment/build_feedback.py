@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
-from core.embodiment.building import verify_break, verify_place
+from core.embodiment.building import BuildVerification, verify_break, verify_place
 from core.eval.loader import BUILD_ACTION_NAMES, BUILD_METRIC_RE
 
 
@@ -26,6 +26,7 @@ class BuildFeedback(TypedDict):
     completion: float
     suggested_next_step: str
     classification: str
+    simulation_id: NotRequired[str | None]
 
 
 BUILD_FEEDBACK_ARTIFACT_TYPE = "build_feedback"
@@ -241,7 +242,7 @@ def _match_observation(
 def _verify_step(
     step: Mapping[str, Any],
     observation: Mapping[str, Any] | None,
-) -> dict[str, Any]:
+) -> BuildVerification:
     if observation is None:
         return {"verified": False, "class": "missing"}
 
