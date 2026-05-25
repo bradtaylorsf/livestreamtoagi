@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -202,6 +203,22 @@ class DreamManager:
                 simulation_id=self._simulation_id,
             )
             texts = [e.content for e in entries] if entries else []
+
+            recent_recall = getattr(self._repo, "get_recent_recall_memories", None)
+            if callable(recent_recall):
+                since = datetime.now(UTC) - timedelta(hours=24)
+                recall_memories = await recent_recall(
+                    agent_id,
+                    since,
+                    limit=10,
+                    simulation_id=self._simulation_id,
+                )
+                if isinstance(recall_memories, list):
+                    texts.extend(
+                        f"[{m.event_type or 'recall'}] {m.summary}"
+                        for m in recall_memories
+                        if getattr(m, "summary", None)
+                    )
 
             if not texts:
                 return ""

@@ -46,7 +46,7 @@ You are {agent_id}. You are reflecting on your recent experiences from the last 
 Your current core memory:
 {core_memory}
 
-Recent recall memories (last 6 hours):
+Recent experiences (conversations and embodied actions, last 6 hours):
 {recall_memories}
 
 Analyze these memories and respond with valid JSON:
