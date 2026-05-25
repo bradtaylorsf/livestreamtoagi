@@ -21,7 +21,8 @@ EVAL_SUITES: dict[str, list[str]] = {
     "quick": QUICK_CATEGORIES,
     "autonomy": ["internal_state", "agency", "entertainment", "dialogue_quality"],
     "economy": ["economic_behavior", "entertainment", "social_dynamics"],
-    "creative": ["creativity", "world_evolution", "entertainment"],
+    "creative": ["creativity", "world_evolution", "entertainment", "build_verification"],
+    "build": ["build_verification", "world_evolution", "productivity"],
     "narrative": ["simulation_narrative", "entertainment", "dialogue_quality"],
     "full": [],  # Empty means "all available" — resolved at runtime
 }
