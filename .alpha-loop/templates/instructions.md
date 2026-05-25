@@ -23,7 +23,7 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 **Website (`website/`)** — Next.js on Vercel, Vitest + Playwright E2E
 
-**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/`
+**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/`. Timestamped `minecraft-server-easy-*` directories are ephemeral shakeout/soak artifacts — don't edit them.
 
 **Python 3.14+ is NOT supported** — native deps (pydantic-core, etc.) don't build against it.
 
@@ -31,7 +31,7 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 ```
 agents/           Per-agent YAML personality configs (vera, rex, aurora, pixel, fork, sentinel, grok, management, alpha, template)
-core/             Python backend — orchestrator (main.py), conversation_engine, conversation/, memory/, bridge/, embodiment/, minecraft/, video/, simulation/, world/, characters/, social/, youtube/, eval/, admin/, auth/, reporting/, notifications/, scheduler, tts, llm_client, management, events/, repos/
+core/             Python backend — orchestrator (main.py), llm_client, cost_governor, kill_switch, management, conversation_engine, conversation_mode, conversation/, memory/, bridge/, embodiment/, minecraft/, video/, simulation/, world/, characters/, social/, youtube/, livestream/, streaming/, eval/, admin/, auth/, reporting/, notifications/, scheduler, tts, events/, repos/, agent_economy/state/goals/registry, context_assembly, system_prompt, tool_executor, run_spec, shared_state, database, redis_client/keys
 tools/            Agent tool implementations (alpha_dispatch, audience, audience_tools, base, character_tools, code_execution, economy_tools, memory_tools, messaging, social_tools, web_tools, world_state, tilemap_gen, revenue_tools, self_modification, journal_image_tool, task_management, stubs)
 frontend/         Phaser.js world renderer (TS)
 website/          Next.js public-facing site (TS)
@@ -75,7 +75,7 @@ Backend entrypoint: `uvicorn core.main:app --reload --port 8010`.
 - **Default ports are non-standard** to avoid local conflicts: Redis 6381 (`REDIS_PORT`), PostgreSQL 5434 (`POSTGRES_PORT`), Langfuse 3100 (`LANGFUSE_PORT`). Don't hardcode the standard ports.
 - **Check services before integration work:** `docker compose up -d && bash scripts/check-services.sh` — all 5 checks (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse) must pass.
 - **Every agent utterance** flows through `core/management.py` content filter before TTS — never bypass it. There is a 3-second intervention window by design.
-- **Cost governor + kill switch are load-bearing.** All LLM calls go through `core/llm_client.py` (OpenRouter routing) so Langfuse and the governor see them. Don't call provider SDKs directly.
+- **Cost governor + kill switch are load-bearing.** All LLM calls go through `core/llm_client.py` (OpenRouter routing) so Langfuse, `core/cost_governor.py`, and `core/kill_switch.py` see them. Don't call provider SDKs directly.
 - **Memory is 3-tier**, not a single store: Core (always in prompt, ~2–3K tokens), Recall (pgvector semantic search), Archival (full transcripts, never deleted). Respect tier boundaries when adding memory features.
 - **Conversation engine** uses weighted speaker selection — see `core/conversation_engine.py` and `specs/CONVERSATION-ENGINE.md`. Don't change weights without updating both.
 - **All external comms** (social posts, emails, public PRs from agents) require human approval for the first 3 months — keep the approval gate in place.

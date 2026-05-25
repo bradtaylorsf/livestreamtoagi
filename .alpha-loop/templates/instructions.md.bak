@@ -23,7 +23,7 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 **Website (`website/`)** — Next.js on Vercel, Vitest + Playwright E2E
 
-**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration)
+**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/`
 
 **Python 3.14+ is NOT supported** — native deps (pydantic-core, etc.) don't build against it.
 
@@ -31,8 +31,8 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 ```
 agents/           Per-agent YAML personality configs (vera, rex, aurora, pixel, fork, sentinel, grok, management, alpha, template)
-core/             Python backend — orchestrator, conversation engine, memory, bridge, embodiment, video, simulation, world, social, youtube, eval, admin, auth, reporting, notifications, scheduler, tts, llm_client, management
-tools/            Agent tool implementations (alpha_dispatch, audience_tools, character_tools, code_execution, economy_tools, memory_tools, messaging, social_tools, web_tools, world_state, tilemap_gen, revenue_tools, self_modification, journal_image_tool, task_management)
+core/             Python backend — orchestrator (main.py), conversation_engine, conversation/, memory/, bridge/, embodiment/, minecraft/, video/, simulation/, world/, characters/, social/, youtube/, eval/, admin/, auth/, reporting/, notifications/, scheduler, tts, llm_client, management, events/, repos/
+tools/            Agent tool implementations (alpha_dispatch, audience, audience_tools, base, character_tools, code_execution, economy_tools, memory_tools, messaging, social_tools, web_tools, world_state, tilemap_gen, revenue_tools, self_modification, journal_image_tool, task_management, stubs)
 frontend/         Phaser.js world renderer (TS)
 website/          Next.js public-facing site (TS)
 mindcraft/        Minecraft embodiment bridge
