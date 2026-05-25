@@ -1,0 +1,8 @@
+viewpoint: top_down
+scale_tiles_per_block: 1.5
+notes:
+- Oval footprint; three tiered seating rings; central sand floor.
+- Outer wall is structural; interior arches are decorative.
+exclude_features:
+- spectators
+- vegetation overgrowth

@@ -1,0 +1,8 @@
+viewpoint: top_down
+scale_tiles_per_block: 1.0
+notes:
+- Tilled-soil grid with irrigation channels along the edges.
+- Single-storey shed at one corner; no roof on the plots.
+exclude_features:
+- crops
+- fences as decoration
