@@ -125,6 +125,7 @@ async def run_headless(args: argparse.Namespace) -> None:
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
     from core.simulation.clock import SimulationClock
+    from core.simulation.decision_logger import DecisionLogger
     from core.simulation.display import SimulationDisplay
     from core.simulation.orchestrator import (
         SimulationConfig,
@@ -231,14 +232,7 @@ async def run_headless(args: argparse.Namespace) -> None:
     )
 
     orchestrator._sim_folder = sim_folder
-    # Decision-log writer is attached by the #852 wiring; absent here the
-    # executor simply records intents in-memory.
-    try:
-        from core.simulation.decision_logger import DecisionLogger
-
-        orchestrator._decision_logger = DecisionLogger(sim_folder)
-    except ImportError:
-        orchestrator._decision_logger = None
+    orchestrator._decision_logger = DecisionLogger(sim_folder)
 
     loop = asyncio.get_running_loop()
 
@@ -257,11 +251,10 @@ async def run_headless(args: argparse.Namespace) -> None:
         else:
             await orchestrator.run()
     finally:
-        if orchestrator._decision_logger is not None:
-            try:
-                orchestrator._decision_logger.close()
-            except Exception:  # pragma: no cover
-                pass
+        try:
+            orchestrator._decision_logger.close()
+        except Exception:  # pragma: no cover
+            pass
         metadata["completed_at"] = datetime.utcnow().isoformat() + "Z"
         metadata["simulation_id"] = str(orchestrator.simulation_id) if orchestrator.simulation_id else None
         _write_metadata(sim_folder, metadata)
