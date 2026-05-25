@@ -90,6 +90,17 @@ class PhaseSpec(BaseModel):
         return v
 
 
+def _validate_world_event_type(value: str) -> str:
+    """Cross-check against the canonical event vocabulary from E22-4."""
+    from core.simulation.world_events import WORLD_EVENT_TYPES
+
+    if value not in WORLD_EVENT_TYPES:
+        raise ValueError(
+            f"unknown world event {value!r}; must be one of {list(WORLD_EVENT_TYPES)}"
+        )
+    return value
+
+
 class ScheduledWorldEvent(BaseModel):
     """A world event that fires on a specific simulation tick."""
 
@@ -97,6 +108,11 @@ class ScheduledWorldEvent(BaseModel):
 
     tick: int = Field(ge=0)
     event: str = Field(min_length=1)
+
+    @field_validator("event")
+    @classmethod
+    def _known_event(cls, v: str) -> str:
+        return _validate_world_event_type(v)
 
 
 class ProbabilisticWorldEvent(BaseModel):
@@ -108,11 +124,23 @@ class ProbabilisticWorldEvent(BaseModel):
     prob_per_tick: float = Field(ge=0.0, le=1.0)
     requires: str | None = None
 
+    @field_validator("event")
+    @classmethod
+    def _known_event(cls, v: str) -> str:
+        return _validate_world_event_type(v)
+
+    @field_validator("requires")
+    @classmethod
+    def _known_requires(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_world_event_type(v)
+
 
 class NeedDecayConfig(BaseModel):
     """Decay/threshold config for a single agent need (hunger, sleep, ...)."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     tick_decay: float = Field(ge=0.0)
     critical_threshold: float = Field(ge=0.0, le=100.0)
@@ -121,20 +149,34 @@ class NeedDecayConfig(BaseModel):
 
 
 class WorldEventsBlock(BaseModel):
-    """Placeholder for the ``world_events:`` block (full shape lands in E22-4).
+    """The ``world_events:`` block — headless environmental triggers (E22-4).
 
-    E22-3 introduces this block so authors and downstream consumers can
-    declare it without failing validation; E22-4 tightens the schema for
-    ``needs`` and event vocabulary. ``extra='allow'`` keeps the door open
-    for fields E22-4 may add.
+    Authors declare scheduled events (fire on a specific tick), probabilistic
+    events (per-tick roll, optionally gated on another event), and per-need
+    decay/threshold config. The :class:`WorldEventScheduler` and
+    :class:`NeedsManager` consume this block at runtime.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     schedule: list[ScheduledWorldEvent] = Field(default_factory=list)
     probabilistic: list[ProbabilisticWorldEvent] = Field(default_factory=list)
     needs: dict[str, NeedDecayConfig] = Field(default_factory=dict)
     disable_world_event_scheduler: bool = False
+
+    @field_validator("needs")
+    @classmethod
+    def _known_need_names(
+        cls, v: dict[str, NeedDecayConfig]
+    ) -> dict[str, NeedDecayConfig]:
+        from core.agent_needs import NEED_NAMES
+
+        unknown = [name for name in v if name not in NEED_NAMES]
+        if unknown:
+            raise ValueError(
+                f"unknown need names {unknown}; valid: {list(NEED_NAMES)}"
+            )
+        return v
 
 
 class EvalTargetsBlock(BaseModel):
