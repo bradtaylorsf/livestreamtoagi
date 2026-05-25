@@ -35,6 +35,23 @@ You implement GitHub issues autonomously. You receive an issue description with 
 - Do NOT add features beyond the issue scope
 - Install dependencies as needed (`pnpm add` / `pnpm add -D`)
 
+## Scope Discipline (verify BEFORE committing)
+
+Scope creep is the #1 review finding across recent sessions — diffs that touch admin routes, agent profile builders, scenario launchers, `.gitignore`, etc. when the issue was a single targeted fix. Before committing:
+
+- **Re-read the issue's acceptance criteria.** For every file in `git diff --name-only origin/main...HEAD`, ask: "Which AC line requires this change?" If you can't name one, revert it.
+- **Working in a batch worktree?** Changes from a sibling issue's branch can accidentally land in your diff. Inspect `git log origin/main..HEAD --oneline` and confirm every commit belongs to THIS issue.
+- **Resist "while I'm here" refactors.** Extracting `_build_agent_profile` from a route handler is a fine refactor — but not inside a UI-copy fix or a single-column bug fix. Open a follow-up issue instead.
+- **Don't churn `.gitignore`.** If you see `.venv` already covered as a directory, don't add duplicate entries. If you committed a `.venv` symlink, untrack it (`git rm --cached .venv`) — `.gitignore` directory entries don't match symlinks of the same name.
+
+## Acceptance Criteria Interpretation
+
+When AC uses a quantifier like "all", "every", "consistently across", or names a family ("all `/api/evals/*` endpoints", "all agent tabs", "every loading spinner"):
+
+- **Enumerate the family explicitly** before implementing. Grep for the prefix or the shared component. `Grep "@router\.(get|post)\(.\"/evals"` will surface every endpoint in `/api/evals/*`.
+- **Apply the change to every member**, not just the ones the new UI happens to call. "Consistently" means the family is uniform — partial coverage leaves the AC literally unmet.
+- **Shared loading/spinner components** (e.g., `TabSpinner`) often back many surfaces. Grep for usages before declaring "all pages have skeletons".
+
 ## Wiring Checklist (verify BEFORE committing)
 
 These are the most common causes of "tests pass but feature is broken" failures. Check each one that applies:
@@ -47,15 +64,28 @@ These are the most common causes of "tests pass but feature is broken" failures.
 ### Route Registration
 - If you added new FastAPI routes: are static routes (e.g., `/evals/compare`, `/evals/history`) registered BEFORE parameterized routes (e.g., `/evals/{eval_id}`)? Parameterized routes shadow static ones.
 - If you added typed path parameters (e.g., `eval_id: uuid_mod.UUID`): callers won't hit string-parse errors.
+- If a route accepts a path param (e.g., `sim_id`), USE it in the handler — don't accept and ignore. Unused path params invite authorization-shaped bugs.
+
+### API Contract Symmetry
+- If the frontend polls on a response field (e.g., `detail.status`), verify the field is BOTH declared on the Pydantic response model AND populated in the route handler. TypeScript `as` casts mask missing fields and cause silent polling timeouts.
+- If you add a public read endpoint that mirrors an admin one (e.g., admin and public `GET /simulations/{id}`), update BOTH or document which is canonical.
+- For new admin endpoints, also implement the symmetric public endpoint if the AC's verification step references it.
 
 ### Data Flow
 - If you query a database table expecting data: verify that something in the production pipeline actually WRITES to that table. A coverage script that reads `artifacts` is useless if the tool pipeline never saves artifacts.
 - If you display metrics (token counts, costs, scores): use real data from the database. Never hardcode placeholder values or use rough estimates like `len(text) // 4`.
 - If you added a method to a repo class: verify it's actually called from the endpoint/service that needs it, not just defined.
 
+### Next.js / SSR Safety
+- Do NOT initialize `useState` from `window`, `sessionStorage`, `localStorage`, or `document` on first render — server renders `null`/`undefined` while client first render reads the persisted value, causing hydration mismatch warnings. Initialize to `null` and hydrate in `useEffect`.
+- If you hydrate filter/selection state from storage AND make an initial fetch on that page, thread the hydrated value into the FIRST fetch — not just subsequent re-triggers. Otherwise UI and data diverge on first paint.
+- Do not link (`<Link href=...>`) to internal routes that don't exist yet. A `/scenarios/<name>` link with no `[name]` page is a guaranteed 404. Either build the route in the same PR, gate the link behind a feature check, or link to an external source.
+- JSX text children do NOT interpret `\u`-style escape sequences — `\u2014` renders literally. Use the actual character (`—`) or a JS expression (`{"\u2014"}`).
+
 ### Time & Clock
 - If your feature depends on simulated time: verify the `SimulationClock` is passed to your component, not using wall-clock `datetime.now()` or `time.monotonic()`.
 - If you advance the clock: do it in BOTH seeded and autonomous mode, not just one.
+- If you compute a "real duration" from boundary timestamps (started_at, completed_at), never derive it from a tick-loop accumulator — fast-forward simulated time decouples loop wall-clock from user-visible span.
 
 ### Event System
 - If you register event listeners: unregister them in a `finally` block to prevent leaks across phases.
