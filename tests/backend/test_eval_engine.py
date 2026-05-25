@@ -546,3 +546,121 @@ async def test_eval_engine_scores_build_verification_sample_run():
     assert call_kwargs["category"] == "build_verification"
     assert call_kwargs["score"] == Decimal("76")
     assert "Build Outcomes" in llm.complete.call_args.kwargs["messages"][1]["content"]
+
+
+async def test_eval_engine_runs_all_categories_on_embodied_only_data():
+    """Every discovered category should run against embodied data without transcripts."""
+    db = MagicMock()
+    llm = MagicMock()
+    eval_repo = MagicMock()
+
+    run_id = uuid.uuid4()
+    sim_id = uuid.uuid4()
+    now = datetime(2026, 5, 20, 10, 0)
+
+    db.fetchrow = AsyncMock(
+        return_value={
+            "id": sim_id,
+            "name": "embodied-only sample",
+            "description": None,
+            "config": "{}",
+            "status": "completed",
+            "started_at": now,
+            "ended_at": None,
+            "wall_time_seconds": None,
+            "simulated_duration": None,
+            "total_conversations": 0,
+            "total_turns": 0,
+            "total_tokens": 0,
+            "total_cost": 0,
+            "total_management_flags": 0,
+            "agents_participated": ["rex"],
+            "error_log": None,
+            "model_versions": "{}",
+            "created_at": now,
+        }
+    )
+    eval_repo.create_eval_run = AsyncMock(
+        return_value=EvalRun(
+            id=run_id,
+            simulation_id=sim_id,
+            eval_suite="full",
+            status="running",
+            started_at=now,
+        )
+    )
+    eval_repo.update_eval_run = AsyncMock(return_value=None)
+    eval_repo.save_eval_result = AsyncMock(return_value=None)
+
+    mock_response = MagicMock()
+    mock_response.content = json.dumps(
+        {
+            "score": 80,
+            "reasoning": "Embodied-only fixture evaluated without loader errors",
+            "evidence": {},
+            "sub_scores": {},
+        }
+    )
+    mock_response.input_tokens = 100
+    mock_response.output_tokens = 50
+    mock_response.estimated_cost = Decimal("0")
+    llm.complete = AsyncMock(return_value=mock_response)
+
+    mock_data = {
+        "simulation": {"id": str(sim_id)},
+        "transcript_text": "",
+        "conversations": [],
+        "embodied_actions": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "action": "buildFromPlan",
+                "status": "success",
+                "outcome_class": "success",
+                "detail": "success: intended=2; present=2; missing=0; completion=1.000",
+                "created_at": now,
+            },
+        ],
+        "perception_reports": [
+            {
+                "agent_id": "rex",
+                "event_type": "bridge_perception",
+                "observations": [{"type": "structure", "action_id": "build-plan-1"}],
+                "snapshot": {"pose": {"position": {"x": 0, "y": 64, "z": 0}}},
+                "content": "Observed verified starter shelter",
+                "created_at": now,
+            },
+        ],
+        "build_outcomes": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "verified": True,
+                "class": "success",
+                "intended": 2,
+                "present": 2,
+                "missing": 0,
+                "completion": 1.0,
+                "created_at": now,
+            },
+        ],
+        "embodied_summary": {
+            "total_actions": 1,
+            "total_perception_reports": 1,
+            "total_build_outcomes": 1,
+        },
+    }
+    categories = discover_categories()
+
+    engine = EvalEngine(db=db, llm_client=llm, eval_repo=eval_repo)
+    with patch(
+        "core.eval.engine.load_simulation_data", new_callable=AsyncMock, return_value=mock_data
+    ):
+        result_id = await engine.run(sim_id, categories=categories)
+
+    assert result_id == run_id
+    assert eval_repo.save_eval_result.call_count == len(categories)
+    saved_categories = [
+        call.kwargs["category"] for call in eval_repo.save_eval_result.call_args_list
+    ]
+    assert saved_categories == categories

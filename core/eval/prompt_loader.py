@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,19 @@ logger = logging.getLogger(__name__)
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "evals" / "prompts"
 
 REQUIRED_FIELDS = {"name", "system", "rubric", "sub_scores", "output_schema"}
+
+
+def _text_or_placeholder(value: Any, placeholder: str) -> str:
+    text = str(value).strip() if value is not None else ""
+    return text if text else placeholder
+
+
+def _list_or_empty(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
 
 
 def discover_categories(prompts_dir: Path | None = None) -> list[str]:
@@ -77,7 +91,11 @@ def render_user_prompt(
 
     if "timeline" in category_data:
         parts.append("\n### Chronological Timeline")
-        parts.append(str(category_data["timeline"])[:100_000])
+        parts.append(
+            _text_or_placeholder(category_data.get("timeline"), "(No timeline events available)")[
+                :100_000
+            ]
+        )
 
     # Summary context (totals) so filtered lists have proper framing
     total_arts = category_data.get("total_artifacts")
@@ -94,43 +112,61 @@ def render_user_prompt(
 
     if "transcript_text" in category_data:
         parts.append("\n### Transcripts")
-        parts.append(str(category_data["transcript_text"])[:100_000])
+        parts.append(
+            _text_or_placeholder(
+                category_data.get("transcript_text"),
+                "(No transcripts available)",
+            )[:100_000]
+        )
 
     if "agent_turns" in category_data:
         parts.append("\n### Agent Turn Counts")
-        parts.append(json.dumps(category_data["agent_turns"], indent=2))
+        turns = _mapping_or_empty(category_data.get("agent_turns"))
+        if turns:
+            parts.append(json.dumps(turns, indent=2))
+        else:
+            parts.append("(No agent turn counts available)")
 
     if "management_logs" in category_data:
-        logs = category_data["management_logs"]
+        logs = _list_or_empty(category_data.get("management_logs"))
         parts.append(f"\n### Management Shadow Logs ({len(logs)} entries)")
-        for entry in logs[:50]:
-            parts.append(
-                f"- Agent: {entry.get('agent_id')}, "
-                f"Severity: {entry.get('severity')}, "
-                f"Action: {entry.get('action_would_take')}, "
-                f"Reason: {entry.get('reason', 'N/A')}"
-            )
+        if logs:
+            for entry in logs[:50]:
+                parts.append(
+                    f"- Agent: {entry.get('agent_id')}, "
+                    f"Severity: {entry.get('severity')}, "
+                    f"Action: {entry.get('action_would_take')}, "
+                    f"Reason: {entry.get('reason', 'N/A')}"
+                )
+        else:
+            parts.append("(No management shadow logs recorded)")
 
     if "artifacts" in category_data:
-        arts = category_data["artifacts"]
+        arts = _list_or_empty(category_data.get("artifacts"))
         total_context = f" of {total_arts}" if total_arts is not None else ""
         parts.append(f"\n### Artifacts ({len(arts)} shown{total_context})")
-        for art in arts[:50]:
-            parts.append(
-                f"- [{art.get('artifact_type')}] Agent: {art.get('agent_id')}, "
-                f"Tool: {art.get('tool_name')}, Status: {art.get('status')}"
-            )
+        if arts:
+            for art in arts[:50]:
+                parts.append(
+                    f"- [{art.get('artifact_type')}] Agent: {art.get('agent_id')}, "
+                    f"Tool: {art.get('tool_name')}, Status: {art.get('status')}"
+                )
+        else:
+            parts.append("(No artifacts recorded)")
 
     if "conversations" in category_data:
-        convs = category_data["conversations"]
+        convs = _list_or_empty(category_data.get("conversations"))
         total_context = f" of {total_convs}" if total_convs is not None else ""
         parts.append(f"\n### Conversations ({len(convs)} shown{total_context})")
-        for conv in convs[:30]:
-            parts.append(
-                f"- Trigger: {conv.get('trigger_type')}, "
-                f"Agents: {conv.get('participating_agents')}, "
-                f"Turns: {conv.get('turn_count')}"
-            )
+        if convs:
+            for conv in convs[:30]:
+                parts.append(
+                    f"- Trigger: {conv.get('trigger_type')}, "
+                    f"Agents: {conv.get('participating_agents')}, "
+                    f"Turns: {conv.get('turn_count')}"
+                )
+        else:
+            parts.append("(No conversations recorded)")
 
     if "simulation" in category_data:
         sim = category_data["simulation"]
@@ -140,131 +176,161 @@ def render_user_prompt(
             parts.append(json.dumps(error_log, indent=2, default=str))
 
     if "agent_goals" in category_data:
-        goals = category_data["agent_goals"]
+        goals = _list_or_empty(category_data.get("agent_goals"))
         parts.append(f"\n### Agent Goals ({len(goals)} total)")
-        for goal in goals[:50]:
-            parts.append(
-                f"- [{goal.get('status')}] Agent: {goal.get('agent_id')}, "
-                f"Goal: {goal.get('goal')}, Priority: {goal.get('priority')}, "
-                f"Source: {goal.get('source')}"
-            )
+        if goals:
+            for goal in goals[:50]:
+                parts.append(
+                    f"- [{goal.get('status')}] Agent: {goal.get('agent_id')}, "
+                    f"Goal: {goal.get('goal')}, Priority: {goal.get('priority')}, "
+                    f"Source: {goal.get('source')}"
+                )
+        else:
+            parts.append("(No agent goals recorded)")
 
     if "tool_usage" in category_data:
-        usage = category_data["tool_usage"]
+        usage = _list_or_empty(category_data.get("tool_usage"))
         parts.append(f"\n### Tool Usage Summary ({len(usage)} entries)")
-        for entry in usage[:50]:
-            parts.append(
-                f"- Agent: {entry.get('agent_id')}, "
-                f"Tool: {entry.get('tool_name')}, "
-                f"Uses: {entry.get('use_count')}"
-            )
+        if usage:
+            for entry in usage[:50]:
+                parts.append(
+                    f"- Agent: {entry.get('agent_id')}, "
+                    f"Tool: {entry.get('tool_name')}, "
+                    f"Uses: {entry.get('use_count')}"
+                )
+        else:
+            parts.append("(No tool usage recorded)")
 
     if "agent_internal_state" in category_data:
-        states = category_data["agent_internal_state"]
+        states = _list_or_empty(category_data.get("agent_internal_state"))
         parts.append(f"\n### Agent Internal State ({len(states)} agents)")
-        for state in states[:20]:
-            parts.append(
-                f"- Agent: {state.get('agent_id')}, "
-                f"Mood: {state.get('mood')}, "
-                f"Energy: {state.get('energy')}, "
-                f"Satisfaction: {state.get('satisfaction')}, "
-                f"Boredom: {state.get('boredom')}, "
-                f"Frustration: {state.get('frustration')}, "
-                f"Social need: {state.get('social_need')}, "
-                f"Creative need: {state.get('creative_need')}, "
-                f"Recognition need: {state.get('recognition_need')}"
-            )
+        if states:
+            for state in states[:20]:
+                parts.append(
+                    f"- Agent: {state.get('agent_id')}, "
+                    f"Mood: {state.get('mood')}, "
+                    f"Energy: {state.get('energy')}, "
+                    f"Satisfaction: {state.get('satisfaction')}, "
+                    f"Boredom: {state.get('boredom')}, "
+                    f"Frustration: {state.get('frustration')}, "
+                    f"Social need: {state.get('social_need')}, "
+                    f"Creative need: {state.get('creative_need')}, "
+                    f"Recognition need: {state.get('recognition_need')}"
+                )
+        else:
+            parts.append("(No agent internal state snapshots recorded)")
 
     if "transactions" in category_data:
-        txns = category_data["transactions"]
+        txns = _list_or_empty(category_data.get("transactions"))
         parts.append(f"\n### Transaction History ({len(txns)} entries)")
-        for txn in txns[:50]:
-            counterparty = txn.get("counterparty_agent_id") or "N/A"
-            parts.append(
-                f"- Agent: {txn.get('agent_id')}, "
-                f"Type: {txn.get('type')}, "
-                f"Amount: {txn.get('amount')}, "
-                f"Counterparty: {counterparty}, "
-                f"Description: {txn.get('description', 'N/A')}"
-            )
+        if txns:
+            for txn in txns[:50]:
+                counterparty = txn.get("counterparty_agent_id") or "N/A"
+                parts.append(
+                    f"- Agent: {txn.get('agent_id')}, "
+                    f"Type: {txn.get('type')}, "
+                    f"Amount: {txn.get('amount')}, "
+                    f"Counterparty: {counterparty}, "
+                    f"Description: {txn.get('description', 'N/A')}"
+                )
+        else:
+            parts.append("(No transactions recorded)")
 
     if "dream_entries" in category_data:
-        dreams = category_data["dream_entries"]
+        dreams = _list_or_empty(category_data.get("dream_entries"))
         parts.append(f"\n### Dream Journal Entries ({len(dreams)} entries)")
-        for dream in dreams[:30]:
-            content = str(dream.get("content", ""))[:500]
-            parts.append(
-                f"- Agent: {dream.get('agent_id')}, "
-                f"Type: {dream.get('reflection_type')}, "
-                f"Content: {content}"
-            )
+        if dreams:
+            for dream in dreams[:30]:
+                content = str(dream.get("content", ""))[:500]
+                parts.append(
+                    f"- Agent: {dream.get('agent_id')}, "
+                    f"Type: {dream.get('reflection_type')}, "
+                    f"Content: {content}"
+                )
+        else:
+            parts.append("(No dream journal entries recorded)")
 
     if "alliance_records" in category_data:
-        alliances = category_data["alliance_records"]
+        alliances = _list_or_empty(category_data.get("alliance_records"))
         parts.append(f"\n### Alliance Records ({len(alliances)} alliances)")
-        for alliance in alliances[:20]:
-            members = alliance.get("members", [])
-            status = "dissolved" if alliance.get("dissolved_at") else "active"
-            parts.append(
-                f"- {alliance.get('name')} ({status}): "
-                f"Founded by {alliance.get('founded_by')}, "
-                f"Purpose: {alliance.get('purpose', 'N/A')}, "
-                f"Members: {members}"
-            )
+        if alliances:
+            for alliance in alliances[:20]:
+                members = alliance.get("members", [])
+                status = "dissolved" if alliance.get("dissolved_at") else "active"
+                parts.append(
+                    f"- {alliance.get('name')} ({status}): "
+                    f"Founded by {alliance.get('founded_by')}, "
+                    f"Purpose: {alliance.get('purpose', 'N/A')}, "
+                    f"Members: {members}"
+                )
+        else:
+            parts.append("(No alliance records recorded)")
 
     if "world_chunks" in category_data:
-        chunks = category_data["world_chunks"]
+        chunks = _list_or_empty(category_data.get("world_chunks"))
         parts.append(f"\n### World Chunks ({len(chunks)} built)")
-        for chunk in chunks[:30]:
-            parts.append(
-                f"- {chunk.get('name')}: "
-                f"Built by {chunk.get('built_by')}, "
-                f"Size: {chunk.get('width')}x{chunk.get('height')}, "
-                f"Description: {chunk.get('description', 'N/A')}"
-            )
+        if chunks:
+            for chunk in chunks[:30]:
+                parts.append(
+                    f"- {chunk.get('name')}: "
+                    f"Built by {chunk.get('built_by')}, "
+                    f"Size: {chunk.get('width')}x{chunk.get('height')}, "
+                    f"Description: {chunk.get('description', 'N/A')}"
+                )
+        else:
+            parts.append("(No world chunks recorded)")
 
     if "embodied_actions" in category_data:
-        actions = category_data["embodied_actions"]
+        actions = _list_or_empty(category_data.get("embodied_actions"))
         parts.append(f"\n### Embodied Actions ({len(actions)} results)")
-        for action in actions[:50]:
-            detail = str(action.get("detail", ""))[:300]
-            parts.append(
-                f"- Agent: {action.get('agent_id')}, "
-                f"Action: {action.get('action') or 'N/A'}, "
-                f"Action ID: {action.get('action_id')}, "
-                f"Status: {action.get('status')}, "
-                f"Class: {action.get('outcome_class') or 'N/A'}, "
-                f"Detail: {detail}"
-            )
+        if actions:
+            for action in actions[:50]:
+                detail = str(action.get("detail", ""))[:300]
+                parts.append(
+                    f"- Agent: {action.get('agent_id')}, "
+                    f"Action: {action.get('action') or 'N/A'}, "
+                    f"Action ID: {action.get('action_id')}, "
+                    f"Status: {action.get('status')}, "
+                    f"Class: {action.get('outcome_class') or 'N/A'}, "
+                    f"Detail: {detail}"
+                )
+        else:
+            parts.append("(No embodied action results recorded)")
 
     if "build_outcomes" in category_data:
-        outcomes = category_data["build_outcomes"]
+        outcomes = _list_or_empty(category_data.get("build_outcomes"))
         parts.append(f"\n### Build Outcomes ({len(outcomes)} results)")
-        for outcome in outcomes[:50]:
-            parts.append(
-                f"- Agent: {outcome.get('agent_id')}, "
-                f"Action ID: {outcome.get('action_id')}, "
-                f"verified={outcome.get('verified')} "
-                f"class={outcome.get('class') or outcome.get('outcome_class') or 'N/A'} "
-                f"intended={outcome.get('intended')} "
-                f"present={outcome.get('present')} "
-                f"missing={outcome.get('missing')} "
-                f"completion={outcome.get('completion')}"
-            )
+        if outcomes:
+            for outcome in outcomes[:50]:
+                parts.append(
+                    f"- Agent: {outcome.get('agent_id')}, "
+                    f"Action ID: {outcome.get('action_id')}, "
+                    f"verified={outcome.get('verified')} "
+                    f"class={outcome.get('class') or outcome.get('outcome_class') or 'N/A'} "
+                    f"intended={outcome.get('intended')} "
+                    f"present={outcome.get('present')} "
+                    f"missing={outcome.get('missing')} "
+                    f"completion={outcome.get('completion')}"
+                )
+        else:
+            parts.append("(No build outcomes recorded)")
 
     if "perception_reports" in category_data:
-        reports = category_data["perception_reports"]
+        reports = _list_or_empty(category_data.get("perception_reports"))
         parts.append(f"\n### Perception Reports ({len(reports)} reports)")
-        for report in reports[:30]:
-            observations = report.get("observations", [])
-            has_snapshot = report.get("snapshot") is not None
-            content = str(report.get("content", ""))[:300]
-            parts.append(
-                f"- Agent: {report.get('agent_id')}, "
-                f"Type: {report.get('event_type')}, "
-                f"Observations: {len(observations)}, "
-                f"Snapshot: {has_snapshot}, "
-                f"Content: {content}"
-            )
+        if reports:
+            for report in reports[:30]:
+                observations = report.get("observations", [])
+                has_snapshot = report.get("snapshot") is not None
+                content = str(report.get("content", ""))[:300]
+                parts.append(
+                    f"- Agent: {report.get('agent_id')}, "
+                    f"Type: {report.get('event_type')}, "
+                    f"Observations: {len(observations)}, "
+                    f"Snapshot: {has_snapshot}, "
+                    f"Content: {content}"
+                )
+        else:
+            parts.append("(No perception reports recorded)")
 
     return "\n".join(parts)
