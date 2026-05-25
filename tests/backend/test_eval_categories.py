@@ -23,6 +23,20 @@ NEW_CATEGORIES = [
     "world_evolution",
 ]
 BUILD_CATEGORIES = ["build_verification"]
+LEGACY_CATEGORIES = [
+    "entertainment",
+    "safety",
+    "dialogue_quality",
+    "productivity",
+    "errors",
+    "agency",
+    "internal_state",
+    "economic_behavior",
+    "creativity",
+    "social_dynamics",
+    "world_evolution",
+    "simulation_narrative",
+]
 
 
 def test_new_categories_discovered():
@@ -253,6 +267,55 @@ def _make_full_data():
     }
 
 
+def _make_embodied_only_data():
+    """Sparse embodied run with no dialogue transcript."""
+    created_at = datetime(2026, 1, 1, 10, 30, tzinfo=UTC)
+    return {
+        "simulation": {"id": "embodied-only"},
+        "transcript_text": "",
+        "conversations": [],
+        "embodied_actions": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "action": "buildFromPlan",
+                "status": "success",
+                "outcome_class": "success",
+                "detail": "success: intended=2; present=2; missing=0; completion=1.000",
+                "created_at": created_at,
+            },
+        ],
+        "perception_reports": [
+            {
+                "agent_id": "rex",
+                "event_type": "bridge_perception",
+                "observations": [{"type": "structure", "action_id": "build-plan-1"}],
+                "snapshot": {"pose": {"position": {"x": 1, "y": 64, "z": 1}}},
+                "content": "Observed verified starter shelter",
+                "created_at": created_at,
+            },
+        ],
+        "build_outcomes": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "verified": True,
+                "class": "success",
+                "intended": 2,
+                "present": 2,
+                "missing": 0,
+                "completion": 1.0,
+                "created_at": created_at,
+            },
+        ],
+        "embodied_summary": {
+            "total_actions": 1,
+            "total_perception_reports": 1,
+            "total_build_outcomes": 1,
+        },
+    }
+
+
 def test_organize_includes_new_categories():
     """organize_by_category should include all 5 new categories."""
     data = _make_full_data()
@@ -325,6 +388,35 @@ def test_organize_embodied_data_plumbed_into_existing_categories():
     assert "perception_reports" in result["agency"]
     assert "perception_reports" in result["world_evolution"]
     assert "perception_reports" in result["simulation_narrative"]
+
+
+def test_legacy_categories_render_for_embodied_only_run():
+    """Every existing eval category should tolerate embodied data without transcripts."""
+    data = _make_embodied_only_data()
+    organized = organize_by_category(data)
+    discovered = discover_categories()
+
+    assert set(LEGACY_CATEGORIES).issubset(organized)
+    assert set(discovered).issubset(organized)
+
+    for category in discovered:
+        rendered = render_user_prompt(load_prompt(category), organized[category])
+        assert "## Simulation Data" in rendered
+        assert rendered.strip()
+
+    entertainment = render_user_prompt(load_prompt("entertainment"), organized["entertainment"])
+    assert "(No transcripts available)" in entertainment
+    assert "(No conversations recorded)" in entertainment
+    assert "(No agent turn counts available)" in entertainment
+
+    build_verification = render_user_prompt(
+        load_prompt("build_verification"),
+        organized["build_verification"],
+    )
+    assert "Build Outcomes (1 results)" in build_verification
+    assert "verified=True class=success intended=2 present=2 missing=0 completion=1.0" in (
+        build_verification
+    )
 
 
 # ── render_user_prompt with new data types ──────────────────

@@ -89,14 +89,17 @@ async def run_report(args: argparse.Namespace) -> None:
                 simulation_id=args.simulation_id,
                 assertion_repo=assertion_repo,
                 relationship_repo=svc.relationship_repo,
+                report_sections=[{"title": s.title, "data": s.data} for s in report.sections],
             )
             scorecard_result = await scorecard.evaluate()
             from core.reporting.timeline_reporter import ReportSection
 
-            report.sections.append(ReportSection(
-                title="Launch Readiness Scorecard",
-                data=scorecard_result.to_dict(),
-            ))
+            report.sections.append(
+                ReportSection(
+                    title="Launch Readiness Scorecard",
+                    data=scorecard_result.to_dict(),
+                )
+            )
 
         if args.format == "json":
             output = format_json(report)
@@ -123,9 +126,7 @@ def format_json_comparison(comparison):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Generate post-simulation timeline reports"
-    )
+    parser = argparse.ArgumentParser(description="Generate post-simulation timeline reports")
     parser.add_argument(
         "--simulation-id",
         type=str,

@@ -265,51 +265,59 @@ async def load_simulation_data(
 
 def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Slice simulation data by what each eval category needs."""
+    transcript_text = data.get("transcript_text") or "(No transcripts available)"
+    conversations = data.get("conversations") or []
+    artifacts = data.get("artifacts") or []
+    management_logs = data.get("management_logs") or []
+    agent_turns = data.get("agent_turns") or {}
+    total_conversations = data.get("total_conversations", len(conversations))
+    total_artifacts = data.get("total_artifacts", len(artifacts))
+    total_management_flags = data.get("total_management_flags", len(management_logs))
+    simulation = data.get("simulation", {})
+
     return {
         "entertainment": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
-            "agent_turns": data["agent_turns"],
-            "total_conversations": data["total_conversations"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
+            "agent_turns": agent_turns,
+            "total_conversations": total_conversations,
         },
         "safety": {
-            "transcript_text": data["transcript_text"],
+            "transcript_text": transcript_text,
             "artifacts": [
-                a for a in data["artifacts"] if a.get("artifact_type") in ("social_post", "email")
+                a for a in artifacts if a.get("artifact_type") in ("social_post", "email")
             ],
         },
         "dialogue_quality": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
-            "agent_turns": data["agent_turns"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
+            "agent_turns": agent_turns,
         },
         "productivity": {
-            "artifacts": data["artifacts"],
-            "conversations": data["conversations"],
-            "total_artifacts": data["total_artifacts"],
+            "artifacts": artifacts,
+            "conversations": conversations,
+            "total_artifacts": total_artifacts,
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "errors": {
-            "artifacts": [a for a in data["artifacts"] if a.get("status") == "failed"],
-            "management_logs": data["management_logs"],
+            "artifacts": [a for a in artifacts if a.get("status") == "failed"],
+            "management_logs": management_logs,
             "conversations": [
-                c
-                for c in data["conversations"]
-                if c.get("turn_count") is not None and c["turn_count"] <= 1
+                c for c in conversations if c.get("turn_count") is not None and c["turn_count"] <= 1
             ],
-            "simulation": data["simulation"],
+            "simulation": simulation,
             # Include totals so the evaluator has context for the filtered data
-            "total_artifacts": data["total_artifacts"],
-            "total_conversations": data["total_conversations"],
-            "total_management_flags": data["total_management_flags"],
+            "total_artifacts": total_artifacts,
+            "total_conversations": total_conversations,
+            "total_management_flags": total_management_flags,
         },
         "agency": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
-            "agent_turns": data["agent_turns"],
-            "artifacts": data["artifacts"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
+            "agent_turns": agent_turns,
+            "artifacts": artifacts,
             "agent_goals": data.get("agent_goals", []),
             "tool_usage": data.get("tool_usage", []),
             "embodied_actions": data.get("embodied_actions", []),
@@ -318,33 +326,33 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "internal_state": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
             "agent_internal_state": data.get("agent_internal_state", []),
         },
         "economic_behavior": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
             "transactions": data.get("transactions", []),
         },
         "creativity": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
-            "artifacts": data["artifacts"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
+            "artifacts": artifacts,
             "dream_entries": data.get("dream_entries", []),
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "social_dynamics": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
             "alliance_records": data.get("alliance_records", []),
         },
         "world_evolution": {
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
-            "artifacts": data["artifacts"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
+            "artifacts": artifacts,
             "world_chunks": data.get("world_chunks", []),
             "embodied_actions": data.get("embodied_actions", []),
             "build_outcomes": data.get("build_outcomes", []),
@@ -355,15 +363,15 @@ def organize_by_category(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "build_outcomes": data.get("build_outcomes", []),
             "embodied_actions": data.get("embodied_actions", []),
             "world_chunks": data.get("world_chunks", []),
-            "artifacts": data["artifacts"],
-            "total_artifacts": data["total_artifacts"],
-            "total_conversations": data["total_conversations"],
+            "artifacts": artifacts,
+            "total_artifacts": total_artifacts,
+            "total_conversations": total_conversations,
             "embodied_summary": data.get("embodied_summary", {}),
         },
         "simulation_narrative": {
             "timeline": _build_timeline(data),
-            "transcript_text": data["transcript_text"],
-            "conversations": data["conversations"],
+            "transcript_text": transcript_text,
+            "conversations": conversations,
             "agent_internal_state": data.get("agent_internal_state", []),
             "transactions": data.get("transactions", []),
             "alliance_records": data.get("alliance_records", []),

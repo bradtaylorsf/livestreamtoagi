@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from core.eval.loader import EMBODIED_EVENT_TYPES, _derive_build_outcomes, _split_embodied_events
+
 if TYPE_CHECKING:
     from core.database import Database
     from core.repos.assertion_repo import AssertionRepo
@@ -58,6 +60,7 @@ class LaunchScorecard:
         assertion_repo: AssertionRepo | None = None,
         relationship_repo: RelationshipRepo | None = None,
         report_sections: list[dict[str, Any]] | None = None,
+        build_verification_threshold: float = 0.5,
     ) -> None:
         import uuid as uuid_mod
 
@@ -67,6 +70,7 @@ class LaunchScorecard:
         self._assertion_repo = assertion_repo
         self._relationship_repo = relationship_repo
         self._report_sections = report_sections or []
+        self._build_verification_threshold = build_verification_threshold
 
     async def evaluate(self) -> ScorecardResult:
         """Run all scorecard criteria and return result."""
@@ -92,6 +96,9 @@ class LaunchScorecard:
 
         # 7. Report data completeness
         criteria.append(self._check_report_completeness())
+
+        # 8. Build verification signal for embodied runs
+        criteria.append(await self._check_build_verification())
 
         # Overall: READY if all required criteria pass
         ready = all(c.passed for c in criteria if c.required)
@@ -282,3 +289,71 @@ class LaunchScorecard:
             evidence=f"Missing data: {', '.join(missing)}" if missing else "All sections have data",
             required=False,
         )
+
+    async def _check_build_verification(self) -> ScorecardCriterion:
+        """Check embodied build attempts have enough verification signal."""
+        summary = self._embodied_summary_from_report_sections()
+        if summary is None:
+            summary = await self._load_embodied_build_summary()
+
+        attempted = int(summary.get("builds_attempted") or 0)
+        verified = int(summary.get("builds_verified") or 0)
+        total_actions = int(summary.get("total_actions") or 0)
+        ratio = verified / attempted if attempted else 1.0
+        passed = attempted == 0 or ratio >= self._build_verification_threshold
+        return ScorecardCriterion(
+            name="build_verification",
+            passed=passed,
+            evidence=(
+                f"{verified}/{attempted} builds verified "
+                f"({ratio:.0%}); {total_actions} embodied actions"
+            ),
+            required=False,
+        )
+
+    def _embodied_summary_from_report_sections(self) -> dict[str, Any] | None:
+        for section in self._report_sections:
+            title = str(section.get("title") or "").lower()
+            if "embodied" in title:
+                data = section.get("data")
+                return data if isinstance(data, dict) else {}
+        return None
+
+    async def _load_embodied_build_summary(self) -> dict[str, Any]:
+        try:
+            sim = await self._db.fetchrow(
+                "SELECT started_at, completed_at FROM simulations WHERE id = $1",
+                self._sim_uuid,
+            )
+            sim_start = sim["started_at"] if sim else None
+            sim_end = sim["completed_at"] if sim else None
+            if not sim_start and not sim_end:
+                return {"total_actions": 0, "builds_attempted": 0, "builds_verified": 0}
+
+            params: list[Any] = [list(EMBODIED_EVENT_TYPES)]
+            conditions = ["event_type = ANY($1::text[])"]
+            if sim_start:
+                params.append(sim_start)
+                conditions.append(f"created_at >= ${len(params)}")
+            if sim_end:
+                params.append(sim_end)
+                conditions.append(f"created_at <= ${len(params)}")
+            where = " AND ".join(conditions)
+            rows = await self._db.fetch(
+                f"""SELECT id, event_type, participants, content, created_at
+                    FROM transcripts
+                    WHERE {where}
+                    ORDER BY created_at""",
+                *params,
+            )
+            if not isinstance(rows, list):
+                return {"total_actions": 0, "builds_attempted": 0, "builds_verified": 0}
+            actions, perceptions = _split_embodied_events([dict(r) for r in rows])
+            outcomes = _derive_build_outcomes(actions, perceptions)
+            return {
+                "total_actions": len(actions),
+                "builds_attempted": len(outcomes),
+                "builds_verified": sum(1 for outcome in outcomes if bool(outcome.get("verified"))),
+            }
+        except Exception:
+            return {"total_actions": 0, "builds_attempted": 0, "builds_verified": 0}

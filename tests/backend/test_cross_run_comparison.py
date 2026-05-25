@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -104,3 +105,74 @@ async def test_cross_run_comparison_includes_experimental_starting_condition_dif
     assert phases.run_b_value == 2
     stop_reason = next(m for m in result.metrics if m.metric == "stop_reason")
     assert stop_reason.run_a_value == "goal_reached"
+
+
+@pytest.mark.asyncio
+async def test_cross_run_comparison_includes_embodied_metrics() -> None:
+    started = datetime(2026, 1, 5, 10, 0, tzinfo=UTC)
+    run_a = _experimental_row(
+        name="embodied-a",
+        persona_backstory="Vera plans.",
+        agent_goal="Build one shelter.",
+        phases_completed=2,
+    )
+    run_b = _experimental_row(
+        name="embodied-b",
+        persona_backstory="Vera builds.",
+        agent_goal="Build two shelters.",
+        phases_completed=2,
+    )
+    run_a["started_at"] = started
+    run_a["completed_at"] = started + timedelta(minutes=5)
+    run_b["started_at"] = started + timedelta(minutes=10)
+    run_b["completed_at"] = started + timedelta(minutes=20)
+
+    def action_row(action_id: str, created_at: datetime, present: int) -> dict:
+        return {
+            "id": action_id,
+            "event_type": "bridge_action_result",
+            "participants": ["rex"],
+            "created_at": created_at,
+            "content": json.dumps(
+                {
+                    "agent_id": "rex",
+                    "action": "buildFromPlan",
+                    "action_id": action_id,
+                    "status": "success" if present == 4 else "partial",
+                    "outcome_class": "success" if present == 4 else "partial",
+                    "detail": (
+                        f"build: intended=4; present={present}; "
+                        f"missing={4 - present}; completion={present / 4:.3f}"
+                    ),
+                }
+            ),
+        }
+
+    mock_db = AsyncMock()
+    mock_db.fetchrow = AsyncMock(side_effect=[run_a, run_b, {"cnt": 1}, {"cnt": 1}])
+    mock_db.fetch = AsyncMock(
+        side_effect=[
+            [action_row("build-a", started + timedelta(minutes=1), 2)],
+            [
+                action_row("build-b1", started + timedelta(minutes=11), 4),
+                action_row("build-b2", started + timedelta(minutes=12), 4),
+            ],
+        ]
+    )
+
+    result = await CrossRunComparison(
+        db=mock_db,
+        simulation_ids=[run_a["id"], run_b["id"]],
+    ).compare()
+
+    actions = next(m for m in result.metrics if m.metric == "total_embodied_actions")
+    verified = next(m for m in result.metrics if m.metric == "builds_verified")
+    completion = next(m for m in result.metrics if m.metric == "avg_build_completion")
+
+    assert actions.run_a_value == 1
+    assert actions.run_b_value == 2
+    assert actions.better_run == "b"
+    assert verified.run_a_value == 0
+    assert verified.run_b_value == 2
+    assert completion.run_a_value == 0.5
+    assert completion.run_b_value == 1.0
