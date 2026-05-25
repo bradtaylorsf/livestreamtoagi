@@ -21,6 +21,8 @@ branches on :class:`core.models.RunMode`.
 
 from __future__ import annotations
 
+import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -29,6 +31,10 @@ from core.models import RunMode
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_BUILD_INTENTS_FILENAME = "build_intents.jsonl"
 
 
 @dataclass
@@ -127,6 +133,8 @@ class HeadlessExecutor:
         )
         self.recorded_intents.append(outcome)
         self._log_outcome(outcome)
+        if intent.tool_name == "propose_build":
+            _append_build_intent(self._sim_folder, intent)
         return outcome
 
     def record_blocked_intent(
@@ -207,6 +215,9 @@ class EmbodiedExecutor:
         # decision logger is attached.
         outcome = ToolOutcome(status="executed", intent=intent)
         self._log_outcome(outcome)
+        if intent.tool_name == "propose_build":
+            _append_build_intent(self._sim_folder, intent)
+            self._handoff_build_intent_to_scheduler(intent)
         return outcome
 
     async def on_utterance(self, utterance: dict[str, Any]) -> None:
@@ -232,6 +243,57 @@ class EmbodiedExecutor:
             )
         except Exception:  # pragma: no cover
             pass
+
+    def _handoff_build_intent_to_scheduler(self, intent: ToolIntent) -> None:
+        """Hand a validated ``BuildIntent`` to Director V2's macro scheduler.
+
+        Imported lazily so the headless executor's import-purity contract
+        is not broken (see ``test_headless_module_does_not_import_embodied_modules``).
+        """
+        try:
+            from core.minecraft.director.build_macro_scheduler import (
+                BuildMacroScheduler,
+            )
+        except Exception:  # pragma: no cover - bridge unavailable in this env
+            logger.debug("BuildMacroScheduler unavailable; build intent recorded only")
+            return
+        handler = getattr(self, "_build_macro_scheduler", None)
+        if handler is None:
+            handler = BuildMacroScheduler()
+            self._build_macro_scheduler = handler
+        scene_id = str(intent.args.get("location_intent") or "open_area")
+        try:
+            handler.try_acquire_plan(
+                scene_id=scene_id,
+                agent_id=intent.actor_id,
+                description=str(intent.args.get("structure_type", "")),
+                origin=intent.args.get("coords"),
+            )
+        except Exception:  # pragma: no cover - scheduler issues must not break sim
+            logger.exception("BuildMacroScheduler hand-off failed")
+
+
+def _append_build_intent(sim_folder: "Path | None", intent: ToolIntent) -> None:
+    """Append a ``propose_build`` intent to ``<sim-folder>/build_intents.jsonl``.
+
+    Best-effort: missing sim folders are silently ignored so that one-shot
+    tool invocations (tests, REPL) still succeed.
+    """
+    if sim_folder is None:
+        return
+    try:
+        sim_folder.mkdir(parents=True, exist_ok=True)
+        path = sim_folder / _BUILD_INTENTS_FILENAME
+        payload: dict[str, Any] = {
+            "intent_id": intent.intent_id,
+            "actor_id": intent.actor_id,
+            "submitted_at": intent.submitted_at,
+            "args": intent.args,
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, default=str) + "\n")
+    except Exception:  # pragma: no cover - logging only
+        logger.exception("failed to append build intent to %s", sim_folder)
 
 
 def select_executor(run_mode: RunMode | str | None) -> EmbodimentExecutor:

@@ -8,6 +8,7 @@ from .alpha_dispatch import DispatchAlphaTool
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
+from .build_tools import ProposeBuildTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
     from core.shared_state import SharedWorkingState
+    from core.simulation.embodiment import EmbodimentExecutor
     from core.social.alliances import AllianceManager
 
 __all__ = [
@@ -72,6 +74,7 @@ __all__ = [
     "GetWorldStateTool",
     "LeaveAllianceTool",
     "ManageTaskTool",
+    "ProposeBuildTool",
     "ProposeSelfModificationTool",
     "RecallMemoryTool",
     "RetrieveTranscriptTool",
@@ -127,6 +130,7 @@ def get_core_tools(
     alliance_manager: AllianceManager | None = None,
     character_spawner: CharacterSpawner | None = None,
     voting_manager: VotingManager | None = None,
+    embodiment_executor: EmbodimentExecutor | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -247,6 +251,15 @@ def get_core_tools(
     if memory_repo is not None:
         tools.append(ProposeSelfModificationTool(agent_id=agent_id, memory_repo=memory_repo))
         tools.append(ViewEvolutionLogTool(agent_id=agent_id, memory_repo=memory_repo))
+
+    # Build proposal tool (#855). Gated by agent YAML via ALLOWED_AGENTS +
+    # the agent_registry filter below.
+    tools.append(
+        ProposeBuildTool(
+            agent_id=agent_id,
+            embodiment_executor=embodiment_executor,
+        )
+    )
 
     if artifact_repo is not None:
         for tool in tools:

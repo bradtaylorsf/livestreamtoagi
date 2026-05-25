@@ -84,6 +84,7 @@ class TestArtifactModels:
             "propose_self_modification",
             "view_evolution_log",
             "send_message",
+            "propose_build",
         }
         assert set(ARTIFACT_TYPE_MAP.keys()) == expected
 
