@@ -2,10 +2,14 @@ meta:
   name: "Dream Cycle"
   description: "24-hour simulation with one overnight dream cycle. Validates that each agent produces dream journal entries, that ~30% of dreams generate goals, and that dreams are referenced in subsequent waking conversations."
   agents: [vera, rex, aurora]
+  supports_modes: [director, embodied]
   expected_max_cost: 8.0
   expected_runtime_minutes: 30
 
 # Dream Cycle Test — validates #272 (dreams)
+# Embodied validation: supported under CONVERSATION_MODE=embodied. Director
+# conversation phases are retained for backwards compatibility; embodied runs
+# seed dream/reflection context through memory_seed plus Mindcraft activity.
 #
 # Tests whether the dream system produces quality content and influences
 # waking behavior. Runs a 24h simulated period with 1 dream cycle overnight.
@@ -29,9 +33,14 @@ audience:
 
 seed_tasks: true
 seed_goals: true
+memory_seed:
+  mode: custom
+  custom_file: scenarios/seeds/dream-reflection-seed.json
 
 phases:
-  # Daytime activity — build memories for dreams to process
+  # Daytime director activity. Under embodied mode these conversation phases
+  # intentionally no-op; custom memory_seed and live Mindcraft recall provide
+  # the dream ingredients before the reflection phases run.
   - name: morning_standup
     type: scheduled
     trigger: standup
@@ -73,6 +82,8 @@ phases:
     reflection_type: dream
 
   # Morning after — observe dream influence on waking behavior
+  # Director-only observation phases. Embodied influence surfaces through
+  # later Mindcraft decisions instead of the director conversation engine.
   - name: post_dream_standup
     type: scheduled
     trigger: standup

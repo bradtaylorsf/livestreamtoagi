@@ -121,6 +121,37 @@ jobs:
 
           pytest "${cost_kill_tests[@]}" -v -m "not integration"
 
+  dreams-regression:
+    name: Dreams/Journals Regression Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-dreams-${{ hashFiles('pyproject.toml') }}
+          restore-keys: ${{ runner.os }}-uv-dreams-
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+      - name: Run dreams/journals regression gate
+        run: |
+          dreams_tests=(
+            tests/backend/test_dreams.py
+            tests/backend/test_reflection.py
+            tests/backend/test_reflection_scheduler.py
+            tests/backend/test_reflection_goals.py
+            tests/backend/test_reflect_after.py
+            tests/backend/test_journal_image.py
+          )
+
+          CONVERSATION_MODE=embodied pytest "${dreams_tests[@]}" -v -m "not integration"
+
   frontend-test:
     name: Frontend Tests
     runs-on: ubuntu-latest

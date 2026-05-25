@@ -1,11 +1,15 @@
 meta:
   name: "Dream Smoke Test"
   description: "Minimal end-to-end check that journals → dreams → dream-goals → mood shifts work without database errors. Use this to verify the dream pipeline before running heavier dream scenarios."
-  agents: [vera, rex, aurora]
+  agents: [vera, rex, aurora, fork, sentinel, pixel, grok]
+  supports_modes: [director, embodied]
   expected_max_cost: 3.0
   expected_runtime_minutes: 10
 
 # Dream Smoke Test — minimal scenario to verify dream system works end-to-end
+# Embodied validation: supported under CONVERSATION_MODE=embodied. The organic
+# conversation phases remain for director-mode smoke coverage; embodied runs
+# get startup journal/recall context from memory_seed and live Mindcraft memory.
 #
 # What this tests:
 #   1. Journal entries are created for each agent (memory seeding)
@@ -34,12 +38,16 @@ audience:
   growth_rate: none
   chat_frequency: silent
 
-seed_tasks: false
-seed_goals: false
+seed_tasks: true
+seed_goals: true
+memory_seed:
+  mode: custom
+  custom_file: scenarios/seeds/dream-reflection-seed.json
 
 phases:
-  # Phase 1: seed memories via a real reflection cycle so each agent
-  # has journal entries to recombine in their dreams.
+  # Phase 1: director-mode seeding. In embodied mode this organic phase
+  # intentionally no-ops; memory_seed supplies journal/recall context and
+  # the reflection phase remains the runnable signal under test.
   - name: seed_memories
     type: organic
     count: 2
@@ -59,7 +67,8 @@ phases:
     reflection_type: dream
     agents: [vera, rex, aurora, fork, sentinel, pixel, grok]
 
-  # Phase 3: one conversation to see dream influence
+  # Phase 3: director-only conversation to see dream influence. Embodied
+  # behavior is observed through Mindcraft action choice after the dream.
   - name: post_dream_check
     type: organic
     count: 1

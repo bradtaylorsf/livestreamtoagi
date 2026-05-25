@@ -2,10 +2,14 @@ meta:
   name: "Goal Generation"
   description: "Organic conversations interleaved with two reflection phases. Validates that agents generate self-directed goals during reflection and reference those goals in subsequent conversations."
   agents: [vera, rex, aurora]
+  supports_modes: [director, embodied]
   expected_max_cost: 8.0
   expected_runtime_minutes: 25
 
 # Goal Generation Test — validates #269 (autonomous goals)
+# Embodied validation: supported under CONVERSATION_MODE=embodied. Organic
+# director phases are preserved for backwards compatibility; embodied goal
+# evidence comes from reflection over memory_seed plus Mindcraft recall.
 #
 # Tests whether agents generate self-directed goals during reflection cycles.
 # Runs organic conversations interspersed with 2 reflection phases.
@@ -28,9 +32,14 @@ audience:
 
 seed_tasks: true
 seed_goals: true
+memory_seed:
+  mode: custom
+  custom_file: scenarios/seeds/dream-reflection-seed.json
 
 phases:
-  # Morning conversations — establish baseline behavior
+  # Morning director conversations establish baseline behavior in director
+  # mode. Under embodied mode these no-op and the seeded embodied recall is
+  # the baseline context for the reflection phases.
   - name: morning_chat_1
     type: organic
     count: 2
@@ -52,7 +61,8 @@ phases:
     type: reflection
     reflection_type: 6hour
 
-  # Post-reflection conversations — observe goal-driven behavior
+  # Post-reflection director conversations observe goal-driven behavior.
+  # Embodied behavior surfaces via Mindcraft action choice, not director chat.
   - name: post_reflection_1
     type: organic
     count: 3
@@ -68,7 +78,8 @@ phases:
     type: reflection
     reflection_type: 6hour
 
-  # Final conversations — look for goal progress references
+  # Final director conversations look for goal progress references. Embodied
+  # runs keep the reflection phases runnable and inspect later Mindcraft state.
   - name: evening_chat
     type: organic
     count: 2
