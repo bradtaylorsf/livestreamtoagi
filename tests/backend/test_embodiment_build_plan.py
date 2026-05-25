@@ -56,6 +56,181 @@ def _run_node_harness(tmp_path: Path, source: str, env: dict[str, str] | None = 
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
+@requires_node
+def test_build_plan_governor_ignores_zone_stride_in_confined_easy_spawn(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+const shifted = governor.applyBuildZoneOffset('alpha', {{ x: -4, y: 64, z: -4 }});
+process.stdout.write(JSON.stringify({{ shifted }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "SOAK_EASY_SPAWN": "1",
+            "EASY_SETUP_BOUNDARY": "glass",
+            "EASY_SETUP_MEADOW_RADIUS": "23",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+        },
+    )
+
+    assert result["shifted"] == {"x": -4, "y": 64, "z": -4}
+
+
+@requires_node
+def test_build_plan_governor_applies_zone_stride_in_open_easy_meadow(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+const shifted = governor.applyBuildZoneOffset('alpha', {{ x: -4, y: 64, z: -4 }});
+process.stdout.write(JSON.stringify({{ shifted }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "SOAK_EASY_SPAWN": "1",
+            "EASY_SETUP_BOUNDARY": "none",
+            "EASY_SETUP_MEADOW_RADIUS": "64",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+        },
+    )
+
+    assert result["shifted"] == {"x": -28, "y": 64, "z": 44}
+
+
+@requires_node
+def test_build_plan_governor_clamps_open_easy_meadow_zone_offset(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+const shifted = governor.applyBuildZoneOffset('grok', {{ x: 70, y: 64, z: -14 }});
+process.stdout.write(JSON.stringify({{ shifted }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "SOAK_EASY_SPAWN": "1",
+            "EASY_SETUP_BOUNDARY": "none",
+            "EASY_SETUP_MEADOW_RADIUS": "96",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+        },
+    )
+
+    assert abs(result["shifted"]["x"]) <= 88
+    assert abs(result["shifted"]["z"]) <= 88
+
+
+@requires_node
+def test_scene_build_origin_uses_objective_slot_for_repeated_owner(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+governor.resetBuildPlanGovernor();
+const agent = {{ name: 'alpha', bot: {{ username: 'Alpha' }} }};
+const origin = {{ x: 0, y: 64, z: 0 }};
+const settings = {{ max_steps: 32, planner_max_steps: 32 }};
+const first = governor.tryAcquireSceneBuild('settlement', agent, 'crafting hall', origin, settings, {{
+    ownerAgentId: 'alpha',
+    phaseOwner: 'alpha',
+    objectiveId: 'phase-1-crafting-hall',
+}});
+governor.recordBuildCompleted(agent, first.plan_id, 'success: intended=4; verified=4');
+const second = governor.tryAcquireSceneBuild('settlement', agent, 'tool workshop', origin, settings, {{
+    ownerAgentId: 'alpha',
+    phaseOwner: 'alpha',
+    objectiveId: 'phase-9-tool-workshop',
+}});
+process.stdout.write(JSON.stringify({{ first: first.origin, second: second.origin }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "SOAK_EASY_SPAWN": "1",
+            "EASY_SETUP_BOUNDARY": "none",
+            "EASY_SETUP_MEADOW_RADIUS": "96",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+        },
+    )
+
+    assert result["first"] != result["second"]
+
+
+@requires_node
+def test_settlement_phase_slots_are_unique_across_objective_roster(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+governor.resetBuildPlanGovernor();
+const agent = {{ name: 'alpha', bot: {{ username: 'Alpha' }} }};
+const origin = {{ x: 0, y: 64, z: 0 }};
+const settings = {{ max_steps: 32, planner_max_steps: 32 }};
+const origins = [];
+for (let index = 0; index < 12; index += 1) {{
+    const objectiveId = `phase-${{index + 1}}-objective`;
+    const acquired = governor.tryAcquireSceneBuild('settlement', agent, objectiveId, origin, settings, {{
+        ownerAgentId: 'alpha',
+        phaseOwner: 'alpha',
+        objectiveId,
+        phaseIndex: index,
+    }});
+    origins.push(acquired.origin);
+    governor.recordBuildCompleted(agent, acquired.plan_id, 'success: intended=4; verified=4');
+}}
+process.stdout.write(JSON.stringify({{
+    origins,
+    unique: new Set(origins.map((item) => `${{item.x}},${{item.y}},${{item.z}}`)).size,
+    phase2: origins[1],
+    phase10: origins[9],
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "SOAK_EASY_SPAWN": "1",
+            "EASY_SETUP_BOUNDARY": "none",
+            "EASY_SETUP_MEADOW_RADIUS": "96",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+            "MC_SIM_BUILD_COOLDOWN_SEC": "0",
+        },
+    )
+
+    assert result["unique"] == 12
+    assert result["phase2"] != result["phase10"]
+    assert all(abs(origin["x"]) <= 88 and abs(origin["z"]) <= 88 for origin in result["origins"])
+
+
+@requires_node
+def test_building_helper_normalizes_wall_torch_as_torch(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const building = await import(pathToFileURL({json.dumps(str(BUILDING_HELPERS))}).href);
+process.stdout.write(JSON.stringify({{
+    wallTorch: building.normalizeBlockType('wall_torch'),
+    torch: building.normalizeBlockType('torch'),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, harness)
+
+    assert result == {"wallTorch": "torch", "torch": "torch"}
+
+
 def _stage_action_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "fork-src"
     commands = root / "agent" / "commands"
@@ -89,6 +264,12 @@ export function bridgeIsKillActive() {
 
 export async function callBridge(opts = {}) {
     appendFileSync(process.env.BRIDGE_CALLS_PATH, JSON.stringify(opts) + '\\n');
+    const failOnce = process.env.STUB_FAIL_BRIDGE_ONCE || '';
+    const failKey = `${opts.service}.${opts.method}`;
+    if (failOnce === failKey && !globalThis.__stubBridgeFailedOnce) {
+        globalThis.__stubBridgeFailedOnce = true;
+        throw new BridgeClientError('bridge_unreachable', 'stub bridge report outage');
+    }
     if (
         opts.service === 'shared_state' &&
         opts.method === 'read' &&
@@ -510,6 +691,273 @@ process.stdout.write(JSON.stringify({{
     assert result["secondReason"] == "cache_miss"
 
 
+@requires_node
+def test_build_plan_governor_releases_scene_after_failed_execution(
+    tmp_path: Path,
+) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+governor.resetBuildPlanGovernor();
+const agent = {{ name: 'alpha', bot: {{ username: 'Alpha' }} }};
+const origin = {{ x: 0, y: 64, z: 0 }};
+const settings = {{ max_steps: 32, planner_max_steps: 32 }};
+
+const first = governor.tryAcquireSceneBuild('settlement-phase-1', agent, 'crafting hall', origin, settings, {{
+    ownerAgentId: 'alpha',
+    phaseOwner: 'alpha',
+    objectiveId: 'phase-1-crafting-hall',
+}});
+governor.recordPlanGenerated(agent, first, {{
+    blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_planks' }}],
+}});
+const failed = governor.recordBuildFailed(
+    agent,
+    first.plan_id,
+    'partial: intended=6; present=0; missing=6; unexpected=5; verified=5',
+);
+const afterFailure = governor.governorSnapshot(agent);
+const second = governor.tryAcquireSceneBuild('settlement-phase-1', agent, 'crafting workshop', origin, settings, {{
+    ownerAgentId: 'alpha',
+    phaseOwner: 'alpha',
+    objectiveId: 'phase-1-crafting-hall',
+}});
+process.stdout.write(JSON.stringify({{
+    failedActive: failed.active_build,
+    snapshotActive: afterFailure.active_build,
+    secondAllowed: second.allowed,
+    secondReason: second.reason,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"MC_SIM_BUILD_COOLDOWN_SEC": "900"},
+    )
+
+    assert result["failedActive"] is None
+    assert result["snapshotActive"] is None
+    assert result["secondAllowed"] is True
+    assert result["secondReason"] == "cache_miss"
+
+
+@requires_node
+def test_plan_and_build_rejects_duplicate_cells_and_uses_blueprint_fallback(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = -1; x <= 3; x += 1) {{
+    for (let z = -1; z <= 3; z += 1) {{
+        world.set(`${{x}},63,${{z}}`, 'grass_block');
+    }}
+}}
+const bot = {{
+    username: 'DuplicatePlanHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [
+            {{ name: 'oak_planks' }},
+            {{ name: 'crafting_table' }},
+            {{ name: 'torch' }},
+        ],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'alpha',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }},
+                        {{ dx: 0, dy: 0, dz: 0, block_type: 'cobblestone' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'crafting hall');
+process.stdout.write(JSON.stringify({{
+    result,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "alpha",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "12",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert "plan-and-build" in result["result"]
+    rejected = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.rejected"
+    )
+    assert "duplicates target" in rejected["payload"]["error"]
+    completed = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.completed"
+    )
+    assert completed["payload"]["source"] == "starter_blueprint_after_rejection"
+    executed = next(
+        event for event in result["events"] if event["type"] == "build_plan.execution.completed"
+    )
+    assert executed["payload"]["verified_blocks"] > 0
+
+
+@requires_node
+def test_plan_and_build_rejects_unavailable_glass_and_uses_tower_blueprint(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = 0; x <= 3; x += 1) {{
+    for (let z = 0; z <= 3; z += 1) {{
+        world.set(`${{x}},63,${{z}}`, 'grass_block');
+    }}
+}}
+let systemMessage = '';
+const bot = {{
+    username: 'TowerFallbackHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [
+            {{ name: 'oak_log' }},
+            {{ name: 'oak_planks' }},
+            {{ name: 'torch' }},
+            {{ name: 'glass' }},
+        ],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'aurora',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest(_messages, prompt) {{
+                systemMessage = prompt;
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 1, dy: 0, dz: 1, block_type: 'glass' }},
+                        {{ dx: 1, dy: 1, dz: 1, block_type: 'glass' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'watch tower');
+process.stdout.write(JSON.stringify({{
+    result,
+    systemMessage,
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+    placed: {{
+        base: world.get('1,64,1') || null,
+        platform: world.get('1,67,1') || null,
+        torch: world.get('1,68,1') || null,
+        glass: [...world.values()].filter((value) => value === 'glass').length,
+    }},
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "aurora",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "24",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert (
+        "glass"
+        not in result["systemMessage"].split("Allowed block_type values:", 1)[1].split("\n", 1)[0]
+    )
+    rejected = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.rejected"
+    )
+    assert "glass is not allowed" in rejected["payload"]["error"]
+    completed = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.completed"
+    )
+    assert completed["payload"]["source"] == "starter_blueprint_after_rejection"
+    assert result["placed"] == {
+        "base": "oak_log",
+        "platform": "oak_planks",
+        "torch": "torch",
+        "glass": 0,
+    }
+
+
 def test_python_verifies_full_build_plan_match() -> None:
     steps = [
         {
@@ -896,6 +1344,653 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_plan_and_build_flattens_lighting_torches_to_ground_level(tmp_path: Path) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) {{
+    world.set(`${{x}},63,${{z}}`, 'grass_block');
+}}
+const bot = {{
+    username: 'LightingHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'torch', count: 8 }}, {{ name: 'cobblestone', count: 4 }}, {{ name: 'oak_log', count: 4 }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'rex',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: -2, dy: 0, dz: -2, block_type: 'cobblestone' }},
+                        {{ dx: 2, dy: 0, dz: -2, block_type: 'cobblestone' }},
+                        {{ dx: -2, dy: 0, dz: 2, block_type: 'cobblestone' }},
+                        {{ dx: 2, dy: 0, dz: 2, block_type: 'cobblestone' }},
+                        {{ dx: -2, dy: 1, dz: -2, block_type: 'oak_log' }},
+                        {{ dx: 2, dy: 1, dz: -2, block_type: 'oak_log' }},
+                        {{ dx: -2, dy: 1, dz: 2, block_type: 'oak_log' }},
+                        {{ dx: 2, dy: 1, dz: 2, block_type: 'oak_log' }},
+                        {{ dx: -2, dy: 2, dz: -2, block_type: 'torch' }},
+                        {{ dx: 2, dy: 2, dz: -2, block_type: 'torch' }},
+                        {{ dx: -2, dy: 2, dz: 2, block_type: 'torch' }},
+                        {{ dx: 2, dy: 2, dz: 2, block_type: 'torch' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'lighting perimeter');
+const completed = globalThis.__timelineEvents.find((event) => event.type === 'build_plan.generation.completed').payload;
+process.stdout.write(JSON.stringify({{
+    result,
+    planBlocks: completed.plan.blocks,
+    finalBlocks: {{
+        nw: world.get('-2,64,-2'),
+        ne: world.get('2,64,-2'),
+        sw: world.get('-2,64,2'),
+        se: world.get('2,64,2'),
+    }},
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "rex",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "16",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert result["finalBlocks"] == {
+        "nw": "torch",
+        "ne": "torch",
+        "sw": "torch",
+        "se": "torch",
+    }
+    assert result["planBlocks"] == [
+        {"dx": -2, "dy": 0, "dz": -2, "block_type": "torch"},
+        {"dx": 2, "dy": 0, "dz": -2, "block_type": "torch"},
+        {"dx": -2, "dy": 0, "dz": 2, "block_type": "torch"},
+        {"dx": 2, "dy": 0, "dz": 2, "block_type": "torch"},
+    ]
+
+
+@requires_node
+def test_plan_and_build_uses_current_inventory_budget_for_fallback(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([
+    ['1,63,1', 'grass_block'],
+    ['2,63,1', 'grass_block'],
+    ['2,63,2', 'grass_block'],
+]);
+let systemMessage = '';
+const bot = {{
+    username: 'InventoryBudgetHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [
+            {{ name: 'oak_planks', count: 4 }},
+            {{ name: 'torch', count: 1 }},
+        ],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'alpha',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest(_messages, prompt) {{
+                systemMessage = prompt;
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 1, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 3, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 4, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 5, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 1, dy: 0, dz: 2, block_type: 'crafting_table' }},
+                    ],
+                    clear: [],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'basic workbench setup');
+process.stdout.write(JSON.stringify({{
+    result,
+    systemMessage,
+    finalBlocks: {{
+        plankA: world.get('1,64,1') || null,
+        plankB: world.get('2,64,1') || null,
+        table: world.get('1,64,2') || null,
+        torchBase: world.get('2,64,2') || null,
+        torch: world.get('2,65,2') || null,
+    }},
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "alpha",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "20",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert "4 oak_planks" in result["systemMessage"]
+    assert "0 crafting_table" in result["systemMessage"]
+    assert result["finalBlocks"] == {
+        "plankA": "oak_planks",
+        "plankB": "oak_planks",
+        "table": None,
+        "torchBase": "oak_planks",
+        "torch": "torch",
+    }
+    rejected = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.rejected"
+    )
+    assert "current inventory" in rejected["payload"]["error"]
+    completed = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.completed"
+    )
+    assert completed["payload"]["source"] == "starter_blueprint_after_rejection"
+    assert len(completed["payload"]["plan"]["blocks"]) == 4
+
+
+@requires_node
+def test_plan_and_build_repairs_elevated_floor_utility_blocks(tmp_path: Path) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([
+    ['1,63,0', 'stone'],
+    ['2,63,0', 'stone'],
+    ['3,63,0', 'stone'],
+]);
+const bot = {{
+    username: 'PlanBuildHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [
+            {{ name: 'cobblestone' }},
+            {{ name: 'crafting_table' }},
+            {{ name: 'chest' }},
+            {{ name: 'oak_log' }},
+        ],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'vera',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' }},
+                        {{ dx: 1, dy: 1, dz: 0, block_type: 'crafting_table' }},
+                        {{ dx: 2, dy: 0, dz: 0, block_type: 'cobblestone' }},
+                        {{ dx: 2, dy: 1, dz: 0, block_type: 'oak_log' }},
+                        {{ dx: 3, dy: 0, dz: 0, block_type: 'cobblestone' }},
+                        {{ dx: 3, dy: 1, dz: 0, block_type: 'chest' }},
+                    ],
+                    clear: [],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'crafting station');
+process.stdout.write(JSON.stringify({{
+    result,
+    finalBlocks: {{
+        table: world.get('1,64,0'),
+        support: world.get('2,64,0'),
+        post: world.get('2,65,0'),
+        chest: world.get('3,64,0'),
+    }},
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "vera",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert result["finalBlocks"] == {
+        "table": "crafting_table",
+        "support": "cobblestone",
+        "post": "oak_log",
+        "chest": "chest",
+    }
+    event_types = [event["type"] for event in result["events"]]
+    assert "build_plan.generation.rejected" not in event_types
+    completed = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.completed"
+    )
+    assert completed["payload"]["source"] == "builder_model"
+    plan_blocks = completed["payload"]["plan"]["blocks"]
+    assert {"dx": 1, "dy": 0, "dz": 0, "block_type": "crafting_table"} in plan_blocks
+    assert {"dx": 3, "dy": 0, "dz": 0, "block_type": "chest"} in plan_blocks
+    assert {"dx": 1, "dy": 0, "dz": 0, "block_type": "cobblestone"} not in plan_blocks
+
+
+@requires_node
+def test_plan_and_build_uses_nearby_ground_origin_when_agent_is_elevated(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = 5; x <= 11; x += 1) {{
+    for (let z = -3; z <= 3; z += 1) {{
+        world.set(`${{x}},63,${{z}}`, 'grass_block');
+    }}
+}}
+world.set('7,64,0', 'cobblestone');
+let plannerMessage = null;
+const bot = {{
+    username: 'ElevatedPlanBuildHarnessBot',
+    entity: {{ position: {{ x: 7.4, y: 65, z: 0.6 }} }},
+    inventory: {{
+        slots: [{{ name: 'cobblestone' }}, {{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'rex',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest(messages) {{
+                plannerMessage = messages[0].content;
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 1, dy: 0, dz: 1, block_type: 'cobblestone' }},
+                        {{ dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'mine staging yard');
+const started = globalThis.__timelineEvents.find((event) => event.type === 'build_plan.generation.started');
+process.stdout.write(JSON.stringify({{
+    result,
+    plannerMessage,
+    origin: started.payload.origin,
+    baseOrigin: started.payload.base_origin,
+    finalBlocks: {{
+        groundA: world.get('8,64,1'),
+        groundB: world.get('9,64,1'),
+        elevatedA: world.get('8,65,1') || null,
+        elevatedB: world.get('9,65,1') || null,
+    }},
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "rex",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert result["origin"] == {"x": 7, "y": 64, "z": 0}
+    assert result["baseOrigin"] == {"x": 7, "y": 64, "z": 0}
+    assert '"y":64' in result["plannerMessage"]
+    assert result["finalBlocks"] == {
+        "groundA": "cobblestone",
+        "groundB": "oak_planks",
+        "elevatedA": None,
+        "elevatedB": None,
+    }
+    assert "success" in result["result"]
+
+
+@requires_node
+def test_plan_and_build_uses_configured_settlement_origin_instead_of_roaming_agent(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = -2; x <= 2; x += 1) {{
+    for (let z = -2; z <= 2; z += 1) {{
+        world.set(`${{x}},63,${{z}}`, 'grass_block');
+    }}
+}}
+let plannerMessage = null;
+const bot = {{
+    username: 'SettlementAnchorHarnessBot',
+    entity: {{ position: {{ x: 70, y: 71, z: -14 }} }},
+    inventory: {{
+        slots: [{{ name: 'cobblestone' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    pathfinder: {{
+        async goto(goal) {{
+            bot.entity.position = {{ x: goal.x, y: goal.y, z: goal.z }};
+        }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'grok',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest(messages) {{
+                plannerMessage = messages[0].content;
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 0, dy: 0, dz: 0, block_type: 'cobblestone' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'scout outpost');
+const started = globalThis.__timelineEvents.find((event) => event.type === 'build_plan.generation.started');
+process.stdout.write(JSON.stringify({{
+    result,
+    plannerMessage,
+    origin: started.payload.origin,
+    baseOrigin: started.payload.base_origin,
+    anchoredBlock: world.get('0,64,0') || null,
+    roamingBlock: world.get('70,71,-14') || null,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "grok",
+            "MC_SIM_BUILD_MODE": "settlement",
+            "MC_SIM_SETTLEMENT_ORIGIN": "0,64,0",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert result["baseOrigin"] == {"x": 0, "y": 64, "z": 0}
+    assert result["origin"] == {"x": 0, "y": 64, "z": 0}
+    assert '"y":64' in result["plannerMessage"]
+    assert result["anchoredBlock"] == "cobblestone"
+    assert result["roamingBlock"] is None
+    assert "success" in result["result"]
+
+
+@requires_node
+def test_plan_and_build_adjusts_shifted_open_meadow_origin_to_target_ground(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = -31; x <= -24; x += 1) {{
+    for (let z = 41; z <= 48; z += 1) {{
+        world.set(`${{x}},64,${{z}}`, 'grass_block');
+    }}
+}}
+let plannerMessage = null;
+const bot = {{
+    username: 'ShiftedOriginHarnessBot',
+    entity: {{ position: {{ x: -4, y: 64, z: -4 }} }},
+    inventory: {{
+        slots: [{{ name: 'cobblestone' }}, {{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    pathfinder: {{
+        setMovements(movements) {{
+            this.movements = movements;
+        }},
+        async goto(goal) {{
+            bot.entity.position = {{ x: goal.x, y: goal.y, z: goal.z - 2 }};
+        }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'alpha',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest(messages) {{
+                plannerMessage = messages[0].content;
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 1, dy: 0, dz: 1, block_type: 'cobblestone' }},
+                        {{ dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'shared storage depot');
+const started = globalThis.__timelineEvents.find((event) => event.type === 'build_plan.generation.started');
+process.stdout.write(JSON.stringify({{
+    result,
+    plannerMessage,
+    origin: started.payload.origin,
+    baseOrigin: started.payload.base_origin,
+    placedA: world.get('-27,65,45'),
+    placedB: world.get('-26,65,45'),
+    untouchedGroundA: world.get('-27,64,45'),
+    untouchedGroundB: world.get('-26,64,45'),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "alpha",
+            "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS": "0",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "8",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+            "SOAK_EASY_SPAWN": "1",
+            "EASY_SETUP_BOUNDARY": "none",
+            "EASY_SETUP_MEADOW_RADIUS": "64",
+        },
+    )
+
+    assert result["baseOrigin"] == {"x": -4, "y": 64, "z": -4}
+    assert result["origin"] == {"x": -28, "y": 65, "z": 44}
+    assert '"y":65' in result["plannerMessage"]
+    assert result["placedA"] == "cobblestone"
+    assert result["placedB"] == "oak_planks"
+    assert result["untouchedGroundA"] == "grass_block"
+    assert result["untouchedGroundB"] == "grass_block"
+    assert "success" in result["result"]
+
+
+@requires_node
 def test_plan_and_build_updates_settlement_objective_shared_state(tmp_path: Path) -> None:
     plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
     harness = f"""
@@ -1178,16 +2273,16 @@ process.stdout.write(JSON.stringify({{
     assert capped["status"] == "owner_cap_reached"
     assert capped["evidence"]["skipped_reason"] == "per_agent_cap"
     updated = [
-        event
-        for event in result["events"]
-        if event["type"] == "settlement_objective.updated"
+        event for event in result["events"] if event["type"] == "settlement_objective.updated"
     ]
     assert updated[0]["payload"]["status"] == "owner_cap_reached"
 
 
 @requires_node
-def test_plan_and_build_allows_director_reassigned_blocked_settlement_owner(
+@pytest.mark.parametrize("objective_status", ["blocked", "pending"])
+def test_plan_and_build_allows_director_reassigned_settlement_owner(
     tmp_path: Path,
+    objective_status: str,
 ) -> None:
     plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
     harness = f"""
@@ -1272,7 +2367,7 @@ process.stdout.write(JSON.stringify({{
         "phase_index": 2,
         "description": "workshop station",
         "owner_agent_id": "pixel",
-        "status": "blocked",
+        "status": objective_status,
     }
     result = _run_node_harness(
         tmp_path,
@@ -2532,6 +3627,116 @@ process.stdout.write(JSON.stringify({{
 
 
 @requires_node
+def test_plan_and_build_repairs_elevated_utility_blocks_without_blueprint_fallback(
+    tmp_path: Path,
+) -> None:
+    plan_action, calls_path = _stage_plan_and_build_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+globalThis.__timelineEvents = [];
+const mod = await import(pathToFileURL({json.dumps(str(plan_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map();
+for (let x = 1; x <= 2; x += 1) {{
+    for (let z = 1; z <= 2; z += 1) {{
+        world.set(`${{x}},63,${{z}}`, 'grass_block');
+    }}
+}}
+const bot = {{
+    username: 'UtilityFloorHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [
+            {{ name: 'oak_planks' }},
+            {{ name: 'crafting_table' }},
+            {{ name: 'chest' }},
+            {{ name: 'torch' }},
+        ],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const agent = {{
+    name: 'alpha',
+    bot,
+    prompter: {{
+        code_model: {{
+            async sendRequest() {{
+                return JSON.stringify({{
+                    blocks: [
+                        {{ dx: 1, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' }},
+                        {{ dx: 1, dy: 1, dz: 1, block_type: 'crafting_table' }},
+                        {{ dx: 2, dy: 1, dz: 1, block_type: 'chest' }},
+                    ],
+                }});
+            }},
+        }},
+    }},
+}};
+const result = await mod.planAndBuildAction.perform(agent, 'crafting hall');
+process.stdout.write(JSON.stringify({{
+    result,
+    finalBlocks: {{
+        table: world.get('1,64,1'),
+        chest: world.get('2,64,1'),
+    }},
+    events: globalThis.__timelineEvents.map((event) => ({{
+        type: event.type,
+        payload: event.payload,
+    }})),
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "LTAG_AGENT_ID": "alpha",
+            "MINECRAFT_PLAN_BUILD_MAX_STEPS": "20",
+            "MC_SIM_BUILD_ZONE_STRIDE": "0",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert result["finalBlocks"] == {
+        "table": "crafting_table",
+        "chest": "chest",
+    }
+    event_types = [event["type"] for event in result["events"]]
+    assert "build_plan.generation.rejected" not in event_types
+    completed = next(
+        event for event in result["events"] if event["type"] == "build_plan.generation.completed"
+    )
+    assert completed["payload"]["source"] == "builder_model"
+    plan_blocks = completed["payload"]["plan"]["blocks"]
+    assert {"dx": 1, "dy": 0, "dz": 1, "block_type": "crafting_table"} in plan_blocks
+    assert {"dx": 2, "dy": 0, "dz": 1, "block_type": "chest"} in plan_blocks
+    assert {"dx": 1, "dy": 0, "dz": 1, "block_type": "oak_planks"} not in plan_blocks
+    assert {"dx": 2, "dy": 0, "dz": 1, "block_type": "oak_planks"} not in plan_blocks
+
+
+@requires_node
 def test_plan_and_build_treats_high_completion_partial_as_completed(
     tmp_path: Path,
 ) -> None:
@@ -2861,6 +4066,7 @@ const bot = {{
         }},
         async goto(goal) {{
             gotoCalls.push({{ x: goal.x, y: goal.y, z: goal.z, range: goal.range }});
+            await new Promise((resolve) => setTimeout(resolve, 25));
             bot.entity.position = {{ x: goal.x, y: goal.y, z: goal.z - 2 }};
         }},
     }},
@@ -2908,13 +4114,170 @@ process.stdout.write(JSON.stringify({{
         {
             "BRIDGE_CALLS_PATH": str(calls_path),
             "MINECRAFT_ALLOW_DESTRUCTIVE_PATHS": "0",
+            "MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TIMEOUT_MS": "1",
+            "MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_MS_PER_BLOCK": "50",
         },
     )
 
     assert "success" in result["result"]
     assert result["placed"] == "oak_planks"
-    assert result["gotoCalls"] == [{"x": 10, "y": 64, "z": 0, "range": 3}]
+    assert result["gotoCalls"] == [{"x": 10, "y": 64, "z": 0, "range": 1}]
     assert result["movementsCanDig"] is False
+
+
+@requires_node
+def test_build_from_plan_continues_after_step_bridge_report_outage(tmp_path: Path) -> None:
+    build_action, calls_path = _stage_action_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(build_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([
+    ['0,63,0', 'grass_block'],
+    ['1,63,0', 'grass_block'],
+]);
+const bot = {{
+    username: 'BridgeOutageBuildHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+}};
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'fork', bot }},
+    'build-plan-bridge-outage',
+    {{ x: 0, y: 64, z: 0 }},
+    {{ blocks: [
+        {{ dx: 0, dy: 0, dz: 0, block_type: 'oak_planks' }},
+        {{ dx: 1, dy: 0, dz: 0, block_type: 'oak_planks' }},
+    ] }},
+    10,
+    10000,
+);
+process.stdout.write(JSON.stringify({{
+    result,
+    finalBlocks: {{
+        a: world.get('0,64,0'),
+        b: world.get('1,64,0'),
+    }},
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "STUB_FAIL_BRIDGE_ONCE": "perception.report",
+        },
+    )
+
+    calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+    assert "success" in result["result"]
+    assert "report warning" in result["result"]
+    assert result["finalBlocks"] == {"a": "oak_planks", "b": "oak_planks"}
+    assert any(call["service"] == "action" and call["method"] == "result" for call in calls)
+
+
+@requires_node
+def test_build_from_plan_torch_reconcile_preserves_structural_supports(tmp_path: Path) -> None:
+    build_action, calls_path = _stage_action_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(build_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([['0,63,0', 'grass_block']]);
+const bot = {{
+    username: 'TorchRepairHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'oak_log' }}, {{ name: 'torch' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        if (this.heldItem.name === 'torch' && target.y === 66) {{
+            world.set(`${{target.x}},${{target.y - 2}},${{target.z}}`, 'air');
+            world.set(`${{target.x}},${{target.y - 1}},${{target.z}}`, 'wall_torch');
+            return;
+        }}
+        world.set(key(target), this.heldItem.name);
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+}};
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'vera', bot }},
+    'build-plan-torch-repair',
+    {{ x: 0, y: 64, z: 0 }},
+    {{
+        blocks: [
+            {{ dx: 0, dy: 0, dz: 0, block_type: 'oak_log' }},
+            {{ dx: 0, dy: 1, dz: 0, block_type: 'oak_log' }},
+            {{ dx: 0, dy: 2, dz: 0, block_type: 'torch' }},
+        ],
+    }},
+    10,
+    10000,
+);
+process.stdout.write(JSON.stringify({{
+    result,
+    finalBlocks: {{
+        base: world.get('0,64,0'),
+        support: world.get('0,65,0'),
+        torch: world.get('0,66,0') || 'air',
+    }},
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+        },
+    )
+
+    assert "partial" in result["result"]
+    assert "present=2" in result["result"]
+    assert "completion=0.667" in result["result"]
+    assert result["finalBlocks"] == {
+        "base": "oak_log",
+        "support": "oak_log",
+        "torch": "air",
+    }
 
 
 @requires_node
@@ -2986,6 +4349,231 @@ process.stdout.write(JSON.stringify({{
 
     assert "success" in result["result"]
     assert result["placed"] == "oak_planks"
-    assert result["digCalls"] == [
-        {"name": "short_grass", "position": {"x": 0, "y": 64, "z": 0}}
-    ]
+    assert result["digCalls"] == [{"name": "short_grass", "position": {"x": 0, "y": 64, "z": 0}}]
+
+
+@requires_node
+def test_build_from_plan_repairs_wrong_target_block_before_placing(
+    tmp_path: Path,
+) -> None:
+    build_action, calls_path = _stage_action_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(build_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([
+    ['0,63,0', 'stone'],
+    ['0,64,0', 'cobblestone'],
+]);
+const digCalls = [];
+const bot = {{
+    username: 'BuildRepairHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async dig(targetBlock) {{
+        digCalls.push({{ name: targetBlock.name, position: targetBlock.position }});
+        world.set(key(targetBlock.position), 'air');
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+}};
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'rex', bot }},
+    'build-plan-repair',
+    {{ x: 0, y: 64, z: 0 }},
+    {{ blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_planks' }}] }},
+    10,
+    10000,
+);
+process.stdout.write(JSON.stringify({{
+    result,
+    placed: world.get('0,64,0'),
+    digCalls,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {"BRIDGE_CALLS_PATH": str(calls_path)},
+    )
+
+    assert "success" in result["result"]
+    assert result["placed"] == "oak_planks"
+    assert result["digCalls"] == [{"name": "cobblestone", "position": {"x": 0, "y": 64, "z": 0}}]
+
+
+@requires_node
+def test_build_from_plan_reconciles_missing_target_after_initial_pass(
+    tmp_path: Path,
+) -> None:
+    build_action, calls_path = _stage_action_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(build_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([['0,63,0', 'stone']]);
+let placeCalls = 0;
+const bot = {{
+    username: 'BuildReconcileHarnessBot',
+    entity: {{ position: {{ x: 0, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        placeCalls += 1;
+        if (placeCalls === 1) return;
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        world.set(key(target), this.heldItem.name);
+    }},
+}};
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'rex', bot }},
+    'build-plan-reconcile',
+    {{ x: 0, y: 64, z: 0 }},
+    {{ blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_planks' }}] }},
+    10,
+    10000,
+);
+process.stdout.write(JSON.stringify({{
+    result,
+    placed: world.get('0,64,0'),
+    placeCalls,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "MINECRAFT_BUILD_FROM_PLAN_PLACE_ATTEMPTS": "1",
+            "MINECRAFT_BUILD_FROM_PLAN_RECONCILE_PASSES": "1",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert result["placed"] == "oak_planks"
+    assert result["placeCalls"] == 2
+
+
+@requires_node
+def test_build_from_plan_reconciles_missing_far_target_after_navigation(
+    tmp_path: Path,
+) -> None:
+    build_action, calls_path = _stage_action_with_stub_bridge(tmp_path)
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const mod = await import(pathToFileURL({json.dumps(str(build_action))}).href);
+const key = (pos) => `${{Math.floor(pos.x)}},${{Math.floor(pos.y)}},${{Math.floor(pos.z)}}`;
+const block = (name, pos) => ({{ name, position: {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }} }});
+const world = new Map([['0,63,0', 'stone']]);
+let placeCalls = 0;
+let gotoCalls = 0;
+const bot = {{
+    username: 'BuildReconcileNavigationHarnessBot',
+    entity: {{ position: {{ x: 10, y: 64, z: 0 }} }},
+    inventory: {{
+        slots: [{{ name: 'oak_planks' }}],
+        items() {{ return this.slots.filter(Boolean); }},
+    }},
+    pathfinder: {{
+        async goto(goal) {{
+            gotoCalls += 1;
+            bot.entity.position = {{ x: goal.x, y: goal.y, z: goal.z }};
+        }},
+    }},
+    blockAt(pos) {{
+        const cell = {{ x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) }};
+        return block(world.get(key(cell)) || 'air', cell);
+    }},
+    async equip(item) {{
+        this.heldItem = item;
+    }},
+    async dig(targetBlock) {{
+        world.set(key(targetBlock.position), 'air');
+    }},
+    async placeBlock(referenceBlock, faceVector) {{
+        placeCalls += 1;
+        if (placeCalls === 1) {{
+            bot.entity.position = {{ x: 10, y: 64, z: 0 }};
+            return;
+        }}
+        const target = {{
+            x: referenceBlock.position.x + faceVector.x,
+            y: referenceBlock.position.y + faceVector.y,
+            z: referenceBlock.position.z + faceVector.z,
+        }};
+        const dx = bot.entity.position.x - target.x;
+        const dy = bot.entity.position.y - target.y;
+        const dz = bot.entity.position.z - target.z;
+        if ((dx * dx + dy * dy + dz * dz) > 9) return;
+        world.set(key(target), this.heldItem.name);
+    }},
+}};
+const result = await mod.buildFromPlanAction.perform(
+    {{ name: 'rex', bot }},
+    'build-plan-reconcile-nav',
+    {{ x: 0, y: 64, z: 0 }},
+    {{ blocks: [{{ dx: 0, dy: 0, dz: 0, block_type: 'oak_planks' }}] }},
+    10,
+    10000,
+);
+process.stdout.write(JSON.stringify({{
+    result,
+    placed: world.get('0,64,0') || null,
+    placeCalls,
+    gotoCalls,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "BRIDGE_CALLS_PATH": str(calls_path),
+            "MINECRAFT_BUILD_FROM_PLAN_PLACE_ATTEMPTS": "1",
+            "MINECRAFT_BUILD_FROM_PLAN_RECONCILE_PASSES": "1",
+        },
+    )
+
+    assert "success" in result["result"]
+    assert result["placed"] == "oak_planks"
+    assert result["placeCalls"] == 2
+    assert result["gotoCalls"] == 2

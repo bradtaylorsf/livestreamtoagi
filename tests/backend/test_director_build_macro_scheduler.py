@@ -132,6 +132,44 @@ def test_retryable_failure_releases_scene_lock_for_retry() -> None:
     assert retry.plan_id == first.plan_id
 
 
+def test_acquired_plan_remains_granted_for_owner_after_verdict_cache_expiry() -> None:
+    scheduler = BuildMacroScheduler(cooldown_ms=10_000)
+    objective = {
+        "objective_id": "phase-storage",
+        "phase_index": 1,
+        "description": "shared storage depot",
+        "owner_agent_id": "vera",
+        "status": "pending",
+    }
+    first = scheduler.try_acquire_plan(
+        scene_id="mcscene-build-1",
+        agent_id="vera",
+        description="shared storage depot",
+        origin={"x": 0, "y": 64, "z": 0},
+        scene=_scene(),
+        candidates=[_candidate("vera", "host facilitator"), _candidate("rex", "builder")],
+        active_objective=objective,
+        now_ms=1_000,
+    )
+
+    resumed = scheduler.try_acquire_plan(
+        scene_id="mcscene-build-1",
+        agent_id="vera",
+        description="shared storage depot",
+        origin={"x": 0, "y": 64, "z": 0},
+        scene=_scene(),
+        candidates=[_candidate("vera", "host facilitator"), _candidate("rex", "builder")],
+        active_objective=objective,
+        now_ms=32_000,
+    )
+
+    assert first.granted is True
+    assert resumed.granted is True
+    assert resumed.reason == "already_owned"
+    assert resumed.plan_id == first.plan_id
+    assert resumed.objective_id == "phase-storage"
+
+
 def test_non_retryable_failure_holds_scene_lock_until_cooldown() -> None:
     scheduler = BuildMacroScheduler(cooldown_ms=1_000)
     first = scheduler.try_acquire_plan(
@@ -216,6 +254,52 @@ def test_settlement_objective_reassigns_stale_or_capped_owner() -> None:
     assert acquisition.phase_index == 1
     assert acquisition.phase_owner == "fork"
     assert acquisition.support_assignments["rex"].phase_owner == "fork"
+
+
+def test_pending_settlement_objective_owner_can_be_claimed_after_grace() -> None:
+    scheduler = BuildMacroScheduler(cooldown_ms=10_000)
+    objective = {
+        "objective_id": "phase-square",
+        "phase_index": 6,
+        "description": "central town square",
+        "owner_agent_id": "sentinel",
+        "status": "pending",
+    }
+
+    owner, reason = scheduler.select_phase_owner(
+        active_objective=objective,
+        candidates=[
+            _candidate("sentinel", "safety moderator"),
+            _candidate("rex", "builder"),
+            _candidate("vera", "host facilitator"),
+        ],
+        fallback_owner="rex",
+        now_ms=2_000,
+    )
+
+    assert owner == "sentinel"
+    assert reason == "settlement_phase_owner"
+
+    acquisition = scheduler.try_acquire_plan(
+        scene_id="mcscene-build-1",
+        agent_id="rex",
+        description="build the central town square",
+        origin={"x": 0, "y": 64, "z": 0},
+        scene=_scene(),
+        candidates=[
+            _candidate("sentinel", "safety moderator"),
+            _candidate("rex", "builder"),
+            _candidate("vera", "host facilitator"),
+        ],
+        active_objective=objective,
+        now_ms=602_100,
+    )
+
+    assert acquisition.granted is True
+    assert acquisition.owner == "rex"
+    assert acquisition.objective_id == "phase-square"
+    assert acquisition.phase_owner == "rex"
+    assert acquisition.support_assignments["sentinel"].phase_owner == "rex"
 
 
 def test_settlement_objective_denies_non_phase_owner() -> None:

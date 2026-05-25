@@ -20,30 +20,121 @@ import {
     tryAcquireSceneBuild,
 } from '../skills/build_plan_governor.js';
 import { normalizePlan } from '../skills/build_plan.js';
-import { normalizeBlockType, positionFrom } from '../skills/building.js';
+import { isAirBlock, normalizeBlockType, positionFrom } from '../skills/building.js';
 import { performBuildFromPlan } from './build_from_plan_action.js';
 
 const DEFAULT_MAX_STEPS = 64;
-const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_RADIUS = 6;
 const MAX_HEIGHT = 5;
 const MIN_CABIN_BLOCKS = 32;
 const DEFAULT_MODEL_MAX_STEPS = 32;
-const ALLOWED_MATERIALS = new Set([
+const DEFAULT_ORIGIN_SURFACE_RADIUS = 2;
+const DEFAULT_ORIGIN_SURFACE_SCAN_DEPTH = 8;
+const DEFAULT_BUILD_SITE_SURFACE_SCAN_UP = 8;
+const STARTER_MATERIALS = Object.freeze([
     'oak_log',
     'oak_planks',
     'cobblestone',
     'dirt',
-    'glass',
     'torch',
     'chest',
     'crafting_table',
+]);
+const EXTENDED_MATERIALS = Object.freeze([
+    ...STARTER_MATERIALS,
+    'glass',
     'stone',
     'stone_bricks',
 ]);
+const STARTER_SUPPLY_LIMITS = Object.freeze({
+    oak_planks: 24,
+    cobblestone: 16,
+    dirt: 16,
+    oak_log: 12,
+    torch: 8,
+    chest: 1,
+    crafting_table: 1,
+});
+const FLOOR_LEVEL_BLOCKS = new Set(['chest', 'crafting_table', 'furnace']);
+
+function materialListFromEnv() {
+    const raw = String(
+        process.env.MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS ||
+            process.env.MC_SIM_PLAN_BUILD_ALLOWED_MATERIALS ||
+            '',
+    ).trim();
+    if (!raw) return [...STARTER_MATERIALS];
+    if (['extended', 'all', '*'].includes(raw.toLowerCase())) return [...EXTENDED_MATERIALS];
+    const parsed = raw
+        .split(/[\s,|]+/)
+        .map((item) => normalizeBlockType(item))
+        .filter(Boolean);
+    return parsed.length > 0 ? parsed : [...STARTER_MATERIALS];
+}
+
+function allowedMaterials() {
+    return new Set(materialListFromEnv());
+}
+
+function allowedMaterialNames() {
+    return [...allowedMaterials()].sort();
+}
+
+function starterSupplyLimitsText() {
+    return Object.entries(STARTER_SUPPLY_LIMITS)
+        .map(([name, count]) => `${count} ${name}`)
+        .join(', ');
+}
 
 function getBot(agent) {
     return agent && agent.bot ? agent.bot : agent;
+}
+
+function inventoryItems(bot) {
+    if (!bot || !bot.inventory) return [];
+    if (typeof bot.inventory.items === 'function') return bot.inventory.items();
+    if (Array.isArray(bot.inventory.slots)) return bot.inventory.slots.filter(Boolean);
+    return [];
+}
+
+function itemCount(item) {
+    const count = Number(item && (item.count ?? item.stackSize));
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 64;
+}
+
+function materialBudgetFromAgent(agent) {
+    const bot = getBot(agent);
+    const allowed = allowedMaterials();
+    const budget = new Map([...allowed].map((name) => [name, 0]));
+    const items = inventoryItems(bot);
+    if (items.length <= 0) {
+        for (const [name, count] of Object.entries(STARTER_SUPPLY_LIMITS)) {
+            if (allowed.has(name)) budget.set(name, count);
+        }
+        return budget;
+    }
+    for (const item of items) {
+        const blockType = normalizeBlockType(item);
+        if (!blockType || !allowed.has(blockType)) continue;
+        budget.set(blockType, (budget.get(blockType) || 0) + itemCount(item));
+    }
+    return budget;
+}
+
+function materialBudgetText(budget) {
+    const entries = [...(budget || new Map()).entries()].sort(([a], [b]) => a.localeCompare(b));
+    return entries.length > 0
+        ? entries.map(([name, count]) => `${count} ${name}`).join(', ')
+        : starterSupplyLimitsText();
+}
+
+function availableMaterialNames(budget) {
+    const available = [...(budget || new Map()).entries()]
+        .filter(([, count]) => Number(count) > 0)
+        .map(([name]) => name)
+        .sort();
+    return available.length > 0 ? available : allowedMaterialNames();
 }
 
 function agentId(agent) {
@@ -79,14 +170,132 @@ function emit(agent, type, traceId, payload = {}) {
     });
 }
 
-function originFromAgent(agent) {
+async function makeVec3(value) {
+    const cell = positionFrom(value);
+    if (!cell) return value;
+    try {
+        const mod = await import('vec3');
+        const Vec3 = mod && (mod.Vec3 || (mod.default && mod.default.Vec3) || mod.default);
+        if (typeof Vec3 === 'function') return new Vec3(cell.x, cell.y, cell.z);
+    } catch {
+        /* Test and static environments may not have the Mindcraft dependency. */
+    }
+    return cell;
+}
+
+async function readBlockTypeAt(bot, position) {
+    if (!bot || typeof bot.blockAt !== 'function') return null;
+    try {
+        return normalizeBlockType(await bot.blockAt(await makeVec3(position)));
+    } catch {
+        return null;
+    }
+}
+
+async function surfaceYAt(bot, x, z, feetY, scanDepth) {
+    const startY = Math.floor(feetY) - 1;
+    const minY = Math.max(-64, startY - scanDepth);
+    for (let y = startY; y >= minY; y -= 1) {
+        const blockType = await readBlockTypeAt(bot, { x, y, z });
+        if (blockType && !isAirBlock(blockType)) return y + 1;
+    }
+    return null;
+}
+
+function modalLowerY(values) {
+    const counts = new Map();
+    for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+    return [...counts.entries()].sort(([aY, aCount], [bY, bCount]) => {
+        if (aCount !== bCount) return bCount - aCount;
+        return aY - bY;
+    })[0]?.[0];
+}
+
+async function nearbyBuildSurfaceY(bot, cell, options = {}) {
+    const radius = positiveIntEnv(
+        'MINECRAFT_PLAN_BUILD_ORIGIN_SURFACE_RADIUS',
+        DEFAULT_ORIGIN_SURFACE_RADIUS,
+    );
+    const scanDepth = positiveIntEnv(
+        'MINECRAFT_PLAN_BUILD_ORIGIN_SCAN_DEPTH',
+        DEFAULT_ORIGIN_SURFACE_SCAN_DEPTH,
+    );
+    const scanUp = Number.isInteger(options.scanUp) && options.scanUp > 0 ? options.scanUp : 0;
+    const startY = cell.y + scanUp;
+    const depth = scanDepth + scanUp;
+    const candidates = [];
+    for (let dz = -radius; dz <= radius; dz += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+            const surfaceY = await surfaceYAt(bot, cell.x + dx, cell.z + dz, startY, depth);
+            if (surfaceY !== null) candidates.push(surfaceY);
+        }
+    }
+    return candidates.length > 0 ? modalLowerY(candidates) : cell.y;
+}
+
+function configuredSettlementOrigin() {
+    if (process.env.MC_SIM_BUILD_MODE !== 'settlement') return null;
+    const raw = String(
+        process.env.MC_SIM_SETTLEMENT_ORIGIN ||
+            process.env.MINECRAFT_SETTLEMENT_ORIGIN ||
+            process.env.MC_SIM_BUILD_ORIGIN ||
+            '',
+    ).trim();
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+        try {
+            return positionFrom(JSON.parse(raw));
+        } catch {
+            return null;
+        }
+    }
+    const parts = raw
+        .split(/[,\s:]+/)
+        .map((part) => Number(part))
+        .filter((part) => Number.isFinite(part));
+    if (parts.length < 3) return null;
+    return {
+        x: Math.floor(parts[0]),
+        y: Math.floor(parts[1]),
+        z: Math.floor(parts[2]),
+    };
+}
+
+async function originFromAgent(agent) {
     const bot = getBot(agent);
+    const configuredOrigin = configuredSettlementOrigin();
+    if (configuredOrigin) {
+        return {
+            x: configuredOrigin.x,
+            y: await nearbyBuildSurfaceY(bot, configuredOrigin),
+            z: configuredOrigin.z,
+        };
+    }
     const position = bot && bot.entity && bot.entity.position;
     const cell = positionFrom(position);
     if (cell) {
-        return { x: Math.floor(cell.x), y: Math.floor(cell.y), z: Math.floor(cell.z) };
+        return {
+            x: Math.floor(cell.x),
+            y: await nearbyBuildSurfaceY(bot, cell),
+            z: Math.floor(cell.z),
+        };
     }
     return { x: 0, y: 64, z: 0 };
+}
+
+async function originAtBuildSurface(agent, origin) {
+    const bot = getBot(agent);
+    const cell = positionFrom(origin);
+    if (!cell) return origin;
+    const scanUp = positiveIntEnv(
+        'MINECRAFT_PLAN_BUILD_SITE_SCAN_UP',
+        DEFAULT_BUILD_SITE_SURFACE_SCAN_UP,
+    );
+    return {
+        x: cell.x,
+        y: await nearbyBuildSurfaceY(bot, cell, { scanUp }),
+        z: cell.z,
+    };
 }
 
 function directorBuildContext(agent) {
@@ -253,6 +462,7 @@ function directorAuthorizedReassignment(activeObjective, context, agent) {
     const directorOwner = normalizedId(context.phaseOwner || context.owner);
     if (!actor || directorOwner !== actor || context.role !== 'planner_owner') return false;
     const status = normalizedId(activeObjective.status);
+    if (status === 'pending') return true;
     if (REASSIGNABLE_SETTLEMENT_STATUSES.has(status)) return true;
     const cooldownUntil = Number(activeObjective.cooldown_until_ms || 0);
     return Number.isFinite(cooldownUntil) && cooldownUntil > Date.now();
@@ -432,6 +642,30 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
             ],
         };
     }
+    if (text.includes('tower') || text.includes('outpost')) {
+        const blocks = [];
+        for (let y = 0; y <= 2; y += 1) {
+            for (const [dx, dz] of [
+                [1, 1],
+                [2, 1],
+                [1, 2],
+                [2, 2],
+            ]) {
+                blocks.push({ dx, dy: y, dz, block_type: 'oak_log' });
+            }
+        }
+        for (const [dx, dz] of [
+            [1, 1],
+            [2, 1],
+            [1, 2],
+            [2, 2],
+        ]) {
+            blocks.push({ dx, dy: 3, dz, block_type: 'oak_planks' });
+        }
+        blocks.push({ dx: 1, dy: 4, dz: 1, block_type: 'torch' });
+        blocks.push({ dx: 2, dy: 4, dz: 2, block_type: 'torch' });
+        return { blocks };
+    }
     if (text.includes('storage') || text.includes('chest')) {
         return {
             blocks: [
@@ -439,6 +673,21 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
                 { dx: 1, dy: 0, dz: 0, block_type: 'chest' },
                 { dx: -1, dy: 0, dz: 0, block_type: 'crafting_table' },
                 { dx: 0, dy: 1, dz: 1, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('market') || text.includes('stall')) {
+        return {
+            blocks: [
+                { dx: 1, dy: 0, dz: 1, block_type: 'oak_planks' },
+                { dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' },
+                { dx: 1, dy: 0, dz: 2, block_type: 'oak_planks' },
+                { dx: 2, dy: 0, dz: 2, block_type: 'chest' },
+                { dx: 1, dy: 1, dz: 1, block_type: 'oak_log' },
+                { dx: 2, dy: 1, dz: 1, block_type: 'oak_log' },
+                { dx: 1, dy: 2, dz: 1, block_type: 'oak_planks' },
+                { dx: 2, dy: 2, dz: 1, block_type: 'oak_planks' },
+                { dx: 1, dy: 3, dz: 1, block_type: 'torch' },
             ],
         };
     }
@@ -459,6 +708,41 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
             ],
         };
     }
+    if (text.includes('mine') || text.includes('staging')) {
+        return {
+            blocks: [
+                { dx: -2, dy: 0, dz: 1, block_type: 'cobblestone' },
+                { dx: -1, dy: 0, dz: 1, block_type: 'cobblestone' },
+                { dx: 0, dy: 0, dz: 1, block_type: 'crafting_table' },
+                { dx: 1, dy: 0, dz: 1, block_type: 'chest' },
+                { dx: 2, dy: 0, dz: 1, block_type: 'cobblestone' },
+                { dx: -2, dy: 0, dz: 2, block_type: 'cobblestone' },
+                { dx: 2, dy: 0, dz: 2, block_type: 'cobblestone' },
+                { dx: -2, dy: 1, dz: 1, block_type: 'torch' },
+                { dx: 2, dy: 1, dz: 1, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('animal') || text.includes('pen')) {
+        return {
+            blocks: [
+                { dx: -2, dy: 0, dz: -2, block_type: 'oak_log' },
+                { dx: -1, dy: 0, dz: -2, block_type: 'cobblestone' },
+                { dx: 0, dy: 0, dz: -2, block_type: 'cobblestone' },
+                { dx: 1, dy: 0, dz: -2, block_type: 'cobblestone' },
+                { dx: 2, dy: 0, dz: -2, block_type: 'oak_log' },
+                { dx: -2, dy: 0, dz: -1, block_type: 'cobblestone' },
+                { dx: 2, dy: 0, dz: -1, block_type: 'cobblestone' },
+                { dx: -2, dy: 0, dz: 0, block_type: 'oak_log' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'dirt' },
+                { dx: 0, dy: 0, dz: 0, block_type: 'dirt' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'dirt' },
+                { dx: 2, dy: 0, dz: 0, block_type: 'oak_log' },
+                { dx: -2, dy: 1, dz: -2, block_type: 'torch' },
+                { dx: 2, dy: 1, dz: 0, block_type: 'torch' },
+            ],
+        };
+    }
     if (text.includes('garden') || text.includes('farm')) {
         return {
             blocks: [
@@ -468,6 +752,58 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
                 { dx: -1, dy: 0, dz: 0, block_type: 'dirt' },
                 { dx: 0, dy: 0, dz: 0, block_type: 'torch' },
                 { dx: 1, dy: 0, dz: 0, block_type: 'dirt' },
+            ],
+        };
+    }
+    if (text.includes('town square') || text.includes('square')) {
+        return {
+            blocks: [
+                { dx: -1, dy: 0, dz: -1, block_type: 'cobblestone' },
+                { dx: 0, dy: 0, dz: -1, block_type: 'cobblestone' },
+                { dx: 1, dy: 0, dz: -1, block_type: 'cobblestone' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: 0, dy: 0, dz: 0, block_type: 'dirt' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: -1, dy: 0, dz: 1, block_type: 'cobblestone' },
+                { dx: 0, dy: 0, dz: 1, block_type: 'cobblestone' },
+                { dx: 1, dy: 0, dz: 1, block_type: 'cobblestone' },
+                { dx: 0, dy: 1, dz: 0, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('food')) {
+        return {
+            blocks: [
+                { dx: 1, dy: 0, dz: 0, block_type: 'oak_planks' },
+                { dx: 2, dy: 0, dz: 0, block_type: 'oak_planks' },
+                { dx: 1, dy: 0, dz: 1, block_type: 'chest' },
+                { dx: 2, dy: 0, dz: 1, block_type: 'oak_planks' },
+                { dx: 1, dy: 1, dz: 0, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('lighting') || text.includes('perimeter')) {
+        return {
+            blocks: [
+                { dx: -3, dy: 0, dz: -3, block_type: 'torch' },
+                { dx: 3, dy: 0, dz: -3, block_type: 'torch' },
+                { dx: -3, dy: 0, dz: 3, block_type: 'torch' },
+                { dx: 3, dy: 0, dz: 3, block_type: 'torch' },
+            ],
+        };
+    }
+    if (text.includes('road') || text.includes('path')) {
+        return {
+            blocks: [
+                { dx: -3, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: -2, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: -1, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: 0, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: 1, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: 2, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: 3, dy: 0, dz: 0, block_type: 'cobblestone' },
+                { dx: -3, dy: 1, dz: 0, block_type: 'torch' },
+                { dx: 3, dy: 1, dz: 0, block_type: 'torch' },
             ],
         };
     }
@@ -485,8 +821,71 @@ function starterBlueprint(description, maxSteps = DEFAULT_MAX_STEPS) {
     return null;
 }
 
-function starterBlueprintOrNull(description, maxSteps = DEFAULT_MAX_STEPS) {
-    return starterBlueprint(description, maxSteps);
+function planWithinMaterialBudget(plan, budget) {
+    if (!plan || !budget) return plan;
+    const remaining = new Map(budget);
+    const placed = new Set();
+    const blocks = [];
+    for (const block of orderBlocksForPlacement(repairFloorLevelBlocks(plan.blocks || []))) {
+        const blockType = normalizeBlockType(block.block_type);
+        const available = Number(remaining.get(blockType) || 0);
+        if (!blockType || available <= 0) continue;
+        if (block.dy > 0 && !placed.has(`${block.dx},${block.dy - 1},${block.dz}`)) continue;
+        blocks.push({ ...block, block_type: blockType });
+        placed.add(`${block.dx},${block.dy},${block.dz}`);
+        remaining.set(blockType, available - 1);
+    }
+    return blocks.length > 0 ? { ...plan, blocks } : null;
+}
+
+function starterBlueprintOrNull(description, maxSteps = DEFAULT_MAX_STEPS, materialBudget = null) {
+    const blueprint = starterBlueprint(description, maxSteps);
+    return materialBudget ? planWithinMaterialBudget(blueprint, materialBudget) : blueprint;
+}
+
+function isLightingRequest(description) {
+    const text = String(description || '').toLowerCase();
+    if (isCabinRequest(text) || text.includes('hut') || text.includes('house')) return false;
+    const hasLighting = /\b(light|lighting|torch|torches|lamp|lantern)\b/.test(text);
+    const hasPerimeterContext = /\b(perimeter|path|road|around|settlement|camp|outside|yard|area)\b/.test(
+        text,
+    );
+    return hasLighting && hasPerimeterContext;
+}
+
+function nearbyFloorTargets(block) {
+    const dx = Number.isInteger(block.dx) ? block.dx : 0;
+    const dz = Number.isInteger(block.dz) ? block.dz : 0;
+    return [
+        { dx, dz },
+        { dx: dx + 1, dz },
+        { dx: dx - 1, dz },
+        { dx, dz: dz + 1 },
+        { dx, dz: dz - 1 },
+        { dx: dx + 1, dz: dz + 1 },
+        { dx: dx - 1, dz: dz - 1 },
+        { dx: dx + 1, dz: dz - 1 },
+        { dx: dx - 1, dz: dz + 1 },
+    ].filter((candidate) => Math.abs(candidate.dx) <= MAX_RADIUS && Math.abs(candidate.dz) <= MAX_RADIUS);
+}
+
+function floorLevelLightingPlan(rawPlan, description) {
+    if (!isLightingRequest(description)) return rawPlan;
+    const plan = rawPlan && rawPlan.plan && !rawPlan.blocks ? rawPlan.plan : rawPlan;
+    const blocks = Array.isArray(plan?.blocks) ? plan.blocks : [];
+    const occupied = new Set();
+    const torches = [];
+    for (const block of blocks) {
+        if (normalizeBlockType(block.block_type) !== 'torch') continue;
+        for (const target of nearbyFloorTargets(block)) {
+            const key = `${target.dx},0,${target.dz}`;
+            if (occupied.has(key)) continue;
+            occupied.add(key);
+            torches.push({ ...block, ...target, dy: 0, block_type: 'torch' });
+            break;
+        }
+    }
+    return torches.length > 0 ? { ...plan, blocks: torches } : rawPlan;
 }
 
 function noStarterBlueprintMessage(description) {
@@ -536,6 +935,31 @@ function orderBlocksForPlacement(blocks) {
     });
 }
 
+function repairFloorLevelBlocks(blocks) {
+    const repaired = [];
+    for (const block of blocks) {
+        const blockType = normalizeBlockType(block.block_type);
+        const next =
+            FLOOR_LEVEL_BLOCKS.has(blockType) && block.dy !== 0
+                ? { ...block, dy: 0, block_type: blockType }
+                : { ...block, block_type: blockType };
+        const key = `${next.dx},${next.dy},${next.dz}`;
+        if (FLOOR_LEVEL_BLOCKS.has(blockType)) {
+            const existingFloorIndex = repaired.findIndex(
+                (item) => `${item.dx},${item.dy},${item.dz}` === key && !FLOOR_LEVEL_BLOCKS.has(item.block_type),
+            );
+            if (existingFloorIndex >= 0) repaired[existingFloorIndex] = next;
+            else repaired.push(next);
+            continue;
+        }
+        const utilityIndex = repaired.findIndex(
+            (item) => `${item.dx},${item.dy},${item.dz}` === key && FLOOR_LEVEL_BLOCKS.has(item.block_type),
+        );
+        if (utilityIndex < 0) repaired.push(next);
+    }
+    return repaired;
+}
+
 function positiveIntEnv(name, fallback) {
     const raw = process.env[name];
     if (raw === undefined || raw === null || raw === '') return fallback;
@@ -547,11 +971,24 @@ function plannerStepLimit(maxSteps) {
     return Math.max(1, Math.min(maxSteps, positiveIntEnv('MINECRAFT_PLAN_BUILD_MODEL_MAX_STEPS', DEFAULT_MODEL_MAX_STEPS)));
 }
 
+function planBuildTimeoutMs() {
+    return positiveIntEnv(
+        'MINECRAFT_PLAN_BUILD_TIMEOUT_MS',
+        positiveIntEnv('MC_SIM_PLAN_BUILD_TIMEOUT_MS', DEFAULT_TIMEOUT_MS),
+    );
+}
+
 function assertPlanMatchesRequest(plan, description, maxSteps) {
     const blocks = Array.isArray(plan?.blocks) ? plan.blocks : [];
     const materials = new Set(blocks.map((block) => normalizeBlockType(block.block_type)));
     if (!hasBuildablePlaceOrder(blocks)) {
         throw new TypeError('build plan places unsupported upper blocks before foundations');
+    }
+    for (const block of blocks) {
+        const blockType = normalizeBlockType(block.block_type);
+        if (FLOOR_LEVEL_BLOCKS.has(blockType) && block.dy !== 0) {
+            throw new TypeError(`${blockType} must be placed at floor level dy=0`);
+        }
     }
     if (!isCabinRequest(description) && isWallRequest(description) && !materials.has('cobblestone')) {
         throw new TypeError('wall plan must use cobblestone from the easy starter kit');
@@ -610,8 +1047,27 @@ function assertBoundedDelta(item, label) {
     }
 }
 
-function validateGeneratedPlan(rawPlan, origin, maxSteps) {
+function assertPlanWithinMaterialBudget(plan, materialBudget) {
+    if (!materialBudget) return;
+    const needed = new Map();
+    for (const block of plan.blocks || []) {
+        const blockType = normalizeBlockType(block.block_type);
+        if (!blockType) continue;
+        needed.set(blockType, (needed.get(blockType) || 0) + 1);
+    }
+    for (const [blockType, count] of needed.entries()) {
+        const available = Number(materialBudget.get(blockType) || 0);
+        if (count > available) {
+            throw new TypeError(
+                `plan needs ${count} ${blockType} but current inventory has ${available}`,
+            );
+        }
+    }
+}
+
+function validateGeneratedPlan(rawPlan, origin, maxSteps, materialBudget = null) {
     const plan = rawPlan && rawPlan.plan && !rawPlan.blocks ? rawPlan.plan : rawPlan;
+    const allowed = allowedMaterials();
     if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
         throw new TypeError('plan JSON must be an object');
     }
@@ -625,12 +1081,24 @@ function validateGeneratedPlan(rawPlan, origin, maxSteps) {
     for (const [index, block] of plan.blocks.entries()) {
         assertBoundedDelta(block, `plan.blocks[${index}]`);
         const blockType = normalizeBlockType(block.block_type);
-        if (!ALLOWED_MATERIALS.has(blockType)) {
-            throw new TypeError(`plan.blocks[${index}].block_type ${block.block_type} is not allowed`);
+        if (!allowed.has(blockType)) {
+            throw new TypeError(
+                `plan.blocks[${index}].block_type ${block.block_type} is not allowed by the easy starter kit`,
+            );
         }
         block.block_type = blockType;
     }
+    plan.blocks = repairFloorLevelBlocks(plan.blocks);
+    const occupied = new Set();
+    for (const [index, block] of plan.blocks.entries()) {
+        const key = `${block.dx},${block.dy},${block.dz}`;
+        if (occupied.has(key)) {
+            throw new TypeError(`plan.blocks[${index}] duplicates target ${key}`);
+        }
+        occupied.add(key);
+    }
     plan.blocks = orderBlocksForPlacement(plan.blocks);
+    assertPlanWithinMaterialBudget(plan, materialBudget);
     for (const [index, item] of clear.entries()) {
         assertBoundedDelta(item, `plan.clear[${index}]`);
     }
@@ -690,7 +1158,15 @@ function markFatalBuilderError(err) {
     return err;
 }
 
-async function generateWithBuilderModel(agent, description, origin, maxSteps, traceId, telemetryBase = {}) {
+async function generateWithBuilderModel(
+    agent,
+    description,
+    origin,
+    maxSteps,
+    traceId,
+    telemetryBase = {},
+    materialBudget = null,
+) {
     let resolved;
     try {
         resolved = resolveBuilderModel(agent);
@@ -707,7 +1183,7 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
     }
 
     if (!resolved.available) {
-        const fallbackPlan = starterBlueprintOrNull(description, maxSteps);
+        const fallbackPlan = starterBlueprintOrNull(description, maxSteps, materialBudget);
         return {
             source: 'starter_blueprint',
             plan: fallbackPlan,
@@ -723,9 +1199,12 @@ async function generateWithBuilderModel(agent, description, origin, maxSteps, tr
         `Use at most ${modelMaxSteps} total clear+block steps for this single phase.`,
         'Prefer compact 6-24 block phases over one large complete structure.',
         `Keep dx/dz within ${MAX_RADIUS} blocks and dy between 0 and ${MAX_HEIGHT}.`,
-        `Allowed block_type values: ${[...ALLOWED_MATERIALS].join(', ')}.`,
+        `Allowed block_type values: ${availableMaterialNames(materialBudget).join(', ')}.`,
         'Order blocks from lowest dy to highest dy, and include a same-column support block before every dy>0 block.',
-        'Stay within starter supplies: at most 24 oak_planks, 16 cobblestone, 16 dirt, 12 oak_log, 8 torch, 1 chest, and 1 crafting_table.',
+        'Place chest, crafting_table, and furnace at dy=0 only; omit the floor block for that same cell.',
+        'Never include two blocks with the same dx, dy, and dz; stack vertically by increasing dy.',
+        `Current inventory budget for this build: ${materialBudgetText(materialBudget)}.`,
+        'Never use a block_type more times than its current inventory count; omit utility blocks with count 0 and substitute available structural blocks.',
         'Avoid placing the first block at dx=0,dz=0 when another nearby offset would work.',
         'Do not include markdown, comments, narration, or code fences.',
     ].join('\n');
@@ -804,7 +1283,7 @@ export const planAndBuildAction = {
     perform: async function (agent, description) {
         const traceId = `trace-${randomUUID()}`;
         let actionId = `plan-build-${randomUUID()}`;
-        const baseOrigin = originFromAgent(agent);
+        const baseOrigin = await originFromAgent(agent);
         if (!planBuildAllowedForAgent(agent)) {
             emit(agent, 'build_plan.generation.skipped', traceId, {
                 action_id: actionId,
@@ -824,7 +1303,7 @@ export const planAndBuildAction = {
         const buildSettings = {
             max_steps: stepLimit,
             planner_max_steps: modelStepLimit,
-            allowed_materials: [...ALLOWED_MATERIALS].sort(),
+            allowed_materials: allowedMaterialNames(),
         };
         const directorContext = directorBuildContext(agent);
         if (directorContext.objectiveId) {
@@ -869,7 +1348,11 @@ export const planAndBuildAction = {
                   },
               )
             : tryAcquireBuild(agent, description, baseOrigin, buildSettings);
-        const origin = acquisition.origin || baseOrigin;
+        const acquiredOrigin = acquisition.origin || baseOrigin;
+        const origin = await originAtBuildSurface(agent, acquiredOrigin);
+        acquisition.origin = origin;
+        if (acquisition.active_build) acquisition.active_build.origin = origin;
+        const materialBudget = materialBudgetFromAgent(agent);
         actionId = acquisition.plan_id || actionId;
         const buildPayload = commonBuildPayload(acquisition, directorContext);
 
@@ -983,11 +1466,17 @@ export const planAndBuildAction = {
                     stepLimit,
                     traceId,
                     buildPayload,
+                    materialBudget,
                 );
                 generated.builder_call_count = callState.builder_call_count;
                 generated.max_builder_calls_per_agent = callState.max_builder_calls_per_agent;
             }
-            plan = validateGeneratedPlan(generated.plan, origin, modelStepLimit);
+            plan = validateGeneratedPlan(
+                floorLevelLightingPlan(generated.plan, description),
+                origin,
+                modelStepLimit,
+                materialBudget,
+            );
             assertPlanMatchesRequest(plan, description, stepLimit);
             if (!acquisition.cache_hit) {
                 recordPlanGenerated(agent, acquisition, plan);
@@ -1021,8 +1510,32 @@ export const planAndBuildAction = {
                     err && err.message ? err.message : String(err)
                 }`;
             }
-            const fallbackPlan = starterBlueprintOrNull(description, stepLimit);
+            const fallbackPlan = starterBlueprintOrNull(description, stepLimit, materialBudget);
             if (!fallbackPlan) {
+                await writeSettlementObjective(
+                    agent,
+                    'settlement_objective_advance',
+                    directorContext,
+                    traceId,
+                    {
+                        description,
+                        owner:
+                            acquisition.active_build_owner ||
+                            directorContext.phaseOwner ||
+                            directorContext.owner,
+                        planId: actionId,
+                        status: 'blocked',
+                        intendedBlocks: 0,
+                        verifiedBlocks: 0,
+                        completionRatio: 0,
+                        reason: 'no_starter_blueprint',
+                        evidence: {
+                            action_id: actionId,
+                            scene_id: buildPayload.scene_id,
+                            skipped_reason: 'no_starter_blueprint',
+                        },
+                    },
+                );
                 return skippedPlanResult(
                     agent,
                     traceId,
@@ -1040,7 +1553,12 @@ export const planAndBuildAction = {
                 plan: fallbackPlan,
                 fallback_reason: 'starter_blueprint_after_rejection',
             };
-            plan = validateGeneratedPlan(generated.plan, origin, stepLimit);
+            plan = validateGeneratedPlan(
+                floorLevelLightingPlan(generated.plan, description),
+                origin,
+                stepLimit,
+                materialBudget,
+            );
             recordPlanGenerated(agent, acquisition, plan);
         }
 
@@ -1103,7 +1621,7 @@ export const planAndBuildAction = {
                 origin,
                 plan,
                 stepLimit,
-                DEFAULT_TIMEOUT_MS,
+                planBuildTimeoutMs(),
             );
         } catch (err) {
             recordBuildFailed(agent, actionId, err && err.message ? err.message : String(err), {

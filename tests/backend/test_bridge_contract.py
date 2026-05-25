@@ -104,6 +104,54 @@ def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def test_director_gate_request_accepts_rescue_context() -> None:
+    request = c.DirectorGateRequest.model_validate(
+        {
+            "agent_id": "alpha",
+            "event_kind": "chat",
+            "event_text": 'Build the active settlement phase "watch tower".',
+            "source_agent": "system",
+            "available_tools": ["!inventory", "!rescue", "!planAndBuild"],
+            "active_objective": {
+                "objective_id": "phase-watch",
+                "phase_index": 3,
+                "description": "watch tower",
+                "owner_agent_id": "rex",
+            },
+            "unresolved_dangers": [
+                {
+                    "agent_id": "sentinel",
+                    "kind": "drowning",
+                    "location": {"x": 7, "y": 56, "z": -2},
+                    "severity": 5,
+                    "danger_id": "danger-sentinel",
+                    "rescuer_id": "alpha",
+                    "recovery_status": "rescue_dispatched",
+                }
+            ],
+            "next_steps": [
+                {
+                    "text": "Rescue Sentinel before more building.",
+                    "added_by": "shared_state",
+                }
+            ],
+            "active_rescue": {
+                "target_agent_id": "sentinel",
+                "danger_id": "danger-sentinel",
+                "rescuer_agent_id": "alpha",
+            },
+        }
+    )
+
+    assert request.unresolved_dangers[0].agent_id == "sentinel"
+    assert request.next_steps[0].text.startswith("Rescue Sentinel")
+    assert request.active_rescue == {
+        "target_agent_id": "sentinel",
+        "danger_id": "danger-sentinel",
+        "rescuer_agent_id": "alpha",
+    }
+
+
 @pytest.fixture(scope="module")
 def committed_schema() -> dict[str, Any]:
     assert COMMITTED_SCHEMA.is_file(), (

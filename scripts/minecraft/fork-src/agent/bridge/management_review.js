@@ -2,7 +2,8 @@
 //
 // This file is staged beside python_bridge.js in the pinned Mindcraft clone.
 // Callers must await reviewChat before any bot.chat, bot.whisper, TTS, or
-// MindServer output path. Bridge failures are fail-closed.
+// MindServer output path. Bridge failures are fail-closed in enforce mode; in
+// shadow mode they are fail-open because shadow policy must never suppress chat.
 
 import { callBridge } from './python_bridge.js';
 
@@ -21,6 +22,10 @@ function managementReviewMode() {
     if (raw === 'enabled' || raw === 'on' || raw === '1') return 'enforce';
     if (raw === 'disabled' || raw === 'off' || raw === '0') return 'off';
     return 'enforce';
+}
+
+function managementReviewShadow() {
+    return managementReviewMode() === 'shadow';
 }
 
 function managementReviewDeadlineMs() {
@@ -86,12 +91,21 @@ export async function reviewChat({ agentId, text, context = {} } = {}) {
         };
     } catch (err) {
         const code = err && err.code ? err.code : 'management_review_failed';
+        const shadow = managementReviewShadow();
         try {
             process.stderr.write(
-                `management_review_event agent_id=${agentId} allow=false outcome=${code}\n`,
+                `management_review_event agent_id=${agentId} allow=${shadow ? 'true' : 'false'} outcome=${code}\n`,
             );
         } catch {
             /* logging must not make a blocked review visible */
+        }
+        if (shadow) {
+            return {
+                allow: true,
+                sanitized: null,
+                reason: `shadow mode -- review unavailable (${code})`,
+                retryable: !!(err && err.retryable),
+            };
         }
         return {
             allow: false,

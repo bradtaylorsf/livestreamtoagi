@@ -866,7 +866,7 @@ const needle = `    const command = getCommand(commandName);
 const patch = `    const command = getCommand(commandName);
     if(!command) return \`\${commandName} is not a command.\`
 
-    if (commandName === '!planAndBuild' && args.length > 1) { // ${marker}
+    if (commandName === '!planAndBuild') { // ${marker}
         const cleanArg = (value) => {
             let arg = String(value || '').trim();
             if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
@@ -874,7 +874,14 @@ const patch = `    const command = getCommand(commandName);
             }
             return arg;
         };
-        args = [args.map(cleanArg).filter(Boolean).join(': ')];
+        args = args || [];
+        if (args.length > 1) {
+            args = [args.map(cleanArg).filter(Boolean).join(': ')];
+        } else if (args.length === 0) {
+            const rawCall = String(message || '');
+            const firstQuoted = rawCall.match(/!planAndBuild\\(\\s*["']([^"']+)["']/);
+            args = [firstQuoted ? firstQuoted[1] : 'active settlement objective'];
+        }
     }
 
     const params = commandParams(command);`;

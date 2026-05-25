@@ -29,6 +29,7 @@ const LOCAL_SAFE_TOOLS = new Set([
     '!getCraftingPlan',
     '!rescue',
 ]);
+const GATHER_TOOLS = new Set(['!collectBlocks', '!collectAllBlocks']);
 const STANDALONE_BUILD_TOOLS = new Set(['!placeHere', '!place', '!break', '!buildFromPlan']);
 const RISKY_PROMPT_TOOLS = new Set([
     '!break',
@@ -64,6 +65,13 @@ function enabledByEnv() {
 
 function sharedStateEnabledByEnv() {
     return !isFalseLike(process.env.MC_SIM_SHARED_STATE_ENABLED || '1');
+}
+
+function gatherToolsAllowedByEnv() {
+    return (
+        isFalseLike(process.env.SOAK_SAFE_TERRAIN_ACTIONS || '0') &&
+        !isFalseLike(process.env.MINECRAFT_ALLOW_DESTRUCTIVE_PATHS || '1')
+    );
 }
 
 function intEnv(name, fallback) {
@@ -140,7 +148,11 @@ function availableTools(agent) {
             if (!text) continue;
             const command = text.startsWith('!') ? text : `!${text}`;
             if (planMode && STANDALONE_BUILD_TOOLS.has(command)) continue;
-            if (LOCAL_SAFE_TOOLS.has(command) || (canPlanBuild && command === '!planAndBuild')) {
+            if (
+                LOCAL_SAFE_TOOLS.has(command) ||
+                (GATHER_TOOLS.has(command) && gatherToolsAllowedByEnv()) ||
+                (canPlanBuild && command === '!planAndBuild')
+            ) {
                 tools.add(command);
             }
         }
@@ -174,9 +186,47 @@ function activeSettlementObjective(agent) {
     }
 }
 
-async function fetchActiveSettlementObjective(agent, traceId, deadlineMs) {
+function activeRescueTask(payload, selfAgentId) {
+    const unresolved = Array.isArray(payload?.unresolved_dangers)
+        ? payload.unresolved_dangers
+        : [];
+    const self = String(selfAgentId || '').trim().toLowerCase();
+    const candidates = unresolved
+        .filter((danger) => {
+            const status = String(danger?.recovery_status || 'open').trim().toLowerCase();
+            return ['open', 'rescue_dispatched', 'unresolved'].includes(status);
+        })
+        .sort((left, right) => {
+            const leftSeverity = Number(left?.severity || 0);
+            const rightSeverity = Number(right?.severity || 0);
+            const leftTime = Number(left?.reported_at || 0);
+            const rightTime = Number(right?.reported_at || 0);
+            return rightSeverity - leftSeverity || rightTime - leftTime;
+        });
+    for (const danger of candidates) {
+        const rescuer = String(danger?.rescuer_id || '').trim().toLowerCase();
+        if (rescuer && rescuer !== self) continue;
+        return {
+            target_agent_id: danger?.agent_id || null,
+            danger_id: danger?.danger_id || null,
+            kind: danger?.kind || null,
+            severity: danger?.severity ?? null,
+            rescuer_agent_id: danger?.rescuer_id || selfAgentId || null,
+            recovery_status: danger?.recovery_status || 'open',
+        };
+    }
+    return null;
+}
+
+async function fetchSharedStateContext(agent, traceId, deadlineMs) {
     const fallback = activeSettlementObjective(agent);
     if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !sharedStateEnabledByEnv()) {
+        agent.__ltagSharedStateContext = {
+            active_objective: fallback,
+            unresolved_dangers: [],
+            next_steps: [],
+            active_rescue: null,
+        };
         return fallback;
     }
     try {
@@ -193,7 +243,16 @@ async function fetchActiveSettlementObjective(agent, traceId, deadlineMs) {
                 estimated_cost_usd: 0.0,
             },
         });
-        const active = response?.payload?.active_objective;
+        const payload = response?.payload || {};
+        const active = payload.active_objective;
+        agent.__ltagSharedStateContext = {
+            active_objective: active || fallback,
+            unresolved_dangers: Array.isArray(payload.unresolved_dangers)
+                ? payload.unresolved_dangers
+                : [],
+            next_steps: Array.isArray(payload.next_steps) ? payload.next_steps : [],
+            active_rescue: activeRescueTask(payload, agentId(agent)),
+        };
         if (active && typeof active === 'object') {
             agent.__ltagSettlementObjective = active;
             globalThis.__ltagSettlementObjective = active;
@@ -206,6 +265,7 @@ async function fetchActiveSettlementObjective(agent, traceId, deadlineMs) {
             });
             return active;
         }
+        return fallback;
     } catch (err) {
         emit(agent, 'settlement_objective.error', {
             trace_id: traceId,
@@ -220,7 +280,10 @@ function settlementEventText(message, activeObjective) {
     const text = String(message || '');
     if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !activeObjective) return text;
     const description = clip(activeObjective.description || 'active settlement objective', 120);
-    if (/planandbuild|build\s+(?:a|an|the|our|this|next|active)\b/i.test(text)) return text;
+    const heartbeat = /^autonomous heartbeat:/i.test(text);
+    if (!heartbeat && /planandbuild|build\s+(?:a|an|the|our|this|next|active)\b/i.test(text)) {
+        return text;
+    }
     return `Build the active settlement phase "${description}". ${text}`;
 }
 
@@ -304,6 +367,12 @@ function filteredGrantedTools(verdict) {
 
 function commandPolicy(verdict) {
     const macro = verdict.build_macro || null;
+    const activeRescue = verdict?.local_observations?.active_rescue || null;
+    if (activeRescue?.target_agent_id) {
+        const target = String(activeRescue.target_agent_id || '').replace(/"/g, '');
+        const danger = String(activeRescue.danger_id || '').replace(/"/g, '');
+        return `Command policy: Active rescue task. Use exactly one concise !rescue("${target}", "${danger}") command before any settlement, build, or gathering action. Do not use !collectBlocks, plan/build commands, standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments.`;
+    }
     if (process.env.MC_SIM_BUILD_MODE === 'plan' || macro) {
         if (macro?.role === 'planner_owner' && macro.granted === true) {
             return 'Command policy: You are the build owner for this planner turn. Include exactly one concise !planAndBuild("...") command in this response for the active structure, then let buildFromPlan finish. Do not use standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
@@ -354,6 +423,14 @@ function enrichMessage(message, verdict, memoryContext = '') {
             lines.push(`Support task: ${macro.support_task}`);
         }
     }
+    const activeRescue = verdict?.local_observations?.active_rescue || null;
+    if (activeRescue?.target_agent_id) {
+        lines.push(
+            `Active rescue: target=${activeRescue.target_agent_id} danger=${
+                activeRescue.danger_id || 'unknown'
+            } kind=${activeRescue.kind || 'unknown'}`,
+        );
+    }
     lines.push(
         commandPolicy(verdict),
         'Use this current scene context and ignore stale queued requests.',
@@ -369,7 +446,8 @@ async function askDirector(agent, turn, options, gateState) {
     gateState.latestSequence = gateSeq;
     const traceId = `trace-director-${randomUUID()}`;
     const deadlineMs = options.deadlineMs ?? intEnv('DIRECTOR_V2_GATE_DEADLINE_MS', DEFAULT_DEADLINE_MS);
-    const activeObjective = await fetchActiveSettlementObjective(agent, traceId, deadlineMs);
+    const activeObjective = await fetchSharedStateContext(agent, traceId, deadlineMs);
+    const sharedStateContext = agent.__ltagSharedStateContext || {};
     const eventText = settlementEventText(turn.message, activeObjective);
     const payload = {
         agent_id: agentId(agent),
@@ -382,6 +460,13 @@ async function askDirector(agent, turn, options, gateState) {
         available_tools: availableTools(agent),
         plan_build_agent_allowlist: planBuildAgentAllowlist(),
         active_objective: activeObjective,
+        unresolved_dangers: Array.isArray(sharedStateContext.unresolved_dangers)
+            ? sharedStateContext.unresolved_dangers
+            : [],
+        next_steps: Array.isArray(sharedStateContext.next_steps)
+            ? sharedStateContext.next_steps
+            : [],
+        active_rescue: sharedStateContext.active_rescue || null,
     };
 
     let response;

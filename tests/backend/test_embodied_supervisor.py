@@ -14,8 +14,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
-from core.models import RunMode, SimulationStatus
-from core.simulation.embodied_supervisor import EmbodiedSimulationSupervisor
+from core.models import ManagementPolicy, RunMode, SimulationStatus
+from core.simulation.embodied_supervisor import (
+    EmbodiedSimulationSupervisor,
+    _preferred_runtime_path_prefixes,
+    _prepend_runtime_paths,
+)
 from core.simulation.orchestrator import SimulationConfig
 
 
@@ -78,6 +82,156 @@ def _experimental_config(**overrides: Any) -> SimulationConfig:
     }
     kwargs.update(overrides)
     return SimulationConfig(**kwargs)
+
+
+def test_runtime_path_prefers_installed_node20(tmp_path: Path) -> None:
+    node20_bin = tmp_path / ".nvm" / "versions" / "node" / "v20.20.2" / "bin"
+    node20_bin.mkdir(parents=True)
+
+    prefixes = _preferred_runtime_path_prefixes(home=tmp_path, static_dirs=())
+    path = _prepend_runtime_paths("/usr/bin", prefixes)
+
+    assert prefixes == [str(node20_bin)]
+    assert path.split(":")[:2] == [str(node20_bin), "/usr/bin"]
+
+
+@pytest.mark.asyncio
+async def test_alpha_is_regular_agent_without_implicit_town_planner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = _sim(uuid.uuid4())
+    repo = _repo(sim)
+    captured: dict[str, Any] = {}
+    monkeypatch.delenv("MC_SIM_ALPHA_TOWN_PLANNER", raising=False)
+    monkeypatch.delenv("MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS", raising=False)
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(agents=["alpha", "vera", "rex"]),
+        simulation_repo=repo,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+    )
+
+    await supervisor.run()
+
+    assert captured["env"]["SOAK_BOTS"] == "alpha vera rex"
+    assert "MC_SIM_ALPHA_TOWN_PLANNER" not in captured["env"]
+    assert "MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS" not in captured["env"]
+
+
+@pytest.mark.asyncio
+async def test_minecraft_easy_mode_aliases_soak_harness_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = _sim(uuid.uuid4())
+    repo = _repo(sim)
+    captured: dict[str, Any] = {}
+    monkeypatch.setenv("MC_SIM_EASY_MODE", "1")
+    monkeypatch.setenv("MC_SIM_KEEP_SERVER_RUNNING", "1")
+    monkeypatch.setenv("MC_SIM_MC_PORT", "25577")
+    monkeypatch.delenv("SOAK_EASY_SPAWN", raising=False)
+    monkeypatch.delenv("SERVER_DIR", raising=False)
+    monkeypatch.delenv("WORLD_CONFIG", raising=False)
+    monkeypatch.delenv("MC_PORT", raising=False)
+    monkeypatch.delenv("SERVER_PORT", raising=False)
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(agents=["alpha", "vera", "rex"]),
+        simulation_repo=repo,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+    )
+
+    await supervisor.run()
+
+    env = captured["env"]
+    assert env["SOAK_EASY_SPAWN"] == "1"
+    assert env["SERVER_DIR"] == str(tmp_path / "minecraft-server-easy")
+    assert env["WORLD_CONFIG"] == str(tmp_path / "scripts" / "minecraft" / "world-easy.config")
+    assert env["MC_HOST"] == "127.0.0.1"
+    assert env["MC_PORT"] == "25577"
+    assert env["SERVER_PORT"] == "25577"
+    assert env["WHITELIST"] == "false"
+    assert env["SOAK_KEEP_MINECRAFT_RUNNING"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_settlement_easy_mode_defaults_to_large_open_meadow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = _sim(uuid.uuid4())
+    repo = _repo(sim)
+    captured: dict[str, Any] = {}
+    monkeypatch.setenv("MC_SIM_EASY_MODE", "1")
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "settlement")
+    monkeypatch.delenv("EASY_SETUP_MEADOW_RADIUS", raising=False)
+    monkeypatch.delenv("EASY_SETUP_BOUNDARY", raising=False)
+    monkeypatch.delenv("EASY_SETUP_ANIMALS", raising=False)
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(agents=["alpha", "vera", "rex"]),
+        simulation_repo=repo,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+    )
+
+    await supervisor.run()
+
+    assert captured["env"]["EASY_SETUP_MEADOW_RADIUS"] == "96"
+    assert captured["env"]["EASY_SETUP_BOUNDARY"] == "none"
+    assert captured["env"]["EASY_SETUP_ANIMALS"] == "1"
+    assert captured["env"]["MC_SIM_SETTLEMENT_ORIGIN"] == "0,64,0"
+
+
+@pytest.mark.asyncio
+async def test_management_policy_propagates_to_minecraft_child_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = _sim(uuid.uuid4())
+    repo = _repo(sim)
+    captured: dict[str, Any] = {}
+    monkeypatch.setenv("MC_SIM_MANAGEMENT_POLICY", "shadow")
+    monkeypatch.setenv("MINECRAFT_MANAGEMENT_REVIEW_MODE", "shadow")
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(management_policy=ManagementPolicy.off),
+        simulation_repo=repo,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+    )
+
+    await supervisor.run()
+
+    assert captured["env"]["MC_SIM_MANAGEMENT_POLICY"] == "off"
+    assert captured["env"]["MINECRAFT_MANAGEMENT_REVIEW_MODE"] == "off"
 
 
 @pytest.mark.asyncio
@@ -258,6 +412,53 @@ async def test_settlement_objective_owners_respect_plan_build_allowlist(
     assert active["owner_agent_id"] == "rex"
     stored = json.loads(redis.store[f"sim:{sim_id}:shared:settlement_objectives"])
     assert [item["owner_agent_id"] for item in stored] == ["rex", "fork", "rex", "fork"]
+
+
+@pytest.mark.asyncio
+async def test_settlement_allowlist_all_is_unrestricted_not_literal_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim_id = uuid.uuid4()
+    sim = _sim(sim_id)
+    repo = _repo(sim)
+    redis = _FakeRedis()
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "settlement")
+    monkeypatch.setenv("MC_SIM_SETTLEMENT_OBJECTIVES", "crafting hall|garden")
+    monkeypatch.setenv("MC_SIM_SETTLEMENT_OWNER_ORDER", "alpha,rex")
+    monkeypatch.setenv("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST", "all")
+    monkeypatch.setenv("MC_SIM_SHARED_STATE_ENABLED", "1")
+    monkeypatch.delenv("SOAK_PLAN_BUILD_BOTS", raising=False)
+    monkeypatch.delenv("SOAK_INIT_MESSAGE", raising=False)
+    monkeypatch.delenv("MC_SIM_ACTIVE_OBJECTIVE_JSON", raising=False)
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(
+            agents=["alpha", "rex", "vera"],
+            conversation_mode="director_v2",
+        ),
+        simulation_repo=repo,
+        redis_client=redis,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+        run_id="run-settlement-all",
+        run_dir=tmp_path / "evidence",
+    )
+
+    await supervisor.run()
+
+    active = json.loads(captured["env"]["MC_SIM_ACTIVE_OBJECTIVE_JSON"])
+    assert active["owner_agent_id"] == "alpha"
+    stored = json.loads(redis.store[f"sim:{sim_id}:shared:settlement_objectives"])
+    assert [item["owner_agent_id"] for item in stored] == ["alpha", "rex"]
 
 
 @pytest.mark.asyncio

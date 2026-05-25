@@ -18,6 +18,11 @@ export const BUILD_CLASSES = Object.freeze([
 ]);
 
 const AIR_BLOCK_TYPES = new Set(['air', 'cave_air', 'void_air']);
+const BLOCK_TYPE_ALIASES = new Map([
+    ['wall_torch', 'torch'],
+    ['soul_wall_torch', 'soul_torch'],
+    ['redstone_wall_torch', 'redstone_torch'],
+]);
 
 function finiteNumber(value) {
     const n = Number(value);
@@ -48,7 +53,8 @@ export function normalizeBlockType(value) {
         .toLowerCase()
         .replace(/^minecraft:/, '')
         .replace(/\s+/g, '_');
-    return normalized.length > 0 ? normalized : null;
+    if (normalized.length === 0) return null;
+    return BLOCK_TYPE_ALIASES.get(normalized) || normalized;
 }
 
 export function isAirBlock(value) {

@@ -689,6 +689,18 @@ class DirectorGateRequest(BaseModel):
         default=None,
         description="Current settlement phase objective when a multi-phase build is active.",
     )
+    unresolved_dangers: list[EmbodiedDangerReport] = Field(
+        default_factory=list,
+        description="Open shared-state danger reports that may preempt normal turns.",
+    )
+    next_steps: list[EmbodiedNextStep] = Field(
+        default_factory=list,
+        description="Open shared-state task hints visible to the Director gate.",
+    )
+    active_rescue: dict[str, Any] | None = Field(
+        default=None,
+        description="Caller-side summary of the rescue task assigned to this bot, if any.",
+    )
 
 
 class DirectorBuildMacro(BaseModel):

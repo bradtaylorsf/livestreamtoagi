@@ -29,12 +29,16 @@ import {
     structureObservation,
 } from '../skills/build_plan.js';
 
-const DEFAULT_BUILD_TIMEOUT_MS = 30000;
+const DEFAULT_BUILD_TIMEOUT_MS = 120000;
 const DEFAULT_STEP_TIMEOUT_MS = 10000;
-const DEFAULT_NAVIGATION_TIMEOUT_MS = 8000;
+const DEFAULT_NAVIGATION_TIMEOUT_MS = 20000;
+const DEFAULT_NAVIGATION_MS_PER_BLOCK = 800;
+const DEFAULT_PLACE_SETTLE_MS = 150;
+const DEFAULT_PLACE_ATTEMPTS = 3;
+const DEFAULT_PLACE_REACH_BLOCKS = 4.25;
+const DEFAULT_NAVIGATION_TOLERANCE_BLOCKS = 1;
+const DEFAULT_RECONCILE_PASSES = 2;
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
-const PLACE_REACH_BLOCKS = 4.25;
-const NAVIGATION_TOLERANCE_BLOCKS = 3;
 const REPLACEABLE_BLOCK_TYPES = new Set([
     'grass',
     'short_grass',
@@ -188,6 +192,13 @@ function clearReplaceableBeforePlaceEnabled() {
     return !['0', 'false', 'no', 'off'].includes(raw);
 }
 
+function repairWrongTargetBeforePlaceEnabled() {
+    const raw = String(process.env.MINECRAFT_BUILD_FROM_PLAN_REPAIR_WRONG_TARGET || '1')
+        .trim()
+        .toLowerCase();
+    return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
 function isReplaceableBlock(value) {
     const blockType = normalizeBlockType(value);
     return blockType !== null && REPLACEABLE_BLOCK_TYPES.has(blockType);
@@ -221,18 +232,68 @@ function distanceSquared(a, b) {
     return dx * dx + dy * dy + dz * dz;
 }
 
+function positionKey(position) {
+    const cell = positionFrom(position);
+    return cell ? `${cell.x},${cell.y},${cell.z}` : null;
+}
+
+function positionFromKey(key) {
+    const parts = String(key || '')
+        .split(',')
+        .map((part) => Number(part));
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null;
+    return { x: parts[0], y: parts[1], z: parts[2] };
+}
+
+function isTorchLike(value) {
+    return normalizeBlockType(value) === 'torch';
+}
+
+function structuralPositionKeys(steps) {
+    const keys = new Set();
+    for (const step of Array.isArray(steps) ? steps : []) {
+        if (!step || step.action !== 'place') continue;
+        if (isTorchLike(step.block_type || step.expected_block_type)) continue;
+        const key = positionKey(step.position);
+        if (key) keys.add(key);
+    }
+    return keys;
+}
+
+function protectedTorchCleanupPositions(target, protectedPositions) {
+    const targetCell = positionFrom(target);
+    if (!targetCell || !protectedPositions || protectedPositions.size <= 0) return [];
+    const positions = [];
+    for (const key of protectedPositions) {
+        const cell = positionFromKey(key);
+        if (!cell) continue;
+        const horizontal = Math.abs(cell.x - targetCell.x) + Math.abs(cell.z - targetCell.z);
+        const vertical = Math.abs(cell.y - targetCell.y);
+        if (horizontal <= 1 && vertical <= 1) positions.push(cell);
+    }
+    return positions;
+}
+
 function withinBuildReach(bot, target) {
     const current = botPosition(bot);
     if (!current) return true;
-    return distanceSquared(current, target) <= PLACE_REACH_BLOCKS * PLACE_REACH_BLOCKS;
+    const reach = placeReachBlocks();
+    return distanceSquared(current, target) <= reach * reach;
 }
 
-function navigationTimeoutMs(remainingMs) {
+function navigationTimeoutMs(bot, target, remainingMs) {
     const configured = positiveNumber(
         process.env.MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TIMEOUT_MS,
         DEFAULT_NAVIGATION_TIMEOUT_MS,
     );
-    return Math.max(1, Math.min(configured, remainingMs));
+    const msPerBlock = positiveNumber(
+        process.env.MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_MS_PER_BLOCK,
+        DEFAULT_NAVIGATION_MS_PER_BLOCK,
+    );
+    const current = botPosition(bot);
+    const distance = current ? Math.sqrt(distanceSquared(current, target)) : 0;
+    const scaled = Math.max(configured, Math.ceil(distance * msPerBlock));
+    return Math.max(1, Math.min(scaled, remainingMs));
 }
 
 async function moveWithinBuildReach(agent, target, timeoutMs) {
@@ -242,7 +303,7 @@ async function moveWithinBuildReach(agent, target, timeoutMs) {
         return { failureClass: 'unreachable', detail: 'pathfinder unavailable' };
     }
     await configureMovementSafety(bot);
-    const goal = await makeGoalNear(target, NAVIGATION_TOLERANCE_BLOCKS);
+    const goal = await makeGoalNear(target, navigationToleranceBlocks());
     try {
         await withTimeout(bot.pathfinder.goto(goal), timeoutMs, 'navigation');
     } catch (err) {
@@ -362,6 +423,41 @@ async function withTimeout(promise, timeoutMs, label) {
     }
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function placementSettleMs() {
+    return positiveNumber(process.env.MINECRAFT_BUILD_FROM_PLAN_PLACE_SETTLE_MS, DEFAULT_PLACE_SETTLE_MS);
+}
+
+function placeReachBlocks() {
+    return positiveNumber(process.env.MINECRAFT_BUILD_FROM_PLAN_PLACE_REACH_BLOCKS, DEFAULT_PLACE_REACH_BLOCKS);
+}
+
+function navigationToleranceBlocks() {
+    return positiveNumber(
+        process.env.MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TOLERANCE_BLOCKS,
+        DEFAULT_NAVIGATION_TOLERANCE_BLOCKS,
+    );
+}
+
+function placeAttempts() {
+    const attempts = positiveNumber(
+        process.env.MINECRAFT_BUILD_FROM_PLAN_PLACE_ATTEMPTS,
+        DEFAULT_PLACE_ATTEMPTS,
+    );
+    return Math.max(1, Math.min(5, Math.floor(attempts)));
+}
+
+function reconcilePasses() {
+    const passes = positiveNumber(
+        process.env.MINECRAFT_BUILD_FROM_PLAN_RECONCILE_PASSES,
+        DEFAULT_RECONCILE_PASSES,
+    );
+    return Math.max(0, Math.min(3, Math.floor(passes)));
+}
+
 async function placeBlockAt(bot, target, timeoutMs) {
     if (!bot || typeof bot.placeBlock !== 'function') {
         return { failureClass: 'blocked', detail: 'placeBlock unavailable' };
@@ -396,6 +492,23 @@ async function digBlock(bot, block, timeoutMs) {
         const message = err && err.message ? err.message : String(err);
         return { failureClass: classifyError(message), detail: message };
     }
+}
+
+async function cleanupMisplacedProtectedTorch(bot, step, protectedPositions, timeoutMs) {
+    if (!isTorchLike(step && (step.block_type || step.expected_block_type))) return '';
+    const details = [];
+    for (const position of protectedTorchCleanupPositions(step.position, protectedPositions)) {
+        const raw = await readRawBlock(bot, position);
+        if (!isTorchLike(raw)) continue;
+        const cleaned = await digBlock(bot, raw, timeoutMs);
+        const key = positionKey(position) || 'unknown';
+        if (cleaned.failureClass) {
+            details.push(`misplaced torch cleanup failed at ${key}: ${cleaned.detail}`);
+        } else {
+            details.push(`removed misplaced torch from protected support ${key}`);
+        }
+    }
+    return details.join('; ');
 }
 
 function stepDetail(outcomeClass, observation, extraDetail) {
@@ -540,46 +653,73 @@ async function performBreakStep(bot, step, timeoutMs) {
     };
 }
 
-async function performPlaceStep(bot, step, timeoutMs) {
+async function performPlaceStep(bot, step, timeoutMs, protectedPositions = new Set()) {
     const expectedBlockType = normalizeBlockType(step.block_type);
-    const beforeRaw = await readRawBlock(bot, step.position);
-    const before = normalizeBlockType(beforeRaw);
+    const initialBeforeRaw = await readRawBlock(bot, step.position);
+    const before = normalizeBlockType(initialBeforeRaw);
     let placement = { failureClass: null, detail: 'already present' };
+    let after = before;
+    const details = [];
 
-    if (before !== expectedBlockType) {
-        const details = [];
+    for (let attempt = 0; attempt < placeAttempts(); attempt += 1) {
+        const beforeRaw = await readRawBlock(bot, step.position);
+        const current = normalizeBlockType(beforeRaw);
+        if (current === expectedBlockType) {
+            placement = { failureClass: null, detail: details.join('; ') || 'already present' };
+            after = current;
+            break;
+        }
         if (
             beforeRaw &&
-            clearReplaceableBeforePlaceEnabled() &&
-            isReplaceableBlock(beforeRaw)
+            !isAirBlock(beforeRaw) &&
+            ((isReplaceableBlock(beforeRaw) && clearReplaceableBeforePlaceEnabled()) ||
+                (repairWrongTargetBeforePlaceEnabled() && current !== expectedBlockType))
         ) {
             const cleared = await digBlock(bot, beforeRaw, timeoutMs);
-            details.push(`cleared ${before}`);
+            details.push(`${isReplaceableBlock(beforeRaw) ? 'cleared' : 'repaired'} ${current}`);
             if (cleared.failureClass) {
                 placement = {
                     failureClass: cleared.failureClass,
                     detail: cleared.detail,
                 };
+                after = await readBlockType(bot, step.position);
+                break;
             }
         }
-        const current = await readBlockType(bot, step.position);
+        const currentAfterClear = await readBlockType(bot, step.position);
         const equipped =
-            placement.failureClass || current === expectedBlockType
+            placement.failureClass || currentAfterClear === expectedBlockType
                 ? placement
                 : await equipBlock(bot, expectedBlockType, step.source_slot);
-        placement = equipped.failureClass
-            ? equipped
-            : current === expectedBlockType
-              ? { failureClass: null, detail: details.join('; ') || 'already present' }
-              : await placeBlockAt(bot, step.position, timeoutMs);
-        if (details.length && placement.detail) {
-            placement.detail = `${details.join('; ')}; ${placement.detail}`;
-        } else if (details.length) {
-            placement.detail = details.join('; ');
+        if (equipped.failureClass || currentAfterClear === expectedBlockType) {
+            placement = equipped.failureClass
+                ? equipped
+                : { failureClass: null, detail: details.join('; ') || 'already present' };
+            after = await readBlockType(bot, step.position);
+            break;
         }
+        const settleMs = placementSettleMs();
+        if (settleMs > 0) await sleep(settleMs);
+        placement = await placeBlockAt(bot, step.position, timeoutMs);
+        if (settleMs > 0) await sleep(settleMs);
+        const cleanupDetail = await cleanupMisplacedProtectedTorch(
+            bot,
+            step,
+            protectedPositions,
+            timeoutMs,
+        );
+        if (cleanupDetail) details.push(cleanupDetail);
+        after = await readBlockType(bot, step.position);
+        if (after === expectedBlockType || placement.failureClass) break;
+        if (attempt + 1 < placeAttempts()) details.push(`retry ${attempt + 1}: saw ${after || 'air'}`);
     }
 
-    const after = await readBlockType(bot, step.position);
+    if (details.length && placement.detail) {
+        placement.detail = `${details.join('; ')}; ${placement.detail}`;
+    } else if (details.length) {
+        placement.detail = details.join('; ');
+    }
+
     const outcomeClass = classifyPlace({
         beforeBlock: before,
         afterBlock: after,
@@ -647,6 +787,19 @@ function attachFinalBlocks(steps, finalBlocks) {
             final_block: key && byKey.has(key) ? byKey.get(key) : step.after_block,
         };
     });
+}
+
+function reconcileOrder(executedSteps) {
+    return executedSteps
+        .map((step, index) => ({ step, index }))
+        .sort((left, right) => {
+            const leftTorch = isTorchLike(left.step && (left.step.block_type || left.step.expected_block_type));
+            const rightTorch = isTorchLike(
+                right.step && (right.step.block_type || right.step.expected_block_type),
+            );
+            if (leftTorch !== rightTorch) return leftTorch ? -1 : 1;
+            return left.index - right.index;
+        });
 }
 
 export async function performBuildFromPlan(agent, action_id, origin, plan, max_steps, timeout_ms) {
@@ -724,6 +877,9 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
     const stepLimit = maxStepsFrom(max_steps, normalized.steps.length);
     const executedSteps = [];
     let failureClass = null;
+    let suppressStepBridgeReports = false;
+    const reportWarnings = [];
+    const protectedPositions = structuralPositionKeys(normalized.steps);
 
     for (const step of normalized.steps) {
         if (bridgeIsKillActive()) {
@@ -744,7 +900,7 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
         const navigation = await moveWithinBuildReach(
             agent,
             step.position,
-            navigationTimeoutMs(remaining),
+            navigationTimeoutMs(bot, step.position, remaining),
         );
         remaining = deadline - Date.now();
         if (remaining <= 0) {
@@ -766,7 +922,7 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
             result =
                 step.action === 'break'
                     ? await performBreakStep(bot, step, stepTimeout)
-                    : await performPlaceStep(bot, step, stepTimeout);
+                    : await performPlaceStep(bot, step, stepTimeout, protectedPositions);
             if (navigation.detail && navigation.detail !== 'already within reach') {
                 result.detail = result.detail
                     ? `${navigation.detail}; ${result.detail}`
@@ -775,25 +931,26 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
         }
         executedSteps.push(result);
 
-        try {
-            await emitBlockStepOutcome({
-                agent,
-                traceId,
-                actionId: stepActionId,
-                step: result,
-                beforeBlock: result.before_block,
-                afterBlock: result.after_block,
-                expectedBlockType: result.expected_block_type || result.block_type,
-                outcomeClass: result.class,
-                extraDetail: result.detail,
-            });
-        } catch (err) {
-            const line = bridgeErrorLine(
-                `build-from-plan ${actionId} step report failed, safe-idling`,
-                err,
-            );
-            announce(agent, traceId, line, true);
-            return line;
+        if (!suppressStepBridgeReports) {
+            try {
+                await emitBlockStepOutcome({
+                    agent,
+                    traceId,
+                    actionId: stepActionId,
+                    step: result,
+                    beforeBlock: result.before_block,
+                    afterBlock: result.after_block,
+                    expectedBlockType: result.expected_block_type || result.block_type,
+                    outcomeClass: result.class,
+                    extraDetail: result.detail,
+                });
+            } catch (err) {
+                suppressStepBridgeReports = true;
+                const warning = bridgeErrorLine(`build-from-plan ${actionId} step report warning`, err);
+                reportWarnings.push(warning);
+                result.detail = result.detail ? `${result.detail}; ${warning}` : warning;
+                console.warn(`[build-from-plan trace=${traceId}] ${warning}`);
+            }
         }
 
         if (result.class !== 'placed' && result.class !== 'removed') {
@@ -801,16 +958,103 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
         }
     }
 
-    const abandonedSteps = normalized.steps.slice(executedSteps.length).map((step) => ({
+    let abandonedSteps = normalized.steps.slice(executedSteps.length).map((step) => ({
         ...step,
         abandoned: true,
         class: failureClass === 'timed-out' ? 'timed-out' : 'blocked',
     }));
-    const allSteps = [...executedSteps, ...abandonedSteps];
-    const finalBlocks = await readFinalBlocks(bot, allSteps);
-    const finalSteps = attachFinalBlocks(allSteps, finalBlocks);
-    const metric = completionMetric({ steps: finalSteps, finalBlocks });
+    let allSteps = [...executedSteps, ...abandonedSteps];
+    let finalBlocks = await readFinalBlocks(bot, allSteps);
+    let finalSteps = attachFinalBlocks(allSteps, finalBlocks);
+    let metric = completionMetric({ steps: finalSteps, finalBlocks });
+    for (let pass = 0; pass < reconcilePasses() && metric.blocks_missing > 0; pass += 1) {
+        if (deadline - Date.now() <= 0) break;
+        let repaired = false;
+        for (const { step, index } of reconcileOrder(executedSteps)) {
+            if (!step || step.action !== 'place') continue;
+            const expected = normalizeBlockType(step.block_type || step.expected_block_type);
+            const actual = await readBlockType(bot, step.position);
+            if (actual === expected) continue;
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            const navigation = await moveWithinBuildReach(
+                agent,
+                step.position,
+                navigationTimeoutMs(bot, step.position, remaining),
+            );
+            let repair;
+            if (navigation.failureClass) {
+                const before = await readBlockType(bot, step.position);
+                repair = {
+                    ...step,
+                    before_block: before,
+                    after_block: before,
+                    class: navigation.failureClass,
+                    detail: `reconcile pass ${pass + 1}; navigation: ${navigation.detail}`,
+                };
+            } else {
+                const afterNavigationRemaining = deadline - Date.now();
+                if (afterNavigationRemaining <= 0) break;
+                repair = await performPlaceStep(
+                    bot,
+                    step,
+                    Math.max(1, Math.min(DEFAULT_STEP_TIMEOUT_MS, afterNavigationRemaining)),
+                    protectedPositions,
+                );
+                const details = [`reconcile pass ${pass + 1}`];
+                if (navigation.detail && navigation.detail !== 'already within reach') {
+                    details.push(navigation.detail);
+                }
+                if (repair.detail) details.push(repair.detail);
+                repair.detail = details.join('; ');
+            }
+            executedSteps[index] = repair;
+            repaired = true;
+            if (!suppressStepBridgeReports) {
+                try {
+                    await emitBlockStepOutcome({
+                        agent,
+                        traceId,
+                        actionId: `${actionId}#${step.index + 1}r${pass + 1}`,
+                        step: repair,
+                        beforeBlock: repair.before_block,
+                        afterBlock: repair.after_block,
+                        expectedBlockType: repair.expected_block_type || repair.block_type,
+                        outcomeClass: repair.class,
+                        extraDetail: repair.detail,
+                    });
+                } catch (err) {
+                    suppressStepBridgeReports = true;
+                    const warning = bridgeErrorLine(
+                        `build-from-plan ${actionId} reconcile report warning`,
+                        err,
+                    );
+                    reportWarnings.push(warning);
+                    repair.detail = repair.detail ? `${repair.detail}; ${warning}` : warning;
+                    console.warn(`[build-from-plan trace=${traceId}] ${warning}`);
+                }
+            }
+        }
+        if (!repaired) break;
+        abandonedSteps = normalized.steps.slice(executedSteps.length).map((step) => ({
+            ...step,
+            abandoned: true,
+            class: failureClass === 'timed-out' ? 'timed-out' : 'blocked',
+        }));
+        allSteps = [...executedSteps, ...abandonedSteps];
+        finalBlocks = await readFinalBlocks(bot, allSteps);
+        finalSteps = attachFinalBlocks(allSteps, finalBlocks);
+        metric = completionMetric({ steps: finalSteps, finalBlocks });
+    }
     const outcomeClass = classifyPlan({ metric, failureClass });
+    const reportWarningDetail =
+        reportWarnings.length > 0
+            ? `${reportWarnings[0]}${
+                  reportWarnings.length > 1
+                      ? `; additional_report_warnings=${reportWarnings.length - 1}`
+                      : ''
+              }`
+            : '';
 
     try {
         const detail = await emitStructureOutcome({
@@ -821,16 +1065,21 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
             steps: finalSteps,
             metric,
             outcomeClass,
+            extraDetail: reportWarningDetail,
         });
         const line = `build-from-plan ${actionId} ${detail}`;
         announce(agent, traceId, line, outcomeClass !== 'success');
         return line;
     } catch (err) {
-        const line = bridgeErrorLine(
-            `build-from-plan ${actionId} completed but report failed`,
-            err,
+        const warning = bridgeErrorLine(`build-from-plan ${actionId} structure report warning`, err);
+        const detail = finalDetail(
+            outcomeClass,
+            metric,
+            [reportWarningDetail, warning].filter(Boolean).join('; '),
         );
-        announce(agent, traceId, line, true);
+        const line = `build-from-plan ${actionId} ${detail}`;
+        console.warn(`[build-from-plan trace=${traceId}] ${warning}`);
+        announce(agent, traceId, line, outcomeClass !== 'success');
         return line;
     }
 }

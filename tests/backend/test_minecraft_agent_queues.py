@@ -609,3 +609,99 @@ process.stdout.write(JSON.stringify({{
         event for event in result["events"] if event["type"] == "settlement_objective.fetched"
     ]
     assert fetched and fetched[0]["payload"]["objective_id"] == "phase-workshop"
+
+
+@requires_node
+def test_director_gate_settlement_heartbeat_with_planandbuild_hint_is_build_intent(
+    tmp_path: Path,
+) -> None:
+    director_gate = _stage_skill_tree(tmp_path, DIRECTOR_GATE)
+    bridge = director_gate.parent.parent / "bridge"
+    (bridge / "python_bridge.js").write_text(
+        """
+export async function callBridge(opts = {}) {
+    globalThis.__bridgeCalls = globalThis.__bridgeCalls || [];
+    globalThis.__bridgeCalls.push(opts);
+    if (opts.service === 'shared_state') {
+        return {
+            ok: true,
+            payload: {
+                active_objective: {
+                    objective_id: 'phase-storage',
+                    phase_index: 1,
+                    description: 'shared storage depot',
+                    owner_agent_id: 'vera',
+                    status: 'pending',
+                },
+            },
+        };
+    }
+    return {
+        ok: true,
+        payload: {
+            selected: true,
+            turn_kind: 'planner',
+            reason: 'settlement_phase_owner',
+            scene_id: 'scene-storage',
+            scene_digest: 'build active storage phase',
+            role: 'builder',
+            local_observations: {},
+            granted_tools: ['!inventory', '!planAndBuild'],
+            build_macro: {
+                role: 'planner_owner',
+                owner: 'vera',
+                plan_id: 'plan-storage',
+                granted: true,
+                objective_id: 'phase-storage',
+                phase_index: 1,
+                phase_owner: 'vera',
+            },
+            queue_depth: 1,
+            suppressed_agents: [],
+        },
+    };
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'settlement';
+process.env.MC_SIM_SHARED_STATE_ENABLED = '1';
+const gate = await import(pathToFileURL({json.dumps(str(director_gate))}).href);
+const calls = [];
+const agent = {{
+    name: 'vera',
+    bot: {{ entity: {{ position: {{ x: 0, y: 64, z: 0 }} }} }},
+    actions: {{
+        actionList: ['!inventory', '!planAndBuild'],
+    }},
+    async handleMessage(source, message, maxResponses = null) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'planning';
+    }},
+}};
+
+gate.installDirectorGate(agent, {{ enabled: true, deadlineMs: 100 }});
+await agent.handleMessage(
+    'system',
+    'Autonomous heartbeat: if you are the build owner and !planAndBuild is available, use it.',
+);
+
+process.stdout.write(JSON.stringify({{
+    calls,
+    bridgeCalls: globalThis.__bridgeCalls,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    director_payload = result["bridgeCalls"][1]["payload"]
+    assert director_payload["event_text"].startswith(
+        'Build the active settlement phase "shared storage depot".'
+    )
+    assert "Autonomous heartbeat:" in director_payload["event_text"]
+    assert (
+        'Include exactly one concise !planAndBuild("...") command' in result["calls"][0]["message"]
+    )

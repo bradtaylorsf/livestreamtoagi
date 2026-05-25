@@ -702,6 +702,20 @@
           "default": null,
           "description": "Current settlement phase objective when a multi-phase build is active."
         },
+        "active_rescue": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Caller-side summary of the rescue task assigned to this bot, if any.",
+          "title": "Active Rescue"
+        },
         "agent_id": {
           "description": "Bot requesting prompt permission.",
           "minLength": 1,
@@ -737,6 +751,14 @@
             "type": "string"
           },
           "title": "Mentions",
+          "type": "array"
+        },
+        "next_steps": {
+          "description": "Open shared-state task hints visible to the Director gate.",
+          "items": {
+            "$ref": "#/$defs/EmbodiedNextStep"
+          },
+          "title": "Next Steps",
           "type": "array"
         },
         "plan_build_agent_allowlist": {
@@ -784,6 +806,14 @@
           "default": null,
           "description": "Agent or speaker that caused the event, when known.",
           "title": "Source Agent"
+        },
+        "unresolved_dangers": {
+          "description": "Open shared-state danger reports that may preempt normal turns.",
+          "items": {
+            "$ref": "#/$defs/EmbodiedDangerReport"
+          },
+          "title": "Unresolved Dangers",
+          "type": "array"
         }
       },
       "required": [

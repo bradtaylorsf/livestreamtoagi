@@ -112,6 +112,7 @@ class BuildMacroScheduler:
     retryable_reasons: frozenset[str] = DEFAULT_RETRYABLE_REASONS
     _scene_state: dict[str, _ScenePlanState] = field(default_factory=dict)
     _active_agent_goals: dict[tuple[str, str], str] = field(default_factory=dict)
+    _pending_objective_seen_ms: dict[str, int] = field(default_factory=dict)
 
     def try_acquire_plan(
         self,
@@ -214,8 +215,14 @@ class BuildMacroScheduler:
             existing = None
         if existing is not None:
             reason = "already_owned" if existing.owner_agent_id == owner else "scene_locked"
+            owner_can_resume_acquired_plan = (
+                objective is not None
+                and existing.owner_agent_id == owner
+                and existing.status == "acquired"
+                and existing.objective_id == (objective.objective_id if objective else None)
+            )
             return BuildMacroAcquireResult(
-                granted=False,
+                granted=owner_can_resume_acquired_plan,
                 scene_id=scene_key,
                 plan_id=existing.plan_id,
                 owner=existing.owner_agent_id,
@@ -315,6 +322,18 @@ class BuildMacroScheduler:
             if fallback and allowed(fallback):
                 return fallback, "acquired"
             return None, "plan_build_no_eligible_agent"
+        fallback = _agent_id(fallback_owner)
+        status = (objective.status or "").strip().lower()
+        if status == "pending" and objective.owner_started_at_ms is None:
+            now = now_ms if now_ms is not None else _now_ms()
+            first_seen = self._pending_objective_seen_ms.setdefault(objective.objective_id, now)
+            owner_grace_elapsed = now - first_seen >= _pending_owner_grace_ms()
+            if current and allowed(current) and not owner_grace_elapsed:
+                return current, "settlement_phase_owner"
+            if fallback and fallback != current and allowed(fallback):
+                return fallback, "settlement_phase_owner_assigned"
+        else:
+            self._pending_objective_seen_ms.pop(objective.objective_id, None)
         if current and allowed(current) and not _objective_needs_reassignment(objective, now_ms):
             return current, "settlement_phase_owner"
 
@@ -333,7 +352,6 @@ class BuildMacroScheduler:
                 return candidate_id, "settlement_phase_owner_reassigned"
         if current and allowed(current):
             return current, "settlement_phase_owner"
-        fallback = _agent_id(fallback_owner)
         if fallback and allowed(fallback):
             return fallback, "settlement_phase_owner_assigned"
         return None, "plan_build_no_eligible_agent"
@@ -593,6 +611,18 @@ def _preferred_phase_owners(
     if not scored:
         return sorted({_agent_id(item) for item in candidates if _agent_id(item)})
     return [candidate_id for _priority, candidate_id in sorted(scored)]
+
+
+def _pending_owner_grace_ms() -> int:
+    raw = (
+        os.environ.get("MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS")
+        or os.environ.get("MINECRAFT_SETTLEMENT_PENDING_OWNER_GRACE_MS")
+        or "600000"
+    )
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 600_000
 
 
 def _plan_build_allowed_agents(

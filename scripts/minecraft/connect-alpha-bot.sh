@@ -53,6 +53,7 @@ MC_SIM_ALPHA_TOWN_PLANNER_MODEL="${MC_SIM_ALPHA_TOWN_PLANNER_MODEL:-google/gemin
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
 
 MCDATA_REL="src/utils/mcdata.js"
+COMMAND_INDEX_REL="src/agent/commands/index.js"
 MCDATA_VERSION_PATCH_MARKER="LTAG E3-2 runtime version refresh"
 ACTIONS_REL="src/agent/commands/actions.js"
 ACTIONS_PATCH_MARKER="LTAG E4-4 bridge ping action"
@@ -69,6 +70,7 @@ ACTIONS_POLL_ERRAND_PATCH_MARKER="LTAG E7-2 poll errand action"
 ACTIONS_RUN_ERRAND_PATCH_MARKER="LTAG E7-3 run errand action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 ACTIONS_PARSE_GUARD_PATCH_MARKER="LTAG E8-16 command parse guard"
+PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER="LTAG E12 open settlement planAndBuild arg fold"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
@@ -118,6 +120,8 @@ ACTION_QUEUE_SKILL_REL="src/agent/skills/action_queue.js"
 MINDCRAFT_DIR_ABS=""
 MCDATA_BACKUP=""
 MCDATA_PATH=""
+COMMAND_INDEX_BACKUP=""
+COMMAND_INDEX_PATH=""
 ACTIONS_BACKUP=""
 ACTIONS_PATH=""
 AGENT_BACKUP=""
@@ -188,6 +192,10 @@ restore_clone_patches() {
     if [ -n "${MCDATA_BACKUP:-}" ] && [ -f "$MCDATA_BACKUP" ] && [ -n "${MCDATA_PATH:-}" ]; then
         cp "$MCDATA_BACKUP" "$MCDATA_PATH" 2> /dev/null || true
         rm -f "$MCDATA_BACKUP"
+    fi
+    if [ -n "${COMMAND_INDEX_BACKUP:-}" ] && [ -f "$COMMAND_INDEX_BACKUP" ] && [ -n "${COMMAND_INDEX_PATH:-}" ]; then
+        cp "$COMMAND_INDEX_BACKUP" "$COMMAND_INDEX_PATH" 2> /dev/null || true
+        rm -f "$COMMAND_INDEX_BACKUP"
     fi
     if [ -n "${ACTIONS_BACKUP:-}" ] && [ -f "$ACTIONS_BACKUP" ] && [ -n "${ACTIONS_PATH:-}" ]; then
         cp "$ACTIONS_BACKUP" "$ACTIONS_PATH" 2> /dev/null || true
@@ -407,6 +415,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would copy:   fork-src/ memory context skill"
     info "Would copy:   fork-src/ Director V2 gate skill"
     info "Would inject: !pollErrand and !runErrand for Alpha errands"
+    info "Would patch:  fold multi-string !planAndBuild args in $MINDCRAFT_DIR/$COMMAND_INDEX_REL"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
@@ -484,7 +493,7 @@ if (townPlanner) {
         .replace('"chat_bot_messages": false,', '"chat_bot_messages": true,');
     source = source.replace(
         '"blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel"]',
-        '"blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel", "!planAndBuild", "!buildFromPlan", "!newAction", "!executeCode"]',
+        '"blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel", "!newAction", "!executeCode"]',
     );
 }
 if (!source.includes('lmstudio_usage.js')) {
@@ -559,8 +568,9 @@ if (townPlanner) {
         'write/announce settlement plan files in plain text, split work into build/gather/explore tasks,',
         'and ask local-model agents to execute their available build, navigation, observation,',
         'inventory, nearby-block, and resource-search tools.',
-        'Do not write command syntax that begins with an exclamation mark in your own messages.',
-        'Do not execute world-changing build/code commands yourself; delegate builds to Rex, Fork, and Pixel.',
+        'Do not write command syntax that begins with an exclamation mark unless Director explicitly grants that tool for your current turn.',
+        'When Director assigns you as build owner, use exactly one concise !planAndBuild request.',
+        'Otherwise, delegate builds to other available owners and coordinate through public chat.',
         'Do not micromanage every block. Prefer high-level plans, reviews, and next tasks.',
         'Keep the settlement coherent: multiple distinct buildings, paths, farms, animal pens,',
         'lighting, storage/workshop, and perimeter. When a task finishes, observe, reflect,',
@@ -1002,6 +1012,65 @@ cp "$ACTIONS_PATH" "$ACTIONS_BACKUP"
 trap restore_clone_patches EXIT
 trap 'restore_clone_patches; exit 130' INT
 trap 'restore_clone_patches; exit 143' TERM
+
+COMMAND_INDEX_PATH="$MINDCRAFT_DIR_ABS/$COMMAND_INDEX_REL"
+if [ ! -f "$COMMAND_INDEX_PATH" ]; then
+    fail "Mindcraft source file missing: $COMMAND_INDEX_PATH"
+    exit 1
+fi
+if grep -q "$PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" "$COMMAND_INDEX_PATH"; then
+    info "Found a previous planAndBuild arg-fold patch in $COMMAND_INDEX_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$COMMAND_INDEX_REL" > "$COMMAND_INDEX_PATH"; then
+        fail "Could not restore pinned $COMMAND_INDEX_REL before patching."
+        exit 1
+    fi
+fi
+COMMAND_INDEX_BACKUP="$(mktemp -t mindcraft-command-index.XXXXXX)"
+cp "$COMMAND_INDEX_PATH" "$COMMAND_INDEX_BACKUP"
+if ! COMMAND_INDEX_PATH="$COMMAND_INDEX_PATH" PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER="$PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.COMMAND_INDEX_PATH;
+const marker = process.env.PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+const needle = `    const command = getCommand(commandName);
+    if(!command) return \`\${commandName} is not a command.\`
+
+    const params = commandParams(command);`;
+const patch = `    const command = getCommand(commandName);
+    if(!command) return \`\${commandName} is not a command.\`
+
+    if (commandName === '!planAndBuild') { // ${marker}
+        const cleanArg = (value) => {
+            let arg = String(value || '').trim();
+            if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
+                arg = arg.substring(1, arg.length - 1);
+            }
+            return arg;
+        };
+        args = args || [];
+        if (args.length > 1) {
+            args = [args.map(cleanArg).filter(Boolean).join(': ')];
+        } else if (args.length === 0) {
+            const rawCall = String(message || '');
+            const firstQuoted = rawCall.match(/!planAndBuild\\(\\s*["']([^"']+)["']/);
+            args = [firstQuoted ? firstQuoted[1] : 'active settlement objective'];
+        }
+    }
+
+    const params = commandParams(command);`;
+if (source.includes(needle)) {
+    source = source.replace(needle, patch);
+} else if (!source.includes(marker)) {
+    throw new Error('planAndBuild arg-fold anchor not found');
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply planAndBuild arg-fold patch to $COMMAND_INDEX_REL"
+    exit 1
+fi
+ok "Applied planAndBuild arg-fold patch to $COMMAND_INDEX_REL"
 if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_PATCH_MARKER="$ACTIONS_PATCH_MARKER" \
     ACTIONS_MOVE_PATCH_MARKER="$ACTIONS_MOVE_PATCH_MARKER" \

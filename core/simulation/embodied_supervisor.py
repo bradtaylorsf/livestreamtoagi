@@ -31,6 +31,11 @@ DEFAULT_SETTLEMENT_OWNER_ORDER = (
     "grok",
     "alpha",
 )
+DEFAULT_RUNTIME_PATH_DIRS = (
+    Path("/opt/homebrew/opt/openjdk@21/bin"),
+    Path("/opt/homebrew/Cellar/openjdk@21/21.0.11/bin"),
+    Path("/opt/homebrew/opt/node@20/bin"),
+)
 
 EmbodiedCommandRunner = Callable[
     [list[str], dict[str, str], Path, "EmbodiedSimulationSupervisor"],
@@ -62,6 +67,32 @@ def _env_enabled(value: str | None, *, default: bool = True) -> bool:
     if value is None or value == "":
         return default
     return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _preferred_runtime_path_prefixes(
+    *,
+    home: Path | None = None,
+    static_dirs: tuple[Path, ...] = DEFAULT_RUNTIME_PATH_DIRS,
+) -> list[str]:
+    """Return local Java/Node runtime dirs that should win over the shell PATH."""
+
+    prefixes: list[str] = []
+    for directory in static_dirs:
+        if directory.is_dir():
+            prefixes.append(str(directory))
+
+    node_root = (home or Path.home()) / ".nvm" / "versions" / "node"
+    if node_root.is_dir():
+        for directory in sorted(node_root.glob("v20*/bin"), reverse=True):
+            if directory.is_dir():
+                prefixes.append(str(directory))
+    return prefixes
+
+
+def _prepend_runtime_paths(path_value: str, prefixes: list[str]) -> str:
+    existing = [part for part in path_value.split(os.pathsep) if part]
+    additions = [part for part in prefixes if part and part not in existing]
+    return os.pathsep.join([*additions, *existing])
 
 
 def _settlement_objective_descriptions(raw: str | None) -> list[str]:
@@ -107,9 +138,9 @@ def _settlement_owner_order(
 
 def _settlement_plan_build_owner_allowlist(env: dict[str, str] | None = None) -> list[str]:
     source = env if env is not None else os.environ
-    return _agent_id_order(
-        source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST") or source.get("SOAK_PLAN_BUILD_BOTS")
-    )
+    raw = source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST") or source.get("SOAK_PLAN_BUILD_BOTS")
+    parsed = _agent_id_order(raw)
+    return [] if any(agent in {"*", "all", "any"} for agent in parsed) else parsed
 
 
 def _objective_slug(description: str) -> str:
@@ -414,6 +445,10 @@ class EmbodiedSimulationSupervisor:
         assert self.run_id is not None
         assert self.run_dir is not None
         env = dict(os.environ)
+        env["PATH"] = _prepend_runtime_paths(
+            env.get("PATH", ""),
+            _preferred_runtime_path_prefixes(),
+        )
         env.update(
             {
                 "LTAG_RUN_ID": self.run_id,
@@ -426,14 +461,44 @@ class EmbodiedSimulationSupervisor:
         if self.config.conversation_mode == "director_v2":
             env["DIRECTOR_V2_GATE"] = "1"
             env["SOAK_PROFILE"] = "director_v2"
+        if self.config.management_policy is not None:
+            env["MC_SIM_MANAGEMENT_POLICY"] = self.config.management_policy.value
+            env["MINECRAFT_MANAGEMENT_REVIEW_MODE"] = self.config.management_policy.value
         if self.config.agents:
             env["SOAK_BOTS"] = " ".join(self.config.agents)
             env["LTAG_SIM_AGENTS"] = " ".join(self.config.agents)
+        self._apply_minecraft_easy_mode_aliases(env)
         self._apply_minecraft_build_starting_conditions(env)
         duration_hours = _duration_hours(self.config.duration)
         if duration_hours is not None and not self.is_persistent:
             env["SOAK_DURATION_HOURS"] = duration_hours
         return env
+
+    def _apply_minecraft_easy_mode_aliases(self, env: dict[str, str]) -> None:
+        if "MC_SIM_KEEP_SERVER_RUNNING" in env:
+            env.setdefault("SOAK_KEEP_MINECRAFT_RUNNING", env["MC_SIM_KEEP_SERVER_RUNNING"])
+        if not _env_enabled(env.get("MC_SIM_EASY_MODE"), default=False):
+            return
+
+        env.setdefault("RESCUE_MODE", env.get("MINECRAFT_RESCUE_MODE", "easy"))
+        env.setdefault("MINECRAFT_RESCUE_MODE", env["RESCUE_MODE"])
+        env.setdefault("SERVER_DIR", str(self.project_root / "minecraft-server-easy"))
+        env.setdefault(
+            "WORLD_CONFIG",
+            str(self.project_root / "scripts" / "minecraft" / "world-easy.config"),
+        )
+        env.setdefault("MC_HOST", "127.0.0.1")
+        port = env.get("MC_PORT") or env.get("MC_SIM_MC_PORT") or env.get("SERVER_PORT") or "25566"
+        env.setdefault("MC_PORT", port)
+        env.setdefault("SERVER_PORT", env["MC_PORT"])
+        env.setdefault("WHITELIST", "false")
+        env.setdefault("SOAK_EASY_SPAWN", "1")
+        env.setdefault("SOAK_KEEP_MINECRAFT_RUNNING", env.get("MC_SIM_KEEP_SERVER_RUNNING", "1"))
+        if env.get("MC_SIM_BUILD_MODE") == "settlement":
+            env.setdefault("EASY_SETUP_MEADOW_RADIUS", "96")
+            env.setdefault("EASY_SETUP_BOUNDARY", "none")
+            env.setdefault("EASY_SETUP_ANIMALS", "1")
+            env.setdefault("MC_SIM_SETTLEMENT_ORIGIN", "0,64,0")
 
     async def _initialize_settlement_objectives(self) -> None:
         if self.simulation_id is None or self.redis is None:
@@ -518,8 +583,18 @@ class EmbodiedSimulationSupervisor:
             )
 
         if env.get("SOAK_EASY_SPAWN") == "1":
+            boundary = str(env.get("EASY_SETUP_BOUNDARY", "glass")).strip().lower()
+            try:
+                radius = int(env.get("EASY_SETUP_MEADOW_RADIUS") or "23")
+            except ValueError:
+                radius = 23
+            meadow_label = (
+                "large open starter meadow"
+                if boundary == "none" or radius > 23
+                else "glass starter meadow"
+            )
             message = (
-                f"{message} Easy-mode rules: stay inside the glass starter meadow, use the "
+                f"{message} Easy-mode rules: stay inside the {meadow_label}, use the "
                 "starter kit you already have, and build one coherent shared structure before "
                 "doing more resource collection. Only the build owner should place blocks "
                 "through !planAndBuild; support agents should coordinate in ordinary public "
