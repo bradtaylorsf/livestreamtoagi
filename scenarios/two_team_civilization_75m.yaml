@@ -8,6 +8,7 @@ meta:
   name: "Two Team Civilization 75m"
   description: "Two factions with leader, builder, gatherer, and scout roles building progressively harder useful camp structures."
   agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 0.25
   expected_runtime_minutes: 75
 
 run_mode: experimental

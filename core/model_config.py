@@ -30,7 +30,7 @@ INTERNAL_MODEL_ROLES: dict[str, InternalModelRole] = {
     "memory_summary": InternalModelRole("LTAG_MODEL_MEMORY_SUMMARY", "fast"),
     "conversation_summary": InternalModelRole("LTAG_MODEL_CONVERSATION_SUMMARY", "fast"),
     "conversation_commitments": InternalModelRole("LTAG_MODEL_CONVERSATION_COMMITMENTS", "fast"),
-    "dream_fallback": InternalModelRole("LTAG_MODEL_DREAM_FALLBACK", "building"),
+    "dream_fallback": InternalModelRole("LTAG_MODEL_DREAM_FALLBACK", "fast"),
     "reflection_fallback": InternalModelRole("LTAG_MODEL_REFLECTION_FALLBACK", "building"),
     "departure_narrative": InternalModelRole("LTAG_MODEL_DEPARTURE_NARRATIVE", "fast"),
     "character_default_conversation": InternalModelRole(

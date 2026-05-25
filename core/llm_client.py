@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from core.exceptions import AgentCostCapExceeded
-from core.model_config import resolve_model_reference
+from core.model_config import AGENT_MODEL_DEFAULTS, agent_model_ref, resolve_model_reference
 from core.models import CostEventCreate, LLMResponse, StreamChunk, ToolCall
 
 if TYPE_CHECKING:
@@ -63,6 +63,13 @@ MODEL_NAME_ALIASES = {
     "x-ai/grok-3-mini": "grok-3-mini",
     "x-ai/grok-3": "grok-3",
 }
+MODEL_NAME_ALIASES.update(
+    {
+        agent_model_ref(agent_id, tier): MODEL_NAME_ALIASES.get(model_id, model_id)
+        for agent_id, tiers in AGENT_MODEL_DEFAULTS.items()
+        for tier, model_id in tiers.items()
+    }
+)
 OFFLINE_TEST_COST_USD = Decimal("0.0001")
 
 # Canonical models that represent the "building" tier (heavier, JSON-capable).

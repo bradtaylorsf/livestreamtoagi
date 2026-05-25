@@ -8,6 +8,7 @@ meta:
   name: "Open Settlement 90m"
   description: "Fresh-world, open-tool Minecraft settlement experiment with teams."
   agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 0.25
   expected_runtime_minutes: 90
 
 run_mode: experimental

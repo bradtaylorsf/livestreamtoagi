@@ -20,6 +20,7 @@ import pytest
 import yaml
 
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+from core.model_config import resolve_model_reference
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "gen_profiles.py"
@@ -74,7 +75,8 @@ gen = _load_gen_module()
 
 
 def _resolve_canonical(raw_id: str) -> str:
-    canonical = MODEL_NAME_ALIASES.get(raw_id, raw_id)
+    resolved = resolve_model_reference(raw_id)
+    canonical = MODEL_NAME_ALIASES.get(resolved, resolved)
     assert canonical in MODEL_REGISTRY, (
         f"{raw_id!r} does not resolve into MODEL_REGISTRY (got {canonical!r})"
     )
@@ -162,17 +164,19 @@ def _run(agent_id: str, args: list[str], cwd: Path, extra_env: dict | None = Non
 def test_openrouter_profile_matches_config_and_claude_table(agent_id: str) -> None:
     cfg = _agent_config(agent_id)
     profile = gen.build_profile(agent_id)
+    conversation_model = resolve_model_reference(cfg["model_conversation"])
+    building_model = resolve_model_reference(cfg["model_building"])
 
     assert set(profile) == PROFILE_KEYS
     assert profile["name"] == COHORT[agent_id]["name"]
-    assert profile["model"] == f"openrouter/{cfg['model_conversation']}"
-    assert profile["code_model"] == f"openrouter/{cfg['model_building']}"
+    assert profile["model"] == f"openrouter/{conversation_model}"
+    assert profile["code_model"] == f"openrouter/{building_model}"
     assert _resolve_canonical(cfg["model_conversation"])
     assert _resolve_canonical(cfg["model_building"])
 
     claude_conversation, claude_building = _claude_row_models(profile["name"])
-    assert claude_conversation == _claude_model_label(cfg["model_conversation"])
-    assert claude_building == _claude_model_label(cfg["model_building"])
+    assert claude_conversation == _claude_model_label(conversation_model)
+    assert claude_building == _claude_model_label(building_model)
 
 
 @pytest.mark.parametrize("agent_id", COHORT)

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from core.model_config import resolve_model_reference
 from core.models import LLMResponse
 from tools.alpha_dispatch import (
     ALLOWED_AGENTS,
@@ -32,7 +33,7 @@ def llm_client() -> AsyncMock:
     client.complete = AsyncMock(
         return_value=LLMResponse(
             content="The answer is 42",
-            model=ALPHA_MODEL,
+            model=resolve_model_reference(ALPHA_MODEL),
             input_tokens=50,
             output_tokens=20,
             estimated_cost=Decimal("0.001"),
@@ -69,16 +70,12 @@ def _make_tool(
 
 
 class TestDispatchAlphaInterface:
-    def test_name_and_description(
-        self, event_bus: AsyncMock, llm_client: AsyncMock
-    ) -> None:
+    def test_name_and_description(self, event_bus: AsyncMock, llm_client: AsyncMock) -> None:
         tool = _make_tool(event_bus, llm_client)
         assert tool.name == "dispatch_alpha"
         assert "alpha" in tool.description.lower()
 
-    def test_parameters_schema(
-        self, event_bus: AsyncMock, llm_client: AsyncMock
-    ) -> None:
+    def test_parameters_schema(self, event_bus: AsyncMock, llm_client: AsyncMock) -> None:
         tool = _make_tool(event_bus, llm_client)
         assert "task" in tool.parameters
         assert "urgency" in tool.parameters
@@ -169,7 +166,7 @@ class TestSuccessfulDispatch:
         llm_client.complete.assert_called_once()
         call_kwargs = llm_client.complete.call_args
         actual_model = call_kwargs.kwargs.get("model", call_kwargs[1].get("model"))
-        assert actual_model == ALPHA_MODEL
+        assert actual_model == resolve_model_reference(ALPHA_MODEL)
 
 
 # --- Timeout ---

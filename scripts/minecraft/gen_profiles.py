@@ -285,9 +285,7 @@ def apply_persona_overrides(
 
 def _persona_override_mapping(
     overrides: (
-        dict[str, dict[str, Any] | PersonaOverride]
-        | list[dict[str, Any] | PersonaOverride]
-        | None
+        dict[str, dict[str, Any] | PersonaOverride] | list[dict[str, Any] | PersonaOverride] | None
     ),
 ) -> dict[str, dict[str, Any]]:
     """Normalize run-spec persona overrides to agent_id -> override dict."""
@@ -361,7 +359,9 @@ def _normalize_agent_goal_mapping(agent_goals: dict[str, Any] | None) -> dict[st
     return normalized
 
 
-def _profile_faction(agent_id: str, faction: FactionConfig | dict[str, Any] | None) -> dict[str, Any] | None:
+def _profile_faction(
+    agent_id: str, faction: FactionConfig | dict[str, Any] | None
+) -> dict[str, Any] | None:
     if faction is None:
         return None
     parsed = faction if isinstance(faction, FactionConfig) else FactionConfig(**faction)
@@ -429,8 +429,10 @@ def _assert_resolves_into_registry(raw_model_id: str) -> None:
     profile must never drift from ``core/llm_client.py``.
     """
     from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+    from core.model_config import resolve_model_reference
 
-    canonical = MODEL_NAME_ALIASES.get(raw_model_id, raw_model_id)
+    resolved = resolve_model_reference(raw_model_id)
+    canonical = MODEL_NAME_ALIASES.get(resolved, resolved)
     if canonical not in MODEL_REGISTRY:
         raise ValueError(
             f"{raw_model_id!r} does not resolve into "
@@ -498,8 +500,10 @@ def build_profile(
         model = f"lmstudio/{chat}"
         code_model = f"lmstudio/{code}"
     else:  # openrouter
-        conv = cfg["model_conversation"]
-        build = cfg["model_building"]
+        from core.model_config import resolve_model_reference
+
+        conv = resolve_model_reference(cfg["model_conversation"])
+        build = resolve_model_reference(cfg["model_building"])
         _assert_resolves_into_registry(conv)
         _assert_resolves_into_registry(build)
         model = f"openrouter/{conv}"
@@ -533,9 +537,7 @@ def build_all_profiles(
     local_code: str | None = None,
     agents_dir: Path = AGENTS_DIR,
     persona_overrides: (
-        dict[str, dict[str, Any] | PersonaOverride]
-        | list[dict[str, Any] | PersonaOverride]
-        | None
+        dict[str, dict[str, Any] | PersonaOverride] | list[dict[str, Any] | PersonaOverride] | None
     ) = None,
     factions: list[dict[str, Any] | FactionConfig] | None = None,
     agent_goals: dict[str, list[str]] | None = None,

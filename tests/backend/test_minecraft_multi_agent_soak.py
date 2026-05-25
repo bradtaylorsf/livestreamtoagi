@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -170,7 +171,7 @@ def test_help_is_operator_facing_and_source_free() -> None:
     assert "set -euo pipefail" not in wrapper.stdout
 
     supervisor = subprocess.run(
-        [".venv/bin/python", str(RUN_SIMULATION), "--help"],
+        [sys.executable, str(RUN_SIMULATION), "--help"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
