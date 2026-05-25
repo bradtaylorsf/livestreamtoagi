@@ -700,10 +700,17 @@ class SimulationOrchestrator:
                     logger.warning("decision log: world_event write failed", exc_info=True)
             if shared is not None and shared._redis is not None:
                 try:
+                    import json as _json
+
                     await shared._redis.rpush(
                         "shared:world_events",
-                        f'{{"event": "{event.event_type}", "tick": {tick}, '
-                        f'"trigger": "{event.trigger}"}}',
+                        _json.dumps(
+                            {
+                                "event": event.event_type,
+                                "tick": tick,
+                                "trigger": event.trigger,
+                            }
+                        ),
                     )
                 except Exception:
                     logger.debug("blackboard: world_event push failed", exc_info=True)
