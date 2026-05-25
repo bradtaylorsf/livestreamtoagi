@@ -937,6 +937,7 @@ async def get_agent_journal(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> list[dict[str, Any]]:
+    """Return journal and dream entries from any run mode for website publishing."""
     db = _get_db()
     sim_id = uuid.UUID(simulation_id) if simulation_id else None
     if sim_id is None:

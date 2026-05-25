@@ -26,6 +26,7 @@ def _make_recall_memory(
     id: int = 1,  # noqa: A002
     agent_id: str = "vera",
     summary: str = "Discussed plans with Rex about the dashboard.",
+    event_type: str = "conversation",
     importance_score: float = 0.5,
 ) -> RecallMemory:
     return RecallMemory(
@@ -33,7 +34,7 @@ def _make_recall_memory(
         agent_id=agent_id,
         summary=summary,
         embedding=[0.1] * EMBEDDING_DIMENSION,
-        event_type="conversation",
+        event_type=event_type,
         participants=["vera", "rex"],
         transcript_id=1,
         importance_score=importance_score,
@@ -209,6 +210,103 @@ class TestSixHourReflection:
         assert result.journal_entry.agent_id == "vera"
         assert result.journal_entry.reflection_type == "6hour"
         memory_repo.create_journal_entry.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_includes_embodied_recall_memories(
+        self,
+        reflection_mgr: ReflectionManager,
+        memory_repo: AsyncMock,
+        llm_client: AsyncMock,
+    ) -> None:
+        """6-hour reflection sends embodied recall memories into the LLM prompt."""
+        memory_repo.get_recent_recall_memories.return_value = [
+            _make_recall_memory(
+                id=11,
+                summary="Vera placed oak planks to finish the workshop doorway.",
+                event_type="bridge_action_result",
+            ),
+            _make_recall_memory(
+                id=12,
+                summary="Vera observed Rex mining near the shared storage chest.",
+                event_type="bridge_perception",
+            ),
+            _make_recall_memory(
+                id=13,
+                summary="Discussed whether the workshop needs windows.",
+                event_type="conversation",
+            ),
+        ]
+        llm_client.complete.return_value = _make_llm_response(
+            json.dumps({
+                "importance_scores": {"11": 0.9, "12": 0.7, "13": 0.4},
+                "promotions": [
+                    {
+                        "section": "key_learnings",
+                        "content": "- Workshop progress matters to Vera",
+                        "reason": "embodied work changed her priorities",
+                    }
+                ],
+            })
+        )
+
+        result = await reflection_mgr.run_6hour_reflection("vera")
+
+        analysis_call = llm_client.complete.call_args_list[0]
+        prompt = analysis_call.kwargs["messages"][0]["content"]
+        assert "(bridge_action_result) Vera placed oak planks" in prompt
+        assert "(bridge_perception) Vera observed Rex mining" in prompt
+        assert "(conversation) Discussed whether the workshop needs windows" in prompt
+        assert result.journal_entry is not None
+        assert result.importance_updates == 3
+        assert result.promoted_count == 1
+
+    @pytest.mark.asyncio
+    async def test_journal_image_generated_in_embodied_mode(
+        self,
+        memory_repo: AsyncMock,
+        llm_client: AsyncMock,
+        core_memory_mgr: AsyncMock,
+        token_counter: MagicMock,
+        agent_registry: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """6-hour embodied reflection attaches generated image URLs to journals."""
+        monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+        fake_image_url = "https://example.test/journal-image.png"
+        journal_image_generator = AsyncMock()
+        journal_image_generator.generate.return_value = fake_image_url
+        llm_client.complete.side_effect = [
+            _make_llm_response(
+                json.dumps({
+                    "importance_scores": {"1": 0.8, "2": 0.3},
+                    "promotions": [],
+                })
+            ),
+            _make_llm_response("I placed oak planks and finished the workshop doorway."),
+        ]
+        reflection_mgr = ReflectionManager(
+            memory_repo=memory_repo,
+            llm_client=llm_client,
+            core_memory_mgr=core_memory_mgr,
+            token_counter=token_counter,
+            agent_registry=agent_registry,
+            journal_image_generator=journal_image_generator,
+        )
+
+        result = await reflection_mgr.run_6hour_reflection("vera")
+
+        journal_image_generator.generate.assert_awaited_once_with(
+            "I placed oak planks and finished the workshop doorway.",
+            "vera",
+            simulation_id=None,
+        )
+        memory_repo.update_journal_entry_image.assert_awaited_once_with(
+            1,
+            fake_image_url,
+            simulation_id=None,
+        )
+        assert result.journal_entry is not None
+        assert result.journal_entry.image_url == fake_image_url
 
     @pytest.mark.asyncio
     async def test_uses_building_model(

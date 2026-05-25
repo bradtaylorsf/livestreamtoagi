@@ -2,6 +2,9 @@
 
 Generates pixel-art-style illustrations for agent journal entries,
 with per-agent visual style based on personality color and aesthetic.
+The generator is conversation-mode agnostic: it uses provider-side Gemini
+image generation plus optional GCS upload, and has no Phaser/frontend asset
+coupling. Consumers render the returned URL like any other journal image.
 """
 
 from __future__ import annotations

@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -203,6 +204,22 @@ class DreamManager:
             )
             texts = [e.content for e in entries] if entries else []
 
+            recent_recall = getattr(self._repo, "get_recent_recall_memories", None)
+            if callable(recent_recall):
+                since = datetime.now(UTC) - timedelta(hours=24)
+                recall_memories = await recent_recall(
+                    agent_id,
+                    since,
+                    limit=10,
+                    simulation_id=self._simulation_id,
+                )
+                if isinstance(recall_memories, list):
+                    texts.extend(
+                        f"[{m.event_type or 'recall'}] {m.summary}"
+                        for m in recall_memories
+                        if getattr(m, "summary", None)
+                    )
+
             if not texts:
                 return ""
 
@@ -304,7 +321,7 @@ class DreamManager:
         agent_id: str,
         dream: DreamResult,
     ) -> None:
-        """Apply dream effects: mood shift, goals, journal entry."""
+        """Apply dream effects: mood shift, goals, journal entry, recall continuity."""
         # Apply mood shift to agent state
         if self._state_mgr is not None:
             await self._apply_mood_shift(agent_id, dream.mood_shift)
@@ -321,6 +338,7 @@ class DreamManager:
                         category=goal.category,
                         simulation_id=self._simulation_id,
                     )
+                    await self._store_dream_recall(agent_id, f"[Dream goal] {goal.description}")
                 except Exception as exc:
                     logger.warning(
                         "Failed to add dream goal for %s: %s", agent_id, exc, exc_info=True
@@ -348,25 +366,29 @@ class DreamManager:
                 logger.warning("Failed to store dream journal for %s", agent_id, exc_info=True)
 
         # Store insights as high-importance recall memories (only if we can embed)
-        if self._repo is not None and self._embedding_fn is not None:
-            for insight in dream.insights:
-                try:
-                    from core.models import RecallMemoryCreate
+        for insight in dream.insights:
+            await self._store_dream_recall(agent_id, f"[Dream insight] {insight}")
 
-                    text = f"[Dream insight] {insight}"
-                    embedding = await self._embedding_fn(text)
-                    await self._repo.add_recall(
-                        RecallMemoryCreate(
-                            agent_id=agent_id,
-                            summary=text,
-                            embedding=embedding,
-                            event_type="dream",
-                            importance_score=0.8,
-                            simulation_id=self._simulation_id,
-                        )
-                    )
-                except Exception:
-                    logger.warning("Failed to store dream insight for %s", agent_id, exc_info=True)
+    async def _store_dream_recall(self, agent_id: str, text: str) -> None:
+        """Mirror dream outputs into recall for the next embodied memory-context fetch."""
+        if self._repo is None or self._embedding_fn is None:
+            return
+        try:
+            from core.models import RecallMemoryCreate
+
+            embedding = await self._embedding_fn(text)
+            await self._repo.add_recall(
+                RecallMemoryCreate(
+                    agent_id=agent_id,
+                    summary=text,
+                    embedding=embedding,
+                    event_type="dream",
+                    importance_score=0.8,
+                    simulation_id=self._simulation_id,
+                )
+            )
+        except Exception:
+            logger.warning("Failed to store dream recall for %s", agent_id, exc_info=True)
 
     async def _apply_mood_shift(
         self,

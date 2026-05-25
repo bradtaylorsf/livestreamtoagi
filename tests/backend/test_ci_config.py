@@ -17,6 +17,14 @@ EXPECTED_COST_KILL_TESTS = [
     "tests/backend/test_spend_kill_alerts.py",
     "tests/backend/test_admin_auth.py",
 ]
+EXPECTED_DREAMS_TESTS = [
+    "tests/backend/test_dreams.py",
+    "tests/backend/test_reflection.py",
+    "tests/backend/test_reflection_scheduler.py",
+    "tests/backend/test_reflection_goals.py",
+    "tests/backend/test_reflect_after.py",
+    "tests/backend/test_journal_image.py",
+]
 
 
 def _load_workflow(name: str) -> dict:
@@ -52,6 +60,7 @@ def test_ci_has_required_jobs():
     assert "frontend-test" in jobs
     assert "website-test" in jobs
     assert "cost-kill-regression" in jobs
+    assert "dreams-regression" in jobs
     assert "integration-test" in jobs
 
 
@@ -70,6 +79,25 @@ def test_cost_kill_regression_gate_references_expected_tests():
 
     assert "pytest" in run_script
     for test_file in EXPECTED_COST_KILL_TESTS:
+        assert test_file in run_script
+
+
+def test_ci_has_dreams_regression_gate():
+    """CI workflow must include a dedicated dreams/journals regression gate."""
+    ci = _load_workflow("ci.yml")
+    job = ci["jobs"].get("dreams-regression")
+    assert job is not None
+    assert job.get("name") == "Dreams/Journals Regression Gate"
+
+
+def test_dreams_regression_gate_references_expected_tests():
+    """Dreams/journals gate should pin the embodied regression test set."""
+    ci = _load_workflow("ci.yml")
+    run_script = _job_run_script(ci["jobs"]["dreams-regression"])
+
+    assert "pytest" in run_script
+    assert "CONVERSATION_MODE=embodied" in run_script
+    for test_file in EXPECTED_DREAMS_TESTS:
         assert test_file in run_script
 
 

@@ -3,6 +3,11 @@
 Serves blog post data. When MDX content files are added to the website,
 this module can be extended to read from disk. For now, returns placeholder
 posts that match the website's LatestPosts component.
+
+Agent journals and dreams are not served from this module. They are published
+from ``journal_entries`` through ``/api/agents/{agent_id}/journal`` and rendered
+by the website as ordinary text plus optional image URLs, with no Phaser scene
+or retired sprite asset dependency.
 """
 
 from __future__ import annotations

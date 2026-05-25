@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 import yaml
 
 SCENARIOS_DIR = Path(__file__).resolve().parent.parent.parent / "scenarios"
@@ -19,6 +22,12 @@ NEW_SCENARIOS = [
     "full_evolution_7d",
     "dress_rehearsal",
     "ab_test",
+]
+DREAM_REFLECTION_SCENARIOS = [
+    "dream_cycle_test",
+    "dream_smoke_test",
+    "embodied_reflection_continuity_test",
+    "goal_generation_test",
 ]
 
 
@@ -52,8 +61,12 @@ def test_scenario_phase_structure():
             assert "name" in phase, f"Scenario '{name}' phase {i} missing 'name'"
             assert "type" in phase, f"Scenario '{name}' phase {i} missing 'type'"
             assert phase["type"] in (
-                "scheduled", "organic", "challenge",
-                "tool_exercise", "reflection", "audience_sim",
+                "scheduled",
+                "organic",
+                "challenge",
+                "tool_exercise",
+                "reflection",
+                "audience_sim",
             ), f"Scenario '{name}' phase {i} has invalid type: {phase['type']}"
 
 
@@ -89,21 +102,81 @@ def test_dream_cycle_has_dream_reflection():
     """dream_cycle_test should include a dream reflection phase."""
     data = _load_scenario("dream_cycle_test")
     dream_phases = [
-        p for p in data["phases"]
+        p
+        for p in data["phases"]
         if p["type"] == "reflection" and p.get("reflection_type") == "dream"
     ]
     assert len(dream_phases) >= 1
 
 
+def _make_dry_phase_runner(*, agents: list[str], conversation_mode: str):
+    from core.simulation.phases import PhaseRunner
+
+    return PhaseRunner(
+        config_loader=MagicMock(),
+        agent_registry=MagicMock(),
+        event_bus=MagicMock(emit=AsyncMock()),
+        llm_client=MagicMock(),
+        management=MagicMock(),
+        context_assembler=MagicMock(),
+        conversation_repo=MagicMock(),
+        archival_memory=MagicMock(),
+        proximity=MagicMock(),
+        trigger_system=MagicMock(),
+        selection_logger=MagicMock(),
+        reflection_manager=MagicMock(),
+        simulation_id=uuid.uuid4(),
+        agents=agents,
+        dry_run=True,
+        conversation_mode=conversation_mode,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dream_scenarios_runnable_under_embodied_mode(monkeypatch):
+    """Dream/reflection scenarios should parse and dry-run in embodied mode."""
+    from core.simulation.orchestrator import SimulationConfig
+
+    monkeypatch.setenv("CONVERSATION_MODE", "embodied")
+
+    for name in DREAM_REFLECTION_SCENARIOS:
+        data = _load_scenario(name)
+        meta = data.get("meta", {})
+        agents = list(meta.get("agents") or ["vera", "rex", "aurora"])
+
+        assert "embodied" in meta.get("supports_modes", [])
+
+        cfg = SimulationConfig(
+            name=name,
+            seed_file=str(SCENARIOS_DIR / f"{name}.yaml"),
+            agents=agents,
+            conversation_mode="embodied",
+            dry_run=True,
+        )
+        cfg.load_seed_file(valid_agent_ids=set(agents))
+
+        assert cfg.memory_seed is not None
+        assert cfg.memory_seed.mode == "custom"
+        assert cfg.memory_seed.custom_file is not None
+        assert (SCENARIOS_DIR.parent / cfg.memory_seed.custom_file).exists()
+
+        runner = _make_dry_phase_runner(
+            agents=cfg.agents,
+            conversation_mode=cfg.conversation_mode,
+        )
+        for phase in cfg.phases:
+            result = await runner.run_phase(phase)
+            assert result.status == "completed", f"{name}:{phase.name} failed"
+            assert result.errors == []
+
+
 def test_ab_test_has_fixed_and_auto_phases():
     """ab_test should have 3+ fixed phases and 10 autonomous phases."""
     data = _load_scenario("ab_test")
-    phases_with_topics = [
-        p for p in data["phases"]
-        if p.get("topics") or p.get("topic")
-    ]
+    phases_with_topics = [p for p in data["phases"] if p.get("topics") or p.get("topic")]
     auto_phases = [
-        p for p in data["phases"]
+        p
+        for p in data["phases"]
         if p["type"] == "organic" and not p.get("topics") and not p.get("topic")
     ]
     assert len(phases_with_topics) >= 3, "Need at least 3 fixed-topic phases"
@@ -114,7 +187,8 @@ def test_full_evolution_has_weekly_reflection():
     """full_evolution_7d should include a weekly reflection."""
     data = _load_scenario("full_evolution_7d")
     weekly = [
-        p for p in data["phases"]
+        p
+        for p in data["phases"]
         if p["type"] == "reflection" and p.get("reflection_type") == "weekly"
     ]
     assert len(weekly) >= 1
@@ -126,15 +200,23 @@ def test_full_evolution_has_weekly_reflection():
 def test_scenario_presets_include_new_scenarios():
     """SCENARIO_PRESETS should include entries for all new scenarios."""
     import sys
+
     sys.path.insert(0, str(SCENARIOS_DIR.parent / "scripts"))
     # Import directly to check the constant
     from scripts.chat import SCENARIO_PRESETS
 
     preset_names = {p[0] for p in SCENARIO_PRESETS}
     expected = {
-        "initiative-test", "goal-generation-test", "budget-crisis",
-        "topic-exhaustion-test", "novelty-injection-test", "dream-cycle-test",
-        "faction-emergence-test", "full-evolution-7d", "dress-rehearsal", "ab-test",
+        "initiative-test",
+        "goal-generation-test",
+        "budget-crisis",
+        "topic-exhaustion-test",
+        "novelty-injection-test",
+        "dream-cycle-test",
+        "faction-emergence-test",
+        "full-evolution-7d",
+        "dress-rehearsal",
+        "ab-test",
     }
     for name in expected:
         assert name in preset_names, f"Preset '{name}' not in SCENARIO_PRESETS"
@@ -148,9 +230,7 @@ def test_scenario_presets_point_to_existing_files():
     for name, _, filepath in SCENARIO_PRESETS:
         if filepath:  # Skip autonomous (no file)
             full_path = project_root / filepath
-            assert full_path.exists(), (
-                f"Preset '{name}' points to non-existent file: {filepath}"
-            )
+            assert full_path.exists(), f"Preset '{name}' points to non-existent file: {filepath}"
 
 
 # ── Faction parsing (#419) ──────────────────────────────────
