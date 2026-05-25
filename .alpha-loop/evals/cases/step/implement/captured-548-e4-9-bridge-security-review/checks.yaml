@@ -1,0 +1,10 @@
+type: step
+step: implement
+eval_method: pending
+status: needs-annotation
+source: auto-captured
+captured_from:
+  issue: 548
+  session: session/epic-506-epic-e4-python-node-bridge
+  date: 2026-05-18
+checks: []
