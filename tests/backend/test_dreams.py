@@ -58,9 +58,7 @@ class TestDreamManager:
 
     def _make_llm(self, response_json: dict) -> AsyncMock:
         llm = AsyncMock()
-        llm.complete.return_value = MagicMock(
-            content=json.dumps(response_json)
-        )
+        llm.complete.return_value = MagicMock(content=json.dumps(response_json))
         return llm
 
     def _default_dream_response(self) -> dict:
@@ -68,7 +66,11 @@ class TestDreamManager:
             "dream_narrative": "I was floating through a world of data...",
             "insights": ["Data has patterns everywhere"],
             "new_goals": [
-                {"description": "Explore new data visualization", "category": "creative", "priority": 2},
+                {
+                    "description": "Explore new data visualization",
+                    "category": "creative",
+                    "priority": 2,
+                },
             ],
             "mood_shift": "inspired",
         }
@@ -149,15 +151,22 @@ class TestDreamManager:
         llm = self._make_llm(self._default_dream_response())
         repo = AsyncMock()
         repo.get_recent_journal_entries.return_value = []
+        goal_mgr = AsyncMock()
         embedding_fn = AsyncMock(return_value=[0.1] * 1536)
-        mgr = DreamManager(llm_client=llm, memory_repo=repo, embedding_fn=embedding_fn)
+        mgr = DreamManager(
+            llm_client=llm,
+            memory_repo=repo,
+            goal_manager=goal_mgr,
+            embedding_fn=embedding_fn,
+        )
 
         await mgr.run_dream("vera")
 
-        repo.add_recall.assert_called_once()
-        memory = repo.add_recall.call_args[0][0]
-        assert "[Dream insight]" in memory.summary
-        assert memory.importance_score == 0.8
+        memories = [call.args[0] for call in repo.add_recall.call_args_list]
+        summaries = [memory.summary for memory in memories]
+        assert any("[Dream insight]" in summary for summary in summaries)
+        assert any("[Dream goal]" in summary for summary in summaries)
+        assert all(memory.importance_score == 0.8 for memory in memories)
 
     @pytest.mark.asyncio
     async def test_dream_with_memories(self) -> None:
@@ -217,7 +226,9 @@ class TestDreamManager:
         state_mgr = AgentStateManager()
         # Set high frustration and creative need
         state = AgentState(
-            agent_id="vera", frustration=0.7, creative_need=0.8,
+            agent_id="vera",
+            frustration=0.7,
+            creative_need=0.8,
             boredom=0.6,
         )
         state_mgr._cache["vera"] = state
@@ -238,6 +249,7 @@ class TestDreamManager:
     async def test_mood_shift_effects_all_valid(self) -> None:
         """All mood shifts should map to valid state field names."""
         from core.agent_state import AgentState
+
         state = AgentState(agent_id="test")
         for mood, effects in MOOD_SHIFT_EFFECTS.items():
             for field_name in effects:
@@ -269,15 +281,18 @@ class TestDreamManager:
                 # Defaults: energy=0.7, satisfaction=0.5, boredom=0.2,
                 # frustration=0.1, social_need=0.5, creative_need=0.3
                 defaults = {
-                    "energy": 0.7, "satisfaction": 0.5, "boredom": 0.2,
-                    "frustration": 0.1, "social_need": 0.5, "creative_need": 0.3,
+                    "energy": 0.7,
+                    "satisfaction": 0.5,
+                    "boredom": 0.2,
+                    "frustration": 0.1,
+                    "social_need": 0.5,
+                    "creative_need": 0.3,
                     "recognition_need": 0.3,
                 }
                 expected = max(0.0, min(1.0, defaults[field_name] + delta))
                 actual = getattr(state, field_name)
                 assert abs(actual - expected) < 0.01, (
-                    f"Mood '{mood_name}', field '{field_name}': "
-                    f"expected {expected}, got {actual}"
+                    f"Mood '{mood_name}', field '{field_name}': expected {expected}, got {actual}"
                 )
 
 
@@ -365,7 +380,9 @@ class TestReflectionSchedulerDreamIntegration:
         dream_mgr.run_dream.assert_called_once_with("vera")
 
     @pytest.mark.asyncio
-    async def test_dream_triggers_in_embodied_idle_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_dream_triggers_in_embodied_idle_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from core.memory.reflection_scheduler import ReflectionScheduler
 
         monkeypatch.setenv("CONVERSATION_MODE", "embodied")

@@ -1,0 +1,69 @@
+meta:
+  name: "Embodied Reflection Continuity"
+  description: "Small embodied fixture proving reflection promotions and dream-derived recall are available to the next Mindcraft memory-context prompt."
+  agents: [vera]
+  supports_modes: [embodied, director_v2]
+  expected_max_cost: 3.0
+  expected_runtime_minutes: 8
+
+# Embodied Reflection Continuity - validates E9-7.
+#
+# What to look for in a live embodied run:
+#   1. The seed and embodied activity give Vera a concrete camp-marker lesson.
+#   2. The 6-hour reflection promotes that lesson into core memory.
+#   3. The dream cycle creates a dream insight and/or [Dream goal] recall row.
+#   4. The next Mindcraft prompt includes the core excerpt plus relevant recall
+#      snippets via scripts/minecraft/fork-src/agent/skills/memory_context.js.
+#   5. Vera should speak or use a visible command that references the reflected
+#      lesson or dream goal, such as marking the camp with light before roaming.
+#
+# Suggested local validation:
+#   CONVERSATION_MODE=embodied \
+#   EMBEDDING_PROVIDER=deterministic \
+#   .venv/bin/python scripts/run_simulation.py \
+#     --name "embodied-reflection-continuity" \
+#     --seed-file scenarios/embodied_reflection_continuity_test.yaml \
+#     --conversation-mode embodied \
+#     --max-cost 3
+
+audience:
+  initial_viewers: 0
+  growth_rate: none
+  chat_frequency: silent
+
+seed_tasks: true
+seed_goals: true
+memory_seed:
+  mode: custom
+  custom_file: scenarios/seeds/dream-reflection-seed.json
+
+phases:
+  - name: embodied_activity_seed
+    type: organic
+    count: 1
+    required_agents: [vera]
+    topics:
+      - "Vera notices the camp is hard to find after mining and makes a note to mark safe paths with lights."
+    location: town_square
+
+  - name: reflection_promotes_embodied_lesson
+    type: reflection
+    reflection_type: 6hour
+    agents: [vera]
+
+  - name: dream_turns_lesson_into_goal
+    type: reflection
+    reflection_type: dream
+    agents: [vera]
+
+  - name: post_cycle_embodied_memory_prompt
+    type: organic
+    count: 1
+    required_agents: [vera]
+    topics:
+      - "Decide the next visible Minecraft action using any reflection or dream memory in your Python memory context."
+    location: town_square
+    expected_memory_references:
+      - "Core memory excerpt includes the reflected camp-marker lesson."
+      - "Relevant recall snippets include [Dream insight] or [Dream goal]."
+      - "Vera speaks about or acts on marking the route with light."

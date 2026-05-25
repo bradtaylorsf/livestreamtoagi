@@ -26,6 +26,7 @@ NEW_SCENARIOS = [
 DREAM_REFLECTION_SCENARIOS = [
     "dream_cycle_test",
     "dream_smoke_test",
+    "embodied_reflection_continuity_test",
     "goal_generation_test",
 ]
 
