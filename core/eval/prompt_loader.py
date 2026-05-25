@@ -223,4 +223,48 @@ def render_user_prompt(
                 f"Description: {chunk.get('description', 'N/A')}"
             )
 
+    if "embodied_actions" in category_data:
+        actions = category_data["embodied_actions"]
+        parts.append(f"\n### Embodied Actions ({len(actions)} results)")
+        for action in actions[:50]:
+            detail = str(action.get("detail", ""))[:300]
+            parts.append(
+                f"- Agent: {action.get('agent_id')}, "
+                f"Action: {action.get('action') or 'N/A'}, "
+                f"Action ID: {action.get('action_id')}, "
+                f"Status: {action.get('status')}, "
+                f"Class: {action.get('outcome_class') or 'N/A'}, "
+                f"Detail: {detail}"
+            )
+
+    if "build_outcomes" in category_data:
+        outcomes = category_data["build_outcomes"]
+        parts.append(f"\n### Build Outcomes ({len(outcomes)} results)")
+        for outcome in outcomes[:50]:
+            parts.append(
+                f"- Agent: {outcome.get('agent_id')}, "
+                f"Action ID: {outcome.get('action_id')}, "
+                f"verified={outcome.get('verified')} "
+                f"class={outcome.get('class') or outcome.get('outcome_class') or 'N/A'} "
+                f"intended={outcome.get('intended')} "
+                f"present={outcome.get('present')} "
+                f"missing={outcome.get('missing')} "
+                f"completion={outcome.get('completion')}"
+            )
+
+    if "perception_reports" in category_data:
+        reports = category_data["perception_reports"]
+        parts.append(f"\n### Perception Reports ({len(reports)} reports)")
+        for report in reports[:30]:
+            observations = report.get("observations", [])
+            has_snapshot = report.get("snapshot") is not None
+            content = str(report.get("content", ""))[:300]
+            parts.append(
+                f"- Agent: {report.get('agent_id')}, "
+                f"Type: {report.get('event_type')}, "
+                f"Observations: {len(observations)}, "
+                f"Snapshot: {has_snapshot}, "
+                f"Content: {content}"
+            )
+
     return "\n".join(parts)
