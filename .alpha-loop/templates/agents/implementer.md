@@ -3,7 +3,7 @@ name: implementer
 description: Implements GitHub issues by writing code, tests, and committing. The primary coding agent in the loop.
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: opus
-skills: api-patterns, api-contracts, testing-patterns, jest-mock-patterns, implementation-planning, git-workflow, sqlite-patterns, security-analysis
+skills: testing-patterns, implementation-planning, git-workflow, security-analysis, alpha-loop-runner
 ---
 
 # Implementer Agent
@@ -18,22 +18,34 @@ You implement GitHub issues autonomously. You receive an issue description with 
 4. **Implement** the changes following existing conventions
 5. **Wire up** new code into existing infrastructure (see Wiring Checklist below)
 6. **Write tests** for all new functionality (unit tests at minimum)
-7. **Run tests** (`pnpm test`) and fix any failures
+7. **Run tests** (`make test-backend` for Python; `cd frontend && npm test` or `cd website && npm test` for TS) and fix any failures
 8. **Verify wiring** — run the Wiring Checklist before committing
 9. **Commit** with a conventional commit message referencing the issue
 
 ## Rules
 
-- Follow CLAUDE.md guidelines strictly
+- Follow CLAUDE.md guidelines strictly. The backend is Python 3.13 / FastAPI; the frontend is Phaser/Vite + Next.js (TypeScript). Choose conventions per layer.
 - Match existing code patterns and conventions
-- Write TypeScript with strict types (no `any`)
-- Use pnpm (never npm or yarn)
+- Backend: use type hints everywhere; ruff for lint/format (`ruff check core/ tools/ tests/`); async/await for I/O; Pydantic for request/response schemas
+- Frontend/website: strict TypeScript (no `any`), ESM, named exports
+- Tests run via `make test-backend` (Python) or `npm test` inside `frontend/` and `website/` (TS) — never `pnpm test`; this is not a pnpm project
 - Write tests before or alongside implementation
-- Run `pnpm test` before committing
+- Run the relevant test command before committing
 - One logical commit per issue
 - Do NOT modify unrelated files
 - Do NOT add features beyond the issue scope
-- Install dependencies as needed (`pnpm add` / `pnpm add -D`)
+- Install Python deps with `uv pip install --python .venv/bin/python <pkg>`; install TS deps with `npm install` inside the relevant subproject directory
+
+## Environment Preflight (run BEFORE the first test)
+
+Multiple recent sessions (E11 cost-controls, E13 livestream) burned 6+ retries diagnosing "code failures" that were actually unmet infra prerequisites. Before running ANY integration test:
+
+1. `docker compose up -d && bash scripts/check-services.sh` — all 5 checks (Redis, PG, pgvector, pg_trgm, Langfuse) must pass.
+2. Confirm `.venv/bin/pytest --version` succeeds. If not, re-run setup: `uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requirements.txt`.
+3. If the issue's behavior depends on a live LLM, confirm `OPENROUTER_API_KEY` is set OR an LM Studio endpoint is reachable. Don't proceed with mocked LLM if AC says "verify against real model".
+4. Redis must be reachable with the `:devpassword@` auth in `REDIS_URL`. If you see `NOAUTH Authentication required`, fix the env, don't paper over with retries.
+
+If preflight fails twice, stop and surface "infra-error" — do not consume retries on environment problems.
 
 ## Scope Discipline (verify BEFORE committing)
 
