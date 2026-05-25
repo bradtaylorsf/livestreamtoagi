@@ -264,6 +264,9 @@ class ScenarioMeta(BaseModel):
     phase_count: int = 0
     expected_max_cost: float = 0.0
     expected_runtime_minutes: int = 0
+    # Categories the scenario is meant to exercise (E22-3). The dashboard
+    # (E22-10) reads this block to filter and color scenarios.
+    eval_targets: dict[str, Any] | None = None
 
 
 # ── Serialization helpers ────────────────────────────────────────
@@ -468,6 +471,9 @@ def _build_scenario_meta(path: Any) -> ScenarioMeta:
     except (TypeError, ValueError):
         expected_runtime_minutes = 0
 
+    eval_targets_value = parsed.get("eval_targets")
+    eval_targets = eval_targets_value if isinstance(eval_targets_value, dict) else None
+
     return ScenarioMeta(
         filename=path.name,
         name=name,
@@ -476,6 +482,7 @@ def _build_scenario_meta(path: Any) -> ScenarioMeta:
         phase_count=phase_count,
         expected_max_cost=expected_max_cost,
         expected_runtime_minutes=expected_runtime_minutes,
+        eval_targets=eval_targets,
     )
 
 

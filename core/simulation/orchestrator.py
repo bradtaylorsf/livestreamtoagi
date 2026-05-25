@@ -258,6 +258,10 @@ class SimulationConfig:
         self.conversation_mode = normalized_conversation_mode
         self.submitted_params = dict(submitted_params or {})
         self.source = source
+        # ``eval_targets`` is populated when a scenario YAML declares one.
+        # The dashboard (E22-10) and headless eval scorer (E22-9) read it
+        # to filter scenarios and apply category-specific rubrics.
+        self.eval_targets: dict[str, Any] | None = None
 
     @property
     def mode(self) -> str:
@@ -318,6 +322,15 @@ class SimulationConfig:
 
         with open(self.seed_file) as f:
             data = yaml.safe_load(f)
+
+        # Validate the YAML against the canonical scenario schema (E22-3).
+        # Pydantic raises ValidationError with field-level messages on bad
+        # input — propagate as-is so authors see exactly what's wrong.
+        from core.simulation.scenario_schema import validate_scenario_dict
+
+        parsed_scenario = validate_scenario_dict(data)
+        if parsed_scenario.eval_targets is not None:
+            self.eval_targets = parsed_scenario.eval_targets.model_dump()
 
         self.audience_config = data.get("audience")
         self.seed_tasks = bool(data.get("seed_tasks", False))
@@ -391,12 +404,9 @@ class SimulationConfig:
 
         raw_phases = data.get("phases", [])
         for entry in raw_phases:
-            phase_type = entry.get("type", "organic")
-            try:
-                ptype = PhaseType(phase_type)
-            except ValueError:
-                logger.warning("Unknown phase type '%s', defaulting to organic", phase_type)
-                ptype = PhaseType.organic
+            # Phase type is validated by the scenario schema above, so this
+            # PhaseType(...) call always succeeds.
+            ptype = PhaseType(entry.get("type", "organic"))
 
             # Extract config: everything except name and type
             config = {k: v for k, v in entry.items() if k not in ("name", "type")}
@@ -482,6 +492,8 @@ class SimulationConfig:
             d["run_mode"] = self.run_mode.value
         if self.experimental_goal is not None:
             d["experimental_goal"] = self.experimental_goal.model_dump()
+        if self.eval_targets is not None:
+            d["eval_targets"] = self.eval_targets
         return d
 
 
