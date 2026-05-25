@@ -39,6 +39,28 @@ Before a real run, check:
 - `.alpha-loop.yaml` for `repo`, `agent`, `setup_command`, `test_command`, `smoke_test`, `skip_verify`, `auto_merge`, `batch`, `batch_size`, `max_issues`, and duration limits
 - `ps -axo pid,ppid,etime,command | rg 'alpha-loop|dist/cli.js' | rg -v 'rg '` to ensure no duplicate loop is running
 
+### Infra Preflight Gate (REQUIRED before consuming any retry budget)
+
+Recent sessions burned 6+ retries diagnosing infrastructure failures as code bugs. Before the dry-run validation, all of these must pass — if any fail, fix the infra first and do NOT start the loop:
+
+```bash
+# Services
+docker compose up -d
+bash scripts/check-services.sh             # all 5 checks must pass
+
+# Python env
+.venv/bin/pytest --version                 # if this fails, re-run setup_command
+
+# Redis auth (must match REDIS_URL — common failure: NOAUTH)
+redis-cli -h 127.0.0.1 -p 6381 -a devpassword ping | grep -q PONG
+
+# LLM provider: at least one must be reachable for issues whose AC depends on a live model
+test -n "$OPENROUTER_API_KEY" \
+  || curl -fsS "${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234}/v1/models" >/dev/null
+```
+
+If preflight fails, status the failure as "infra-error" and do not invoke `alpha-loop run`. Retries against a broken environment are wasted.
+
 ## Running An Epic
 
 1. Confirm the epic issue number and verify it has the `epic` label:
@@ -114,6 +136,19 @@ If the user says "run the loop" without an epic number:
 ## Completion Validation
 
 When the loop stops, do not just report that it exited. Validate completion:
+
+### Acceptance Evidence Classifier (run BEFORE declaring completion)
+
+For each completed child issue, classify its AC:
+
+- **Offline-acceptance**: tests + ruff + smoke logs alone satisfy the AC. Code-passing == done.
+- **Live-acceptance**: AC explicitly references a live external surface (Twitch/YouTube stream capture, LM Studio reachable model, real Minecraft world artifact, real OpenRouter call, browser-rendered page).
+
+If AC is live-acceptance, the loop's `make test-backend` + smoke is INSUFFICIENT. You must:
+- Locate the named evidence artifact (stream URL, world snapshot path, browser screenshot, captured response).
+- If missing, mark the issue "code-complete, acceptance-pending" and DO NOT close the parent epic checkbox until live evidence lands.
+
+The empirical pattern from session E13: 7/7 issues had passing tests but missed acceptance because the loop conflated "tests green" with "acceptance complete".
 
 1. Inspect the session output and session PR.
 2. Inspect the epic and children with `gh issue view` / `gh pr list`; confirm completed child issues have merged PRs and checked boxes.
