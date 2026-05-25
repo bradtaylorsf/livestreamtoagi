@@ -475,12 +475,76 @@ class ContextAssembler:
             if nearby:
                 parts.append(f"Nearby Agents: {nearby}")
 
+            needs_summary = await self._get_needs_summary(agent_id)
+            if needs_summary:
+                parts.append(needs_summary)
+
+            recent_event = await self._get_recent_world_event()
+            if recent_event:
+                parts.append(recent_event)
+
             if len(parts) == 1:
                 return ""
             return "\n".join(parts)
         except Exception:
             logger.warning("Failed to read world state for %s", agent_id)
             return ""
+
+    async def _get_needs_summary(self, agent_id: str) -> str:
+        """Pull a per-agent needs snapshot from Redis (E22-4).
+
+        The headless ``NeedsManager`` mirrors state to
+        ``agent:needs:<agent_id>`` via ``snapshot_to_redis``. Only needs at
+        or below their warning threshold show up, so a fed agent stays out
+        of the prompt entirely.
+        """
+        if not self._redis:
+            return ""
+        try:
+            raw = await self._redis.get(f"agent:needs:{agent_id}")
+            if not raw:
+                return ""
+            import json as _json
+
+            data = _json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+        except Exception:
+            return ""
+
+        below_critical = data.get("below_critical") or {}
+        below_warning = data.get("below_warning") or {}
+        if not below_critical and not below_warning:
+            return ""
+
+        lines = ["Active needs:"]
+        for need in below_critical:
+            lines.append(f"- {need}: CRITICAL ({data.get(need, 0):.0f}/100)")
+        for need in below_warning:
+            if need in below_critical:
+                continue
+            lines.append(f"- {need}: low ({data.get(need, 0):.0f}/100)")
+        return "\n".join(lines)
+
+    async def _get_recent_world_event(self) -> str:
+        """Surface the most recent headless world event for prompt context."""
+        if not self._redis:
+            return ""
+        try:
+            recent = await self._redis.lrange("shared:world_events", -1, -1)
+        except Exception:
+            return ""
+        if not recent:
+            return ""
+        try:
+            import json as _json
+
+            raw = recent[-1]
+            data = _json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+        except Exception:
+            return ""
+        event_name = data.get("event")
+        if not event_name:
+            return ""
+        return f"Recent world event: {event_name}"
 
     async def _get_chat_highlights(self, agent_id: str) -> str:
         """Get recent Twitch chat highlights. Only for Pixel agent."""

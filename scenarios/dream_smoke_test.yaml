@@ -33,6 +33,12 @@ meta:
 # Run with:
 #   pnpm chat sim dream-smoke-test --max-cost 3
 
+eval_targets:
+  primary: [internal_state, agency]
+  secondary: [dialogue_quality]
+  success_criteria:
+    internal_state: "min_score >= 50"
+
 audience:
   initial_viewers: 0
   growth_rate: none

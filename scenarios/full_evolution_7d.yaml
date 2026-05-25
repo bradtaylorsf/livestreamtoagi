@@ -24,6 +24,13 @@ meta:
 # Run with:
 #   pnpm chat sim full-evolution-7d --max-cost 50
 
+eval_targets:
+  primary: [social_dynamics, world_evolution, simulation_narrative]
+  secondary: [agency, entertainment, dialogue_quality, internal_state]
+  success_criteria:
+    social_dynamics: "min_score >= 60"
+    world_evolution: "at_least_one_build_intent"
+
 audience:
   initial_viewers: 10
   growth_rate: medium
