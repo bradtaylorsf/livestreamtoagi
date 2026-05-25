@@ -739,6 +739,14 @@
           "title": "Mentions",
           "type": "array"
         },
+        "plan_build_agent_allowlist": {
+          "description": "Run-scoped agent ids allowed to own !planAndBuild phases.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Plan Build Agent Allowlist",
+          "type": "array"
+        },
         "position": {
           "anyOf": [
             {

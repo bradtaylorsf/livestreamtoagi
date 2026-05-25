@@ -420,9 +420,7 @@ class MemorySnapshotImporter:
                     continue
                 for goal in goals:
                     source = goal.source if goal.source in _ALLOWED_GOAL_SOURCES else "assigned"
-                    category = (
-                        goal.category if goal.category in _ALLOWED_GOAL_CATEGORIES else None
-                    )
+                    category = goal.category if goal.category in _ALLOWED_GOAL_CATEGORIES else None
                     try:
                         await self._db.execute(
                             """INSERT INTO agent_goals

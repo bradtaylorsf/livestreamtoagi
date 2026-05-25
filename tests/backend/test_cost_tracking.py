@@ -268,6 +268,7 @@ class TestAlphaCostAttribution:
 
     @pytest.mark.asyncio
     async def test_dispatch_alpha_attributes_llm_spend_to_alpha(self) -> None:
+        from core.model_config import resolve_model_reference
         from tools.alpha_dispatch import ALPHA_MODEL, DispatchAlphaTool
 
         client, cost_repo = _make_cost_tracking_client()
@@ -285,7 +286,7 @@ class TestAlphaCostAttribution:
         cost_repo.add_cost.assert_awaited_once()
         event = cost_repo.add_cost.await_args.args[0]
         assert event.agent_id == "alpha"
-        assert event.details["model"] == ALPHA_MODEL
+        assert event.details["model"] == resolve_model_reference(ALPHA_MODEL)
 
 
 # ── SimulationRepo.get_total_cost_from_events ────────────────

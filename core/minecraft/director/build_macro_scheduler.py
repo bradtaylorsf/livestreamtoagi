@@ -595,7 +595,9 @@ def _preferred_phase_owners(
     return [candidate_id for _priority, candidate_id in sorted(scored)]
 
 
-def _plan_build_allowed_agents(value: Sequence[Any] | str | set[str] | None = None) -> set[str] | None:
+def _plan_build_allowed_agents(
+    value: Sequence[Any] | str | set[str] | None = None,
+) -> set[str] | None:
     if isinstance(value, set):
         parsed = {_agent_id(item) for item in value}
         parsed.discard("")

@@ -29,9 +29,7 @@ INTERNAL_MODEL_ROLES: dict[str, InternalModelRole] = {
     "topic_classifier": InternalModelRole("LTAG_MODEL_TOPIC_CLASSIFIER", "fast"),
     "memory_summary": InternalModelRole("LTAG_MODEL_MEMORY_SUMMARY", "fast"),
     "conversation_summary": InternalModelRole("LTAG_MODEL_CONVERSATION_SUMMARY", "fast"),
-    "conversation_commitments": InternalModelRole(
-        "LTAG_MODEL_CONVERSATION_COMMITMENTS", "fast"
-    ),
+    "conversation_commitments": InternalModelRole("LTAG_MODEL_CONVERSATION_COMMITMENTS", "fast"),
     "dream_fallback": InternalModelRole("LTAG_MODEL_DREAM_FALLBACK", "building"),
     "reflection_fallback": InternalModelRole("LTAG_MODEL_REFLECTION_FALLBACK", "building"),
     "departure_narrative": InternalModelRole("LTAG_MODEL_DEPARTURE_NARRATIVE", "fast"),
@@ -43,23 +41,17 @@ INTERNAL_MODEL_ROLES: dict[str, InternalModelRole] = {
     ),
     "character_concept": InternalModelRole("LTAG_MODEL_CHARACTER_CONCEPT", "building"),
     "character_config": InternalModelRole("LTAG_MODEL_CHARACTER_CONFIG", "fast"),
-    "character_system_prompt": InternalModelRole(
-        "LTAG_MODEL_CHARACTER_SYSTEM_PROMPT", "fast"
-    ),
+    "character_system_prompt": InternalModelRole("LTAG_MODEL_CHARACTER_SYSTEM_PROMPT", "fast"),
     "world_event": InternalModelRole("LTAG_MODEL_WORLD_EVENT", "fast"),
     "world_revenue": InternalModelRole("LTAG_MODEL_WORLD_REVENUE", "fast"),
-    "recurring_persona_comment": InternalModelRole(
-        "LTAG_MODEL_RECURRING_PERSONA_COMMENT", "fast"
-    ),
+    "recurring_persona_comment": InternalModelRole("LTAG_MODEL_RECURRING_PERSONA_COMMENT", "fast"),
     "recurring_persona_chat": InternalModelRole("LTAG_MODEL_RECURRING_PERSONA_CHAT", "fast"),
     "simulation_learning_summary": InternalModelRole(
         "LTAG_MODEL_SIMULATION_LEARNING_SUMMARY", "fast"
     ),
     "eval_engine": InternalModelRole("LTAG_MODEL_EVAL_ENGINE", "building"),
     "eval_analyzer": InternalModelRole("LTAG_MODEL_EVAL_ANALYZER", "building"),
-    "relationship_sentiment": InternalModelRole(
-        "LTAG_MODEL_RELATIONSHIP_SENTIMENT", "fast"
-    ),
+    "relationship_sentiment": InternalModelRole("LTAG_MODEL_RELATIONSHIP_SENTIMENT", "fast"),
     "alpha_dispatch": InternalModelRole("LTAG_MODEL_ALPHA_DISPATCH", "building"),
 }
 

@@ -57,9 +57,7 @@ async def _read_payload(state: SharedWorkingState) -> dict[str, Any]:
         "claims": [asdict(claim) for claim in await state.get_agent_claims()],
         "dangers": [asdict(report) for report in await state.get_danger_reports()],
         "unresolved_dangers": [asdict(report) for report in unresolved],
-        "recent_actions": [
-            asdict(action) for action in await state.get_recent_verified_actions()
-        ],
+        "recent_actions": [asdict(action) for action in await state.get_recent_verified_actions()],
         "build_site": asdict(build_site) if build_site else None,
         "next_steps": [asdict(step) for step in await state.get_next_steps()],
         "settlement_objectives": [asdict(objective) for objective in objectives],
@@ -174,9 +172,7 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
     elif payload.operation == "verified_action_record":
         if payload.verified_action is None:
             raise ValueError("verified_action_record requires verified_action")
-        await state.record_verified_action(
-            VerifiedAction(**payload.verified_action.model_dump())
-        )
+        await state.record_verified_action(VerifiedAction(**payload.verified_action.model_dump()))
     elif payload.operation == "build_site_set":
         if payload.build_site is None:
             raise ValueError("build_site_set requires build_site")

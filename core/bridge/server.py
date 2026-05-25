@@ -324,9 +324,10 @@ def _shared_state_services_unavailable(
 ) -> BridgeResponse | None:
     if services is None:
         message = "shared-state services are unavailable; application lifespan has not initialized"
-    elif getattr(services, "redis", None) is None and getattr(
-        services, "shared_working_state", None
-    ) is None:
+    elif (
+        getattr(services, "redis", None) is None
+        and getattr(services, "shared_working_state", None) is None
+    ):
         message = "shared working state is unavailable"
     else:
         return None

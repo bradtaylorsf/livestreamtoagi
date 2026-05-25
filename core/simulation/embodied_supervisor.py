@@ -108,8 +108,7 @@ def _settlement_owner_order(
 def _settlement_plan_build_owner_allowlist(env: dict[str, str] | None = None) -> list[str]:
     source = env if env is not None else os.environ
     return _agent_id_order(
-        source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST")
-        or source.get("SOAK_PLAN_BUILD_BOTS")
+        source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST") or source.get("SOAK_PLAN_BUILD_BOTS")
     )
 
 
