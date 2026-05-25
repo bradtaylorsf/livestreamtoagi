@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import signal
 import sys
 from datetime import timedelta
@@ -51,6 +52,34 @@ def _default_agents() -> str:
 
 
 DEFAULT_AGENTS = _default_agents()
+
+
+def _truthy_env(value: str | None) -> bool:
+    if value is None or value == "":
+        return False
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _normalize_management_policy(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"off", "disabled", "0"}:
+        return "off"
+    if normalized == "shadow":
+        return "shadow"
+    if normalized in {"enforce", "enabled", "on", "1"}:
+        return "enforce"
+    return normalized
+
+
+def _management_policy_from_env() -> str | None:
+    if _truthy_env(os.environ.get("MC_SIM_DISABLE_MANAGEMENT")):
+        return "off"
+    return _normalize_management_policy(
+        os.environ.get("MC_SIM_MANAGEMENT_POLICY")
+        or os.environ.get("MINECRAFT_MANAGEMENT_REVIEW_MODE")
+    )
 
 
 def _load_run_config_file(path: str | None) -> dict:
@@ -210,6 +239,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
     memory_seed_cfg = _memory_seed_from_run_config(args, run_config)
     world_cfg = _world_from_run_config(args, run_config)
 
+    management_policy = args.management_policy or run_config.get("management_policy")
+    if management_policy is None and args.management_shadow is None:
+        management_policy = _management_policy_from_env()
+
     sim_config = SimulationConfig(
         name=args.name,
         description=args.description,
@@ -224,7 +257,7 @@ async def run_simulation(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         verbose=verbose,
         management_shadow=args.management_shadow,
-        management_policy=args.management_policy or run_config.get("management_policy"),
+        management_policy=management_policy,
         existing_sim_id=getattr(args, "resume_sim_id", None) or getattr(args, "sim_id", None),
         hypothesis=getattr(args, "hypothesis", None),
         auto_draft_learnings=getattr(args, "auto_draft_learnings", False),

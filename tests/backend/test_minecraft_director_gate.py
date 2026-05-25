@@ -548,6 +548,109 @@ async def test_plan_build_allowlist_reassigns_non_builder_objective_owner(
     assert "!planAndBuild" not in by_agent["vera"].available_tools
 
 
+async def test_pending_settlement_objective_does_not_lock_out_selected_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS", "0")
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Rex is the build owner. Build the next settlement phase.",
+        active_objective={
+            "objective_id": "phase-square",
+            "phase_index": 6,
+            "description": "central town square",
+            "owner_agent_id": "sentinel",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    owner = by_agent["rex"]
+    assert owner.selected is True
+    assert owner.turn_kind == "planner"
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner == "rex"
+    assert owner.build_macro.objective_id == "phase-square"
+    assert owner.build_macro.reason == "settlement_phase_owner_assigned"
+    assert "!planAndBuild" in owner.available_tools
+
+    assert by_agent["sentinel"].build_macro is not None
+    assert by_agent["sentinel"].build_macro.role == "support"
+    assert "!planAndBuild" not in by_agent["sentinel"].available_tools
+
+
+async def test_expired_pending_settlement_owner_can_be_claimed_by_calling_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS", "0")
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Autonomous settlement heartbeat: build the next settlement phase.",
+        active_objective={
+            "objective_id": "phase-animal-pen",
+            "phase_index": 2,
+            "description": "garden animal pen",
+            "owner_agent_id": "rex",
+            "status": "pending",
+        },
+    )
+
+    decision = await gate.evaluate("sim-test", "sentinel", event)
+
+    assert decision.selected is True
+    assert decision.turn_kind == "planner"
+    assert decision.build_macro is not None
+    assert decision.build_macro.owner == "sentinel"
+    assert decision.build_macro.reason == "settlement_phase_owner_assigned"
+    assert "!planAndBuild" in decision.available_tools
+
+
+async def test_pending_settlement_owner_default_grace_blocks_early_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS", raising=False)
+    monkeypatch.delenv("MINECRAFT_SETTLEMENT_PENDING_OWNER_GRACE_MS", raising=False)
+    now = 1_000
+
+    def fake_now_ms() -> int:
+        return now
+
+    monkeypatch.setattr("core.minecraft.director.build_macro_scheduler._now_ms", fake_now_ms)
+    monkeypatch.setattr("core.minecraft.director.prompt_gate._now_ms", fake_now_ms)
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text='Build the active settlement phase "garden animal pen".',
+        active_objective={
+            "objective_id": "phase-animal-pen",
+            "phase_index": 2,
+            "description": "garden animal pen",
+            "owner_agent_id": "rex",
+            "status": "pending",
+        },
+    )
+
+    first = await gate.evaluate("sim-test", "sentinel", event)
+    now += 120_000
+    event["scene_hint"] = "batch:1:system:garden-animal-pen-retry"
+    second = await gate.evaluate("sim-test", "sentinel", event)
+
+    assert first.selected is False
+    assert first.build_macro is not None
+    assert first.build_macro.owner == "rex"
+    assert first.build_macro.reason == "support_assignment"
+    assert "!planAndBuild" not in first.available_tools
+    assert second.selected is False
+    assert second.build_macro is not None
+    assert second.build_macro.owner == "rex"
+    assert second.build_macro.reason == "support_assignment"
+    assert "!planAndBuild" not in second.available_tools
+
+
 async def test_plan_build_allowlist_blocks_non_eligible_explicit_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -639,6 +742,51 @@ async def test_active_settlement_objective_ignores_stale_backend_plan_mode_latch
     assert "!planAndBuild" in owner.available_tools
 
 
+async def test_unresolved_distress_preempts_settlement_build_turn() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text='Build the active settlement phase "watch tower".',
+        available_tools=["!inventory", "!nearbyBlocks", "!rescue", "!planAndBuild"],
+        active_objective={
+            "objective_id": "phase-watch-tower",
+            "phase_index": 3,
+            "description": "watch tower",
+            "owner_agent_id": "rex",
+            "status": "pending",
+        },
+        unresolved_dangers=[
+            {
+                "agent_id": "sentinel",
+                "kind": "drowning",
+                "location": {"x": 7, "y": 56, "z": -2},
+                "severity": 5,
+                "danger_id": "danger-sentinel",
+                "rescuer_id": "alpha",
+                "recovery_status": "rescue_dispatched",
+                "reported_at": 1_000.0,
+            }
+        ],
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    rescuer = by_agent["alpha"]
+    assert rescuer.selected is True
+    assert rescuer.turn_kind == "speaker"
+    assert rescuer.reason == "active_rescue_task"
+    assert rescuer.build_macro is None
+    assert rescuer.local_observations["active_rescue"]["target_agent_id"] == "sentinel"
+    assert rescuer.local_observations["active_rescue"]["danger_id"] == "danger-sentinel"
+    assert "!rescue" in rescuer.available_tools
+    assert "!planAndBuild" not in rescuer.available_tools
+    assert all(decision.build_macro is None for decision in decisions)
+    assert all(
+        not decision.selected for agent_id, decision in by_agent.items() if agent_id != "alpha"
+    )
+
+
 async def test_new_settlement_objective_releases_previous_scene_owner() -> None:
     gate = _gate()
     phase_one = _build_event(
@@ -680,6 +828,50 @@ async def test_new_settlement_objective_releases_previous_scene_owner() -> None:
     assert "!planAndBuild" in owner.available_tools
 
 
+async def test_settlement_owner_keeps_plan_grant_after_cached_verdict_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 1_000
+
+    def fake_now_ms() -> int:
+        return now
+
+    monkeypatch.setattr("core.minecraft.director.prompt_gate._now_ms", fake_now_ms)
+    monkeypatch.setattr("core.minecraft.director.prompt_gate._DECISION_TTL_MS", 10)
+    gate = _gate()
+    event = _build_event(
+        source_agent="fork",
+        event_text=(
+            'Build the active settlement phase "shared storage depot". '
+            "Incoming batch from support agents."
+        ),
+        scene_hint="settlement-shared-storage-scene",
+        active_objective={
+            "objective_id": "phase-storage",
+            "phase_index": 1,
+            "description": "shared storage depot",
+            "owner_agent_id": "vera",
+            "status": "pending",
+        },
+    )
+
+    support_decision = await gate.evaluate("sim-test", "sentinel", event)
+    assert support_decision.selected is False
+    assert support_decision.build_macro is not None
+    assert support_decision.build_macro.owner == "vera"
+
+    now = 1_015
+    owner_decision = await gate.evaluate("sim-test", "vera", event)
+
+    assert owner_decision.selected is True
+    assert owner_decision.turn_kind == "planner"
+    assert owner_decision.build_macro is not None
+    assert owner_decision.build_macro.owner == "vera"
+    assert owner_decision.build_macro.granted is True
+    assert owner_decision.build_macro.plan_id == support_decision.build_macro.plan_id
+    assert "!planAndBuild" in owner_decision.available_tools
+
+
 async def test_explicit_plan_and_build_in_settlement_brief_overrides_completion_words() -> None:
     gate = _gate()
     event = _build_event(
@@ -707,6 +899,37 @@ async def test_explicit_plan_and_build_in_settlement_brief_overrides_completion_
     assert owner.build_macro.objective_id == "phase-cabin"
     assert owner.build_macro.granted is True
     assert "!planAndBuild" in owner.available_tools
+
+
+async def test_pending_settlement_owner_preempts_ordinary_chatter() -> None:
+    gate = _gate()
+    event = _event(
+        source_agent="viewer",
+        event_text="The storage depot is done. Decide what the settlement should do next.",
+        scene_hint="settlement-phase-transition",
+        available_tools=["!inventory"],
+        active_objective={
+            "objective_id": "phase-garden-pen",
+            "phase_index": 2,
+            "description": "garden animal pen",
+            "owner_agent_id": "rex",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    owner = by_agent["rex"]
+    assert owner.selected is True
+    assert owner.turn_kind == "planner"
+    assert owner.reason == "settlement_phase_owner"
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner == "rex"
+    assert owner.build_macro.objective_id == "phase-garden-pen"
+    assert owner.build_macro.granted is True
+    assert "!planAndBuild" in owner.available_tools
+    assert all(not decision.selected for agent, decision in by_agent.items() if agent != "rex")
 
 
 async def test_settlement_active_objective_reassigns_capped_owner() -> None:
@@ -810,6 +1033,44 @@ async def test_scene_selected_agent_cap_limits_starvation_fanout() -> None:
     assert selected_agents_by_scene
     assert max(len(agent_ids) for agent_ids in selected_agents_by_scene.values()) <= 4
     assert suppression_reasons["scene_selected_agent_cap"] > 0
+
+
+async def test_scene_cap_does_not_block_new_settlement_phase_owner() -> None:
+    gate = _gate()
+
+    for idx in range(len(AGENTS) * 2):
+        event = _event(
+            source_agent="system",
+            event_text=f"Same meadow coordination round {idx}. Pick one useful visible action.",
+            scene_hint=f"same-meadow-round-{idx}",
+            position={"x": 0, "y": 64, "z": 0},
+        )
+        for agent_id in AGENTS:
+            await gate.evaluate("sim-test", agent_id, {**event, "agent_id": agent_id})
+
+    event = _build_event(
+        source_agent="system",
+        event_text='Build the active settlement phase "mine staging yard".',
+        scene_hint="same-meadow-round-owner",
+        position={"x": 0, "y": 64, "z": 0},
+        active_objective={
+            "objective_id": "phase-mine-yard",
+            "phase_index": 4,
+            "description": "mine staging yard",
+            "owner_agent_id": "pixel",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    assert by_agent["pixel"].selected is True
+    assert by_agent["pixel"].turn_kind == "planner"
+    assert by_agent["pixel"].reason == "settlement_phase_owner"
+    assert by_agent["pixel"].build_macro is not None
+    assert by_agent["pixel"].build_macro.owner == "pixel"
+    assert "!planAndBuild" in by_agent["pixel"].available_tools
 
 
 async def test_director_gate_bridge_response_surfaces_build_macro(

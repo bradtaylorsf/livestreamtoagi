@@ -40,6 +40,8 @@
 #                               400s such as "Model unloaded". Default: 2.
 #   MINECRAFT_LLM_RETRY_DELAY_SECONDS
 #                               Base delay between retry attempts. Default: 2.
+#   MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS
+#                               Per-request LM Studio proxy timeout. Default: 120.
 #   SOAK_LLM_SMOKE_TIMEOUT_SECONDS
 #                               Timeout for the preflight LM Studio chat
 #                               warm-up. Default: 120.
@@ -137,10 +139,17 @@
 #                               Default: 300.
 #   MC_SIM_BUILD_ZONE_STRIDE    Per-agent build origin offset stride. Default: 12.
 #   MC_SIM_BUILD_CACHE_TTL_SEC  Plan cache TTL. Default: 3600.
+#   MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS
+#                               Time a pending settlement phase reserves its
+#                               preassigned owner before another selected
+#                               planner may claim it. Default: 60000.
 #   SOAK_PLAN_BUILD_BOTS        Optional comma/space-separated agent ids that
 #                               may receive/use !planAndBuild for this run.
 #                               Default: unrestricted. Alias for
 #                               MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST.
+#   MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS
+#                               Optional comma/space/pipe-separated block list
+#                               for builder JSON. Defaults to the easy starter kit.
 #   SOAK_BUILDER_PROVIDER      Builder smoke selector: local or openrouter.
 #                               Defaults to MC_SIM_BUILDER_PROVIDER.
 #   SOAK_SAFE_TERRAIN_ACTIONS   Set to 1 to stage local-sim terrain guards:
@@ -254,6 +263,7 @@ MINECRAFT_LLM_QUEUE_PROXY="${MINECRAFT_LLM_QUEUE_PROXY:-1}"
 MINECRAFT_LLM_CONCURRENCY="${MINECRAFT_LLM_CONCURRENCY:-1}"
 MINECRAFT_LLM_RETRY_ATTEMPTS="${MINECRAFT_LLM_RETRY_ATTEMPTS:-2}"
 MINECRAFT_LLM_RETRY_DELAY_SECONDS="${MINECRAFT_LLM_RETRY_DELAY_SECONDS:-2}"
+MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS="${MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS:-120}"
 MINECRAFT_LLM_PROXY_HOST="${MINECRAFT_LLM_PROXY_HOST:-127.0.0.1}"
 MINECRAFT_LLM_PROXY_PORT="${MINECRAFT_LLM_PROXY_PORT:-1235}"
 MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/bridge/ws}"
@@ -297,6 +307,11 @@ SOAK_BLOCK_NEW_ACTIONS="${SOAK_BLOCK_NEW_ACTIONS:-0}"
 SOAK_BLOCK_EXECUTE_CODE_ACTIONS="${SOAK_BLOCK_EXECUTE_CODE_ACTIONS:-$SOAK_BLOCK_SLOW_SIM_ACTIONS}"
 SOAK_ALLOW_BUILDER_NEW_ACTIONS="${SOAK_ALLOW_BUILDER_NEW_ACTIONS:-0}"
 SOAK_BUILDER_BOTS="${SOAK_BUILDER_BOTS:-rex fork pixel}"
+case "$(printf '%s' "${MC_SIM_DISABLE_MANAGEMENT:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on|enabled)
+    MC_SIM_MANAGEMENT_POLICY="off"
+        ;;
+esac
 if [ -z "${MC_SIM_MANAGEMENT_POLICY:-}" ]; then
     if [ "${MC_SIM_DISABLE_MANAGEMENT:-1}" = "0" ]; then
         MC_SIM_MANAGEMENT_POLICY="enforce"
@@ -337,10 +352,24 @@ MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
 MC_SIM_BUILD_CACHE_TTL_SEC="${MC_SIM_BUILD_CACHE_TTL_SEC:-3600}"
 SOAK_PLAN_BUILD_BOTS="${SOAK_PLAN_BUILD_BOTS:-${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-}}"
 MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST="${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-$SOAK_PLAN_BUILD_BOTS}"
+MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS="${MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS:-${MC_SIM_PLAN_BUILD_ALLOWED_MATERIALS:-}}"
+MINECRAFT_BUILD_FROM_PLAN_PLACE_REACH_BLOCKS="${MINECRAFT_BUILD_FROM_PLAN_PLACE_REACH_BLOCKS:-3.25}"
+MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TOLERANCE_BLOCKS="${MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TOLERANCE_BLOCKS:-1}"
 SOAK_BUILDER_PROVIDER="${SOAK_BUILDER_PROVIDER:-$MC_SIM_BUILDER_PROVIDER}"
 SOAK_SAFE_TERRAIN_ACTIONS="${SOAK_SAFE_TERRAIN_ACTIONS:-0}"
 SOAK_EASY_SPAWN="${SOAK_EASY_SPAWN:-0}"
 SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS="${SOAK_EASY_SPAWN_ONLINE_DELAY_SECONDS:-5}"
+if [ "$SOAK_EASY_SPAWN" = "1" ] && [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
+    EASY_SETUP_BOUNDARY="${EASY_SETUP_BOUNDARY:-none}"
+    EASY_SETUP_MEADOW_RADIUS="${EASY_SETUP_MEADOW_RADIUS:-96}"
+    EASY_SETUP_ANIMALS="${EASY_SETUP_ANIMALS:-1}"
+    MC_SIM_SETTLEMENT_ORIGIN="${MC_SIM_SETTLEMENT_ORIGIN:-0,64,0}"
+else
+    EASY_SETUP_BOUNDARY="${EASY_SETUP_BOUNDARY:-}"
+    EASY_SETUP_MEADOW_RADIUS="${EASY_SETUP_MEADOW_RADIUS:-}"
+    EASY_SETUP_ANIMALS="${EASY_SETUP_ANIMALS:-}"
+fi
+export EASY_SETUP_BOUNDARY EASY_SETUP_MEADOW_RADIUS EASY_SETUP_ANIMALS MC_SIM_SETTLEMENT_ORIGIN
 SOAK_SETTINGS_INIT_MESSAGE="$SOAK_INIT_MESSAGE"
 if [ "$SOAK_EASY_SPAWN" = "1" ]; then
     SOAK_SETTINGS_INIT_MESSAGE=""
@@ -757,7 +786,7 @@ print_plan() {
     info "backend health: $BACKEND_HEALTH_URL"
     info "LM Studio:      $LOCAL_LLM_BASE_URL"
     if [ "$MINECRAFT_LLM_QUEUE_PROXY" = "1" ]; then
-        info "LM queue:       enabled concurrency=${MINECRAFT_LLM_CONCURRENCY} upstream=${LOCAL_LLM_UPSTREAM_URL} retries=${MINECRAFT_LLM_RETRY_ATTEMPTS}"
+        info "LM queue:       enabled concurrency=${MINECRAFT_LLM_CONCURRENCY} upstream=${LOCAL_LLM_UPSTREAM_URL} retries=${MINECRAFT_LLM_RETRY_ATTEMPTS} timeout=${MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS}s"
     else
         info "LM queue:       disabled"
     fi
@@ -810,7 +839,7 @@ print_plan() {
         info "newAction:      normal Mindcraft setting (allow_insecure_coding remains unchanged)"
     fi
     if [ "$SOAK_SAFE_TERRAIN_ACTIONS" = "1" ]; then
-        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing; blocks !place/!break/!observe)"
+        info "safe terrain:   enabled (no auto elbow-room/pickup/torch modes; no destructive pathing; blocks !place/!break/!observe/!collectBlocks)"
     else
         info "safe terrain:   disabled"
     fi
@@ -907,7 +936,7 @@ if (process.env.SOAK_SAFE_TERRAIN_ACTIONS === '1') {
     const blocked = Array.isArray(settings.blocked_actions)
         ? [...settings.blocked_actions]
         : [...baseBlockedActions];
-    for (const command of ["!break", "!observe", "!place"]) {
+    for (const command of ["!break", "!observe", "!place", "!collectBlocks", "!collectAllBlocks"]) {
         if (!blocked.includes(command)) blocked.push(command);
     }
     settings.blocked_actions = blocked;
@@ -1504,6 +1533,7 @@ write_metadata() {
         echo "minecraft_llm_concurrency=$MINECRAFT_LLM_CONCURRENCY"
         echo "minecraft_llm_retry_attempts=$MINECRAFT_LLM_RETRY_ATTEMPTS"
         echo "minecraft_llm_retry_delay_seconds=$MINECRAFT_LLM_RETRY_DELAY_SECONDS"
+        echo "minecraft_llm_request_timeout_seconds=$MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS"
         echo "minecraft_llm_proxy_host=$MINECRAFT_LLM_PROXY_HOST"
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
@@ -1524,8 +1554,10 @@ write_metadata() {
         echo "build_cooldown_sec=$MC_SIM_BUILD_COOLDOWN_SEC"
         echo "build_zone_stride=$MC_SIM_BUILD_ZONE_STRIDE"
         echo "build_cache_ttl_sec=$MC_SIM_BUILD_CACHE_TTL_SEC"
+        echo "settlement_pending_owner_grace_ms=${MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS:-60000}"
         echo "settlement_owner_order=$MC_SIM_SETTLEMENT_OWNER_ORDER"
         echo "plan_build_agent_allowlist=$MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST"
+        echo "plan_build_allowed_materials=${MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS:-starter}"
         echo "bridge_url=$MINECRAFT_BRIDGE_URL"
         echo "bridge_token_set=yes"
         echo "conversation_mode=$CONVERSATION_MODE"
@@ -1655,6 +1687,7 @@ start_lm_queue_proxy() {
             --concurrency "$proxy_concurrency" \
             --retry-attempts "$MINECRAFT_LLM_RETRY_ATTEMPTS" \
             --retry-delay-seconds "$MINECRAFT_LLM_RETRY_DELAY_SECONDS" \
+            --request-timeout-seconds "$MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS" \
             --telemetry "$RUN_DIR/timeline-raw/llm-queue.ndjson" \
             > "$RUN_DIR/logs/lmstudio-queue-proxy.log" 2>&1 &
     echo "$!" > "$LLM_PROXY_PID_FILE"
@@ -1793,15 +1826,14 @@ if (!source.includes(marker)) {
         let numArgs = 0;
 `;
     const patch = `        const command = getCommand(parsed.commandName);
-        const directorRestrictedTools = new Set(['!planAndBuild', '!buildFromPlan', '!placeHere', '!place', '!break']); // ${marker}
         const directorContext = agent && agent.__ltagDirectorContext;
         const directorGrantedTools = Array.isArray(directorContext?.granted_tools)
             ? directorContext.granted_tools
             : null;
         const directorGateEnabled = process.env.DIRECTOR_V2_GATE !== '0'
             && String(process.env.CONVERSATION_MODE || '').trim().toLowerCase() === 'director_v2';
-        if (directorGateEnabled && directorGrantedTools && directorRestrictedTools.has(parsed.commandName)
-            && !directorGrantedTools.includes(parsed.commandName)) {
+        if (directorGateEnabled && directorGrantedTools && String(parsed.commandName || '').startsWith('!')
+            && !directorGrantedTools.includes(parsed.commandName)) { // ${marker}
             console.warn('Director V2 blocked unavailable command:', parsed.commandName);
             return \`Command \${parsed.commandName} is not available for this Director V2 turn.\`;
         }
@@ -1939,7 +1971,12 @@ launch_bot() {
         export MC_SIM_BUILDER_MAX_USD_PER_RUN MC_SIM_BUILDER_USD_PER_1K_INPUT MC_SIM_BUILDER_USD_PER_1K_OUTPUT
         export MC_SIM_BUILD_MODE
         export MC_SIM_BUILD_MAX_PER_AGENT MC_SIM_BUILD_COOLDOWN_SEC MC_SIM_BUILD_ZONE_STRIDE MC_SIM_BUILD_CACHE_TTL_SEC
+        export EASY_SETUP_BOUNDARY EASY_SETUP_MEADOW_RADIUS
+        export MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS
         export MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST SOAK_PLAN_BUILD_BOTS
+        export MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS
+        export MINECRAFT_BUILD_FROM_PLAN_PLACE_REACH_BLOCKS
+        export MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TOLERANCE_BLOCKS
         export MC_HEARTBEAT_ENABLED MC_HEARTBEAT_TICK_MS MC_HEARTBEAT_IDLE_MS
         export MC_HEARTBEAT_COOLDOWN_MS MC_HEARTBEAT_STALE_ACTION_MS MC_HEARTBEAT_MAX_NO_COMMAND
         bot_settings_json="$(settings_json_for_bot "$bot" || true)"

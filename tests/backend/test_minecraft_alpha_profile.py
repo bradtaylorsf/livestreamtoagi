@@ -304,7 +304,9 @@ def test_script_real_run_guards_and_staging_contract() -> None:
     assert "MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" in src
     assert "MC_SIM_ALPHA_TOWN_PLANNER_MODEL" in src
     assert "google/gemini-3.5-flash" in src
-    assert '"!planAndBuild", "!buildFromPlan", "!newAction", "!executeCode"' in src
+    assert '"!newAction", "!executeCode"' in src
+    assert '"!planAndBuild", "!buildFromPlan", "!newAction", "!executeCode"' not in src
+    assert "When Director assigns you as build owner" in src
 
 
 def test_alpha_poll_errand_action_is_non_verbal_and_bridge_backed() -> None:

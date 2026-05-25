@@ -94,6 +94,26 @@ class _TransientModelLoadHandler(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
 
+class _SlowUpstreamHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args: object) -> None:
+        return
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("content-length") or 0)
+        if length:
+            self.rfile.read(length)
+        time.sleep(1.0)
+        response = b'{"id":"too-late","choices":[]}'
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(response)))
+        self.end_headers()
+        try:
+            self.wfile.write(response)
+        except BrokenPipeError:
+            return
+
+
 def _start_fake_upstream() -> ThreadingHTTPServer:
     _FakeUpstreamHandler.starts = []
     _FakeUpstreamHandler.ends = []
@@ -107,6 +127,13 @@ def _start_fake_upstream() -> ThreadingHTTPServer:
 def _start_transient_model_load_upstream() -> ThreadingHTTPServer:
     _TransientModelLoadHandler.attempts = 0
     server = ThreadingHTTPServer(("127.0.0.1", 0), _TransientModelLoadHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def _start_slow_upstream() -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowUpstreamHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
@@ -126,9 +153,20 @@ def test_proxy_joins_paths_without_double_v1_prefix() -> None:
         telemetry_path=None,
     )
 
-    assert proxy._upstream_url("/v1/chat/completions") == "http://localhost:1234/v1/chat/completions"
+    assert (
+        proxy._upstream_url("/v1/chat/completions") == "http://localhost:1234/v1/chat/completions"
+    )
     assert proxy._upstream_url("/chat/completions") == "http://localhost:1234/v1/chat/completions"
     assert proxy._upstream_url("/v1/models?x=1") == "http://localhost:1234/v1/models?x=1"
+
+
+def test_proxy_default_timeout_releases_stalled_turns_promptly(monkeypatch) -> None:
+    monkeypatch.delenv("MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS", raising=False)
+    proxy_mod = _load_proxy()
+
+    args = proxy_mod.parse_args([])
+
+    assert args.request_timeout_seconds == 120
 
 
 def test_proxy_serializes_requests_and_emits_queue_telemetry(tmp_path: Path) -> None:
@@ -284,6 +322,47 @@ def test_proxy_retries_transient_lmstudio_model_load_errors(tmp_path: Path) -> N
         upstream.server_close()
 
 
+def test_proxy_times_out_stalled_upstream_request(tmp_path: Path) -> None:
+    proxy_mod = _load_proxy()
+    upstream = _start_slow_upstream()
+    telemetry = tmp_path / "llm-queue.ndjson"
+    proxy = proxy_mod.QueueProxy(
+        upstream=f"http://127.0.0.1:{upstream.server_address[1]}/v1",
+        concurrency=1,
+        telemetry_path=telemetry,
+        request_timeout_seconds=0.1,
+    )
+    proxy.start()
+    try:
+        job = proxy_mod.ProxyJob(
+            request_id="queue-timeout-chat",
+            method="POST",
+            path="/v1/chat/completions",
+            headers={"content-type": "application/json"},
+            body=json.dumps({"model": "chat-model", "messages": []}).encode(),
+            enqueued_ms=proxy_mod._now_ms(),
+        )
+        proxy.enqueue(job)
+
+        assert job.event.wait(timeout=2), "timed-out chat job did not finish"
+        assert job.response_status == 502
+        assert proxy.health()["failed"] == 1
+        assert b"timed out" in job.response_body.lower()
+
+        events = [
+            json.loads(line)
+            for line in telemetry.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        failed = next(event for event in events if event["event_type"] == "llm.queue.failed")
+        assert failed["payload"]["model"] == "chat-model"
+        assert "timed out" in failed["payload"]["error"].lower()
+    finally:
+        proxy.stop()
+        upstream.shutdown()
+        upstream.server_close()
+
+
 def test_proxy_exits_on_sigterm() -> None:
     port = _free_port()
     proc = subprocess.Popen(
@@ -307,7 +386,9 @@ def test_proxy_exits_on_sigterm() -> None:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=0.5) as resp:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/healthz", timeout=0.5
+                ) as resp:
                     assert resp.status == 200
                     break
             except OSError:

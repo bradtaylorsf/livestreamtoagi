@@ -494,6 +494,11 @@ class EmbodiedSimulationSupervisor:
         env.setdefault("WHITELIST", "false")
         env.setdefault("SOAK_EASY_SPAWN", "1")
         env.setdefault("SOAK_KEEP_MINECRAFT_RUNNING", env.get("MC_SIM_KEEP_SERVER_RUNNING", "1"))
+        if env.get("MC_SIM_BUILD_MODE") == "settlement":
+            env.setdefault("EASY_SETUP_MEADOW_RADIUS", "96")
+            env.setdefault("EASY_SETUP_BOUNDARY", "none")
+            env.setdefault("EASY_SETUP_ANIMALS", "1")
+            env.setdefault("MC_SIM_SETTLEMENT_ORIGIN", "0,64,0")
 
     async def _initialize_settlement_objectives(self) -> None:
         if self.simulation_id is None or self.redis is None:
@@ -578,8 +583,18 @@ class EmbodiedSimulationSupervisor:
             )
 
         if env.get("SOAK_EASY_SPAWN") == "1":
+            boundary = str(env.get("EASY_SETUP_BOUNDARY", "glass")).strip().lower()
+            try:
+                radius = int(env.get("EASY_SETUP_MEADOW_RADIUS") or "23")
+            except ValueError:
+                radius = 23
+            meadow_label = (
+                "large open starter meadow"
+                if boundary == "none" or radius > 23
+                else "glass starter meadow"
+            )
             message = (
-                f"{message} Easy-mode rules: stay inside the glass starter meadow, use the "
+                f"{message} Easy-mode rules: stay inside the {meadow_label}, use the "
                 "starter kit you already have, and build one coherent shared structure before "
                 "doing more resource collection. Only the build owner should place blocks "
                 "through !planAndBuild; support agents should coordinate in ordinary public "

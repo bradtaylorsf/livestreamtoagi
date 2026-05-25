@@ -418,7 +418,7 @@ class SharedWorkingState:
 
     async def get_active_settlement_objective(self) -> SettlementObjective | None:
         for objective in await self.get_settlement_objectives():
-            if objective.status not in {"completed", "failed"}:
+            if objective.status not in {"blocked", "completed", "failed"}:
                 return objective
         return None
 

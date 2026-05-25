@@ -19,6 +19,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
+ALPHA_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-alpha-bot.sh"
 COHORT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-cohort-bot.sh"
 RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 RUN_SIMULATION = REPO_ROOT / "scripts" / "run_simulation.py"
@@ -201,6 +202,31 @@ def test_static_verify_passes_without_live_services() -> None:
     proc = _run("--verify")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "Static soak verify passed" in proc.stdout
+
+
+def test_easy_spawn_starter_kit_matches_plan_build_starter_materials() -> None:
+    setup_src = EASY_SETUP_SCRIPT.read_text(encoding="utf-8")
+    plan_src = (
+        REPO_ROOT
+        / "scripts"
+        / "minecraft"
+        / "fork-src"
+        / "agent"
+        / "commands"
+        / "plan_and_build_action.js"
+    ).read_text(encoding="utf-8")
+
+    for block in (
+        "oak_log",
+        "oak_planks",
+        "dirt",
+        "cobblestone",
+        "torch",
+        "crafting_table",
+        "chest",
+    ):
+        assert f"'{block}'" in plan_src
+        assert f"/give @a minecraft:{block}" in setup_src
 
 
 def test_dry_run_lists_all_bots_and_does_not_require_services() -> None:
@@ -568,6 +594,47 @@ def test_local_sim_wrapper_accepts_management_policy_shadow(tmp_path) -> None:
     assert "management review: shadow" in proc.stdout
 
 
+def test_local_sim_wrapper_disable_management_overrides_policy_shadow(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_MODEL=google/gemma-4-e4b",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+                "MC_SIM_MANAGEMENT_POLICY=shadow",
+                "MC_SIM_DISABLE_MANAGEMENT=1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({"ENV_FILE": str(env_file)}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "management review: off" in proc.stdout
+
+
+def test_soak_disable_management_overrides_policy_shadow() -> None:
+    proc = _run(
+        "--dry-run",
+        env={
+            "MC_SIM_MANAGEMENT_POLICY": "shadow",
+            "MC_SIM_DISABLE_MANAGEMENT": "1",
+        },
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "management:    policy=off" in proc.stdout
+
+
 def test_local_sim_wrapper_env_file_management_toggle_wins_over_pollution(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -757,6 +824,7 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "after_easy_spawn_starter_kit" in text
     assert "MC_SIM_BUILD_MODE" in text
     assert "export MC_SIM_BUILD_MODE" in text
+    assert "export EASY_SETUP_BOUNDARY EASY_SETUP_MEADOW_RADIUS" in text
     assert "build_mode=$MC_SIM_BUILD_MODE" in text
     assert "SOAK_PLAN_BUILD_BOTS" in text
     assert "MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST" in text
@@ -769,6 +837,7 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "apply_director_tool_guard_patch" in text
     assert "Director V2 blocked unavailable command" in text
     assert "is not available for this Director V2 turn" in text
+    assert "directorGrantedTools.includes(parsed.commandName)" in text
     assert "SOAK_BLOCK_PRIVATE_CONVERSATIONS" in text
     assert "SOAK_BLOCK_SLOW_SIM_ACTIONS" in text
     assert "SOAK_BLOCK_NEW_ACTIONS" in text
@@ -784,6 +853,7 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
     assert "settings.num_examples = 0" in text
     assert "settings.show_command_syntax = 'none'" in text
     assert "SOAK_SAFE_TERRAIN_ACTIONS" in text
+    assert '"!collectBlocks", "!collectAllBlocks"' in text
     assert "SOAK_EASY_SPAWN" in text
     assert "SOAK_MIN_INTENT_TO_COMMAND_RATIO" in text
     assert "SOAK_RELIABILITY_FAIL_ON_VIOLATION" in text
@@ -827,8 +897,19 @@ def test_script_auto_starts_minecraft_when_health_is_down() -> None:
 def test_cohort_launcher_folds_multi_arg_plan_and_build_commands() -> None:
     text = COHORT_SCRIPT.read_text(encoding="utf-8")
     assert "PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" in text
-    assert "commandName === '!planAndBuild' && args.length > 1" in text
+    assert "commandName === '!planAndBuild'" in text
+    assert "args = args || []" in text
     assert "args.map(cleanArg).filter(Boolean).join(': ')" in text
+    assert "active settlement objective" in text
+
+
+def test_alpha_launcher_folds_multi_arg_plan_and_build_commands() -> None:
+    text = ALPHA_SCRIPT.read_text(encoding="utf-8")
+    assert "PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" in text
+    assert "commandName === '!planAndBuild'" in text
+    assert "args = args || []" in text
+    assert "args.map(cleanArg).filter(Boolean).join(': ')" in text
+    assert "active settlement objective" in text
 
 
 def test_easy_spawn_access_writer_is_offline_safe(tmp_path) -> None:
@@ -891,6 +972,19 @@ def test_easy_spawn_script_builds_safe_starter_arena() -> None:
     assert "minecraft:oak_log 32" in text
     assert "minecraft:oak_planks" in text
     assert "minecraft:stone_pickaxe 1" in text
+
+
+def test_easy_spawn_large_meadow_fill_commands_are_chunked_under_server_limit() -> None:
+    text = EASY_SETUP_SCRIPT.read_text(encoding="utf-8")
+    assert "EASY_SETUP_MAX_FILL_BLOCKS" in text
+    assert "function chunkedFillCommands" in text
+    assert "Math.sqrt(maxFillBlocks / Math.max(1, height))" in text
+    assert "...chunkedFillCommands(" in text
+    assert (
+        "`/fill -${meadowRadius} 64 -${meadowRadius} ${meadowRadius} 96 ${meadowRadius} "
+        "minecraft:air replace`" not in text
+    )
+    assert "`/fill -${inner} 58 -${inner} ${inner} 62 ${inner} minecraft:dirt replace`" not in text
 
 
 def test_bridge_move_actions_respect_non_destructive_path_env() -> None:

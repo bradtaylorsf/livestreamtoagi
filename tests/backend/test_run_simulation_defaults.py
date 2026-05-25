@@ -53,3 +53,18 @@ def test_explicit_cli_agents_override_seed_file_agents() -> None:
     )
 
     assert run_simulation._agents_from_run_config(args, {}) == ["vera", "rex"]
+
+
+def test_env_management_disable_overrides_env_policy(monkeypatch) -> None:
+    monkeypatch.setenv("MC_SIM_DISABLE_MANAGEMENT", "1")
+    monkeypatch.setenv("MC_SIM_MANAGEMENT_POLICY", "shadow")
+
+    assert run_simulation._management_policy_from_env() == "off"
+
+
+def test_env_management_policy_supports_review_mode_alias(monkeypatch) -> None:
+    monkeypatch.delenv("MC_SIM_DISABLE_MANAGEMENT", raising=False)
+    monkeypatch.delenv("MC_SIM_MANAGEMENT_POLICY", raising=False)
+    monkeypatch.setenv("MINECRAFT_MANAGEMENT_REVIEW_MODE", "disabled")
+
+    assert run_simulation._management_policy_from_env() == "off"

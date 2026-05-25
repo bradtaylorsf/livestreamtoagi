@@ -57,6 +57,32 @@ function easySpawnEnabled() {
     return boolEnv('SOAK_EASY_SPAWN') || boolEnv('MC_SIM_EASY_MODE');
 }
 
+function easySpawnConstrained() {
+    if (!easySpawnEnabled()) return false;
+    const boundary = String(process.env.EASY_SETUP_BOUNDARY || 'glass').trim().toLowerCase();
+    const radius = intEnv('EASY_SETUP_MEADOW_RADIUS', 23);
+    return boundary !== 'none' && radius <= 23;
+}
+
+function openEasyMeadowLimit() {
+    if (!easySpawnEnabled()) return null;
+    const boundary = String(process.env.EASY_SETUP_BOUNDARY || 'glass').trim().toLowerCase();
+    const radius = intEnv('EASY_SETUP_MEADOW_RADIUS', 23);
+    if (boundary !== 'none' && radius <= 23) return null;
+    const margin = intEnv('MC_SIM_BUILD_ZONE_MARGIN', 8);
+    return Math.max(1, radius - margin);
+}
+
+function clampToOpenEasyMeadow(cell) {
+    const limit = openEasyMeadowLimit();
+    if (!Number.isFinite(limit)) return cell;
+    return {
+        ...cell,
+        x: Math.max(-limit, Math.min(limit, cell.x)),
+        z: Math.max(-limit, Math.min(limit, cell.z)),
+    };
+}
+
 function nowMs(options = {}) {
     return Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
 }
@@ -107,18 +133,57 @@ function zoneBucket(origin) {
     ].join(',');
 }
 
+function gridExtentForStride(stride) {
+    const limit = openEasyMeadowLimit();
+    if (!Number.isFinite(limit) || stride <= 0) return 2;
+    return Math.max(2, Math.floor(limit / stride));
+}
+
+function gridOffsetForSlot(slot, extent) {
+    const width = extent * 2 + 1;
+    const slotCount = width * width;
+    const normalized = ((slot % slotCount) + slotCount) % slotCount;
+    return {
+        gridX: (normalized % width) - extent,
+        gridZ: Math.floor(normalized / width) - extent,
+    };
+}
+
+function phaseSlotIndexFromKey(agentKey) {
+    const text = String(agentKey || '').trim().toLowerCase();
+    const phaseMatch = /^phase:(\d+)(?::|$)/.exec(text);
+    if (phaseMatch) return Number.parseInt(phaseMatch[1], 10);
+    const objectiveMatch = /^objective:phase-(\d+)(?:[-:]|$)/.exec(text);
+    if (!objectiveMatch) return null;
+    return Math.max(0, Number.parseInt(objectiveMatch[1], 10) - 1);
+}
+
 export function applyBuildZoneOffset(agentKey, origin) {
     const stride = intEnv('MC_SIM_BUILD_ZONE_STRIDE', DEFAULT_BUILD_ZONE_STRIDE);
     const base = positionCell(origin);
-    if (stride <= 0 || easySpawnEnabled()) return base;
-    const slot = Number.parseInt(hashText(agentKey, 8), 16) % 25;
-    const gridX = (slot % 5) - 2;
-    const gridZ = Math.floor(slot / 5) - 2;
-    return {
+    if (stride <= 0 || easySpawnConstrained()) return clampToOpenEasyMeadow(base);
+    const extent = gridExtentForStride(stride);
+    const width = extent * 2 + 1;
+    const slotCount = width * width;
+    const phaseSlot = phaseSlotIndexFromKey(agentKey);
+    const slot =
+        Number.isInteger(phaseSlot) && phaseSlot >= 0
+            ? phaseSlot
+            : Number.parseInt(hashText(agentKey, 8), 16) % slotCount;
+    const { gridX, gridZ } = gridOffsetForSlot(slot, extent);
+    return clampToOpenEasyMeadow({
         x: base.x + gridX * stride,
         y: base.y,
         z: base.z + gridZ * stride,
-    };
+    });
+}
+
+function sceneZoneKey(agentKey, options = {}) {
+    if (Number.isInteger(options.phaseIndex)) {
+        return `phase:${options.phaseIndex}:objective:${String(options.objectiveId || '').toLowerCase()}`;
+    }
+    if (options.objectiveId) return `objective:${String(options.objectiveId).toLowerCase()}`;
+    return agentKey;
 }
 
 export function buildPlanCacheKey(agentKey, description, origin, settings = {}) {
@@ -371,7 +436,7 @@ export function tryAcquireSceneBuild(
     const ownerAgentId = options.ownerAgentId ? String(options.ownerAgentId).toLowerCase() : agentKey;
     const phaseOwner = options.phaseOwner ? String(options.phaseOwner).toLowerCase() : ownerAgentId;
     const now = nowMs(options);
-    const buildOrigin = applyBuildZoneOffset(agentKey, origin);
+    const buildOrigin = applyBuildZoneOffset(sceneZoneKey(agentKey, options), origin);
     const cacheKey = buildPlanCacheKey(agentKey, description, buildOrigin, settings);
     const sceneState = sceneFor(normalizedSceneId);
     expireSceneBuild(sceneState, now);
@@ -605,36 +670,20 @@ function releaseSceneBuild(agent, planId, status, result = '', options = {}) {
         if (status === 'failed') {
             const failure = retryableReasonFrom(result, options);
             sceneState.planCache.delete(active.cacheKey);
-            if (failure.retryable) {
-                sceneState.activeBuild = null;
-                return {
-                    scene_id: sceneId,
-                    plan_id: active.planId,
-                    status,
-                    result,
-                    reason: failure.reason,
-                    retryable: true,
-                    cooldown_remaining_sec: 0,
-                    active_build: null,
-                };
-            }
-            active.status = 'failed';
-            active.result = result;
-            active.failedAt = now;
-            active.cooldownUntil =
-                now + intEnv('MC_SIM_BUILD_COOLDOWN_SEC', DEFAULT_BUILD_COOLDOWN_SEC) * 1000;
+            sceneState.activeBuild = null;
+            const cooldownSec = failure.retryable
+                ? 0
+                : intEnv('MC_SIM_BUILD_COOLDOWN_SEC', DEFAULT_BUILD_COOLDOWN_SEC);
+            if (cooldownSec > 0) sceneState.lastCompletedAtByKey.set(active.cacheKey, now);
             return {
                 scene_id: sceneId,
                 plan_id: active.planId,
                 status,
                 result,
                 reason: failure.reason,
-                retryable: false,
-                cooldown_remaining_sec: intEnv(
-                    'MC_SIM_BUILD_COOLDOWN_SEC',
-                    DEFAULT_BUILD_COOLDOWN_SEC,
-                ),
-                active_build: publicActiveBuild(active),
+                retryable: failure.retryable,
+                cooldown_remaining_sec: cooldownSec,
+                active_build: null,
             };
         }
         if (active.agentKey === agentKey || active.owner === agentKey || !planId) {

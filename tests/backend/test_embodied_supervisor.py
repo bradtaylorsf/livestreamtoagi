@@ -170,6 +170,41 @@ async def test_minecraft_easy_mode_aliases_soak_harness_env(
 
 
 @pytest.mark.asyncio
+async def test_settlement_easy_mode_defaults_to_large_open_meadow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = _sim(uuid.uuid4())
+    repo = _repo(sim)
+    captured: dict[str, Any] = {}
+    monkeypatch.setenv("MC_SIM_EASY_MODE", "1")
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "settlement")
+    monkeypatch.delenv("EASY_SETUP_MEADOW_RADIUS", raising=False)
+    monkeypatch.delenv("EASY_SETUP_BOUNDARY", raising=False)
+    monkeypatch.delenv("EASY_SETUP_ANIMALS", raising=False)
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(agents=["alpha", "vera", "rex"]),
+        simulation_repo=repo,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+    )
+
+    await supervisor.run()
+
+    assert captured["env"]["EASY_SETUP_MEADOW_RADIUS"] == "96"
+    assert captured["env"]["EASY_SETUP_BOUNDARY"] == "none"
+    assert captured["env"]["EASY_SETUP_ANIMALS"] == "1"
+    assert captured["env"]["MC_SIM_SETTLEMENT_ORIGIN"] == "0,64,0"
+
+
+@pytest.mark.asyncio
 async def test_management_policy_propagates_to_minecraft_child_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

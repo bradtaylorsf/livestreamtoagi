@@ -81,12 +81,14 @@ class QueueProxy:
         telemetry_path: Path | None,
         retry_attempts: int = 2,
         retry_delay_seconds: float = 2.0,
+        request_timeout_seconds: float = 120.0,
     ) -> None:
         self.upstream = upstream.rstrip("/")
         self.concurrency = max(1, concurrency)
         self.telemetry_path = telemetry_path
         self.retry_attempts = max(0, retry_attempts)
         self.retry_delay_seconds = max(0.0, retry_delay_seconds)
+        self.request_timeout_seconds = max(1.0, request_timeout_seconds)
         self.jobs: queue.PriorityQueue[tuple[int, int, ProxyJob | None]] = queue.PriorityQueue()
         self.stats = ProxyStats()
         self._telemetry_lock = threading.Lock()
@@ -132,6 +134,7 @@ class QueueProxy:
             "upstream": self.upstream,
             "concurrency": self.concurrency,
             "retry_attempts": self.retry_attempts,
+            "request_timeout_seconds": self.request_timeout_seconds,
             **self.stats.snapshot(self.jobs.qsize()),
         }
 
@@ -203,21 +206,34 @@ class QueueProxy:
         }
         request_body = None if job.method in {"GET", "HEAD"} and not job.body else job.body
         for attempt in range(self.retry_attempts + 1):
-            request = urllib.request.Request(url, data=request_body, headers=headers, method=job.method)
+            request = urllib.request.Request(
+                url, data=request_body, headers=headers, method=job.method
+            )
             try:
-                with urllib.request.urlopen(request, timeout=600) as response:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=self.request_timeout_seconds,
+                ) as response:
                     job.response_status = int(response.status)
                     job.response_headers = {
                         key.lower(): value
                         for key, value in response.headers.items()
                         if key.lower()
-                        not in {"transfer-encoding", "connection", "content-length", "content-encoding"}
+                        not in {
+                            "transfer-encoding",
+                            "connection",
+                            "content-length",
+                            "content-encoding",
+                        }
                     }
                     job.response_body = response.read()
                     return
             except urllib.error.HTTPError as exc:
                 body = exc.read()
-                if self._should_retry_http_error(job, int(exc.code), body) and attempt < self.retry_attempts:
+                if (
+                    self._should_retry_http_error(job, int(exc.code), body)
+                    and attempt < self.retry_attempts
+                ):
                     delay = self.retry_delay_seconds * (attempt + 1)
                     self._emit(
                         "llm.queue.retry",
@@ -423,6 +439,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=float,
         default=float(os.environ.get("MINECRAFT_LLM_RETRY_DELAY_SECONDS", "2")),
     )
+    parser.add_argument(
+        "--request-timeout-seconds",
+        type=float,
+        default=float(os.environ.get("MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS", "120")),
+    )
     parser.add_argument("--telemetry", default=os.environ.get("MINECRAFT_LLM_QUEUE_TELEMETRY"))
     return parser.parse_args(argv)
 
@@ -435,19 +456,23 @@ def main(argv: list[str] | None = None) -> int:
         telemetry_path=telemetry_path_from_env(args.telemetry),
         retry_attempts=args.retry_attempts,
         retry_delay_seconds=args.retry_delay_seconds,
+        request_timeout_seconds=args.request_timeout_seconds,
     )
     proxy.start()
     server = ProxyServer((args.host, args.port), ProxyHandler)
     server.proxy = proxy
 
     def _shutdown(_signum: int, _frame: Any) -> None:
-        threading.Thread(target=server.shutdown, name="lmstudio-queue-shutdown", daemon=True).start()
+        threading.Thread(
+            target=server.shutdown, name="lmstudio-queue-shutdown", daemon=True
+        ).start()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
     print(
         f"LM Studio queue proxy listening on http://{args.host}:{args.port} -> {args.upstream} "
-        f"(concurrency={proxy.concurrency}, retry_attempts={proxy.retry_attempts})",
+        f"(concurrency={proxy.concurrency}, retry_attempts={proxy.retry_attempts}, "
+        f"request_timeout_seconds={proxy.request_timeout_seconds:g})",
         flush=True,
     )
     try:

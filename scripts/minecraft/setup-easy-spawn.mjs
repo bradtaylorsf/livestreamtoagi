@@ -30,6 +30,7 @@ Environment:
   EASY_SETUP_MEADOW_RADIUS Starter meadow radius     (default: 23)
   EASY_SETUP_BOUNDARY      glass or none             (default: glass)
   EASY_SETUP_ANIMALS       Spawn starter animals     (default: 0)
+  EASY_SETUP_MAX_FILL_BLOCKS Max blocks per /fill chunk (default: 30000)
   RESCUE_MODE      Rescue fallback policy       (easy permits op teleport fallback)
 `);
     process.exit(0);
@@ -45,6 +46,7 @@ const port = Number(process.env.MC_PORT || process.env.SERVER_PORT || 25566);
 const minecraftVersion = process.env.MC_VERSION || '1.21.6';
 const commandDelayMs = Number(process.env.EASY_SETUP_COMMAND_DELAY_MS || 250);
 const onlineDelayMs = Number(process.env.EASY_SETUP_ONLINE_DELAY_MS || 0);
+const maxFillBlocks = boundedInt(process.env.EASY_SETUP_MAX_FILL_BLOCKS, 30000, 1, 32768);
 const meadowRadius = boundedInt(process.env.EASY_SETUP_MEADOW_RADIUS, 23, 23, 96);
 const boundaryMode = String(process.env.EASY_SETUP_BOUNDARY || 'glass').trim().toLowerCase();
 const spawnAnimals = truthy(process.env.EASY_SETUP_ANIMALS);
@@ -81,6 +83,28 @@ function truthy(value) {
     return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value || '').trim().toLowerCase());
 }
 
+function chunkedFillCommands(x1, y1, z1, x2, y2, z2, block, mode = 'replace') {
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
+    const minZ = Math.min(z1, z2);
+    const maxZ = Math.max(z1, z2);
+    const height = maxY - minY + 1;
+    const horizontalSpan = Math.max(1, Math.floor(Math.sqrt(maxFillBlocks / Math.max(1, height))));
+    const suffix = mode ? ` ${mode}` : '';
+    const commands = [];
+
+    for (let x = minX; x <= maxX; x += horizontalSpan) {
+        const endX = Math.min(maxX, x + horizontalSpan - 1);
+        for (let z = minZ; z <= maxZ; z += horizontalSpan) {
+            const endZ = Math.min(maxZ, z + horizontalSpan - 1);
+            commands.push(`/fill ${x} ${minY} ${z} ${endX} ${maxY} ${endZ} ${block}${suffix}`);
+        }
+    }
+    return commands;
+}
+
 function expandedMeadowCommands() {
     if (meadowRadius === 23 && boundaryMode === 'glass') return [];
     const inner = Math.max(1, meadowRadius - 1);
@@ -90,9 +114,17 @@ function expandedMeadowCommands() {
         '/fill -23 64 23 23 68 23 minecraft:air replace minecraft:glass',
         '/fill -23 64 -23 -23 68 23 minecraft:air replace minecraft:glass',
         '/fill 23 64 -23 23 68 23 minecraft:air replace minecraft:glass',
-        `/fill -${meadowRadius} 64 -${meadowRadius} ${meadowRadius} 96 ${meadowRadius} minecraft:air replace`,
-        `/fill -${inner} 58 -${inner} ${inner} 62 ${inner} minecraft:dirt replace`,
-        `/fill -${inner} 63 -${inner} ${inner} 63 ${inner} minecraft:grass_block replace`,
+        ...chunkedFillCommands(
+            -meadowRadius,
+            64,
+            -meadowRadius,
+            meadowRadius,
+            96,
+            meadowRadius,
+            'minecraft:air',
+        ),
+        ...chunkedFillCommands(-inner, 58, -inner, inner, 62, inner, 'minecraft:dirt'),
+        ...chunkedFillCommands(-inner, 63, -inner, inner, 63, inner, 'minecraft:grass_block'),
     ];
     if (boundaryMode !== 'none') {
         commands.push(
@@ -319,6 +351,7 @@ async function main() {
             '/give @a minecraft:cobblestone 24',
             '/give @a minecraft:torch 16',
             '/give @a minecraft:crafting_table 1',
+            '/give @a minecraft:chest 1',
             '/give @a minecraft:stone_axe 1',
             '/give @a minecraft:stone_pickaxe 1',
         ];

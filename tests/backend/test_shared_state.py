@@ -186,6 +186,36 @@ class TestSettlementObjectives:
     """SharedWorkingState settlement objective operations."""
 
     @pytest.mark.asyncio
+    async def test_blocked_objective_advances_active_phase(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(
+                    objective_id="phase-1-watch-tower",
+                    phase_index=0,
+                    description="watch tower",
+                    status="blocked",
+                    owner_agent_id="aurora",
+                    verified_blocks=13,
+                    completion_ratio=0.68,
+                ),
+                SettlementObjective(
+                    objective_id="phase-2-mine-staging",
+                    phase_index=1,
+                    description="mine staging yard",
+                    status="pending",
+                    owner_agent_id="rex",
+                ),
+            ]
+        )
+
+        active = await state.get_active_settlement_objective()
+
+        assert active is not None
+        assert active.objective_id == "phase-2-mine-staging"
+
+    @pytest.mark.asyncio
     async def test_completed_objective_does_not_regress_on_stale_assign(self) -> None:
         redis = _make_mock_redis()
         state = SharedWorkingState(redis)

@@ -110,6 +110,8 @@ points `LOCAL_LLM_BASE_URL` at the proxy, while
 `LOCAL_LLM_UPSTREAM_URL` keeps the real LM Studio endpoint. Set
 `MINECRAFT_LLM_QUEUE_PROXY=0` to bypass it, or raise
 `MINECRAFT_LLM_CONCURRENCY` from `1` to `2` for a slightly wider local queue.
+`MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS` bounds each upstream LM Studio request
+so one stalled local completion cannot freeze every bot behind it.
 The bridge, Alpha, and cohort launchers write the effective
 `LOCAL_LLM_BASE_URL` into each staged Mindcraft profile, so chat completions
 use the proxy endpoint when it is enabled. Startup embeddings use
@@ -152,9 +154,10 @@ access files for a temporary op setup bot, sets peaceful/daylight rules, creates
 a flat grass starter meadow with visible resource piles and work blocks, resets
 the above-ground build volume plus the top soil layers, then teleports online
 bots onto a cleared staging strip with separated spawn offsets and a small
-starter kit. The easy arena also pins spawn radius to zero, disables
-drowning/fall/freeze damage for local validation, and wraps the starter meadow
-in a glass boundary so agents have a small safe place to learn before exploring.
+starter kit. The easy arena also pins spawn radius to zero and disables
+drowning/fall/freeze damage for local validation. By default it wraps the
+starter meadow in a small glass boundary; settlement-mode direct supervisor
+runs default to a larger open meadow instead.
 Set `MC_SIM_EASY_MODE=0` to use the normal Minecraft target instead, or set
 `MC_SIM_MC_PORT=<port>` if `25566` is busy. In easy mode,
 `MC_SIM_KEEP_SERVER_RUNNING=1` by default so the Paper
@@ -164,11 +167,18 @@ also choose a high run-specific MindServer base port by default to avoid stale
 `8080+` listeners from previous experiments; set
 `MC_SIM_MINDSERVER_BASE_PORT=<port>` if you need a fixed range.
 Direct `scripts/run_simulation.py` embodied runs honor the same
-`MC_SIM_EASY_MODE=1` aliases before delegating to the soak harness.
+`MC_SIM_EASY_MODE=1` aliases before delegating to the soak harness. For
+settlement-mode embodied runs, the direct supervisor defaults the easy setup to
+a larger open meadow (`EASY_SETUP_MEADOW_RADIUS=96`,
+`EASY_SETUP_BOUNDARY=none`, `EASY_SETUP_ANIMALS=1`) and a stable settlement
+anchor (`MC_SIM_SETTLEMENT_ORIGIN=0,64,0`) unless those variables are set
+explicitly.
 For open settlement experiments, `setup-easy-spawn.mjs` also supports
 `EASY_SETUP_MEADOW_RADIUS=<23..96>`, `EASY_SETUP_BOUNDARY=none`, and
 `EASY_SETUP_ANIMALS=1` so the same disposable easy world can be expanded beyond
-the fenced validation arena without touching the normal server.
+the fenced validation arena without touching the normal server. Large meadow
+terrain reset commands are chunked under Minecraft's `/fill` limit; override
+`EASY_SETUP_MAX_FILL_BLOCKS` only when testing a different server cap.
 The sim wrapper defaults to the real character cast only:
 Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. BridgeBot is excluded
 unless `MC_SIM_INCLUDE_BRIDGE_BOT=1` is set, because it is a technical bridge
@@ -238,6 +248,7 @@ Useful knobs:
 | `MINECRAFT_LLM_QUEUE_PROXY` | `1` | Start the local FIFO proxy and route bot LLM traffic through it. |
 | `MINECRAFT_LLM_CONCURRENCY` | `1` | Active upstream LM Studio requests allowed by the proxy. |
 | `MINECRAFT_LLM_RETRY_ATTEMPTS` | `2` | Retries for transient LM Studio model-load 400s such as `Model unloaded` or `Operation canceled`. |
+| `MINECRAFT_LLM_REQUEST_TIMEOUT_SECONDS` | `120` | Per-upstream-request timeout used by the local queue proxy. |
 | `LOCAL_LLM_UPSTREAM_URL` | `$LOCAL_LLM_BASE_URL` | Real LM Studio upstream when the proxy is enabled. |
 
 ## Builder-Plan Mode
@@ -257,7 +268,9 @@ executes it through the verified `!buildFromPlan` path. Generated plans are
 normalized into bottom-up placement order before execution, so a model that
 lists supported upper blocks before their foundations does not force a fallback.
 Invalid local model plans are rejected and replaced with a starter blueprint
-such as marker camp, 3x3 hut, simple wall, or torch-lit storage corner.
+such as marker camp, 3x3 hut, simple wall, torch-lit storage corner, watch
+tower, market stall, mine staging yard, town square, animal pen, lighting
+perimeter, or road segment.
 
 OpenRouter builder routing is opt-in and applies only to this
 `purpose=plan_generation` path:
@@ -289,6 +302,11 @@ only unless the owner explicitly coordinates additional work; standalone
 placement/build commands are removed from non-owner tool menus and blocked at
 the command parser. The Node governor mirrors that scene lock so stale direct
 commands are skipped with `reason=scene_locked` before any provider call.
+When `SOAK_SAFE_TERRAIN_ACTIONS=1`, the staged runtime also removes terrain
+collection commands such as `!collectBlocks` and blocks any command not granted
+by the current Director turn. Unresolved shared-state distress preempts
+settlement ownership: the assigned rescuer is selected with `!rescue` before
+the next build/gather action can proceed.
 
 For exploratory civilization runs, `SOAK_PLAN_BUILD_BOTS` or
 `MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` can restrict builder-plan eligibility to
@@ -309,15 +327,37 @@ cached plans are reused without a new builder-model call. Defaults:
 | --- | --- | --- |
 | `MC_SIM_BUILD_MAX_PER_AGENT` | `6` | Max non-cached plan generations per agent. |
 | `MC_SIM_BUILD_COOLDOWN_SEC` | `300` | Cooldown for equivalent completed build requests. |
-| `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks; ignored while easy spawn is enabled so starter-meadow builds stay inside the glass boundary. |
+| `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic origin offset so plans do not all occupy the same blocks; scene settlement phases use their numeric phase index as the primary slot key, while free builds use the agent id. Ignored only for confined glass easy-spawn meadows. Large open settlement meadows honor the stride, expand the phase grid to use more of the prepared meadow, and clamp offsets inside it. |
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
+| `MC_SIM_SETTLEMENT_ORIGIN` / `MINECRAFT_SETTLEMENT_ORIGIN` | `0,64,0` | Stable anchor for settlement-mode build sites. This keeps later phases from drifting to a roaming owner's current Y level or outside the prepared meadow. |
+| `MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS` / `MINECRAFT_SETTLEMENT_PENDING_OWNER_GRACE_MS` | `600000` | Time a pending settlement phase gives its preassigned owner to start before another selected planner may claim it. Keep this comfortably above local chat-model queue latency for single-lane LM Studio runs. |
 | `MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` / `SOAK_PLAN_BUILD_BOTS` | unset | Optional current builder-duty allowlist for `!planAndBuild`; unset means any agent may become owner. |
+| `MINECRAFT_PLAN_BUILD_ALLOWED_MATERIALS` / `MC_SIM_PLAN_BUILD_ALLOWED_MATERIALS` | starter kit | Optional comma/space/pipe-separated block list for builder JSON; `extended`, `all`, or `*` restores the older broad list including glass/stone variants. |
 | `MINECRAFT_PLAN_BUILD_MODEL_MAX_STEPS` | `32` | Planner-facing cap for one generated phase. Keep this lower than `MINECRAFT_PLAN_BUILD_MAX_STEPS` in open-settlement shakeouts so agents build several compact structures instead of one oversized wall. |
+| `MINECRAFT_PLAN_BUILD_TIMEOUT_MS` / `MC_SIM_PLAN_BUILD_TIMEOUT_MS` | `120000` | Total execution deadline for one generated plan. |
+| `MINECRAFT_PLAN_BUILD_SITE_SCAN_UP` | `8` | Extra upward scan range used after per-agent zone stride so open-meadow build origins land on the target zone's ground surface, not the agent's old Y level. |
+| `MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TIMEOUT_MS` | `20000` | Minimum navigation timeout for each placement step. The executor scales this upward by distance for open-meadow stride targets. |
+| `MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_MS_PER_BLOCK` | `800` | Distance-based navigation allowance per block when a generated build origin is far from the bot. |
+| `MINECRAFT_BUILD_FROM_PLAN_PLACE_REACH_BLOCKS` | `3.25` in soak wrappers | Maximum distance before the executor walks closer to a target block. The action default remains `4.25` for unit/static compatibility. |
+| `MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TOLERANCE_BLOCKS` | `1` in soak wrappers | Pathfinder `GoalNear` tolerance used before block placement in live soak runs. |
+| `MINECRAFT_BUILD_FROM_PLAN_RECONCILE_PASSES` | `2` | Final repair pass count over intended block cells after the first build pass. Two passes let dependent support blocks settle after fragile utility placements such as torches. |
 
 When the local smoke auto-starts the easy Paper server and applies the safe
 starter inventory, `MC_SIM_INIT_MESSAGE` is delivered after that starter-kit
 setup so build owners do not begin a plan before the requested materials are
-available.
+available. Blocked settlement phases remain in evidence, but shared state moves
+the active objective to the next phase so one partial build does not stall the
+whole settlement run.
+
+Lighting-only build requests are normalized to floor-level torch placements in
+the easy settlement harness. This avoids fragile elevated torch-post plans while
+still producing useful perimeter/path lighting evidence.
+
+Management review policy is controlled by `MC_SIM_MANAGEMENT_POLICY` (`off`,
+`shadow`, or `enforce`). The legacy `MC_SIM_DISABLE_MANAGEMENT=1` flag now
+forces `off` for env-driven local runs, even if a stale policy value is also
+present, so relaxed/open settlement profiles do not spend time on shadow review
+bridge calls.
 
 Plan evidence appears as `build_plan.generation.*` and
 `build_plan.execution.*` events. `scene_id`, build-plan id, owner,

@@ -92,6 +92,7 @@ class _CachedVerdict:
     available_tools: list[str]
     build_macros: dict[str, BuildMacroAssignment]
     active_objective: SettlementObjectiveContext | None
+    active_rescue: dict[str, Any] | None
     provider: str | None
     model: str | None
     estimated_usd: float | None
@@ -225,6 +226,7 @@ class DirectorPromptGate:
         scene_hint = _text(event.get("scene_hint"))
         event_text = _text(event.get("event_text")) or ""
         available_tools = _tool_list(event.get("available_tools"))
+        build_macro_intent = _is_build_macro_intent(event_text, available_tools)
         plan_build_agent_allowlist = _agent_list(event.get("plan_build_agent_allowlist"))
         active_objective = _settlement_objective_context(event)
         raw_event = {
@@ -261,6 +263,7 @@ class DirectorPromptGate:
             now_ms=now_ms,
             broadcast_to_all=source_agent == "system",
         )
+        active_rescue = _active_rescue_context(event, candidates)
         seed = _stable_seed(scene.scene_id, state.event_sequence)
         if _is_successful_build_plan_status_notice(event_text.lower()):
             state.plan_mode_build_completed = True
@@ -292,23 +295,34 @@ class DirectorPromptGate:
             plan_build_agent_allowlist=plan_build_agent_allowlist,
             candidates=candidates,
             scene_event_type=event_type,
+            build_macro_intent=build_macro_intent,
+            calling_agent=calling_agent,
             now_ms=now_ms,
+        )
+        scheduler_decision = _apply_active_rescue_owner(
+            scheduler_decision,
+            candidates=candidates,
+            active_rescue=active_rescue,
         )
         scheduler_decision = self._limit_scene_selected_agents(
             scene=scene,
             scheduler_decision=scheduler_decision,
             candidates=candidates,
         )
-        build_macros = self._build_macro_assignments(
-            scene=scene,
-            scheduler_decision=scheduler_decision,
-            candidates=candidates,
-            event_text=event_text,
-            origin=origin,
-            available_tools=available_tools,
-            active_objective=active_objective,
-            plan_build_agent_allowlist=plan_build_agent_allowlist,
-            now_ms=now_ms,
+        build_macros = (
+            {}
+            if active_rescue is not None
+            else self._build_macro_assignments(
+                scene=scene,
+                scheduler_decision=scheduler_decision,
+                candidates=candidates,
+                event_text=event_text,
+                origin=origin,
+                available_tools=available_tools,
+                active_objective=active_objective,
+                plan_build_agent_allowlist=plan_build_agent_allowlist,
+                now_ms=now_ms,
+            )
         )
         return _CachedVerdict(
             event_key=event_key,
@@ -322,6 +336,7 @@ class DirectorPromptGate:
             available_tools=available_tools,
             build_macros=build_macros,
             active_objective=active_objective,
+            active_rescue=active_rescue,
             provider=_text(event.get("provider")),
             model=_text(event.get("model")),
             estimated_usd=_float_or_none(event.get("estimated_usd")),
@@ -399,7 +414,9 @@ class DirectorPromptGate:
     ) -> dict[str, BuildMacroAssignment]:
         if active_objective is None and _is_plan_mode_single_build_closed(self._state):
             return {}
-        if not _is_build_macro_intent(event_text, available_tools):
+        if not _is_build_macro_intent(
+            event_text, available_tools
+        ) and not _should_force_pending_settlement_owner(active_objective):
             return {}
         selected = scheduler_decision.selected
         owner = scheduler_decision.selected_planner_agent_id
@@ -520,6 +537,8 @@ class DirectorPromptGate:
     ) -> SchedulerDecision:
         if scheduler_decision.was_urgent or not scheduler_decision.selected:
             return scheduler_decision
+        if _has_required_planner_owner(scheduler_decision):
+            return scheduler_decision
 
         cap = _selected_agent_scene_cap(len(self._state.agents))
         already_selected = self._state.scene_selected_agents.get(scene.scene_id, set())
@@ -560,6 +579,17 @@ class DirectorPromptGate:
         )
 
 
+def _has_required_planner_owner(scheduler_decision: SchedulerDecision) -> bool:
+    return any(
+        turn.kind == "planner"
+        and (
+            turn.reason == "explicit_build_owner"
+            or turn.reason.startswith("settlement_phase_owner")
+        )
+        for turn in scheduler_decision.selected
+    )
+
+
 _GATES: dict[str, DirectorPromptGate] = {}
 
 
@@ -588,6 +618,7 @@ def _event_key(event: Mapping[str, Any]) -> str:
         "mentions": sorted(_agent_list(event.get("mentions"))),
         "scene_hint": _text(event.get("scene_hint")) or "",
         "objective": _settlement_objective_key(event),
+        "rescue": _rescue_assignment_key(event),
     }
     raw = "|".join(f"{key}={value}" for key, value in payload.items())
     return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
@@ -699,6 +730,7 @@ def _local_observations(
         "active_objective": cached.active_objective.model_dump()
         if cached.active_objective is not None
         else None,
+        "active_rescue": cached.active_rescue,
     }
 
 
@@ -803,14 +835,27 @@ def _apply_settlement_phase_owner(
     plan_build_agent_allowlist: Sequence[str],
     candidates: Sequence[SchedulerCandidate],
     scene_event_type: SceneEventType,
+    build_macro_intent: bool = False,
+    calling_agent: str | None = None,
     now_ms: int,
 ) -> SchedulerDecision:
-    if active_objective is None or scene_event_type != SceneEventType.BUILD_ACTION:
+    if active_objective is None:
         return scheduler_decision
+    if (
+        scene_event_type != SceneEventType.BUILD_ACTION
+        and not build_macro_intent
+        and not _should_force_pending_settlement_owner(active_objective)
+    ):
+        return scheduler_decision
+    selected_planner = scheduler_decision.selected_planner_agent_id
+    current_owner = _canonical_agent_id(active_objective.owner_agent_id)
+    fallback_owner = selected_planner
+    if calling_agent and (not selected_planner or selected_planner == current_owner):
+        fallback_owner = calling_agent
     owner, reason = scheduler.select_phase_owner(
         active_objective=active_objective,
         candidates=candidates,
-        fallback_owner=scheduler_decision.selected_planner_agent_id,
+        fallback_owner=fallback_owner,
         plan_build_agent_allowlist=plan_build_agent_allowlist,
         now_ms=now_ms,
     )
@@ -837,6 +882,54 @@ def _apply_settlement_phase_owner(
             "suppression_reason": reason if suppressed_agents else None,
         }
     )
+
+
+def _apply_active_rescue_owner(
+    scheduler_decision: SchedulerDecision,
+    *,
+    candidates: Sequence[SchedulerCandidate],
+    active_rescue: Mapping[str, Any] | None,
+) -> SchedulerDecision:
+    if active_rescue is None:
+        return scheduler_decision
+    rescuer = _canonical_agent_id(active_rescue.get("rescuer_agent_id"))
+    if not rescuer:
+        return scheduler_decision
+    candidate_ids = {candidate.agent_id for candidate in candidates}
+    if rescuer not in candidate_ids:
+        return scheduler_decision
+    selected = scheduler_decision.selected
+    if len(selected) == 1 and selected[0].agent_id == rescuer and selected[0].kind == "speaker":
+        return scheduler_decision
+
+    suppressed_agents = sorted(
+        candidate.agent_id for candidate in candidates if candidate.agent_id != rescuer
+    )
+    return scheduler_decision.model_copy(
+        update={
+            "selected": [
+                SchedulerTurn(
+                    agent_id=rescuer,
+                    kind="speaker",
+                    score=10.0,
+                    reason="active_rescue_task",
+                    factor_breakdown={"active_rescue_task": 1.0},
+                )
+            ],
+            "suppressed_agents": suppressed_agents,
+            "suppression_reason": "active_rescue_task" if suppressed_agents else None,
+            "was_urgent": True,
+        }
+    )
+
+
+def _should_force_pending_settlement_owner(
+    active_objective: SettlementObjectiveContext | None,
+) -> bool:
+    if active_objective is None:
+        return False
+    status = str(active_objective.status or "").strip().lower()
+    return status == "pending" and bool(_canonical_agent_id(active_objective.owner_agent_id))
 
 
 def _explicit_build_owner(
@@ -970,6 +1063,113 @@ def _settlement_objective_context(
         return SettlementObjectiveContext.model_validate(raw)
     except ValueError:
         return None
+
+
+def _active_rescue_context(
+    event: Mapping[str, Any],
+    candidates: Sequence[SchedulerCandidate],
+) -> dict[str, Any] | None:
+    raw_active = event.get("active_rescue")
+    if isinstance(raw_active, Mapping):
+        rescue = _normalize_rescue_context(raw_active, candidates)
+        if rescue is not None:
+            return rescue
+
+    raw_dangers = event.get("unresolved_dangers")
+    if not isinstance(raw_dangers, Sequence) or isinstance(raw_dangers, str | bytes):
+        return None
+
+    rescues = [
+        rescue
+        for danger in raw_dangers
+        if isinstance(danger, Mapping)
+        for rescue in [_normalize_rescue_context(danger, candidates)]
+        if rescue is not None
+    ]
+    if not rescues:
+        return None
+    return max(
+        rescues,
+        key=lambda item: (
+            _int_or_none(item.get("severity")) or 0,
+            _float_or_none(item.get("reported_at")) or 0.0,
+        ),
+    )
+
+
+def _normalize_rescue_context(
+    raw: Mapping[str, Any],
+    candidates: Sequence[SchedulerCandidate],
+) -> dict[str, Any] | None:
+    status = (_text(raw.get("recovery_status")) or "open").lower()
+    if status not in {"open", "rescue_dispatched", "unresolved"}:
+        return None
+    target = _canonical_agent_id(raw.get("target_agent_id") or raw.get("agent_id"))
+    if not target:
+        return None
+    candidate_ids = {candidate.agent_id for candidate in candidates}
+    rescuer = _canonical_agent_id(raw.get("rescuer_agent_id") or raw.get("rescuer_id"))
+    if not rescuer or rescuer == target or rescuer not in candidate_ids:
+        rescuer = _fallback_rescuer(target, candidate_ids)
+    if not rescuer:
+        return None
+    return {
+        "target_agent_id": target,
+        "danger_id": _text(raw.get("danger_id")),
+        "kind": _text(raw.get("kind")) or "stuck",
+        "severity": _int_or_none(raw.get("severity")) or 0,
+        "reported_at": _float_or_none(raw.get("reported_at")) or 0.0,
+        "rescuer_agent_id": rescuer,
+        "recovery_status": status,
+    }
+
+
+def _fallback_rescuer(target: str, candidate_ids: set[str]) -> str | None:
+    for agent_id in ("alpha", "sentinel", "rex", "vera", "aurora", "pixel", "fork", "grok"):
+        if agent_id in candidate_ids and agent_id != target:
+            return agent_id
+    for agent_id in sorted(candidate_ids):
+        if agent_id != target:
+            return agent_id
+    return None
+
+
+def _rescue_assignment_key(event: Mapping[str, Any]) -> str:
+    raw_active = event.get("active_rescue")
+    if isinstance(raw_active, Mapping):
+        return ":".join(
+            [
+                _canonical_agent_id(
+                    raw_active.get("target_agent_id") or raw_active.get("agent_id")
+                ),
+                _text(raw_active.get("danger_id")) or "",
+                _canonical_agent_id(
+                    raw_active.get("rescuer_agent_id") or raw_active.get("rescuer_id")
+                ),
+                _text(raw_active.get("recovery_status")) or "",
+            ]
+        )
+    raw_dangers = event.get("unresolved_dangers")
+    if not isinstance(raw_dangers, Sequence) or isinstance(raw_dangers, str | bytes):
+        return ""
+    parts = []
+    for raw in raw_dangers:
+        if not isinstance(raw, Mapping):
+            continue
+        status = (_text(raw.get("recovery_status")) or "open").lower()
+        if status not in {"open", "rescue_dispatched", "unresolved"}:
+            continue
+        parts.append(
+            ":".join(
+                [
+                    _canonical_agent_id(raw.get("target_agent_id") or raw.get("agent_id")),
+                    _text(raw.get("danger_id")) or "",
+                    _canonical_agent_id(raw.get("rescuer_agent_id") or raw.get("rescuer_id")),
+                    status,
+                ]
+            )
+        )
+    return "|".join(sorted(parts))
 
 
 def _settlement_objective_key(event: Mapping[str, Any]) -> str:
