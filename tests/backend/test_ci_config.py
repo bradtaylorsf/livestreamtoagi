@@ -25,6 +25,15 @@ EXPECTED_DREAMS_TESTS = [
     "tests/backend/test_reflect_after.py",
     "tests/backend/test_journal_image.py",
 ]
+EXPECTED_EVAL_TESTS = [
+    "tests/backend/test_eval_engine.py",
+    "tests/backend/test_eval_categories.py",
+    "tests/backend/test_eval_analyzer.py",
+    "tests/backend/test_agency_eval.py",
+    "tests/backend/test_day_over_day_reporting.py",
+    "tests/backend/test_cross_run_comparison.py",
+    "tests/backend/test_timeline_reporter.py",
+]
 
 
 def _load_workflow(name: str) -> dict:
@@ -61,6 +70,7 @@ def test_ci_has_required_jobs():
     assert "website-test" in jobs
     assert "cost-kill-regression" in jobs
     assert "dreams-regression" in jobs
+    assert "eval-regression" in jobs
     assert "integration-test" in jobs
 
 
@@ -98,6 +108,25 @@ def test_dreams_regression_gate_references_expected_tests():
     assert "pytest" in run_script
     assert "CONVERSATION_MODE=embodied" in run_script
     for test_file in EXPECTED_DREAMS_TESTS:
+        assert test_file in run_script
+
+
+def test_ci_has_eval_regression_gate():
+    """CI workflow must include a dedicated eval/reporting regression gate."""
+    ci = _load_workflow("ci.yml")
+    job = ci["jobs"].get("eval-regression")
+    assert job is not None
+    assert job.get("name") == "Eval Regression Gate"
+
+
+def test_eval_regression_gate_references_expected_tests():
+    """Eval/reporting gate should pin the embodied regression test set."""
+    ci = _load_workflow("ci.yml")
+    run_script = _job_run_script(ci["jobs"]["eval-regression"])
+
+    assert "pytest" in run_script
+    assert "CONVERSATION_MODE=embodied" in run_script
+    for test_file in EXPECTED_EVAL_TESTS:
         assert test_file in run_script
 
 
