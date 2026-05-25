@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _BUILD_INTENTS_FILENAME = "build_intents.jsonl"
+_BUILD_SCRIPTS_DIRNAME = "build_scripts"
 
 
 @dataclass
@@ -73,7 +74,7 @@ class EmbodimentExecutor(Protocol):
         self,
         *,
         simulation_id: Any,
-        sim_folder: "Path | None" = None,
+        sim_folder: Path | None = None,
         decision_logger: Any | None = None,
     ) -> None:
         """Called once after the simulation row exists but before phases run."""
@@ -105,17 +106,24 @@ class HeadlessExecutor:
 
     requires_minecraft_world: bool = False
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        build_plan_compiler: Any | None = None,
+        build_plan_resolver: Any | None = None,
+    ) -> None:
         self.recorded_intents: list[ToolOutcome] = []
-        self._sim_folder: "Path | None" = None
+        self._sim_folder: Path | None = None
         self._decision_logger: Any | None = None
         self._simulation_id: Any | None = None
+        self._build_plan_compiler = build_plan_compiler
+        self._build_plan_resolver = build_plan_resolver
 
     async def setup(
         self,
         *,
         simulation_id: Any,
-        sim_folder: "Path | None" = None,
+        sim_folder: Path | None = None,
         decision_logger: Any | None = None,
     ) -> None:
         self._simulation_id = simulation_id
@@ -135,6 +143,12 @@ class HeadlessExecutor:
         self._log_outcome(outcome)
         if intent.tool_name == "propose_build":
             _append_build_intent(self._sim_folder, intent)
+            await _maybe_write_build_script(
+                self._sim_folder,
+                intent,
+                compiler=self._build_plan_compiler,
+                resolver=self._build_plan_resolver,
+            )
         return outcome
 
     def record_blocked_intent(
@@ -190,16 +204,23 @@ class EmbodiedExecutor:
 
     requires_minecraft_world: bool = True
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        build_plan_compiler: Any | None = None,
+        build_plan_resolver: Any | None = None,
+    ) -> None:
         self._simulation_id: Any | None = None
-        self._sim_folder: "Path | None" = None
+        self._sim_folder: Path | None = None
         self._decision_logger: Any | None = None
+        self._build_plan_compiler = build_plan_compiler
+        self._build_plan_resolver = build_plan_resolver
 
     async def setup(
         self,
         *,
         simulation_id: Any,
-        sim_folder: "Path | None" = None,
+        sim_folder: Path | None = None,
         decision_logger: Any | None = None,
     ) -> None:
         self._simulation_id = simulation_id
@@ -217,6 +238,12 @@ class EmbodiedExecutor:
         self._log_outcome(outcome)
         if intent.tool_name == "propose_build":
             _append_build_intent(self._sim_folder, intent)
+            await _maybe_write_build_script(
+                self._sim_folder,
+                intent,
+                compiler=self._build_plan_compiler,
+                resolver=self._build_plan_resolver,
+            )
             self._handoff_build_intent_to_scheduler(intent)
         return outcome
 
@@ -273,7 +300,7 @@ class EmbodiedExecutor:
             logger.exception("BuildMacroScheduler hand-off failed")
 
 
-def _append_build_intent(sim_folder: "Path | None", intent: ToolIntent) -> None:
+def _append_build_intent(sim_folder: Path | None, intent: ToolIntent) -> None:
     """Append a ``propose_build`` intent to ``<sim-folder>/build_intents.jsonl``.
 
     Best-effort: missing sim folders are silently ignored so that one-shot
@@ -294,6 +321,54 @@ def _append_build_intent(sim_folder: "Path | None", intent: ToolIntent) -> None:
             fh.write(json.dumps(payload, default=str) + "\n")
     except Exception:  # pragma: no cover - logging only
         logger.exception("failed to append build intent to %s", sim_folder)
+
+
+async def _maybe_write_build_script(
+    sim_folder: Path | None,
+    intent: ToolIntent,
+    *,
+    compiler: Any | None,
+    resolver: Any | None,
+) -> None:
+    """Compile a ``BuildPlan`` for ``intent`` and persist the script (issue #857).
+
+    The executor only writes a script when a compiler *and* a resolver are
+    attached; tests that don't care about scripted builds leave them
+    ``None`` and get a no-op. The resolver is a small callable that takes a
+    ``BuildIntent``-shaped dict and returns either a ``BuildPlan`` or
+    ``None`` (typically the decomposer cache lookup from E22-6).
+    """
+    if sim_folder is None or compiler is None or resolver is None:
+        return
+    intent_id = intent.intent_id or intent.args.get("intent_id")
+    if not intent_id:
+        return
+    try:
+        plan = resolver(intent.args)
+        if plan is None:
+            return
+        if hasattr(plan, "__await__"):
+            plan = await plan
+        if plan is None:
+            return
+        from core.agents.build_intent import BuildIntent as _BuildIntent
+
+        validated = _BuildIntent.model_validate(intent.args)
+        script = compiler.compile(plan, intent=validated)
+    except Exception:  # pragma: no cover - compiler/resolver issues must not break sim
+        logger.exception("build script compile failed for intent %s", intent_id)
+        return
+
+    try:
+        scripts_dir = sim_folder / _BUILD_SCRIPTS_DIRNAME
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        target = scripts_dir / f"{intent_id}.script.json"
+        target.write_text(
+            json.dumps(script.to_jsonable(), sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:  # pragma: no cover - filesystem errors must not break sim
+        logger.exception("failed to write build script %s", intent_id)
 
 
 def select_executor(run_mode: RunMode | str | None) -> EmbodimentExecutor:
