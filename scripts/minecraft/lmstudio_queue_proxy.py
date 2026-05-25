@@ -88,7 +88,7 @@ class QueueProxy:
         self.telemetry_path = telemetry_path
         self.retry_attempts = max(0, retry_attempts)
         self.retry_delay_seconds = max(0.0, retry_delay_seconds)
-        self.request_timeout_seconds = max(1.0, request_timeout_seconds)
+        self.request_timeout_seconds = max(0.001, request_timeout_seconds)
         self.jobs: queue.PriorityQueue[tuple[int, int, ProxyJob | None]] = queue.PriorityQueue()
         self.stats = ProxyStats()
         self._telemetry_lock = threading.Lock()
