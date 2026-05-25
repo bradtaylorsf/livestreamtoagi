@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from core.bridge.consumers.perception_action_memory import (
     format_action_result,
+    format_build_feedback,
     format_observations,
     on_bridge_action_result,
     on_bridge_perception,
@@ -22,6 +23,7 @@ __all__ = [
     "SceneMemoryConsumer",
     "ensure_scene_memory_consumer",
     "format_action_result",
+    "format_build_feedback",
     "format_observations",
     "get_scene_memory_consumer",
     "on_bridge_action_result",

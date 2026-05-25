@@ -10,8 +10,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from core.eval.loader import EMBODIED_EVENT_TYPES, _split_embodied_events
 from core.reporting.sections.cost_analysis import generate_cost_analysis
 from core.reporting.sections.daily_breakdown import generate_daily_breakdown
+from core.reporting.sections.embodied_activity import (
+    extract_build_feedback_artifacts,
+    generate_embodied_activity,
+)
 from core.reporting.sections.executive_summary import generate_executive_summary
 from core.reporting.sections.key_moments import generate_key_moments
 from core.reporting.sections.memory_evolution import generate_memory_evolution
@@ -105,12 +110,29 @@ class TimelineReporter:
         cost_events = await self._load_cost_events()
         artifacts = await self._load_artifacts()
         management_log = await self._load_management_log()
+        sim_start = sim.get("started_at") or sim.get("created_at")
+        sim_end = sim.get("completed_at")
+        embodied_actions, perception_reports = await self._load_embodied_events(sim_start, sim_end)
+        world_chunks = await self._load_world_chunks(sim_start, sim_end)
 
         # Filter by requested days
         if days:
-            sim_start = sim.get("started_at") or sim.get("created_at")
             conversations = self._filter_by_days(conversations, days, sim_start)
             cost_events = self._filter_cost_by_days(cost_events, days, sim_start)
+            embodied_actions = self._filter_events_by_days(
+                embodied_actions, days, sim_start, "created_at"
+            )
+            perception_reports = self._filter_events_by_days(
+                perception_reports, days, sim_start, "created_at"
+            )
+            world_chunks = self._filter_events_by_days(world_chunks, days, sim_start, "built_date")
+
+        embodied_summary = generate_embodied_activity(
+            embodied_actions,
+            perception_reports,
+            world_chunks,
+            extract_build_feedback_artifacts(artifacts),
+        )
 
         # 1. Executive Summary
         report.sections.append(
@@ -122,6 +144,7 @@ class TimelineReporter:
                     cost_events,
                     artifacts,
                     management_log,
+                    embodied_summary,
                 ),
             )
         )
@@ -179,7 +202,15 @@ class TimelineReporter:
             )
         )
 
-        # 6. Cost Analysis
+        # 6. Embodied Activity
+        report.sections.append(
+            ReportSection(
+                title="Embodied Activity",
+                data=embodied_summary,
+            )
+        )
+
+        # 7. Cost Analysis
         report.sections.append(
             ReportSection(
                 title="Cost Analysis",
@@ -187,7 +218,7 @@ class TimelineReporter:
             )
         )
 
-        # 7. Key Moments
+        # 8. Key Moments
         report.sections.append(
             ReportSection(
                 title="Key Moments",
@@ -299,6 +330,52 @@ class TimelineReporter:
                WHERE simulation_id = $1
                ORDER BY created_at""",
             self._simulation_uuid,
+        )
+        return [dict(r) for r in rows]
+
+    async def _load_embodied_events(
+        self,
+        sim_start: Any = None,
+        sim_end: Any = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        params: list[Any] = [list(EMBODIED_EVENT_TYPES)]
+        conditions = ["event_type = ANY($1::text[])"]
+        if sim_start:
+            params.append(sim_start)
+            conditions.append(f"created_at >= ${len(params)}")
+        if sim_end:
+            params.append(sim_end)
+            conditions.append(f"created_at <= ${len(params)}")
+        where = " AND ".join(conditions)
+        rows = await self._db.fetch(
+            f"""SELECT id, event_type, participants, content, created_at
+                FROM transcripts
+                WHERE {where}
+                ORDER BY created_at""",
+            *params,
+        )
+        return _split_embodied_events([dict(r) for r in rows])
+
+    async def _load_world_chunks(
+        self,
+        sim_start: Any = None,
+        sim_end: Any = None,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if sim_start:
+            params.append(sim_start)
+            conditions.append(f"built_date >= ${len(params)}")
+        if sim_end:
+            params.append(sim_end)
+            conditions.append(f"built_date <= ${len(params)}")
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = await self._db.fetch(
+            f"""SELECT id, name, x_offset, y_offset, width, height,
+                       built_by, built_date, description
+                FROM world_chunks{where}
+                ORDER BY built_date""",
+            *params,
         )
         return [dict(r) for r in rows]
 
@@ -414,4 +491,25 @@ class TimelineReporter:
                 cost_day = delta.days + 1
                 if cost_day in days:
                     filtered.append(cost)
+        return filtered
+
+    @staticmethod
+    def _filter_events_by_days(
+        events: list[dict],
+        days: list[int],
+        sim_start: Any = None,
+        timestamp_key: str = "created_at",
+    ) -> list[dict]:
+        """Filter timestamped events to only include specified simulated days."""
+        if not sim_start or not hasattr(sim_start, "timetuple"):
+            return events
+
+        filtered = []
+        for event in events:
+            created = event.get(timestamp_key)
+            if created and hasattr(created, "timetuple"):
+                delta = created - sim_start
+                event_day = delta.days + 1
+                if event_day in days:
+                    filtered.append(event)
         return filtered

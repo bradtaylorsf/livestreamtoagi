@@ -129,6 +129,24 @@ teleport rescue as operator-only actions.
 | Example spec | `scenarios/persistent_24x7.yaml` | `scenarios/experimental_short_run.yaml` |
 | Example command | `.venv/bin/python scripts/run_simulation.py --persistent --seed-file scenarios/persistent_24x7.yaml --max-cost-rolling 5 --rolling-window 1h` | `.venv/bin/python scripts/run_simulation.py --name "experimental-short-a" --seed-file scenarios/experimental_short_run.yaml --run-mode experimental --max-cost 0.01` |
 
+## Eval Suite Mapping
+
+Persistent 24/7 runs should use the `persistent` eval suite. It keeps the live
+show qualities front and center: entertainment, safety, dialogue quality,
+social dynamics, agency, internal state, and errors.
+
+Experimental runs should use the `experimental` eval suite. It emphasizes
+comparison signals that are meaningful across bounded starting-condition tests:
+build verification, creativity, world evolution, productivity, simulation
+narrative, and agency.
+
+Run either suite against a completed simulation ID:
+
+```bash
+.venv/bin/python scripts/run_eval.py --simulation-id <uuid> --suite persistent
+.venv/bin/python scripts/run_eval.py --simulation-id <uuid> --suite experimental
+```
+
 ## Compare Experiments
 
 Run two experimental specs or the same spec with different `--run-config-file`

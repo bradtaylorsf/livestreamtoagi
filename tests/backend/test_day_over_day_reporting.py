@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,7 +16,6 @@ from core.reporting.sections.daily_breakdown import (
     _compute_day_over_day_metrics,
     generate_daily_breakdown,
 )
-
 
 # ── Day-over-day metrics tests ─────────────────────────────────
 
@@ -53,7 +52,6 @@ def test_day_over_day_metrics_basic():
 
 
 def test_day_over_day_insufficient_data():
-    from collections import Counter
 
     days = [_make_day("2026-01-05")]
     metrics = _compute_day_over_day_metrics(days, {})
@@ -221,9 +219,15 @@ def test_scorecard_report_completeness_pass():
 
     scorecard = LaunchScorecard.__new__(LaunchScorecard)
     scorecard._report_sections = [
-        {"title": "Tool Usage", "data": {"by_tool": {"web_search": {"count": 5}}, "total_invocations": 5}},
+        {
+            "title": "Tool Usage",
+            "data": {"by_tool": {"web_search": {"count": 5}}, "total_invocations": 5},
+        },
         {"title": "Memory Evolution", "data": {"core_memory_changes": {"rex": 2}}},
-        {"title": "Relationship Evolution", "data": {"available": True, "matrix": {"rex": {"fork": {}}}}},
+        {
+            "title": "Relationship Evolution",
+            "data": {"available": True, "matrix": {"rex": {"fork": {}}}},
+        },
         {"title": "Cost Analysis", "data": {"by_day": {"2026-01-05": "0.01"}}},
     ]
     result = scorecard._check_report_completeness()
@@ -257,6 +261,96 @@ def test_scorecard_optional_failures_dont_block():
     # ready=True because all *required* criteria pass
     d = result.to_dict()
     assert d["status"] == "READY"
+
+
+@pytest.mark.asyncio
+async def test_scorecard_build_verification_passes_when_no_builds():
+    scorecard = LaunchScorecard(
+        db=AsyncMock(),
+        simulation_id=str(uuid.uuid4()),
+        report_sections=[
+            {
+                "title": "Embodied Activity",
+                "data": {
+                    "total_actions": 0,
+                    "builds_attempted": 0,
+                    "builds_verified": 0,
+                },
+            }
+        ],
+    )
+
+    result = await scorecard._check_build_verification()
+
+    assert result.name == "build_verification"
+    assert result.passed is True
+    assert result.required is False
+    assert "0/0 builds verified" in result.evidence
+
+
+@pytest.mark.asyncio
+async def test_scorecard_build_verification_passes_or_fails_by_ratio():
+    passing = LaunchScorecard(
+        db=AsyncMock(),
+        simulation_id=str(uuid.uuid4()),
+        build_verification_threshold=0.75,
+        report_sections=[
+            {
+                "title": "Embodied Activity",
+                "data": {
+                    "total_actions": 5,
+                    "builds_attempted": 4,
+                    "builds_verified": 3,
+                },
+            }
+        ],
+    )
+    failing = LaunchScorecard(
+        db=AsyncMock(),
+        simulation_id=str(uuid.uuid4()),
+        build_verification_threshold=0.75,
+        report_sections=[
+            {
+                "title": "Embodied Activity",
+                "data": {
+                    "total_actions": 5,
+                    "builds_attempted": 4,
+                    "builds_verified": 2,
+                },
+            }
+        ],
+    )
+
+    assert (await passing._check_build_verification()).passed is True
+    failed_result = await failing._check_build_verification()
+    assert failed_result.passed is False
+    assert "2/4 builds verified" in failed_result.evidence
+
+
+@pytest.mark.asyncio
+async def test_scorecard_build_quality_feedback_uses_report_section():
+    scorecard = LaunchScorecard(
+        db=AsyncMock(),
+        simulation_id=str(uuid.uuid4()),
+        report_sections=[
+            {
+                "title": "Embodied Activity",
+                "data": {
+                    "builds_attempted": 1,
+                    "build_feedback_records": 1,
+                    "latest_suggested_next_step": "Repair missing wall blocks.",
+                },
+            }
+        ],
+    )
+
+    result = await scorecard._check_build_quality_feedback()
+
+    assert result.name == "build_quality_feedback"
+    assert result.passed is True
+    assert result.required is False
+    assert "1 build-quality feedback records" in result.evidence
+    assert "Repair missing wall blocks" in result.evidence
 
 
 # ── CrossRunComparison mock test ───────────────────────────────

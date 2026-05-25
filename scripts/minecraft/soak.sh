@@ -2261,6 +2261,7 @@ write_summary() {
     heartbeat_halt_count="$(wc -l < "$HEARTBEAT_HALT_FILE" | tr -d ' ')"
     bridge_drops="$(count_matches 'bridge[-_ ]down|bridge_(connect_failed|send_failed)|bridge unavailable|WebSocket.*(closed|disconnect)|ECONN' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
     management_events="$(count_matches 'management_review_event|Management|intervene|shadow' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log)"
+    build_feedback_records="$(count_matches 'build_feedback|Build quality feedback|build-quality feedback' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log "$RUN_DIR"/timeline-raw/*.ndjson)"
     crash_lines="$(count_matches 'uncaught|unhandled|fatal|segmentation|crash|exception|heartbeat\.halted|max-no-command' "$RUN_DIR"/bots/*.log "$RUN_DIR"/logs/*.log "$RUN_DIR"/timeline-raw/*.ndjson)"
     runaway_lines="$(find "$RUN_DIR/bots" -name '*.log' -type f -exec wc -l {} \; | awk -v max="$SOAK_MAX_LOG_LINES_PER_BOT" '$1 > max {print $0}')"
     {
@@ -2276,6 +2277,7 @@ write_summary() {
         echo "heartbeat_halts: $heartbeat_halt_count"
         echo "bridge_drop_lines: $bridge_drops"
         echo "management_event_lines: $management_events"
+        echo "build_quality_feedback_records: $build_feedback_records"
         echo "crash_candidate_lines: $crash_lines"
         echo
         echo "Respond/ignore rough count from bot logs"

@@ -1,0 +1,63 @@
+name: build_verification
+description: "Evaluates intended-vs-actual embodied build outcomes using verification signals"
+model: claude-sonnet-4-6
+max_tokens: 4096
+temperature: 0.3
+
+system: |
+  You are a build verification analyst evaluating an AI reality show called "Livestream to AGI."
+  Agents now build inside Minecraft through verified embodied actions. Your job is to score
+  whether intended structures actually appeared in the world, using the build outcome metrics
+  and action-result evidence provided.
+
+  Focus on the E6 verification signal:
+  - intended: how many blocks or steps the plan expected
+  - present: how many intended blocks were observed in the final world state
+  - missing: intended blocks that were absent
+  - completion: present divided by intended when available
+  - verified/class/status/detail: whether the bridge classified the outcome as successful,
+    partial, blocked, invalid, abandoned, or failed
+
+  Do not reward claims of building unless the provided verification evidence supports them.
+  A perfect score means ambitious builds are completed and verified against world state.
+  A low score means builds are mostly abandoned, blocked, unverifiable, or mismatched from
+  the stated intent.
+
+  Rate the simulation on a 0-100 scale. Respond ONLY with valid JSON.
+
+rubric:
+  "90-100": "Excellent verified building — ambitious plans completed with high completion fractions and strong world-state evidence"
+  "70-89": "Good verified building — most intended blocks are present with minor missing pieces or recoverable partials"
+  "50-69": "Mixed building — some verified progress, but frequent partials, small scope, or inconsistent fidelity"
+  "30-49": "Weak building — plans start but are often blocked, abandoned, or only minimally verified"
+  "0-29": "No meaningful verified building — no build outcomes, failed verification, or claims without world-state evidence"
+
+sub_scores:
+  - intended_vs_actual: "How closely did final observed structures match the intended build?"
+  - completion_rate: "What fraction of intended blocks or steps were verified present?"
+  - step_fidelity: "Were individual build steps executed in the requested order and form?"
+  - failure_recovery: "Did agents recover from blocked, missing-material, or partial outcomes?"
+  - build_ambition: "Were verified builds meaningful enough to improve the world?"
+
+output_schema:
+  score: "number (0-100)"
+  reasoning: "string"
+  sub_scores:
+    intended_vs_actual: "number (0-100)"
+    completion_rate: "number (0-100)"
+    step_fidelity: "number (0-100)"
+    failure_recovery: "number (0-100)"
+    build_ambition: "number (0-100)"
+  evidence:
+    verified_builds: "string[] — completed or mostly completed verified builds"
+    partial_builds: "string[] — builds with missing blocks or partial outcomes"
+    failed_builds: "string[] — blocked, abandoned, invalid, or failed build attempts"
+    strongest_verification: "string — best intended-vs-actual evidence"
+    repair_opportunities: "string[] — concrete fixes agents should attempt next"
+
+input_data:
+  - build_outcomes
+  - build_feedback
+  - embodied_actions
+  - world_chunks
+  - artifacts

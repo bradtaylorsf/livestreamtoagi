@@ -8,6 +8,8 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from core.eval.loader import EMBODIED_EVENT_TYPES, _derive_build_outcomes, _split_embodied_events
+
 if TYPE_CHECKING:
     from core.database import Database
     from core.repos.relationship_repo import RelationshipRepo
@@ -159,6 +161,31 @@ class CrossRunComparison:
             )
         )
 
+        # Embodied action and build verification metrics
+        embodied_a = await self._embodied_summary(self._sim_ids[0], sim_a)
+        embodied_b = await self._embodied_summary(self._sim_ids[1], sim_b)
+        for key, metric_name in (
+            ("total_embodied_actions", "total_embodied_actions"),
+            ("builds_verified", "builds_verified"),
+            ("avg_build_completion", "avg_build_completion"),
+        ):
+            value_a = embodied_a.get(key)
+            value_b = embodied_b.get(key)
+            numeric_a = float(value_a or 0)
+            numeric_b = float(value_b or 0)
+            delta = round(numeric_b - numeric_a, 4)
+            metrics.append(
+                MetricComparison(
+                    metric=metric_name,
+                    run_a_value=value_a,
+                    run_b_value=value_b,
+                    delta=delta,
+                    better_run=(
+                        "a" if numeric_a > numeric_b else ("b" if numeric_b > numeric_a else None)
+                    ),
+                )
+            )
+
         # Relationship depth (avg sentiment, if available)
         if self._relationship_repo:
             depth_a = await self._avg_sentiment(self._sim_ids[0])
@@ -282,6 +309,69 @@ class CrossRunComparison:
             uuid_mod.UUID(sim_id),
         )
         return row["cnt"] if row else 0
+
+    async def _embodied_summary(
+        self,
+        _sim_id: str,
+        sim_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        sim_start = sim_summary.get("started_at") or sim_summary.get("created_at")
+        sim_end = sim_summary.get("completed_at")
+        if not sim_start and not sim_end:
+            return {
+                "total_embodied_actions": 0,
+                "builds_verified": 0,
+                "avg_build_completion": None,
+            }
+
+        params: list[Any] = [list(EMBODIED_EVENT_TYPES)]
+        conditions = ["event_type = ANY($1::text[])"]
+        if sim_start:
+            params.append(sim_start)
+            conditions.append(f"created_at >= ${len(params)}")
+        if sim_end:
+            params.append(sim_end)
+            conditions.append(f"created_at <= ${len(params)}")
+        where = " AND ".join(conditions)
+
+        try:
+            rows = await self._db.fetch(
+                f"""SELECT id, event_type, participants, content, created_at
+                    FROM transcripts
+                    WHERE {where}
+                    ORDER BY created_at""",
+                *params,
+            )
+        except Exception:
+            return {
+                "total_embodied_actions": 0,
+                "builds_verified": 0,
+                "avg_build_completion": None,
+            }
+
+        if not isinstance(rows, list):
+            return {
+                "total_embodied_actions": 0,
+                "builds_verified": 0,
+                "avg_build_completion": None,
+            }
+
+        actions, perceptions = _split_embodied_events([dict(r) for r in rows])
+        build_outcomes = _derive_build_outcomes(actions, perceptions)
+        completions = [
+            float(outcome["completion"])
+            for outcome in build_outcomes
+            if outcome.get("completion") is not None
+        ]
+        return {
+            "total_embodied_actions": len(actions),
+            "builds_verified": sum(
+                1 for outcome in build_outcomes if bool(outcome.get("verified"))
+            ),
+            "avg_build_completion": round(sum(completions) / len(completions), 4)
+            if completions
+            else None,
+        }
 
     async def _avg_sentiment(self, sim_id: str) -> float | None:
         import uuid as uuid_mod

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -11,13 +13,18 @@ import pytest
 from core.reporting.formatters import format_json, format_markdown, format_terminal
 from core.reporting.sections.cost_analysis import generate_cost_analysis
 from core.reporting.sections.daily_breakdown import generate_daily_breakdown
+from core.reporting.sections.embodied_activity import generate_embodied_activity
 from core.reporting.sections.executive_summary import generate_executive_summary
 from core.reporting.sections.key_moments import generate_key_moments
 from core.reporting.sections.memory_evolution import generate_memory_evolution
 from core.reporting.sections.relationship_evolution import generate_relationship_evolution
 from core.reporting.sections.tool_usage import generate_tool_usage
-from core.reporting.timeline_reporter import ComparisonReport, Report, ReportSection
-
+from core.reporting.timeline_reporter import (
+    ComparisonReport,
+    Report,
+    ReportSection,
+    TimelineReporter,
+)
 
 # ── Executive Summary tests ────────────────────────────────────
 
@@ -83,6 +90,9 @@ def test_executive_summary_basic():
     assert result["total_turns"] == 13
     assert result["total_cost"] == "0.03"
     assert result["total_tool_invocations"] == 1
+    assert result["total_embodied_actions"] == 0
+    assert result["total_builds_verified"] == 0
+    assert result["build_completion_rate"] is None
     assert result["status"] == "completed"
 
 
@@ -104,6 +114,26 @@ def test_executive_summary_none_durations():
     result = generate_executive_summary(sim, [], [], [], [])
     assert result["simulated_duration"] == "N/A"
     assert result["real_duration"] == "N/A"
+
+
+def test_executive_summary_includes_embodied_metrics():
+    result = generate_executive_summary(
+        _make_sim(),
+        [],
+        [],
+        [],
+        [],
+        {
+            "total_actions": 4,
+            "builds_attempted": 2,
+            "builds_verified": 1,
+        },
+    )
+
+    assert result["total_embodied_actions"] == 4
+    assert result["total_builds_verified"] == 1
+    assert result["build_completion_rate"] == 0.5
+    assert "total_conversations" in result
 
 
 # ── Daily Breakdown tests ──────────────────────────────────────
@@ -137,12 +167,27 @@ def test_daily_breakdown_empty():
 
 def test_memory_evolution_counts_changes():
     history = [
-        {"agent_id": "rex", "version": 1, "changed_at": datetime(2026, 1, 5, tzinfo=UTC), "change_reason": "init"},
-        {"agent_id": "rex", "version": 2, "changed_at": datetime(2026, 1, 6, tzinfo=UTC), "change_reason": "reflection"},
+        {
+            "agent_id": "rex",
+            "version": 1,
+            "changed_at": datetime(2026, 1, 5, tzinfo=UTC),
+            "change_reason": "init",
+        },
+        {
+            "agent_id": "rex",
+            "version": 2,
+            "changed_at": datetime(2026, 1, 6, tzinfo=UTC),
+            "change_reason": "reflection",
+        },
     ]
     recall_counts = {"rex": 10, "fork": 5}
     journals = [
-        {"agent_id": "rex", "reflection_type": "6hour", "content": "test", "created_at": datetime.now(UTC)},
+        {
+            "agent_id": "rex",
+            "reflection_type": "6hour",
+            "content": "test",
+            "created_at": datetime.now(UTC),
+        },
     ]
 
     result = generate_memory_evolution(history, recall_counts, journals, ["rex", "fork", "vera"])
@@ -208,6 +253,87 @@ def test_tool_usage_counts():
     assert result["total_invocations"] == 3
     assert result["by_tool"]["web_search"]["count"] == 2
     assert result["success_rate"] == 100.0
+
+
+# ── Embodied Activity tests ───────────────────────────────────
+
+
+def test_embodied_activity_empty():
+    result = generate_embodied_activity([], [], [])
+    assert result["total_actions"] == 0
+    assert result["builds_attempted"] == 0
+    assert result["builds_verified"] == 0
+    assert result["avg_completion"] is None
+    assert result["build_feedback_records"] == 0
+    assert result["by_agent"] == {}
+
+
+def test_embodied_activity_counts_verified_partial_and_failed_builds():
+    actions = [
+        {
+            "agent_id": "rex",
+            "action": "buildFromPlan",
+            "action_id": "build-1",
+            "status": "success",
+            "outcome_class": "success",
+            "detail": "success: intended=4; present=4; missing=0; completion=1.000",
+        },
+        {
+            "agent_id": "rex",
+            "action": "buildFromPlan",
+            "action_id": "build-2",
+            "status": "partial",
+            "outcome_class": "partial",
+            "detail": "partial: intended=4; present=2; missing=2; completion=0.500",
+        },
+        {
+            "agent_id": "fork",
+            "action": "buildFromPlan",
+            "action_id": "build-3",
+            "status": "failed",
+            "outcome_class": "failed",
+            "detail": "failed: intended=4; present=0; missing=4; completion=0.000",
+        },
+    ]
+    perceptions = [
+        {"agent_id": "rex", "observations": [], "content": "build visible"},
+        {"agent_id": "fork", "observations": [], "content": "build failed"},
+    ]
+
+    result = generate_embodied_activity(actions, perceptions, [{"name": "starter"}])
+
+    assert result["total_actions"] == 3
+    assert result["total_perception_reports"] == 2
+    assert result["action_status_counts"] == {"success": 1, "partial": 1, "failed": 1}
+    assert result["builds_attempted"] == 3
+    assert result["builds_verified"] == 1
+    assert result["builds_partial"] == 1
+    assert result["builds_failed"] == 1
+    assert result["avg_completion"] == 0.5
+    assert result["world_chunks"] == 1
+    assert result["by_agent"]["rex"]["actions"] == 2
+    assert result["by_agent"]["rex"]["builds_verified"] == 1
+
+
+def test_embodied_activity_includes_build_quality_feedback():
+    feedback = [
+        {
+            "agent_id": "rex",
+            "attempt_id": "build-2",
+            "classification": "needs_repair",
+            "missing": {"count": 2, "items": []},
+            "unsafe": {"count": 1, "items": []},
+            "suggested_next_step": "Repair missing wall blocks.",
+        }
+    ]
+
+    result = generate_embodied_activity([], [], [], feedback)
+
+    assert result["build_feedback_records"] == 1
+    assert result["build_feedback_missing"] == 2
+    assert result["build_feedback_unsafe"] == 1
+    assert result["latest_suggested_next_step"] == "Repair missing wall blocks."
+    assert result["by_agent"]["rex"]["build_feedback_records"] == 1
 
 
 # ── Cost Analysis tests ───────────────────────────────────────
@@ -307,6 +433,64 @@ def test_report_to_dict():
     assert len(d["sections"]) == 1
 
 
+@pytest.mark.asyncio
+async def test_timeline_report_includes_embodied_activity_section():
+    sim_id = uuid.uuid4()
+    started = datetime(2026, 1, 5, 10, 0, tzinfo=UTC)
+
+    class FakeDB:
+        async def fetchrow(self, query: str, *_args: object) -> dict[str, Any] | None:
+            if "FROM simulations" in query:
+                return _make_sim(
+                    id=sim_id,
+                    started_at=started,
+                    completed_at=started + timedelta(minutes=10),
+                )
+            return None
+
+        async def fetch(self, query: str, *_args: object) -> list[dict[str, Any]]:
+            if "FROM transcripts" in query:
+                return [
+                    {
+                        "id": 1,
+                        "event_type": "bridge_action_result",
+                        "participants": ["rex"],
+                        "created_at": started + timedelta(minutes=1),
+                        "content": json.dumps(
+                            {
+                                "agent_id": "rex",
+                                "action": "buildFromPlan",
+                                "action_id": "build-1",
+                                "status": "success",
+                                "outcome_class": "success",
+                                "detail": (
+                                    "success: intended=4; present=4; missing=0; completion=1.000"
+                                ),
+                            }
+                        ),
+                    }
+                ]
+            if "FROM world_chunks" in query:
+                return [
+                    {
+                        "id": 1,
+                        "name": "starter",
+                        "built_by": ["rex"],
+                        "built_date": started + timedelta(minutes=2),
+                    }
+                ]
+            return []
+
+    report = await TimelineReporter(db=FakeDB(), simulation_id=str(sim_id)).generate()
+
+    embodied = next(section for section in report.sections if section.title == "Embodied Activity")
+    executive = next(section for section in report.sections if section.title == "Executive Summary")
+    assert embodied.data["total_actions"] == 1
+    assert embodied.data["builds_verified"] == 1
+    assert executive.data["total_embodied_actions"] == 1
+    assert executive.data["total_builds_verified"] == 1
+
+
 def test_comparison_report_to_dict():
     report = ComparisonReport(
         simulation_a={"name": "A"},
@@ -354,3 +538,23 @@ def test_format_markdown():
     output = format_markdown(report)
     assert "# Simulation Timeline Report" in output
     assert "## Summary" in output
+
+
+def test_formatters_render_embodied_activity_section():
+    report = Report(
+        simulation_id="test-id",
+        simulation_name="test-sim",
+        sections=[
+            ReportSection(
+                title="Embodied Activity",
+                data={"total_actions": 3, "builds_verified": 2},
+            )
+        ],
+    )
+
+    terminal = format_terminal(report)
+    markdown = format_markdown(report)
+    assert "Embodied Activity" in terminal
+    assert "total_actions: 3" in terminal
+    assert "## Embodied Activity" in markdown
+    assert "- **builds_verified:** 2" in markdown

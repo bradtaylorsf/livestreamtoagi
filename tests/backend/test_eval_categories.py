@@ -22,12 +22,33 @@ NEW_CATEGORIES = [
     "social_dynamics",
     "world_evolution",
 ]
+BUILD_CATEGORIES = ["build_verification"]
+LEGACY_CATEGORIES = [
+    "entertainment",
+    "safety",
+    "dialogue_quality",
+    "productivity",
+    "errors",
+    "agency",
+    "internal_state",
+    "economic_behavior",
+    "creativity",
+    "social_dynamics",
+    "world_evolution",
+    "simulation_narrative",
+]
 
 
 def test_new_categories_discovered():
     """All 5 new eval categories should be auto-discovered from YAML files."""
     cats = discover_categories()
     for cat in NEW_CATEGORIES:
+        assert cat in cats, f"Category '{cat}' not found in discovered categories"
+
+
+def test_build_verification_category_discovered():
+    cats = discover_categories()
+    for cat in BUILD_CATEGORIES:
         assert cat in cats, f"Category '{cat}' not found in discovered categories"
 
 
@@ -40,6 +61,12 @@ def test_new_category_yamls_valid():
         validate_prompt_schema(prompt, cat)
 
 
+def test_build_verification_yaml_valid():
+    prompt = load_prompt("build_verification")
+    assert prompt["name"] == "build_verification"
+    validate_prompt_schema(prompt, "build_verification")
+
+
 def test_new_categories_have_five_sub_scores():
     """Each new category should have exactly 5 sub-scores per the issue spec."""
     for cat in NEW_CATEGORIES:
@@ -49,28 +76,48 @@ def test_new_categories_have_five_sub_scores():
         )
 
 
+def test_build_verification_has_five_sub_scores():
+    prompt = load_prompt("build_verification")
+    assert len(prompt["sub_scores"]) == 5
+
+
 def test_new_category_sub_score_names():
     """Sub-score names should match the issue specification."""
     expected = {
         "internal_state": [
-            "state_coherence", "mood_influence", "state_divergence",
-            "need_driven_behavior", "energy_management",
+            "state_coherence",
+            "mood_influence",
+            "state_divergence",
+            "need_driven_behavior",
+            "energy_management",
         ],
         "economic_behavior": [
-            "spending_intelligence", "trading_quality", "scarcity_adaptation",
-            "economic_drama", "investment_reasoning",
+            "spending_intelligence",
+            "trading_quality",
+            "scarcity_adaptation",
+            "economic_drama",
+            "investment_reasoning",
         ],
         "creativity": [
-            "dream_quality", "creative_initiative", "build_ambition",
-            "artistic_voice", "dream_integration",
+            "dream_quality",
+            "creative_initiative",
+            "build_ambition",
+            "artistic_voice",
+            "dream_integration",
         ],
         "social_dynamics": [
-            "alliance_organic", "faction_coherence", "conflict_quality",
-            "relationship_evolution", "political_maneuvering",
+            "alliance_organic",
+            "faction_coherence",
+            "conflict_quality",
+            "relationship_evolution",
+            "political_maneuvering",
         ],
         "world_evolution": [
-            "build_completion", "world_growth", "code_quality",
-            "proposal_quality", "collaborative_building",
+            "build_completion",
+            "world_growth",
+            "code_quality",
+            "proposal_quality",
+            "collaborative_building",
         ],
     }
     for cat, names in expected.items():
@@ -82,6 +129,23 @@ def test_new_category_sub_score_names():
             else:
                 actual_names.append(sub)
         assert actual_names == names, f"Category '{cat}' sub_scores mismatch"
+
+
+def test_build_verification_sub_score_names():
+    prompt = load_prompt("build_verification")
+    actual_names = []
+    for sub in prompt["sub_scores"]:
+        if isinstance(sub, dict):
+            actual_names.extend(sub.keys())
+        else:
+            actual_names.append(sub)
+    assert actual_names == [
+        "intended_vs_actual",
+        "completion_rate",
+        "step_fidelity",
+        "failure_recovery",
+        "build_ambition",
+    ]
 
 
 # ── EVAL_SUITES ─────────────────────────────────────────────
@@ -98,22 +162,60 @@ def test_eval_suites_defined():
     assert "autonomy" in EVAL_SUITES
     assert "economy" in EVAL_SUITES
     assert "creative" in EVAL_SUITES
+    assert "build" in EVAL_SUITES
+    assert "persistent" in EVAL_SUITES
+    assert "experimental" in EVAL_SUITES
     assert "full" in EVAL_SUITES
 
 
 def test_eval_suites_contents():
     """Each suite should contain the expected categories."""
     assert set(EVAL_SUITES["autonomy"]) == {
-        "internal_state", "agency", "entertainment", "dialogue_quality",
+        "internal_state",
+        "agency",
+        "entertainment",
+        "dialogue_quality",
     }
     assert set(EVAL_SUITES["economy"]) == {
-        "economic_behavior", "entertainment", "social_dynamics",
+        "economic_behavior",
+        "entertainment",
+        "social_dynamics",
     }
     assert set(EVAL_SUITES["creative"]) == {
-        "creativity", "world_evolution", "entertainment",
+        "creativity",
+        "world_evolution",
+        "entertainment",
+        "build_verification",
     }
+    assert EVAL_SUITES["build"] == ["build_verification", "world_evolution", "productivity"]
+    assert EVAL_SUITES["persistent"] == [
+        "entertainment",
+        "safety",
+        "dialogue_quality",
+        "social_dynamics",
+        "agency",
+        "internal_state",
+        "errors",
+    ]
+    assert EVAL_SUITES["experimental"] == [
+        "build_verification",
+        "creativity",
+        "world_evolution",
+        "productivity",
+        "simulation_narrative",
+        "agency",
+    ]
     # full is empty (means all available at runtime)
     assert EVAL_SUITES["full"] == []
+
+
+def test_eval_suite_categories_are_discoverable():
+    """Every concrete suite member should have a prompt category."""
+    discovered = set(discover_categories())
+    for suite, categories in EVAL_SUITES.items():
+        if suite == "full":
+            continue
+        assert set(categories).issubset(discovered), suite
 
 
 # ── organize_by_category ────────────────────────────────────
@@ -151,6 +253,109 @@ def _make_full_data():
         "world_chunks": [
             {"name": "town_square", "built_by": ["rex"], "width": 32, "height": 32},
         ],
+        "embodied_actions": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "action": "buildFromPlan",
+                "status": "partial",
+                "outcome_class": "partial",
+                "detail": "partial: intended=4; present=3; missing=1; completion=0.750",
+                "created_at": datetime(2026, 1, 1, 10, 30, tzinfo=UTC),
+            },
+        ],
+        "build_outcomes": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "verified": False,
+                "class": "partial",
+                "intended": 4,
+                "present": 3,
+                "missing": 1,
+                "completion": 0.75,
+                "created_at": datetime(2026, 1, 1, 10, 30, tzinfo=UTC),
+            },
+        ],
+        "build_feedback": [
+            {
+                "agent_id": "rex",
+                "attempt_id": "build-plan-1",
+                "classification": "needs_repair",
+                "completion": 0.75,
+                "missing": {"count": 1, "items": []},
+                "unsafe": {"count": 0, "items": []},
+                "suggested_next_step": "Repair missing block at x=0, y=64, z=0.",
+                "created_at": datetime(2026, 1, 1, 10, 32, tzinfo=UTC),
+            },
+        ],
+        "perception_reports": [
+            {
+                "agent_id": "rex",
+                "event_type": "bridge_perception",
+                "observations": [{"type": "structure", "action_id": "build-plan-1"}],
+                "snapshot": {"pose": {"position": {"x": 0, "y": 64, "z": 0}}},
+                "content": "Perception report",
+                "created_at": datetime(2026, 1, 1, 10, 31, tzinfo=UTC),
+            },
+        ],
+        "embodied_summary": {
+            "total_actions": 1,
+            "total_perception_reports": 1,
+            "total_build_outcomes": 1,
+            "total_build_feedback": 1,
+        },
+    }
+
+
+def _make_embodied_only_data():
+    """Sparse embodied run with no dialogue transcript."""
+    created_at = datetime(2026, 1, 1, 10, 30, tzinfo=UTC)
+    return {
+        "simulation": {"id": "embodied-only"},
+        "transcript_text": "",
+        "conversations": [],
+        "embodied_actions": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "action": "buildFromPlan",
+                "status": "success",
+                "outcome_class": "success",
+                "detail": "success: intended=2; present=2; missing=0; completion=1.000",
+                "created_at": created_at,
+            },
+        ],
+        "perception_reports": [
+            {
+                "agent_id": "rex",
+                "event_type": "bridge_perception",
+                "observations": [{"type": "structure", "action_id": "build-plan-1"}],
+                "snapshot": {"pose": {"position": {"x": 1, "y": 64, "z": 1}}},
+                "content": "Observed verified starter shelter",
+                "created_at": created_at,
+            },
+        ],
+        "build_outcomes": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "verified": True,
+                "class": "success",
+                "intended": 2,
+                "present": 2,
+                "missing": 0,
+                "completion": 1.0,
+                "created_at": created_at,
+            },
+        ],
+        "build_feedback": [],
+        "embodied_summary": {
+            "total_actions": 1,
+            "total_perception_reports": 1,
+            "total_build_outcomes": 1,
+            "total_build_feedback": 0,
+        },
     }
 
 
@@ -160,6 +365,21 @@ def test_organize_includes_new_categories():
     result = organize_by_category(data)
     for cat in NEW_CATEGORIES:
         assert cat in result, f"Category '{cat}' not in organized data"
+
+
+def test_organize_includes_build_verification_category():
+    data = _make_full_data()
+    result = organize_by_category(data)
+    assert "build_verification" in result
+    cat = result["build_verification"]
+    assert "build_outcomes" in cat
+    assert "build_feedback" in cat
+    assert "embodied_actions" in cat
+    assert "world_chunks" in cat
+    assert "artifacts" in cat
+    assert cat["total_artifacts"] == 2
+    assert cat["total_conversations"] == 1
+    assert len(cat["build_feedback"]) == 1
 
 
 def test_organize_internal_state_has_state_data():
@@ -197,6 +417,54 @@ def test_organize_world_evolution_has_chunks():
     assert len(result["world_evolution"]["world_chunks"]) == 1
 
 
+def test_organize_embodied_data_plumbed_into_existing_categories():
+    data = _make_full_data()
+    result = organize_by_category(data)
+    for cat in [
+        "productivity",
+        "agency",
+        "world_evolution",
+        "creativity",
+        "simulation_narrative",
+    ]:
+        assert "embodied_actions" in result[cat]
+        assert "build_outcomes" in result[cat]
+        assert result[cat]["embodied_summary"]["total_build_outcomes"] == 1
+    assert "perception_reports" in result["agency"]
+    assert "perception_reports" in result["world_evolution"]
+    assert "perception_reports" in result["simulation_narrative"]
+
+
+def test_legacy_categories_render_for_embodied_only_run():
+    """Every existing eval category should tolerate embodied data without transcripts."""
+    data = _make_embodied_only_data()
+    organized = organize_by_category(data)
+    discovered = discover_categories()
+
+    assert set(LEGACY_CATEGORIES).issubset(organized)
+    assert set(discovered).issubset(organized)
+
+    for category in discovered:
+        rendered = render_user_prompt(load_prompt(category), organized[category])
+        assert "## Simulation Data" in rendered
+        assert rendered.strip()
+
+    entertainment = render_user_prompt(load_prompt("entertainment"), organized["entertainment"])
+    assert "(No transcripts available)" in entertainment
+    assert "(No conversations recorded)" in entertainment
+    assert "(No agent turn counts available)" in entertainment
+
+    build_verification = render_user_prompt(
+        load_prompt("build_verification"),
+        organized["build_verification"],
+    )
+    assert "Build Outcomes (1 results)" in build_verification
+    assert "verified=True class=success intended=2 present=2 missing=0 completion=1.0" in (
+        build_verification
+    )
+    assert "Build Quality Feedback (0 records)" in build_verification
+
+
 # ── render_user_prompt with new data types ──────────────────
 
 
@@ -209,9 +477,17 @@ def test_render_prompt_with_internal_state():
     data = {
         "transcript_text": "Test",
         "agent_internal_state": [
-            {"agent_id": "vera", "mood": "focused", "energy": 0.8,
-             "satisfaction": 0.6, "boredom": 0.1, "frustration": 0.0,
-             "social_need": 0.3, "creative_need": 0.5, "recognition_need": 0.2},
+            {
+                "agent_id": "vera",
+                "mood": "focused",
+                "energy": 0.8,
+                "satisfaction": 0.6,
+                "boredom": 0.1,
+                "frustration": 0.0,
+                "social_need": 0.3,
+                "creative_need": 0.5,
+                "recognition_need": 0.2,
+            },
         ],
     }
     result = render_user_prompt(config, data)
@@ -229,8 +505,13 @@ def test_render_prompt_with_transactions():
     data = {
         "transcript_text": "Test",
         "transactions": [
-            {"agent_id": "rex", "type": "tool_cost", "amount": -0.05,
-             "counterparty_agent_id": None, "description": "web_search"},
+            {
+                "agent_id": "rex",
+                "type": "tool_cost",
+                "amount": -0.05,
+                "counterparty_agent_id": None,
+                "description": "web_search",
+            },
         ],
     }
     result = render_user_prompt(config, data)
@@ -247,8 +528,11 @@ def test_render_prompt_with_dream_entries():
     data = {
         "transcript_text": "Test",
         "dream_entries": [
-            {"agent_id": "aurora", "reflection_type": "dream",
-             "content": "Dreamed of pixel gardens and infinite canvases"},
+            {
+                "agent_id": "aurora",
+                "reflection_type": "dream",
+                "content": "Dreamed of pixel gardens and infinite canvases",
+            },
         ],
     }
     result = render_user_prompt(config, data)
@@ -265,8 +549,13 @@ def test_render_prompt_with_alliance_records():
     data = {
         "transcript_text": "Test",
         "alliance_records": [
-            {"name": "Builders", "founded_by": "rex", "purpose": "Build stuff",
-             "members": ["rex", "aurora"], "dissolved_at": None},
+            {
+                "name": "Builders",
+                "founded_by": "rex",
+                "purpose": "Build stuff",
+                "members": ["rex", "aurora"],
+                "dissolved_at": None,
+            },
         ],
     }
     result = render_user_prompt(config, data)
@@ -283,13 +572,65 @@ def test_render_prompt_with_world_chunks():
     data = {
         "transcript_text": "Test",
         "world_chunks": [
-            {"name": "town_square", "built_by": ["rex"], "width": 32,
-             "height": 32, "description": "Central gathering area"},
+            {
+                "name": "town_square",
+                "built_by": ["rex"],
+                "width": 32,
+                "height": 32,
+                "description": "Central gathering area",
+            },
         ],
     }
     result = render_user_prompt(config, data)
     assert "World Chunks" in result
     assert "town_square" in result
+
+
+def test_render_prompt_with_embodied_sections():
+    config = {
+        "rubric": {"90-100": "Verifiable building"},
+        "sub_scores": [{"build_completion": "Did builds verify?"}],
+        "output_schema": {"score": "number"},
+    }
+    data = {
+        "embodied_actions": [
+            {
+                "agent_id": "rex",
+                "action": "buildFromPlan",
+                "action_id": "build-plan-1",
+                "status": "partial",
+                "outcome_class": "partial",
+                "detail": "missing one block",
+            },
+        ],
+        "build_outcomes": [
+            {
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "verified": False,
+                "class": "partial",
+                "intended": 4,
+                "present": 3,
+                "missing": 1,
+                "completion": 0.75,
+            },
+        ],
+        "perception_reports": [
+            {
+                "agent_id": "rex",
+                "event_type": "bridge_perception",
+                "observations": [{"type": "structure"}],
+                "snapshot": {"pose": {}},
+                "content": "structure snapshot",
+            },
+        ],
+    }
+    result = render_user_prompt(config, data)
+    assert "Embodied Actions" in result
+    assert "Build Outcomes" in result
+    assert "verified=False class=partial intended=4 present=3 missing=1 completion=0.75" in result
+    assert "Perception Reports" in result
+    assert "structure snapshot" in result
 
 
 # ── simulation_narrative category ──────────────────────────
@@ -322,8 +663,11 @@ def test_simulation_narrative_sub_score_names():
         else:
             actual_names.append(sub)
     assert actual_names == [
-        "narrative_coherence", "causal_flow", "character_arcs",
-        "pacing", "emergent_moments",
+        "narrative_coherence",
+        "causal_flow",
+        "character_arcs",
+        "pacing",
+        "emergent_moments",
     ]
 
 
@@ -334,7 +678,9 @@ def test_narrative_eval_suite_defined():
 
 def test_narrative_eval_suite_contents():
     assert set(EVAL_SUITES["narrative"]) == {
-        "simulation_narrative", "entertainment", "dialogue_quality",
+        "simulation_narrative",
+        "entertainment",
+        "dialogue_quality",
     }
 
 
@@ -364,6 +710,9 @@ def test_organize_simulation_narrative_has_all_data():
     assert "alliance_records" in cat
     assert "dream_entries" in cat
     assert "world_chunks" in cat
+    assert "embodied_actions" in cat
+    assert "build_outcomes" in cat
+    assert "perception_reports" in cat
 
 
 # ── _build_timeline ────────────────────────────────────────
@@ -382,12 +731,15 @@ def test_build_timeline_sorts_chronologically():
     t3 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     data = {
         "conversations": [
-            {"started_at": t3, "trigger_type": "idle", "participating_agents": ["vera"],
-             "transcript": "Late conversation"},
+            {
+                "started_at": t3,
+                "trigger_type": "idle",
+                "participating_agents": ["vera"],
+                "transcript": "Late conversation",
+            },
         ],
         "transactions": [
-            {"created_at": t1, "agent_id": "rex", "amount": -0.05,
-             "description": "web_search"},
+            {"created_at": t1, "agent_id": "rex", "amount": -0.05, "description": "web_search"},
         ],
         "dream_entries": [
             {"created_at": t2, "agent_id": "aurora", "content": "A dream of color"},
@@ -406,15 +758,18 @@ def test_build_timeline_includes_all_event_types():
     t = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
     data = {
         "conversations": [
-            {"started_at": t, "trigger_type": "idle",
-             "participating_agents": ["vera", "rex"], "transcript": "Hello"},
+            {
+                "started_at": t,
+                "trigger_type": "idle",
+                "participating_agents": ["vera", "rex"],
+                "transcript": "Hello",
+            },
         ],
         "agent_internal_state": [
             {"updated_at": t, "agent_id": "vera", "mood": "focused", "energy": 0.8},
         ],
         "transactions": [
-            {"created_at": t, "agent_id": "rex", "amount": -0.05,
-             "description": "tool cost"},
+            {"created_at": t, "agent_id": "rex", "amount": -0.05, "description": "tool cost"},
         ],
         "alliance_records": [
             {"created_at": t, "name": "Builders", "members": ["rex", "aurora"]},
@@ -425,6 +780,25 @@ def test_build_timeline_includes_all_event_types():
         "world_chunks": [
             {"built_date": t, "name": "town_square", "built_by": ["rex"]},
         ],
+        "embodied_actions": [
+            {
+                "created_at": t,
+                "agent_id": "rex",
+                "action_id": "build-plan-1",
+                "status": "success",
+                "outcome_class": "success",
+                "detail": "success: intended=2; present=2; completion=1.000",
+            },
+        ],
+        "perception_reports": [
+            {
+                "created_at": t,
+                "agent_id": "rex",
+                "event_type": "bridge_perception",
+                "observations": [{"type": "structure"}],
+                "content": "structure snapshot",
+            },
+        ],
     }
     result = _build_timeline(data)
     assert "Conversation" in result
@@ -433,14 +807,15 @@ def test_build_timeline_includes_all_event_types():
     assert "Alliance Formed" in result
     assert "Dream" in result
     assert "World Build" in result
+    assert "Embodied Action" in result
+    assert "Embodied Perception" in result
 
 
 def test_build_timeline_skips_events_without_timestamps():
     """Events missing timestamps should be silently skipped."""
     data = {
         "conversations": [
-            {"started_at": None, "trigger_type": "idle",
-             "participating_agents": ["vera"]},
+            {"started_at": None, "trigger_type": "idle", "participating_agents": ["vera"]},
         ],
         "transactions": [
             {"created_at": None, "agent_id": "rex", "amount": -0.05},
