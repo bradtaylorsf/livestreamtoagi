@@ -185,6 +185,41 @@ def test_load_seed_file_parses_factions():
     assert builders.goal
 
 
+def test_two_team_civilization_scenario_loads_roles_and_factions():
+    """The two-team Minecraft scenario records team goals and role prompts."""
+    from core.simulation.orchestrator import SimulationConfig
+
+    agents = {"alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"}
+    cfg = SimulationConfig(
+        name="two-team-civilization",
+        seed_file=str(SCENARIOS_DIR / "two_team_civilization_75m.yaml"),
+        agents=sorted(agents),
+        conversation_mode="director_v2",
+        run_mode="experimental",
+        dry_run=True,
+    )
+    cfg.load_seed_file(valid_agent_ids=agents)
+
+    assert cfg.run_mode.value == "experimental"
+    assert cfg.memory_seed is not None
+    assert cfg.memory_seed.mode == "none"
+    assert {faction.name for faction in cfg.factions} == {"team_ember", "team_grove"}
+    assert next(f for f in cfg.factions if f.name == "team_ember").members == [
+        "alpha",
+        "rex",
+        "vera",
+        "sentinel",
+    ]
+    assert next(f for f in cfg.factions if f.name == "team_grove").members == [
+        "aurora",
+        "fork",
+        "pixel",
+        "grok",
+    ]
+    assert "builder-duty" in " ".join(cfg.agent_goals["rex"]).lower()
+    assert "scout" in " ".join(cfg.agent_goals["grok"]).lower()
+
+
 def test_embodied_seed_file_serializes_factions_and_agent_goals(tmp_path):
     """Embodied run configs keep factions and goals in the simulation snapshot."""
     from core.simulation.orchestrator import SimulationConfig

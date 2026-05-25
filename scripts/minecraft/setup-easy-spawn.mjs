@@ -27,6 +27,9 @@ Environment:
   EASY_SETUP_OBSERVERS Extra human names to teleport into the safe meadow
   EASY_SETUP_OPERATORS Human names to op for gamemode/tp commands
   EASY_SETUP_SPECTATORS Human names to switch into spectator mode
+  EASY_SETUP_MEADOW_RADIUS Starter meadow radius     (default: 23)
+  EASY_SETUP_BOUNDARY      glass or none             (default: glass)
+  EASY_SETUP_ANIMALS       Spawn starter animals     (default: 0)
   RESCUE_MODE      Rescue fallback policy       (easy permits op teleport fallback)
 `);
     process.exit(0);
@@ -42,6 +45,9 @@ const port = Number(process.env.MC_PORT || process.env.SERVER_PORT || 25566);
 const minecraftVersion = process.env.MC_VERSION || '1.21.6';
 const commandDelayMs = Number(process.env.EASY_SETUP_COMMAND_DELAY_MS || 250);
 const onlineDelayMs = Number(process.env.EASY_SETUP_ONLINE_DELAY_MS || 0);
+const meadowRadius = boundedInt(process.env.EASY_SETUP_MEADOW_RADIUS, 23, 23, 96);
+const boundaryMode = String(process.env.EASY_SETUP_BOUNDARY || 'glass').trim().toLowerCase();
+const spawnAnimals = truthy(process.env.EASY_SETUP_ANIMALS);
 const players = parseNames(
     process.env.EASY_SETUP_PLAYERS || 'BridgeBot Alpha Vera Rex Aurora Pixel Fork Sentinel Grok',
 );
@@ -63,6 +69,54 @@ function parseNames(value) {
             .map((name) => name.trim())
             .filter(Boolean),
     )];
+}
+
+function boundedInt(value, fallback, min, max) {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+}
+
+function truthy(value) {
+    return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value || '').trim().toLowerCase());
+}
+
+function expandedMeadowCommands() {
+    if (meadowRadius === 23 && boundaryMode === 'glass') return [];
+    const inner = Math.max(1, meadowRadius - 1);
+    const edge = meadowRadius;
+    const commands = [
+        '/fill -23 64 -23 23 68 -23 minecraft:air replace minecraft:glass',
+        '/fill -23 64 23 23 68 23 minecraft:air replace minecraft:glass',
+        '/fill -23 64 -23 -23 68 23 minecraft:air replace minecraft:glass',
+        '/fill 23 64 -23 23 68 23 minecraft:air replace minecraft:glass',
+        `/fill -${meadowRadius} 64 -${meadowRadius} ${meadowRadius} 96 ${meadowRadius} minecraft:air replace`,
+        `/fill -${inner} 58 -${inner} ${inner} 62 ${inner} minecraft:dirt replace`,
+        `/fill -${inner} 63 -${inner} ${inner} 63 ${inner} minecraft:grass_block replace`,
+    ];
+    if (boundaryMode !== 'none') {
+        commands.push(
+            `/fill -${edge} 64 -${edge} ${edge} 68 -${edge} minecraft:glass replace`,
+            `/fill -${edge} 64 ${edge} ${edge} 68 ${edge} minecraft:glass replace`,
+            `/fill -${edge} 64 -${edge} -${edge} 68 ${edge} minecraft:glass replace`,
+            `/fill ${edge} 64 -${edge} ${edge} 68 ${edge} minecraft:glass replace`,
+        );
+    }
+    return commands;
+}
+
+function animalCommands() {
+    if (!spawnAnimals) return [];
+    return [
+        '/summon minecraft:cow 14 64 10',
+        '/summon minecraft:cow 16 64 10',
+        '/summon minecraft:sheep 18 64 10',
+        '/summon minecraft:sheep 20 64 10',
+        '/summon minecraft:chicken 14 64 14',
+        '/summon minecraft:chicken 16 64 14',
+        '/summon minecraft:pig 18 64 14',
+        '/summon minecraft:pig 20 64 14',
+    ];
 }
 
 function offlineUuid(name) {
@@ -227,6 +281,8 @@ async function main() {
         '/setblock -2 64 4 minecraft:torch replace',
         '/fill -10 63 -5 10 63 1 minecraft:grass_block replace',
         '/fill -10 64 -5 10 68 1 minecraft:air replace',
+        ...expandedMeadowCommands(),
+        ...animalCommands(),
     ];
     for (const body of terrainCommands) {
         await command(body);

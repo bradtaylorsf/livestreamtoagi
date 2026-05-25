@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -19,6 +20,17 @@ from core.simulation.clock import SimulationClock
 from core.simulation.orchestrator import CostLimitExceededError, SimulationConfig
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SETTLEMENT_OWNER_ORDER = (
+    "fork",
+    "rex",
+    "pixel",
+    "sentinel",
+    "aurora",
+    "vera",
+    "grok",
+    "alpha",
+)
 
 EmbodiedCommandRunner = Callable[
     [list[str], dict[str, str], Path, "EmbodiedSimulationSupervisor"],
@@ -44,6 +56,94 @@ def _duration_hours(duration: timedelta | None) -> str | None:
         return None
     hours = duration.total_seconds() / 3600
     return f"{hours:.6f}".rstrip("0").rstrip(".")
+
+
+def _env_enabled(value: str | None, *, default: bool = True) -> bool:
+    if value is None or value == "":
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _settlement_objective_descriptions(raw: str | None) -> list[str]:
+    return [part.strip() for part in str(raw or "").split("|") if part.strip()]
+
+
+def _agent_id_order(raw: str | None) -> list[str]:
+    return [
+        part.strip().lower()
+        for part in str(raw or "").replace(",", " ").replace("|", " ").split()
+        if part.strip()
+    ]
+
+
+def _settlement_owner_order(
+    raw: str | None,
+    agents: list[str] | tuple[str, ...],
+    *,
+    allowed_agents: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    available = [agent.strip().lower() for agent in agents if agent and agent.strip()]
+    allowed = [agent.strip().lower() for agent in allowed_agents or () if agent and agent.strip()]
+    if allowed:
+        allowed_set = set(allowed)
+        available = [agent for agent in available if agent in allowed_set]
+        for agent in allowed:
+            if agent not in available:
+                available.append(agent)
+    available_set = set(available)
+    if raw:
+        preferred = _agent_id_order(raw)
+    else:
+        preferred = list(DEFAULT_SETTLEMENT_OWNER_ORDER)
+    ordered: list[str] = []
+    for agent in preferred:
+        if agent and agent not in ordered and (not available_set or agent in available_set):
+            ordered.append(agent)
+    for agent in available:
+        if agent not in ordered:
+            ordered.append(agent)
+    return ordered
+
+
+def _settlement_plan_build_owner_allowlist(env: dict[str, str] | None = None) -> list[str]:
+    source = env if env is not None else os.environ
+    return _agent_id_order(
+        source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST")
+        or source.get("SOAK_PLAN_BUILD_BOTS")
+    )
+
+
+def _objective_slug(description: str) -> str:
+    chars: list[str] = []
+    previous_dash = False
+    for char in description.lower():
+        if char.isalnum():
+            chars.append(char)
+            previous_dash = False
+        elif not previous_dash:
+            chars.append("-")
+            previous_dash = True
+    slug = "".join(chars).strip("-")
+    return slug or "objective"
+
+
+def _settlement_objective_payload(
+    index: int,
+    description: str,
+    owner_order: list[str] | None = None,
+) -> dict[str, Any]:
+    owner = owner_order[index % len(owner_order)] if owner_order else None
+    return {
+        "objective_id": f"phase-{index + 1}-{_objective_slug(description)}",
+        "phase_index": index,
+        "description": description,
+        "owner_agent_id": owner,
+        "status": "pending",
+        "previous_owner_agent_ids": [],
+        "owner_started_at_ms": None,
+        "stale_after_ms": None,
+        "cooldown_until_ms": None,
+    }
 
 
 async def _default_command_runner(
@@ -152,6 +252,7 @@ class EmbodiedSimulationSupervisor:
         self.run_id = self.run_id or f"run-{sim.id}"
         self.run_dir = self.run_dir or self._default_run_dir()
 
+        await self._initialize_settlement_objectives()
         await self._persist_supervisor_config("running")
         env = self._child_environment()
 
@@ -180,7 +281,14 @@ class EmbodiedSimulationSupervisor:
                 if return_code != 0:
                     status = (
                         SimulationStatus.cancelled
-                        if self.stop_reason in {"cancelled", "kill_switch", "cost_cap", "duration_reached", "goal_reached"}
+                        if self.stop_reason
+                        in {
+                            "cancelled",
+                            "kill_switch",
+                            "cost_cap",
+                            "duration_reached",
+                            "goal_reached",
+                        }
                         else SimulationStatus.failed
                     )
                     if self.stop_reason is None:
@@ -189,7 +297,10 @@ class EmbodiedSimulationSupervisor:
                 if not self.is_persistent:
                     self._set_stop_reason(self.stop_reason or "completed")
                     break
-                if self.max_launcher_cycles is not None and launcher_cycles >= self.max_launcher_cycles:
+                if (
+                    self.max_launcher_cycles is not None
+                    and launcher_cycles >= self.max_launcher_cycles
+                ):
                     self._set_stop_reason("cycle_limit")
                     break
 
@@ -234,9 +345,6 @@ class EmbodiedSimulationSupervisor:
             self._set_stop_reason("kill_switch")
             return True
         await self._check_cost_limit()
-        if not self.is_persistent and self.config.duration and self.clock.elapsed() >= self.config.duration:
-            self._set_stop_reason("duration_reached")
-            return True
         if not self.is_persistent and await self._experimental_goal_reached():
             self._set_stop_reason("goal_reached")
             return True
@@ -287,7 +395,9 @@ class EmbodiedSimulationSupervisor:
     async def _persist_supervisor_config(self, lifecycle: str) -> None:
         if self.simulation_id is None:
             return
-        await self.simulation_repo.update_config(self.simulation_id, self._config_snapshot(lifecycle))
+        await self.simulation_repo.update_config(
+            self.simulation_id, self._config_snapshot(lifecycle)
+        )
 
     def _default_run_dir(self) -> Path:
         assert self.simulation_id is not None
@@ -320,10 +430,109 @@ class EmbodiedSimulationSupervisor:
         if self.config.agents:
             env["SOAK_BOTS"] = " ".join(self.config.agents)
             env["LTAG_SIM_AGENTS"] = " ".join(self.config.agents)
+        self._apply_minecraft_build_starting_conditions(env)
         duration_hours = _duration_hours(self.config.duration)
         if duration_hours is not None and not self.is_persistent:
             env["SOAK_DURATION_HOURS"] = duration_hours
         return env
+
+    async def _initialize_settlement_objectives(self) -> None:
+        if self.simulation_id is None or self.redis is None:
+            return
+        if os.environ.get("MC_SIM_BUILD_MODE") != "settlement":
+            return
+        if not _env_enabled(os.environ.get("MC_SIM_SHARED_STATE_ENABLED"), default=True):
+            return
+        objectives = _settlement_objective_descriptions(
+            os.environ.get("MC_SIM_SETTLEMENT_OBJECTIVES")
+        )
+        if not objectives:
+            return
+        owner_order = _settlement_owner_order(
+            os.environ.get("MC_SIM_SETTLEMENT_OWNER_ORDER"),
+            list(self.config.agents),
+            allowed_agents=_settlement_plan_build_owner_allowlist(),
+        )
+        from core.redis_keys import ScopedRedis
+        from core.shared_state import SettlementObjective, SharedWorkingState
+
+        state = SharedWorkingState(ScopedRedis(self.redis, self.simulation_id))
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(
+                    **_settlement_objective_payload(index, description, owner_order)
+                )
+                for index, description in enumerate(objectives)
+            ]
+        )
+
+    def _apply_minecraft_build_starting_conditions(self, env: dict[str, str]) -> None:
+        build_mode = env.get("MC_SIM_BUILD_MODE")
+        if build_mode not in {"plan", "settlement"}:
+            return
+
+        if not env.get("SOAK_INIT_MESSAGE"):
+            env["SOAK_INIT_MESSAGE"] = self._default_minecraft_init_message(build_mode, env)
+
+        if build_mode != "settlement" or env.get("MC_SIM_ACTIVE_OBJECTIVE_JSON"):
+            return
+        objectives = _settlement_objective_descriptions(env.get("MC_SIM_SETTLEMENT_OBJECTIVES"))
+        if not objectives:
+            return
+        owner_order = _settlement_owner_order(
+            env.get("MC_SIM_SETTLEMENT_OWNER_ORDER"),
+            env.get("SOAK_BOTS", "").split(),
+            allowed_agents=_settlement_plan_build_owner_allowlist(env),
+        )
+        env["MC_SIM_ACTIVE_OBJECTIVE_JSON"] = json.dumps(
+            _settlement_objective_payload(0, objectives[0], owner_order),
+            separators=(",", ":"),
+        )
+
+    def _default_minecraft_init_message(self, build_mode: str, env: dict[str, str]) -> str:
+        if build_mode == "plan":
+            message = (
+                "You are beginning a local Minecraft plan-build simulation in an easy "
+                "starter meadow. Coordinate in ordinary public chat, choose one compact "
+                'shared structure, and use !planAndBuild("small shared cabin") or another '
+                "concise !planAndBuild request to generate a bounded JSON plan with the "
+                "builder model and execute it through !buildFromPlan. Good starter requests "
+                'are "marker camp", "3x3 hut", "simple wall", and '
+                '"torch-lit storage corner". Keep arbitrary code execution out of the run; '
+                "!executeCode remains blocked. After a plan starts, let the build finish "
+                "before issuing another embodied action."
+            )
+        else:
+            objectives = env.get("MC_SIM_SETTLEMENT_OBJECTIVES") or (
+                "starter cabin|perimeter wall|workshop station|garden plot"
+            )
+            message = (
+                "You are beginning a local Minecraft multi-phase settlement build in an easy "
+                f"starter meadow. Complete these settlement objectives in order: {objectives}. "
+                "Use exactly one !planAndBuild request per active phase, for example "
+                '!planAndBuild("small shared cabin") for the starter cabin. Rotate the build '
+                "owner after a completed, blocked, cooldown, stale, or capped phase; non-owners should "
+                "only support through chat, inventory/resource checks, guarding, or clearing "
+                'instructions from the owner. Good phase requests are "small shared cabin", '
+                '"simple wall", "workshop station", and "garden plot". Do not repeat the '
+                "starter cabin for later non-cabin additions."
+            )
+
+        if env.get("SOAK_EASY_SPAWN") == "1":
+            message = (
+                f"{message} Easy-mode rules: stay inside the glass starter meadow, use the "
+                "starter kit you already have, and build one coherent shared structure before "
+                "doing more resource collection. Only the build owner should place blocks "
+                "through !planAndBuild; support agents should coordinate in ordinary public "
+                "Minecraft chat, check inventory or nearby resources when useful, and avoid "
+                "standalone block placement unless the owner asks for help. Do not use !place, "
+                "!placeHere, !break, !observe, or JSON/object command arguments in this local smoke."
+            )
+
+        return (
+            f"{message} Build mode is {build_mode}: prefer one active !planAndBuild phase at a "
+            "time and let buildFromPlan finish before issuing another embodied action."
+        )
 
     def _minecraft_command(self) -> list[str]:
         command = [str(self.project_root / "scripts" / "minecraft" / "soak.sh")]

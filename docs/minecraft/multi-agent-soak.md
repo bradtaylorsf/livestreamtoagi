@@ -84,6 +84,11 @@ Required runtime state:
 | Bridge auth | `MINECRAFT_BRIDGE_TOKEN` exported and matching the backend |
 | LM Studio | OpenAI-compatible server reachable at `http://localhost:1234/v1`, with `LOCAL_LLM_MODEL` loaded enough to complete a chat request |
 
+Model role overrides are documented in [../model-configuration.md](../model-configuration.md).
+For local soaks, `LTAG_MODEL_*` controls logical role selection while
+`LOCAL_LLM_MODEL` and `LOCAL_LLM_MODEL_BUILDING` control the actual LM Studio
+runtime model IDs.
+
 ## Live Soak Command
 
 Use local models only:
@@ -158,6 +163,10 @@ to `0` when you want the runner to stop its auto-started server. Local sims
 also choose a high run-specific MindServer base port by default to avoid stale
 `8080+` listeners from previous experiments; set
 `MC_SIM_MINDSERVER_BASE_PORT=<port>` if you need a fixed range.
+For open settlement experiments, `setup-easy-spawn.mjs` also supports
+`EASY_SETUP_MEADOW_RADIUS=<23..96>`, `EASY_SETUP_BOUNDARY=none`, and
+`EASY_SETUP_ANIMALS=1` so the same disposable easy world can be expanded beyond
+the fenced validation arena without touching the normal server.
 The sim wrapper defaults to the real character cast only:
 Alpha, Vera, Rex, Aurora, Pixel, Fork, Sentinel, and Grok. BridgeBot is excluded
 unless `MC_SIM_INCLUDE_BRIDGE_BOT=1` is set, because it is a technical bridge
@@ -242,9 +251,11 @@ In this mode the local wrapper lets agents call
 `!planAndBuild("small shared cabin")`. By default the action asks the profile
 `code_model` (the `LOCAL_LLM_MODEL_BUILDING` tier) for strict JSON, validates
 allowed materials, bounds, and max steps, logs the plan as JSON evidence, and
-executes it through the verified `!buildFromPlan` path. Invalid local model
-plans are rejected and replaced with a starter blueprint such as marker camp,
-3x3 hut, simple wall, or torch-lit storage corner.
+executes it through the verified `!buildFromPlan` path. Generated plans are
+normalized into bottom-up placement order before execution, so a model that
+lists supported upper blocks before their foundations does not force a fallback.
+Invalid local model plans are rejected and replaced with a starter blueprint
+such as marker camp, 3x3 hut, simple wall, or torch-lit storage corner.
 
 OpenRouter builder routing is opt-in and applies only to this
 `purpose=plan_generation` path:
@@ -277,6 +288,16 @@ placement/build commands are removed from non-owner tool menus and blocked at
 the command parser. The Node governor mirrors that scene lock so stale direct
 commands are skipped with `reason=scene_locked` before any provider call.
 
+For exploratory civilization runs, `SOAK_PLAN_BUILD_BOTS` or
+`MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` can restrict builder-plan eligibility to
+the agents currently assigned or elected into builder duty. This is a run
+policy, not a permanent character role: leave it unset for unrestricted
+ownership, set it to `all`/`any`/`*` for explicit unrestricted ownership, or set
+it to a comma/space-separated list such as `rex fork` for one experiment. The
+Director will prefer eligible phase owners and the runtime command guard blocks
+non-eligible direct `!planAndBuild` attempts before a builder-model request is
+made.
+
 The build governor runs before any provider call. Each agent may have one
 active build at a time, each scene may have one active plan owner, equivalent
 completed builds are cooled down for `MC_SIM_BUILD_COOLDOWN_SEC` seconds, and
@@ -288,6 +309,8 @@ cached plans are reused without a new builder-model call. Defaults:
 | `MC_SIM_BUILD_COOLDOWN_SEC` | `300` | Cooldown for equivalent completed build requests. |
 | `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks. |
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
+| `MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` / `SOAK_PLAN_BUILD_BOTS` | unset | Optional current builder-duty allowlist for `!planAndBuild`; unset means any agent may become owner. |
+| `MINECRAFT_PLAN_BUILD_MODEL_MAX_STEPS` | `32` | Planner-facing cap for one generated phase. Keep this lower than `MINECRAFT_PLAN_BUILD_MAX_STEPS` in open-settlement shakeouts so agents build several compact structures instead of one oversized wall. |
 
 When the local smoke auto-starts the easy Paper server and applies the safe
 starter inventory, `MC_SIM_INIT_MESSAGE` is delivered after that starter-kit
@@ -300,9 +323,32 @@ provider/model, paid/local request counts, token usage, estimated USD,
 `fallback_reason`, execution result, and parsed verified block counts are
 included in `timeline.ndjson`, `timeline-totals.json`, `summary.txt`, and
 `monitor.html`. `build_plan.generation.skipped` records `scene_locked`,
-`active_build_exists`, `cache_hit`, `cooldown`, and `per_agent_cap` outcomes.
+`active_build_exists`, `cache_hit`, `cooldown`, `per_agent_cap`, and
+`plan_build_agent_not_allowed` outcomes.
 `!executeCode` remains separately gated by
 `SOAK_BLOCK_EXECUTE_CODE_ACTIONS` / `MC_SIM_BLOCK_EXECUTE_CODE_ACTIONS`.
+
+Alpha remains non-verbal by default. Set `MC_SIM_ALPHA_TOWN_PLANNER=1` for
+disposable open settlement runs where Alpha should participate in public chat as
+a planning agent. In that mode `connect-alpha-bot.sh` stages only the temporary
+Mindcraft clone with a verbal Alpha profile. The committed Alpha profile stays
+local-only and action-only. By default the town planner uses the local LM Studio
+chat/code models; set `MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER=openrouter` to route
+Alpha's own chat/code model through
+`openrouter/${MC_SIM_ALPHA_TOWN_PLANNER_MODEL:-google/gemini-3.5-flash}`. For
+cost-controlled open settlement tests, prefer local Alpha plus capped
+OpenRouter builder-plan calls. Alpha's staged planner prompt and per-clone
+blocked-actions list make it delegate world-changing build/code commands to the
+builder team instead of running `!planAndBuild`, `!buildFromPlan`, `!newAction`,
+or `!executeCode` itself.
+
+`!newAction` is still disabled by Mindcraft's default
+`allow_insecure_coding=false`. Set `SOAK_ALLOW_BUILDER_NEW_ACTIONS=1` to enable
+it only for `SOAK_BUILDER_BOTS` (default: `rex fork pixel`) in a disposable run.
+Leave that off for plan-build shakeouts so Gemini/OpenRouter is used only by the
+capped `!planAndBuild` builder provider. Set `SOAK_BLOCK_NEW_ACTIONS=1` when a
+shakeout should hide `!newAction` from command docs while keeping
+`!planAndBuild` available.
 
 Local-only builder smoke:
 
@@ -382,7 +428,7 @@ The default behavioral thresholds are env-overridable:
 
 | Env var | Default | Gate |
 | --- | ---: | --- |
-| `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. |
+| `SOAK_MIN_MOVEMENT_PER_AGENT` | `5` | Every tracked agent must meet or exceed this movement count. In `MC_SIM_BUILD_MODE=settlement`, gather/build commands can satisfy this per-agent liveness threshold when a builder stays mostly stationary. |
 | `SOAK_MAX_DEATHS_PER_AGENT` | `2` | Any agent above this death/respawn count fails. |
 | `SOAK_MAX_STUCK_PER_AGENT` | `5` | Any agent above this stuck/path-failure count fails. |
 | `SOAK_MAX_RESTARTS_PER_AGENT` | `1` | Any agent above this restart/disconnect/exit signature count fails. |

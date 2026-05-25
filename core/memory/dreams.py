@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from core.model_config import resolve_internal_model
+
 if TYPE_CHECKING:
     from core.agent_goals import AgentGoalManager
     from core.agent_registry import AgentRegistry
@@ -143,7 +145,7 @@ class DreamManager:
         )
 
         # 3. Get the agent's building model for dreaming
-        agent_model = "anthropic/claude-haiku-4.5"  # Fallback
+        agent_model = resolve_internal_model("dream_fallback")
         if self._registry is not None:
             agent_cfg = self._registry.get_agent(agent_id)
             if agent_cfg is not None:

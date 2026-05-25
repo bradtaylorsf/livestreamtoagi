@@ -225,6 +225,7 @@ class DirectorPromptGate:
         scene_hint = _text(event.get("scene_hint"))
         event_text = _text(event.get("event_text")) or ""
         available_tools = _tool_list(event.get("available_tools"))
+        plan_build_agent_allowlist = _agent_list(event.get("plan_build_agent_allowlist"))
         active_objective = _settlement_objective_context(event)
         raw_event = {
             "event_id": f"director-gate-{event_key[:16]}",
@@ -239,6 +240,7 @@ class DirectorPromptGate:
                 "message": event_text,
                 "scene_hint": scene_hint,
                 "available_tools": available_tools,
+                "plan_build_agent_allowlist": plan_build_agent_allowlist,
                 "active_objective": active_objective.model_dump()
                 if active_objective is not None
                 else None,
@@ -262,7 +264,7 @@ class DirectorPromptGate:
         seed = _stable_seed(scene.scene_id, state.event_sequence)
         if _is_successful_build_plan_status_notice(event_text.lower()):
             state.plan_mode_build_completed = True
-        if _should_quiesce_after_plan_build(state, event_type):
+        if _should_quiesce_after_plan_build(state, event_type, active_objective=active_objective):
             scheduler_decision = _suppressed_scheduler_decision(
                 scene=scene,
                 candidates=candidates,
@@ -287,6 +289,7 @@ class DirectorPromptGate:
             state.build_scheduler,
             scheduler_decision,
             active_objective=active_objective,
+            plan_build_agent_allowlist=plan_build_agent_allowlist,
             candidates=candidates,
             scene_event_type=event_type,
             now_ms=now_ms,
@@ -304,6 +307,7 @@ class DirectorPromptGate:
             origin=origin,
             available_tools=available_tools,
             active_objective=active_objective,
+            plan_build_agent_allowlist=plan_build_agent_allowlist,
             now_ms=now_ms,
         )
         return _CachedVerdict(
@@ -391,8 +395,9 @@ class DirectorPromptGate:
         available_tools: Sequence[str],
         active_objective: SettlementObjectiveContext | None,
         now_ms: int,
+        plan_build_agent_allowlist: Sequence[str] = (),
     ) -> dict[str, BuildMacroAssignment]:
-        if _is_plan_mode_single_build_closed(self._state):
+        if active_objective is None and _is_plan_mode_single_build_closed(self._state):
             return {}
         if not _is_build_macro_intent(event_text, available_tools):
             return {}
@@ -411,6 +416,7 @@ class DirectorPromptGate:
             scene=scene,
             candidates=candidates,
             active_objective=active_objective,
+            plan_build_agent_allowlist=plan_build_agent_allowlist,
             now_ms=now_ms,
         )
         assignments = dict(acquisition.support_assignments)
@@ -794,6 +800,7 @@ def _apply_settlement_phase_owner(
     scheduler_decision: SchedulerDecision,
     *,
     active_objective: SettlementObjectiveContext | None,
+    plan_build_agent_allowlist: Sequence[str],
     candidates: Sequence[SchedulerCandidate],
     scene_event_type: SceneEventType,
     now_ms: int,
@@ -804,6 +811,7 @@ def _apply_settlement_phase_owner(
         active_objective=active_objective,
         candidates=candidates,
         fallback_owner=scheduler_decision.selected_planner_agent_id,
+        plan_build_agent_allowlist=plan_build_agent_allowlist,
         now_ms=now_ms,
     )
     if owner is None:
@@ -855,14 +863,12 @@ def _explicit_build_owner(
 
 def _is_build_macro_intent(event_text: str, available_tools: Sequence[str]) -> bool:
     lowered = str(event_text or "").lower()
-    if (
-        lowered.startswith("autonomous heartbeat:")
-        or _is_build_plan_status_notice(lowered)
-        or _is_build_completion_chatter(lowered)
-    ):
+    if lowered.startswith("autonomous heartbeat:") or _is_build_plan_status_notice(lowered):
         return False
     if "!planandbuild" in lowered or "planandbuild" in lowered:
         return True
+    if _is_build_completion_chatter(lowered):
+        return False
     return _has_build_request_intent(lowered)
 
 
@@ -923,7 +929,11 @@ def _is_plan_mode_single_build_closed(state: _GateState) -> bool:
 def _should_quiesce_after_plan_build(
     state: _GateState,
     event_type: SceneEventType,
+    *,
+    active_objective: SettlementObjectiveContext | None = None,
 ) -> bool:
+    if active_objective is not None:
+        return False
     if not _is_plan_mode_single_build_closed(state):
         return False
     return event_type not in {
@@ -1081,12 +1091,8 @@ def _log_prompt_decision(decision: PromptDecision, *, agent_id: str) -> None:
                 "build_plan_id": decision.build_macro.plan_id if decision.build_macro else None,
                 "build_owner": decision.build_macro.owner if decision.build_macro else None,
                 "build_role": decision.build_macro.role if decision.build_macro else None,
-                "objective_id": decision.build_macro.objective_id
-                if decision.build_macro
-                else None,
-                "phase_index": decision.build_macro.phase_index
-                if decision.build_macro
-                else None,
+                "objective_id": decision.build_macro.objective_id if decision.build_macro else None,
+                "phase_index": decision.build_macro.phase_index if decision.build_macro else None,
                 "queue_depth": decision.queue_depth,
                 "suppressed_agents_count": len(decision.suppressed_agents),
             }

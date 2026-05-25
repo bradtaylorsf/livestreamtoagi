@@ -62,6 +62,10 @@ function enabledByEnv() {
     return String(process.env.CONVERSATION_MODE || '').trim().toLowerCase() === 'director_v2';
 }
 
+function sharedStateEnabledByEnv() {
+    return !isFalseLike(process.env.MC_SIM_SHARED_STATE_ENABLED || '1');
+}
+
 function intEnv(name, fallback) {
     const raw = process.env[name];
     if (raw === undefined || raw === null || raw === '') return fallback;
@@ -78,6 +82,25 @@ function agentId(agent) {
         process.env.MC_AGENT_ID ||
         'agent'
     );
+}
+
+function planBuildAllowedAgents() {
+    const raw = String(
+        process.env.MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST || process.env.SOAK_PLAN_BUILD_BOTS || '',
+    ).trim();
+    if (!raw || ['*', 'all', 'any'].includes(raw.toLowerCase())) return null;
+    return new Set(
+        raw
+            .split(/[\s,]+/)
+            .map((item) => item.trim().toLowerCase())
+            .filter(Boolean),
+    );
+}
+
+function planBuildAllowedForAgent(agent) {
+    const allowed = planBuildAllowedAgents();
+    if (!allowed) return true;
+    return allowed.has(String(agentId(agent) || '').trim().toLowerCase());
 }
 
 function clip(value, limit = 240) {
@@ -106,7 +129,8 @@ function position(agent) {
 function availableTools(agent) {
     const planMode = ['plan', 'settlement'].includes(process.env.MC_SIM_BUILD_MODE);
     const tools = new Set(planMode ? DEFAULT_TOOLS.filter((tool) => !STANDALONE_BUILD_TOOLS.has(tool)) : DEFAULT_TOOLS);
-    if (planMode) {
+    const canPlanBuild = planMode && planBuildAllowedForAgent(agent);
+    if (canPlanBuild) {
         tools.add('!planAndBuild');
     }
     const actionNames = agent?.actions?.actions || agent?.actions?.actionList || null;
@@ -116,12 +140,23 @@ function availableTools(agent) {
             if (!text) continue;
             const command = text.startsWith('!') ? text : `!${text}`;
             if (planMode && STANDALONE_BUILD_TOOLS.has(command)) continue;
-            if (LOCAL_SAFE_TOOLS.has(command) || (planMode && command === '!planAndBuild')) {
+            if (LOCAL_SAFE_TOOLS.has(command) || (canPlanBuild && command === '!planAndBuild')) {
                 tools.add(command);
             }
         }
     }
     return [...tools].filter((tool) => !RISKY_PROMPT_TOOLS.has(tool)).sort();
+}
+
+function planBuildAgentAllowlist() {
+    const raw = String(
+        process.env.MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST || process.env.SOAK_PLAN_BUILD_BOTS || '',
+    ).trim();
+    if (!raw || ['*', 'all', 'any'].includes(raw.toLowerCase())) return [];
+    return raw
+        .split(/[\s,]+/)
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean);
 }
 
 function activeSettlementObjective(agent) {
@@ -137,6 +172,56 @@ function activeSettlementObjective(agent) {
     } catch {
         return null;
     }
+}
+
+async function fetchActiveSettlementObjective(agent, traceId, deadlineMs) {
+    const fallback = activeSettlementObjective(agent);
+    if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !sharedStateEnabledByEnv()) {
+        return fallback;
+    }
+    try {
+        const response = await callBridge({
+            service: 'shared_state',
+            method: 'read',
+            payload: {},
+            deadlineMs: Math.min(deadlineMs, intEnv('MC_SIM_SHARED_STATE_DEADLINE_MS', 1000)),
+            agentId: agentId(agent),
+            traceId,
+            costContext: {
+                agent_tier: 'conversation',
+                budget_bucket: 'shared-state',
+                estimated_cost_usd: 0.0,
+            },
+        });
+        const active = response?.payload?.active_objective;
+        if (active && typeof active === 'object') {
+            agent.__ltagSettlementObjective = active;
+            globalThis.__ltagSettlementObjective = active;
+            emit(agent, 'settlement_objective.fetched', {
+                trace_id: traceId,
+                objective_id: active.objective_id || null,
+                phase_index: Number.isInteger(active.phase_index) ? active.phase_index : null,
+                owner_agent_id: active.owner_agent_id || null,
+                status: active.status || null,
+            });
+            return active;
+        }
+    } catch (err) {
+        emit(agent, 'settlement_objective.error', {
+            trace_id: traceId,
+            error_code: err && err.code ? String(err.code) : 'shared_state_read_failed',
+            error: clip(err && err.message ? err.message : String(err), 180),
+        });
+    }
+    return fallback;
+}
+
+function settlementEventText(message, activeObjective) {
+    const text = String(message || '');
+    if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !activeObjective) return text;
+    const description = clip(activeObjective.description || 'active settlement objective', 120);
+    if (/planandbuild|build\s+(?:a|an|the|our|this|next|active)\b/i.test(text)) return text;
+    return `Build the active settlement phase "${description}". ${text}`;
 }
 
 function sceneHint({ source, message, batch }) {
@@ -221,7 +306,7 @@ function commandPolicy(verdict) {
     const macro = verdict.build_macro || null;
     if (process.env.MC_SIM_BUILD_MODE === 'plan' || macro) {
         if (macro?.role === 'planner_owner' && macro.granted === true) {
-            return 'Command policy: Only the build owner should place blocks through !planAndBuild. Use exactly one concise !planAndBuild request for the shared structure, then let buildFromPlan finish. Do not use standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
+            return 'Command policy: You are the build owner for this planner turn. Include exactly one concise !planAndBuild("...") command in this response for the active structure, then let buildFromPlan finish. Do not use standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
         }
         return 'Command policy: Support role only. Use ordinary chat, !inventory, !nearbyBlocks, or !searchForBlock when useful. Do not use plan/build commands, standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
     }
@@ -283,18 +368,21 @@ async function askDirector(agent, turn, options, gateState) {
     const gateSeq = ++gateState.sequence;
     gateState.latestSequence = gateSeq;
     const traceId = `trace-director-${randomUUID()}`;
+    const deadlineMs = options.deadlineMs ?? intEnv('DIRECTOR_V2_GATE_DEADLINE_MS', DEFAULT_DEADLINE_MS);
+    const activeObjective = await fetchActiveSettlementObjective(agent, traceId, deadlineMs);
+    const eventText = settlementEventText(turn.message, activeObjective);
     const payload = {
         agent_id: agentId(agent),
         event_kind: 'chat',
-        event_text: String(turn.message || ''),
+        event_text: eventText,
         source_agent: turn.source ? String(turn.source) : null,
         mentions: mentions(turn.message),
         position: position(agent),
         scene_hint: sceneHint(turn),
         available_tools: availableTools(agent),
-        active_objective: activeSettlementObjective(agent),
+        plan_build_agent_allowlist: planBuildAgentAllowlist(),
+        active_objective: activeObjective,
     };
-    const deadlineMs = options.deadlineMs ?? intEnv('DIRECTOR_V2_GATE_DEADLINE_MS', DEFAULT_DEADLINE_MS);
 
     let response;
     try {

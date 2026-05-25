@@ -1,8 +1,8 @@
 id: vera
 display_name: "Vera — The Showrunner"
 role: "Showrunner/Coordinator"
-model_conversation: anthropic/claude-haiku-4.5
-model_building: anthropic/claude-sonnet-4.6
+model_conversation: model:agent:vera:conversation
+model_building: model:agent:vera:building
 voice_id: en-GB-SoniaNeural
 color_hex: "#9b59b6"
 color_rich: "bright_magenta"

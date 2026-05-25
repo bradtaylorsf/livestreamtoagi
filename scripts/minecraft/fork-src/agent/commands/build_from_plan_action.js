@@ -31,7 +31,21 @@ import {
 
 const DEFAULT_BUILD_TIMEOUT_MS = 30000;
 const DEFAULT_STEP_TIMEOUT_MS = 10000;
+const DEFAULT_NAVIGATION_TIMEOUT_MS = 8000;
 const BRIDGE_REPORT_TIMEOUT_MS = 5000;
+const PLACE_REACH_BLOCKS = 4.25;
+const NAVIGATION_TOLERANCE_BLOCKS = 3;
+const REPLACEABLE_BLOCK_TYPES = new Set([
+    'grass',
+    'short_grass',
+    'tall_grass',
+    'fern',
+    'large_fern',
+    'dead_bush',
+    'snow',
+    'snow_layer',
+    'vine',
+]);
 
 function getBot(agent) {
     return agent && agent.bot ? agent.bot : agent;
@@ -130,6 +144,122 @@ function faceVectorFrom(face) {
         west: { x: -1, y: 0, z: 0 },
     };
     return faces[f] || null;
+}
+
+function messageFromError(err) {
+    if (!err) return '';
+    return err && err.message ? String(err.message) : String(err);
+}
+
+async function makeGoalNear(target, tolerance) {
+    try {
+        const mod = await import('mineflayer-pathfinder');
+        const goals = (mod && mod.goals) || (mod && mod.default && mod.default.goals);
+        const GoalNear = goals && goals.GoalNear;
+        if (GoalNear) return new GoalNear(target.x, target.y, target.z, tolerance);
+    } catch {
+        /* Test and static environments may not have the Mindcraft dependency. */
+    }
+    return { x: target.x, y: target.y, z: target.z, range: tolerance };
+}
+
+async function ensurePathfinder(bot) {
+    if (bot && bot.pathfinder && typeof bot.pathfinder.goto === 'function') return true;
+    try {
+        const mod = await import('mineflayer-pathfinder');
+        if (bot && typeof bot.loadPlugin === 'function' && mod && mod.pathfinder) {
+            bot.loadPlugin(mod.pathfinder);
+        }
+    } catch {
+        return false;
+    }
+    return !!(bot && bot.pathfinder && typeof bot.pathfinder.goto === 'function');
+}
+
+function destructivePathsAllowed() {
+    const raw = String(process.env.MINECRAFT_ALLOW_DESTRUCTIVE_PATHS || '1').trim().toLowerCase();
+    return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+function clearReplaceableBeforePlaceEnabled() {
+    const raw = String(process.env.MINECRAFT_BUILD_FROM_PLAN_CLEAR_REPLACEABLE || '1')
+        .trim()
+        .toLowerCase();
+    return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+function isReplaceableBlock(value) {
+    const blockType = normalizeBlockType(value);
+    return blockType !== null && REPLACEABLE_BLOCK_TYPES.has(blockType);
+}
+
+async function configureMovementSafety(bot) {
+    if (destructivePathsAllowed()) return;
+    try {
+        const mod = await import('mineflayer-pathfinder');
+        const Movements = (mod && mod.Movements) || (mod && mod.default && mod.default.Movements);
+        if (Movements && bot && bot.pathfinder && typeof bot.pathfinder.setMovements === 'function') {
+            const movements = new Movements(bot);
+            movements.canDig = false;
+            movements.allow1by1towers = false;
+            bot.pathfinder.setMovements(movements);
+        }
+    } catch {
+        /* Navigation will still report pathfinder failures normally. */
+    }
+}
+
+function botPosition(bot) {
+    return positionFrom(bot && bot.entity && bot.entity.position);
+}
+
+function distanceSquared(a, b) {
+    if (!a || !b) return Number.POSITIVE_INFINITY;
+    const dx = Number(a.x) - Number(b.x);
+    const dy = Number(a.y) - Number(b.y);
+    const dz = Number(a.z) - Number(b.z);
+    return dx * dx + dy * dy + dz * dz;
+}
+
+function withinBuildReach(bot, target) {
+    const current = botPosition(bot);
+    if (!current) return true;
+    return distanceSquared(current, target) <= PLACE_REACH_BLOCKS * PLACE_REACH_BLOCKS;
+}
+
+function navigationTimeoutMs(remainingMs) {
+    const configured = positiveNumber(
+        process.env.MINECRAFT_BUILD_FROM_PLAN_NAVIGATION_TIMEOUT_MS,
+        DEFAULT_NAVIGATION_TIMEOUT_MS,
+    );
+    return Math.max(1, Math.min(configured, remainingMs));
+}
+
+async function moveWithinBuildReach(agent, target, timeoutMs) {
+    const bot = getBot(agent);
+    if (withinBuildReach(bot, target)) return { failureClass: null, detail: 'already within reach' };
+    if (!(await ensurePathfinder(bot))) {
+        return { failureClass: 'unreachable', detail: 'pathfinder unavailable' };
+    }
+    await configureMovementSafety(bot);
+    const goal = await makeGoalNear(target, NAVIGATION_TOLERANCE_BLOCKS);
+    try {
+        await withTimeout(bot.pathfinder.goto(goal), timeoutMs, 'navigation');
+    } catch (err) {
+        const message = messageFromError(err);
+        const lower = message.toLowerCase();
+        if (lower.includes('timed out') || lower.includes('timeout')) {
+            return { failureClass: 'timed-out', detail: message };
+        }
+        if (lower.includes('unreachable') || lower.includes('no path')) {
+            return { failureClass: 'unreachable', detail: message };
+        }
+        return { failureClass: 'blocked', detail: message };
+    }
+    if (!withinBuildReach(bot, target)) {
+        return { failureClass: 'unreachable', detail: 'pathfinder stopped outside build reach' };
+    }
+    return { failureClass: null, detail: 'moved within build reach' };
 }
 
 function sourceSlotItem(bot, sourceSlot) {
@@ -412,14 +542,41 @@ async function performBreakStep(bot, step, timeoutMs) {
 
 async function performPlaceStep(bot, step, timeoutMs) {
     const expectedBlockType = normalizeBlockType(step.block_type);
-    const before = await readBlockType(bot, step.position);
+    const beforeRaw = await readRawBlock(bot, step.position);
+    const before = normalizeBlockType(beforeRaw);
     let placement = { failureClass: null, detail: 'already present' };
 
     if (before !== expectedBlockType) {
-        const equipped = await equipBlock(bot, expectedBlockType, step.source_slot);
+        const details = [];
+        if (
+            beforeRaw &&
+            clearReplaceableBeforePlaceEnabled() &&
+            isReplaceableBlock(beforeRaw)
+        ) {
+            const cleared = await digBlock(bot, beforeRaw, timeoutMs);
+            details.push(`cleared ${before}`);
+            if (cleared.failureClass) {
+                placement = {
+                    failureClass: cleared.failureClass,
+                    detail: cleared.detail,
+                };
+            }
+        }
+        const current = await readBlockType(bot, step.position);
+        const equipped =
+            placement.failureClass || current === expectedBlockType
+                ? placement
+                : await equipBlock(bot, expectedBlockType, step.source_slot);
         placement = equipped.failureClass
             ? equipped
-            : await placeBlockAt(bot, step.position, timeoutMs);
+            : current === expectedBlockType
+              ? { failureClass: null, detail: details.join('; ') || 'already present' }
+              : await placeBlockAt(bot, step.position, timeoutMs);
+        if (details.length && placement.detail) {
+            placement.detail = `${details.join('; ')}; ${placement.detail}`;
+        } else if (details.length) {
+            placement.detail = details.join('; ');
+        }
     }
 
     const after = await readBlockType(bot, step.position);
@@ -578,17 +735,44 @@ export async function performBuildFromPlan(agent, action_id, origin, plan, max_s
             failureClass = 'partial';
             break;
         }
-        const remaining = deadline - Date.now();
+        let remaining = deadline - Date.now();
         if (remaining <= 0) {
             failureClass = 'timed-out';
             break;
         }
-        const stepTimeout = Math.max(1, Math.min(DEFAULT_STEP_TIMEOUT_MS, remaining));
         const stepActionId = `${actionId}#${step.index + 1}`;
-        const result =
-            step.action === 'break'
-                ? await performBreakStep(bot, step, stepTimeout)
-                : await performPlaceStep(bot, step, stepTimeout);
+        const navigation = await moveWithinBuildReach(
+            agent,
+            step.position,
+            navigationTimeoutMs(remaining),
+        );
+        remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            failureClass = 'timed-out';
+            break;
+        }
+        let result;
+        if (navigation.failureClass) {
+            const before = await readBlockType(bot, step.position);
+            result = {
+                ...step,
+                before_block: before,
+                after_block: before,
+                class: navigation.failureClass,
+                detail: `navigation: ${navigation.detail}`,
+            };
+        } else {
+            const stepTimeout = Math.max(1, Math.min(DEFAULT_STEP_TIMEOUT_MS, remaining));
+            result =
+                step.action === 'break'
+                    ? await performBreakStep(bot, step, stepTimeout)
+                    : await performPlaceStep(bot, step, stepTimeout);
+            if (navigation.detail && navigation.detail !== 'already within reach') {
+                result.detail = result.detail
+                    ? `${navigation.detail}; ${result.detail}`
+                    : navigation.detail;
+            }
+        }
         executedSteps.push(result);
 
         try {

@@ -58,6 +58,7 @@ minecraft-server/
 # in scripts/minecraft/run-local-sim.sh and soak.sh). Same shape as
 # minecraft-server/: world data, Paper jar, libraries — all regenerated locally.
 minecraft-server-easy/
+minecraft-server-easy-*/
 
 # Mindcraft working clone (default MINDCRAFT_DIR for scripts/minecraft/setup-mindcraft.sh)
 # A local pinned checkout + node_modules — NOT a vendored copy. The only

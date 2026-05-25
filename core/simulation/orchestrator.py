@@ -24,6 +24,7 @@ from core.event_bus import EventType
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY, OpenRouterClient
 from core.memory.reflection_scheduler import ReflectionScheduler
+from core.model_config import resolve_internal_model
 from core.models import (
     ExperimentalGoalConfig,
     FactionConfig,
@@ -1813,7 +1814,7 @@ class SimulationOrchestrator:
         try:
             resp = await self._llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                model="claude-haiku-4-5",
+                model=resolve_internal_model("simulation_learning_summary"),
                 max_tokens=200,
             )
         except Exception:

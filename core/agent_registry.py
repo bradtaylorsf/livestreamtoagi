@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from core.constants import LIVE_SIMULATION_ID
-from core.llm_client import MODEL_REGISTRY
+from core.llm_client import MODEL_NAME_ALIASES, MODEL_REGISTRY
+from core.model_config import resolve_agent_model
 from core.models import AgentConfig, AgentStatus
 
 if TYPE_CHECKING:
@@ -26,17 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 VALID_MODEL_NAMES = set(MODEL_REGISTRY.keys())
-MODEL_NAME_ALIASES = {
-    "anthropic/claude-haiku-4.5": "claude-haiku-4-5",
-    "anthropic/claude-sonnet-4.6": "claude-sonnet-4-6",
-    "google/gemini-flash": "gemini-flash",
-    "google/gemini-2.5-pro": "gemini-2.5-pro",
-    "openai/gpt-4o-mini": "gpt-4o-mini",
-    "openai/gpt-5.2": "gpt-5.2",
-    "deepseek/deepseek-v3.2": "deepseek-v3.2",
-    "x-ai/grok-3-mini": "grok-3-mini",
-    "x-ai/grok-3": "grok-3",
-}
 REDIS_STATUS_PREFIX = "agent:status:"
 
 
@@ -107,8 +97,16 @@ class AgentRegistry:
                     id=ac.agent_id,
                     display_name=params.get("display_name", ac.agent_id),
                     role=params.get("role", ""),
-                    model_conversation=params.get("model_conversation", "claude-haiku-4-5"),
-                    model_building=params.get("model_building", "claude-sonnet-4-6"),
+                    model_conversation=self._resolve_model_field(
+                        ac.agent_id,
+                        "model_conversation",
+                        params.get("model_conversation"),
+                    ),
+                    model_building=self._resolve_model_field(
+                        ac.agent_id,
+                        "model_building",
+                        params.get("model_building"),
+                    ),
                     voice_id=params.get("voice_id"),
                     color_hex=params.get("color_hex", "#888888"),
                     color_rich=params.get("color_rich", "white"),
@@ -205,8 +203,16 @@ class AgentRegistry:
                 id=agent_id,
                 display_name=params.get("display_name", agent_id),
                 role=params.get("role", ""),
-                model_conversation=params.get("model_conversation", "claude-haiku-4-5"),
-                model_building=params.get("model_building", "claude-sonnet-4-6"),
+                model_conversation=self._resolve_model_field(
+                    agent_id,
+                    "model_conversation",
+                    params.get("model_conversation"),
+                ),
+                model_building=self._resolve_model_field(
+                    agent_id,
+                    "model_building",
+                    params.get("model_building"),
+                ),
                 voice_id=params.get("voice_id"),
                 color_hex=params.get("color_hex", "#888888"),
                 color_rich=params.get("color_rich", "white"),
@@ -256,15 +262,17 @@ class AgentRegistry:
                 f"config.yaml in {agent_dir.name} missing required keys: {sorted(missing)}"
             )
 
-        # Validate model names
-        for field in ("model_conversation", "model_building"):
-            model_name = raw.get(field, "")
-            canonical_model_name = MODEL_NAME_ALIASES.get(model_name, model_name)
-            if canonical_model_name not in VALID_MODEL_NAMES:
-                raise ValueError(
-                    f"Agent '{raw.get('id', agent_dir.name)}' has invalid {field}: "
-                    f"'{model_name}'. Valid models: {sorted(VALID_MODEL_NAMES)}"
-                )
+        agent_id = str(raw.get("id", agent_dir.name))
+        raw["model_conversation"] = self._resolve_model_field(
+            agent_id,
+            "model_conversation",
+            raw.get("model_conversation"),
+        )
+        raw["model_building"] = self._resolve_model_field(
+            agent_id,
+            "model_building",
+            raw.get("model_building"),
+        )
 
         # Load system prompt
         prompt_path = agent_dir / "system_prompt.md"
@@ -309,6 +317,28 @@ class AgentRegistry:
         raw["behaviors"] = behaviors
 
         return AgentConfig(**raw)
+
+    def _resolve_model_field(
+        self,
+        agent_id: str,
+        field: str,
+        configured: object,
+    ) -> str:
+        """Resolve a YAML/DB model field through env-driven agent model roles."""
+        tier = "conversation" if field == "model_conversation" else "building"
+        configured_model = configured if isinstance(configured, str) else None
+        model_name = resolve_agent_model(agent_id, tier, configured_model)
+        self._validate_model_name(agent_id, field, model_name)
+        return model_name
+
+    @staticmethod
+    def _validate_model_name(agent_id: str, field: str, model_name: str) -> None:
+        canonical_model_name = MODEL_NAME_ALIASES.get(model_name, model_name)
+        if canonical_model_name not in VALID_MODEL_NAMES:
+            raise ValueError(
+                f"Agent '{agent_id}' has invalid {field}: "
+                f"'{model_name}'. Valid models: {sorted(VALID_MODEL_NAMES)}"
+            )
 
     def get_agent(self, agent_id: str) -> AgentConfig | None:
         """Return an agent config by ID, or None if not found."""

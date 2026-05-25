@@ -2,7 +2,7 @@
 
 Three-layer filter that reviews every agent output before TTS/display:
   Layer 1: Keyword blocklist (instant, no API call)
-  Layer 2: LLM review with Twitch/YouTube TOS context (Claude Haiku 4.5)
+  Layer 2: LLM review with Twitch/YouTube TOS context
   Layer 3: Severity-based intervention (1=notice ... 5=kill switch)
 """
 
@@ -18,6 +18,7 @@ import yaml
 
 from core.event_bus import EventType
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
+from core.model_config import resolve_internal_model
 from core.models import ContentReviewResult, ManagementPolicy
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ CONTENT_RULES_PATH = (
 )
 MUTE_KEY_PREFIX = "mute:"
 DEFAULT_MUTE_TTL = 300  # seconds
-FILTER_MODEL = "claude-haiku-4-5"
+FILTER_MODEL_ROLE = "management_filter"
 
 
 class Management:
@@ -295,7 +296,7 @@ class Management:
         try:
             resp = await self._llm.complete(
                 messages=messages,
-                model=FILTER_MODEL,
+                model=resolve_internal_model(FILTER_MODEL_ROLE),
                 agent_id="management",
                 temperature=0.4,
                 max_tokens=100,
@@ -462,7 +463,7 @@ class Management:
         try:
             resp = await self._llm.complete(
                 messages=messages,
-                model=FILTER_MODEL,
+                model=resolve_internal_model(FILTER_MODEL_ROLE),
                 agent_id="management",
                 temperature=0.1,
                 max_tokens=150,

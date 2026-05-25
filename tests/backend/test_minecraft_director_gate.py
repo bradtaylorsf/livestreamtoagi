@@ -482,6 +482,7 @@ async def test_settlement_active_objective_controls_build_owner() -> None:
     event = _build_event(
         source_agent="system",
         event_text="Build the next settlement phase.",
+        plan_build_agent_allowlist=["vera", "rex", "fork"],
         active_objective={
             "objective_id": "phase-workshop",
             "phase_index": 2,
@@ -509,6 +510,205 @@ async def test_settlement_active_objective_controls_build_owner() -> None:
     assert "!planAndBuild" not in by_agent["rex"].available_tools
 
 
+async def test_plan_build_allowlist_reassigns_non_builder_objective_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST", "rex fork")
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Build the next team workshop phase.",
+        active_objective={
+            "objective_id": "phase-workshop",
+            "phase_index": 2,
+            "description": "workshop station",
+            "owner_agent_id": "vera",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    selected = [decision for decision in decisions if decision.selected]
+
+    assert len(selected) == 1
+    owner = selected[0]
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner in {"rex", "fork"}
+    assert owner.build_macro.reason in {
+        "settlement_phase_owner_assigned",
+        "settlement_phase_owner_reassigned",
+    }
+    assert owner.build_macro.objective_id == "phase-workshop"
+    assert "!planAndBuild" in owner.available_tools
+
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+    assert by_agent[owner.build_macro.owner].selected is True
+    assert by_agent["vera"].build_macro is not None
+    assert by_agent["vera"].build_macro.role == "support"
+    assert "!planAndBuild" not in by_agent["vera"].available_tools
+
+
+async def test_plan_build_allowlist_blocks_non_eligible_explicit_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST", "rex fork")
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text=(
+            "Vera is the build owner. Build one small logistics hut. "
+            "Rex and Fork are the currently elected builder-duty agents."
+        ),
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    owner = by_agent["vera"]
+    assert owner.selected is True
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner == "vera"
+    assert owner.build_macro.reason == "plan_build_agent_not_allowed"
+    assert owner.build_macro.granted is False
+    assert "!planAndBuild" not in owner.available_tools
+
+
+async def test_request_allowlist_reassigns_blocked_settlement_owner_without_backend_env() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Build the next settlement phase.",
+        plan_build_agent_allowlist=["rex", "fork"],
+        active_objective={
+            "objective_id": "phase-workshop",
+            "phase_index": 2,
+            "description": "Team Ember storage workshop station",
+            "owner_agent_id": "aurora",
+            "status": "blocked",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    selected = [decision for decision in decisions if decision.selected]
+
+    assert len(selected) == 1
+    owner = selected[0]
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner in {"rex", "fork"}
+    assert owner.build_macro.owner != "aurora"
+    assert owner.build_macro.reason == "settlement_phase_owner_reassigned"
+    assert "!planAndBuild" in owner.available_tools
+
+
+async def test_active_settlement_objective_ignores_stale_backend_plan_mode_latch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "plan")
+    monkeypatch.setenv("MC_SIM_BUILD_MAX_PER_AGENT", "1")
+    gate = _gate()
+    status_notice = _event(
+        source_agent="fork",
+        event_text=(
+            "build-from-plan build-plan-1 success: intended=12; present=12; "
+            "missing=0; unexpected=0; verified=12; completion=1.000"
+        ),
+        available_tools=["!inventory"],
+    )
+    await gate.evaluate("sim-test", "rex", status_notice)
+
+    event = _build_event(
+        source_agent="system",
+        event_text='Build the active settlement phase "perimeter wall". Autonomous heartbeat.',
+        active_objective={
+            "objective_id": "phase-wall",
+            "phase_index": 1,
+            "description": "perimeter wall",
+            "owner_agent_id": "rex",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    owner = by_agent["rex"]
+    assert owner.selected is True
+    assert owner.build_macro is not None
+    assert owner.build_macro.granted is True
+    assert owner.build_macro.objective_id == "phase-wall"
+    assert "!planAndBuild" in owner.available_tools
+
+
+async def test_new_settlement_objective_releases_previous_scene_owner() -> None:
+    gate = _gate()
+    phase_one = _build_event(
+        source_agent="system",
+        event_text='Build the active settlement phase "starter cabin".',
+        scene_hint="settlement-shared-scene",
+        active_objective={
+            "objective_id": "phase-cabin",
+            "phase_index": 0,
+            "description": "starter cabin",
+            "owner_agent_id": "fork",
+            "status": "pending",
+        },
+    )
+    first_decisions = [await gate.evaluate("sim-test", agent_id, phase_one) for agent_id in AGENTS]
+    assert dict(zip(AGENTS, first_decisions, strict=True))["fork"].build_macro.owner == "fork"
+
+    phase_two = _build_event(
+        source_agent="vera",
+        event_text='Build the active settlement phase "workshop station".',
+        scene_hint="settlement-shared-scene",
+        active_objective={
+            "objective_id": "phase-workshop",
+            "phase_index": 2,
+            "description": "workshop station",
+            "owner_agent_id": "pixel",
+            "status": "pending",
+        },
+    )
+
+    second_decisions = [await gate.evaluate("sim-test", agent_id, phase_two) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, second_decisions, strict=True))
+
+    owner = by_agent["pixel"]
+    assert owner.selected is True
+    assert owner.build_macro is not None
+    assert owner.build_macro.owner == "pixel"
+    assert owner.build_macro.objective_id == "phase-workshop"
+    assert "!planAndBuild" in owner.available_tools
+
+
+async def test_explicit_plan_and_build_in_settlement_brief_overrides_completion_words() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text=(
+            "Complete these settlement objectives in order: starter cabin|perimeter wall. "
+            'Use exactly one !planAndBuild("small shared cabin") request for this phase.'
+        ),
+        active_objective={
+            "objective_id": "phase-cabin",
+            "phase_index": 0,
+            "description": "starter cabin",
+            "owner_agent_id": "vera",
+            "status": "pending",
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    by_agent = dict(zip(AGENTS, decisions, strict=True))
+
+    owner = by_agent["vera"]
+    assert owner.selected is True
+    assert owner.turn_kind == "planner"
+    assert owner.build_macro is not None
+    assert owner.build_macro.objective_id == "phase-cabin"
+    assert owner.build_macro.granted is True
+    assert "!planAndBuild" in owner.available_tools
+
+
 async def test_settlement_active_objective_reassigns_capped_owner() -> None:
     gate = _gate()
     event = _build_event(
@@ -532,6 +732,32 @@ async def test_settlement_active_objective_reassigns_capped_owner() -> None:
     assert selected[0].build_macro.owner == "fork"
     assert selected[0].build_macro.reason == "settlement_phase_owner_reassigned"
     assert selected[0].build_macro.objective_id == "phase-wall"
+
+
+async def test_settlement_active_objective_retries_previous_owner_when_current_capped() -> None:
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text="Build the next settlement phase.",
+        plan_build_agent_allowlist=["rex", "fork"],
+        active_objective={
+            "objective_id": "phase-workshop",
+            "phase_index": 3,
+            "description": "Team Grove storage workshop station",
+            "owner_agent_id": "rex",
+            "status": "owner_cap_reached",
+            "previous_owner_agent_ids": ["fork"],
+        },
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    selected = [decision for decision in decisions if decision.selected]
+
+    assert len(selected) == 1
+    assert selected[0].build_macro is not None
+    assert selected[0].build_macro.owner == "fork"
+    assert selected[0].build_macro.reason == "settlement_phase_owner_reassigned"
+    assert selected[0].build_macro.objective_id == "phase-workshop"
 
 
 async def test_selection_starvation_guard_eventually_selects_every_agent() -> None:

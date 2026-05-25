@@ -11,6 +11,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from core.model_config import resolve_internal_model
+
 if TYPE_CHECKING:
     import uuid
 
@@ -151,7 +153,7 @@ class TopicDetector:
 
         response = await self._llm_client.complete(
             messages=[{"role": "user", "content": prompt}],
-            model=self._config.classifier_model,
+            model=resolve_internal_model("topic_classifier", self._config.classifier_model),
             max_tokens=5,
             simulation_id=self._simulation_id,
         )

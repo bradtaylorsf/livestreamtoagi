@@ -681,6 +681,10 @@ class DirectorGateRequest(BaseModel):
         default_factory=list,
         description="Mindcraft action/tool affordances available to the selected prompt.",
     )
+    plan_build_agent_allowlist: list[str] = Field(
+        default_factory=list,
+        description="Run-scoped agent ids allowed to own !planAndBuild phases.",
+    )
     active_objective: EmbodiedSettlementObjective | None = Field(
         default=None,
         description="Current settlement phase objective when a multi-phase build is active.",

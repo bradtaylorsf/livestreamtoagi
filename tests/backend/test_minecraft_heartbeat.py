@@ -158,6 +158,48 @@ process.stdout.write(JSON.stringify({{ calls }}) + '\\n');
 
 
 @requires_node
+def test_settlement_mode_heartbeat_prompt_prefers_plan_build_owner_command(
+    tmp_path: Path,
+) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'settlement';
+const {{ installHeartbeat }} = await import(pathToFileURL({json.dumps(str(HEARTBEAT))}).href);
+let now = 1000;
+const calls = [];
+const agent = {{
+    name: 'rex',
+    async handleMessage(source, message, maxResponses) {{
+        calls.push({{ source, message, maxResponses }});
+        return 'Starting the active build. !planAndBuild("Team Ember crafting shelter")';
+    }},
+    actions: {{}},
+}};
+
+const heartbeat = installHeartbeat(agent, {{
+    autoStart: false,
+    now: () => now,
+    emit: () => {{}},
+    idleMs: 0,
+    cooldownMs: 0,
+    staleActionMs: 1000,
+    maxNoCommand: 3,
+}});
+await heartbeat.tick();
+
+process.stdout.write(JSON.stringify({{ calls }}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    prompt = result["calls"][0]["message"]
+    assert "If you are the build owner and !planAndBuild is available" in prompt
+    assert "!placeHere" not in prompt
+    assert "standalone block placement" in prompt
+
+
+@requires_node
 def test_plan_mode_chat_response_satisfies_heartbeat_without_command(tmp_path: Path) -> None:
     source = f"""
 import {{ pathToFileURL }} from 'node:url';
@@ -178,6 +220,67 @@ const agent = {{
     self_prompter: {{
         async stop() {{
             throw new Error('plan-mode support chat should not halt');
+        }},
+    }},
+    actions: {{}},
+}};
+const heartbeat = installHeartbeat(agent, {{
+    autoStart: false,
+    now: () => now,
+    emit: (event) => events.push(event),
+    idleMs: 0,
+    cooldownMs: 0,
+    staleActionMs: 1000,
+    maxNoCommand: 2,
+}});
+heartbeat.state.consecutiveNoCommand = 1;
+
+const result = await heartbeat.tick();
+
+process.stdout.write(JSON.stringify({{
+    result,
+    halted: heartbeat.state.halted,
+    noCommandStreak: heartbeat.state.consecutiveNoCommand,
+    eventTypes: events.map((event) => event.type),
+    outcome: events.find((event) => event.type === 'heartbeat.outcome')?.payload,
+}}) + '\\n');
+"""
+
+    result = _run_node_harness(tmp_path, source)
+
+    assert result["result"]["fired"] is True
+    assert result["result"]["hadCommand"] is False
+    assert result["halted"] is False
+    assert result["noCommandStreak"] == 0
+    assert result["eventTypes"] == ["heartbeat.fired", "heartbeat.outcome"]
+    assert result["outcome"]["outcome"] == "chat"
+    assert result["outcome"]["chat_satisfied_heartbeat"] is True
+    assert result["outcome"]["no_command_streak"] == 0
+
+
+@requires_node
+def test_settlement_mode_support_chat_satisfies_heartbeat_without_command(
+    tmp_path: Path,
+) -> None:
+    source = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.MC_SIM_BUILD_MODE = 'settlement';
+const {{ installHeartbeat }} = await import(pathToFileURL({json.dumps(str(HEARTBEAT))}).href);
+let now = 1;
+const events = [];
+const agent = {{
+    name: 'sentinel',
+    async handleMessage() {{
+        await this.routeResponse(null, 'I can scout the route and report hazards while Rex builds.');
+        return undefined;
+    }},
+    async routeResponse() {{
+        return undefined;
+    }},
+    self_prompter: {{
+        async stop() {{
+            throw new Error('settlement support chat should not halt');
         }},
     }},
     actions: {{}},

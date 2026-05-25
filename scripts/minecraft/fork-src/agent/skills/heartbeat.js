@@ -54,7 +54,7 @@ export const DEFAULT_HEARTBEAT_OPTIONS = Object.freeze({
 });
 
 function defaultPrompt() {
-    return process.env.MC_SIM_BUILD_MODE === 'plan'
+    return ['plan', 'settlement'].includes(process.env.MC_SIM_BUILD_MODE)
         ? PLAN_BUILD_NEXT_ACTION_PROMPT
         : DEFAULT_HEARTBEAT_OPTIONS.prompt;
 }
@@ -297,7 +297,12 @@ function directorGateSuppressed(agent, beforeSequence) {
 }
 
 function planBuildChatSatisfiesHeartbeat(value, wasDirectorSuppressed) {
-    if (wasDirectorSuppressed || process.env.MC_SIM_BUILD_MODE !== 'plan') return false;
+    if (
+        wasDirectorSuppressed ||
+        !['plan', 'settlement'].includes(process.env.MC_SIM_BUILD_MODE)
+    ) {
+        return false;
+    }
     return !classifyHeartbeatResponse(value).blank;
 }
 

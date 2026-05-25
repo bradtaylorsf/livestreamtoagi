@@ -537,6 +537,8 @@ function releaseBuild(agent, planId, status, result = '', options = {}) {
     if (active && (!planId || active.planId === planId)) {
         if (status === 'completed') {
             state.lastCompletedAtByKey.set(active.cacheKey, now);
+        } else if (status === 'failed') {
+            state.planCache.delete(active.cacheKey);
         }
         state.activeBuild = null;
         return {
@@ -592,6 +594,7 @@ function releaseSceneBuild(agent, planId, status, result = '', options = {}) {
         }
         if (status === 'failed') {
             const failure = retryableReasonFrom(result, options);
+            sceneState.planCache.delete(active.cacheKey);
             if (failure.retryable) {
                 sceneState.activeBuild = null;
                 return {

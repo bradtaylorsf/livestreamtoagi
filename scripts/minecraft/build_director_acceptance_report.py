@@ -23,7 +23,11 @@ DIRECTOR_DECISION_EVENTS = {
     "director.scene.opened",
     "director.scene.closed",
 }
-MEMORY_EVENTS = {"director.scene.digest", "director.memory.compaction"}
+MEMORY_EVENTS = {
+    "director.scene.digest",
+    "director.memory.compaction",
+    "memory_context.fetched",
+}
 MACRO_EVENT_PREFIXES = ("build_plan.",)
 DISTRESS_EVENTS = {
     "distress_reported",
@@ -461,8 +465,11 @@ def normalize_objective_rows(macro_rows: list[dict[str, Any]]) -> list[dict[str,
 def useful_memory_digest(row: dict[str, Any]) -> bool:
     event_type = str(row.get("event_type") or "")
     entries = coerce_int(row.get("entries_count"))
+    context_chars = coerce_int(row.get("context_chars"))
     distributed = row.get("distributed_to")
     summary = str(row.get("summary") or "")
+    if event_type == "memory_context.fetched":
+        return context_chars > 0 and row.get("ok") is not False
     if event_type == "director.scene.digest":
         return (
             entries > 0
@@ -491,6 +498,7 @@ def normalize_memory_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if isinstance(data.get("distributed_to"), list)
             else [],
             "entries_count": coerce_int(data.get("entries_count")),
+            "context_chars": coerce_int(data.get("context_chars")),
             "tokens": coerce_int(data.get("tokens")),
             "latency_ms": coerce_int(data.get("latency_ms")),
             "transcript_id": data.get("transcript_id"),
@@ -516,7 +524,9 @@ def normalize_distress_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]
             {
                 "ts": event.get("ts"),
                 "event_type": event_type,
-                "agent": event_agent(event) or danger.get("agent_id") or data.get("target_agent_id"),
+                "agent": event_agent(event)
+                or danger.get("agent_id")
+                or data.get("target_agent_id"),
                 "danger_id": data.get("danger_id") or danger.get("danger_id"),
                 "kind": data.get("kind") or danger.get("kind"),
                 "severity": coerce_int(data.get("severity") or danger.get("severity")),

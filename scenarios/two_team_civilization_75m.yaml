@@ -1,0 +1,76 @@
+# Two Team Civilization 75m - exploratory Minecraft faction/team run.
+#
+# The current implementation has one global settlement objective queue, so this
+# profile alternates objectives between two teams while preserving a shared
+# global goal. Team-local goal ledgers are tracked in the planning follow-up.
+
+meta:
+  name: "Two Team Civilization 75m"
+  description: "Two factions with leader, builder, gatherer, and scout roles building progressively harder useful camp structures."
+  agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_runtime_minutes: 75
+
+run_mode: experimental
+experimental_goal:
+  kind: artifacts
+  target: 140
+agents:
+  - alpha
+  - vera
+  - rex
+  - aurora
+  - pixel
+  - fork
+  - sentinel
+  - grok
+world:
+  world_type: default
+  seed: 51475
+  persistent: false
+memory_seed:
+  mode: none
+management_policy: shadow
+persona_overrides:
+  - agent_id: alpha
+    backstory: "Alpha starts this run as Team Ember's leader and keeps Ember aligned with the shared civilization goal."
+    system_prompt_append: "Lead Team Ember, assign work, compare progress with Team Grove through scout reports, and adapt without micromanaging every block."
+  - agent_id: aurora
+    backstory: "Aurora starts this run as Team Grove's leader and balances beauty, survival, and useful infrastructure."
+    system_prompt_append: "Lead Team Grove, assign work, compare progress with Team Ember through scout reports, and adapt as objectives get harder."
+agent_goals:
+  alpha:
+    - "Lead Team Ember: set a short plan, ask Rex for builds, Vera for supplies, and Sentinel for scouting reports."
+    - "Remember Team Ember's progress and adjust after Team Grove reports."
+  rex:
+    - "Act as Team Ember's current builder-duty agent: create compact useful build plans for crafting, storage, hunting prep, and defenses."
+  vera:
+    - "Act as Team Ember's gatherer/logistics agent: check inventory, gather nearby useful materials, and report supply constraints."
+  sentinel:
+    - "Act as Team Ember's scout: inspect hazards, terrain, and Team Grove's progress, then report back to Alpha."
+  aurora:
+    - "Lead Team Grove: set a short plan, ask Fork for builds, Pixel for supplies/details, and Grok for scouting reports."
+    - "Remember Team Grove's progress and adjust after Team Ember reports."
+  fork:
+    - "Act as Team Grove's current builder-duty agent: create robust compact build plans for crafting, storage, hunting prep, and defenses."
+  pixel:
+    - "Act as Team Grove's gatherer/designer: gather or account for materials, organize supplies, and improve visible details."
+  grok:
+    - "Act as Team Grove's scout: inspect odd terrain, resources, and Team Ember's progress, then report back to Aurora."
+factions:
+  - name: team_ember
+    members: [alpha, rex, vera, sentinel]
+    goal: "Build a useful survival camp with crafting, storage, resource prep, scouting coverage, and defenses."
+    stance: cooperative-competitive
+  - name: team_grove
+    members: [aurora, fork, pixel, grok]
+    goal: "Build a useful survival camp with crafting, storage, garden/resource systems, scouting coverage, and defenses."
+    stance: cooperative-competitive
+
+phases:
+  - name: two_team_launch
+    type: scheduled
+    trigger: standup
+    required_agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+    topic: "Two teams launch separate but comparable camps, each with leader, builder, gatherer, and scout roles."
+    location: starter_meadow
+    max_turns: 10

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.eval.loader import load_simulation_data, organize_by_category
 from core.eval.prompt_loader import discover_categories, load_prompt, render_user_prompt
+from core.model_config import resolve_internal_model
 
 # Categories selected for the "quick" eval suite — hand-picked for breadth
 # rather than relying on alphabetical order of available categories.
@@ -163,7 +164,7 @@ class EvalEngine:
         """Run a single eval category and store the result."""
         prompt_config = load_prompt(category)
 
-        model = prompt_config.get("model", "claude-sonnet-4-6")
+        model = resolve_internal_model("eval_engine", prompt_config.get("model"))
         max_tokens = prompt_config.get("max_tokens", 4096)
         temperature = prompt_config.get("temperature", 0.3)
 

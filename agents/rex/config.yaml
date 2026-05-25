@@ -1,8 +1,8 @@
 id: rex
 display_name: "Rex — The Skeptic"
 role: "Engineer/Builder"
-model_conversation: anthropic/claude-haiku-4.5
-model_building: anthropic/claude-sonnet-4.6
+model_conversation: model:agent:rex:conversation
+model_building: model:agent:rex:building
 voice_id: en-US-GuyNeural
 color_hex: "#e74c3c"
 color_rich: "bright_green"

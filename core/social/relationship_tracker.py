@@ -11,6 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from core.memory.reflection import _parse_json_response
+from core.model_config import resolve_internal_model
 
 if TYPE_CHECKING:
     import uuid
@@ -58,7 +59,7 @@ class RelationshipTracker:
         relationship_repo: RelationshipRepo,
         simulation_id: uuid.UUID,
         clock: SimulationClock | None = None,
-        sentiment_model: str = "anthropic/claude-haiku-4.5",
+        sentiment_model: str | None = None,
     ) -> None:
         self._llm = llm_client
         self._repo = relationship_repo
@@ -158,7 +159,7 @@ class RelationshipTracker:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": "Analyze the conversation now."},
                 ],
-                model=self._sentiment_model,
+                model=resolve_internal_model("relationship_sentiment", self._sentiment_model),
                 agent_id="system",
                 temperature=0.2,
                 max_tokens=500,

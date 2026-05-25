@@ -287,15 +287,14 @@ def test_acceptance_report_builder_writes_evidence_and_schema(tmp_path: Path) ->
         },
         {
             "ts": "2026-05-21T00:05:16Z",
-            "event_type": "director.scene.digest",
+            "event_type": "memory_context.fetched",
             "agent": "alpha",
             "payload": {
                 "scene_id": "scene-1",
-                "participants": ["alpha", "vera"],
-                "distributed_to": ["alpha", "vera"],
-                "entries_count": 4,
-                "tokens": 38,
-                "summary": "Alpha and Vera agreed to build a torch-lit marker.",
+                "agent_id": "alpha",
+                "recent_event_count": 4,
+                "context_chars": 180,
+                "run_mode": "director_v2",
             },
         },
         {

@@ -15,6 +15,8 @@ import random
 import time
 from typing import TYPE_CHECKING, Any
 
+from core.model_config import resolve_internal_model
+
 if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.llm_client import OpenRouterClient
@@ -284,7 +286,7 @@ class WorldSimulator:
                     },
                     {"role": "user", "content": content[:500]},
                 ],
-                model="claude-haiku-4-5",
+                model=resolve_internal_model("world_revenue"),
                 agent_id="world_simulator",
                 temperature=0.3,
                 max_tokens=10,
@@ -407,7 +409,7 @@ class WorldSimulator:
                     },
                     {"role": "user", "content": context or "General inquiry about collaboration"},
                 ],
-                model="claude-haiku-4-5",
+                model=resolve_internal_model("world_event"),
                 agent_id="world_simulator",
                 temperature=0.7,
                 max_tokens=150,

@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from core.model_config import resolve_internal_model
+
 if TYPE_CHECKING:
     from uuid import UUID
 
@@ -237,7 +239,7 @@ class DepartureManager:
                     },
                     {"role": "user", "content": "Write the departure narrative."},
                 ],
-                model="anthropic/claude-haiku-4.5",
+                model=resolve_internal_model("departure_narrative"),
                 agent_id="system",
                 temperature=0.8,
                 max_tokens=200,

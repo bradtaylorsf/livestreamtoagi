@@ -48,8 +48,14 @@ function emit(agent, type, traceId, payload = {}) {
 function distressKind(bot) {
     const health = Number(bot?.health);
     const oxygen = Number(bot?.oxygenLevel ?? bot?.oxygen);
+    const inWater = Boolean(
+        bot?.entity?.isInWater ||
+            bot?.entity?.isInWaterRain ||
+            bot?.entity?.isInWaterOrRain ||
+            bot?.isInWater,
+    );
     if (Number.isFinite(health) && health <= 0) return { kind: 'death', severity: 5 };
-    if (Number.isFinite(oxygen) && oxygen <= 3) return { kind: 'drowning', severity: 5 };
+    if (inWater && Number.isFinite(oxygen) && oxygen <= 3) return { kind: 'drowning', severity: 5 };
     if (Number.isFinite(health) && health < 6) return { kind: 'low_health', severity: 4 };
     return null;
 }

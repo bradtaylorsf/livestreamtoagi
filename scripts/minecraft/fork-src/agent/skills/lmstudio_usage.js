@@ -1,7 +1,7 @@
-// LM Studio request/response timeline capture for staged Mindcraft clones.
+// OpenAI-compatible request/response timeline capture for staged Mindcraft clones.
 //
 // Importing this module monkey-patches global fetch once. The OpenAI SDK used
-// by Mindcraft sends LM Studio requests through fetch, so this records
+// by Mindcraft sends LM Studio/OpenRouter requests through fetch, so this records
 // llm.request/llm.response events without editing the git-ignored clone or
 // adding npm dependencies.
 
@@ -52,35 +52,36 @@ function parseBody(body) {
     }
 }
 
-function isLmStudioApi(url) {
+function apiProvider(url) {
     if (!url) return false;
     try {
         const parsed = new URL(url);
-        return (
-            /(^|\.)localhost$|^127\.0\.0\.1$/.test(parsed.hostname) &&
-            (parsed.pathname.endsWith('/chat/completions') ||
-                parsed.pathname.endsWith('/completions') ||
-                parsed.pathname.endsWith('/embeddings') ||
-                parsed.pathname.endsWith('/models'))
-        );
+        const isOpenAiPath =
+            parsed.pathname.endsWith('/chat/completions') ||
+            parsed.pathname.endsWith('/completions') ||
+            parsed.pathname.endsWith('/embeddings') ||
+            parsed.pathname.endsWith('/models');
+        if (!isOpenAiPath) return false;
+        if (/(^|\.)localhost$|^127\.0\.0\.1$/.test(parsed.hostname)) return 'lmstudio';
+        if (parsed.hostname === 'openrouter.ai') return 'openrouter';
+        return false;
     } catch {
-        return (
-            url.includes('/v1/chat/completions') ||
+        if (url.includes('openrouter.ai/api/v1/')) return 'openrouter';
+        return url.includes('/v1/chat/completions') ||
             url.includes('/v1/completions') ||
             url.includes('/v1/embeddings') ||
             url.includes('/v1/models')
-        );
+            ? 'lmstudio'
+            : false;
     }
 }
 
-function isLmStudioCompletion(url) {
-    return (
-        isLmStudioApi(url) &&
-        (url.includes('/chat/completions') || url.includes('/completions'))
-    );
+function isTrackedCompletion(url) {
+    return Boolean(apiProvider(url)) && (url.includes('/chat/completions') || url.includes('/completions'));
 }
 
 function redirectUrl(url) {
+    if (apiProvider(url) !== 'lmstudio') return url;
     const base = process.env.LOCAL_LLM_BASE_URL;
     if (!base || base === 'http://localhost:1234/v1' || base === 'http://127.0.0.1:1234/v1') {
         return url;
@@ -98,6 +99,26 @@ function redirectUrl(url) {
     } catch {
         return url;
     }
+}
+
+function headerValue(headers, name) {
+    if (!headers) return '';
+    const target = name.toLowerCase();
+    if (typeof headers.get === 'function') return headers.get(name) || '';
+    if (Array.isArray(headers)) {
+        const found = headers.find(([key]) => String(key).toLowerCase() === target);
+        return found ? String(found[1] || '') : '';
+    }
+    if (typeof headers === 'object') {
+        const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === target);
+        return key ? String(headers[key] || '') : '';
+    }
+    return '';
+}
+
+function skipUsageCapture(input, init) {
+    const headers = (init && init.headers) || (input && typeof input === 'object' && input.headers);
+    return headerValue(headers, 'X-LTAG-Skip-Usage-Capture') === '1';
 }
 
 function redirectInput(input, init, url) {
@@ -137,24 +158,34 @@ function usagePayload({ body, json, latencyMs, outcome, status }) {
     const hasProviderUsage =
         Number.isFinite(usage.prompt_tokens) ||
         Number.isFinite(usage.completion_tokens) ||
-        Number.isFinite(usage.total_tokens);
+        Number.isFinite(usage.total_tokens) ||
+        Number.isFinite(usage.reasoning_tokens) ||
+        Number.isFinite(usage.completion_tokens_details?.reasoning_tokens);
     const promptTokens = Number.isFinite(usage.prompt_tokens)
         ? usage.prompt_tokens
         : deterministicTokenEstimate(body.messages || body.prompt || body.input || body);
     const completionTokens = Number.isFinite(usage.completion_tokens)
         ? usage.completion_tokens
         : deterministicTokenEstimate(responseText(json));
+    const reasoningTokens = Number.isFinite(usage.reasoning_tokens)
+        ? usage.reasoning_tokens
+        : Number.isFinite(usage.completion_tokens_details?.reasoning_tokens)
+          ? usage.completion_tokens_details.reasoning_tokens
+          : 0;
     const totalTokens = Number.isFinite(usage.total_tokens)
         ? usage.total_tokens
         : promptTokens + completionTokens;
     return {
+        provider: body.__ltag_provider || 'unknown',
         model: body.model || 'unknown',
         purpose: body.__ltag_purpose || process.env.MC_LLM_REQUEST_PURPOSE || 'mindcraft.lmstudio',
         reason: body.__ltag_reason || process.env.MC_LLM_REQUEST_REASON || 'mindcraft_completion',
         latency_ms: latencyMs,
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
+        reasoning_tokens: reasoningTokens,
         total_tokens: totalTokens,
+        billable_total_tokens: totalTokens + reasoningTokens,
         estimated: !hasProviderUsage,
         usage_source: hasProviderUsage ? 'provider_reported' : 'estimated',
         outcome,
@@ -169,12 +200,15 @@ function emitRequest({ agent, traceId, body }) {
         agent,
         traceId,
         payload: {
+            provider: body.__ltag_provider || 'unknown',
             model: body.model || 'unknown',
             purpose: body.__ltag_purpose || process.env.MC_LLM_REQUEST_PURPOSE || 'mindcraft.lmstudio',
             reason: body.__ltag_reason || process.env.MC_LLM_REQUEST_REASON || 'mindcraft_completion',
             prompt_tokens: promptTokens,
             completion_tokens: 0,
+            reasoning_tokens: 0,
             total_tokens: promptTokens,
+            billable_total_tokens: promptTokens,
             latency_ms: 0,
             estimated: true,
             usage_source: 'estimated',
@@ -192,18 +226,19 @@ export function installLmstudioUsageCapture() {
 
         globalThis.fetch = async function ltagTimelineFetch(input, init) {
             let url = requestUrl(input);
-            if (!isLmStudioApi(url)) {
+            if (!apiProvider(url) || skipUsageCapture(input, init)) {
                 return originalFetch(input, init);
             }
             const redirected = redirectInput(input, init, url);
             input = redirected.input;
             init = redirected.init;
             url = redirected.url;
-            if (!isLmStudioCompletion(url)) {
+            if (!isTrackedCompletion(url)) {
                 return originalFetch(input, init);
             }
 
             const body = parseBody(requestBody(input, init));
+            body.__ltag_provider = apiProvider(url) || 'unknown';
             const traceId = `trace-llm-${randomUUID()}`;
             const agent = process.env.LTAG_AGENT_ID || process.env.MC_AGENT_ID || body.agent;
             const startedAt = Date.now();

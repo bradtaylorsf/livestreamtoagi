@@ -305,7 +305,16 @@ def normalize_usage(payload: dict[str, Any], *, event_type: str) -> dict[str, An
 
     prompt_tokens = first_int(payload.get("prompt_tokens"), usage.get("prompt_tokens"))
     completion_tokens = first_int(payload.get("completion_tokens"), usage.get("completion_tokens"))
+    completion_details = usage.get("completion_tokens_details")
+    if not isinstance(completion_details, dict):
+        completion_details = {}
+    reasoning_tokens = first_int(
+        payload.get("reasoning_tokens"),
+        usage.get("reasoning_tokens"),
+        completion_details.get("reasoning_tokens"),
+    )
     total_tokens = first_int(payload.get("total_tokens"), usage.get("total_tokens"))
+    billable_total_tokens = first_int(payload.get("billable_total_tokens"))
 
     reported = prompt_tokens is not None and (
         total_tokens is not None or completion_tokens is not None or event_type == "llm.request"
@@ -334,10 +343,16 @@ def normalize_usage(payload: dict[str, Any], *, event_type: str) -> dict[str, An
     if total_tokens is None:
         total_tokens = prompt_tokens + completion_tokens
         estimated = True
+    if reasoning_tokens is None:
+        reasoning_tokens = 0
+    if billable_total_tokens is None:
+        billable_total_tokens = total_tokens + reasoning_tokens
 
     payload["prompt_tokens"] = int(prompt_tokens)
     payload["completion_tokens"] = int(completion_tokens)
+    payload["reasoning_tokens"] = int(reasoning_tokens)
     payload["total_tokens"] = int(total_tokens)
+    payload["billable_total_tokens"] = int(billable_total_tokens)
     payload["estimated"] = bool(estimated or not reported)
     payload["usage_source"] = "estimated" if payload["estimated"] else "provider_reported"
     if event_type == "llm.request":
@@ -1090,7 +1105,13 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
                 "model": str(event.payload.get("model") or "unknown"),
                 "prompt_tokens": int(event.payload.get("prompt_tokens") or 0),
                 "completion_tokens": int(event.payload.get("completion_tokens") or 0),
+                "reasoning_tokens": int(event.payload.get("reasoning_tokens") or 0),
                 "total_tokens": int(event.payload.get("total_tokens") or 0),
+                "billable_total_tokens": int(
+                    event.payload.get("billable_total_tokens")
+                    or event.payload.get("total_tokens")
+                    or 0
+                ),
                 "estimated": bool(event.payload.get("estimated", True)),
                 "usage_source": event.payload.get("usage_source") or "estimated",
             }
@@ -1098,32 +1119,58 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
     token_totals = {
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        "reasoning_tokens": 0,
         "total_tokens": 0,
+        "billable_total_tokens": 0,
         "requests": 0,
         "provider_reported": {
             "requests": 0,
             "prompt_tokens": 0,
             "completion_tokens": 0,
+            "reasoning_tokens": 0,
             "total_tokens": 0,
+            "billable_total_tokens": 0,
         },
         "estimated": {
             "requests": 0,
             "prompt_tokens": 0,
             "completion_tokens": 0,
+            "reasoning_tokens": 0,
             "total_tokens": 0,
+            "billable_total_tokens": 0,
         },
     }
     tokens_by_agent: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        lambda: {
+            "requests": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "reasoning_tokens": 0,
+            "total_tokens": 0,
+            "billable_total_tokens": 0,
+        }
     )
     tokens_by_model: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        lambda: {
+            "requests": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "reasoning_tokens": 0,
+            "total_tokens": 0,
+            "billable_total_tokens": 0,
+        }
     )
 
     for usage in usage_by_request.values():
         bucket_name = "estimated" if usage["estimated"] else "provider_reported"
         token_totals["requests"] += 1
-        for token_key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        for token_key in (
+            "prompt_tokens",
+            "completion_tokens",
+            "reasoning_tokens",
+            "total_tokens",
+            "billable_total_tokens",
+        ):
             token_totals[token_key] += usage[token_key]
             token_totals[bucket_name][token_key] += usage[token_key]
         token_totals[bucket_name]["requests"] += 1
@@ -1134,17 +1181,25 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
             target["requests"] += 1
             target["prompt_tokens"] += usage["prompt_tokens"]
             target["completion_tokens"] += usage["completion_tokens"]
+            target["reasoning_tokens"] += usage["reasoning_tokens"]
             target["total_tokens"] += usage["total_tokens"]
+            target["billable_total_tokens"] += usage["billable_total_tokens"]
 
     tokens = {
         "requests": token_totals["requests"],
         "prompt": token_totals["prompt_tokens"],
         "completion": token_totals["completion_tokens"],
+        "reasoning": token_totals["reasoning_tokens"],
         "total": token_totals["total_tokens"],
+        "billable_total": token_totals["billable_total_tokens"],
         "provider_reported": token_totals["provider_reported"]["total_tokens"],
         "provider_reported_requests": token_totals["provider_reported"]["requests"],
+        "provider_reported_billable_total": token_totals["provider_reported"][
+            "billable_total_tokens"
+        ],
         "estimated": token_totals["estimated"]["total_tokens"],
         "estimated_requests": token_totals["estimated"]["requests"],
+        "estimated_billable_total": token_totals["estimated"]["billable_total_tokens"],
     }
 
     builder_usage: dict[str, Any] = {
@@ -1159,7 +1214,9 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
                 "paid_calls": 0,
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
+                "reasoning_tokens": 0,
                 "total_tokens": 0,
+                "billable_total_tokens": 0,
                 "estimated_usd": 0.0,
             }
         ),
@@ -1195,13 +1252,17 @@ def summarize_events(events: list[TimelineEvent], run_dir: Path) -> dict[str, An
         paid = bool(payload.get("paid") or provider == "openrouter")
         prompt_tokens = int(payload.get("prompt_tokens") or 0)
         completion_tokens = int(payload.get("completion_tokens") or 0)
+        reasoning_tokens = int(payload.get("reasoning_tokens") or 0)
         total_tokens = int(payload.get("total_tokens") or prompt_tokens + completion_tokens)
+        billable_total_tokens = int(payload.get("billable_total_tokens") or total_tokens)
         estimated_usd = coerce_float(payload.get("estimated_usd")) or 0.0
         provider_bucket = builder_usage["by_provider"][provider]
         provider_bucket["calls"] += 1
         provider_bucket["prompt_tokens"] += prompt_tokens
         provider_bucket["completion_tokens"] += completion_tokens
+        provider_bucket["reasoning_tokens"] += reasoning_tokens
         provider_bucket["total_tokens"] += total_tokens
+        provider_bucket["billable_total_tokens"] += billable_total_tokens
         provider_bucket["estimated_usd"] += estimated_usd
         builder_usage["estimated_usd"] += estimated_usd
         agent_bucket["estimated_usd"] += estimated_usd

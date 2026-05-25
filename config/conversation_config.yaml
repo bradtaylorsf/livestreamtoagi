@@ -104,7 +104,7 @@ topics:
   # If no keyword matches, fall back to LLM-based relevance scoring
   fallback_to_llm: true
   # Model used for topic classification (cheap and fast)
-  classifier_model: "anthropic/claude-haiku-4.5"
+  classifier_model: "model:topic_classifier"
 
 # ─── Adjacency pairs ─────────────────────────────────
 # Who naturally responds to whom — loaded from agent configs (adjacency)

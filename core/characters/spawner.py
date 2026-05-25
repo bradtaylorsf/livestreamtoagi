@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from pydantic import BaseModel, Field
 
+from core.model_config import model_ref, resolve_internal_model
+
 if TYPE_CHECKING:
     from uuid import UUID
 
@@ -50,9 +52,8 @@ _AVAILABLE_COLORS = [
     ("#e67e22", "dark_orange"),
 ]
 
-# Default model assignments for new characters
-_DEFAULT_CONVERSATION_MODEL = "anthropic/claude-haiku-4.5"
-_DEFAULT_BUILDING_MODEL = "anthropic/claude-sonnet-4.6"
+_DEFAULT_CONVERSATION_MODEL = model_ref("character_default_conversation")
+_DEFAULT_BUILDING_MODEL = model_ref("character_default_building")
 
 CONCEPT_GENERATION_PROMPT = """\
 You are designing a new AI character for a 24/7 livestreamed AI reality show.
@@ -244,7 +245,7 @@ class CharacterSpawner:
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": "Generate a new character concept now."},
             ],
-            model="anthropic/claude-sonnet-4.6",
+            model=resolve_internal_model("character_concept"),
             agent_id="system",
             temperature=0.9,
             max_tokens=500,
@@ -447,7 +448,7 @@ class CharacterSpawner:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": "Generate the config values now."},
                 ],
-                model="anthropic/claude-haiku-4.5",
+                model=resolve_internal_model("character_config"),
                 agent_id="system",
                 temperature=0.5,
                 max_tokens=300,
@@ -486,7 +487,7 @@ class CharacterSpawner:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": "Write the character prompt now."},
                 ],
-                model="anthropic/claude-haiku-4.5",
+                model=resolve_internal_model("character_system_prompt"),
                 agent_id="system",
                 temperature=0.7,
                 max_tokens=500,

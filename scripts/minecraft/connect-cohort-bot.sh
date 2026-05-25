@@ -56,6 +56,7 @@ MINECRAFT_BRIDGE_URL="${MINECRAFT_BRIDGE_URL:-ws://127.0.0.1:8010/api/minecraft/
 MCDATA_REL="src/utils/mcdata.js"
 MCDATA_VERSION_PATCH_MARKER="LTAG E3-2 runtime version refresh"
 ACTIONS_REL="src/agent/commands/actions.js"
+COMMAND_INDEX_REL="src/agent/commands/index.js"
 ACTIONS_PATCH_MARKER="LTAG E4-4 bridge ping action"
 ACTIONS_MOVE_PATCH_MARKER="LTAG E6-2 move action"
 ACTIONS_NAVIGATE_PATCH_MARKER="LTAG E6-2 navigate action"
@@ -68,6 +69,7 @@ ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 ACTIONS_PARSE_GUARD_PATCH_MARKER="LTAG E8-16 command parse guard"
+PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER="LTAG E12 open settlement planAndBuild arg fold"
 AGENT_MANAGEMENT_PATCH_MARKER="LTAG E8-7 management chat gate"
 AGENT_CLEAN_EXIT_PATCH_MARKER="LTAG E8-14 clean exit chat gate"
 AGENT_HEARTBEAT_PATCH_MARKER="LTAG E8-15 autonomous heartbeat"
@@ -116,6 +118,8 @@ MCDATA_BACKUP=""
 MCDATA_PATH=""
 ACTIONS_BACKUP=""
 ACTIONS_PATH=""
+COMMAND_INDEX_BACKUP=""
+COMMAND_INDEX_PATH=""
 AGENT_BACKUP=""
 AGENT_PATH=""
 MODES_BACKUP=""
@@ -204,6 +208,10 @@ restore_clone_patches() {
     if [ -n "${ACTIONS_BACKUP:-}" ] && [ -f "$ACTIONS_BACKUP" ] && [ -n "${ACTIONS_PATH:-}" ]; then
         cp "$ACTIONS_BACKUP" "$ACTIONS_PATH" 2> /dev/null || true
         rm -f "$ACTIONS_BACKUP"
+    fi
+    if [ -n "${COMMAND_INDEX_BACKUP:-}" ] && [ -f "$COMMAND_INDEX_BACKUP" ] && [ -n "${COMMAND_INDEX_PATH:-}" ]; then
+        cp "$COMMAND_INDEX_BACKUP" "$COMMAND_INDEX_PATH" 2> /dev/null || true
+        rm -f "$COMMAND_INDEX_BACKUP"
     fi
     if [ -n "${AGENT_BACKUP:-}" ] && [ -f "$AGENT_BACKUP" ] && [ -n "${AGENT_PATH:-}" ]; then
         cp "$AGENT_BACKUP" "$AGENT_PATH" 2> /dev/null || true
@@ -363,6 +371,7 @@ if [ "$MODE" = "dry-run" ]; then
     info "Would copy:   fork-src/ autonomous heartbeat skill"
     info "Would copy:   fork-src/ memory context skill"
     info "Would copy:   fork-src/ Director V2 gate skill"
+    info "Would patch:  fold multi-string !planAndBuild args in $MINDCRAFT_DIR/$COMMAND_INDEX_REL"
     info "Would patch:  inject bridge/action commands into $MINDCRAFT_DIR/$ACTIONS_REL"
     info "Would stage:  runtime-version shim in $MINDCRAFT_DIR/$MCDATA_REL"
     info "Would launch: (cd $MINDCRAFT_DIR && node main.js --profiles $MINDCRAFT_PROFILE)"
@@ -829,6 +838,58 @@ then
     exit 1
 fi
 ok "Applied action-manager no-kill patch to $ACTION_MANAGER_REL"
+
+COMMAND_INDEX_PATH="$MINDCRAFT_DIR_ABS/$COMMAND_INDEX_REL"
+if [ ! -f "$COMMAND_INDEX_PATH" ]; then
+    fail "Mindcraft source file missing: $COMMAND_INDEX_PATH"
+    exit 1
+fi
+if grep -q "$PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" "$COMMAND_INDEX_PATH"; then
+    info "Found a previous planAndBuild arg-fold patch in $COMMAND_INDEX_REL; restoring pinned source first."
+    if ! git -C "$MINDCRAFT_DIR_ABS" show "HEAD:$COMMAND_INDEX_REL" > "$COMMAND_INDEX_PATH"; then
+        fail "Could not restore pinned $COMMAND_INDEX_REL before patching."
+        exit 1
+    fi
+fi
+COMMAND_INDEX_BACKUP="$(mktemp -t mindcraft-command-index.XXXXXX)"
+cp "$COMMAND_INDEX_PATH" "$COMMAND_INDEX_BACKUP"
+if ! COMMAND_INDEX_PATH="$COMMAND_INDEX_PATH" PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER="$PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER" node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const path = process.env.COMMAND_INDEX_PATH;
+const marker = process.env.PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER;
+let source = readFileSync(path, 'utf8');
+const needle = `    const command = getCommand(commandName);
+    if(!command) return \`\${commandName} is not a command.\`
+
+    const params = commandParams(command);`;
+const patch = `    const command = getCommand(commandName);
+    if(!command) return \`\${commandName} is not a command.\`
+
+    if (commandName === '!planAndBuild' && args.length > 1) { // ${marker}
+        const cleanArg = (value) => {
+            let arg = String(value || '').trim();
+            if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
+                arg = arg.substring(1, arg.length - 1);
+            }
+            return arg;
+        };
+        args = [args.map(cleanArg).filter(Boolean).join(': ')];
+    }
+
+    const params = commandParams(command);`;
+if (source.includes(needle)) {
+    source = source.replace(needle, patch);
+} else if (!source.includes(marker)) {
+    throw new Error('planAndBuild arg-fold anchor not found');
+}
+writeFileSync(path, source);
+NODE
+then
+    fail "Failed to apply planAndBuild arg-fold patch to $COMMAND_INDEX_REL"
+    exit 1
+fi
+ok "Applied planAndBuild arg-fold patch to $COMMAND_INDEX_REL"
 
 ACTIONS_PATH="$MINDCRAFT_DIR_ABS/$ACTIONS_REL"
 if [ ! -f "$ACTIONS_PATH" ]; then

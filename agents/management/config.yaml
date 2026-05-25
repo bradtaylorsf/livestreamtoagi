@@ -4,8 +4,8 @@
 id: management
 display_name: "Management — The Exhausted Middle Layer"
 role: "Content Filter"
-model_conversation: anthropic/claude-haiku-4.5
-model_building: anthropic/claude-haiku-4.5
+model_conversation: model:agent:management:conversation
+model_building: model:agent:management:building
 voice_id: en-US-AndrewNeural
 color_hex: "#95a5a6"
 color_rich: "bright_white"

@@ -434,6 +434,8 @@ class SharedWorkingState:
         for objective in objectives:
             if objective.objective_id != objective_id:
                 continue
+            if objective.status == "completed":
+                return objective
             owner = owner_agent_id.strip().lower()
             if objective.owner_agent_id and objective.owner_agent_id != owner:
                 objective.previous_owner_agent_ids = [
@@ -464,7 +466,10 @@ class SharedWorkingState:
         for objective in objectives:
             if objective.objective_id != objective_id:
                 continue
-            objective.status = _normalize_objective_status(status)
+            next_status = _normalize_objective_status(status)
+            if objective.status == "completed" and next_status != "completed":
+                return objective
+            objective.status = next_status
             if plan_id:
                 objective.plan_id = plan_id
             if intended_blocks is not None:

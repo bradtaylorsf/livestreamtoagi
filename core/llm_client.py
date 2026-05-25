@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from core.exceptions import AgentCostCapExceeded
+from core.model_config import resolve_model_reference
 from core.models import CostEventCreate, LLMResponse, StreamChunk, ToolCall
 
 if TYPE_CHECKING:
@@ -358,6 +359,7 @@ class OpenRouterClient:
         return self._provider != "openrouter"
 
     def _resolve_model(self, model: str) -> ModelConfig:
+        model = resolve_model_reference(model)
         canonical_model = MODEL_NAME_ALIASES.get(model, model)
         if canonical_model not in MODEL_REGISTRY:
             if self.is_local_provider:
@@ -373,6 +375,7 @@ class OpenRouterClient:
 
     def runtime_model_id(self, model: str) -> str:
         """Return the model ID that will be sent to the provider."""
+        model = resolve_model_reference(model)
         model_config = self._resolve_model(model)
         if self._provider == "openrouter":
             return model_config.openrouter_id
@@ -587,9 +590,10 @@ class OpenRouterClient:
         tool_choice: str | dict[str, Any] | None = None,
         simulation_id: uuid.UUID | None = None,
     ) -> LLMResponse:
-        model_config = self._resolve_model(model)
-        runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        requested_model = resolve_model_reference(model, agent_id=effective_agent_id)
+        model_config = self._resolve_model(requested_model)
+        runtime_model = self.runtime_model_id(requested_model)
         await self._raise_if_agent_capped(effective_agent_id)
         payload: dict[str, Any] = {
             "model": runtime_model,
@@ -659,7 +663,7 @@ class OpenRouterClient:
 
         await self._log_cost(
             effective_agent_id,
-            model,
+            requested_model,
             input_tokens,
             output_tokens,
             cost,
@@ -670,12 +674,12 @@ class OpenRouterClient:
             provider=self._provider,
             runtime_model=runtime_model,
         )
-        trace_model = runtime_model if self.is_local_provider else model
+        trace_model = runtime_model if self.is_local_provider else requested_model
         self._trace_langfuse(trace_model, input_tokens, output_tokens, latency_ms, cost)
 
         return LLMResponse(
             content=content,
-            model=model,
+            model=requested_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost=cost,
@@ -695,9 +699,10 @@ class OpenRouterClient:
         max_tokens: int | None = None,
         simulation_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        model_config = self._resolve_model(model)
-        runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        requested_model = resolve_model_reference(model, agent_id=effective_agent_id)
+        model_config = self._resolve_model(requested_model)
+        runtime_model = self.runtime_model_id(requested_model)
         await self._raise_if_agent_capped(effective_agent_id)
         payload: dict[str, Any] = {
             "model": runtime_model,
@@ -769,7 +774,7 @@ class OpenRouterClient:
 
             await self._log_cost(
                 effective_agent_id,
-                model,
+                requested_model,
                 input_tokens,
                 output_tokens,
                 cost,
@@ -780,7 +785,7 @@ class OpenRouterClient:
                 provider=self._provider,
                 runtime_model=runtime_model,
             )
-            trace_model = runtime_model if self.is_local_provider else model
+            trace_model = runtime_model if self.is_local_provider else requested_model
             self._trace_langfuse(trace_model, input_tokens, output_tokens, latency_ms, cost)
 
 
@@ -836,9 +841,10 @@ class OfflineTestLLMClient(OpenRouterClient):
         simulation_id: uuid.UUID | None = None,
     ) -> LLMResponse:
         _ = (timeout, temperature, tools, tool_choice)
-        model_config = self._resolve_model(model)
-        runtime_model = self.runtime_model_id(model)
         effective_agent_id = agent_id if agent_id is not None else current_agent_id.get()
+        requested_model = resolve_model_reference(model, agent_id=effective_agent_id)
+        model_config = self._resolve_model(requested_model)
+        runtime_model = self.runtime_model_id(requested_model)
         await self._raise_if_agent_capped(effective_agent_id)
 
         start = time.monotonic()
@@ -853,7 +859,7 @@ class OfflineTestLLMClient(OpenRouterClient):
 
         await self._log_cost(
             effective_agent_id,
-            model,
+            requested_model,
             input_tokens,
             output_tokens,
             cost,
@@ -867,7 +873,7 @@ class OfflineTestLLMClient(OpenRouterClient):
 
         return LLMResponse(
             content=content,
-            model=model,
+            model=requested_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost=cost,
