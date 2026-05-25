@@ -108,6 +108,7 @@ class ConversationOptions:
     topic_history: dict[str, list[float]] | None = None
     prompt_log_repo: object | None = None
     factions: list[Any] | None = None
+    embodiment_executor: Any | None = None
 
 
 @dataclass

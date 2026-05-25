@@ -77,6 +77,77 @@ def test_build_agent_tools_threads_embodiment_executor() -> None:
     assert tool._executor is executor  # noqa: SLF001 — wired through
 
 
+def test_conversation_engine_passes_executor_to_build_agent_tools() -> None:
+    """Regression: ConversationEngine must thread the executor so propose_build
+    actually writes build_intents.jsonl during real simulation runs.
+    """
+    from unittest.mock import patch
+
+    from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
+    from core.conversation_engine import ConversationEngine
+
+    executor = HeadlessExecutor()
+    services = _services_for_inventory(["propose_build"])
+    infra = SimpleNamespace(
+        config_loader=SimpleNamespace(
+            config=SimpleNamespace(
+                topics={},
+                energy=SimpleNamespace(),
+            )
+        ),
+        agent_registry=services.agent_registry,
+        event_bus=MagicMock(),
+        llm_client=MagicMock(),
+        proximity=MagicMock(),
+        trigger_system=MagicMock(),
+        selection_logger=MagicMock(),
+    )
+
+    with (
+        patch("core.conversation_engine.SpeakerSelector"),
+        patch("core.conversation_engine.TopicDetector"),
+        patch("core.conversation_engine.build_agent_tools", return_value={}) as mock_build,
+    ):
+        engine = ConversationEngine(
+            infra=InfraServices(**infra.__dict__),
+            memory=MemoryServices(archival_memory=MagicMock()),
+            options=ConversationOptions(embodiment_executor=executor),
+            management=MagicMock(),
+            context_assembler=MagicMock(),
+            conversation_repo=MagicMock(),
+            services=services,
+        )
+        engine._get_tools_for_agent("rex")
+        mock_build.assert_called_once_with(
+            "rex",
+            services,
+            simulation_mode=False,
+            embodiment_executor=executor,
+        )
+
+
+def test_director_tool_adapter_threads_executor_to_tool_builder() -> None:
+    """Regression: DirectorToolAdapter must forward the executor so propose_build
+    works when invoked through the Director V2 path.
+    """
+    from core.minecraft.director.tool_adapter import DirectorToolAdapter
+
+    executor = HeadlessExecutor()
+    builder = MagicMock(return_value={})
+    adapter = DirectorToolAdapter(
+        SimpleNamespace(),
+        tool_builder=builder,
+        embodiment_executor=executor,
+    )
+    adapter._build_tools("rex")
+    builder.assert_called_once_with(
+        "rex",
+        adapter._services,
+        False,
+        embodiment_executor=executor,
+    )
+
+
 # ─── Malformed args yield typed errors ────────────────────────────
 
 

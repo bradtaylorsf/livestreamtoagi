@@ -862,6 +862,7 @@ class SimulationOrchestrator:
             prompt_log_repo=self._prompt_log_repo,
             factions=list(self._config.factions),
             conversation_mode=self._config.conversation_mode,
+            embodiment_executor=self._executor,
         )
 
     def _idle_gap(self) -> timedelta:
