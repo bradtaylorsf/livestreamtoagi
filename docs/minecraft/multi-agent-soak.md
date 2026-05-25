@@ -163,6 +163,8 @@ to `0` when you want the runner to stop its auto-started server. Local sims
 also choose a high run-specific MindServer base port by default to avoid stale
 `8080+` listeners from previous experiments; set
 `MC_SIM_MINDSERVER_BASE_PORT=<port>` if you need a fixed range.
+Direct `scripts/run_simulation.py` embodied runs honor the same
+`MC_SIM_EASY_MODE=1` aliases before delegating to the soak harness.
 For open settlement experiments, `setup-easy-spawn.mjs` also supports
 `EASY_SETUP_MEADOW_RADIUS=<23..96>`, `EASY_SETUP_BOUNDARY=none`, and
 `EASY_SETUP_ANIMALS=1` so the same disposable easy world can be expanded beyond
@@ -307,7 +309,7 @@ cached plans are reused without a new builder-model call. Defaults:
 | --- | --- | --- |
 | `MC_SIM_BUILD_MAX_PER_AGENT` | `6` | Max non-cached plan generations per agent. |
 | `MC_SIM_BUILD_COOLDOWN_SEC` | `300` | Cooldown for equivalent completed build requests. |
-| `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks. |
+| `MC_SIM_BUILD_ZONE_STRIDE` | `12` | Deterministic per-agent origin offset so plans do not all occupy the same blocks; ignored while easy spawn is enabled so starter-meadow builds stay inside the glass boundary. |
 | `MC_SIM_BUILD_CACHE_TTL_SEC` | `3600` | Time to keep validated plans in the per-agent cache. |
 | `MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST` / `SOAK_PLAN_BUILD_BOTS` | unset | Optional current builder-duty allowlist for `!planAndBuild`; unset means any agent may become owner. |
 | `MINECRAFT_PLAN_BUILD_MODEL_MAX_STEPS` | `32` | Planner-facing cap for one generated phase. Keep this lower than `MINECRAFT_PLAN_BUILD_MAX_STEPS` in open-settlement shakeouts so agents build several compact structures instead of one oversized wall. |

@@ -138,9 +138,9 @@ def _settlement_owner_order(
 
 def _settlement_plan_build_owner_allowlist(env: dict[str, str] | None = None) -> list[str]:
     source = env if env is not None else os.environ
-    return _agent_id_order(
-        source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST") or source.get("SOAK_PLAN_BUILD_BOTS")
-    )
+    raw = source.get("MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST") or source.get("SOAK_PLAN_BUILD_BOTS")
+    parsed = _agent_id_order(raw)
+    return [] if any(agent in {"*", "all", "any"} for agent in parsed) else parsed
 
 
 def _objective_slug(description: str) -> str:
@@ -461,17 +461,39 @@ class EmbodiedSimulationSupervisor:
         if self.config.conversation_mode == "director_v2":
             env["DIRECTOR_V2_GATE"] = "1"
             env["SOAK_PROFILE"] = "director_v2"
+        if self.config.management_policy is not None:
+            env["MC_SIM_MANAGEMENT_POLICY"] = self.config.management_policy.value
+            env["MINECRAFT_MANAGEMENT_REVIEW_MODE"] = self.config.management_policy.value
         if self.config.agents:
             env["SOAK_BOTS"] = " ".join(self.config.agents)
             env["LTAG_SIM_AGENTS"] = " ".join(self.config.agents)
-        if any(agent.lower() == "alpha" for agent in self.config.agents):
-            env.setdefault("MC_SIM_ALPHA_TOWN_PLANNER", "1")
-            env.setdefault("MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS", "management")
+        self._apply_minecraft_easy_mode_aliases(env)
         self._apply_minecraft_build_starting_conditions(env)
         duration_hours = _duration_hours(self.config.duration)
         if duration_hours is not None and not self.is_persistent:
             env["SOAK_DURATION_HOURS"] = duration_hours
         return env
+
+    def _apply_minecraft_easy_mode_aliases(self, env: dict[str, str]) -> None:
+        if "MC_SIM_KEEP_SERVER_RUNNING" in env:
+            env.setdefault("SOAK_KEEP_MINECRAFT_RUNNING", env["MC_SIM_KEEP_SERVER_RUNNING"])
+        if not _env_enabled(env.get("MC_SIM_EASY_MODE"), default=False):
+            return
+
+        env.setdefault("RESCUE_MODE", env.get("MINECRAFT_RESCUE_MODE", "easy"))
+        env.setdefault("MINECRAFT_RESCUE_MODE", env["RESCUE_MODE"])
+        env.setdefault("SERVER_DIR", str(self.project_root / "minecraft-server-easy"))
+        env.setdefault(
+            "WORLD_CONFIG",
+            str(self.project_root / "scripts" / "minecraft" / "world-easy.config"),
+        )
+        env.setdefault("MC_HOST", "127.0.0.1")
+        port = env.get("MC_PORT") or env.get("MC_SIM_MC_PORT") or env.get("SERVER_PORT") or "25566"
+        env.setdefault("MC_PORT", port)
+        env.setdefault("SERVER_PORT", env["MC_PORT"])
+        env.setdefault("WHITELIST", "false")
+        env.setdefault("SOAK_EASY_SPAWN", "1")
+        env.setdefault("SOAK_KEEP_MINECRAFT_RUNNING", env.get("MC_SIM_KEEP_SERVER_RUNNING", "1"))
 
     async def _initialize_settlement_objectives(self) -> None:
         if self.simulation_id is None or self.redis is None:

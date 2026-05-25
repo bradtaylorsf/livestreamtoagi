@@ -47,6 +47,16 @@ function intEnv(name, fallback) {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function boolEnv(name) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') return false;
+    return !['0', 'false', 'no', 'off', 'disabled'].includes(String(raw).trim().toLowerCase());
+}
+
+function easySpawnEnabled() {
+    return boolEnv('SOAK_EASY_SPAWN') || boolEnv('MC_SIM_EASY_MODE');
+}
+
 function nowMs(options = {}) {
     return Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
 }
@@ -100,7 +110,7 @@ function zoneBucket(origin) {
 export function applyBuildZoneOffset(agentKey, origin) {
     const stride = intEnv('MC_SIM_BUILD_ZONE_STRIDE', DEFAULT_BUILD_ZONE_STRIDE);
     const base = positionCell(origin);
-    if (stride <= 0) return base;
+    if (stride <= 0 || easySpawnEnabled()) return base;
     const slot = Number.parseInt(hashText(agentKey, 8), 16) % 25;
     const gridX = (slot % 5) - 2;
     const gridZ = Math.floor(slot / 5) - 2;

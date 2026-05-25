@@ -56,6 +56,28 @@ def _run_node_harness(tmp_path: Path, source: str, env: dict[str, str] | None = 
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
+@requires_node
+def test_build_plan_governor_ignores_zone_stride_in_easy_spawn(tmp_path: Path) -> None:
+    harness = f"""
+import {{ pathToFileURL }} from 'node:url';
+
+const governor = await import(pathToFileURL({json.dumps(str(BUILD_PLAN_GOVERNOR_HELPERS))}).href);
+const shifted = governor.applyBuildZoneOffset('alpha', {{ x: -4, y: 64, z: -4 }});
+process.stdout.write(JSON.stringify({{ shifted }}) + '\\n');
+"""
+
+    result = _run_node_harness(
+        tmp_path,
+        harness,
+        {
+            "SOAK_EASY_SPAWN": "1",
+            "MC_SIM_BUILD_ZONE_STRIDE": "24",
+        },
+    )
+
+    assert result["shifted"] == {"x": -4, "y": 64, "z": -4}
+
+
 def _stage_action_with_stub_bridge(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "fork-src"
     commands = root / "agent" / "commands"
@@ -1178,9 +1200,7 @@ process.stdout.write(JSON.stringify({{
     assert capped["status"] == "owner_cap_reached"
     assert capped["evidence"]["skipped_reason"] == "per_agent_cap"
     updated = [
-        event
-        for event in result["events"]
-        if event["type"] == "settlement_objective.updated"
+        event for event in result["events"] if event["type"] == "settlement_objective.updated"
     ]
     assert updated[0]["payload"]["status"] == "owner_cap_reached"
 
@@ -2986,6 +3006,4 @@ process.stdout.write(JSON.stringify({{
 
     assert "success" in result["result"]
     assert result["placed"] == "oak_planks"
-    assert result["digCalls"] == [
-        {"name": "short_grass", "position": {"x": 0, "y": 64, "z": 0}}
-    ]
+    assert result["digCalls"] == [{"name": "short_grass", "position": {"x": 0, "y": 64, "z": 0}}]

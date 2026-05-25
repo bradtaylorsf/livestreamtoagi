@@ -159,7 +159,7 @@ def test_client_is_local_only_no_external_spend() -> None:
     assert "openrouter" not in BRIDGE_ACTION.read_text().lower()
 
 
-def test_management_review_helper_fails_closed_and_uses_filter_tier() -> None:
+def test_management_review_helper_enforces_filter_tier_and_shadow_fail_open() -> None:
     src = MANAGEMENT_REVIEW.read_text()
     assert "reviewChat" in src
     assert "service: 'management'" in src
@@ -167,9 +167,11 @@ def test_management_review_helper_fails_closed_and_uses_filter_tier() -> None:
     assert "DEFAULT_MANAGEMENT_REVIEW_DEADLINE_MS = 10000" in src
     assert "MINECRAFT_MANAGEMENT_REVIEW_MODE" in src
     assert "management policy=off" in src
+    assert "managementReviewShadow" in src
+    assert "shadow mode -- review unavailable" in src
     assert "agent_id: agentId" in src
     assert "agent_tier: 'filter'" in src
-    assert "allow: false" in src, "bridge failures must block chat"
+    assert "allow: false" in src, "enforce-mode bridge failures must block chat"
 
 
 def test_client_exposes_shared_state_blackboard_helpers() -> None:
