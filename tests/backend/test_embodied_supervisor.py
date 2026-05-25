@@ -15,7 +15,11 @@ import pytest
 
 from core.kill_switch import KILL_SWITCH_ACTIVE_VALUE, KILL_SWITCH_KEY
 from core.models import RunMode, SimulationStatus
-from core.simulation.embodied_supervisor import EmbodiedSimulationSupervisor
+from core.simulation.embodied_supervisor import (
+    EmbodiedSimulationSupervisor,
+    _preferred_runtime_path_prefixes,
+    _prepend_runtime_paths,
+)
 from core.simulation.orchestrator import SimulationConfig
 
 
@@ -78,6 +82,48 @@ def _experimental_config(**overrides: Any) -> SimulationConfig:
     }
     kwargs.update(overrides)
     return SimulationConfig(**kwargs)
+
+
+def test_runtime_path_prefers_installed_node20(tmp_path: Path) -> None:
+    node20_bin = tmp_path / ".nvm" / "versions" / "node" / "v20.20.2" / "bin"
+    node20_bin.mkdir(parents=True)
+
+    prefixes = _preferred_runtime_path_prefixes(home=tmp_path, static_dirs=())
+    path = _prepend_runtime_paths("/usr/bin", prefixes)
+
+    assert prefixes == [str(node20_bin)]
+    assert path.split(":")[:2] == [str(node20_bin), "/usr/bin"]
+
+
+@pytest.mark.asyncio
+async def test_alpha_defaults_to_town_planner_and_memory_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sim = _sim(uuid.uuid4())
+    repo = _repo(sim)
+    captured: dict[str, Any] = {}
+    monkeypatch.delenv("MC_SIM_ALPHA_TOWN_PLANNER", raising=False)
+    monkeypatch.delenv("MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS", raising=False)
+
+    async def runner(command, env, cwd, supervisor):
+        captured["env"] = env
+        return 0
+
+    supervisor = EmbodiedSimulationSupervisor(
+        config=_experimental_config(agents=["alpha", "vera", "rex"]),
+        simulation_repo=repo,
+        project_root=tmp_path,
+        command_runner=runner,
+        run_eval=False,
+        run_report=False,
+    )
+
+    await supervisor.run()
+
+    assert captured["env"]["SOAK_BOTS"] == "alpha vera rex"
+    assert captured["env"]["MC_SIM_ALPHA_TOWN_PLANNER"] == "1"
+    assert captured["env"]["MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS"] == "management"
 
 
 @pytest.mark.asyncio

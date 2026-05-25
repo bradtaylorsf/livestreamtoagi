@@ -34,14 +34,20 @@ from core.models import ManagementPolicy  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+DEFAULT_AGENT_ORDER = ("alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
+DEFAULT_AGENT_EXCLUDE = frozenset({"management"})
+
 
 def _default_agents() -> str:
-    """Build default agent list from registry (conversation participants only)."""
+    """Build default simulation roster from real agent configs."""
     from core.agent_registry import AgentRegistry
 
     registry = AgentRegistry(redis_client=None)
     agents = registry._load_all_from_yaml()
-    return ",".join(a.id for a in agents.values() if a.chattiness > 0 or a.initiative > 0)
+    available = {agent_id for agent_id in agents if agent_id not in DEFAULT_AGENT_EXCLUDE}
+    ordered = [agent_id for agent_id in DEFAULT_AGENT_ORDER if agent_id in available]
+    ordered.extend(sorted(available.difference(ordered)))
+    return ",".join(ordered)
 
 
 DEFAULT_AGENTS = _default_agents()
@@ -58,8 +64,35 @@ def _load_run_config_file(path: str | None) -> dict:
     return data
 
 
+def _agents_from_seed_file(path: str | None) -> list[str]:
+    if not path:
+        return []
+    import yaml
+
+    seed_path = Path(path)
+    if not seed_path.is_absolute():
+        seed_path = PROJECT_ROOT / seed_path
+    if not seed_path.is_file():
+        return []
+    parsed = yaml.safe_load(seed_path.read_text()) or {}
+    if not isinstance(parsed, dict):
+        return []
+    raw_agents = parsed.get("agents")
+    if raw_agents is None and isinstance(parsed.get("meta"), dict):
+        raw_agents = parsed["meta"].get("agents")
+    if isinstance(raw_agents, str):
+        raw_agents = raw_agents.split(",")
+    if not isinstance(raw_agents, list):
+        return []
+    return [agent.strip() for agent in raw_agents if isinstance(agent, str) and agent.strip()]
+
+
 def _agents_from_run_config(args: argparse.Namespace, run_config: dict) -> list[str]:
-    raw_agents = run_config.get("agents") or args.agents.split(",")
+    raw_agents = run_config.get("agents")
+    if raw_agents is None:
+        raw_agents = getattr(args, "agents", None)
+    if raw_agents is None:
+        raw_agents = _agents_from_seed_file(getattr(args, "seed_file", None)) or DEFAULT_AGENTS
     if isinstance(raw_agents, str):
         raw_agents = raw_agents.split(",")
     if not isinstance(raw_agents, list):
@@ -232,9 +265,8 @@ async def run_simulation(args: argparse.Namespace) -> None:
     conversation_repo = ConversationRepo(svc.db)
     simulation_repo = SimulationRepo(svc.db)
 
-    if (
-        sim_config.conversation_mode in {"embodied", "director_v2"}
-        and not getattr(args, "no_embodied_supervisor", False)
+    if sim_config.conversation_mode in {"embodied", "director_v2"} and not getattr(
+        args, "no_embodied_supervisor", False
     ):
         from core.simulation.embodied_supervisor import EmbodiedSimulationSupervisor
 
@@ -424,8 +456,11 @@ def main() -> None:
     parser.add_argument(
         "--agents",
         type=str,
-        default=DEFAULT_AGENTS,
-        help=f"Comma-separated agent names (default: {DEFAULT_AGENTS})",
+        default=None,
+        help=(
+            "Comma-separated agent names. Defaults to the seed file agents when present; "
+            f"otherwise {DEFAULT_AGENTS}."
+        ),
     )
     parser.add_argument(
         "--max-cost",
@@ -704,7 +739,11 @@ def main() -> None:
     # simulated time only advances by wall-clock conversation duration, so a
     # --duration of "7d" would take an extremely long time to reach. Recommend
     # using a speed multiplier (e.g. --speed-multiplier 42) for autonomous runs.
-    if (args.duration or args.duration_hours is not None) and args.speed_multiplier == 0 and not args.seed_file:
+    if (
+        (args.duration or args.duration_hours is not None)
+        and args.speed_multiplier == 0
+        and not args.seed_file
+    ):
         print(
             "\n  WARNING: --duration with --speed-multiplier 0 (instant mode)"
             "\n  will advance simulated time very slowly. Each conversation only"

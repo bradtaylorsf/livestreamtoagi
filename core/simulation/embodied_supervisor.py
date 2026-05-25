@@ -31,6 +31,11 @@ DEFAULT_SETTLEMENT_OWNER_ORDER = (
     "grok",
     "alpha",
 )
+DEFAULT_RUNTIME_PATH_DIRS = (
+    Path("/opt/homebrew/opt/openjdk@21/bin"),
+    Path("/opt/homebrew/Cellar/openjdk@21/21.0.11/bin"),
+    Path("/opt/homebrew/opt/node@20/bin"),
+)
 
 EmbodiedCommandRunner = Callable[
     [list[str], dict[str, str], Path, "EmbodiedSimulationSupervisor"],
@@ -62,6 +67,32 @@ def _env_enabled(value: str | None, *, default: bool = True) -> bool:
     if value is None or value == "":
         return default
     return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _preferred_runtime_path_prefixes(
+    *,
+    home: Path | None = None,
+    static_dirs: tuple[Path, ...] = DEFAULT_RUNTIME_PATH_DIRS,
+) -> list[str]:
+    """Return local Java/Node runtime dirs that should win over the shell PATH."""
+
+    prefixes: list[str] = []
+    for directory in static_dirs:
+        if directory.is_dir():
+            prefixes.append(str(directory))
+
+    node_root = (home or Path.home()) / ".nvm" / "versions" / "node"
+    if node_root.is_dir():
+        for directory in sorted(node_root.glob("v20*/bin"), reverse=True):
+            if directory.is_dir():
+                prefixes.append(str(directory))
+    return prefixes
+
+
+def _prepend_runtime_paths(path_value: str, prefixes: list[str]) -> str:
+    existing = [part for part in path_value.split(os.pathsep) if part]
+    additions = [part for part in prefixes if part and part not in existing]
+    return os.pathsep.join([*additions, *existing])
 
 
 def _settlement_objective_descriptions(raw: str | None) -> list[str]:
@@ -414,6 +445,10 @@ class EmbodiedSimulationSupervisor:
         assert self.run_id is not None
         assert self.run_dir is not None
         env = dict(os.environ)
+        env["PATH"] = _prepend_runtime_paths(
+            env.get("PATH", ""),
+            _preferred_runtime_path_prefixes(),
+        )
         env.update(
             {
                 "LTAG_RUN_ID": self.run_id,
@@ -429,6 +464,9 @@ class EmbodiedSimulationSupervisor:
         if self.config.agents:
             env["SOAK_BOTS"] = " ".join(self.config.agents)
             env["LTAG_SIM_AGENTS"] = " ".join(self.config.agents)
+        if any(agent.lower() == "alpha" for agent in self.config.agents):
+            env.setdefault("MC_SIM_ALPHA_TOWN_PLANNER", "1")
+            env.setdefault("MC_SIM_MEMORY_CONTEXT_EXCLUDE_AGENTS", "management")
         self._apply_minecraft_build_starting_conditions(env)
         duration_hours = _duration_hours(self.config.duration)
         if duration_hours is not None and not self.is_persistent:
