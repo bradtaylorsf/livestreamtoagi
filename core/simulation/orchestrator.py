@@ -38,6 +38,7 @@ from core.models import (
     resolve_management_policy,
 )
 from core.simulation.clock import SimulationClock
+from core.simulation.embodiment import EmbodimentExecutor, select_executor
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 if TYPE_CHECKING:
@@ -281,6 +282,17 @@ class SimulationConfig:
                 self.world_config = WorldConfig(persistent=True)
             else:
                 self.world_config.persistent = True
+            return
+
+        if self.run_mode == RunMode.headless:
+            if self.seed_file is None and self.duration is None and self.experimental_goal is None:
+                raise ValueError(
+                    "headless mode requires a seed_file, duration, or experimental_goal"
+                )
+            if self.world_config is not None and self.world_config.durable_world_id:
+                raise ValueError("headless mode cannot use durable_world_id")
+            if self.world_config is not None:
+                self.world_config.persistent = False
             return
 
         if self.run_mode != RunMode.experimental:
@@ -544,6 +556,12 @@ class SimulationOrchestrator:
             "artifacts": 0,
         }
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
+
+        # Single switch point for embodiment behavior — everything else in the
+        # orchestrator (and the conversation engine, dreams, relationships,
+        # alliances, blackboard) is shared across modes.
+        self._executor: EmbodimentExecutor = select_executor(self._config.run_mode)
+        self._decision_logger: Any | None = None
 
     @property
     def simulation_id(self) -> uuid.UUID | None:
@@ -831,6 +849,8 @@ class SimulationOrchestrator:
 
     async def _provision_world_for_run(self) -> None:
         """Apply RunSpec.world to the Minecraft server world config."""
+        if not self._executor.requires_minecraft_world:
+            return
         if self._config.world_config is None or self._config.dry_run or self._simulation_id is None:
             return
 
@@ -955,6 +975,12 @@ class SimulationOrchestrator:
         except Exception as exc:
             await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
             raise
+
+        await self._executor.setup(
+            simulation_id=sim.id,
+            sim_folder=getattr(self, "_sim_folder", None),
+            decision_logger=self._decision_logger,
+        )
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -1211,6 +1237,12 @@ class SimulationOrchestrator:
         except Exception as exc:
             await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
             raise
+
+        await self._executor.setup(
+            simulation_id=sim.id,
+            sim_folder=getattr(self, "_sim_folder", None),
+            decision_logger=self._decision_logger,
+        )
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -1606,6 +1638,11 @@ class SimulationOrchestrator:
             EventType.SIMULATION_ERROR,
             self._on_simulation_error,
         )
+
+        try:
+            await self._executor.teardown()
+        except Exception:  # pragma: no cover
+            logger.warning("Executor teardown raised", exc_info=True)
 
         completed_at = datetime.now(UTC)
         # Wall-clock duration between start and completion. Falls back to
