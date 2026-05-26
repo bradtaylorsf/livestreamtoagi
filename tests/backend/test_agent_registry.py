@@ -508,8 +508,11 @@ async def test_grok_config_loads_with_expected_values():
     grok = registry.get_agent("grok")
     assert grok is not None
     assert grok.display_name == "Grok — The Wild Card"
-    assert grok.model_conversation == "x-ai/grok-3-mini"
-    assert grok.model_building == "x-ai/grok-3"
+    # x-ai/grok-3-mini and x-ai/grok-3 are deprecated upstream (404 on
+    # OpenRouter). The agent config now pins the live grok-4.3 model directly;
+    # legacy refs alias-forward to grok-4.3 via core/llm_client.py for safety.
+    assert grok.model_conversation == "x-ai/grok-4.3"
+    assert grok.model_building == "x-ai/grok-4.3"
     assert grok.voice_id == "en-US-ChristopherNeural"
     assert grok.chattiness == 0.8
     assert grok.initiative == 0.6

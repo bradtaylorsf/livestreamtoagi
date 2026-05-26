@@ -103,8 +103,9 @@ def _claude_model_label(raw_model_id: str) -> str:
     """Render this repo's config model ids in the CLAUDE.md table style."""
     labels = {
         "anthropic/claude-haiku-4.5": "Claude Haiku 4.5",
-        "x-ai/grok-3-mini": "Grok 3 Mini",
-        "x-ai/grok-3": "Grok 3",
+        # grok-3-mini and grok-3 were retired upstream; the live model is
+        # grok-4.3 which covers both conversation and building tiers.
+        "x-ai/grok-4.3": "Grok 4.3",
     }
     try:
         return labels[raw_model_id]
