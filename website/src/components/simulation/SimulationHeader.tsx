@@ -1,4 +1,5 @@
 import Link from "next/link";
+import HeadlessBadge from "@/components/HeadlessBadge";
 import { formatDuration } from "./formatDuration";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -17,6 +18,7 @@ interface SimulationHeaderProps {
   real_duration: string | null;
   simulated_duration: string | null;
   breadcrumbHref: string;
+  config?: Record<string, unknown> | null;
 }
 
 export default function SimulationHeader({
@@ -28,6 +30,7 @@ export default function SimulationHeader({
   real_duration,
   simulated_duration,
   breadcrumbHref,
+  config,
 }: SimulationHeaderProps) {
   return (
     <>
@@ -49,6 +52,7 @@ export default function SimulationHeader({
           >
             {status}
           </span>
+          <HeadlessBadge config={config} />
         </div>
         {description && (
           <p className="text-sm text-foreground/60">{description}</p>

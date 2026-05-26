@@ -587,6 +587,12 @@ export async function getScenarios(): Promise<ScenarioInfo[]> {
 }
 
 // Public scenario library (read-only, anonymous)
+export interface PublicScenarioEvalTargets {
+  primary?: string[];
+  secondary?: string[];
+  success_criteria?: Record<string, string>;
+}
+
 export interface PublicScenarioMeta {
   filename: string;
   name: string;
@@ -595,10 +601,144 @@ export interface PublicScenarioMeta {
   phase_count: number;
   expected_max_cost: number;
   expected_runtime_minutes: number;
+  eval_targets?: PublicScenarioEvalTargets | null;
 }
 
 export async function getPublicScenarios(): Promise<PublicScenarioMeta[]> {
   return request<PublicScenarioMeta[]>("/api/scenarios");
+}
+
+// Headless trigger (issue #860) — kicks scripts/run_headless_sim.py and
+// returns the pre-created simulation ID so the website can redirect to it.
+export interface RunHeadlessRequest {
+  scenario: string;
+  name?: string;
+  max_cost?: number;
+  seed?: number;
+}
+
+export interface RunHeadlessResponse {
+  simulation_id: string;
+  name: string;
+  status: string;
+}
+
+export async function runHeadlessScenario(
+  body: RunHeadlessRequest,
+): Promise<RunHeadlessResponse> {
+  return request<RunHeadlessResponse>("/api/admin/simulations/headless", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// Headless artifact tabs (issue #860)
+export interface BuildIntentSummary {
+  intent_id?: string;
+  agent_id?: string;
+  structure_type?: string;
+  motivation_chain?: { kind: string; description?: string | null }[];
+  args?: Record<string, unknown>;
+  compiled_script?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
+export async function getBuildIntents(
+  simId: string,
+): Promise<BuildIntentSummary[]> {
+  return request<BuildIntentSummary[]>(
+    `/api/simulations/${simId}/build-intents`,
+  );
+}
+
+export interface WorldEventEntry {
+  tick: number;
+  sim_time: number;
+  wall_time: string | null;
+  actor_id: string | null;
+  event_type: "world_event" | "needs_state";
+  payload: Record<string, unknown>;
+}
+
+export async function getWorldEvents(
+  simId: string,
+): Promise<WorldEventEntry[]> {
+  return request<WorldEventEntry[]>(
+    `/api/simulations/${simId}/world-events`,
+  );
+}
+
+export interface ReplayScreenshot {
+  path: string;
+  milestone?: string | null;
+  caption?: string | null;
+  sim_time?: number | null;
+  tick?: number | null;
+  [key: string]: unknown;
+}
+
+export interface ReplayManifest {
+  available: boolean;
+  screenshots?: ReplayScreenshot[];
+  video?: string | null;
+  duration_seconds?: number | null;
+  [key: string]: unknown;
+}
+
+export async function getReplayManifest(
+  simId: string,
+): Promise<ReplayManifest> {
+  return request<ReplayManifest>(
+    `/api/simulations/${simId}/replay-manifest`,
+  );
+}
+
+export interface HeadlessEvalCategory {
+  score: number;
+  reasoning?: string;
+  evidence?: unknown;
+  sub_scores?: Record<string, unknown>;
+  confidence?: number;
+  signal_type: "deterministic" | "llm_judge" | "unsupported";
+  cached?: boolean;
+  skipped?: boolean;
+  [key: string]: unknown;
+}
+
+export interface HeadlessSuccessCriterion {
+  category: string;
+  criterion: string;
+  pass: boolean;
+  reason?: string;
+  skipped?: boolean;
+  cached?: boolean;
+}
+
+export interface HeadlessEvalScores {
+  schema_version: number;
+  scorer: string;
+  scored_at?: string;
+  decision_log_hash: string;
+  scenario_id: string | null;
+  categories: Record<string, HeadlessEvalCategory>;
+  success_criteria: HeadlessSuccessCriterion[];
+  primary: string[];
+  secondary: string[];
+}
+
+export async function getSimulationEvalScores(
+  simId: string,
+): Promise<HeadlessEvalScores | null> {
+  try {
+    return await request<HeadlessEvalScores>(
+      `/api/simulations/${simId}/eval-scores`,
+    );
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export interface CreateSimulationRequest {

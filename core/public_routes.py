@@ -2524,6 +2524,94 @@ async def get_simulation_evals(sim_id: str) -> list[dict[str, Any]]:
     return result
 
 
+@router.get("/simulations/{sim_id}/build-intents")
+async def get_simulation_build_intents(sim_id: str) -> list[dict[str, Any]]:
+    """List structured BuildIntent rows for a headless simulation (issue #860).
+
+    Reads ``<sim-folder>/build_intents.jsonl`` (one JSON object per line).
+    Returns an empty list if the file does not exist, so the website can
+    render an empty-state without surfacing 404 noise.
+    """
+    import json as _json
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        return []
+    path = folder / "build_intents.jsonl"
+    if not path.is_file():
+        return []
+    intents: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                stripped = raw.strip()
+                if not stripped:
+                    continue
+                try:
+                    intents.append(_json.loads(stripped))
+                except _json.JSONDecodeError:
+                    continue
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"failed to read intents: {exc}")
+    return intents
+
+
+@router.get("/simulations/{sim_id}/world-events")
+async def get_simulation_world_events(sim_id: str) -> list[dict[str, Any]]:
+    """Timeline of world_event + needs_state rows from the decision log (issue #860)."""
+    from core.simulation.decision_logger import DecisionLogReader
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        return []
+    try:
+        reader = DecisionLogReader(folder)
+    except FileNotFoundError:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in reader.replay():
+        if row.event_type not in ("world_event", "needs_state"):
+            continue
+        out.append(
+            {
+                "tick": row.tick,
+                "sim_time": row.sim_time,
+                "wall_time": row.wall_time.isoformat() if row.wall_time else None,
+                "actor_id": row.actor_id,
+                "event_type": row.event_type,
+                "payload": row.payload.model_dump(mode="json"),
+            }
+        )
+    return out
+
+
+@router.get("/simulations/{sim_id}/replay-manifest")
+async def get_simulation_replay_manifest(sim_id: str) -> dict[str, Any]:
+    """Manifest of replay screenshots produced by ``scripts/replay_in_minecraft.py``.
+
+    Returns ``{"available": false}`` when the replay has not been run, so the
+    website renders an empty-state instead of a 404 banner.
+    """
+    import json as _json
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        return {"available": False}
+    manifest_path = folder / "replay" / "replay_manifest.json"
+    if not manifest_path.is_file():
+        return {"available": False}
+    try:
+        manifest = _json.loads(manifest_path.read_text())
+    except (OSError, _json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to read replay manifest: {exc}",
+        )
+    if isinstance(manifest, dict):
+        manifest.setdefault("available", True)
+    return manifest
+
+
 @router.get("/simulations/{sim_id}/eval-scores")
 async def get_simulation_eval_scores(sim_id: str) -> dict[str, Any]:
     """Headless eval scores for a simulation (issue #859).

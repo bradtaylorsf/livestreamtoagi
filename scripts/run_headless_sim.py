@@ -147,6 +147,7 @@ async def run_headless(args: argparse.Namespace) -> None:
         duration=duration,
         run_mode=RunMode.headless,
         scenario_id=scenario_path.stem,
+        existing_sim_id=args.sim_id,
     )
     sim_config.load_seed_file(valid_agent_ids=set(scenario_agents))
 
@@ -322,6 +323,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-eval",
         action="store_true",
         help="Skip post-run headless eval scoring (decision log still written).",
+    )
+    parser.add_argument(
+        "--sim-id",
+        type=str,
+        default=None,
+        help="Use a pre-created simulations row UUID instead of creating one.",
     )
     return parser
 

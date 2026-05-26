@@ -12,9 +12,13 @@ import {
   getEvalRuns,
   getEvalCategories,
   getEvalHistory,
+  getPublicScenarios,
+  getSimulation,
   type PublicEvalRun,
   type EvalHistoryPoint,
+  type PublicScenarioMeta,
 } from "@/lib/api";
+import HeadlessBadge from "@/components/HeadlessBadge";
 import { scoreColor } from "@/lib/score-utils";
 import { exportAsJSON, exportAsCSV } from "@/lib/export";
 import {
@@ -62,7 +66,15 @@ export default function EvalsPage() {
   const [filterModel, setFilterModel] = useState<string>("");
 
   const simParam = searchParams.get("sim");
+  const scenarioParam = searchParams.get("scenario") ?? "";
   const [hydratedSim, setHydratedSim] = useState<string | null>(null);
+  const [scenarios, setScenarios] = useState<PublicScenarioMeta[]>([]);
+  const [runScenarios, setRunScenarios] = useState<Record<string, string | null>>(
+    {},
+  );
+  const [runConfigs, setRunConfigs] = useState<
+    Record<string, Record<string, unknown> | null>
+  >({});
   useEffect(() => {
     if (simParam == null) {
       setHydratedSim(getCurrentSimulationId() ?? "");
@@ -71,6 +83,30 @@ export default function EvalsPage() {
     }
   }, [simParam]);
   const currentSimId = hydratedSim ?? "";
+
+  useEffect(() => {
+    let cancelled = false;
+    getPublicScenarios()
+      .then((data) => {
+        if (!cancelled) setScenarios(data);
+      })
+      .catch(() => {
+        // Optional — scenario filter is a nice-to-have
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setScenarioFilter = useCallback(
+    (filename: string) => {
+      const sp = new URLSearchParams(searchParams.toString());
+      if (filename) sp.set("scenario", filename);
+      else sp.delete("scenario");
+      router.replace(`?${sp.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
 
   const setCurrentSimId = useCallback(
     (id: string) => {
@@ -96,6 +132,35 @@ export default function EvalsPage() {
       ]);
 
       setRuns(evalRuns);
+
+      // Best-effort: fetch each sim's config so we can render the headless
+      // badge and apply the scenario filter. Capped at the first 25 to keep
+      // the page snappy on large eval histories.
+      const uniqueSimIds = Array.from(
+        new Set(evalRuns.map((r) => r.simulation_id)),
+      ).slice(0, 25);
+      const configEntries = await Promise.all(
+        uniqueSimIds.map((id) =>
+          getSimulation(id)
+            .then((sim) => {
+              const config = (sim.config ?? {}) as Record<string, unknown>;
+              const scenarioId =
+                typeof config.scenario_id === "string"
+                  ? (config.scenario_id as string)
+                  : null;
+              return [id, scenarioId, config] as const;
+            })
+            .catch(() => [id, null, null] as const),
+        ),
+      );
+      const scenarioMap: Record<string, string | null> = {};
+      const configMap: Record<string, Record<string, unknown> | null> = {};
+      for (const [id, scenarioId, config] of configEntries) {
+        scenarioMap[id] = scenarioId;
+        configMap[id] = config;
+      }
+      setRunScenarios(scenarioMap);
+      setRunConfigs(configMap);
 
       // Build category cards from history data
       const cards: EvalCategoryCardProps[] = [];
@@ -158,17 +223,19 @@ export default function EvalsPage() {
     new Set(runs.flatMap((r) => Object.values(r.model_versions ?? {}))),
   ).sort();
 
-  // Filter runs by agent/model selection
+  // Filter runs by agent/model + scenario selection
+  const scenarioFilterStem = scenarioParam
+    ? scenarioParam.replace(/\.yaml$/, "")
+    : "";
   const filteredRuns = runs.filter((r) => {
     const mv = r.model_versions ?? {};
-    if (filterAgent && filterModel) {
-      return mv[filterAgent] === filterModel;
-    }
-    if (filterAgent) {
-      return filterAgent in mv;
-    }
-    if (filterModel) {
-      return Object.values(mv).includes(filterModel);
+    if (filterAgent && filterModel && mv[filterAgent] !== filterModel) return false;
+    if (filterAgent && !filterModel && !(filterAgent in mv)) return false;
+    if (filterModel && !filterAgent && !Object.values(mv).includes(filterModel))
+      return false;
+    if (scenarioFilterStem) {
+      const sid = runScenarios[r.simulation_id];
+      if (sid !== scenarioFilterStem) return false;
     }
     return true;
   });
@@ -222,7 +289,7 @@ export default function EvalsPage() {
           Transparent, read-only view of how the agent system performs across
           all 12 evaluation categories. Every score is public.
         </p>
-        <div className="pt-2">
+        <div className="pt-2 flex flex-wrap items-end gap-3">
           <SimulationPicker
             id="evals-sim-filter"
             value={currentSimId}
@@ -230,6 +297,28 @@ export default function EvalsPage() {
             label="Simulation"
             allLabel="All simulations"
           />
+          {scenarios.length > 0 && (
+            <label
+              htmlFor="evals-scenario-filter"
+              className="flex flex-col gap-1 text-xs text-foreground/50"
+            >
+              Scenario
+              <select
+                id="evals-scenario-filter"
+                data-testid="evals-scenario-filter"
+                value={scenarioParam}
+                onChange={(e) => setScenarioFilter(e.target.value)}
+                className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground/80"
+              >
+                <option value="">All scenarios</option>
+                {scenarios.map((s) => (
+                  <option key={s.filename} value={s.filename}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         <div
           className="rounded border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-400/80"
@@ -436,12 +525,15 @@ export default function EvalsPage() {
                         {run.date}
                       </td>
                       <td className="px-4 py-2 text-xs">
-                        <Link
-                          href={`/simulations/${run.simulation_id}?tab=evals`}
-                          className="text-neon-cyan hover:underline"
-                        >
-                          {run.simulation_name || run.simulation_id.slice(0, 8) + "..."}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/simulations/${run.simulation_id}?tab=evals`}
+                            className="text-neon-cyan hover:underline"
+                          >
+                            {run.simulation_name || run.simulation_id.slice(0, 8) + "..."}
+                          </Link>
+                          <HeadlessBadge config={runConfigs[run.simulation_id] ?? null} />
+                        </div>
                       </td>
                       <td className="px-4 py-2 text-right font-mono">
                         {score != null ? (
