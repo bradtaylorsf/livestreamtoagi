@@ -582,6 +582,10 @@ class SimulationOrchestrator:
         # alliances, blackboard) is shared across modes.
         self._executor: EmbodimentExecutor = select_executor(self._config.run_mode)
         self._decision_logger: Any | None = None
+        # Event-bus callbacks the orchestrator registers to mirror live
+        # events into the decision log (issue #859). Stored so _finalize can
+        # unsubscribe cleanly.
+        self._decision_log_callbacks: list[tuple[str, Any]] = []
         # World-event scheduler + needs manager (E22-4). Built lazily in
         # ``run``/``run_autonomous`` so tests that only construct the
         # orchestrator don't pay the import cost.
@@ -596,6 +600,81 @@ class SimulationOrchestrator:
     @property
     def simulation_id(self) -> uuid.UUID | None:
         return self._simulation_id
+
+    def _attach_decision_logger_listeners(self) -> None:
+        """Mirror AGENT_SPEAK / TOOL_EXECUTED events into the decision log.
+
+        Without this, the headless scorer's LLM-judge categories (which read
+        utterance excerpts) and the deterministic productivity/errors signals
+        get an empty log on real runs because nothing else writes utterance
+        or non-propose_build tool rows. propose_build still goes through the
+        embodiment executor so we skip it here to avoid double-logging.
+        """
+        if self._decision_logger is None:
+            return
+
+        async def on_agent_speak(event: dict[str, Any]) -> None:
+            data = event.get("data") or {}
+            try:
+                self._decision_logger.log_utterance(
+                    actor_id=str(data.get("agent_id") or "unknown"),
+                    text=str(data.get("content") or ""),
+                    channel=str(data.get("channel") or "chat"),
+                    model=data.get("model"),
+                    tokens=data.get("tokens"),
+                    cost=str(data["cost"]) if data.get("cost") is not None else None,
+                )
+            except Exception:  # pragma: no cover - logging must never break the sim
+                logger.debug("decision_logger.log_utterance failed", exc_info=True)
+
+        async def on_tool_executed(event: dict[str, Any]) -> None:
+            data = event.get("data") or {}
+            tool_name = str(data.get("tool_name") or data.get("tool") or "")
+            # propose_build is already written via HeadlessExecutor /
+            # EmbodiedExecutor execute_tool_intent — skip to avoid dupes.
+            if not tool_name or tool_name == "propose_build":
+                return
+            try:
+                self._decision_logger.log_tool_intent(
+                    actor_id=str(data.get("agent_id") or "unknown"),
+                    tool_name=tool_name,
+                    args=data.get("args") or data.get("inputs") or {},
+                    status=str(data.get("status") or "executed"),
+                    block_reason=data.get("block_reason"),
+                    outcome=data.get("result") or data.get("outcome"),
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("decision_logger.log_tool_intent failed", exc_info=True)
+
+        async def on_management_intervention(event: dict[str, Any]) -> None:
+            data = event.get("data") or {}
+            try:
+                self._decision_logger.log_utterance(
+                    actor_id="management",
+                    text=str(data.get("reason") or data.get("message") or ""),
+                    channel="management",
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("decision_logger.log_utterance(management) failed", exc_info=True)
+
+        self._event_bus.on(EventType.AGENT_SPEAK.value, on_agent_speak)
+        self._decision_log_callbacks.append((EventType.AGENT_SPEAK.value, on_agent_speak))
+        self._event_bus.on(EventType.TOOL_EXECUTED.value, on_tool_executed)
+        self._decision_log_callbacks.append((EventType.TOOL_EXECUTED.value, on_tool_executed))
+        self._event_bus.on(
+            EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention
+        )
+        self._decision_log_callbacks.append(
+            (EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)
+        )
+
+    def _detach_decision_logger_listeners(self) -> None:
+        for event_type, cb in self._decision_log_callbacks:
+            try:
+                self._event_bus.off(event_type, cb)
+            except Exception:  # pragma: no cover
+                logger.debug("decision_logger callback unsubscribe failed", exc_info=True)
+        self._decision_log_callbacks.clear()
 
     def _build_world_event_runtime(self, sim_id: uuid.UUID) -> None:
         """Instantiate the world-event scheduler + needs manager for the run.
@@ -1163,6 +1242,7 @@ class SimulationOrchestrator:
             sim_folder=getattr(self, "_sim_folder", None),
             decision_logger=self._decision_logger,
         )
+        self._attach_decision_logger_listeners()
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -1431,6 +1511,7 @@ class SimulationOrchestrator:
             sim_folder=getattr(self, "_sim_folder", None),
             decision_logger=self._decision_logger,
         )
+        self._attach_decision_logger_listeners()
 
         self._display.show_simulation_start(sim, self._config)
 
@@ -1832,6 +1913,7 @@ class SimulationOrchestrator:
             EventType.SIMULATION_ERROR,
             self._on_simulation_error,
         )
+        self._detach_decision_logger_listeners()
 
         try:
             await self._executor.teardown()
