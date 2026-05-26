@@ -264,6 +264,9 @@ class ScenarioMeta(BaseModel):
     phase_count: int = 0
     expected_max_cost: float = 0.0
     expected_runtime_minutes: int = 0
+    # Categories the scenario is meant to exercise (E22-3). The dashboard
+    # (E22-10) reads this block to filter and color scenarios.
+    eval_targets: dict[str, Any] | None = None
 
 
 # ── Serialization helpers ────────────────────────────────────────
@@ -377,6 +380,41 @@ def _scenarios_dir() -> Any:
     return Path(__file__).resolve().parent.parent / "scenarios"
 
 
+def _headless_snapshots_dir() -> Any:
+    """Return the root folder under which headless sim artifacts are written."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "snapshots" / "headless"
+
+
+def _resolve_headless_sim_folder(sim_id: str) -> Any | None:
+    """Find a headless sim folder by simulation_id (matches metadata.json).
+
+    The scorer/replay tools write artifacts under ``snapshots/headless/<ts>_<name>/``.
+    This helper scans those folders for the matching ``metadata.json`` so the
+    public API can serve the JSON without a DB lookup.
+    """
+    import json as _json
+    from pathlib import Path
+
+    root = _headless_snapshots_dir()
+    if not root.is_dir():
+        return None
+    for entry in sorted(root.iterdir(), reverse=True):
+        if not entry.is_dir():
+            continue
+        meta_path = entry / "metadata.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = _json.loads(meta_path.read_text())
+        except (OSError, _json.JSONDecodeError):
+            continue
+        if meta.get("simulation_id") == sim_id or entry.name == sim_id:
+            return Path(entry)
+    return None
+
+
 def _extract_leading_comment_block(text: str) -> str:
     """Best-effort description from the first contiguous block of ``# ...`` lines."""
     lines: list[str] = []
@@ -468,6 +506,9 @@ def _build_scenario_meta(path: Any) -> ScenarioMeta:
     except (TypeError, ValueError):
         expected_runtime_minutes = 0
 
+    eval_targets_value = parsed.get("eval_targets")
+    eval_targets = eval_targets_value if isinstance(eval_targets_value, dict) else None
+
     return ScenarioMeta(
         filename=path.name,
         name=name,
@@ -476,6 +517,7 @@ def _build_scenario_meta(path: Any) -> ScenarioMeta:
         phase_count=phase_count,
         expected_max_cost=expected_max_cost,
         expected_runtime_minutes=expected_runtime_minutes,
+        eval_targets=eval_targets,
     )
 
 
@@ -2480,6 +2522,116 @@ async def get_simulation_evals(sim_id: str) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+@router.get("/simulations/{sim_id}/build-intents")
+async def get_simulation_build_intents(sim_id: str) -> list[dict[str, Any]]:
+    """List structured BuildIntent rows for a headless simulation (issue #860).
+
+    Reads ``<sim-folder>/build_intents.jsonl`` (one JSON object per line).
+    Returns an empty list if the file does not exist, so the website can
+    render an empty-state without surfacing 404 noise.
+    """
+    import json as _json
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        return []
+    path = folder / "build_intents.jsonl"
+    if not path.is_file():
+        return []
+    intents: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                stripped = raw.strip()
+                if not stripped:
+                    continue
+                try:
+                    intents.append(_json.loads(stripped))
+                except _json.JSONDecodeError:
+                    continue
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"failed to read intents: {exc}") from exc
+    return intents
+
+
+@router.get("/simulations/{sim_id}/world-events")
+async def get_simulation_world_events(sim_id: str) -> list[dict[str, Any]]:
+    """Timeline of world_event + needs_state rows from the decision log (issue #860)."""
+    from core.simulation.decision_logger import DecisionLogReader
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        return []
+    try:
+        reader = DecisionLogReader(folder)
+    except FileNotFoundError:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in reader.replay():
+        if row.event_type not in ("world_event", "needs_state"):
+            continue
+        out.append(
+            {
+                "tick": row.tick,
+                "sim_time": row.sim_time,
+                "wall_time": row.wall_time.isoformat() if row.wall_time else None,
+                "actor_id": row.actor_id,
+                "event_type": row.event_type,
+                "payload": row.payload.model_dump(mode="json"),
+            }
+        )
+    return out
+
+
+@router.get("/simulations/{sim_id}/replay-manifest")
+async def get_simulation_replay_manifest(sim_id: str) -> dict[str, Any]:
+    """Manifest of replay screenshots produced by ``scripts/replay_in_minecraft.py``.
+
+    Returns ``{"available": false}`` when the replay has not been run, so the
+    website renders an empty-state instead of a 404 banner.
+    """
+    import json as _json
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        return {"available": False}
+    manifest_path = folder / "replay" / "replay_manifest.json"
+    if not manifest_path.is_file():
+        return {"available": False}
+    try:
+        manifest = _json.loads(manifest_path.read_text())
+    except (OSError, _json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to read replay manifest: {exc}",
+        ) from exc
+    if isinstance(manifest, dict):
+        manifest.setdefault("available", True)
+    return manifest
+
+
+@router.get("/simulations/{sim_id}/eval-scores")
+async def get_simulation_eval_scores(sim_id: str) -> dict[str, Any]:
+    """Headless eval scores for a simulation (issue #859).
+
+    Reads ``<sim-folder>/eval_scores.json`` produced by
+    :class:`core.eval.headless_scorer.HeadlessScorer`. Returns 404 if the
+    simulation has no headless artifacts.
+    """
+    import json as _json
+
+    folder = _resolve_headless_sim_folder(sim_id)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="headless sim folder not found")
+    scores_path = folder / "eval_scores.json"
+    if not scores_path.is_file():
+        raise HTTPException(status_code=404, detail="eval_scores.json not found")
+    try:
+        return _json.loads(scores_path.read_text())
+    except (OSError, _json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=f"failed to read eval scores: {exc}") from exc
 
 
 @router.get("/simulations/{sim_id}/social-graph")

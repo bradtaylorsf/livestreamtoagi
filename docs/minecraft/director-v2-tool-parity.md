@@ -44,7 +44,9 @@ This inventory mirrors `TOOL_PARITY` in
 | `leave_alliance` | `tools.social_tools` | alliance | `callable_now` | N/A | N/A | Leaving an alliance is internal state managed by the existing alliance manager. |
 | `manage_task` | `tools.task_management` | task | `callable_now` | #712 | N/A | The shared task board remains useful until the Minecraft blackboard is expanded. |
 | `propose_alliance` | `tools.social_tools` | alliance | `callable_now` | N/A | N/A | Alliance proposals are internal social governance and use the existing manager. |
+| `propose_build` | `tools.build_tools` | world_state | `callable_now` | #855 | N/A | Structured BuildIntent submission is the first-class signal for building; Director V2 routes it to the build macro scheduler. |
 | `propose_character` | `tools.character_tools` | character | `callable_now` | N/A | N/A | Character applications stay internal and still flow through the existing voting lifecycle. |
+| `propose_new_building` | `tools.build_tools` | world_state | `callable_now` | #861 | N/A | Dream-up build proposal: agents describe a brand-new building structurally; the refinement loop generates an image, decomposes it, builds it, and iterates against a vision comparison until the screenshot matches the source image. |
 | `propose_self_modification` | `tools.self_modification` | self_mod | `approval_gated` | N/A | N/A | Self-modification only creates a human-review proposal and must not auto-apply changes. |
 | `recall_memory` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 2 recall is still a backend memory read and keeps the three-tier memory boundary. |
 | `retrieve_transcript` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 3 transcript lookup remains a read-only backend memory operation. |

@@ -178,6 +178,7 @@ class PhaseRunner:
         prompt_log_repo: object | None = None,
         factions: list[Any] | None = None,
         conversation_mode: str | None = None,
+        embodiment_executor: Any | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -203,6 +204,7 @@ class PhaseRunner:
         self._prompt_log_repo = prompt_log_repo
         self._factions = list(factions or [])
         self._conversation_mode = conversation_mode
+        self._embodiment_executor = embodiment_executor
 
         # Cross-phase conversation context to prevent repetition (#271)
         from core.models import ConversationRecord
@@ -695,6 +697,7 @@ class PhaseRunner:
                     prompt_log_repo=self._prompt_log_repo,
                     topic_history=dict(self._topic_history),
                     factions=list(self._factions) if self._factions else None,
+                    embodiment_executor=self._embodiment_executor,
                 ),
                 management=self._management,
                 context_assembler=self._context,

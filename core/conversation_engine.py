@@ -197,6 +197,10 @@ class ConversationEngine:
 
         # Per-agent tool cache — lazily built on first use
         self._tool_cache: dict[str, dict[str, BaseTool]] = {}
+        # Optional embodiment executor threaded into tool builders so
+        # propose_build (and any future executor-aware tool) records intents
+        # to the active sim folder and routes to Director V2 in embodied runs.
+        self._embodiment_executor = options.embodiment_executor
 
         # Conversation progression tracking (#248)
         self._dialogue_only_streak: int = 0
@@ -1125,6 +1129,7 @@ class ConversationEngine:
                 agent_id,
                 self._services,
                 simulation_mode=self._simulation_mode,
+                embodiment_executor=self._embodiment_executor,
             )
             logger.debug(
                 "Built %d tools for agent %s",

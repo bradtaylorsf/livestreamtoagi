@@ -10,7 +10,7 @@ import os
 from decimal import Decimal
 
 import pytest
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: F401 (imported for the fixtures below)
 
 from core.constants import LIVE_SIMULATION_ID
 from core.database import Database
@@ -34,18 +34,27 @@ from core.repos.transcript_repo import TranscriptRepo
 from core.repos.world_repo import WorldRepo
 from db.migrate import up
 
-load_dotenv()
+def _database_url() -> str:
+    # Load .env lazily so test collection does not pollute os.environ with the
+    # operator's local Minecraft soak config (MC_SIM_BUILD_MODE, etc.). When
+    # this module ran load_dotenv() at import time, every test collection leaked
+    # those vars into the pytest process and broke unrelated tests that read
+    # os.environ at runtime.
+    load_dotenv()
+    return os.environ.get(
+        "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
+    )
 
-DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://agi:devpassword@localhost:5434/livestream_agi_test"
-)
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6381")
+
+def _redis_url() -> str:
+    load_dotenv()
+    return os.environ.get("REDIS_URL", "redis://localhost:6381")
 
 
 @pytest.fixture()
 async def db():
     """Provide a connected Database instance, clean up after test."""
-    database = Database(dsn=DATABASE_URL, min_size=2, max_size=5)
+    database = Database(dsn=_database_url(), min_size=2, max_size=5)
     await database.connect()
 
     # Run migrations to ensure schema exists
@@ -95,7 +104,7 @@ async def db():
 @pytest.fixture()
 async def redis():
     """Provide a connected RedisClient instance."""
-    client = RedisClient(url=REDIS_URL)
+    client = RedisClient(url=_redis_url())
     await client.connect()
     yield client
     await client.disconnect()
@@ -107,7 +116,7 @@ async def redis():
 @pytest.mark.integration
 async def test_pool_connect_and_disconnect():
     """Pool connects, executes a query, and disconnects cleanly."""
-    database = Database(dsn=DATABASE_URL, min_size=2, max_size=5)
+    database = Database(dsn=_database_url(), min_size=2, max_size=5)
     await database.connect()
     result = await database.fetchval("SELECT 1")
     assert result == 1
@@ -117,7 +126,7 @@ async def test_pool_connect_and_disconnect():
 @pytest.mark.integration
 async def test_pool_acquire_context_manager():
     """acquire() yields a usable connection."""
-    database = Database(dsn=DATABASE_URL, min_size=2, max_size=5)
+    database = Database(dsn=_database_url(), min_size=2, max_size=5)
     await database.connect()
     async with database.acquire() as conn:
         result = await conn.fetchval("SELECT 42")
@@ -128,7 +137,7 @@ async def test_pool_acquire_context_manager():
 @pytest.mark.integration
 async def test_redis_connect_and_disconnect():
     """Redis connects, pings, and disconnects cleanly."""
-    client = RedisClient(url=REDIS_URL)
+    client = RedisClient(url=_redis_url())
     await client.connect()
     result = await client.client.ping()
     assert result is True

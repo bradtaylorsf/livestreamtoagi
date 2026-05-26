@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from core.bootstrap import Services
+    from core.simulation.embodiment import EmbodimentExecutor
     from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ def build_agent_tools(
     agent_id: str,
     services: Services,
     simulation_mode: bool = False,
+    *,
+    embodiment_executor: EmbodimentExecutor | None = None,
 ) -> dict[str, BaseTool]:
     """Build a tool registry for a specific agent, returning {name: tool_instance}.
 
@@ -55,6 +58,7 @@ def build_agent_tools(
         alliance_manager=services.alliance_manager,
         character_spawner=services.character_spawner,
         voting_manager=services.voting_manager,
+        embodiment_executor=embodiment_executor,
     )
     for tool in core_tools:
         registry.register(tool)

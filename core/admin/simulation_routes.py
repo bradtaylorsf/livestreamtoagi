@@ -66,6 +66,21 @@ class NewSimulationResponse(BaseModel):
     status: str
 
 
+class HeadlessRunRequest(BaseModel):
+    """Body for POST /simulations/headless (issue #860)."""
+
+    scenario: str = Field(min_length=1)
+    name: str | None = None
+    max_cost: float | None = Field(default=None, ge=0)
+    seed: int | None = None
+
+
+class HeadlessRunResponse(BaseModel):
+    simulation_id: str
+    name: str
+    status: str
+
+
 class ScenarioInfo(BaseModel):
     filename: str
     name: str
@@ -253,6 +268,83 @@ async def create_simulation(
     )
 
     return NewSimulationResponse(
+        simulation_id=str(sim.id),
+        name=sim_name,
+        status="running",
+    )
+
+
+@router.post("/simulations/headless", response_model=HeadlessRunResponse)
+async def create_headless_simulation(
+    body: HeadlessRunRequest,
+    db: Database = Depends(get_db),
+) -> HeadlessRunResponse:
+    """Launch a headless simulation via ``scripts/run_headless_sim.py`` (issue #860).
+
+    Pre-creates the simulations row so the website can resolve the new sim
+    by ID immediately; threads the row UUID into the subprocess via
+    ``--sim-id`` so the orchestrator inserts under the same ID.
+    """
+    import subprocess
+    import sys
+
+    from core.models import SimulationCreate
+    from core.repos.simulation_repo import SimulationRepo
+
+    project_root = _project_root()
+    scenarios_dir = (project_root / "scenarios").resolve()
+    candidate = (scenarios_dir / body.scenario).resolve()
+    try:
+        candidate.relative_to(scenarios_dir)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="scenario must resolve inside scenarios/",
+        ) from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=400, detail="scenario not found")
+
+    sim_name = body.name or f"headless-{candidate.stem}-{_time_str()}"
+    max_cost = body.max_cost if body.max_cost is not None else 1.0
+
+    sim_repo = SimulationRepo(db)
+    sim = await sim_repo.create(
+        SimulationCreate(
+            name=sim_name,
+            config={
+                "scenario": body.scenario,
+                "scenario_id": candidate.stem,
+                "headless": True,
+                "max_cost": max_cost,
+                "source": "headless_trigger",
+            },
+        )
+    )
+
+    cmd = [
+        sys.executable,
+        str(project_root / "scripts" / "run_headless_sim.py"),
+        "--scenario",
+        str(candidate),
+        "--name",
+        sim_name,
+        "--max-cost",
+        str(max_cost),
+        "--sim-id",
+        str(sim.id),
+    ]
+    if body.seed is not None:
+        cmd += ["--seed", str(body.seed)]
+
+    subprocess.Popen(  # noqa: S603
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        cwd=str(project_root),
+    )
+
+    return HeadlessRunResponse(
         simulation_id=str(sim.id),
         name=sim_name,
         status="running",
