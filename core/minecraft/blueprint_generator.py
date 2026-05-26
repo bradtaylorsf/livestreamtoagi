@@ -166,9 +166,7 @@ class BlueprintGenerator:
     ) -> None:
         self._provider = provider
         self._version = version
-        self._cache_dir = (
-            Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
-        )
+        self._cache_dir = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
 
     @property
     def version(self) -> int:
@@ -186,9 +184,7 @@ class BlueprintGenerator:
     def cost_per_call(self) -> Decimal:
         return self._provider.cost_per_call
 
-    async def generate(
-        self, intent: NewBuildingIntent
-    ) -> tuple[bytes, str, bool]:
+    async def generate(self, intent: NewBuildingIntent) -> tuple[bytes, str, bool]:
         """Return ``(image_bytes, prompt, cache_hit)`` for ``intent``."""
         prompt = build_image_prompt(intent)
         cache_path = self._cache_path(prompt)
@@ -201,19 +197,10 @@ class BlueprintGenerator:
 
     def _cache_path(self, prompt: str) -> Path:
         digest = hashlib.sha256(
-            (
-                prompt
-                + "|"
-                + self._provider.model_id
-                + "|"
-                + str(self._version)
-            ).encode("utf-8")
+            (prompt + "|" + self._provider.model_id + "|" + str(self._version)).encode("utf-8")
         ).hexdigest()
         provider_slug = self._provider.model_id.replace("/", "_")
-        return (
-            self._cache_dir
-            / f"{digest}__{provider_slug}__v{self._version}.png"
-        )
+        return self._cache_dir / f"{digest}__{provider_slug}__v{self._version}.png"
 
 
 __all__ = [

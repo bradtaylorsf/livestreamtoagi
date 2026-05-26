@@ -90,9 +90,7 @@ def _load_scenario_eval_targets(sim_folder: Path) -> dict[str, Any]:
     try:
         parsed = yaml.safe_load(scenario_path.read_text()) or {}
     except (OSError, yaml.YAMLError) as exc:
-        logger.warning(
-            "headless_scorer: cannot parse scenario %s: %s", scenario_path, exc
-        )
+        logger.warning("headless_scorer: cannot parse scenario %s: %s", scenario_path, exc)
         return {}
     targets = parsed.get("eval_targets")
     return targets if isinstance(targets, dict) else {}
@@ -114,18 +112,14 @@ def _render_decision_log_excerpt(rows: list[DecisionLogRow]) -> str:
         for u in utterances[:200]:
             text = (u.payload.text or "").strip().replace("\n", " ")
             text = text[:280]
-            parts.append(
-                f"- t={u.tick} {u.actor_id}({u.payload.channel or 'chat'}): {text}"
-            )
+            parts.append(f"- t={u.tick} {u.actor_id}({u.payload.channel or 'chat'}): {text}")
     else:
         parts.append("(no utterances)")
 
     parts.append("\n### Tool Intents")
     if intents:
         for i in intents[:200]:
-            args_view = ", ".join(
-                f"{k}={v}" for k, v in (i.payload.args or {}).items()
-            )[:200]
+            args_view = ", ".join(f"{k}={v}" for k, v in (i.payload.args or {}).items())[:200]
             parts.append(
                 f"- t={i.tick} {i.actor_id} {i.payload.tool_name}({args_view}) "
                 f"status={i.payload.status} "
@@ -246,9 +240,7 @@ class HeadlessScorer:
                     "signal_type": "deterministic",
                 }
             elif cat in LLM_JUDGE_CATEGORIES:
-                categories_out[cat] = await self._score_llm_judge(
-                    cat, rows, log_hash=log_hash
-                )
+                categories_out[cat] = await self._score_llm_judge(cat, rows, log_hash=log_hash)
             else:
                 # Unknown category — emit a neutral placeholder rather than crash.
                 categories_out[cat] = {
@@ -396,7 +388,7 @@ class HeadlessScorer:
             }
         system = (
             "You evaluate whether a simulation meets a single declared success "
-            "criterion. Respond with strict JSON: {\"pass\": bool, \"reason\": str}."
+            'criterion. Respond with strict JSON: {"pass": bool, "reason": str}.'
         )
         user = (
             f"## Category\n{category}\n\n"
@@ -442,13 +434,9 @@ class HeadlessScorer:
     def _write_cache(self, log_hash: str, key: str, payload: dict[str, Any]) -> None:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         try:
-            self._cache_path(log_hash, key).write_text(
-                json.dumps(payload, indent=2, default=str)
-            )
+            self._cache_path(log_hash, key).write_text(json.dumps(payload, indent=2, default=str))
         except OSError as exc:
-            logger.warning(
-                "headless_scorer: cache write failed for %s: %s", key, exc
-            )
+            logger.warning("headless_scorer: cache write failed for %s: %s", key, exc)
 
 
 def _utterances_text(rows: Iterable[DecisionLogRow], limit: int = 200) -> str:

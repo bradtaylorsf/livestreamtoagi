@@ -56,9 +56,7 @@ async def capture_screenshot(
     except Exception as exc:  # pragma: no cover - bridge can raise transient errors
         logger.warning("screenshot bridge call failed for %s: %s", label, exc)
         output_path.write_bytes(_PLACEHOLDER_PNG)
-        return ScreenshotResult(
-            path=output_path, status="error", detail=str(exc)
-        )
+        return ScreenshotResult(path=output_path, status="error", detail=str(exc))
 
     status = str(response.get("status", "")).lower() if isinstance(response, Mapping) else ""
     image_bytes = response.get("image_bytes") if isinstance(response, Mapping) else None
@@ -68,11 +66,7 @@ async def capture_screenshot(
 
     detail = None
     if isinstance(response, Mapping):
-        detail = (
-            response.get("reason")
-            or response.get("error")
-            or response.get("message")
-        )
+        detail = response.get("reason") or response.get("error") or response.get("message")
     output_path.write_bytes(_PLACEHOLDER_PNG)
     status_label = "unsupported" if status in {"", "unsupported", "rejected"} else "error"
     return ScreenshotResult(

@@ -2631,9 +2631,7 @@ async def get_simulation_eval_scores(sim_id: str) -> dict[str, Any]:
     try:
         return _json.loads(scores_path.read_text())
     except (OSError, _json.JSONDecodeError) as exc:
-        raise HTTPException(
-            status_code=500, detail=f"failed to read eval scores: {exc}"
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"failed to read eval scores: {exc}") from exc
 
 
 @router.get("/simulations/{sim_id}/social-graph")

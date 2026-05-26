@@ -99,9 +99,7 @@ class FakeDecomposerProvider:
                 "shape": "rectangle",
                 "bbox": {"x": 0, "y": 0, "w": 8, "h": 8},
             },
-            "levels": [
-                {"index": 0, "height_blocks": 3, "floor_material": "oak_planks"}
-            ],
+            "levels": [{"index": 0, "height_blocks": 3, "floor_material": "oak_planks"}],
             "materials": [
                 {"region": "walls", "material": "oak_log"},
                 {"region": "roof", "material": "spruce_planks"},
@@ -193,9 +191,7 @@ class RefinementLoop:
         (intent_folder / "source_image.png").write_bytes(image_bytes)
         (intent_folder / "image_prompt.txt").write_text(prompt, encoding="utf-8")
 
-        accumulated_cost = (
-            Decimal("0") if cache_hit else self._generator.cost_per_call
-        )
+        accumulated_cost = Decimal("0") if cache_hit else self._generator.cost_per_call
         self._log_iteration_event(
             actor_id=actor_id,
             iteration=-1,
@@ -253,9 +249,7 @@ class RefinementLoop:
             )
             last_feedback = feedback
             feedback_path = feedback_dir / f"iter_{n}.json"
-            feedback_path.write_text(
-                feedback.model_dump_json(indent=2), encoding="utf-8"
-            )
+            feedback_path.write_text(feedback.model_dump_json(indent=2), encoding="utf-8")
 
             iter_cost = self._comparison.cost_per_call
             accumulated_cost += iter_cost
@@ -281,7 +275,9 @@ class RefinementLoop:
                     "match_score": feedback.match_score,
                     "feature_deltas": feedback.feature_deltas,
                     "cost_usd": str(accumulated_cost),
-                    "patches": [p.model_dump(mode="json") for p in feedback.recommended_buildplan_patches],
+                    "patches": [
+                        p.model_dump(mode="json") for p in feedback.recommended_buildplan_patches
+                    ],
                 },
             )
 
@@ -354,9 +350,7 @@ class RefinementLoop:
         accumulated_cost: Decimal,
         last_feedback: RefinementFeedback | None,
     ) -> dict[str, Any]:
-        final_match_score = (
-            iterations[-1].match_score if iterations else 0.0
-        )
+        final_match_score = iterations[-1].match_score if iterations else 0.0
         return {
             "intent": intent.to_log_payload(),
             "image_prompt": prompt,
@@ -387,9 +381,7 @@ class RefinementLoop:
                 }
                 for rec in iterations
             ],
-            "final_feedback": (
-                last_feedback.model_dump(mode="json") if last_feedback else None
-            ),
+            "final_feedback": (last_feedback.model_dump(mode="json") if last_feedback else None),
             "completed_at": datetime.now(UTC).isoformat(),
         }
 
@@ -397,9 +389,7 @@ class RefinementLoop:
 # ─── plan-patch application ───────────────────────────────────────
 
 
-def _apply_patches(
-    plan: BuildPlan, patches: list[BuildPlanPatch]
-) -> BuildPlan:
+def _apply_patches(plan: BuildPlan, patches: list[BuildPlanPatch]) -> BuildPlan:
     """Return a new ``BuildPlan`` with ``patches`` applied.
 
     Unknown or contradictory patches are skipped rather than raising — the

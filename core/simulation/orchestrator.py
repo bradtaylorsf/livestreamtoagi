@@ -661,9 +661,7 @@ class SimulationOrchestrator:
         self._decision_log_callbacks.append((EventType.AGENT_SPEAK.value, on_agent_speak))
         self._event_bus.on(EventType.TOOL_EXECUTED.value, on_tool_executed)
         self._decision_log_callbacks.append((EventType.TOOL_EXECUTED.value, on_tool_executed))
-        self._event_bus.on(
-            EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention
-        )
+        self._event_bus.on(EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)
         self._decision_log_callbacks.append(
             (EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)
         )
@@ -693,9 +691,7 @@ class SimulationOrchestrator:
 
         seed = int(hashlib.sha256(str(sim_id).encode()).hexdigest()[:8], 16)
         self._world_event_scheduler = WorldEventScheduler.from_config(block, seed=seed)
-        need_configs = {
-            name: NeedConfig(**raw) for name, raw in (block.get("needs") or {}).items()
-        }
+        need_configs = {name: NeedConfig(**raw) for name, raw in (block.get("needs") or {}).items()}
         self._needs_manager = NeedsManager(
             configs=need_configs,
             simulation_id=str(sim_id),
@@ -760,11 +756,7 @@ class SimulationOrchestrator:
         tick: int,
     ) -> None:
         """Log world events to decision log and push them on the blackboard."""
-        shared = (
-            self._services.shared_working_state
-            if self._services is not None
-            else None
-        )
+        shared = self._services.shared_working_state if self._services is not None else None
 
         for event in events:
             if self._decision_logger is not None:

@@ -30,8 +30,7 @@ def get_card(card_id: str) -> ArchitecturalCard:
         return ARCHITECTURAL_CARDS[card_id]
     except KeyError as exc:
         raise KeyError(
-            f"unknown architectural card: {card_id!r}; "
-            f"known ids: {sorted(ARCHITECTURAL_CARDS)}"
+            f"unknown architectural card: {card_id!r}; known ids: {sorted(ARCHITECTURAL_CARDS)}"
         ) from exc
 
 

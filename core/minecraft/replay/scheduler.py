@@ -209,9 +209,7 @@ class ReplayScheduler:
                 )
                 after_members = row.payload.members or []
                 before_count = (
-                    len(before_members)
-                    if isinstance(before_members, (list, tuple))
-                    else 0
+                    len(before_members) if isinstance(before_members, (list, tuple)) else 0
                 )
                 if before_count == 0 and len(after_members) > 0:
                     events.append(

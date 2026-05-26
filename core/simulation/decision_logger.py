@@ -345,7 +345,9 @@ class DecisionLogger:
 class DecisionLogReader:
     """Streaming reader that yields validated rows in order."""
 
-    def __init__(self, sim_folder: str | Path, *, expected_schema_version: int = SCHEMA_VERSION) -> None:
+    def __init__(
+        self, sim_folder: str | Path, *, expected_schema_version: int = SCHEMA_VERSION
+    ) -> None:
         self._sim_folder = Path(sim_folder)
         self._path = self._sim_folder / _DECISION_LOG_FILENAME
         if not self._path.is_file():

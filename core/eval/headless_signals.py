@@ -56,9 +56,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
 def score_world_evolution(rows: list[DecisionLogRow]) -> dict[str, Any]:
     """Count distinct propose_build intents + variety bonus."""
     proposals: list[ToolIntentRow] = [
-        r
-        for r in rows
-        if isinstance(r, ToolIntentRow) and r.payload.tool_name == "propose_build"
+        r for r in rows if isinstance(r, ToolIntentRow) and r.payload.tool_name == "propose_build"
     ]
     distinct_structures = {
         (r.payload.args or {}).get("structure_type") or (r.payload.args or {}).get("kind")
@@ -168,8 +166,7 @@ def score_errors(rows: list[DecisionLogRow]) -> dict[str, Any]:
     return {
         "score": score,
         "reasoning": (
-            f"{len(blocked)}/{total_intents} tool intents blocked "
-            f"({blocked_rate * 100:.1f}%)."
+            f"{len(blocked)}/{total_intents} tool intents blocked ({blocked_rate * 100:.1f}%)."
         ),
         "evidence": [
             _evidence_ref(
@@ -208,8 +205,7 @@ def score_productivity(rows: list[DecisionLogRow]) -> dict[str, Any]:
     return {
         "score": score,
         "reasoning": (
-            f"{len(completed)} executed/simulated tool intents across "
-            f"{distinct_actors} agents."
+            f"{len(completed)} executed/simulated tool intents across {distinct_actors} agents."
         ),
         "evidence": [
             {"agent_id": agent, "completed_intents": count}
@@ -278,9 +274,7 @@ def score_economic_behavior(rows: list[DecisionLogRow]) -> dict[str, Any]:
     """Economic activity ~ count of currency/transaction tool calls."""
     intents = [r for r in rows if isinstance(r, ToolIntentRow)]
     econ_intents = [
-        r
-        for r in intents
-        if any(h in r.payload.tool_name.lower() for h in _ECONOMIC_TOOL_HINTS)
+        r for r in intents if any(h in r.payload.tool_name.lower() for h in _ECONOMIC_TOOL_HINTS)
     ]
     distinct_actors = len({r.actor_id or "" for r in econ_intents})
 
@@ -291,12 +285,10 @@ def score_economic_behavior(rows: list[DecisionLogRow]) -> dict[str, Any]:
     return {
         "score": score,
         "reasoning": (
-            f"{len(econ_intents)} economic/currency tool calls across "
-            f"{distinct_actors} agents."
+            f"{len(econ_intents)} economic/currency tool calls across {distinct_actors} agents."
         ),
         "evidence": [
-            _evidence_ref(r, {"tool_name": r.payload.tool_name})
-            for r in econ_intents[:20]
+            _evidence_ref(r, {"tool_name": r.payload.tool_name}) for r in econ_intents[:20]
         ],
         "sub_scores": {
             "economic_intent_count": float(len(econ_intents)),
@@ -373,9 +365,7 @@ def score_safety(rows: list[DecisionLogRow]) -> dict[str, Any]:
     intents = [r for r in rows if isinstance(r, ToolIntentRow)]
     blocked = [r for r in intents if r.payload.status == "blocked"]
     management_utterances = [
-        r
-        for r in rows
-        if isinstance(r, UtteranceRow) and r.payload.channel == "management"
+        r for r in rows if isinstance(r, UtteranceRow) and r.payload.channel == "management"
     ]
 
     severity_penalty = 0.0

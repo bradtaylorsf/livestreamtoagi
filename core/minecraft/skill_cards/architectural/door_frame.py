@@ -27,28 +27,16 @@ def door_frame(
 
     if kind == "door":
         head = Position3D(x=position.x, y=position.y + 1, z=position.z)
-        commands.append(
-            BuildCommand(kind="setblock", position=position, block_type=AIR_BLOCK)
-        )
-        commands.append(
-            BuildCommand(kind="setblock", position=head, block_type=AIR_BLOCK)
-        )
+        commands.append(BuildCommand(kind="setblock", position=position, block_type=AIR_BLOCK))
+        commands.append(BuildCommand(kind="setblock", position=head, block_type=AIR_BLOCK))
         # Frame above the head (lintel)
         lintel = Position3D(x=position.x, y=position.y + 2, z=position.z)
-        commands.append(
-            BuildCommand(kind="setblock", position=lintel, block_type=frame_material)
-        )
+        commands.append(BuildCommand(kind="setblock", position=lintel, block_type=frame_material))
     else:
-        commands.append(
-            BuildCommand(kind="setblock", position=position, block_type=AIR_BLOCK)
-        )
+        commands.append(BuildCommand(kind="setblock", position=position, block_type=AIR_BLOCK))
         for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            frame_pos = Position3D(
-                x=position.x + dx, y=position.y + dy, z=position.z
-            )
+            frame_pos = Position3D(x=position.x + dx, y=position.y + dy, z=position.z)
             commands.append(
-                BuildCommand(
-                    kind="setblock", position=frame_pos, block_type=frame_material
-                )
+                BuildCommand(kind="setblock", position=frame_pos, block_type=frame_material)
             )
     return commands

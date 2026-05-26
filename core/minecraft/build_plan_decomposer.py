@@ -150,11 +150,11 @@ class BlueprintDecomposer:
         intent_hints: Mapping[str, Any] | None = None,
     ) -> BuildPlan:
         structure_value = (
-            structure_type.value if isinstance(structure_type, StructureType) else str(structure_type)
+            structure_type.value
+            if isinstance(structure_type, StructureType)
+            else str(structure_type)
         )
-        size_value = (
-            size_class.value if isinstance(size_class, SizeClass) else str(size_class)
-        )
+        size_value = size_class.value if isinstance(size_class, SizeClass) else str(size_class)
         resolved_path = self._resolve_image_path(structure_value, image_path)
         hints = (
             dict(intent_hints)
@@ -185,9 +185,7 @@ class BlueprintDecomposer:
 
     # ─── internals ──────────────────────────────────────────────
 
-    def _resolve_image_path(
-        self, structure_value: str, image_path: Path | str | None
-    ) -> Path:
+    def _resolve_image_path(self, structure_value: str, image_path: Path | str | None) -> Path:
         if image_path is not None:
             path = Path(image_path)
             if not path.is_file():
@@ -204,9 +202,7 @@ class BlueprintDecomposer:
     def _cache_path(self, image_bytes: bytes) -> Path:
         digest = hashlib.sha256(image_bytes).hexdigest()
         model_slug = self._provider.model_id.replace("/", "_")
-        return (
-            self._cache_dir / f"{digest}__{model_slug}__v{self._version}.json"
-        )
+        return self._cache_dir / f"{digest}__{model_slug}__v{self._version}.json"
 
     def _read_cache(self, cache_path: Path) -> BuildPlan | None:
         if not cache_path.is_file():
@@ -215,9 +211,7 @@ class BlueprintDecomposer:
             payload = json.loads(cache_path.read_text(encoding="utf-8"))
             return BuildPlan.model_validate(payload)
         except Exception:  # noqa: BLE001
-            logger.warning(
-                "discarding unreadable cache entry %s", cache_path, exc_info=True
-            )
+            logger.warning("discarding unreadable cache entry %s", cache_path, exc_info=True)
             return None
 
     def _write_cache(self, cache_path: Path, plan: BuildPlan) -> None:

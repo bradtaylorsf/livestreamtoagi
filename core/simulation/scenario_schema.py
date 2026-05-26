@@ -95,9 +95,7 @@ def _validate_world_event_type(value: str) -> str:
     from core.simulation.world_events import WORLD_EVENT_TYPES
 
     if value not in WORLD_EVENT_TYPES:
-        raise ValueError(
-            f"unknown world event {value!r}; must be one of {list(WORLD_EVENT_TYPES)}"
-        )
+        raise ValueError(f"unknown world event {value!r}; must be one of {list(WORLD_EVENT_TYPES)}")
     return value
 
 
@@ -166,16 +164,12 @@ class WorldEventsBlock(BaseModel):
 
     @field_validator("needs")
     @classmethod
-    def _known_need_names(
-        cls, v: dict[str, NeedDecayConfig]
-    ) -> dict[str, NeedDecayConfig]:
+    def _known_need_names(cls, v: dict[str, NeedDecayConfig]) -> dict[str, NeedDecayConfig]:
         from core.agent_needs import NEED_NAMES
 
         unknown = [name for name in v if name not in NEED_NAMES]
         if unknown:
-            raise ValueError(
-                f"unknown need names {unknown}; valid: {list(NEED_NAMES)}"
-            )
+            raise ValueError(f"unknown need names {unknown}; valid: {list(NEED_NAMES)}")
         return v
 
 
@@ -202,9 +196,7 @@ class EvalTargetsBlock(BaseModel):
             return v
         unknown = [item for item in v if item not in valid]
         if unknown:
-            raise ValueError(
-                f"unknown eval categories {unknown}; valid: {sorted(valid)}"
-            )
+            raise ValueError(f"unknown eval categories {unknown}; valid: {sorted(valid)}")
         return v
 
     @model_validator(mode="after")
@@ -214,9 +206,7 @@ class EvalTargetsBlock(BaseModel):
             return self
         unknown = [c for c in self.success_criteria if c not in valid]
         if unknown:
-            raise ValueError(
-                f"success_criteria references unknown eval categories: {unknown}"
-            )
+            raise ValueError(f"success_criteria references unknown eval categories: {unknown}")
         return self
 
 

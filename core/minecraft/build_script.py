@@ -82,9 +82,7 @@ class BuildScript(BaseModel):
         manifest dict; the ordered ``commands`` list preserves insertion
         order from the compiler.
         """
-        return json.loads(
-            json.dumps(self.model_dump(mode="json"), sort_keys=True)
-        )
+        return json.loads(json.dumps(self.model_dump(mode="json"), sort_keys=True))
 
 
 class BuildScriptManifest(BaseModel):

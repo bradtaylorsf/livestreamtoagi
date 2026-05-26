@@ -141,9 +141,7 @@ class NeedsManager:
     def get_state(self, agent_id: str) -> AgentNeedsState:
         state = self._states.get(agent_id)
         if state is None:
-            state = AgentNeedsState(
-                agent_id=agent_id, simulation_id=self._simulation_id
-            )
+            state = AgentNeedsState(agent_id=agent_id, simulation_id=self._simulation_id)
             self._states[agent_id] = state
         return state
 

@@ -58,9 +58,7 @@ class NewBuildingIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid", use_enum_values=True)
 
-    intent_id: str = Field(
-        default_factory=lambda: f"newbuild-{uuid.uuid4().hex[:12]}"
-    )
+    intent_id: str = Field(default_factory=lambda: f"newbuild-{uuid.uuid4().hex[:12]}")
     proposer_id: str = Field(min_length=1)
     concept: str = Field(min_length=2, max_length=80)
     intended_use: str = Field(min_length=1, max_length=200)
@@ -105,9 +103,7 @@ class NewBuildingIntent(BaseModel):
     def _motivation_non_empty(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError(
-                "motivation is required and must link to a goal/need/dream"
-            )
+            raise ValueError("motivation is required and must link to a goal/need/dream")
         return stripped
 
     def to_log_payload(self) -> dict[str, Any]:

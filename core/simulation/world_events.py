@@ -86,9 +86,7 @@ class WorldEventScheduler:
     ) -> None:
         # Defensive copy so the caller's lists aren't mutated.
         self._schedule: list[dict[str, Any]] = [dict(item) for item in schedule or []]
-        self._probabilistic: list[dict[str, Any]] = [
-            dict(item) for item in probabilistic or []
-        ]
+        self._probabilistic: list[dict[str, Any]] = [dict(item) for item in probabilistic or []]
         self._scheduled_fired: set[int] = set()
         self._active_gates: set[str] = set()
         self._rng = random.Random(seed)

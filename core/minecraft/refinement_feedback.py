@@ -49,9 +49,7 @@ class RefinementFeedback(BaseModel):
     match_score: float = Field(ge=0.0, le=1.0)
     feature_deltas: list[str] = Field(default_factory=list)
     per_region_critique: dict[str, str] = Field(default_factory=dict)
-    recommended_buildplan_patches: list[BuildPlanPatch] = Field(
-        default_factory=list
-    )
+    recommended_buildplan_patches: list[BuildPlanPatch] = Field(default_factory=list)
     provider_model_id: str = Field(min_length=1)
 
 

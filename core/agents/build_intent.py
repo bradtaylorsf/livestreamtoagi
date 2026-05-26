@@ -112,9 +112,7 @@ class BuildIntent(BaseModel):
     @model_validator(mode="after")
     def _coords_required_when_claim_specified(self) -> BuildIntent:
         if self.location_intent == LocationIntent.claim_specified.value and self.coords is None:
-            raise ValueError(
-                "coords are required when location_intent='claim_specified'"
-            )
+            raise ValueError("coords are required when location_intent='claim_specified'")
         return self
 
     def to_log_payload(self) -> dict[str, Any]:

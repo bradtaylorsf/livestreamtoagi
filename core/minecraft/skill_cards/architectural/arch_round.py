@@ -29,12 +29,8 @@ def arch_round(
     commands: list[BuildCommand] = []
 
     if pillar_height > 0:
-        left_top = Position3D(
-            x=position.x, y=position.y + pillar_height - 1, z=position.z
-        )
-        right_base = Position3D(
-            x=position.x + span - 1, y=position.y, z=position.z
-        )
+        left_top = Position3D(x=position.x, y=position.y + pillar_height - 1, z=position.z)
+        right_base = Position3D(x=position.x + span - 1, y=position.y, z=position.z)
         right_top = Position3D(
             x=position.x + span - 1,
             y=position.y + pillar_height - 1,

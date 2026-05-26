@@ -53,9 +53,7 @@ class ProposeBuildTool(BaseTool):
     # Gates registration. The agent-registry path also requires
     # 'propose_build' in the agent's YAML tools list; this fallback governs
     # CLI/test code paths that bypass the registry.
-    ALLOWED_AGENTS = frozenset(
-        {"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"}
-    )
+    ALLOWED_AGENTS = frozenset({"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"})
 
     name = "propose_build"
     description = (
@@ -80,8 +78,7 @@ class ProposeBuildTool(BaseTool):
         "location_intent": {
             "type": "string",
             "description": (
-                "Where it should go. 'claim_specified' additionally requires "
-                "the `coords` argument."
+                "Where it should go. 'claim_specified' additionally requires the `coords` argument."
             ),
             "enum": sorted(LOCATION_INTENTS),
         },
@@ -97,7 +94,7 @@ class ProposeBuildTool(BaseTool):
             "optional": True,
             "description": (
                 "Optional block-space coordinates "
-                "{\"x\":..,\"y\":..,\"z\":..}. Required when "
+                '{"x":..,"y":..,"z":..}. Required when '
                 "location_intent='claim_specified'."
             ),
         },
@@ -282,9 +279,7 @@ class ProposeNewBuildingTool(BaseTool):
             try:
                 from core.simulation.embodiment import ToolIntent
             except Exception:  # pragma: no cover
-                logger.exception(
-                    "propose_new_building: failed to import ToolIntent"
-                )
+                logger.exception("propose_new_building: failed to import ToolIntent")
             else:
                 tool_intent = ToolIntent(
                     tool_name=self.name,
@@ -313,9 +308,7 @@ class ProposeNewBuildingTool(BaseTool):
                         agent_id=self._agent_id,
                     )
                 except Exception:  # pragma: no cover
-                    logger.exception(
-                        "refinement loop failed for intent %s", intent.intent_id
-                    )
+                    logger.exception("refinement loop failed for intent %s", intent.intent_id)
 
             asyncio.create_task(_run_loop())
             loop_status = "scheduled"

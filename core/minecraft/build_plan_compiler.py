@@ -120,9 +120,7 @@ class BuildPlanCompiler:
         seed: int = 0,
     ) -> BuildScriptManifest:
         """Return the preflight manifest without holding onto the full command list."""
-        script = self.compile(
-            plan, intent=intent, intent_id=intent_id, origin=origin, seed=seed
-        )
+        script = self.compile(plan, intent=intent, intent_id=intent_id, origin=origin, seed=seed)
         return BuildScriptManifest(
             intent_id=script.intent_id,
             structure_type=script.structure_type,
@@ -299,10 +297,7 @@ def _recipe_generic(
     if levels:
         top_level = levels[-1]
         roof_base_y = (
-            origin.y
-            + _floor_y_for_level(plan, top_level)
-            + max(1, top_level.height_blocks)
-            + 1
+            origin.y + _floor_y_for_level(plan, top_level) + max(1, top_level.height_blocks) + 1
         )
         commands.extend(
             roof_pitched(
@@ -384,9 +379,7 @@ def _recipe_farm(
 
     floor_y = origin.y
     commands.extend(
-        foundation_lay(
-            bbox=bbox, origin=origin, floor_y=floor_y, material=field_material
-        )
+        foundation_lay(bbox=bbox, origin=origin, floor_y=floor_y, material=field_material)
     )
     commands.extend(
         wall_segment(
@@ -457,9 +450,7 @@ def _recipe_coliseum(
     floor_y = origin.y
     # Sand floor of the arena.
     commands.extend(
-        foundation_lay(
-            bbox=bbox, origin=origin, floor_y=floor_y, material=floor_material
-        )
+        foundation_lay(bbox=bbox, origin=origin, floor_y=floor_y, material=floor_material)
     )
 
     # Tiered seating rings.
@@ -515,9 +506,7 @@ def _recipe_market(
     # bounded by short walls. Falls back to a generic single-building if
     # no rooms were decomposed.
     if not plan.rooms:
-        return _recipe_generic(
-            plan=plan, origin=origin, materials=materials, seed=seed
-        )
+        return _recipe_generic(plan=plan, origin=origin, materials=materials, seed=seed)
 
     commands: list[BuildCommand] = []
     bbox = _bbox_for_level(plan)
@@ -526,9 +515,7 @@ def _recipe_market(
     floor_y = origin.y
 
     commands.extend(
-        foundation_lay(
-            bbox=bbox, origin=origin, floor_y=floor_y, material=plaza_material
-        )
+        foundation_lay(bbox=bbox, origin=origin, floor_y=floor_y, material=plaza_material)
     )
 
     for room in _sorted_rooms(plan):

@@ -160,7 +160,15 @@ class NeedsStateRow(_BaseRow):
 
 
 DecisionLogRow = Annotated[
-    UtteranceRow | ToolIntentRow | RelationshipDeltaRow | AllianceDeltaRow | DreamRow | NewGoalRow | BlackboardMutationRow | WorldEventRow | NeedsStateRow,
+    UtteranceRow
+    | ToolIntentRow
+    | RelationshipDeltaRow
+    | AllianceDeltaRow
+    | DreamRow
+    | NewGoalRow
+    | BlackboardMutationRow
+    | WorldEventRow
+    | NeedsStateRow,
     Field(discriminator="event_type"),
 ]
 
