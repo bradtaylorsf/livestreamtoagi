@@ -287,6 +287,19 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         ),
         linked_issue="#855",
     ),
+    "propose_new_building": ToolParityEntry(
+        name="propose_new_building",
+        module="tools.build_tools",
+        category="world_state",
+        classification="callable_now",
+        rationale=(
+            "Dream-up build proposal: agents describe a brand-new building "
+            "structurally; the refinement loop generates an image, "
+            "decomposes it, builds it, and iterates against a vision "
+            "comparison until the screenshot matches the source image."
+        ),
+        linked_issue="#861",
+    ),
 }
 
 

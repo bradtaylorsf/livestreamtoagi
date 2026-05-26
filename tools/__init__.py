@@ -8,7 +8,7 @@ from .alpha_dispatch import DispatchAlphaTool
 from .audience import GetAudienceStatusTool
 from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageTool
 from .base import BaseTool
-from .build_tools import ProposeBuildTool
+from .build_tools import ProposeBuildTool, ProposeNewBuildingTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
@@ -34,6 +34,8 @@ from .web_tools import FetchUrlTool, WebSearchTool
 from .world_state import GetWorldStateTool
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import docker
     from core.agent_economy import AgentEconomyManager
     from core.agent_registry import AgentRegistry
@@ -45,6 +47,7 @@ if TYPE_CHECKING:
     from core.memory.archival_memory import ArchivalMemoryManager
     from core.memory.core_memory import CoreMemoryManager
     from core.memory.recall_memory import RecallMemoryManager
+    from core.minecraft.build_refinement_loop import RefinementLoop
     from core.redis_client import RedisClient
     from core.repos.artifact_repo import ArtifactRepo
     from core.repos.cost_repo import CostRepo
@@ -75,6 +78,7 @@ __all__ = [
     "LeaveAllianceTool",
     "ManageTaskTool",
     "ProposeBuildTool",
+    "ProposeNewBuildingTool",
     "ProposeSelfModificationTool",
     "RecallMemoryTool",
     "RetrieveTranscriptTool",
@@ -131,6 +135,8 @@ def get_core_tools(
     character_spawner: CharacterSpawner | None = None,
     voting_manager: VotingManager | None = None,
     embodiment_executor: EmbodimentExecutor | None = None,
+    refinement_loop: RefinementLoop | None = None,
+    sim_folder: Path | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -258,6 +264,18 @@ def get_core_tools(
         ProposeBuildTool(
             agent_id=agent_id,
             embodiment_executor=embodiment_executor,
+        )
+    )
+
+    # Dream-up new-building tool (#861). Same gating as propose_build, but
+    # additionally needs a refinement loop + sim folder to actually run
+    # the image-gen / decompose / compile / compare iterations.
+    tools.append(
+        ProposeNewBuildingTool(
+            agent_id=agent_id,
+            embodiment_executor=embodiment_executor,
+            refinement_loop=refinement_loop,
+            sim_folder=sim_folder,
         )
     )
 
