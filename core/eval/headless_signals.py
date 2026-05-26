@@ -328,7 +328,7 @@ def score_internal_state(rows: list[DecisionLogRow]) -> dict[str, Any]:
             if v is not None
         }
         prev = last_seen.get(actor, {})
-        if any(prev.get(k) != snapshot.get(k) for k in snapshot.keys()):
+        if any(prev.get(k) != snapshot.get(k) for k in snapshot):
             transitions_per_actor[actor] += 1
         last_seen[actor] = snapshot
 

@@ -2552,7 +2552,7 @@ async def get_simulation_build_intents(sim_id: str) -> list[dict[str, Any]]:
                 except _json.JSONDecodeError:
                     continue
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"failed to read intents: {exc}")
+        raise HTTPException(status_code=500, detail=f"failed to read intents: {exc}") from exc
     return intents
 
 
@@ -2606,7 +2606,7 @@ async def get_simulation_replay_manifest(sim_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"failed to read replay manifest: {exc}",
-        )
+        ) from exc
     if isinstance(manifest, dict):
         manifest.setdefault("available", True)
     return manifest
@@ -2631,7 +2631,9 @@ async def get_simulation_eval_scores(sim_id: str) -> dict[str, Any]:
     try:
         return _json.loads(scores_path.read_text())
     except (OSError, _json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=f"failed to read eval scores: {exc}")
+        raise HTTPException(
+            status_code=500, detail=f"failed to read eval scores: {exc}"
+        ) from exc
 
 
 @router.get("/simulations/{sim_id}/social-graph")

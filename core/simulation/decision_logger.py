@@ -13,9 +13,10 @@ from __future__ import annotations
 import io
 import json
 import logging
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -324,7 +325,7 @@ class DecisionLogger:
                 self._file.close()
                 self._file = None
 
-    def __enter__(self) -> "DecisionLogger":
+    def __enter__(self) -> DecisionLogger:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

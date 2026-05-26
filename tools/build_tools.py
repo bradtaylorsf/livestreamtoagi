@@ -118,7 +118,7 @@ class ProposeBuildTool(BaseTool):
         self,
         *,
         agent_id: str = "unknown",
-        embodiment_executor: "EmbodimentExecutor | None" = None,
+        embodiment_executor: EmbodimentExecutor | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._executor = embodiment_executor

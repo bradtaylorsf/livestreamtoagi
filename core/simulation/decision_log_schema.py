@@ -12,7 +12,7 @@ Bumping ``SCHEMA_VERSION`` requires writing a corresponding reader migration
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -160,17 +160,7 @@ class NeedsStateRow(_BaseRow):
 
 
 DecisionLogRow = Annotated[
-    Union[
-        UtteranceRow,
-        ToolIntentRow,
-        RelationshipDeltaRow,
-        AllianceDeltaRow,
-        DreamRow,
-        NewGoalRow,
-        BlackboardMutationRow,
-        WorldEventRow,
-        NeedsStateRow,
-    ],
+    UtteranceRow | ToolIntentRow | RelationshipDeltaRow | AllianceDeltaRow | DreamRow | NewGoalRow | BlackboardMutationRow | WorldEventRow | NeedsStateRow,
     Field(discriminator="event_type"),
 ]
 
