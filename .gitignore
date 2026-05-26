@@ -98,3 +98,24 @@ research/**/*.pdf
 .alpha-loop/auth/
 .alpha-loop/templates/*.bak
 .worktrees/
+
+# E22 generated artifacts — per-run sim folders, CLI build outputs, smoke
+# scratch. Top-level snapshots/*.json fixtures (conflict.json, mature.json,
+# day3_normal.json) stay tracked.
+/snapshots/cli-builds/
+/snapshots/smoke-propose-new-building/
+/snapshots/headless/20*Z_*/
+
+# Auto-generated MP4 video renders from simulations.
+/videos/*.mp4
+
+# Playwright snapshots/screenshots that occasionally land at repo root from
+# ad-hoc CLI use. The standard playwright-cli artifacts under .playwright-cli/
+# are already ignored above.
+/after-load.yaml
+/loaded.yaml
+/overview.png
+/proposals.png
+/world-events.png
+/replay-gallery.png
+/evals.png

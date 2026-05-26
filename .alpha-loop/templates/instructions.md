@@ -23,7 +23,7 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 **Website (`website/`)** — Next.js on Vercel, Vitest + Playwright E2E
 
-**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/`
+**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/` (with `core/minecraft/blueprint_generator.py` and `core/minecraft/cloud_providers.py` driving headless build planning). Timestamped `minecraft-server-easy-*` directories are ephemeral shakeout/soak artifacts — don't edit them.
 
 **Python 3.14+ is NOT supported** — native deps (pydantic-core, etc.) don't build against it.
 
@@ -31,7 +31,7 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 ```
 agents/           Per-agent YAML personality configs (vera, rex, aurora, pixel, fork, sentinel, grok, management, alpha, template)
-core/             Python backend — orchestrator (main.py), conversation_engine, conversation/, memory/, bridge/, embodiment/, minecraft/, video/, simulation/, world/, characters/, social/, youtube/, eval/, admin/, auth/, reporting/, notifications/, scheduler, tts, llm_client, management, events/, repos/
+core/             Python backend — orchestrator (main.py), bootstrap, llm_client, model_config, cost_governor, kill_switch, management, conversation_engine, conversation_mode, conversation/, memory/, bridge/, embodiment/, minecraft/, video/, simulation/ (orchestrator + phases), world/, characters/, social/, youtube/, livestream/, streaming/, eval/, admin/, auth/, reporting/, notifications/, scheduler, tts, events/, repos/, agent_economy/state/goals/registry, context_assembly, system_prompt, tool_executor, run_spec, shared_state, database, redis_client/keys
 tools/            Agent tool implementations (alpha_dispatch, audience, audience_tools, base, character_tools, code_execution, economy_tools, memory_tools, messaging, social_tools, web_tools, world_state, tilemap_gen, revenue_tools, self_modification, journal_image_tool, task_management, stubs)
 frontend/         Phaser.js world renderer (TS)
 website/          Next.js public-facing site (TS)
@@ -41,11 +41,11 @@ minecraft-server-easy/   Simplified baseline Minecraft world
 tests/            tests/backend/ (pytest) and tests/integration/
 specs/            Read-only design specs (engineering, character sheets, conversation engine, memory, tools, human checklist)
 research/         Academic literature index + analysis; consult PAPER-INDEX.md when touching any subsystem
-scripts/          Setup, deployment, service checks (e.g. check-services.sh)
+scripts/          Setup, deployment, service checks, smoke/soak runners (e.g. check-services.sh, build_in_minecraft.py, overnight_e22_runs.sh, smoke_propose_new_building.py)
 docker/           Service Dockerfiles
 db/               Schemas / migrations
 docs/             Project documentation
-evals/, scenarios/, snapshots/   Eval harness inputs/outputs
+evals/, scenarios/, snapshots/   Eval harness inputs/outputs (e.g. snapshots/headless, snapshots/cli-builds)
 config/           Runtime configuration
 sandbox/          gVisor sandbox runtime
 logs/, videos/    Generated artifacts (gitignored)
@@ -75,10 +75,11 @@ Backend entrypoint: `uvicorn core.main:app --reload --port 8010`.
 - **Default ports are non-standard** to avoid local conflicts: Redis 6381 (`REDIS_PORT`), PostgreSQL 5434 (`POSTGRES_PORT`), Langfuse 3100 (`LANGFUSE_PORT`). Don't hardcode the standard ports.
 - **Check services before integration work:** `docker compose up -d && bash scripts/check-services.sh` — all 5 checks (Redis, PostgreSQL, pgvector, pg_trgm, Langfuse) must pass.
 - **Every agent utterance** flows through `core/management.py` content filter before TTS — never bypass it. There is a 3-second intervention window by design.
-- **Cost governor + kill switch are load-bearing.** All LLM calls go through `core/llm_client.py` (OpenRouter routing) so Langfuse and the governor see them. Don't call provider SDKs directly.
+- **Cost governor + kill switch are load-bearing.** All LLM calls go through `core/llm_client.py` (OpenRouter routing) so Langfuse, `core/cost_governor.py`, and `core/kill_switch.py` see them. Don't call provider SDKs directly. Model selection per agent/role lives in `core/model_config.py` — update there, not at call sites.
 - **Memory is 3-tier**, not a single store: Core (always in prompt, ~2–3K tokens), Recall (pgvector semantic search), Archival (full transcripts, never deleted). Respect tier boundaries when adding memory features.
 - **Conversation engine** uses weighted speaker selection — see `core/conversation_engine.py` and `specs/CONVERSATION-ENGINE.md`. Don't change weights without updating both.
 - **All external comms** (social posts, emails, public PRs from agents) require human approval for the first 3 months — keep the approval gate in place.
 - **`specs/` is read-only reference.** Don't edit specs to match code; update code or open a separate discussion.
 - **Makefile targets pin `.venv/bin/...`** so they work under `/bin/sh` without venv activation (e.g. `make test-backend`, `make render-verify`). Use them in automation rather than bare `pytest` / `playwright`.
-- **Agent model assignments** (conversation vs. building model per agent) are defined in `agents/<name>/` configs and `specs/CHARACTER-SHEETS.md`. Don't reassign models ad-hoc — personality is tied to model choice.
+- **Agent model assignments** (conversation vs. building model per agent) are defined in `agents/<name>/` configs, `core/model_config.py`, and `specs/CHARACTER-SHEETS.md`. Don't reassign models ad-hoc — personality is tied to model choice.
+- **Headless sim snapshots** must land under `snapshots/headless/` (pass `--output-dir snapshots/headless`) so the dashboard can serve artifacts. Avoid reasoning-variant Gemmas (e.g. `gemma-4-26b-a4b`) for local sims — they emit empty content; use `gemma-4-e4b`.

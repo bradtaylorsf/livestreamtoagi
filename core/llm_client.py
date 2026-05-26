@@ -60,8 +60,10 @@ MODEL_NAME_ALIASES = {
     "openai/gpt-4o-mini": "gpt-4o-mini",
     "openai/gpt-5.2": "gpt-5.2",
     "deepseek/deepseek-v3.2": "deepseek-v3.2",
-    "x-ai/grok-3-mini": "grok-3-mini",
-    "x-ai/grok-3": "grok-3",
+    "x-ai/grok-3-mini": "grok-4.3",
+    "x-ai/grok-3": "grok-4.3",
+    "x-ai/grok-4.3": "grok-4.3",
+    "x-ai/grok-4": "grok-4.3",
 }
 MODEL_NAME_ALIASES.update(
     {
@@ -79,7 +81,7 @@ BUILDING_TIER_MODELS = frozenset(
         "claude-sonnet-4-6",
         "gemini-2.5-pro",
         "gpt-5.2",
-        "grok-3",
+        "grok-4.3",
     }
 )
 
@@ -139,13 +141,8 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         input_price_per_1m=Decimal("0.20"),
         output_price_per_1m=Decimal("0.77"),
     ),
-    "grok-3-mini": ModelConfig(
-        openrouter_id="x-ai/grok-3-mini",
-        input_price_per_1m=Decimal("0.30"),
-        output_price_per_1m=Decimal("0.50"),
-    ),
-    "grok-3": ModelConfig(
-        openrouter_id="x-ai/grok-3",
+    "grok-4.3": ModelConfig(
+        openrouter_id="x-ai/grok-4.3",
         input_price_per_1m=Decimal("3.00"),
         output_price_per_1m=Decimal("15.00"),
     ),

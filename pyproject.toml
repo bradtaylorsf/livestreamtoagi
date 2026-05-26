@@ -7,7 +7,11 @@ license = { text = "MIT" }
 dependencies = [
     "crewai>=0.80.0",
     "openai>=1.0.0",
-    "fastapi>=0.115.0",
+    # fastapi 0.136.3 is flagged by Amazon Inspector (MAL-2026-4750): the
+    # release added an undocumented `fastar>=0.9.0` typo-squat dependency
+    # via pyproject.toml. Exclude that specific version; future releases
+    # are expected to be clean.
+    "fastapi>=0.115.0,!=0.136.3",
     "uvicorn[standard]>=0.30.0",
     "websockets>=13.0",
     "asyncpg>=0.30.0",
@@ -31,6 +35,12 @@ dependencies = [
     "google-api-python-client>=2.100.0",
     "google-auth>=2.30.0",
     "google-auth-oauthlib>=1.2.0",
+    # gemini-3.5-flash structured-JSON vision decomposer used by
+    # core/minecraft/cloud_providers.py (propose_new_building pipeline).
+    "google-genai>=2.6.0",
+    # RCON client for scripts/build_in_minecraft.py — places compiled
+    # BuildScripts in a live Minecraft server.
+    "mcrcon>=0.7.0",
 ]
 
 [project.optional-dependencies]

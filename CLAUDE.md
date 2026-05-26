@@ -143,7 +143,7 @@ Nine agents with distinct personalities and model assignments (see `agents/` and
 | Pixel | Researcher/Audience Liaison | GPT-4o Mini | GPT-5.2 |
 | Fork | Contrarian/Code Reviewer | DeepSeek V3.2 | DeepSeek V3.2 |
 | Sentinel | Budget Monitor/QA | Claude Haiku 4.5 | Claude Haiku 4.5 |
-| Grok | Wild Card/Provocateur | Grok 3 Mini | Grok 3 |
+| Grok | Wild Card/Provocateur | Grok 4.3 | Grok 4.3 |
 | Management | Content Filter | Claude Haiku 4.5 | — |
 | Alpha | Errand Runner (wolf) | DeepSeek V3.2 | — |
 

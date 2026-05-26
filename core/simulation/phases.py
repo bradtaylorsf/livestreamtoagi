@@ -179,6 +179,7 @@ class PhaseRunner:
         factions: list[Any] | None = None,
         conversation_mode: str | None = None,
         embodiment_executor: Any | None = None,
+        sim_folder: Any | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._agents = agent_registry
@@ -205,6 +206,7 @@ class PhaseRunner:
         self._factions = list(factions or [])
         self._conversation_mode = conversation_mode
         self._embodiment_executor = embodiment_executor
+        self._sim_folder = sim_folder
 
         # Cross-phase conversation context to prevent repetition (#271)
         from core.models import ConversationRecord
@@ -698,6 +700,7 @@ class PhaseRunner:
                     topic_history=dict(self._topic_history),
                     factions=list(self._factions) if self._factions else None,
                     embodiment_executor=self._embodiment_executor,
+                    sim_folder=self._sim_folder,
                 ),
                 management=self._management,
                 context_assembler=self._context,

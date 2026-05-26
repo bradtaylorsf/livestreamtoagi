@@ -27,45 +27,105 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CACHE_DIR = REPO_ROOT / ".cache" / "blueprint_generator"
-DEFAULT_PROMPT_VERSION = 1
+# Bumped to 2 on 2026-05-26 — invalidates v1 (generic top-down) cached
+# images so the new Minecraft technical-blueprint template renders fresh.
+DEFAULT_PROMPT_VERSION = 2
 
-_SIZE_LABELS = {
-    "small": "approx. 8x8 meters",
-    "medium": "approx. 16x16 meters",
-    "large": "approx. 32x32 meters",
-    "epic": "approx. 64x64 meters or larger",
+# Approximate block envelopes per size_class — used to seed the prompt's
+# Width(X) / Depth(Z) / Height(Y) callouts. The Gemini decomposer is free
+# to refine the exact footprint when it reads the rendered blueprint.
+_SIZE_DIMENSIONS = {
+    "small": {"width": 8, "depth": 8, "height": 6},
+    "medium": {"width": 16, "depth": 16, "height": 12},
+    "large": {"width": 32, "depth": 32, "height": 24},
+    "epic": {"width": 64, "depth": 64, "height": 42},
 }
 
+# Minecraft technical-blueprint template. Produces a multi-panel poster
+# (isometric hero + front/side elevations + top floor plan + material
+# legend + build specs) on a navy grid-paper background. All dimensions
+# are in BLOCKS so the downstream Gemini decomposer can extract a build
+# plan deterministically.
 IMAGE_PROMPT_TEMPLATE = (
-    "Top-down architectural blueprint of {concept}. "
-    "Style: {vibe}. "
-    "Biome context: {biome_fit}. "
-    "Intended footprint: {size_label}. "
-    "Scale: 1 grid square = 1 meter. "
-    "Render as a clean blueprint: neutral white background, black ink "
-    "linework, dimension callouts at corners, and a north arrow. "
-    "Show structural shell, walls, and roof footprint. Do not include "
-    "people, animals, vehicles, signage, or text labels beyond dimension "
-    "callouts. No photorealistic rendering, no perspective."
+    "MINECRAFT TECHNICAL BLUEPRINT poster of '{concept}', drawn in the "
+    "style of an engineering schematic on a dark navy blue grid-paper "
+    "background (#0a1a3a) with thin white linework. SINGLE 1024x1024 "
+    "image laid out as a multi-panel poster:\n"
+    "\n"
+    "HEADER (top): Title in uppercase '{concept_upper} — MINECRAFT "
+    "BLUEPRINT', with a one-line subtitle 'Recreated block by block in "
+    "the {biome_fit} biome.'\n"
+    "\n"
+    "PROJECT OVERVIEW (top-left box): 2-3 short sentences describing the "
+    "build and its purpose.\n"
+    "\n"
+    "OVERALL DIMENSIONS (left, beneath overview): Width (X): {width} "
+    "blocks, Depth (Z): {depth} blocks, Height (Y): {height} blocks.\n"
+    "\n"
+    "ISOMETRIC HERO RENDER (center-top, largest panel): 3D isometric view "
+    "of the completed Minecraft build with cubic blocks clearly visible. "
+    "Vibe: {vibe}. Render the structure with the block palette listed in "
+    "the legend.\n"
+    "\n"
+    "FRONT ELEVATION — WEST (top-right): Orthographic front view with "
+    "per-tier block-height annotations along the right margin (e.g. "
+    "'8 BLOCKS FIRST TIER', '6 BLOCKS ATTIC WALL'). Total height "
+    "labelled '{height} BLOCKS (TOTAL HEIGHT)'.\n"
+    "\n"
+    "SIDE ELEVATION — NORTH (middle-right): Orthographic side view with "
+    "depth labelled '{depth} BLOCKS (DEPTH)' and total height marked.\n"
+    "\n"
+    "TOP VIEW / FLOOR PLAN (bottom-right): Plan view of the footprint "
+    "with major zones marked by letter labels (A, B, C, D, E ...) and a "
+    "key listing what each zone is (e.g. 'A: ENTRY HALL 6x4 blocks').\n"
+    "\n"
+    "MATERIAL LEGEND (bottom-left): Numbered list 1-8 of MINECRAFT-"
+    "CANONICAL blocks used in this build (e.g. stone, smooth sandstone, "
+    "oak planks, dark oak planks, stone bricks, polished andesite, oak "
+    "log, glass, lantern). Show each block with its name and its "
+    "structural use (e.g. 'Main walls', 'Roof', 'Trim').\n"
+    "\n"
+    "BUILD SPECIFICATIONS (bottom-center): Bulleted construction notes "
+    "covering tier count, arch/opening dimensions if any, wall "
+    "thickness, and notable features. Include a TIER HEIGHT BREAKDOWN "
+    "summing to {height} blocks.\n"
+    "\n"
+    "COORDINATE AXES INDICATOR (small inset near hero render): Right-"
+    "handed XYZ gnomon, X (width), Y (up), Z (depth).\n"
+    "\n"
+    "FOOTER (bottom strip): 'DESIGNED FOR MINECRAFT BUILDERS — PLAN · "
+    "BUILD · SURVIVE · INSPIRE' on the left and the note '1 block = 1 "
+    "Minecraft block' on the right.\n"
+    "\n"
+    "STRICT STYLE RULES: thin white linework on the navy background, "
+    "block faces visible as cubes in the isometric, faint blueprint grid "
+    "underlay, NO people, NO animals, NO vehicles, NO photorealism, NO "
+    "text outside the labelled panels described above. Material names "
+    "must use real Minecraft block names. Every dimension callout is in "
+    "BLOCKS."
 )
 
 
-def _size_label(size_class: str) -> str:
-    return _SIZE_LABELS.get(size_class, "approx. 16x16 meters")
+def _dimensions(size_class: str) -> dict[str, int]:
+    return _SIZE_DIMENSIONS.get(size_class, _SIZE_DIMENSIONS["medium"])
 
 
 def build_image_prompt(intent: NewBuildingIntent) -> str:
-    """Render the locked image prompt for ``intent``.
+    """Render the locked Minecraft-technical-blueprint prompt for ``intent``.
 
     The intent's pydantic validators already restricted ``concept`` to a
     safe character set and gated ``vibe``, ``biome_fit``, ``size_class``
     against enums; this function never accepts a raw string from a caller.
     """
+    dims = _dimensions(intent.size_class)
     return IMAGE_PROMPT_TEMPLATE.format(
         concept=intent.concept,
+        concept_upper=intent.concept.upper(),
         vibe=intent.vibe,
         biome_fit=intent.biome_fit,
-        size_label=_size_label(intent.size_class),
+        width=dims["width"],
+        depth=dims["depth"],
+        height=dims["height"],
     )
 
 

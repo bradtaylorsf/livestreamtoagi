@@ -132,8 +132,12 @@ def test_config_model_alias_resolves():
     [
         ("google/gemini-flash", "gemini-flash"),
         ("google/gemini-2.5-pro", "gemini-2.5-pro"),
-        ("x-ai/grok-3-mini", "grok-3-mini"),
-        ("x-ai/grok-3", "grok-3"),
+        # x-ai/grok-3-mini and x-ai/grok-3 were retired upstream on OpenRouter
+        # (deprecated → 404). Legacy refs alias-forward to grok-4.3.
+        ("x-ai/grok-3-mini", "grok-4.3"),
+        ("x-ai/grok-3", "grok-4.3"),
+        ("x-ai/grok-4.3", "grok-4.3"),
+        ("x-ai/grok-4", "grok-4.3"),
     ],
 )
 def test_provider_prefixed_model_aliases_resolve(configured_name: str, canonical_name: str):
@@ -472,7 +476,7 @@ def test_local_provider_routes_building_tier_to_separate_model():
     assert client.runtime_model_id("claude-sonnet-4-6") == "big-local"
     assert client.runtime_model_id("gemini-2.5-pro") == "big-local"
     assert client.runtime_model_id("gpt-5.2") == "big-local"
-    assert client.runtime_model_id("grok-3") == "big-local"
+    assert client.runtime_model_id("grok-4.3") == "big-local"
 
     # Provider-prefixed aliases also route to the building model
     assert client.runtime_model_id("anthropic/claude-sonnet-4.6") == "big-local"

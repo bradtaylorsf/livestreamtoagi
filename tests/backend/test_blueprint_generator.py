@@ -36,22 +36,31 @@ def _intent(**overrides) -> NewBuildingIntent:
 
 
 def test_prompt_template_contains_locked_anchors() -> None:
-    assert "blueprint" in IMAGE_PROMPT_TEMPLATE.lower()
-    assert "grid square" in IMAGE_PROMPT_TEMPLATE
-    assert "Neutral" in IMAGE_PROMPT_TEMPLATE or "neutral" in IMAGE_PROMPT_TEMPLATE
+    # v2 anchors: Minecraft technical-blueprint poster (issue #850 follow-up).
+    # Header keywords + every placeholder the prompt builder actually uses.
+    assert "MINECRAFT TECHNICAL BLUEPRINT" in IMAGE_PROMPT_TEMPLATE
+    assert "BLOCKS" in IMAGE_PROMPT_TEMPLATE
+    assert "ISOMETRIC HERO RENDER" in IMAGE_PROMPT_TEMPLATE
+    assert "MATERIAL LEGEND" in IMAGE_PROMPT_TEMPLATE
+    assert "1 block = 1 Minecraft block" in IMAGE_PROMPT_TEMPLATE
     assert "{concept}" in IMAGE_PROMPT_TEMPLATE
+    assert "{concept_upper}" in IMAGE_PROMPT_TEMPLATE
     assert "{vibe}" in IMAGE_PROMPT_TEMPLATE
     assert "{biome_fit}" in IMAGE_PROMPT_TEMPLATE
-    assert "{size_label}" in IMAGE_PROMPT_TEMPLATE
+    assert "{width}" in IMAGE_PROMPT_TEMPLATE
+    assert "{depth}" in IMAGE_PROMPT_TEMPLATE
+    assert "{height}" in IMAGE_PROMPT_TEMPLATE
 
 
 def test_build_prompt_only_interpolates_enum_validated_fields() -> None:
     intent = _intent()
     prompt = build_image_prompt(intent)
     assert "amphitheater carved into hillside" in prompt
+    assert "AMPHITHEATER CARVED INTO HILLSIDE" in prompt  # concept_upper
     assert "classical" in prompt
     assert "mountain" in prompt
-    assert "1 grid square = 1 meter" in prompt
+    # v2 uses block dimensions (1 block = 1 m), not the legacy "grid square".
+    assert "1 block = 1 Minecraft block" in prompt
     # nothing should look like a raw template placeholder
     assert "{" not in prompt
     assert "}" not in prompt
@@ -104,7 +113,12 @@ async def test_cache_key_changes_with_concept(tmp_path: Path) -> None:
 
 
 def test_size_label_appears_in_prompt() -> None:
+    # v2 emits per-axis block dimensions (W/D/H) instead of an "NxN meters"
+    # label. small = 8/8/6, epic = 64/64/42.
     small = build_image_prompt(_intent(size_class=SizeClass.small))
     epic = build_image_prompt(_intent(size_class=SizeClass.epic))
-    assert "8x8" in small
-    assert "64x64" in epic
+    assert "Width (X): 8 blocks" in small
+    assert "Depth (Z): 8 blocks" in small
+    assert "Height (Y): 6 blocks" in small
+    assert "Width (X): 64 blocks" in epic
+    assert "Height (Y): 42 blocks" in epic

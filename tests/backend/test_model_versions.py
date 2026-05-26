@@ -114,7 +114,9 @@ class TestModelRegistry:
             "gemini-flash", "gemini-2.5-pro",
             "gpt-4o-mini", "gpt-5.2",
             "deepseek-v3.2",
-            "grok-3-mini", "grok-3",
+            # grok-3-mini + grok-3 deprecated upstream → grok-4.3 covers both
+            # conversation and building tiers.
+            "grok-4.3",
         ]
         for model in agent_models:
             assert model in MODEL_REGISTRY, f"{model} not in MODEL_REGISTRY"
