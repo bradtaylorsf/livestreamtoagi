@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
+from core.event_bus import EventBus, EventType
 from core.simulation.decision_logger import DecisionLogReader, DecisionLogger
 from core.simulation.orchestrator import SimulationConfig, SimulationOrchestrator
 
@@ -172,6 +173,84 @@ async def test_world_event_queued_as_trigger(tmp_path: Path) -> None:
     call_args = orch._triggers.queue_event.call_args_list[0]
     assert call_args.args[0] == "world_event"
     assert call_args.args[1]["event"] == "nightfall"
+
+
+@pytest.mark.asyncio
+async def test_decision_logger_listeners_mirror_agent_speak_and_tool_events(
+    tmp_path: Path,
+) -> None:
+    """AGENT_SPEAK / TOOL_EXECUTED / MANAGEMENT_INTERVENTION events flow into the log."""
+    event_bus = EventBus()
+
+    scenario = tmp_path / "scenario.yaml"
+    scenario.write_text(
+        yaml.safe_dump(
+            {
+                "meta": {"name": "wet", "description": "test", "agents": ["vera"]},
+                "phases": [{"name": "p", "type": "organic"}],
+            }
+        )
+    )
+    cfg = SimulationConfig(
+        name="wet",
+        seed_file=str(scenario),
+        agents=["vera"],
+        dry_run=True,
+    )
+    cfg.load_seed_file()
+
+    orchestrator = SimulationOrchestrator(
+        config=cfg,
+        db=MagicMock(),
+        redis_client=MagicMock(),
+        simulation_repo=MagicMock(),
+        config_loader=MagicMock(),
+        agent_registry=MagicMock(),
+        event_bus=event_bus,
+        llm_client=MagicMock(),
+        management=MagicMock(),
+        context_assembler=MagicMock(),
+        conversation_repo=MagicMock(),
+        archival_memory=MagicMock(),
+        proximity=MagicMock(),
+        trigger_system=MagicMock(),
+        selection_logger=MagicMock(),
+        reflection_manager=MagicMock(),
+        display=MagicMock(),
+    )
+    orchestrator._decision_logger = DecisionLogger(tmp_path)
+    orchestrator._attach_decision_logger_listeners()
+
+    await event_bus.emit(
+        EventType.AGENT_SPEAK.value,
+        {"agent_id": "vera", "content": "Hello world", "channel": "chat"},
+    )
+    await event_bus.emit(
+        EventType.TOOL_EXECUTED.value,
+        {"agent_id": "rex", "tool_name": "currency_transfer", "status": "executed"},
+    )
+    # propose_build is handled by the embodiment executor — should be skipped here.
+    await event_bus.emit(
+        EventType.TOOL_EXECUTED.value,
+        {"agent_id": "rex", "tool_name": "propose_build", "status": "executed"},
+    )
+    await event_bus.emit(
+        EventType.MANAGEMENT_INTERVENTION.value,
+        {"reason": "flagged: scale concern", "agent_id": "rex"},
+    )
+
+    orchestrator._detach_decision_logger_listeners()
+    orchestrator._decision_logger.close()
+
+    rows = list(DecisionLogReader(tmp_path).replay())
+    utterances = [r for r in rows if r.event_type == "utterance"]
+    tool_intents = [r for r in rows if r.event_type == "tool_intent"]
+    assert {u.payload.text for u in utterances} == {
+        "Hello world",
+        "flagged: scale concern",
+    }
+    assert {u.payload.channel for u in utterances} == {"chat", "management"}
+    assert [t.payload.tool_name for t in tool_intents] == ["currency_transfer"]
 
 
 @pytest.mark.asyncio

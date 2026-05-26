@@ -10,6 +10,7 @@ import {
   getAgentEvolution,
   getAgentJournal,
   getAgentRelationships,
+  getBuildIntents,
   getChallenges,
   getClips,
   getConversation,
@@ -18,11 +19,15 @@ import {
   getLore,
   getPublicScenarios,
   getReplayCues,
+  getReplayManifest,
   getScenarios,
+  getSimulationEvalScores,
   getSimulationSnapshot,
   getStats,
   getWorldChunks,
+  getWorldEvents,
   requestMagicLink,
+  runHeadlessScenario,
   runSimulationEval,
   shareSimulationAsChallenge,
   submitPublicSimulation,
@@ -371,6 +376,94 @@ describe("getPublicScenarios", () => {
       expect.anything(),
     );
     expect(result).toEqual(scenarios);
+  });
+});
+
+describe("runHeadlessScenario", () => {
+  it("POSTs to /api/admin/simulations/headless and returns the new simulation id", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse({
+        simulation_id: "abc-123",
+        name: "headless-test",
+        status: "running",
+      }),
+    );
+    const resp = await runHeadlessScenario({ scenario: "test.yaml" });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/admin/simulations/headless",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ scenario: "test.yaml" }),
+      }),
+    );
+    expect(resp.simulation_id).toBe("abc-123");
+  });
+});
+
+describe("getBuildIntents", () => {
+  it("GETs /api/simulations/{id}/build-intents and returns the JSON array", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse([{ intent_id: "i1", structure_type: "cabin" }]),
+    );
+    const result = await getBuildIntents("sim-1");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/sim-1/build-intents",
+      expect.anything(),
+    );
+    expect(result).toEqual([{ intent_id: "i1", structure_type: "cabin" }]);
+  });
+});
+
+describe("getWorldEvents", () => {
+  it("GETs /api/simulations/{id}/world-events", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse([
+        { tick: 1, sim_time: 0.0, wall_time: null, actor_id: null, event_type: "world_event", payload: {} },
+      ]),
+    );
+    const events = await getWorldEvents("sim-1");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/sim-1/world-events",
+      expect.anything(),
+    );
+    expect(events).toHaveLength(1);
+  });
+});
+
+describe("getReplayManifest", () => {
+  it("GETs /api/simulations/{id}/replay-manifest", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ available: true, screenshots: [] }));
+    const manifest = await getReplayManifest("sim-1");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/simulations/sim-1/replay-manifest",
+      expect.anything(),
+    );
+    expect(manifest.available).toBe(true);
+  });
+});
+
+describe("getSimulationEvalScores", () => {
+  it("returns null on 404 instead of throwing", async () => {
+    mockFetch.mockReturnValue(jsonResponse({ detail: "missing" }, 404));
+    const result = await getSimulationEvalScores("sim-1");
+    expect(result).toBeNull();
+  });
+
+  it("returns scores body on 200", async () => {
+    mockFetch.mockReturnValue(
+      jsonResponse({
+        schema_version: 1,
+        scorer: "headless",
+        decision_log_hash: "abc",
+        scenario_id: "s",
+        categories: {},
+        success_criteria: [],
+        primary: [],
+        secondary: [],
+      }),
+    );
+    const result = await getSimulationEvalScores("sim-1");
+    expect(result?.scorer).toBe("headless");
   });
 });
 
