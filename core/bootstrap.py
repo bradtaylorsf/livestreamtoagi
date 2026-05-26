@@ -109,6 +109,10 @@ class ConversationOptions:
     prompt_log_repo: object | None = None
     factions: list[Any] | None = None
     embodiment_executor: Any | None = None
+    # Per-simulation artifacts directory. Threaded to propose_new_building so
+    # the refinement loop writes blueprint images + iteration events into the
+    # current sim's folder. None when not running under a headless sim.
+    sim_folder: Any | None = None
 
 
 @dataclass
@@ -150,6 +154,47 @@ class Services:
     event_generator: EventGenerator | None
     config_loader: ConfigLoader
     config_version_repo: ConfigVersionRepo | None
+    # Cloud-backed image→BuildPlan→Minecraft refinement loop. Constructed
+    # only when OPENAI_API_KEY and GOOGLE_API_KEY are present; otherwise
+    # propose_new_building falls back to recording intent without running
+    # the loop. See ``make_refinement_loop`` below.
+    refinement_loop: Any | None = None
+
+
+def make_refinement_loop() -> Any | None:
+    """Construct the cloud-backed RefinementLoop when both keys are set.
+
+    Returns None when ``OPENAI_API_KEY`` or ``GOOGLE_API_KEY`` is missing
+    so the rest of the system stays runnable on local-only setups.
+    """
+    import os
+
+    if not os.environ.get("OPENAI_API_KEY") or not os.environ.get("GOOGLE_API_KEY"):
+        return None
+
+    try:
+        from core.minecraft.blueprint_generator import BlueprintGenerator
+        from core.minecraft.build_plan_compiler import BuildPlanCompiler
+        from core.minecraft.build_refinement_loop import (
+            RefinementLoop,
+            screenshotting_build_executor,
+        )
+        from core.minecraft.cloud_providers import (
+            GeminiComparisonProvider,
+            GeminiVisionDecomposer,
+            OpenAIImageProvider,
+        )
+    except Exception as exc:  # pragma: no cover - missing optional dep
+        logger.warning("RefinementLoop unavailable: %s", exc)
+        return None
+
+    return RefinementLoop(
+        blueprint_generator=BlueprintGenerator(OpenAIImageProvider()),
+        decomposer=GeminiVisionDecomposer(),
+        compiler=BuildPlanCompiler(),
+        build_executor=screenshotting_build_executor,
+        comparison_provider=GeminiComparisonProvider(),
+    )
 
 
 def make_embedding_fn(
@@ -517,6 +562,7 @@ async def bootstrap_services(
         event_generator=event_generator,
         config_loader=config_loader,
         config_version_repo=config_version_repo,
+        refinement_loop=make_refinement_loop(),
     )
 
 
@@ -591,6 +637,7 @@ async def _bootstrap_dry_run(
         event_generator=None,
         config_loader=config_loader,
         config_version_repo=None,
+        refinement_loop=None,
     )
 
 

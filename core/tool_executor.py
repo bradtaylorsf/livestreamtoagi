@@ -31,11 +31,16 @@ def build_agent_tools(
     simulation_mode: bool = False,
     *,
     embodiment_executor: EmbodimentExecutor | None = None,
+    sim_folder: Any | None = None,
 ) -> dict[str, BaseTool]:
     """Build a tool registry for a specific agent, returning {name: tool_instance}.
 
     Uses the shared tool factories from tools/__init__.py so both
     ConversationEngine and interactive scripts get identical tool sets.
+
+    ``sim_folder`` is the per-simulation artifacts directory; passed through
+    to ``propose_new_building`` so the refinement loop writes blueprint
+    images + decision-log iteration events into that sim's folder.
     """
     from tools import ToolRegistry, get_core_tools, get_memory_tools
 
@@ -59,6 +64,8 @@ def build_agent_tools(
         character_spawner=services.character_spawner,
         voting_manager=services.voting_manager,
         embodiment_executor=embodiment_executor,
+        refinement_loop=getattr(services, "refinement_loop", None),
+        sim_folder=sim_folder,
     )
     for tool in core_tools:
         registry.register(tool)

@@ -1,20 +1,25 @@
 ## Architecture
-- **Backend entry:** `core/main.py` — FastAPI app with lifespan that calls `bootstrap_services()` (in `core/bootstrap.py`); mounts `admin_router`, `bridge_router`, `public_router`, `auth_api`, `kill_switch_api`, plus `/ws` WebSocket for the Phaser frontend.
-- **Database:** PostgreSQL 16 + pgvector via `asyncpg` (wired in `core/database.py`); raw SQL migrations live in `db/migrations/NNN_*.up.sql` / `*.down.sql` (047+ files); auto-applied on startup when `bootstrap_services(auto_migrate=True)`.
-- **State:** Redis 7 (`core/redis_client.py`, keys in `core/redis_keys.py`) for shared/scoped state and kill switches; event flow goes through `core/event_bus.py`.
-- **Layout:** `core/` orchestrator + memory + LLM routing; `tools/` agent tool implementations (e.g., `journal_image_tool`); `agents/<name>/system_prompt.md` YAML+markdown personalities; `frontend/` Phaser+Vite; `website/` Next.js; `specs/` read-only design docs; `.alpha-loop/` epic queue + skill templates.
+- **Backend entry:** `core/main:app` (FastAPI + WebSocket) launched via `uvicorn core.main:app --port 8010`; bootstrap wiring in `core/bootstrap.py`, orchestrator in `core/simulation/orchestrator.py` driving `core/simulation/phases.py`.
+- **LLM + tools:** `core/llm_client.py` routes through OpenRouter using `core/model_config.py`; agents invoke tools through `core/tool_executor.py`. Minecraft pipeline lives in `core/minecraft/` (blueprint generator, cloud providers, `scripts/build_in_minecraft.py`).
+- **Frontend:** Phaser.js 3 renderer in `frontend/` (Vite + Vitest). **Website:** Next.js in `website/` (Vercel, Vitest + Playwright E2E).
+- **Database:** PostgreSQL 16 + pgvector on port 5434, Redis 7 on 6381, Langfuse on 3100 — all via `docker compose up -d` then `bash scripts/check-services.sh`.
+- **Key dirs:** `agents/` (YAML personality configs), `core/` (orchestrator/memory/conversation), `tools/` (agent tool impls), `tests/` (organized by layer), `specs/` (read-only design), `snapshots/headless/` (sim artifacts for dashboard).
 
 ## Conventions
-- Python 3.13 strict (pinned in `.python-version`, 3.14 unsupported); type hints everywhere; async I/O; `ruff` for lint+format; Pydantic models on API boundaries; mypy is aspirational (many `Any` flows disabled in `pyproject.toml`).
-- Tests live in `tests/backend/` (unit, `pytest-asyncio` auto-mode) and `tests/integration/` (marker `integration:`; needs Docker services). Run via `pytest tests/backend/` or `make test-backend` (PATH-safe for shell runners without `.venv/bin`).
-- New FastAPI routes: define a router module in `core/`, import + `app.include_router(...)` in `core/main.py`. New migration: add paired `NNN_*.up.sql`/`*.down.sql` under `db/migrations/`. New agent: add `agents/<name>/system_prompt.md` and register via `core/agent_registry.py`.
+- Python 3.13 only (3.14+ breaks pydantic-core); type hints everywhere, async/await for I/O, Pydantic for API schemas, `ruff check`/`ruff format` for `core/` and `tools/`.
+- TypeScript strict mode, ESM, named exports, `const` by default.
+- Tests: `pytest tests/backend/ -v` or `make test-backend` (PATH-safe, pins `.venv/bin/pytest`). Frontend/website use Vitest; website E2E uses Playwright.
+- Commits: Conventional (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`); branches `feat/...` or `fix/...`; one feature per PR.
+- New agents: add YAML in `agents/` + register in `core/model_config.py`. New tools: implement in `tools/` and wire through `core/tool_executor.py`.
 
 ## Critical Rules
-- **Never commit** `.env` (contains OpenRouter/Twitch/YouTube/Langfuse/KillSwitch keys); honor cost caps (`AGENT_HOURLY_CAP_USD*`) — `core/cost_governor.py` and `core/kill_switch.py` are load-bearing safety.
-- `specs/` is read-only reference — don't edit during implementation.
-- Migrations are **forward-only in numbering** — always add the next sequential `NNN`; always provide a working `.down.sql`.
-- Before integration tests or verifying issues, run `docker compose up -d && bash scripts/check-services.sh` (all 5 checks must pass: Redis 6381, Postgres 5434, pgvector, pg_trgm, Langfuse 3100).
-- Every agent output must pass through `core/management.py` content filter before TTS — don't bypass it when adding new speech paths.
+- **Never commit `.env`** — contains OpenRouter, Twitch/YouTube, Langfuse, DB, kill-switch secrets.
+- **`specs/` is read-only reference** — do not modify design docs as part of feature work.
+- **Management content filter is mandatory** — every agent output must pass through it before TTS (3s intervention delay).
+- **Cost governor + kill switch** (`AGENT_HOURLY_CAP_USD`, `KILL_SWITCH_API_KEY`) must remain wired; do not bypass in new code paths.
+- **Render pipeline targets pin `.venv/bin/python` / `.venv/bin/playwright`** — keep that pinning to defeat stale PATH shims.
+- **Gemma reasoning models emit empty content** (e.g., `gemma-4-26b-a4b`) — use `gemma-4-e4b` for local sims.
+- **Headless sims must use `--output-dir snapshots/headless`** so the dashboard can serve artifacts.
 
 ## Active State
 - Test status: (will be filled in by the loop)

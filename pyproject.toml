@@ -31,6 +31,12 @@ dependencies = [
     "google-api-python-client>=2.100.0",
     "google-auth>=2.30.0",
     "google-auth-oauthlib>=1.2.0",
+    # gemini-3.5-flash structured-JSON vision decomposer used by
+    # core/minecraft/cloud_providers.py (propose_new_building pipeline).
+    "google-genai>=2.6.0",
+    # RCON client for scripts/build_in_minecraft.py — places compiled
+    # BuildScripts in a live Minecraft server.
+    "mcrcon>=0.7.0",
 ]
 
 [project.optional-dependencies]

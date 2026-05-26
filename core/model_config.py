@@ -69,8 +69,8 @@ AGENT_MODEL_DEFAULTS: dict[str, dict[AgentModelTier, str]] = {
         "building": "deepseek/deepseek-v3.2",
     },
     "grok": {
-        "conversation": "x-ai/grok-3-mini",
-        "building": "x-ai/grok-3",
+        "conversation": "x-ai/grok-4.3",
+        "building": "x-ai/grok-4.3",
     },
     "management": {
         "conversation": LEGACY_FAST_MODEL,

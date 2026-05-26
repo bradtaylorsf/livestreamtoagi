@@ -934,6 +934,7 @@ class SimulationOrchestrator:
             factions=list(self._config.factions),
             conversation_mode=self._config.conversation_mode,
             embodiment_executor=self._executor,
+            sim_folder=getattr(self, "_sim_folder", None),
         )
 
     def _idle_gap(self) -> timedelta:
