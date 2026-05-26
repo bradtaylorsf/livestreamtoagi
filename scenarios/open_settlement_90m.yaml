@@ -11,6 +11,12 @@ meta:
   expected_max_cost: 0.25
   expected_runtime_minutes: 90
 
+eval_targets:
+  primary: [world_evolution, build_verification, social_dynamics]
+  secondary: [agency, productivity]
+  success_criteria:
+    world_evolution: "at_least_one_build_intent"
+
 run_mode: experimental
 experimental_goal:
   kind: artifacts

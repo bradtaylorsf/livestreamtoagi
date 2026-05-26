@@ -19,6 +19,12 @@ meta:
 #     --max-cost 10.00 \
 #     --verbose
 
+eval_targets:
+  primary: [dialogue_quality, social_dynamics]
+  secondary: [internal_state, entertainment]
+  success_criteria:
+    dialogue_quality: "min_score >= 60"
+
 audience:
   initial_viewers: 0
   growth_rate: slow    # 0 → 20 over the simulation

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getPublicScenarios, type PublicScenarioMeta } from "@/lib/api";
 import ScenarioCard from "@/components/ScenarioCard";
 import { SkeletonGrid } from "@/components/Skeleton";
@@ -11,6 +11,9 @@ export default function ScenarioLibraryPage() {
   const [scenarios, setScenarios] = useState<PublicScenarioMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
+    () => new Set(),
+  );
   const showSkeleton = useDelayedFlag(loading);
 
   useEffect(() => {
@@ -33,6 +36,38 @@ export default function ScenarioLibraryPage() {
     };
   }, []);
 
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of scenarios) {
+      for (const cat of s.eval_targets?.primary ?? []) set.add(cat);
+      for (const cat of s.eval_targets?.secondary ?? []) set.add(cat);
+    }
+    return Array.from(set).sort();
+  }, [scenarios]);
+
+  const filteredScenarios = useMemo(() => {
+    if (selectedCategories.size === 0) return scenarios;
+    return scenarios.filter((s) => {
+      const cats = new Set<string>([
+        ...(s.eval_targets?.primary ?? []),
+        ...(s.eval_targets?.secondary ?? []),
+      ]);
+      for (const sel of selectedCategories) {
+        if (cats.has(sel)) return true;
+      }
+      return false;
+    });
+  }, [scenarios, selectedCategories]);
+
+  function toggleCategory(cat: string) {
+    setSelectedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="mb-8">
@@ -54,6 +89,47 @@ export default function ScenarioLibraryPage() {
         </div>
       </div>
 
+      {availableCategories.length > 0 && (
+        <div
+          className="mb-6"
+          data-testid="scenario-category-filter"
+          aria-label="Filter by eval category"
+        >
+          <p className="text-xs text-foreground/50 mb-2 uppercase tracking-wide">
+            Filter by eval category
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {availableCategories.map((cat) => {
+              const active = selectedCategories.has(cat);
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => toggleCategory(cat)}
+                  className={
+                    "rounded border px-2 py-1 text-xs transition-colors " +
+                    (active
+                      ? "border-neon-cyan bg-neon-cyan/20 text-neon-cyan"
+                      : "border-border bg-surface-light text-foreground/70 hover:border-neon-cyan/40")
+                  }
+                >
+                  {cat}
+                </button>
+              );
+            })}
+            {selectedCategories.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedCategories(new Set())}
+                className="rounded border border-border bg-surface-light px-2 py-1 text-xs text-foreground/60 hover:text-neon-cyan"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {error && (
         <div
           role="alert"
@@ -70,16 +146,20 @@ export default function ScenarioLibraryPage() {
         />
       )}
 
-      {!loading && scenarios.length === 0 && !error && (
-        <p className="text-sm text-foreground/60">No scenarios found.</p>
+      {!loading && filteredScenarios.length === 0 && !error && (
+        <p className="text-sm text-foreground/60">
+          {selectedCategories.size > 0
+            ? "No scenarios match the selected eval categories."
+            : "No scenarios found."}
+        </p>
       )}
 
-      {!loading && scenarios.length > 0 && (
+      {!loading && filteredScenarios.length > 0 && (
         <div
           data-testid="scenario-grid"
           className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
         >
-          {scenarios.map((scenario) => (
+          {filteredScenarios.map((scenario) => (
             <ScenarioCard key={scenario.filename} scenario={scenario} />
           ))}
         </div>

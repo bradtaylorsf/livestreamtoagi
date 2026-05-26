@@ -25,6 +25,12 @@ meta:
 # Run with:
 #   pnpm chat sim goal-generation-test --max-cost 8
 
+eval_targets:
+  primary: [agency, internal_state]
+  secondary: [dialogue_quality]
+  success_criteria:
+    agency: "at_least_one_self_directed_goal"
+
 audience:
   initial_viewers: 5
   growth_rate: slow

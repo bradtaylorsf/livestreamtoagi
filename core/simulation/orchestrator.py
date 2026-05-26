@@ -38,6 +38,7 @@ from core.models import (
     resolve_management_policy,
 )
 from core.simulation.clock import SimulationClock
+from core.simulation.embodiment import EmbodimentExecutor, select_executor
 from core.simulation.phases import Phase, PhaseRunner, PhaseType
 
 if TYPE_CHECKING:
@@ -257,6 +258,14 @@ class SimulationConfig:
         self.conversation_mode = normalized_conversation_mode
         self.submitted_params = dict(submitted_params or {})
         self.source = source
+        # ``eval_targets`` is populated when a scenario YAML declares one.
+        # The dashboard (E22-10) and headless eval scorer (E22-9) read it
+        # to filter scenarios and apply category-specific rubrics.
+        self.eval_targets: dict[str, Any] | None = None
+        # ``world_events`` block (E22-4) parsed from the scenario YAML. The
+        # orchestrator builds a WorldEventScheduler + NeedsManager from
+        # this block at runtime.
+        self.world_events: dict[str, Any] | None = None
 
     @property
     def mode(self) -> str:
@@ -283,6 +292,17 @@ class SimulationConfig:
                 self.world_config.persistent = True
             return
 
+        if self.run_mode == RunMode.headless:
+            if self.seed_file is None and self.duration is None and self.experimental_goal is None:
+                raise ValueError(
+                    "headless mode requires a seed_file, duration, or experimental_goal"
+                )
+            if self.world_config is not None and self.world_config.durable_world_id:
+                raise ValueError("headless mode cannot use durable_world_id")
+            if self.world_config is not None:
+                self.world_config.persistent = False
+            return
+
         if self.run_mode != RunMode.experimental:
             return
 
@@ -306,6 +326,17 @@ class SimulationConfig:
 
         with open(self.seed_file) as f:
             data = yaml.safe_load(f)
+
+        # Validate the YAML against the canonical scenario schema (E22-3).
+        # Pydantic raises ValidationError with field-level messages on bad
+        # input — propagate as-is so authors see exactly what's wrong.
+        from core.simulation.scenario_schema import validate_scenario_dict
+
+        parsed_scenario = validate_scenario_dict(data)
+        if parsed_scenario.eval_targets is not None:
+            self.eval_targets = parsed_scenario.eval_targets.model_dump()
+        if parsed_scenario.world_events is not None:
+            self.world_events = parsed_scenario.world_events.model_dump()
 
         self.audience_config = data.get("audience")
         self.seed_tasks = bool(data.get("seed_tasks", False))
@@ -379,12 +410,9 @@ class SimulationConfig:
 
         raw_phases = data.get("phases", [])
         for entry in raw_phases:
-            phase_type = entry.get("type", "organic")
-            try:
-                ptype = PhaseType(phase_type)
-            except ValueError:
-                logger.warning("Unknown phase type '%s', defaulting to organic", phase_type)
-                ptype = PhaseType.organic
+            # Phase type is validated by the scenario schema above, so this
+            # PhaseType(...) call always succeeds.
+            ptype = PhaseType(entry.get("type", "organic"))
 
             # Extract config: everything except name and type
             config = {k: v for k, v in entry.items() if k not in ("name", "type")}
@@ -470,6 +498,10 @@ class SimulationConfig:
             d["run_mode"] = self.run_mode.value
         if self.experimental_goal is not None:
             d["experimental_goal"] = self.experimental_goal.model_dump()
+        if self.eval_targets is not None:
+            d["eval_targets"] = self.eval_targets
+        if self.world_events is not None:
+            d["world_events"] = self.world_events
         return d
 
 
@@ -545,9 +577,247 @@ class SimulationOrchestrator:
         }
         self.clock = clock or SimulationClock(speed_multiplier=config.speed_multiplier)
 
+        # Single switch point for embodiment behavior — everything else in the
+        # orchestrator (and the conversation engine, dreams, relationships,
+        # alliances, blackboard) is shared across modes.
+        self._executor: EmbodimentExecutor = select_executor(self._config.run_mode)
+        self._decision_logger: Any | None = None
+        # Event-bus callbacks the orchestrator registers to mirror live
+        # events into the decision log (issue #859). Stored so _finalize can
+        # unsubscribe cleanly.
+        self._decision_log_callbacks: list[tuple[str, Any]] = []
+        # World-event scheduler + needs manager (E22-4). Built lazily in
+        # ``run``/``run_autonomous`` so tests that only construct the
+        # orchestrator don't pay the import cost.
+        self._world_event_scheduler: Any | None = None
+        self._needs_manager: Any | None = None
+        # Counter used to derive a monotonic "world tick" from phase
+        # completions. The world-event scheduler operates on this counter
+        # rather than wall-time so headless and embodied runs share the
+        # same advancement semantics.
+        self._world_tick: int = 0
+
     @property
     def simulation_id(self) -> uuid.UUID | None:
         return self._simulation_id
+
+    def _attach_decision_logger_listeners(self) -> None:
+        """Mirror AGENT_SPEAK / TOOL_EXECUTED events into the decision log.
+
+        Without this, the headless scorer's LLM-judge categories (which read
+        utterance excerpts) and the deterministic productivity/errors signals
+        get an empty log on real runs because nothing else writes utterance
+        or non-propose_build tool rows. propose_build still goes through the
+        embodiment executor so we skip it here to avoid double-logging.
+        """
+        if self._decision_logger is None:
+            return
+
+        async def on_agent_speak(event: dict[str, Any]) -> None:
+            data = event.get("data") or {}
+            try:
+                self._decision_logger.log_utterance(
+                    actor_id=str(data.get("agent_id") or "unknown"),
+                    text=str(data.get("content") or ""),
+                    channel=str(data.get("channel") or "chat"),
+                    model=data.get("model"),
+                    tokens=data.get("tokens"),
+                    cost=str(data["cost"]) if data.get("cost") is not None else None,
+                )
+            except Exception:  # pragma: no cover - logging must never break the sim
+                logger.debug("decision_logger.log_utterance failed", exc_info=True)
+
+        async def on_tool_executed(event: dict[str, Any]) -> None:
+            data = event.get("data") or {}
+            tool_name = str(data.get("tool_name") or data.get("tool") or "")
+            # propose_build is already written via HeadlessExecutor /
+            # EmbodiedExecutor execute_tool_intent — skip to avoid dupes.
+            if not tool_name or tool_name == "propose_build":
+                return
+            try:
+                self._decision_logger.log_tool_intent(
+                    actor_id=str(data.get("agent_id") or "unknown"),
+                    tool_name=tool_name,
+                    args=data.get("args") or data.get("inputs") or {},
+                    status=str(data.get("status") or "executed"),
+                    block_reason=data.get("block_reason"),
+                    outcome=data.get("result") or data.get("outcome"),
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("decision_logger.log_tool_intent failed", exc_info=True)
+
+        async def on_management_intervention(event: dict[str, Any]) -> None:
+            data = event.get("data") or {}
+            try:
+                self._decision_logger.log_utterance(
+                    actor_id="management",
+                    text=str(data.get("reason") or data.get("message") or ""),
+                    channel="management",
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("decision_logger.log_utterance(management) failed", exc_info=True)
+
+        self._event_bus.on(EventType.AGENT_SPEAK.value, on_agent_speak)
+        self._decision_log_callbacks.append((EventType.AGENT_SPEAK.value, on_agent_speak))
+        self._event_bus.on(EventType.TOOL_EXECUTED.value, on_tool_executed)
+        self._decision_log_callbacks.append((EventType.TOOL_EXECUTED.value, on_tool_executed))
+        self._event_bus.on(EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)
+        self._decision_log_callbacks.append(
+            (EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)
+        )
+
+    def _detach_decision_logger_listeners(self) -> None:
+        for event_type, cb in self._decision_log_callbacks:
+            try:
+                self._event_bus.off(event_type, cb)
+            except Exception:  # pragma: no cover
+                logger.debug("decision_logger callback unsubscribe failed", exc_info=True)
+        self._decision_log_callbacks.clear()
+
+    def _build_world_event_runtime(self, sim_id: uuid.UUID) -> None:
+        """Instantiate the world-event scheduler + needs manager for the run.
+
+        No-op when the scenario doesn't declare a ``world_events:`` block
+        or when it sets ``disable_world_event_scheduler: true`` (used in
+        embodied runs to defer to real Minecraft events).
+        """
+        block = self._config.world_events or {}
+        if block.get("disable_world_event_scheduler"):
+            logger.info("world_events: scheduler disabled by scenario")
+            return
+
+        from core.agent_needs import NeedConfig, NeedsManager
+        from core.simulation.world_events import WorldEventScheduler
+
+        seed = int(hashlib.sha256(str(sim_id).encode()).hexdigest()[:8], 16)
+        self._world_event_scheduler = WorldEventScheduler.from_config(block, seed=seed)
+        need_configs = {name: NeedConfig(**raw) for name, raw in (block.get("needs") or {}).items()}
+        self._needs_manager = NeedsManager(
+            configs=need_configs,
+            simulation_id=str(sim_id),
+        )
+        if need_configs or block.get("schedule") or block.get("probabilistic"):
+            logger.info(
+                "world_events: scheduler armed with %d scheduled, %d probabilistic, %d needs",
+                len(block.get("schedule") or []),
+                len(block.get("probabilistic") or []),
+                len(need_configs),
+            )
+
+    async def _tick_world(self, agent_ids: list[str]) -> None:
+        """Advance the world-event scheduler + needs manager by one tick.
+
+        Called once per phase. Emits events to the shared blackboard and
+        the decision logger, and queues conversation triggers so the next
+        phase can react to a hunger spike or nightfall.
+        """
+        if self._world_event_scheduler is None and self._needs_manager is None:
+            return
+        self._world_tick += 1
+        tick = self._world_tick
+
+        events: list[Any] = []
+        if self._world_event_scheduler is not None:
+            events.extend(self._world_event_scheduler.tick(tick))
+
+        needs_events: list[Any] = []
+        if self._needs_manager is not None and agent_ids:
+            needs_events = self._needs_manager.tick_all(agent_ids, ticks=1)
+            # Mirror snapshots to sim-scoped Redis so prompt assembly can
+            # surface active needs without re-reading the manager.
+            for agent_id in agent_ids:
+                await self._snapshot_needs_to_redis(agent_id)
+
+        if events or needs_events:
+            await self._publish_world_events(events, needs_events, tick)
+
+    async def _snapshot_needs_to_redis(self, agent_id: str) -> None:
+        """Mirror one agent's needs into Redis via the scoped client."""
+        if self._needs_manager is None or self._services is None:
+            return
+        scoped = getattr(self._services, "scoped_redis", None)
+        if scoped is None:
+            return
+        try:
+            import json as _json
+
+            state = self._needs_manager.get_state(agent_id)
+            await scoped.set(
+                f"agent:needs:{agent_id}",
+                _json.dumps(state.model_dump()),
+            )
+        except Exception:
+            logger.debug("needs snapshot to redis failed", exc_info=True)
+
+    async def _publish_world_events(
+        self,
+        events: list[Any],
+        needs_events: list[Any],
+        tick: int,
+    ) -> None:
+        """Log world events to decision log and push them on the blackboard."""
+        shared = self._services.shared_working_state if self._services is not None else None
+
+        for event in events:
+            if self._decision_logger is not None:
+                try:
+                    self._decision_logger.log_world_event(
+                        event_type=event.event_type,
+                        trigger=event.trigger,
+                        details=event.details,
+                        sim_time=float(tick),
+                    )
+                except Exception:
+                    logger.warning("decision log: world_event write failed", exc_info=True)
+            if shared is not None and shared._redis is not None:
+                try:
+                    import json as _json
+
+                    await shared._redis.rpush(
+                        "shared:world_events",
+                        _json.dumps(
+                            {
+                                "event": event.event_type,
+                                "tick": tick,
+                                "trigger": event.trigger,
+                            }
+                        ),
+                    )
+                except Exception:
+                    logger.debug("blackboard: world_event push failed", exc_info=True)
+            try:
+                self._triggers.queue_event(
+                    "world_event",
+                    {"event": event.event_type, "tick": tick},
+                )
+            except Exception:
+                logger.debug("trigger queue: world_event push failed", exc_info=True)
+
+        for event in needs_events:
+            if self._decision_logger is not None:
+                state = self._needs_manager.get_state(event.agent_id)
+                try:
+                    self._decision_logger.log_needs_state(
+                        actor_id=event.agent_id,
+                        hunger=state.hunger,
+                        sleep=state.sleep,
+                        energy=state.energy,
+                        other={"safety": state.safety, "social": state.social},
+                        sim_time=float(tick),
+                    )
+                    self._decision_logger.log_world_event(
+                        event_type=event.event_type,
+                        trigger="needs",
+                        details={
+                            "agent_id": event.agent_id,
+                            "need": event.need,
+                            "value": event.value,
+                            "threshold": event.threshold,
+                        },
+                        sim_time=float(tick),
+                    )
+                except Exception:
+                    logger.warning("decision log: needs_state write failed", exc_info=True)
 
     def _build_reflection_scheduler(self) -> ReflectionScheduler:
         """Create a ReflectionScheduler from config, falling back to defaults."""
@@ -663,6 +933,7 @@ class SimulationOrchestrator:
             prompt_log_repo=self._prompt_log_repo,
             factions=list(self._config.factions),
             conversation_mode=self._config.conversation_mode,
+            embodiment_executor=self._executor,
         )
 
     def _idle_gap(self) -> timedelta:
@@ -831,6 +1102,8 @@ class SimulationOrchestrator:
 
     async def _provision_world_for_run(self) -> None:
         """Apply RunSpec.world to the Minecraft server world config."""
+        if not self._executor.requires_minecraft_world:
+            return
         if self._config.world_config is None or self._config.dry_run or self._simulation_id is None:
             return
 
@@ -956,6 +1229,13 @@ class SimulationOrchestrator:
             await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
             raise
 
+        await self._executor.setup(
+            simulation_id=sim.id,
+            sim_folder=getattr(self, "_sim_folder", None),
+            decision_logger=self._decision_logger,
+        )
+        self._attach_decision_logger_listeners()
+
         self._display.show_simulation_start(sim, self._config)
 
         # Apply memory seed BEFORE init_core_memories so seeded values win.
@@ -987,6 +1267,7 @@ class SimulationOrchestrator:
 
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
+        self._build_world_event_runtime(sim.id)
         await self._apply_initial_agent_energy()
 
         # Initialize economy accounts for this simulation scope
@@ -1102,6 +1383,11 @@ class SimulationOrchestrator:
                 self._record_experimental_progress(result)
                 self._display.show_phase_complete(result, phase.name)
 
+                # Advance world-event scheduler + needs by one tick per phase.
+                # Headless runs rely on this for hunger/nightfall pressure;
+                # embodied runs can opt out via the scenario block.
+                await self._tick_world(list(self._config.agents))
+
                 # Advance simulated clock so reflection scheduler can track time
                 if result.duration_seconds > 0:
                     if self._config.speed_multiplier > 0:
@@ -1212,6 +1498,13 @@ class SimulationOrchestrator:
             await self._finalize(SimulationStatus.failed, error_log={"reason": str(exc)})
             raise
 
+        await self._executor.setup(
+            simulation_id=sim.id,
+            sim_folder=getattr(self, "_sim_folder", None),
+            decision_logger=self._decision_logger,
+        )
+        self._attach_decision_logger_listeners()
+
         self._display.show_simulation_start(sim, self._config)
 
         # Apply memory seed BEFORE init_core_memories so seeded values win.
@@ -1242,6 +1535,7 @@ class SimulationOrchestrator:
 
         reflection_scheduler = self._build_reflection_scheduler()
         runner = self._build_phase_runner(sim.id, relationship_tracker)
+        self._build_world_event_runtime(sim.id)
         await self._apply_initial_agent_energy()
 
         persistent_mode = self._config.run_mode == RunMode.persistent
@@ -1356,6 +1650,11 @@ class SimulationOrchestrator:
                 day_stats["tools"] += result.artifacts
 
                 self._display.show_phase_complete(result, phase.name)
+
+                # Advance the headless world-event scheduler one tick per
+                # autonomous conversation. Skipped when the scenario opts
+                # out (embodied runs fed by real Minecraft events).
+                await self._tick_world(list(self._config.agents))
 
                 # Advance clock by conversation duration + idle gap
                 multiplier = self._config.speed_multiplier
@@ -1606,6 +1905,12 @@ class SimulationOrchestrator:
             EventType.SIMULATION_ERROR,
             self._on_simulation_error,
         )
+        self._detach_decision_logger_listeners()
+
+        try:
+            await self._executor.teardown()
+        except Exception:  # pragma: no cover
+            logger.warning("Executor teardown raised", exc_info=True)
 
         completed_at = datetime.now(UTC)
         # Wall-clock duration between start and completion. Falls back to

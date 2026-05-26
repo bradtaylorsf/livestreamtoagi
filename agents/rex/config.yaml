@@ -17,6 +17,8 @@ tools:
   - execute_code
   - generate_tilemap
   - dispatch_alpha
+  - propose_build
+  - propose_new_building
 
 topic_relevance:
   code: 0.9

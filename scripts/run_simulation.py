@@ -27,13 +27,15 @@ from pathlib import Path
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from dotenv import load_dotenv  # noqa: E402
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.models import ManagementPolicy  # noqa: E402
 
-load_dotenv(PROJECT_ROOT / ".env")
+# load_dotenv runs in main() rather than at module-import time so test modules
+# that import helpers from this script (e.g. tests/backend/test_public_run_config.py)
+# do not load the operator's local .env into os.environ during pytest collection,
+# which would leak MC_SIM_* / SOAK_* values into unrelated tests.
 
 DEFAULT_AGENT_ORDER = ("alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok")
 DEFAULT_AGENT_EXCLUDE = frozenset({"management"})
@@ -455,6 +457,10 @@ async def run_simulation(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+
     parser = argparse.ArgumentParser(description="Run a full-day simulation of the AI reality show")
     parser.add_argument(
         "--name",

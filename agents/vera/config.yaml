@@ -21,6 +21,8 @@ tools:
   - create_poll
   - get_revenue_status
   - draft_email
+  - propose_build
+  - propose_new_building
 
 topic_relevance:
   code: 0.4

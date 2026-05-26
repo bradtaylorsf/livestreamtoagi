@@ -1,0 +1,9 @@
+viewpoint: elevation
+scale_tiles_per_block: 1.0
+notes:
+- Single-segment stone wall, 4 blocks tall, crenelated top.
+- Treat the entire run as one level with consistent material.
+exclude_features:
+- gates
+- watchpoints
+- banners

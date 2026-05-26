@@ -23,9 +23,10 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from core.bootstrap import Services
+    from core.simulation.embodiment import EmbodimentExecutor
     from tools.base import BaseTool
 
-ToolBuilder = Callable[[str, "Services", bool], dict[str, "BaseTool"]]
+ToolBuilder = Callable[..., dict[str, "BaseTool"]]
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,12 @@ class DirectorToolAdapter:
         *,
         tool_builder: ToolBuilder = build_agent_tools,
         simulation_mode: bool = False,
+        embodiment_executor: EmbodimentExecutor | None = None,
     ) -> None:
         self._services = services
         self._tool_builder = tool_builder
         self._simulation_mode = simulation_mode
+        self._embodiment_executor = embodiment_executor
 
     def available_tools_for(self, agent_id: str) -> list[str]:
         """Return callable-now tools present in the agent's backend registry."""
@@ -168,7 +171,12 @@ class DirectorToolAdapter:
         return result
 
     def _build_tools(self, agent_id: str) -> dict[str, BaseTool]:
-        return self._tool_builder(agent_id, self._services, self._simulation_mode)
+        return self._tool_builder(
+            agent_id,
+            self._services,
+            self._simulation_mode,
+            embodiment_executor=self._embodiment_executor,
+        )
 
     @staticmethod
     def _not_callable_result(entry: ToolParityEntry) -> dict[str, Any]:

@@ -144,13 +144,17 @@ class TestSimulationConfig:
         finally:
             os.unlink(path)
 
-    def test_load_seed_file_unknown_type_defaults_to_organic(self):
+    def test_load_seed_file_unknown_type_rejected(self):
+        """E22-3: the scenario schema rejects unknown phase types up-front."""
+        import pytest
+        from pydantic import ValidationError
+
         phases = [{"name": "mystery", "type": "unknown_type"}]
         path = make_seed_file(phases)
         try:
             config = SimulationConfig(name="test", seed_file=path, agents=["vera"])
-            config.load_seed_file()
-            assert config.phases[0].type == PhaseType.organic
+            with pytest.raises(ValidationError, match="unknown phase type"):
+                config.load_seed_file()
         finally:
             os.unlink(path)
 

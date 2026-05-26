@@ -90,17 +90,17 @@ harnesses:
   - codex
 
 # === Pipeline (per-stage harness + model routing) ===========================
-# The core of this config. Judgment- and tool-heavy stages -> Claude Opus
-# (correctness on a 9-agent system + multi-service verification matters most).
-# Token-heavy execution stages -> Codex gpt-5.5 (cost-effective bulk coding).
-# Each step accepts { agent?, model? }; unset steps fall back to top-level.
+# All stages run on Claude. Judgment- and tool-heavy stages (review, verify)
+# pin Opus; bulk-execution stages (implement, test_fix, learn) inherit the
+# top-level model so Claude Code picks its default. Each step accepts
+# { agent?, model? }; unset steps fall back to top-level.
 pipeline:
   plan:                       # Architecture & task decomposition
     agent: claude
   implement:                  # Bulk code generation
-    agent: codex
+    agent: claude
   test_fix:                   # Mechanical iteration on failing tests
-    agent: codex
+    agent: claude
   review:                     # Catch subtle correctness / security issues
     agent: claude
     model: opus
@@ -108,7 +108,7 @@ pipeline:
     agent: claude             # Phaser stack — Claude has the best tool-use
     model: opus
   learn:                      # Learning extraction (cheap summarization)
-    agent: codex
+    agent: claude
 
 # === Batch mode =============================================================
 batch: true

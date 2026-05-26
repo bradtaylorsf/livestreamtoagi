@@ -748,6 +748,7 @@ ARTIFACT_TYPE_MAP: dict[str, str] = {
     "propose_self_modification": "self_modification",
     "view_evolution_log": "self_modification",
     "send_message": "message",
+    "propose_build": "build_intent",
 }
 
 # Tools whose artifacts should default to pending_approval status
@@ -861,6 +862,7 @@ class WorldConfig(BaseModel):
 class RunMode(enum.StrEnum):
     persistent = "persistent"
     experimental = "experimental"
+    headless = "headless"
 
 
 class ManagementPolicy(enum.StrEnum):
@@ -881,6 +883,8 @@ def default_management_policy_for_run_mode(
     if mode == RunMode.persistent:
         return ManagementPolicy.enforce
     if mode == RunMode.experimental:
+        return ManagementPolicy.shadow
+    if mode == RunMode.headless:
         return ManagementPolicy.shadow
     return None
 

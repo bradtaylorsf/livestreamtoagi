@@ -1,0 +1,47 @@
+# A/B fixture for issue #861.
+#
+# Pairs propose_build (library image — coliseum) and propose_new_building
+# (dreamed image — vertical hanging garden tower) for the same agent
+# (Aurora) and the same scenario seed, so eval scoring can compute deltas
+# on `world_evolution` and `creativity` between the curated and dreamed
+# pipelines.
+#
+# Consumed by the headless eval scorer (E22-9) via the standard scenario
+# loader; this YAML lives in tests/ rather than scenarios/ so it isn't
+# picked up by production scenario sweeps.
+
+scenario_id: refinement_ab__aurora_forest_garden
+agent: aurora
+biome: forest
+seed: 1
+
+variants:
+  - name: a__library_propose_build
+    tool: propose_build
+    args:
+      structure_type: coliseum
+      size_class: large
+      location_intent: open_area
+      motivation: "test fixture — library-image baseline"
+
+  - name: b__dreamed_propose_new_building
+    tool: propose_new_building
+    args:
+      concept: vertical hanging garden tower
+      intended_use: communal garden and meditation spot
+      vibe: organic
+      size_class: large
+      biome_fit: forest
+      motivation: "test fixture — dreamed-image arm"
+
+eval_targets:
+  - world_evolution
+  - creativity
+
+notes: |
+  Used by the headless eval suite to demonstrate that propose_new_building
+  produces deltas (positive or negative) on `world_evolution` and
+  `creativity` versus the library-image baseline. The match-score from the
+  refinement loop is recorded separately in final_summary.json and is not
+  one of the eval categories — it's a per-iteration signal used inside the
+  loop.

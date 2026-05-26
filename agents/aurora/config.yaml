@@ -17,6 +17,8 @@ tools:
   - dispatch_alpha
   - draft_social_post
   - draft_email
+  - propose_build
+  - propose_new_building
 
 topic_relevance:
   code: 0.1

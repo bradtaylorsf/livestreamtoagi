@@ -30,6 +30,10 @@ import {
   HypothesisOutcomesTab,
   LearningsTab,
 } from "@/components/simulation";
+import ProposalsTab from "@/components/simulation/ProposalsTab";
+import WorldEventsTab from "@/components/simulation/WorldEventsTab";
+import ReplayGalleryTab from "@/components/simulation/ReplayGalleryTab";
+import HeadlessBadge from "@/components/HeadlessBadge";
 import {
   SkeletonBlock,
   SkeletonCardList,
@@ -51,6 +55,9 @@ const TAB_KEYS = [
   "conversations",
   "social-graph",
   "snapshots",
+  "proposals",
+  "world-events",
+  "replay-gallery",
   "costs",
 ] as const;
 
@@ -67,6 +74,9 @@ const TAB_LABELS: Record<TabKey, string> = {
   conversations: "Conversations",
   "social-graph": "Social Graph",
   snapshots: "Snapshots",
+  proposals: "Proposals",
+  "world-events": "World Events",
+  "replay-gallery": "Replay Gallery",
   costs: "Cost Analysis",
 };
 
@@ -936,6 +946,12 @@ function SimulationDetailContent() {
         return <SocialGraphTab simulationId={id} />;
       case "snapshots":
         return <SnapshotsTab simulationId={id} />;
+      case "proposals":
+        return <ProposalsTab simulationId={id} />;
+      case "world-events":
+        return <WorldEventsTab simulationId={id} />;
+      case "replay-gallery":
+        return <ReplayGalleryTab simulationId={id} />;
       case "costs":
         return <CostsTab simulationId={id} />;
       default:
@@ -966,6 +982,7 @@ function SimulationDetailContent() {
         real_duration={sim.real_duration}
         simulated_duration={sim.simulated_duration}
         breadcrumbHref="/simulations"
+        config={sim.config}
       />
 
       {/* Tab navigation */}

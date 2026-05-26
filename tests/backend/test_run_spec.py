@@ -200,6 +200,9 @@ async def test_orchestrator_records_world_provisioned_metadata(tmp_path: Path) -
     orchestrator._llm = MagicMock()
     orchestrator.clock = MagicMock()
     orchestrator.clock.to_dict.return_value = {"speed_multiplier": 0}
+    from core.simulation.embodiment import EmbodiedExecutor
+
+    orchestrator._executor = EmbodiedExecutor()
 
     result = WorldProvisionResult(
         world_config_path=tmp_path / "run-world.config",
