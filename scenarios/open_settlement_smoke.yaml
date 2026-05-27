@@ -1,0 +1,97 @@
+# Open Settlement Smoke (E21-1)
+#
+# Short open-ended Minecraft collaboration smoke. Agents receive only a
+# high-level civilization seed — no fixed blueprint — and must choose at
+# least one shared objective, take distinct roles, and produce at least one
+# embodied world-changing action together. Three required phases exercise
+# the discussion → delegation → review/repair loop called out in #821.
+
+meta:
+  name: "Open Settlement Smoke"
+  description: "Short open-ended Minecraft collaboration smoke (no fixed blueprint)."
+  agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+  expected_max_cost: 0.10
+  expected_runtime_minutes: 25
+
+eval_targets:
+  primary: [social_dynamics, world_evolution, agency]
+  secondary: [productivity, creativity]
+  success_criteria:
+    social_dynamics: "shared_objective_chosen"
+    agency: "distinct_role_assignments_at_least_two"
+    world_evolution: "world_changing_action_count_at_least_one"
+
+run_mode: experimental
+experimental_goal:
+  kind: artifacts
+  target: 20
+agents:
+  - alpha
+  - vera
+  - rex
+  - aurora
+  - pixel
+  - fork
+  - sentinel
+  - grok
+world:
+  world_type: default
+  seed: 51491
+  persistent: false
+memory_seed:
+  mode: none
+management_policy: shadow
+persona_overrides:
+  - agent_id: alpha
+    backstory: "Alpha opens this run as a neutral facilitator with no preset blueprint to hand out."
+    system_prompt_append: "Open the conversation with a high-level civilization seed and let the group converge on a concrete objective; do not name a specific structure first."
+agent_goals:
+  alpha:
+    - "Help the group converge on a shared starter-settlement objective without dictating what to build."
+    - "Summarize delegated work and prompt a brief review/repair pass."
+  vera:
+    - "Surface logistics, supplies, and shared inventory; coordinate handoffs between teammates."
+  rex:
+    - "Volunteer to build whatever the group converges on; act fast on the first concrete plan."
+  aurora:
+    - "Shape visual coherence and propose creative settlement details."
+  pixel:
+    - "Track useful details, mark waypoints, and keep the audience-facing story coherent."
+  fork:
+    - "Stress-test the group plan, flag risks, and lead repair passes when something looks off."
+  sentinel:
+    - "Scout terrain, watch for hazards, and feed back what the group should fix."
+  grok:
+    - "Inject one wild but safe idea, then defer to the group's chosen objective."
+factions:
+  - name: planner_builders
+    members: [alpha, rex, fork]
+    goal: "Drive the discussion → delegation → review loop without locking in a fixed blueprint."
+    stance: facilitator-builder
+  - name: support
+    members: [vera, aurora, pixel, sentinel, grok]
+    goal: "Provide supplies, scouting, visual detail, and one disruptive idea."
+    stance: support-and-growth
+
+phases:
+  - name: discussion
+    type: scheduled
+    trigger: standup
+    required_agents: [alpha, vera, rex, aurora, pixel, fork, sentinel, grok]
+    topic: "Agents discuss a high-level civilization seed and converge on a single concrete starter-settlement objective."
+    location: starter_meadow
+    max_turns: 6
+  - name: delegation
+    type: scheduled
+    trigger: standup
+    required_agents: [alpha, rex, fork, vera, sentinel]
+    topic: "Alpha delegates concrete tasks: at least two agents take distinct roles and one embodied build/resource action is attempted."
+    location: starter_meadow
+    max_turns: 5
+  - name: review_repair
+    type: scheduled
+    trigger: standup
+    required_agents: [alpha, rex, fork, aurora, pixel]
+    topic: "Group reviews what got built or gathered, flags problems, and assigns at least one repair or follow-up action."
+    location: starter_meadow
+    max_turns: 5
