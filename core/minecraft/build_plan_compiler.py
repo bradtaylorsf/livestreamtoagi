@@ -90,7 +90,9 @@ class BuildPlanCompiler:
         materials = _materials_lookup(plan)
 
         recipe = _recipe_for(plan.structure_type)
-        commands = recipe(plan=plan, origin=origin, materials=materials, seed=seed)
+        commands, invoked_cards = recipe(
+            plan=plan, origin=origin, materials=materials, seed=seed
+        )
 
         manifest = _materials_manifest(commands)
         total_blocks = sum(manifest.values())
@@ -108,6 +110,7 @@ class BuildPlanCompiler:
             estimated_seconds=estimated,
             source_plan_hash=source_hash,
             compiler_version=self._compiler_version,
+            skill_cards_invoked=list(dict.fromkeys(invoked_cards)),
         )
 
     def dry_run(
@@ -142,7 +145,7 @@ def _size_enum(value: SizeClass | str) -> SizeClass:
     return value if isinstance(value, SizeClass) else SizeClass(value)
 
 
-RecipeFn = Callable[..., list[BuildCommand]]
+RecipeFn = Callable[..., tuple[list[BuildCommand], list[str]]]
 
 
 def _recipe_for(structure_type: StructureType | str) -> RecipeFn:
@@ -227,7 +230,7 @@ def _recipe_generic(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     commands: list[BuildCommand] = []
     bbox = _bbox_for_level(plan)
     floor_material = _pick(materials, _FLOOR_REGION_KEYS)
@@ -314,8 +317,9 @@ def _recipe_generic(
         )
 
     # 5. Ornamentation last so nothing overwrites the carved openings.
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, extra_invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, extra_invoked
 
 
 def _emit_key_features(
@@ -323,11 +327,14 @@ def _emit_key_features(
     *,
     origin: Position3D,
     materials: dict[str, str],
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     commands: list[BuildCommand] = []
+    invoked: list[str] = []
     column_material = _pick(materials, _COLUMN_REGION_KEYS)
     capital_material = materials.get(_CAPITAL_REGION_KEYS[0])
     arch_material = _pick(materials, _WALL_REGION_KEYS)
+    roof_material = _pick(materials, _ROOF_REGION_KEYS)
+    trim_material = _pick(materials, _FRAME_REGION_KEYS)
 
     for feature in sorted(
         plan.key_features,
@@ -348,6 +355,7 @@ def _emit_key_features(
                     capital_material=capital_material,
                 )
             )
+            invoked.append("column_doric")
         elif feature.kind == "arch":
             commands.extend(
                 arch_round(
@@ -357,15 +365,39 @@ def _emit_key_features(
                     material=arch_material,
                 )
             )
-        # roof / ornament / other key features have no extra primitive; the
-        # main roof recipe already covers the structural roof.
-    return commands
+            invoked.append("arch_round")
+        elif feature.kind == "roof":
+            w = max(1, int(size.get("w", size.get("span", 3))))
+            d = max(1, int(size.get("d", size.get("depth", 3))))
+            commands.extend(
+                roof_pitched(
+                    bbox=BoundingBox(x=0, y=0, w=w, h=d),
+                    origin=base,
+                    base_y=base.y,
+                    material=roof_material,
+                )
+            )
+            invoked.append("roof_pitched")
+        else:  # "ornament" or "other" — single-row trim ring
+            w = max(1, int(size.get("w", size.get("span", 1))))
+            d = max(1, int(size.get("d", size.get("depth", 1))))
+            commands.extend(
+                wall_segment(
+                    bbox=BoundingBox(x=0, y=0, w=w, h=d),
+                    origin=base,
+                    base_y=base.y,
+                    height=1,
+                    material=trim_material,
+                )
+            )
+            invoked.append("wall_segment")
+    return commands, invoked
 
 
 # ─── Per-structure recipes ─────────────────────────────────────────────
 
 
-def _recipe_cabin(**kwargs) -> list[BuildCommand]:
+def _recipe_cabin(**kwargs) -> tuple[list[BuildCommand], list[str]]:
     return _recipe_generic(**kwargs)
 
 
@@ -375,7 +407,7 @@ def _recipe_farm(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # A farm is a low fence ringing a tilled field. We model it as a thin
     # perimeter wall (the fence) + a floor slab (the field).
     commands: list[BuildCommand] = []
@@ -396,8 +428,9 @@ def _recipe_farm(
             material=fence_material,
         )
     )
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 def _recipe_wall(
@@ -406,7 +439,7 @@ def _recipe_wall(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # A defensive wall: a tall perimeter rectangle, no roof.
     commands: list[BuildCommand] = []
     bbox = _bbox_for_level(plan)
@@ -423,8 +456,9 @@ def _recipe_wall(
             material=wall_material,
         )
     )
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 def _recipe_watchtower(
@@ -433,7 +467,7 @@ def _recipe_watchtower(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # Tall and narrow — generic recipe handles stacked levels + roof; we
     # just delegate to it so the per-level walls fire.
     return _recipe_generic(plan=plan, origin=origin, materials=materials, seed=seed)
@@ -445,7 +479,7 @@ def _recipe_coliseum(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # Outer wall + tiered seating modelled as concentric perimeters
     # shrinking inward, plus columns/arches from key_features.
     commands: list[BuildCommand] = []
@@ -497,8 +531,9 @@ def _recipe_coliseum(
             )
         )
 
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 def _recipe_market(
@@ -507,7 +542,7 @@ def _recipe_market(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # Open plaza ringed by stalls. We treat each ``rooms`` entry as a stall
     # bounded by short walls. Falls back to a generic single-building if
     # no rooms were decomposed.
@@ -539,8 +574,9 @@ def _recipe_market(
             )
         )
 
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 _STRUCTURE_RECIPES: dict[StructureType, RecipeFn] = {

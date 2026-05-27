@@ -412,6 +412,105 @@ def test_materials_manifest_matches_total_blocks() -> None:
         assert script.total_blocks == sum(script.materials_manifest.values()), name
 
 
+def _ornamentation_plan(features: list[KeyFeature]) -> BuildPlan:
+    return BuildPlan(
+        structure_type="cabin",
+        size_class="medium",
+        source_image_id="features:image.png",
+        footprint=Footprint(
+            shape="rectangle", bbox=BoundingBox(x=0, y=0, w=12, h=12)
+        ),
+        levels=[Level(index=0, height_blocks=4, floor_material="oak_planks")],
+        materials=[
+            MaterialAssignment(region="floor", material="oak_planks"),
+            MaterialAssignment(region="walls", material="oak_log"),
+            MaterialAssignment(region="roof", material="dark_oak_planks"),
+            MaterialAssignment(region="frame", material="stone_bricks"),
+            MaterialAssignment(region="columns", material="quartz_pillar"),
+            MaterialAssignment(region="trim", material="stone_bricks"),
+        ],
+        key_features=features,
+        decomposer_version=1,
+        provider_model_id="fake/test",
+    )
+
+
+def test_compile_invokes_skill_cards_for_each_key_feature_kind() -> None:
+    """A plan with one of each KeyFeatureKind invokes the matching card."""
+    plan = _ornamentation_plan(
+        [
+            KeyFeature(
+                kind="column", position=Position3D(x=1, y=0, z=1), size={"height": 4}
+            ),
+            KeyFeature(
+                kind="arch",
+                position=Position3D(x=2, y=0, z=2),
+                size={"span": 3, "height": 4},
+            ),
+            KeyFeature(
+                kind="roof",
+                position=Position3D(x=3, y=5, z=3),
+                size={"w": 4, "d": 4},
+            ),
+            KeyFeature(
+                kind="ornament",
+                position=Position3D(x=5, y=1, z=5),
+                size={"w": 2, "d": 2},
+            ),
+        ]
+    )
+    compiler = BuildPlanCompiler()
+    script = compiler.compile(plan, intent=_intent("cabin"))
+    assert set(script.skill_cards_invoked) >= {
+        "arch_round",
+        "column_doric",
+        "roof_pitched",
+        "wall_segment",
+    }
+
+
+def test_compile_skill_cards_invoked_is_empty_when_plan_has_no_features() -> None:
+    compiler = BuildPlanCompiler()
+    script = compiler.compile(_cabin_plan(), intent=_intent("cabin"))
+    assert script.skill_cards_invoked == []
+
+
+def test_compile_skill_cards_invoked_is_deduplicated_and_deterministic() -> None:
+    """Repeated kinds collapse to one entry and the same plan compiles identically."""
+    plan = _ornamentation_plan(
+        [
+            KeyFeature(kind="column", position=Position3D(x=1, y=0, z=1), size={"height": 3}),
+            KeyFeature(kind="column", position=Position3D(x=8, y=0, z=8), size={"height": 3}),
+            KeyFeature(kind="ornament", position=Position3D(x=4, y=1, z=4), size={"w": 2, "d": 2}),
+        ]
+    )
+    compiler = BuildPlanCompiler()
+    first = compiler.compile(plan, intent=_intent("cabin"))
+    second = compiler.compile(plan, intent=_intent("cabin"))
+    assert first.skill_cards_invoked == second.skill_cards_invoked
+    assert first.skill_cards_invoked.count("column_doric") == 1
+    assert "wall_segment" in first.skill_cards_invoked
+
+
+def test_property_random_plans_with_features_invoke_at_least_one_card() -> None:
+    """If a random plan has any key_features, the resulting script lists at least one card."""
+    rng = random.Random(20260526)
+    compiler = BuildPlanCompiler()
+    plans_with_features = 0
+    for _ in range(60):
+        plan = _random_plan(rng)
+        script = compiler.compile(plan, intent=_intent(plan.structure_type))
+        if plan.key_features:
+            plans_with_features += 1
+            assert script.skill_cards_invoked, (
+                f"plan with {len(plan.key_features)} feature(s) produced an empty "
+                f"skill_cards_invoked list"
+            )
+        else:
+            assert script.skill_cards_invoked == []
+    assert plans_with_features > 0, "expected some random plans to have key_features"
+
+
 def _command_cells(cmd: BuildCommand):
     """Yield every (x, y, z) cell a command writes to."""
     if cmd.kind == "setblock":

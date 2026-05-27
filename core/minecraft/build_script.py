@@ -73,6 +73,7 @@ class BuildScript(BaseModel):
     estimated_seconds: float = 0.0
     source_plan_hash: str = Field(min_length=1)
     compiler_version: int = COMPILER_VERSION
+    skill_cards_invoked: list[str] = Field(default_factory=list)
 
     def to_jsonable(self) -> dict[str, Any]:
         """JSON-serializable representation with stable key ordering.
