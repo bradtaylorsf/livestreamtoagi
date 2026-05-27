@@ -268,18 +268,23 @@ def _recipe_generic(
         )
 
     # 3. Walls (hollow outline via wall_segment's four-side perimeter fills)
-    #    and interior room partitions.
+    #    and interior room partitions. Every level gets its own ring so
+    #    upper floors are not left floating above the level below.
+    top_wall_y = origin.y
     for level in levels:
         floor_y = origin.y + _floor_y_for_level(plan, level)
+        base_y = floor_y + 1
+        height = max(1, level.height_blocks)
         commands.extend(
             wall_segment(
                 bbox=bbox,
                 origin=origin,
-                base_y=floor_y + 1,
-                height=max(1, level.height_blocks),
+                base_y=base_y,
+                height=height,
                 material=wall_material,
             )
         )
+        top_wall_y = base_y + height - 1
         for room in _sorted_rooms(plan):
             if room.level_index != level.index:
                 continue
@@ -291,8 +296,28 @@ def _recipe_generic(
                         y=origin.y,
                         z=origin.z + bbox.y,
                     ),
-                    base_y=floor_y + 1,
-                    height=max(1, level.height_blocks),
+                    base_y=base_y,
+                    height=height,
+                    material=wall_material,
+                )
+            )
+
+    # 3b. Cap strip: today the per-level walls always butt up against
+    #     `roof_base_y - 1` because the roof and wall math share the same
+    #     accumulated offset. Guard against future drift (e.g. a recipe
+    #     that picks a custom roof base) by filling any residual gap with
+    #     the walls material so upper floors never end up floating below
+    #     a roof.
+    if levels:
+        gap_start = top_wall_y + 1
+        gap_end = roof_base_y - 1
+        if gap_start <= gap_end:
+            commands.extend(
+                wall_segment(
+                    bbox=bbox,
+                    origin=origin,
+                    base_y=gap_start,
+                    height=gap_end - gap_start + 1,
                     material=wall_material,
                 )
             )
@@ -466,8 +491,9 @@ def _recipe_watchtower(
     materials: dict[str, str],
     seed: int,
 ) -> tuple[list[BuildCommand], list[str]]:
-    # Tall and narrow — generic recipe handles stacked levels + roof; we
-    # just delegate to it so the per-level walls fire.
+    # Tall and narrow — the generic recipe emits a wall ring for every
+    # level plus a cap strip up to the roof base, so upper floors never
+    # float above the level below.
     return _recipe_generic(plan=plan, origin=origin, materials=materials, seed=seed)
 
 
