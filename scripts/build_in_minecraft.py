@@ -43,9 +43,10 @@ from pathlib import Path
 
 from core.agents.new_building_intent import NewBuildingIntent
 from core.minecraft.blueprint_generator import build_image_prompt
+from core.minecraft.build_executors import command_to_minecraft as _command_to_minecraft
 from core.minecraft.build_plan import BuildPlan, Position3D
 from core.minecraft.build_plan_compiler import BuildPlanCompiler
-from core.minecraft.build_script import BuildCommand, BuildScript
+from core.minecraft.build_script import BuildScript
 from core.minecraft.cloud_providers import (
     GeminiVisionDecomposer,
     OpenAIImageProvider,
@@ -60,51 +61,6 @@ def _parse_origin(raw: str) -> Position3D:
         return Position3D(x=parts[0], y=parts[1], z=parts[2])
     except Exception as exc:  # noqa: BLE001 — argparse error path
         raise argparse.ArgumentTypeError(f"--origin must be x,y,z (got {raw!r}): {exc}") from exc
-
-
-def _normalize_block(name: str | None) -> str:
-    """Convert any block-name shape into a Minecraft snake_case id.
-
-    Gemini sometimes emits display names like "Stone Bricks" or
-    "Dark Oak Planks". Minecraft commands need ``stone_bricks`` /
-    ``dark_oak_planks``. We also drop any leading ``minecraft:`` so the
-    caller can always add it back.
-    """
-    if not name:
-        return "stone"
-    n = name.strip().lower()
-    if n.startswith("minecraft:"):
-        n = n.split(":", 1)[1]
-    n = n.replace(" ", "_").replace("-", "_")
-    while "__" in n:
-        n = n.replace("__", "_")
-    return n
-
-
-def _command_to_minecraft(cmd: BuildCommand) -> str | None:
-    """Translate one BuildCommand into a Minecraft command string.
-
-    Returns None for ``wait`` (handled separately) and for unsupported kinds.
-    """
-    pos = cmd.position
-    if cmd.kind == "setblock":
-        block = _normalize_block(cmd.block_type)
-        return f"/setblock {pos.x} {pos.y} {pos.z} minecraft:{block}"
-    if cmd.kind == "fill":
-        if cmd.region_to is None:
-            return None
-        block = _normalize_block(cmd.block_type)
-        return (
-            f"/fill {pos.x} {pos.y} {pos.z} "
-            f"{cmd.region_to.x} {cmd.region_to.y} {cmd.region_to.z} "
-            f"minecraft:{block}"
-        )
-    if cmd.kind == "wait":
-        return None
-    # structure blocks are placement-by-id; the bot bridge expects a setblock
-    # of a structure_block, then activation. We don't drive that here yet —
-    # fall back to a structure_void marker so the chain doesn't crash.
-    return f"/setblock {pos.x} {pos.y} {pos.z} minecraft:structure_void"
 
 
 async def _generate(
