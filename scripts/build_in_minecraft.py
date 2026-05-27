@@ -161,19 +161,61 @@ async def _send_rcon(
     port: int,
     password: str,
     throttle_ms: int = 30,
-) -> tuple[int, int]:
+    auto_ground: bool = True,
+    foundation: str = "cobblestone",
+) -> tuple[int, int, BuildScript]:
     """Send every BuildCommand directly to the Minecraft server via RCON.
 
     Simpler than the bridge path: no bot needed, just the server with
     ``enable-rcon=true`` and a password. Commands are sent without the
     leading ``/`` (the RCON protocol takes them bare).
+
+    When ``auto_ground`` is True we query the world via the same RCON
+    connection to find the highest non-air block at the origin column,
+    shift the script's y so the build sits on terrain, and prepend a
+    cobblestone foundation pillar so steep terrain doesn't leave the
+    build hanging over a cliff. Returns the (possibly shifted) script as
+    the third tuple element so callers can report the resolved y.
     """
     from mcrcon import MCRcon  # type: ignore[import-not-found]
 
+    from core.minecraft.terrain import auto_ground_script, make_rcon_block_matcher
+
     sent = 0
     skipped = 0
+    final_script = script
     with MCRcon(host, password, port=port, timeout=10) as mcr:
-        for cmd in script.commands:
+        foundation_cmds: list[str] = []
+        if auto_ground:
+            matcher = make_rcon_block_matcher(mcr)
+            final_script, foundation_cmds = auto_ground_script(
+                script, matcher, foundation=foundation
+            )
+            if final_script.origin.y != script.origin.y:
+                print(
+                    f"      auto-ground: y {script.origin.y} → {final_script.origin.y} "
+                    f"(+{len(foundation_cmds)} foundation /fill commands)"
+                )
+
+        for foundation_cmd in foundation_cmds:
+            cmd_text = (
+                foundation_cmd[1:] if foundation_cmd.startswith("/") else foundation_cmd
+            )
+            try:
+                resp = mcr.command(cmd_text)
+                sent += 1
+                if resp and "error" in resp.lower():
+                    print(f"      ⚠ rcon response: {resp.strip()[:120]}", file=sys.stderr)
+                if throttle_ms:
+                    await asyncio.sleep(throttle_ms / 1000.0)
+            except Exception as exc:  # noqa: BLE001 — surface every send error
+                print(
+                    f"      ✗ foundation {sent + skipped + 1} ({cmd_text[:60]}) failed: {exc}",
+                    file=sys.stderr,
+                )
+                skipped += 1
+
+        for cmd in final_script.commands:
             if cmd.kind == "wait":
                 await asyncio.sleep(cmd.wait_seconds or 0.0)
                 continue
@@ -196,7 +238,7 @@ async def _send_rcon(
                     file=sys.stderr,
                 )
                 skipped += 1
-    return sent, skipped
+    return sent, skipped, final_script
 
 
 def _print_dry_run(script: BuildScript) -> None:
@@ -228,6 +270,7 @@ async def main_async(args: argparse.Namespace) -> int:
         print(f"PASS (dry-run). artifacts in: {output_dir}")
         return 0
 
+    final_script = script
     if args.rcon_host:
         print(
             f"[4/4] sending {len(script.commands)} commands via RCON to "
@@ -236,14 +279,22 @@ async def main_async(args: argparse.Namespace) -> int:
         if not args.rcon_password:
             sys.exit("--rcon-host requires --rcon-password (or RCON_PASSWORD in env).")
         started = time.monotonic()
-        sent, skipped = await _send_rcon(
+        sent, skipped, final_script = await _send_rcon(
             script,
             host=args.rcon_host,
             port=args.rcon_port,
             password=args.rcon_password,
             throttle_ms=args.throttle_ms,
+            auto_ground=args.auto_ground,
+            foundation=args.foundation,
         )
     else:
+        if args.auto_ground:
+            print(
+                "      ⚠ --auto-ground requested without --rcon-host; "
+                "the HTTP bridge path cannot query terrain. Building at literal "
+                f"y={args.origin.y}."
+            )
         print(f"[4/4] sending {len(script.commands)} commands to HTTP bridge...")
         started = time.monotonic()
         sent, skipped = await _send_live(script, throttle_ms=args.throttle_ms)
@@ -251,10 +302,11 @@ async def main_async(args: argparse.Namespace) -> int:
     print(f"      sent={sent} skipped={skipped} elapsed={elapsed:.1f}s")
     print()
     print(f"PASS. artifacts in: {output_dir}")
+    view_origin = final_script.origin
     print(
         f"      Connect a Minecraft 1.21.6 client to localhost:25565 and "
-        f"teleport to the origin {args.origin} (/tp <name> {args.origin.x} "
-        f"{args.origin.y} {args.origin.z}) to view the build."
+        f"teleport to the resolved origin (/tp <name> {view_origin.x} "
+        f"{view_origin.y} {view_origin.z}) to view the build."
     )
     return 0 if skipped == 0 else 1
 
@@ -324,6 +376,25 @@ def main() -> None:
         "--rcon-password",
         default=os.environ.get("RCON_PASSWORD"),
         help="RCON password (or set RCON_PASSWORD in env).",
+    )
+    parser.add_argument(
+        "--auto-ground",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Query the world via RCON to find the terrain top at the origin "
+            "column, then shift the build's y so it sits on the ground. "
+            "Requires --rcon-host. Use --no-auto-ground to build at the literal "
+            "--origin y."
+        ),
+    )
+    parser.add_argument(
+        "--foundation",
+        default="cobblestone",
+        help=(
+            "Block to use for the foundation pillar emitted under steep terrain "
+            "(default: cobblestone). Ignored when --no-auto-ground is set."
+        ),
     )
     args = parser.parse_args()
 

@@ -168,6 +168,7 @@ async def test_executor_sends_translated_commands_without_leading_slash(
         rcon_port=25575,
         rcon_password="pw",
         throttle_ms=0,
+        auto_ground=False,
     )
 
     result = await executor(script)
@@ -208,6 +209,7 @@ async def test_executor_skips_unsupported_and_honors_wait(
         rcon_host="127.0.0.1",
         rcon_password="pw",
         throttle_ms=0,
+        auto_ground=False,
     )
 
     await executor(script)
@@ -238,6 +240,7 @@ async def test_executor_returns_screenshot_when_provided(
         rcon_password="pw",
         screenshot_fn=screenshot,
         throttle_ms=0,
+        auto_ground=False,
     )
 
     result = await executor(script)
@@ -272,6 +275,7 @@ async def test_executor_logs_warning_on_error_response(
             rcon_host="127.0.0.1",
             rcon_password="pw",
             throttle_ms=0,
+            auto_ground=False,
         )
         with caplog.at_level(logging.WARNING, logger="core.minecraft.build_executors"):
             await executor(script)
@@ -348,6 +352,106 @@ def test_make_refinement_loop_uses_placeholder_when_rcon_unset(
     loop = make_refinement_loop()
     assert loop is not None
     assert loop._build_executor is screenshotting_build_executor
+
+
+# ─── auto-ground integration ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_auto_ground_shifts_origin_and_prepends_foundation(
+    fake_mcrcon: type[_FakeMCRcon],
+) -> None:
+    """``auto_ground=True`` issues terrain queries then foundation fills before the build."""
+
+    # Pre-arm the next MCRcon instance with terrain responses.
+    original_init = _FakeMCRcon.__init__
+
+    def init_with_responses(self: _FakeMCRcon, *args: Any, **kw: Any) -> None:
+        original_init(self, *args, **kw)
+        # All "execute if block ... air" queries return "Test passed"
+        # except at y=70 → simulates grass at y=70.
+        def _command(text: str) -> str:
+            self.commands.append(text)
+            if text.startswith("execute if block 0 70 0"):
+                # any non-air check at y=70 passes for stone
+                if "minecraft:stone" in text:
+                    return "Test passed"
+                return "Test failed"
+            if text.startswith("execute if block "):
+                # everything else above terrain is air, below is stone
+                parts = text.split()
+                y = int(parts[4])
+                if y > 70:
+                    return "Test passed" if "minecraft:air" in text else "Test failed"
+                if "minecraft:stone" in text:
+                    return "Test passed"
+                return "Test failed"
+            return ""
+
+        self.command = _command  # type: ignore[method-assign]
+
+    fake_mcrcon.__init__ = init_with_responses  # type: ignore[assignment, method-assign]
+    try:
+        script = _make_script(
+            [
+                BuildCommand(
+                    kind="fill",
+                    position=Position3D(x=0, y=80, z=0),
+                    region_to=Position3D(x=4, y=84, z=4),
+                    block_type="oak_planks",
+                ),
+            ],
+        )
+        # Override origin so dy is non-zero.
+        script = script.model_copy(update={"origin": Position3D(x=0, y=80, z=0)})
+
+        executor = RconBuildExecutor(
+            rcon_host="127.0.0.1",
+            rcon_password="pw",
+            throttle_ms=0,
+            auto_ground=True,
+            foundation="cobblestone",
+            terrain_scan_y_start=120,
+            terrain_scan_y_floor=0,
+        )
+
+        await executor(script)
+
+        inst = fake_mcrcon.instances[0]
+        # Last command should be the shifted build command (origin 80 → 71,
+        # dy=-9 → build's fill runs from 71..75).
+        build_cmds = [c for c in inst.commands if c.startswith("fill 0 ")]
+        assert any(c == "fill 0 71 0 4 75 4 minecraft:oak_planks" for c in build_cmds)
+    finally:
+        fake_mcrcon.__init__ = original_init  # type: ignore[method-assign]
+
+
+@pytest.mark.asyncio
+async def test_executor_auto_ground_disabled_skips_terrain_queries(
+    fake_mcrcon: type[_FakeMCRcon],
+) -> None:
+    script = _make_script(
+        [
+            BuildCommand(
+                kind="setblock",
+                position=Position3D(x=0, y=64, z=0),
+                block_type="dirt",
+            )
+        ]
+    )
+    executor = RconBuildExecutor(
+        rcon_host="127.0.0.1",
+        rcon_password="pw",
+        throttle_ms=0,
+        auto_ground=False,
+    )
+
+    await executor(script)
+
+    inst = fake_mcrcon.instances[0]
+    # No "execute if block" queries should appear when auto_ground is off.
+    assert not any(c.startswith("execute if block") for c in inst.commands)
+    assert inst.commands == ["setblock 0 64 0 minecraft:dirt"]
 
 
 # ─── Optional live smoke (skipped without env var) ─────────────────

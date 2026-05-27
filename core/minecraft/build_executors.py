@@ -96,6 +96,10 @@ class RconBuildExecutor:
         throttle_ms: int = 30,
         screenshot_fn: ScreenshotFn | None = None,
         timeout_seconds: int = 10,
+        auto_ground: bool = True,
+        foundation: str = "cobblestone",
+        terrain_scan_y_start: int = 320,
+        terrain_scan_y_floor: int = -64,
     ) -> None:
         self._host = rcon_host
         self._port = rcon_port
@@ -103,6 +107,10 @@ class RconBuildExecutor:
         self._throttle_ms = max(0, throttle_ms)
         self._screenshot_fn = screenshot_fn
         self._timeout = timeout_seconds
+        self._auto_ground = auto_ground
+        self._foundation = foundation
+        self._terrain_y_start = terrain_scan_y_start
+        self._terrain_y_floor = terrain_scan_y_floor
 
     @property
     def host(self) -> str:
@@ -132,6 +140,10 @@ class RconBuildExecutor:
         ``mcrcon`` is synchronous, so this runs in a thread off the
         event loop. ``wait`` commands are converted to a blocking sleep
         because the connection must stay open.
+
+        When ``auto_ground`` is enabled, the first thing we do on the
+        open connection is a terrain query at the script's origin column
+        to compute the y-offset and emit foundation /fill commands.
         """
         import time as _time
 
@@ -141,7 +153,21 @@ class RconBuildExecutor:
         skipped = 0
         throttle_seconds = self._throttle_ms / 1000.0
         with MCRcon(self._host, self._password, port=self._port, timeout=self._timeout) as mcr:
-            for cmd in script.commands:
+            final_script, foundation_cmds = self._apply_auto_ground(script, mcr)
+            for foundation in foundation_cmds:
+                bare = foundation[1:] if foundation.startswith("/") else foundation
+                try:
+                    resp = mcr.command(bare)
+                    sent += 1
+                    if resp and "error" in resp.lower():
+                        logger.warning("RCON response error: %s", resp.strip()[:200])
+                    if throttle_seconds:
+                        _time.sleep(throttle_seconds)
+                except Exception:
+                    logger.exception("RCON foundation command failed: %s", bare[:120])
+                    skipped += 1
+
+            for cmd in final_script.commands:
                 if cmd.kind == "wait":
                     if cmd.wait_seconds:
                         _time.sleep(cmd.wait_seconds)
@@ -162,6 +188,27 @@ class RconBuildExecutor:
                     logger.exception("RCON command failed: %s", bare[:120])
                     skipped += 1
         return sent, skipped
+
+    def _apply_auto_ground(
+        self, script: BuildScript, mcr: object
+    ) -> tuple[BuildScript, list[str]]:
+        """Resolve terrain and return (shifted_script, foundation_commands).
+
+        Returns ``(script, [])`` when ``auto_ground`` is disabled so the
+        original behavior is preserved byte-for-byte.
+        """
+        if not self._auto_ground:
+            return script, []
+        from core.minecraft.terrain import auto_ground_script, make_rcon_block_matcher
+
+        matcher = make_rcon_block_matcher(mcr)
+        return auto_ground_script(
+            script,
+            matcher,
+            foundation=self._foundation,
+            y_start=self._terrain_y_start,
+            y_floor=self._terrain_y_floor,
+        )
 
 
 def rcon_executor_from_env() -> RconBuildExecutor | None:
