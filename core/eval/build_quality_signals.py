@@ -179,9 +179,7 @@ def opening_accessible_count(
     max_y += 1
     max_z += 1
 
-    occupied = _build_occupancy_grid(
-        script, (min_x, min_y, min_z), (max_x, max_y, max_z)
-    )
+    occupied = _build_occupancy_grid(script, (min_x, min_y, min_z), (max_x, max_y, max_z))
 
     # Flood-fill air from every cell on the margin surface.
     reachable: set[tuple[int, int, int]] = set()
@@ -189,9 +187,7 @@ def opening_accessible_count(
     for x in range(min_x, max_x + 1):
         for y in range(min_y, max_y + 1):
             for z in range(min_z, max_z + 1):
-                on_margin = (
-                    x in (min_x, max_x) or y in (min_y, max_y) or z in (min_z, max_z)
-                )
+                on_margin = x in (min_x, max_x) or y in (min_y, max_y) or z in (min_z, max_z)
                 if on_margin and (x, y, z) not in occupied:
                     if (x, y, z) not in reachable:
                         reachable.add((x, y, z))
@@ -207,9 +203,7 @@ def opening_accessible_count(
             (0, 0, -1),
         ):
             nx, ny, nz = x + dx, y + dy, z + dz
-            if not (
-                min_x <= nx <= max_x and min_y <= ny <= max_y and min_z <= nz <= max_z
-            ):
+            if not (min_x <= nx <= max_x and min_y <= ny <= max_y and min_z <= nz <= max_z):
                 continue
             if (nx, ny, nz) in occupied or (nx, ny, nz) in reachable:
                 continue
@@ -228,10 +222,12 @@ def opening_accessible_count(
         "value": len(accessible),
         "declared": len(openings),
         "accessible_positions": [
-            {"x": script.origin.x + o.position.x,
-             "y": script.origin.y + o.position.y,
-             "z": script.origin.z + o.position.z,
-             "kind": o.kind}
+            {
+                "x": script.origin.x + o.position.x,
+                "y": script.origin.y + o.position.y,
+                "z": script.origin.z + o.position.z,
+                "kind": o.kind,
+            }
             for o in accessible
         ],
     }
@@ -253,9 +249,7 @@ def interior_volume_realized(plan: BuildPlan, script: BuildScript) -> dict[str, 
         return {"value": 1.0, "air_cells": 0, "expected": 0}
 
     origin = (script.origin.x, script.origin.y, script.origin.z)
-    (min_x, _world_min_y, min_z), (max_x, _world_max_y, max_z) = _plan_world_bbox(
-        plan, origin
-    )
+    (min_x, _world_min_y, min_z), (max_x, _world_max_y, max_z) = _plan_world_bbox(plan, origin)
     # Inset to interior; vertical range is foundation+1 up to foundation+total_height.
     int_min_x = min_x + 1
     int_max_x = max_x - 1
@@ -283,11 +277,7 @@ def interior_volume_realized(plan: BuildPlan, script: BuildScript) -> dict[str, 
 def material_variety_ratio(plan: BuildPlan, script: BuildScript) -> dict[str, Any]:
     """Unique placed materials ÷ unique declared materials, clamped to ``[0, 1]``."""
     declared = {normalize_block(m.material) for m in plan.materials}
-    placed = {
-        normalize_block(c.block_type)
-        for c in _placement_commands(script)
-        if c.block_type
-    }
+    placed = {normalize_block(c.block_type) for c in _placement_commands(script) if c.block_type}
     if not declared:
         return {"value": 1.0, "placed": sorted(placed), "declared": []}
     ratio = max(0.0, min(1.0, len(placed) / len(declared)))
@@ -503,6 +493,7 @@ def _signals_for_build(plan: BuildPlan, script: BuildScript) -> dict[str, Any]:
 def _aggregate_per_build(per_build: list[dict[str, Any]]) -> dict[str, Any]:
     """Fold per-build signals into the scorer's category shape."""
     n = len(per_build)
+
     def _mean(key: str) -> float:
         return sum(b[key]["value"] for b in per_build) / n
 

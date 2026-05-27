@@ -107,7 +107,7 @@ async def capture_build_screenshot(
         from playwright.async_api import async_playwright  # type: ignore[import-not-found]
     except ImportError as exc:
         raise RuntimeError(
-            "playwright is not installed; install via `uv pip install -e \".[render]\"`"
+            'playwright is not installed; install via `uv pip install -e ".[render]"`'
         ) from exc
 
     cx, cy, cz = _script_centroid(script)

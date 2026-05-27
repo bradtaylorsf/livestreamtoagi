@@ -31,9 +31,7 @@ def door_frame(
                 commands.append(
                     BuildCommand(
                         kind="setblock",
-                        position=Position3D(
-                            x=position.x + dx, y=position.y + dy, z=position.z
-                        ),
+                        position=Position3D(x=position.x + dx, y=position.y + dy, z=position.z),
                         block_type=AIR_BLOCK,
                     )
                 )

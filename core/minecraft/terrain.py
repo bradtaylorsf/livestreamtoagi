@@ -176,12 +176,8 @@ def shift_script_y(script: BuildScript, dy: int) -> BuildScript:
         new_pos = Position3D(x=cmd.position.x, y=cmd.position.y + dy, z=cmd.position.z)
         new_region = None
         if cmd.region_to is not None:
-            new_region = Position3D(
-                x=cmd.region_to.x, y=cmd.region_to.y + dy, z=cmd.region_to.z
-            )
-        new_commands.append(
-            cmd.model_copy(update={"position": new_pos, "region_to": new_region})
-        )
+            new_region = Position3D(x=cmd.region_to.x, y=cmd.region_to.y + dy, z=cmd.region_to.z)
+        new_commands.append(cmd.model_copy(update={"position": new_pos, "region_to": new_region}))
     new_origin = Position3D(x=script.origin.x, y=script.origin.y + dy, z=script.origin.z)
     return script.model_copy(update={"commands": new_commands, "origin": new_origin})
 

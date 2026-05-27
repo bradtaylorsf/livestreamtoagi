@@ -90,9 +90,7 @@ class BuildPlanCompiler:
         materials = _materials_lookup(plan)
 
         recipe = _recipe_for(plan.structure_type)
-        commands, invoked_cards = recipe(
-            plan=plan, origin=origin, materials=materials, seed=seed
-        )
+        commands, invoked_cards = recipe(plan=plan, origin=origin, materials=materials, seed=seed)
 
         manifest = _materials_manifest(commands)
         total_blocks = sum(manifest.values())

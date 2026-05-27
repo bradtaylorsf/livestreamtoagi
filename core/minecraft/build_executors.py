@@ -196,9 +196,7 @@ class RconBuildExecutor:
                     skipped += 1
         return sent, skipped
 
-    def _apply_auto_ground(
-        self, script: BuildScript, mcr: object
-    ) -> tuple[BuildScript, list[str]]:
+    def _apply_auto_ground(self, script: BuildScript, mcr: object) -> tuple[BuildScript, list[str]]:
         """Resolve terrain and return (shifted_script, foundation_commands).
 
         Returns ``(script, [])`` when ``auto_ground`` is disabled so the

@@ -201,9 +201,7 @@ def make_refinement_loop() -> Any | None:
         )
         build_executor: Any = rcon_executor
     else:
-        logger.info(
-            "RefinementLoop: RCON_HOST/RCON_PASSWORD unset — using placeholder executor"
-        )
+        logger.info("RefinementLoop: RCON_HOST/RCON_PASSWORD unset — using placeholder executor")
         build_executor = screenshotting_build_executor
 
     return RefinementLoop(
