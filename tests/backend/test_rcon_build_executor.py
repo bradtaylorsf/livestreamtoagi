@@ -28,6 +28,7 @@ import pytest
 from core.agents.build_intent import SizeClass, StructureType
 from core.minecraft.build_executors import (
     RconBuildExecutor,
+    async_safe_mcrcon_class,
     command_to_minecraft,
     normalize_block,
     rcon_executor_from_env,
@@ -512,6 +513,99 @@ async def test_executor_auto_ground_disabled_skips_terrain_queries(
     # No "execute if block" queries should appear when auto_ground is off.
     assert not any(c.startswith("execute if block") for c in inst.commands)
     assert inst.commands == ["setblock 0 64 0 minecraft:dirt"]
+
+
+# ─── #885 async-safe MCRcon regression ────────────────────────────
+
+
+def test_async_safe_mcrcon_class_returns_real_mcrcon_subclass() -> None:
+    """The helper subclasses the real ``mcrcon.MCRcon`` rather than returning it raw.
+
+    Subclassing is what lets us override ``__init__`` and ``_read`` to skip
+    the SIGALRM install that crashes on macOS in worker threads (#885).
+    """
+    import mcrcon
+
+    cls = async_safe_mcrcon_class()
+    assert cls is not mcrcon.MCRcon
+    assert issubclass(cls, mcrcon.MCRcon)
+
+
+def test_async_safe_mcrcon_init_does_not_install_signal_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Constructing the wrapper must not call ``signal.signal(SIGALRM, ...)``."""
+    import signal as _signal
+
+    calls: list[tuple[int, Any]] = []
+
+    real_signal = _signal.signal
+
+    def spy(signum: int, handler: Any) -> Any:
+        calls.append((signum, handler))
+        return real_signal(signum, handler)
+
+    monkeypatch.setattr(_signal, "signal", spy)
+
+    cls = async_safe_mcrcon_class()
+    cls("127.0.0.1", "pw", port=25575, timeout=5)
+
+    # Real mcrcon.MCRcon would record (SIGALRM, timeout_handler) here.
+    assert not any(sig == _signal.SIGALRM for sig, _ in calls), (
+        f"async-safe wrapper unexpectedly installed signal handler: {calls}"
+    )
+
+
+def test_async_safe_mcrcon_constructs_in_non_main_thread() -> None:
+    """Regression: ``asyncio.to_thread`` runs ``_send_all_sync`` (and thus the
+    MCRcon constructor) in a worker thread. The upstream class crashes there
+    on macOS with ``ValueError: signal only works in main thread of the main
+    interpreter`` — our wrapper must not.
+    """
+    import threading
+
+    cls = async_safe_mcrcon_class()
+    errors: list[BaseException] = []
+
+    def construct() -> None:
+        try:
+            cls("127.0.0.1", "pw", port=25575, timeout=5)
+        except BaseException as exc:  # noqa: BLE001 — capture for assertion
+            errors.append(exc)
+
+    t = threading.Thread(target=construct)
+    t.start()
+    t.join()
+
+    assert not errors, f"async-safe MCRcon raised in worker thread: {errors!r}"
+
+
+@pytest.mark.asyncio
+async def test_executor_runs_from_event_loop_without_signal_error(
+    fake_mcrcon: type[_FakeMCRcon],
+) -> None:
+    """``await executor(script)`` must succeed when called from an asyncio
+    event loop. ``asyncio.to_thread`` dispatches ``_send_all_sync`` to a
+    worker thread; the SIGALRM install in upstream mcrcon would raise here
+    before #885."""
+    script = _make_script(
+        [
+            BuildCommand(
+                kind="setblock",
+                position=Position3D(x=0, y=64, z=0),
+                block_type="stone",
+            )
+        ]
+    )
+    executor = RconBuildExecutor(
+        rcon_host="127.0.0.1",
+        rcon_password="pw",
+        throttle_ms=0,
+        auto_ground=False,
+    )
+
+    # Must not raise ValueError("signal only works in main thread...").
+    await executor(script)
 
 
 # ─── Optional live smoke (skipped without env var) ─────────────────
