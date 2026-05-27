@@ -12,7 +12,7 @@ Two pure helpers — :func:`compute_script_extents` and
 :func:`_build_permalink_url` — are unit-testable without Playwright. The
 async :func:`capture_build_screenshot` is the production entry point.
 
-See ``docker/minecraft-server/README.md`` for plugin installation steps.
+See ``docker/README-minecraft-server.md`` for plugin installation steps.
 """
 
 from __future__ import annotations
