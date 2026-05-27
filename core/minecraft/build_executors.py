@@ -75,6 +75,63 @@ def command_to_minecraft(cmd: BuildCommand) -> str | None:
     return f"/setblock {pos.x} {pos.y} {pos.z} minecraft:structure_void"
 
 
+def async_safe_mcrcon_class() -> type:
+    """Return an ``mcrcon.MCRcon``-compatible class safe for worker threads.
+
+    Upstream ``mcrcon.MCRcon.__init__`` calls
+    ``signal.signal(signal.SIGALRM, ...)`` unconditionally on non-Windows
+    platforms. ``signal.signal`` raises ``ValueError: signal only works in
+    main thread of the main interpreter`` when invoked off the main
+    thread on macOS Python 3.13 — which is exactly what
+    :meth:`RconBuildExecutor.__call__` does via ``asyncio.to_thread``
+    (issue #885).
+
+    We import ``MCRcon`` through ``sys.modules`` so the test suite's
+    ``monkeypatch.setitem(sys.modules, "mcrcon", ...)`` shim still works.
+    The fake class used in tests has no ``_read`` method to override; we
+    return it unchanged because it never installs a signal handler.
+
+    For the real ``mcrcon.MCRcon`` we return a subclass that:
+
+    * Re-implements ``__init__`` to mirror the parent's attribute setup
+      without the ``signal.signal`` call.
+    * Re-implements ``_read`` to use ``socket.settimeout`` instead of
+      ``signal.alarm`` so the timeout works in any thread.
+    """
+    from mcrcon import MCRcon  # type: ignore[import-not-found]
+
+    if not hasattr(MCRcon, "_read"):
+        return MCRcon
+
+    class _AsyncSafeMCRcon(MCRcon):  # type: ignore[misc, valid-type]
+        def __init__(
+            self,
+            host: str,
+            password: str,
+            port: int = 25575,
+            tlsmode: int = 0,
+            timeout: int = 5,
+        ) -> None:
+            self.host = host
+            self.password = password
+            self.port = port
+            self.tlsmode = tlsmode
+            self.timeout = timeout
+
+        def _read(self, length: int) -> bytes:
+            if self.socket is not None and self.timeout:
+                self.socket.settimeout(float(self.timeout))
+            data = b""
+            while len(data) < length:
+                chunk = self.socket.recv(length - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            return data
+
+    return _AsyncSafeMCRcon
+
+
 ScreenshotFn = Callable[[BuildScript], Awaitable[bytes]]
 
 
@@ -93,7 +150,7 @@ class RconBuildExecutor:
         rcon_host: str,
         rcon_port: int = 25575,
         rcon_password: str,
-        throttle_ms: int = 30,
+        throttle_ms: int = 100,
         screenshot_fn: ScreenshotFn | None = None,
         timeout_seconds: int = 10,
         auto_ground: bool = True,
@@ -154,7 +211,7 @@ class RconBuildExecutor:
         """
         import time as _time
 
-        from mcrcon import MCRcon  # type: ignore[import-not-found]
+        MCRcon = async_safe_mcrcon_class()
 
         sent = 0
         skipped = 0
@@ -166,6 +223,7 @@ class RconBuildExecutor:
                 try:
                     resp = mcr.command(bare)
                     sent += 1
+                    logger.debug("RCON foundation -> %s | resp=%r", bare[:120], resp[:160])
                     if resp and "error" in resp.lower():
                         logger.warning("RCON response error: %s", resp.strip()[:200])
                     if throttle_seconds:
@@ -187,6 +245,7 @@ class RconBuildExecutor:
                 try:
                     resp = mcr.command(bare)
                     sent += 1
+                    logger.debug("RCON cmd -> %s | resp=%r", bare[:120], resp[:160])
                     if resp and "error" in resp.lower():
                         logger.warning("RCON response error: %s", resp.strip()[:200])
                     if throttle_seconds:
@@ -254,6 +313,7 @@ def rcon_executor_from_env() -> RconBuildExecutor | None:
 __all__ = [
     "RconBuildExecutor",
     "ScreenshotFn",
+    "async_safe_mcrcon_class",
     "command_to_minecraft",
     "normalize_block",
     "rcon_executor_from_env",

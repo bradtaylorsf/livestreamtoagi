@@ -177,9 +177,10 @@ async def _send_rcon(
     build hanging over a cliff. Returns the (possibly shifted) script as
     the third tuple element so callers can report the resolved y.
     """
-    from mcrcon import MCRcon  # type: ignore[import-not-found]
-
+    from core.minecraft.build_executors import async_safe_mcrcon_class
     from core.minecraft.terrain import auto_ground_script, make_rcon_block_matcher
+
+    MCRcon = async_safe_mcrcon_class()
 
     sent = 0
     skipped = 0
