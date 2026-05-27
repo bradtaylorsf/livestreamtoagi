@@ -236,6 +236,8 @@ def _recipe_generic(
     frame_material = _pick(materials, _FRAME_REGION_KEYS)
 
     levels = _sorted_levels(plan)
+
+    # 1. Floors for every level.
     for level in levels:
         floor_y = origin.y + _floor_y_for_level(plan, level)
         commands.extend(
@@ -246,8 +248,28 @@ def _recipe_generic(
                 material=level.floor_material or floor_material,
             )
         )
-        # Walls rise from one block above the floor up through the level
-        # height so the floor slab is visible inside the room.
+
+    # 2. Roof above the top level. Emitted before walls so wall fills are
+    #    the last writes on the perimeter, letting openings (step 4) carve
+    #    air last without a wall re-fill resealing the doorway.
+    if levels:
+        top_level = levels[-1]
+        roof_base_y = (
+            origin.y + _floor_y_for_level(plan, top_level) + max(1, top_level.height_blocks) + 1
+        )
+        commands.extend(
+            roof_pitched(
+                bbox=bbox,
+                origin=origin,
+                base_y=roof_base_y,
+                material=roof_material,
+            )
+        )
+
+    # 3. Walls (hollow outline via wall_segment's four-side perimeter fills)
+    #    and interior room partitions.
+    for level in levels:
+        floor_y = origin.y + _floor_y_for_level(plan, level)
         commands.extend(
             wall_segment(
                 bbox=bbox,
@@ -257,8 +279,6 @@ def _recipe_generic(
                 material=wall_material,
             )
         )
-
-        # Interior partitions for any rooms recorded against this level.
         for room in _sorted_rooms(plan):
             if room.level_index != level.index:
                 continue
@@ -276,7 +296,7 @@ def _recipe_generic(
                 )
             )
 
-    # Openings (doors / windows) — carve after walls so the air-fill wins.
+    # 4. Openings (doors / windows) — carve AFTER walls so the air-fill wins.
     for opening in sorted(
         plan.openings, key=lambda o: (o.level_index, o.position.x, o.position.y, o.position.z)
     ):
@@ -293,21 +313,7 @@ def _recipe_generic(
             )
         )
 
-    # Roof on the top level.
-    if levels:
-        top_level = levels[-1]
-        roof_base_y = (
-            origin.y + _floor_y_for_level(plan, top_level) + max(1, top_level.height_blocks) + 1
-        )
-        commands.extend(
-            roof_pitched(
-                bbox=bbox,
-                origin=origin,
-                base_y=roof_base_y,
-                material=roof_material,
-            )
-        )
-
+    # 5. Ornamentation last so nothing overwrites the carved openings.
     commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
     return commands
 

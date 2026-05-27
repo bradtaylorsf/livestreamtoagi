@@ -225,18 +225,33 @@ def test_roof_pitched_shrinks_to_a_ridge() -> None:
     assert ys == sorted(ys), "roof layers must be emitted bottom-up"
 
 
-def test_door_frame_door_carves_two_cells_plus_lintel() -> None:
+def test_door_frame_door_carves_six_cells_plus_two_lintel_blocks() -> None:
+    """A walk-through door is 2 wide × 3 tall with a 2-wide lintel on top.
+
+    Carves are always emitted before the lintel so a later wall fill, if
+    accidentally added in the wrong order, cannot reseal the opening.
+    """
     commands = door_frame(
         position=Position3D(x=4, y=64, z=0),
         kind="door",
         frame_material="oak_log",
     )
-    kinds = [(cmd.kind, cmd.block_type) for cmd in commands]
-    assert kinds == [
-        ("setblock", "air"),
-        ("setblock", "air"),
-        ("setblock", "oak_log"),
-    ]
+    air_carves = [cmd for cmd in commands if cmd.block_type == "air"]
+    lintel = [cmd for cmd in commands if cmd.block_type == "oak_log"]
+    assert len(air_carves) == 6
+    assert len(lintel) == 2
+    carve_cells = {(c.position.x, c.position.y, c.position.z) for c in air_carves}
+    assert carve_cells == {
+        (4, 64, 0), (5, 64, 0),
+        (4, 65, 0), (5, 65, 0),
+        (4, 66, 0), (5, 66, 0),
+    }
+    lintel_cells = {(c.position.x, c.position.y, c.position.z) for c in lintel}
+    assert lintel_cells == {(4, 67, 0), (5, 67, 0)}
+    # Carves must precede lintels in emission order.
+    last_air_index = max(i for i, c in enumerate(commands) if c.block_type == "air")
+    first_lintel_index = min(i for i, c in enumerate(commands) if c.block_type == "oak_log")
+    assert last_air_index < first_lintel_index
 
 
 def test_door_frame_window_emits_ring_of_frame() -> None:
@@ -395,6 +410,81 @@ def test_materials_manifest_matches_total_blocks() -> None:
     for name, factory in _REFERENCE_PLANS.items():
         script = compiler.compile(factory(), intent=_intent(name))
         assert script.total_blocks == sum(script.materials_manifest.values()), name
+
+
+def _command_cells(cmd: BuildCommand):
+    """Yield every (x, y, z) cell a command writes to."""
+    if cmd.kind == "setblock":
+        yield (cmd.position.x, cmd.position.y, cmd.position.z)
+    elif cmd.kind == "fill" and cmd.region_to is not None:
+        x0, x1 = sorted((cmd.position.x, cmd.region_to.x))
+        y0, y1 = sorted((cmd.position.y, cmd.region_to.y))
+        z0, z1 = sorted((cmd.position.z, cmd.region_to.z))
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                for z in range(z0, z1 + 1):
+                    yield (x, y, z)
+
+
+def test_cabin_door_remains_open_after_compile() -> None:
+    """Compiling a cabin with a door leaves a walkable 2×3 air opening.
+
+    Regression for #871: walls used to be emitted as solid fills *after*
+    the door air carve, sealing the opening. The compiler now emits
+    floors → roof → walls → openings → key_features so the last write at
+    every door cell is `setblock air`, and the hollow wall-outline never
+    re-fills the interior.
+    """
+    compiler = BuildPlanCompiler()
+    plan = _cabin_plan()
+    script = compiler.compile(plan, intent=_intent("cabin"))
+
+    origin = DEFAULT_ORIGIN
+    door = plan.openings[0].position
+    door_x = origin.x + door.x
+    door_y = origin.y + door.y
+    door_z = origin.z + door.z
+
+    door_cells: set[tuple[int, int, int]] = {
+        (door_x + dx, door_y + dy, door_z)
+        for dx in (0, 1)
+        for dy in (0, 1, 2)
+    }
+
+    last_write: dict[tuple[int, int, int], tuple[str, str | None]] = {}
+    for cmd in script.commands:
+        for cell in _command_cells(cmd):
+            if cell in door_cells:
+                last_write[cell] = (cmd.kind, cmd.block_type)
+
+    for cell in door_cells:
+        assert cell in last_write, f"door cell {cell} was never written"
+        assert last_write[cell] == ("setblock", "air"), (
+            f"door cell {cell} sealed by {last_write[cell]} after compile"
+        )
+
+    # Interior volume is empty: no non-air writes inside the perimeter,
+    # between floor+1 and floor+height-1 (exclusive of the roof slabs above).
+    bbox = plan.footprint.bbox
+    floor_y = origin.y
+    height = plan.levels[0].height_blocks
+    x_lo, x_hi = origin.x + bbox.x + 1, origin.x + bbox.x + bbox.w - 2
+    z_lo, z_hi = origin.z + bbox.y + 1, origin.z + bbox.y + bbox.h - 2
+    y_lo, y_hi = floor_y + 1, floor_y + height - 1
+
+    interior_blocks: list[tuple[tuple[int, int, int], str]] = []
+    for cmd in script.commands:
+        if cmd.block_type is None or cmd.block_type == "air":
+            continue
+        for cell in _command_cells(cmd):
+            x, y, z = cell
+            if x_lo <= x <= x_hi and z_lo <= z <= z_hi and y_lo <= y <= y_hi:
+                interior_blocks.append((cell, cmd.block_type))
+
+    assert not interior_blocks, (
+        f"cabin interior must be hollow; found {len(interior_blocks)} block(s) "
+        f"e.g. {interior_blocks[:5]}"
+    )
 
 
 # ─── Embodiment wiring ──────────────────────────────────────────
