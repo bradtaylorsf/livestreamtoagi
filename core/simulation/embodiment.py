@@ -370,6 +370,19 @@ async def _maybe_write_build_script(
     except Exception:  # pragma: no cover - filesystem errors must not break sim
         logger.exception("failed to write build script %s", intent_id)
 
+    # Live execution: if RCON env vars are set, also stream the BuildScript to
+    # the running Minecraft server so blocks appear in real time during the
+    # headless sim. Failure to reach RCON must never break the sim — the
+    # JSONL + script.json are still on disk for offline replay.
+    try:
+        from core.minecraft.build_executors import rcon_executor_from_env
+
+        rcon_executor = rcon_executor_from_env()
+        if rcon_executor is not None:
+            await rcon_executor(script)
+    except Exception:  # pragma: no cover - live RCON errors must not break sim
+        logger.exception("live RCON execution failed for intent %s", intent_id)
+
 
 def select_executor(run_mode: RunMode | str | None) -> EmbodimentExecutor:
     """Return the executor for ``run_mode``.
