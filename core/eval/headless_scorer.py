@@ -346,6 +346,7 @@ class HeadlessScorer:
                 "confidence": parsed.get("confidence", 0.7),
                 "signal_type": "llm_judge",
                 "model": model,
+                "runtime_model": getattr(response, "runtime_model", None),
             }
         self._write_cache(log_hash, category, result)
         return result
@@ -419,6 +420,8 @@ class HeadlessScorer:
             "criterion": criterion,
             "pass": bool(parsed.get("pass", False)),
             "reason": parsed.get("reason", ""),
+            "model": model,
+            "runtime_model": getattr(response, "runtime_model", None),
         }
 
     # ─── Cache helpers ────────────────────────────────────────────────

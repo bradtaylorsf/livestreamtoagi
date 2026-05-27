@@ -32,10 +32,16 @@ export SOAK_PLAN_BUILD_BOTS="${SOAK_PLAN_BUILD_BOTS:-rex fork}"
 mkdir -p "${OUTPUT_DIR}"
 
 echo "[1/3] preflight: scripts/minecraft/eval_commands.py (dry-run)"
+PREFLIGHT_ARGS=(--dry-run --limit 3 --json)
+# resolve_provider_config requires --model for openrouter even under --dry-run.
+# Use MC_EVAL_MODEL when set; otherwise fall back to a cheap default so the
+# wrapper works on either provider without manual config.
+PREFLIGHT_PROVIDER="${LLM_PROVIDER:-lmstudio}"
+if [[ "${PREFLIGHT_PROVIDER}" == "openrouter" ]]; then
+  PREFLIGHT_ARGS+=(--model "${MC_EVAL_MODEL:-deepseek/deepseek-v3.2}")
+fi
 "${PYTHON_BIN}" "${REPO_ROOT}/scripts/minecraft/eval_commands.py" \
-  --dry-run \
-  --limit 3 \
-  --json \
+  "${PREFLIGHT_ARGS[@]}" \
   > "${OUTPUT_DIR}/_open_settlement_smoke_preflight.json" \
   || {
     echo "ERROR: E17/E18 preflight failed; refusing to launch settlement smoke" >&2

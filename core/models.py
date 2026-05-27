@@ -573,6 +573,7 @@ class ToolCall(BaseModel):
 class LLMResponse(BaseModel):
     content: str
     model: str
+    runtime_model: str | None = None
     input_tokens: int
     output_tokens: int
     estimated_cost: Decimal

@@ -684,6 +684,7 @@ class OpenRouterClient:
         return LLMResponse(
             content=content,
             model=requested_model,
+            runtime_model=runtime_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost=cost,
@@ -878,6 +879,7 @@ class OfflineTestLLMClient(OpenRouterClient):
         return LLMResponse(
             content=content,
             model=requested_model,
+            runtime_model=runtime_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             estimated_cost=cost,

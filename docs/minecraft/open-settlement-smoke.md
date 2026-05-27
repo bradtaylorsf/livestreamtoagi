@@ -6,9 +6,9 @@ together, delegate distinct roles, take an embodied world-changing
 action, and review/repair the result — without being handed a fixed
 cabin blueprint?
 
-Owned by epic [#820](https://github.com/anthropics/livestreamtoagi/issues/820)
+Owned by epic [#820](https://github.com/bradtaylorsf/livestreamtoagi/issues/820)
 and tracked under issue
-[#821](https://github.com/anthropics/livestreamtoagi/issues/821).
+[#821](https://github.com/bradtaylorsf/livestreamtoagi/issues/821).
 
 ## What it produces
 
