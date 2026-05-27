@@ -29,12 +29,14 @@ fi
 export MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-settlement}"
 export SOAK_PLAN_BUILD_BOTS="${SOAK_PLAN_BUILD_BOTS:-rex fork}"
 
+mkdir -p "${OUTPUT_DIR}"
+
 echo "[1/3] preflight: scripts/minecraft/eval_commands.py (dry-run)"
 "${PYTHON_BIN}" "${REPO_ROOT}/scripts/minecraft/eval_commands.py" \
   --dry-run \
   --limit 3 \
   --json \
-  > "${REPO_ROOT}/snapshots/headless/_open_settlement_smoke_preflight.json" \
+  > "${OUTPUT_DIR}/_open_settlement_smoke_preflight.json" \
   || {
     echo "ERROR: E17/E18 preflight failed; refusing to launch settlement smoke" >&2
     exit 1
