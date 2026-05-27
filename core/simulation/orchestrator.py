@@ -533,6 +533,8 @@ class SimulationOrchestrator:
         services: Services | None = None,
         clock: SimulationClock | None = None,
         relationship_repo: RelationshipRepo | None = None,
+        build_plan_compiler: Any | None = None,
+        build_plan_resolver: Any | None = None,
     ) -> None:
         self._config = config
         self._db = db
@@ -580,7 +582,11 @@ class SimulationOrchestrator:
         # Single switch point for embodiment behavior — everything else in the
         # orchestrator (and the conversation engine, dreams, relationships,
         # alliances, blackboard) is shared across modes.
-        self._executor: EmbodimentExecutor = select_executor(self._config.run_mode)
+        self._executor: EmbodimentExecutor = select_executor(
+            self._config.run_mode,
+            build_plan_compiler=build_plan_compiler,
+            build_plan_resolver=build_plan_resolver,
+        )
         self._decision_logger: Any | None = None
         # Event-bus callbacks the orchestrator registers to mirror live
         # events into the decision log (issue #859). Stored so _finalize can
