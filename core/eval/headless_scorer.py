@@ -22,6 +22,7 @@ import yaml
 
 from core.eval.headless_signals import (
     DETERMINISTIC_SIGNALS,
+    SIM_FOLDER_AWARE_SIGNALS,
     collect_tool_intents,
     collect_utterances,
     collect_world_events,
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 OUTPUT_SCHEMA_VERSION = 1
 SCORER_NAME = "headless"
 
-# The 12 dashboard categories.
+# Dashboard categories — the 12 originals plus build_quality (#876).
 ALL_CATEGORIES: tuple[str, ...] = (
     "creativity",
     "agency",
@@ -49,6 +50,7 @@ ALL_CATEGORIES: tuple[str, ...] = (
     "dialogue_quality",
     "simulation_narrative",
     "world_evolution",
+    "build_quality",
 )
 
 LLM_JUDGE_CATEGORIES: tuple[str, ...] = (
@@ -234,7 +236,10 @@ class HeadlessScorer:
         categories_out: dict[str, dict[str, Any]] = {}
         for cat in self._categories:
             if cat in DETERMINISTIC_SIGNALS:
-                signal = DETERMINISTIC_SIGNALS[cat](rows)
+                if cat in SIM_FOLDER_AWARE_SIGNALS:
+                    signal = DETERMINISTIC_SIGNALS[cat](rows, sim_folder=self._sim_folder)
+                else:
+                    signal = DETERMINISTIC_SIGNALS[cat](rows)
                 categories_out[cat] = {
                     **signal,
                     "signal_type": "deterministic",

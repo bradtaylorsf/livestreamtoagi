@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,7 +26,6 @@ from core.eval.headless_signals import (
     score_world_evolution,
 )
 from core.simulation.decision_logger import DecisionLogger, DecisionLogReader
-
 
 # ─── Helpers ───────────────────────────────────────────────────
 
@@ -309,6 +307,87 @@ eval_targets:
     assert entry["category"] == "social_dynamics"
     assert entry["pass"] is True
     assert "alliances" in entry["reason"]
+
+
+@pytest.mark.asyncio
+async def test_scorer_routes_build_quality_through_deterministic(tmp_path: Path) -> None:
+    """build_quality (#876) is dispatched with sim_folder; signal_type=deterministic."""
+    _build_log(tmp_path)
+    _write_metadata(tmp_path)
+
+    # Drop a minimal new_buildings fixture so build_quality can compute a real score.
+    from core.agents.build_intent import SizeClass, StructureType
+    from core.minecraft.build_plan import (
+        BoundingBox,
+        BuildPlan,
+        Footprint,
+        Level,
+        MaterialAssignment,
+        Position3D,
+    )
+    from core.minecraft.build_script import BuildCommand, BuildScript
+
+    plan = BuildPlan(
+        structure_type=StructureType.cabin,
+        size_class=SizeClass.small,
+        source_image_id="src:1",
+        footprint=Footprint(shape="rectangle", bbox=BoundingBox(x=0, y=0, w=4, h=4)),
+        levels=[Level(index=0, height_blocks=3, floor_material="cobblestone")],
+        materials=[MaterialAssignment(region="walls", material="oak_log")],
+        decomposer_version=1,
+        provider_model_id="test/decomposer",
+    )
+    script = BuildScript(
+        intent_id="iq",
+        structure_type=StructureType.cabin,
+        size_class=SizeClass.small,
+        origin=Position3D(x=0, y=64, z=0),
+        commands=[
+            BuildCommand(
+                kind="fill",
+                position=Position3D(x=0, y=65, z=0),
+                region_to=Position3D(x=3, y=67, z=0),
+                block_type="oak_log",
+            )
+        ],
+        materials_manifest={},
+        total_blocks=12,
+        estimated_seconds=1.0,
+        source_plan_hash="h",
+        compiler_version=1,
+    )
+    intent_dir = tmp_path / "new_buildings" / "iq"
+    (intent_dir / "decompositions").mkdir(parents=True)
+    (intent_dir / "scripts").mkdir(parents=True)
+    (intent_dir / "decompositions" / "iter_0.buildplan.json").write_text(
+        plan.model_dump_json()
+    )
+    (intent_dir / "scripts" / "iter_0.script.json").write_text(
+        json.dumps(script.to_jsonable())
+    )
+    (intent_dir / "final_summary.json").write_text(
+        json.dumps(
+            {
+                "iterations": [
+                    {
+                        "iteration": 0,
+                        "buildplan_path": (intent_dir / "decompositions" / "iter_0.buildplan.json")
+                        .as_posix(),
+                        "script_path": (intent_dir / "scripts" / "iter_0.script.json")
+                        .as_posix(),
+                    }
+                ]
+            }
+        )
+    )
+
+    scorer = HeadlessScorer(tmp_path, llm_client=_StubLLM())
+    result = await scorer.score()
+
+    assert "build_quality" in result["categories"]
+    payload = result["categories"]["build_quality"]
+    assert payload["signal_type"] == "deterministic"
+    assert payload["sub_scores"]["build_count"] == 1.0
 
 
 @pytest.mark.asyncio
