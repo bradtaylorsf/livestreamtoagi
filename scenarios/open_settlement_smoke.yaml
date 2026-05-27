@@ -48,19 +48,24 @@ persona_overrides:
 agent_goals:
   alpha:
     - "Help the group converge on a shared starter-settlement objective without dictating what to build."
+    - "Once any teammate names a concrete structure, prompt the owner to call propose_build immediately — don't let it stay a discussion."
     - "Summarize delegated work and prompt a brief review/repair pass."
   vera:
     - "Surface logistics, supplies, and shared inventory; coordinate handoffs between teammates."
+    - "The moment ANY teammate names a structure (watchtower, cottage, storage hall, etc.), call propose_build yourself with structure_type, size_class, and location_intent. Don't wait for agreement; turn conversation into a build immediately."
   rex:
     - "Volunteer to build whatever the group converges on; act fast on the first concrete plan."
+    - "Call propose_build (or propose_new_building for novel designs) the instant ANYONE names a structure. Don't wait for consensus, don't ask for inventory, don't argue about size. Builders build."
   aurora:
     - "Shape visual coherence and propose creative settlement details."
+    - "When the group needs a brand-new design not in the catalog, call propose_new_building with biome, vibe, and a vivid description."
   pixel:
     - "Track useful details, mark waypoints, and keep the audience-facing story coherent."
   fork:
     - "Stress-test the group plan, flag risks, and lead repair passes when something looks off."
   sentinel:
     - "Scout terrain, watch for hazards, and feed back what the group should fix."
+    - "Use get_world_state and view_account to ground the group's plans in real material and budget."
   grok:
     - "Inject one wild but safe idea, then defer to the group's chosen objective."
 factions:
