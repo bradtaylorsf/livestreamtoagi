@@ -174,6 +174,7 @@ def make_refinement_loop() -> Any | None:
 
     try:
         from core.minecraft.blueprint_generator import BlueprintGenerator
+        from core.minecraft.build_executors import rcon_executor_from_env
         from core.minecraft.build_plan_compiler import BuildPlanCompiler
         from core.minecraft.build_refinement_loop import (
             RefinementLoop,
@@ -188,11 +189,25 @@ def make_refinement_loop() -> Any | None:
         logger.warning("RefinementLoop unavailable: %s", exc)
         return None
 
+    rcon_executor = rcon_executor_from_env()
+    if rcon_executor is not None:
+        logger.info(
+            "RefinementLoop: using RconBuildExecutor (%s:%d) for real block placement",
+            rcon_executor.host,
+            rcon_executor.port,
+        )
+        build_executor: Any = rcon_executor
+    else:
+        logger.info(
+            "RefinementLoop: RCON_HOST/RCON_PASSWORD unset — using placeholder executor"
+        )
+        build_executor = screenshotting_build_executor
+
     return RefinementLoop(
         blueprint_generator=BlueprintGenerator(OpenAIImageProvider()),
         decomposer=GeminiVisionDecomposer(),
         compiler=BuildPlanCompiler(),
-        build_executor=screenshotting_build_executor,
+        build_executor=build_executor,
         comparison_provider=GeminiComparisonProvider(),
     )
 
