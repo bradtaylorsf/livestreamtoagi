@@ -56,6 +56,39 @@ def test_select_executor_non_headless_returns_embodied(mode: RunMode | None) -> 
     assert executor.requires_minecraft_world is True
 
 
+def test_select_executor_threads_compiler_and_resolver_into_headless() -> None:
+    """``select_executor`` must propagate compiler+resolver kwargs (issue #888)."""
+    from core.minecraft.build_plan_catalog import build_plan_catalog_resolver
+    from core.minecraft.build_plan_compiler import BuildPlanCompiler
+
+    compiler = BuildPlanCompiler()
+    resolver = build_plan_catalog_resolver()
+    executor = select_executor(
+        RunMode.headless,
+        build_plan_compiler=compiler,
+        build_plan_resolver=resolver,
+    )
+    assert isinstance(executor, HeadlessExecutor)
+    assert executor._build_plan_compiler is compiler
+    assert executor._build_plan_resolver is resolver
+
+
+def test_select_executor_threads_compiler_and_resolver_into_embodied() -> None:
+    from core.minecraft.build_plan_catalog import build_plan_catalog_resolver
+    from core.minecraft.build_plan_compiler import BuildPlanCompiler
+
+    compiler = BuildPlanCompiler()
+    resolver = build_plan_catalog_resolver()
+    executor = select_executor(
+        RunMode.persistent,
+        build_plan_compiler=compiler,
+        build_plan_resolver=resolver,
+    )
+    assert isinstance(executor, EmbodiedExecutor)
+    assert executor._build_plan_compiler is compiler
+    assert executor._build_plan_resolver is resolver
+
+
 @pytest.mark.asyncio
 async def test_headless_executor_records_tool_intents() -> None:
     executor = HeadlessExecutor()

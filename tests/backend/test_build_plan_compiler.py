@@ -57,9 +57,7 @@ def _cabin_plan() -> BuildPlan:
         structure_type="cabin",
         size_class="medium",
         source_image_id="cabin:image.png",
-        footprint=Footprint(
-            shape="rectangle", bbox=BoundingBox(x=0, y=0, w=6, h=5)
-        ),
+        footprint=Footprint(shape="rectangle", bbox=BoundingBox(x=0, y=0, w=6, h=5)),
         levels=[Level(index=0, height_blocks=3, floor_material="oak_planks")],
         materials=[
             MaterialAssignment(region="floor", material="oak_planks"),
@@ -242,9 +240,12 @@ def test_door_frame_door_carves_six_cells_plus_two_lintel_blocks() -> None:
     assert len(lintel) == 2
     carve_cells = {(c.position.x, c.position.y, c.position.z) for c in air_carves}
     assert carve_cells == {
-        (4, 64, 0), (5, 64, 0),
-        (4, 65, 0), (5, 65, 0),
-        (4, 66, 0), (5, 66, 0),
+        (4, 64, 0),
+        (5, 64, 0),
+        (4, 65, 0),
+        (5, 65, 0),
+        (4, 66, 0),
+        (5, 66, 0),
     }
     lintel_cells = {(c.position.x, c.position.y, c.position.z) for c in lintel}
     assert lintel_cells == {(4, 67, 0), (5, 67, 0)}
@@ -417,9 +418,7 @@ def _ornamentation_plan(features: list[KeyFeature]) -> BuildPlan:
         structure_type="cabin",
         size_class="medium",
         source_image_id="features:image.png",
-        footprint=Footprint(
-            shape="rectangle", bbox=BoundingBox(x=0, y=0, w=12, h=12)
-        ),
+        footprint=Footprint(shape="rectangle", bbox=BoundingBox(x=0, y=0, w=12, h=12)),
         levels=[Level(index=0, height_blocks=4, floor_material="oak_planks")],
         materials=[
             MaterialAssignment(region="floor", material="oak_planks"),
@@ -439,9 +438,7 @@ def test_compile_invokes_skill_cards_for_each_key_feature_kind() -> None:
     """A plan with one of each KeyFeatureKind invokes the matching card."""
     plan = _ornamentation_plan(
         [
-            KeyFeature(
-                kind="column", position=Position3D(x=1, y=0, z=1), size={"height": 4}
-            ),
+            KeyFeature(kind="column", position=Position3D(x=1, y=0, z=1), size={"height": 4}),
             KeyFeature(
                 kind="arch",
                 position=Position3D(x=2, y=0, z=2),
@@ -545,9 +542,7 @@ def test_cabin_door_remains_open_after_compile() -> None:
     door_z = origin.z + door.z
 
     door_cells: set[tuple[int, int, int]] = {
-        (door_x + dx, door_y + dy, door_z)
-        for dx in (0, 1)
-        for dy in (0, 1, 2)
+        (door_x + dx, door_y + dy, door_z) for dx in (0, 1) for dy in (0, 1, 2)
     }
 
     last_write: dict[tuple[int, int, int], tuple[str, str | None]] = {}
@@ -586,6 +581,124 @@ def test_cabin_door_remains_open_after_compile() -> None:
     )
 
 
+# ─── Multi-level wall coverage (issue #887) ─────────────────────
+
+
+def _is_perimeter_wall_fill(cmd: BuildCommand, plan: BuildPlan, origin: Position3D) -> bool:
+    """True if ``cmd`` is a perimeter wall fill of the building footprint.
+
+    Wall fills are the 4 thin slabs that ``wall_segment`` emits for the
+    outer footprint: one of ``position`` or ``region_to`` shares the same
+    value for either x or z with the other corner of the footprint.
+    """
+    if cmd.kind != "fill" or cmd.region_to is None:
+        return False
+    bbox = plan.footprint.bbox
+    x0 = origin.x + bbox.x
+    x1 = origin.x + bbox.x + bbox.w - 1
+    z0 = origin.z + bbox.y
+    z1 = origin.z + bbox.y + bbox.h - 1
+    px = (cmd.position.x, cmd.region_to.x)
+    pz = (cmd.position.z, cmd.region_to.z)
+    on_x_edge = px == (x0, x0) or px == (x1, x1)
+    on_z_edge = pz == (z0, z0) or pz == (z1, z1)
+    spans_full_x = sorted(px) == [x0, x1]
+    spans_full_z = sorted(pz) == [z0, z1]
+    return (on_x_edge and spans_full_z) or (on_z_edge and spans_full_x)
+
+
+def test_recipe_generic_emits_walls_for_every_level() -> None:
+    """A 3-level watchtower must have walls behind every floor.
+
+    Regression for #887: pre-fix, the wall-generation loop only iterated
+    level 0, leaving the second and third floors floating above empty
+    air. The fix iterates ``plan.levels`` so the perimeter wall command
+    count scales with the number of levels and every level's y range is
+    covered.
+    """
+    compiler = BuildPlanCompiler()
+    plan = _watchtower_plan()
+    script = compiler.compile(plan, intent=_intent("watchtower"))
+    origin = DEFAULT_ORIGIN
+
+    perimeter_walls = [cmd for cmd in script.commands if _is_perimeter_wall_fill(cmd, plan, origin)]
+    # 4 wall fills per level; tower has 3 levels.
+    assert len(perimeter_walls) == 4 * len(plan.levels), (
+        f"expected {4 * len(plan.levels)} perimeter wall fills, got {len(perimeter_walls)}"
+    )
+
+    levels = sorted(plan.levels, key=lambda lvl: lvl.index)
+    floor_offset = 0
+    expected_ranges: list[tuple[int, int]] = []
+    for level in levels:
+        base_y = origin.y + floor_offset + 1
+        top_y = base_y + max(1, level.height_blocks) - 1
+        expected_ranges.append((base_y, top_y))
+        floor_offset += max(1, level.height_blocks)
+
+    for base_y, top_y in expected_ranges:
+        covering = [
+            cmd
+            for cmd in perimeter_walls
+            if min(cmd.position.y, cmd.region_to.y) <= base_y
+            and max(cmd.position.y, cmd.region_to.y) >= top_y
+        ]
+        assert covering, f"no perimeter wall fill covers the y range [{base_y}, {top_y}]"
+
+    # Consecutive levels' walls must be adjacent — no gaps, no holes.
+    for (_, top_a), (base_b, _) in zip(expected_ranges, expected_ranges[1:], strict=False):
+        assert base_b == top_a + 1, (
+            f"gap between levels: top of one level is {top_a}, base of next is {base_b}"
+        )
+
+    # The topmost wall must reach the y immediately below the roof base.
+    roof_base_y = origin.y + sum(max(1, lvl.height_blocks) for lvl in levels) + 1
+    top_y = expected_ranges[-1][1]
+    assert top_y == roof_base_y - 1, (
+        f"topmost wall y is {top_y}; expected roof_base_y - 1 = {roof_base_y - 1}"
+    )
+
+
+@pytest.mark.parametrize("num_levels", [1, 2, 3, 5])
+def test_recipe_generic_wall_count_scales_linearly_with_levels(num_levels: int) -> None:
+    """Wall fill count must grow linearly with ``len(plan.levels)``."""
+    plan = BuildPlan(
+        structure_type="watchtower",
+        size_class="medium",
+        source_image_id="scaling:image.png",
+        footprint=Footprint(shape="rectangle", bbox=BoundingBox(x=0, y=0, w=6, h=6)),
+        levels=[
+            Level(index=i, height_blocks=3, floor_material="stone_bricks")
+            for i in range(num_levels)
+        ],
+        materials=[
+            MaterialAssignment(region="floor", material="stone_bricks"),
+            MaterialAssignment(region="walls", material="cobblestone"),
+            MaterialAssignment(region="roof", material="dark_oak_planks"),
+        ],
+        decomposer_version=1,
+        provider_model_id="fake/test",
+    )
+    compiler = BuildPlanCompiler()
+    script = compiler.compile(plan, intent=_intent("watchtower"))
+    origin = DEFAULT_ORIGIN
+    perimeter_walls = [cmd for cmd in script.commands if _is_perimeter_wall_fill(cmd, plan, origin)]
+    assert len(perimeter_walls) == 4 * num_levels
+
+
+def test_recipe_generic_uses_walls_region_material_for_every_level() -> None:
+    """All per-level perimeter walls must use the ``walls`` region material."""
+    compiler = BuildPlanCompiler()
+    plan = _watchtower_plan()
+    script = compiler.compile(plan, intent=_intent("watchtower"))
+    origin = DEFAULT_ORIGIN
+    perimeter_walls = [cmd for cmd in script.commands if _is_perimeter_wall_fill(cmd, plan, origin)]
+    wall_material = next(m.material for m in plan.materials if m.region == "walls")
+    assert perimeter_walls, "watchtower must emit perimeter walls"
+    for cmd in perimeter_walls:
+        assert cmd.block_type == wall_material
+
+
 # ─── Embodiment wiring ──────────────────────────────────────────
 
 
@@ -601,9 +714,7 @@ async def test_headless_executor_writes_build_script_when_resolver_attached(
     def resolver(args: dict[str, Any]) -> BuildPlan | None:
         return plan
 
-    executor = HeadlessExecutor(
-        build_plan_compiler=compiler, build_plan_resolver=resolver
-    )
+    executor = HeadlessExecutor(build_plan_compiler=compiler, build_plan_resolver=resolver)
     await executor.setup(simulation_id="sim-1", sim_folder=tmp_path)
 
     intent = _intent("cabin")
@@ -708,9 +819,7 @@ def _random_plan(rng: random.Random) -> BuildPlan:
         structure_type=structure,
         size_class=rng.choice(["small", "medium", "large", "epic"]),
         source_image_id=f"{structure}:rand",
-        footprint=Footprint(
-            shape="rectangle", bbox=BoundingBox(x=0, y=0, w=width, h=depth)
-        ),
+        footprint=Footprint(shape="rectangle", bbox=BoundingBox(x=0, y=0, w=width, h=depth)),
         levels=levels,
         rooms=rooms,
         materials=materials,
