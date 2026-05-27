@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCENARIO="${SCENARIO:-${REPO_ROOT}/scenarios/open_settlement_smoke.yaml}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/snapshots/headless}"
 MAX_COST="${MAX_COST:-0.10}"
-DURATION_HOURS="${DURATION_HOURS:-0.5}"
+DURATION="${DURATION:-25m}"
 PYTHON_BIN="${PYTHON_BIN:-${REPO_ROOT}/.venv/bin/python}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
@@ -51,7 +51,7 @@ trap 'rm -f "${SIM_LOG}"' EXIT
   --scenario "${SCENARIO}" \
   --name "${NAME}" \
   --max-cost "${MAX_COST}" \
-  --duration "${DURATION_HOURS}h" \
+  --duration "${DURATION}" \
   --output-dir "${OUTPUT_DIR}" \
   --verbose \
   | tee "${SIM_LOG}"
