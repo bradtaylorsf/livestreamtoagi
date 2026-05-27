@@ -150,7 +150,7 @@ class RconBuildExecutor:
         rcon_host: str,
         rcon_port: int = 25575,
         rcon_password: str,
-        throttle_ms: int = 30,
+        throttle_ms: int = 100,
         screenshot_fn: ScreenshotFn | None = None,
         timeout_seconds: int = 10,
         auto_ground: bool = True,
@@ -223,6 +223,7 @@ class RconBuildExecutor:
                 try:
                     resp = mcr.command(bare)
                     sent += 1
+                    logger.debug("RCON foundation -> %s | resp=%r", bare[:120], resp[:160])
                     if resp and "error" in resp.lower():
                         logger.warning("RCON response error: %s", resp.strip()[:200])
                     if throttle_seconds:
@@ -244,6 +245,7 @@ class RconBuildExecutor:
                 try:
                     resp = mcr.command(bare)
                     sent += 1
+                    logger.debug("RCON cmd -> %s | resp=%r", bare[:120], resp[:160])
                     if resp and "error" in resp.lower():
                         logger.warning("RCON response error: %s", resp.strip()[:200])
                     if throttle_seconds:

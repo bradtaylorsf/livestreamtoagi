@@ -515,6 +515,109 @@ async def test_executor_auto_ground_disabled_skips_terrain_queries(
     assert inst.commands == ["setblock 0 64 0 minecraft:dirt"]
 
 
+# ─── #886 multi-fill streaming regression ─────────────────────────
+
+
+def test_executor_default_throttle_is_protective_for_paper() -> None:
+    """Default ``throttle_ms`` must be ≥100ms.
+
+    Regression for #886: at 30ms throttle, multi-/fill BuildScripts sent
+    back-to-back over RCON only materialized the first fill on Paper —
+    later fills landed at Paper's command queue faster than its tick loop
+    could process them and got dropped silently (no "error" in the RCON
+    response). 100ms ≈ 2 ticks at 20tps, which is what the field testing
+    in the issue confirmed is enough headroom for ``/fill`` to settle.
+    """
+    executor = RconBuildExecutor(rcon_host="127.0.0.1", rcon_password="pw")
+    assert executor._throttle_ms >= 100
+
+
+@pytest.mark.asyncio
+async def test_executor_streams_every_layer_of_multi_fill_build(
+    fake_mcrcon: type[_FakeMCRcon],
+) -> None:
+    """Regression for #886: every ``/fill`` in a multi-layer BuildScript
+    must reach the fake RCON connection, not just the first one. Before the
+    fix the executor reported ``sent=50 skipped=0`` but only the first
+    ``/fill`` actually materialized in the world; this test pins the
+    pre-network-layer invariant that all commands are dispatched in order
+    with no silent drops.
+    """
+    fills = [
+        BuildCommand(
+            kind="fill",
+            position=Position3D(x=0, y=y, z=0),
+            region_to=Position3D(x=4, y=y, z=4),
+            block_type=mat,
+        )
+        for y, mat in [
+            (64, "stone_bricks"),
+            (68, "stone_bricks"),
+            (72, "oak_planks"),
+            (77, "dark_oak_planks"),
+        ]
+    ]
+    script = _make_script(fills)
+    executor = RconBuildExecutor(
+        rcon_host="127.0.0.1",
+        rcon_password="pw",
+        throttle_ms=0,
+        auto_ground=False,
+    )
+
+    await executor(script)
+
+    inst = fake_mcrcon.instances[0]
+    assert inst.commands == [
+        "fill 0 64 0 4 64 4 minecraft:stone_bricks",
+        "fill 0 68 0 4 68 4 minecraft:stone_bricks",
+        "fill 0 72 0 4 72 4 minecraft:oak_planks",
+        "fill 0 77 0 4 77 4 minecraft:dark_oak_planks",
+    ]
+
+
+def test_auto_ground_shifts_every_layer_not_just_first() -> None:
+    """Regression for #886 (suspected root cause 1): the auto-ground shift
+    must be applied to every command's y, not just the first one.
+
+    Constructs a 4-layer BuildScript at y=80/84/88/92 with origin y=80,
+    runs ``auto_ground_script`` with a matcher that reports terrain_top=63
+    (so dy = -16), and asserts every fill ends up shifted by exactly -16.
+    """
+    from core.minecraft.terrain import auto_ground_script
+
+    fills = [
+        BuildCommand(
+            kind="fill",
+            position=Position3D(x=0, y=y, z=0),
+            region_to=Position3D(x=4, y=y, z=4),
+            block_type="oak_planks",
+        )
+        for y in (80, 84, 88, 92)
+    ]
+    script = _make_script(fills).model_copy(update={"origin": Position3D(x=0, y=80, z=0)})
+
+    def matcher(x: int, y: int, z: int, block_or_tag: str) -> bool:
+        # Air above y=63, stone at y=63, anything below also stone.
+        if "air" in block_or_tag:
+            return y > 63
+        if "minecraft:stone" in block_or_tag:
+            return y <= 63
+        return False
+
+    shifted, foundation_cmds = auto_ground_script(script, matcher)
+
+    # dy = (63 + 1) - 80 = -16; every command's y should drop by 16.
+    shifted_ys = [cmd.position.y for cmd in shifted.commands]
+    assert shifted_ys == [64, 68, 72, 76]
+    region_ys = [cmd.region_to.y for cmd in shifted.commands if cmd.region_to is not None]
+    assert region_ys == [64, 68, 72, 76]
+    assert shifted.origin.y == 64
+    # Foundation perimeter spans terrain_top+1 (=64) to base_y-1 (=63) → empty.
+    # (base_y after shift is the new lowest command y, which equals terrain_top+1.)
+    assert foundation_cmds == []
+
+
 # ─── #885 async-safe MCRcon regression ────────────────────────────
 
 
@@ -635,3 +738,72 @@ async def test_live_rcon_one_block_setblock() -> None:  # pragma: no cover - liv
     # Should not raise; we don't assert response content because servers
     # differ in their setblock acknowledgements.
     await executor(script)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("MC_LIVE_RCON_HOST"),
+    reason="set MC_LIVE_RCON_HOST/_PORT/_PASSWORD to run against a real server",
+)
+@pytest.mark.asyncio
+async def test_live_rcon_multi_layer_fill_materializes_every_layer() -> None:  # pragma: no cover - live path
+    """Live regression for #886: every layer of a multi-fill build must
+    place blocks. Pre-fix this test would have placed only the y=64 layer.
+
+    The test reserves a 4×4 footprint at a configurable origin (default
+    (200,64,200), well clear of spawn), wipes it to air, runs the executor,
+    then issues ``execute if block`` checks at the center of each layer.
+    """
+    from core.minecraft.build_executors import async_safe_mcrcon_class
+
+    host = os.environ["MC_LIVE_RCON_HOST"]
+    port = int(os.environ.get("MC_LIVE_RCON_PORT", "25575"))
+    password = os.environ["MC_LIVE_RCON_PASSWORD"]
+    origin_x = int(os.environ.get("MC_LIVE_TEST_X", "200"))
+    origin_z = int(os.environ.get("MC_LIVE_TEST_Z", "200"))
+
+    layers = [
+        (64, "stone_bricks"),
+        (68, "stone_bricks"),
+        (72, "oak_planks"),
+        (77, "dark_oak_planks"),
+    ]
+
+    # Wipe the test footprint to air first so we don't false-positive on
+    # leftover blocks from a previous run.
+    MCRcon = async_safe_mcrcon_class()
+    with MCRcon(host, password, port=port, timeout=10) as mcr:
+        mcr.command(
+            f"fill {origin_x} 60 {origin_z} {origin_x + 4} 80 {origin_z + 4} minecraft:air"
+        )
+
+    script = _make_script(
+        [
+            BuildCommand(
+                kind="fill",
+                position=Position3D(x=origin_x, y=y, z=origin_z),
+                region_to=Position3D(x=origin_x + 4, y=y, z=origin_z + 4),
+                block_type=mat,
+            )
+            for y, mat in layers
+        ]
+    )
+    script = script.model_copy(
+        update={"origin": Position3D(x=origin_x, y=layers[0][0], z=origin_z)}
+    )
+
+    executor = RconBuildExecutor(
+        rcon_host=host,
+        rcon_port=port,
+        rcon_password=password,
+        auto_ground=False,
+    )
+    await executor(script)
+
+    # Probe the center of each layer.
+    cx, cz = origin_x + 2, origin_z + 2
+    with MCRcon(host, password, port=port, timeout=10) as mcr:
+        for y, mat in layers:
+            resp = mcr.command(f"execute if block {cx} {y} {cz} minecraft:{mat}")
+            assert "passed" in (resp or "").lower(), (
+                f"layer y={y} did not materialize: {resp!r}"
+            )
