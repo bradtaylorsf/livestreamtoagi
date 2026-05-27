@@ -232,7 +232,10 @@ async def test_executor_returns_screenshot_when_provided(
         ]
     )
 
-    async def screenshot() -> bytes:
+    received: dict[str, Any] = {}
+
+    async def screenshot(s: BuildScript) -> bytes:
+        received["script"] = s
         return b"\x89PNG-from-bluemap"
 
     executor = RconBuildExecutor(
@@ -245,6 +248,39 @@ async def test_executor_returns_screenshot_when_provided(
 
     result = await executor(script)
     assert result == b"\x89PNG-from-bluemap"
+    # The executor passes the script through to the screenshot fn so
+    # BlueMap can derive the camera target from the build's coordinates.
+    assert received["script"] is script
+
+
+@pytest.mark.asyncio
+async def test_executor_returns_placeholder_when_screenshot_fn_raises(
+    fake_mcrcon: type[_FakeMCRcon],
+) -> None:
+    script = _make_script(
+        [
+            BuildCommand(
+                kind="setblock",
+                position=Position3D(x=0, y=0, z=0),
+                block_type="dirt",
+            )
+        ]
+    )
+
+    async def screenshot(_: BuildScript) -> bytes:
+        raise RuntimeError("bluemap unreachable")
+
+    executor = RconBuildExecutor(
+        rcon_host="127.0.0.1",
+        rcon_password="pw",
+        screenshot_fn=screenshot,
+        throttle_ms=0,
+        auto_ground=False,
+    )
+
+    result = await executor(script)
+    # Build commands still ran; the failure only neutralizes the screenshot.
+    assert result == DEFAULT_BUILD_EXECUTOR_PNG
 
 
 @pytest.mark.asyncio
@@ -314,9 +350,33 @@ def test_rcon_executor_from_env_invalid_port_falls_back(
     monkeypatch.setenv("RCON_HOST", "mc.example.com")
     monkeypatch.setenv("RCON_PASSWORD", "secret")
     monkeypatch.setenv("RCON_PORT", "not-a-number")
+    monkeypatch.delenv("BLUEMAP_URL", raising=False)
     executor = rcon_executor_from_env()
     assert isinstance(executor, RconBuildExecutor)
     assert executor.port == 25575
+
+
+def test_rcon_executor_from_env_wires_bluemap_when_url_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RCON_HOST", "mc.example.com")
+    monkeypatch.setenv("RCON_PASSWORD", "secret")
+    monkeypatch.setenv("BLUEMAP_URL", "http://localhost:8100")
+    executor = rcon_executor_from_env()
+    assert isinstance(executor, RconBuildExecutor)
+    # Private attribute — but this is the production wiring under test.
+    assert executor._screenshot_fn is not None
+
+
+def test_rcon_executor_from_env_omits_bluemap_when_url_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RCON_HOST", "mc.example.com")
+    monkeypatch.setenv("RCON_PASSWORD", "secret")
+    monkeypatch.delenv("BLUEMAP_URL", raising=False)
+    executor = rcon_executor_from_env()
+    assert isinstance(executor, RconBuildExecutor)
+    assert executor._screenshot_fn is None
 
 
 def test_make_refinement_loop_uses_rcon_executor_when_env_set(

@@ -75,7 +75,7 @@ def command_to_minecraft(cmd: BuildCommand) -> str | None:
     return f"/setblock {pos.x} {pos.y} {pos.z} minecraft:structure_void"
 
 
-ScreenshotFn = Callable[[], Awaitable[bytes]]
+ScreenshotFn = Callable[[BuildScript], Awaitable[bytes]]
 
 
 class RconBuildExecutor:
@@ -131,7 +131,14 @@ class RconBuildExecutor:
             script.intent_id,
         )
         if self._screenshot_fn is not None:
-            return await self._screenshot_fn()
+            try:
+                return await self._screenshot_fn(script)
+            except Exception:
+                logger.exception(
+                    "screenshot_fn failed for intent %s; returning placeholder",
+                    script.intent_id,
+                )
+                return DEFAULT_BUILD_EXECUTOR_PNG
         return DEFAULT_BUILD_EXECUTOR_PNG
 
     def _send_all_sync(self, script: BuildScript) -> tuple[int, int]:
@@ -218,6 +225,11 @@ def rcon_executor_from_env() -> RconBuildExecutor | None:
     ``RCON_PORT`` (defaults to 25575). Returning ``None`` means the
     caller should keep the placeholder executor — headless sims without
     a live Minecraft stay functional.
+
+    When ``BLUEMAP_URL`` is also set the executor receives a screenshot
+    function that captures the live BlueMap canvas after each build
+    (issue #875), so the refinement loop's comparison step gets a real
+    PNG of the built structure instead of the placeholder.
     """
     host = os.environ.get("RCON_HOST", "").strip()
     password = os.environ.get("RCON_PASSWORD", "")
@@ -228,7 +240,17 @@ def rcon_executor_from_env() -> RconBuildExecutor | None:
     except ValueError:
         logger.warning("RCON_PORT is not an int; falling back to 25575")
         port = 25575
-    return RconBuildExecutor(rcon_host=host, rcon_port=port, rcon_password=password)
+    from core.minecraft.bluemap_screenshot import bluemap_screenshot_fn_from_env
+
+    screenshot_fn = bluemap_screenshot_fn_from_env()
+    if screenshot_fn is not None:
+        logger.info("RconBuildExecutor: BlueMap screenshot capture enabled")
+    return RconBuildExecutor(
+        rcon_host=host,
+        rcon_port=port,
+        rcon_password=password,
+        screenshot_fn=screenshot_fn,
+    )
 
 
 __all__ = [
