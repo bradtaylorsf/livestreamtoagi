@@ -191,10 +191,13 @@ def make_refinement_loop() -> Any | None:
 
     rcon_executor = rcon_executor_from_env()
     if rcon_executor is not None:
+        screenshot_enabled = rcon_executor._screenshot_fn is not None
         logger.info(
-            "RefinementLoop: using RconBuildExecutor (%s:%d) for real block placement",
+            "RefinementLoop: using RconBuildExecutor (%s:%d) for real block placement "
+            "(screenshot_capture=%s)",
             rcon_executor.host,
             rcon_executor.port,
+            "bluemap" if screenshot_enabled else "placeholder",
         )
         build_executor: Any = rcon_executor
     else:
