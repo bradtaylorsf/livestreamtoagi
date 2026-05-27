@@ -18,20 +18,30 @@ def door_frame(
 ) -> list[BuildCommand]:
     """Carve an opening and place a one-block-thick frame around it.
 
-    For a door the opening is 1×2 (head + foot); for a window it is 1×1.
-    The frame is emitted as ``setblock`` commands so it composes cleanly
-    over a previously-filled wall (the air carve runs first, then the
-    frame). All positions are absolute world coordinates.
+    For a door the opening is 2 wide × 3 tall (unsneaking-player walkable);
+    for a window it is 1×1. Carves are always emitted before frame writes
+    so the frame cannot reseal the opening if a later wall fill is added
+    in the wrong order.
     """
     commands: list[BuildCommand] = []
 
     if kind == "door":
-        head = Position3D(x=position.x, y=position.y + 1, z=position.z)
-        commands.append(BuildCommand(kind="setblock", position=position, block_type=AIR_BLOCK))
-        commands.append(BuildCommand(kind="setblock", position=head, block_type=AIR_BLOCK))
-        # Frame above the head (lintel)
-        lintel = Position3D(x=position.x, y=position.y + 2, z=position.z)
-        commands.append(BuildCommand(kind="setblock", position=lintel, block_type=frame_material))
+        for dx in (0, 1):
+            for dy in (0, 1, 2):
+                commands.append(
+                    BuildCommand(
+                        kind="setblock",
+                        position=Position3D(
+                            x=position.x + dx, y=position.y + dy, z=position.z
+                        ),
+                        block_type=AIR_BLOCK,
+                    )
+                )
+        for dx in (0, 1):
+            lintel = Position3D(x=position.x + dx, y=position.y + 3, z=position.z)
+            commands.append(
+                BuildCommand(kind="setblock", position=lintel, block_type=frame_material)
+            )
     else:
         commands.append(BuildCommand(kind="setblock", position=position, block_type=AIR_BLOCK))
         for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):

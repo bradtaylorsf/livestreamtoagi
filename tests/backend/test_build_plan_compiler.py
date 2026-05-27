@@ -225,18 +225,33 @@ def test_roof_pitched_shrinks_to_a_ridge() -> None:
     assert ys == sorted(ys), "roof layers must be emitted bottom-up"
 
 
-def test_door_frame_door_carves_two_cells_plus_lintel() -> None:
+def test_door_frame_door_carves_six_cells_plus_two_lintel_blocks() -> None:
+    """A walk-through door is 2 wide × 3 tall with a 2-wide lintel on top.
+
+    Carves are always emitted before the lintel so a later wall fill, if
+    accidentally added in the wrong order, cannot reseal the opening.
+    """
     commands = door_frame(
         position=Position3D(x=4, y=64, z=0),
         kind="door",
         frame_material="oak_log",
     )
-    kinds = [(cmd.kind, cmd.block_type) for cmd in commands]
-    assert kinds == [
-        ("setblock", "air"),
-        ("setblock", "air"),
-        ("setblock", "oak_log"),
-    ]
+    air_carves = [cmd for cmd in commands if cmd.block_type == "air"]
+    lintel = [cmd for cmd in commands if cmd.block_type == "oak_log"]
+    assert len(air_carves) == 6
+    assert len(lintel) == 2
+    carve_cells = {(c.position.x, c.position.y, c.position.z) for c in air_carves}
+    assert carve_cells == {
+        (4, 64, 0), (5, 64, 0),
+        (4, 65, 0), (5, 65, 0),
+        (4, 66, 0), (5, 66, 0),
+    }
+    lintel_cells = {(c.position.x, c.position.y, c.position.z) for c in lintel}
+    assert lintel_cells == {(4, 67, 0), (5, 67, 0)}
+    # Carves must precede lintels in emission order.
+    last_air_index = max(i for i, c in enumerate(commands) if c.block_type == "air")
+    first_lintel_index = min(i for i, c in enumerate(commands) if c.block_type == "oak_log")
+    assert last_air_index < first_lintel_index
 
 
 def test_door_frame_window_emits_ring_of_frame() -> None:
@@ -395,6 +410,180 @@ def test_materials_manifest_matches_total_blocks() -> None:
     for name, factory in _REFERENCE_PLANS.items():
         script = compiler.compile(factory(), intent=_intent(name))
         assert script.total_blocks == sum(script.materials_manifest.values()), name
+
+
+def _ornamentation_plan(features: list[KeyFeature]) -> BuildPlan:
+    return BuildPlan(
+        structure_type="cabin",
+        size_class="medium",
+        source_image_id="features:image.png",
+        footprint=Footprint(
+            shape="rectangle", bbox=BoundingBox(x=0, y=0, w=12, h=12)
+        ),
+        levels=[Level(index=0, height_blocks=4, floor_material="oak_planks")],
+        materials=[
+            MaterialAssignment(region="floor", material="oak_planks"),
+            MaterialAssignment(region="walls", material="oak_log"),
+            MaterialAssignment(region="roof", material="dark_oak_planks"),
+            MaterialAssignment(region="frame", material="stone_bricks"),
+            MaterialAssignment(region="columns", material="quartz_pillar"),
+            MaterialAssignment(region="trim", material="stone_bricks"),
+        ],
+        key_features=features,
+        decomposer_version=1,
+        provider_model_id="fake/test",
+    )
+
+
+def test_compile_invokes_skill_cards_for_each_key_feature_kind() -> None:
+    """A plan with one of each KeyFeatureKind invokes the matching card."""
+    plan = _ornamentation_plan(
+        [
+            KeyFeature(
+                kind="column", position=Position3D(x=1, y=0, z=1), size={"height": 4}
+            ),
+            KeyFeature(
+                kind="arch",
+                position=Position3D(x=2, y=0, z=2),
+                size={"span": 3, "height": 4},
+            ),
+            KeyFeature(
+                kind="roof",
+                position=Position3D(x=3, y=5, z=3),
+                size={"w": 4, "d": 4},
+            ),
+            KeyFeature(
+                kind="ornament",
+                position=Position3D(x=5, y=1, z=5),
+                size={"w": 2, "d": 2},
+            ),
+        ]
+    )
+    compiler = BuildPlanCompiler()
+    script = compiler.compile(plan, intent=_intent("cabin"))
+    assert set(script.skill_cards_invoked) >= {
+        "arch_round",
+        "column_doric",
+        "roof_pitched",
+        "wall_segment",
+    }
+
+
+def test_compile_skill_cards_invoked_is_empty_when_plan_has_no_features() -> None:
+    compiler = BuildPlanCompiler()
+    script = compiler.compile(_cabin_plan(), intent=_intent("cabin"))
+    assert script.skill_cards_invoked == []
+
+
+def test_compile_skill_cards_invoked_is_deduplicated_and_deterministic() -> None:
+    """Repeated kinds collapse to one entry and the same plan compiles identically."""
+    plan = _ornamentation_plan(
+        [
+            KeyFeature(kind="column", position=Position3D(x=1, y=0, z=1), size={"height": 3}),
+            KeyFeature(kind="column", position=Position3D(x=8, y=0, z=8), size={"height": 3}),
+            KeyFeature(kind="ornament", position=Position3D(x=4, y=1, z=4), size={"w": 2, "d": 2}),
+        ]
+    )
+    compiler = BuildPlanCompiler()
+    first = compiler.compile(plan, intent=_intent("cabin"))
+    second = compiler.compile(plan, intent=_intent("cabin"))
+    assert first.skill_cards_invoked == second.skill_cards_invoked
+    assert first.skill_cards_invoked.count("column_doric") == 1
+    assert "wall_segment" in first.skill_cards_invoked
+
+
+def test_property_random_plans_with_features_invoke_at_least_one_card() -> None:
+    """If a random plan has any key_features, the resulting script lists at least one card."""
+    rng = random.Random(20260526)
+    compiler = BuildPlanCompiler()
+    plans_with_features = 0
+    for _ in range(60):
+        plan = _random_plan(rng)
+        script = compiler.compile(plan, intent=_intent(plan.structure_type))
+        if plan.key_features:
+            plans_with_features += 1
+            assert script.skill_cards_invoked, (
+                f"plan with {len(plan.key_features)} feature(s) produced an empty "
+                f"skill_cards_invoked list"
+            )
+        else:
+            assert script.skill_cards_invoked == []
+    assert plans_with_features > 0, "expected some random plans to have key_features"
+
+
+def _command_cells(cmd: BuildCommand):
+    """Yield every (x, y, z) cell a command writes to."""
+    if cmd.kind == "setblock":
+        yield (cmd.position.x, cmd.position.y, cmd.position.z)
+    elif cmd.kind == "fill" and cmd.region_to is not None:
+        x0, x1 = sorted((cmd.position.x, cmd.region_to.x))
+        y0, y1 = sorted((cmd.position.y, cmd.region_to.y))
+        z0, z1 = sorted((cmd.position.z, cmd.region_to.z))
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                for z in range(z0, z1 + 1):
+                    yield (x, y, z)
+
+
+def test_cabin_door_remains_open_after_compile() -> None:
+    """Compiling a cabin with a door leaves a walkable 2×3 air opening.
+
+    Regression for #871: walls used to be emitted as solid fills *after*
+    the door air carve, sealing the opening. The compiler now emits
+    floors → roof → walls → openings → key_features so the last write at
+    every door cell is `setblock air`, and the hollow wall-outline never
+    re-fills the interior.
+    """
+    compiler = BuildPlanCompiler()
+    plan = _cabin_plan()
+    script = compiler.compile(plan, intent=_intent("cabin"))
+
+    origin = DEFAULT_ORIGIN
+    door = plan.openings[0].position
+    door_x = origin.x + door.x
+    door_y = origin.y + door.y
+    door_z = origin.z + door.z
+
+    door_cells: set[tuple[int, int, int]] = {
+        (door_x + dx, door_y + dy, door_z)
+        for dx in (0, 1)
+        for dy in (0, 1, 2)
+    }
+
+    last_write: dict[tuple[int, int, int], tuple[str, str | None]] = {}
+    for cmd in script.commands:
+        for cell in _command_cells(cmd):
+            if cell in door_cells:
+                last_write[cell] = (cmd.kind, cmd.block_type)
+
+    for cell in door_cells:
+        assert cell in last_write, f"door cell {cell} was never written"
+        assert last_write[cell] == ("setblock", "air"), (
+            f"door cell {cell} sealed by {last_write[cell]} after compile"
+        )
+
+    # Interior volume is empty: no non-air writes inside the perimeter,
+    # between floor+1 and floor+height-1 (exclusive of the roof slabs above).
+    bbox = plan.footprint.bbox
+    floor_y = origin.y
+    height = plan.levels[0].height_blocks
+    x_lo, x_hi = origin.x + bbox.x + 1, origin.x + bbox.x + bbox.w - 2
+    z_lo, z_hi = origin.z + bbox.y + 1, origin.z + bbox.y + bbox.h - 2
+    y_lo, y_hi = floor_y + 1, floor_y + height - 1
+
+    interior_blocks: list[tuple[tuple[int, int, int], str]] = []
+    for cmd in script.commands:
+        if cmd.block_type is None or cmd.block_type == "air":
+            continue
+        for cell in _command_cells(cmd):
+            x, y, z = cell
+            if x_lo <= x <= x_hi and z_lo <= z <= z_hi and y_lo <= y <= y_hi:
+                interior_blocks.append((cell, cmd.block_type))
+
+    assert not interior_blocks, (
+        f"cabin interior must be hollow; found {len(interior_blocks)} block(s) "
+        f"e.g. {interior_blocks[:5]}"
+    )
 
 
 # ─── Embodiment wiring ──────────────────────────────────────────
