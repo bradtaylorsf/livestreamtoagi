@@ -211,7 +211,7 @@ class RconBuildExecutor:
         """
         import time as _time
 
-        MCRcon = async_safe_mcrcon_class()
+        MCRcon = async_safe_mcrcon_class()  # noqa: N806 — class-shaped factory return
 
         sent = 0
         skipped = 0
