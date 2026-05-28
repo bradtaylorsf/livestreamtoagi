@@ -22,6 +22,11 @@ tools:
   - list_pending_trades
   - steal
   - report_theft
+  - propose_treaty
+  - sign_treaty
+  - break_treaty
+  - defect_faction
+  - list_active_treaties
 
 topic_relevance:
   code: 0.7

@@ -27,6 +27,8 @@ from core.simulation.decision_log_schema import (
     BlackboardMutationPayload,
     BlackboardMutationRow,
     DecisionLogRow,
+    DiplomacyEventPayload,
+    DiplomacyEventRow,
     DreamPayload,
     DreamRow,
     MotivationLink,
@@ -387,6 +389,43 @@ class DecisionLogger:
                     detected=detected,
                     witnesses=list(witnesses or []),
                     motivation=motivation,
+                ),
+            )
+        )
+
+    def log_diplomacy_event(
+        self,
+        *,
+        treaty_id: str | None,
+        parties: list[str],
+        action: str,
+        terms: dict[str, Any] | None = None,
+        breaker_id: str | None = None,
+        defector_id: str | None = None,
+        from_faction: str | None = None,
+        to_faction: str | None = None,
+        motivation: str | None = None,
+        reason: str | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            DiplomacyEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id,
+                payload=DiplomacyEventPayload(
+                    treaty_id=treaty_id,
+                    parties=list(parties or []),
+                    action=action,  # type: ignore[arg-type]
+                    terms=dict(terms or {}),
+                    breaker_id=breaker_id,
+                    defector_id=defector_id,
+                    from_faction=from_faction,
+                    to_faction=to_faction,
+                    motivation=motivation,
+                    reason=reason,
                 ),
             )
         )

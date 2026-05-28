@@ -263,6 +263,15 @@ async def run_headless(args: argparse.Namespace) -> None:
         ownership_ledger=orchestrator._ownership_ledger,
         simulation_id=args.sim_id or name,
     )
+    # Per-sim diplomacy ledger (#894) — seeds factions from the scenario
+    # YAML's ``factions:`` block and replays <sim>/diplomacy_log.jsonl.
+    from core.civilization.diplomacy import DiplomacyLedger
+
+    orchestrator._diplomacy_ledger = DiplomacyLedger(
+        sim_folder,
+        simulation_id=args.sim_id or name,
+        factions=sim_config.factions,
+    )
 
     loop = asyncio.get_running_loop()
 

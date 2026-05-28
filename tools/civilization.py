@@ -1,4 +1,4 @@
-"""Civilization tools (issues #891 ownership, #892 trade, #893 theft).
+"""Civilization tools (issues #891 ownership, #892 trade, #893 theft, #894 diplomacy).
 
 Ownership tools (#891) backed by an :class:`OwnershipLedger`:
 
@@ -19,21 +19,35 @@ Theft tools (#893) backed by a :class:`TheftLedger`:
 * :class:`StealTool` — attempt to take items from another agent's container.
 * :class:`ReportTheftTool` — witness promotes an undetected attempt.
 
+Diplomacy tools (#894) backed by a :class:`DiplomacyLedger`:
+
+* :class:`ProposeTreatyTool` — propose a treaty to another faction.
+* :class:`SignTreatyTool` — counterparty leader signs a pending treaty.
+* :class:`BreakTreatyTool` — withdraw from an active treaty.
+* :class:`DefectFactionTool` — leave one faction for another.
+* :class:`ListActiveTreatiesTool` — introspect the diplomatic state.
+
 The mutating tools write an ``ownership_delta`` / ``trade_event`` /
-``theft_event`` row to the decision logger directly when one is injected —
-the ARTIFACT_CREATED event emitted by :meth:`BaseTool.run` only carries the
-tool name, not its args or result, so we cannot reconstruct the delta from
-that event alone. The ``ARTIFACT_CREATED`` event still fires (via
-``BaseTool.run``) so the existing tool_intent capture path keeps recording
-these as tool calls.
+``theft_event`` / ``diplomacy_event`` row to the decision logger directly
+when one is injected — the ARTIFACT_CREATED event emitted by
+:meth:`BaseTool.run` only carries the tool name, not its args or result, so
+we cannot reconstruct the delta from that event alone. The
+``ARTIFACT_CREATED`` event still fires (via ``BaseTool.run``) so the
+existing tool_intent capture path keeps recording these as tool calls.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from core.civilization.diplomacy import (
+    DiplomacyFailure,
+    DiplomacyLedger,
+    Treaty,
+)
 from core.civilization.ownership import (
     OwnershipClaim,
     OwnershipConflict,
@@ -45,6 +59,7 @@ from core.civilization.trade import TradeFailure, TradeLedger, TradeOffer
 from .base import BaseTool
 
 if TYPE_CHECKING:
+    from core.agent_goals import AgentGoalManager
     from core.simulation.decision_logger import DecisionLogger
 
 logger = logging.getLogger(__name__)
@@ -53,6 +68,7 @@ _TARGET_TYPES = ("region", "structure", "container")
 _BUILDER_AGENTS = frozenset({"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"})
 _TRADER_AGENTS = frozenset({"vera", "rex", "pixel", "sentinel", "fork"})
 _THIEF_AGENTS = frozenset({"grok", "fork", "pixel"})
+_DIPLOMAT_AGENTS = frozenset({"vera", "fork"})
 
 # Magnitude of trust hit per consequence (per spec):
 #   detected theft → victim trust toward thief drops 0.5
@@ -60,6 +76,9 @@ _THIEF_AGENTS = frozenset({"grok", "fork", "pixel"})
 _VICTIM_TRUST_HIT = 0.5
 _WITNESS_TRUST_HIT = 0.2
 _DEFAULT_TRUST = 0.5
+# Extra penalty (over and above the victim trust hit) when the theft also
+# violates a non_aggression treaty between the parties' factions (#894).
+_BREAKER_TRUST_HIT = 2.0
 
 
 def _claim_to_dict(claim: OwnershipClaim) -> dict[str, Any]:
@@ -741,17 +760,69 @@ def _emit_theft_consequences(
     decision_logger: DecisionLogger | None,
     *,
     attempt: TheftAttempt,
+    diplomacy_ledger: DiplomacyLedger | None = None,
+    goal_manager: AgentGoalManager | None = None,
+    simulation_id: Any | None = None,
 ) -> None:
-    """Apply victim + witness trust hits as relationship_delta rows."""
+    """Apply victim + witness trust hits as relationship_delta rows.
+
+    When a diplomacy ledger is supplied, also check for treaty consequences:
+    a ``non_aggression`` treaty between the thief and victim factions adds
+    an extra trust hit *and* auto-breaks the treaty; a ``mutual_defense``
+    treaty injects a defend-the-victim goal for each ally agent.
+    """
     if decision_logger is None or not attempt.detected:
         return
     try:
+        victim_reason = "theft_detected"
+        victim_trust_hit = _VICTIM_TRUST_HIT
+        thief_faction = None
+        victim_faction = None
+        broken_treaty_ids: list[str] = []
+        if diplomacy_ledger is not None:
+            thief_faction = diplomacy_ledger.get_faction_for(attempt.thief_id)
+            victim_faction = diplomacy_ledger.get_faction_for(attempt.victim_id)
+            if (
+                thief_faction is not None
+                and victim_faction is not None
+                and thief_faction.faction_id != victim_faction.faction_id
+            ):
+                for treaty in diplomacy_ledger.treaties_between(
+                    thief_faction.faction_id, victim_faction.faction_id
+                ):
+                    if not treaty.terms.get("non_aggression"):
+                        continue
+                    victim_reason = "theft_non_aggression_breach"
+                    victim_trust_hit = _VICTIM_TRUST_HIT + _BREAKER_TRUST_HIT
+                    broken = diplomacy_ledger.break_(
+                        treaty.treaty_id,
+                        breaker_id=attempt.thief_id,
+                        reason="theft_non_aggression_breach",
+                    )
+                    if isinstance(broken, Treaty):
+                        broken_treaty_ids.append(broken.treaty_id)
+                        try:
+                            decision_logger.log_diplomacy_event(
+                                treaty_id=broken.treaty_id,
+                                parties=list(broken.parties),
+                                action="broken",
+                                terms=dict(broken.terms),
+                                breaker_id=attempt.thief_id,
+                                reason="theft_non_aggression_breach",
+                                actor_id=attempt.thief_id,
+                            )
+                        except Exception:  # pragma: no cover
+                            logger.exception(
+                                "decision_logger.log_diplomacy_event failed (auto-break treaty=%s)",
+                                broken.treaty_id,
+                            )
+
         decision_logger.log_relationship_delta(
             a=attempt.victim_id,
             b=attempt.thief_id,
             before={"trust": _DEFAULT_TRUST},
-            after={"trust": _DEFAULT_TRUST - _VICTIM_TRUST_HIT},
-            reason="theft_detected",
+            after={"trust": _DEFAULT_TRUST - victim_trust_hit},
+            reason=victim_reason,
         )
         for witness in attempt.witnesses:
             if witness == attempt.victim_id or witness == attempt.thief_id:
@@ -763,11 +834,100 @@ def _emit_theft_consequences(
                 after={"trust": _DEFAULT_TRUST - _WITNESS_TRUST_HIT},
                 reason="theft_witnessed",
             )
+
+        if (
+            diplomacy_ledger is not None
+            and victim_faction is not None
+            and goal_manager is not None
+        ):
+            _inject_defense_goals(
+                diplomacy_ledger=diplomacy_ledger,
+                goal_manager=goal_manager,
+                victim_id=attempt.victim_id,
+                thief_id=attempt.thief_id,
+                victim_faction_id=victim_faction.faction_id,
+                simulation_id=simulation_id,
+                decision_logger=decision_logger,
+            )
     except Exception:  # pragma: no cover
         logger.exception(
             "decision_logger.log_relationship_delta failed (theft attempt=%s)",
             attempt.attempt_id,
         )
+
+
+def _inject_defense_goals(
+    *,
+    diplomacy_ledger: DiplomacyLedger,
+    goal_manager: AgentGoalManager,
+    victim_id: str,
+    thief_id: str,
+    victim_faction_id: str,
+    simulation_id: Any | None,
+    decision_logger: DecisionLogger | None,
+) -> None:
+    """Add a `defend <victim>` goal to each mutual-defense ally agent."""
+    try:
+        defenders = diplomacy_ledger.mutual_defenders_of(victim_faction_id)
+    except Exception:  # pragma: no cover
+        logger.exception("diplomacy_ledger.mutual_defenders_of failed")
+        return
+    if not defenders:
+        return
+    description = f"defend {victim_id} from {thief_id}"
+    for defender_id in defenders:
+        if defender_id in {victim_id, thief_id}:
+            continue
+        try:
+            coro = goal_manager.add_goal(
+                agent_id=defender_id,
+                goal_text=description,
+                priority=2,
+                source="treaty_mutual_defense",
+                category="defense",
+                simulation_id=simulation_id,
+            )
+        except TypeError:
+            try:
+                coro = goal_manager.add_goal(
+                    agent_id=defender_id,
+                    goal_text=description,
+                    priority=2,
+                    source="treaty_mutual_defense",
+                )
+            except Exception:  # pragma: no cover
+                logger.exception(
+                    "goal_manager.add_goal failed for defender=%s", defender_id
+                )
+                continue
+        except Exception:  # pragma: no cover
+            logger.exception(
+                "goal_manager.add_goal failed for defender=%s", defender_id
+            )
+            continue
+        if asyncio.iscoroutine(coro):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                loop.create_task(coro)
+            else:
+                try:
+                    asyncio.run(coro)
+                except Exception:  # pragma: no cover
+                    logger.exception("asyncio.run(add_goal) failed")
+        if decision_logger is not None:
+            try:
+                decision_logger.log_new_goal(
+                    actor_id=defender_id,
+                    description=description,
+                    category="defense",
+                    priority=2,
+                    source="treaty_mutual_defense",
+                )
+            except Exception:  # pragma: no cover
+                logger.exception("decision_logger.log_new_goal failed")
 
 
 def _theft_failure_response(failure: TheftFailure) -> dict[str, Any]:
@@ -822,15 +982,21 @@ class StealTool(BaseTool):
         decision_logger: DecisionLogger | None = None,
         tick_provider: Callable[[], int] | None = None,
         victim_online_provider: Callable[[str], bool] | None = None,
+        diplomacy_ledger: DiplomacyLedger | None = None,
+        goal_manager: AgentGoalManager | None = None,
+        simulation_id_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._ledger = theft_ledger
         self._decision_logger = decision_logger
         self._tick_provider = tick_provider
         self._victim_online_provider = victim_online_provider
+        self._diplomacy_ledger = diplomacy_ledger
+        self._goal_manager = goal_manager
+        self._simulation_id_provider = simulation_id_provider
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        kwargs.pop("simulation_id", None)
+        simulation_id = kwargs.pop("simulation_id", None)
         kwargs.pop("conversation_id", None)
 
         if self._ledger is None:
@@ -878,8 +1044,20 @@ class StealTool(BaseTool):
         if isinstance(result, TheftFailure):
             return _theft_failure_response(result)
 
+        if simulation_id is None and self._simulation_id_provider is not None:
+            try:
+                simulation_id = self._simulation_id_provider()
+            except Exception:
+                simulation_id = None
+
         _log_theft(self._decision_logger, attempt=result, actor_id=self._agent_id)
-        _emit_theft_consequences(self._decision_logger, attempt=result)
+        _emit_theft_consequences(
+            self._decision_logger,
+            attempt=result,
+            diplomacy_ledger=self._diplomacy_ledger,
+            goal_manager=self._goal_manager,
+            simulation_id=simulation_id,
+        )
 
         return {"status": "stolen", **_attempt_to_dict(result)}
 
@@ -913,13 +1091,19 @@ class ReportTheftTool(BaseTool):
         agent_id: str = "unknown",
         theft_ledger: TheftLedger | None = None,
         decision_logger: DecisionLogger | None = None,
+        diplomacy_ledger: DiplomacyLedger | None = None,
+        goal_manager: AgentGoalManager | None = None,
+        simulation_id_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._ledger = theft_ledger
         self._decision_logger = decision_logger
+        self._diplomacy_ledger = diplomacy_ledger
+        self._goal_manager = goal_manager
+        self._simulation_id_provider = simulation_id_provider
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        kwargs.pop("simulation_id", None)
+        simulation_id = kwargs.pop("simulation_id", None)
         kwargs.pop("conversation_id", None)
 
         if self._ledger is None:
@@ -943,21 +1127,470 @@ class ReportTheftTool(BaseTool):
         if isinstance(result, TheftFailure):
             return _theft_failure_response(result)
 
+        if simulation_id is None and self._simulation_id_provider is not None:
+            try:
+                simulation_id = self._simulation_id_provider()
+            except Exception:
+                simulation_id = None
+
         _log_theft(self._decision_logger, attempt=result, actor_id=self._agent_id)
-        _emit_theft_consequences(self._decision_logger, attempt=result)
+        _emit_theft_consequences(
+            self._decision_logger,
+            attempt=result,
+            diplomacy_ledger=self._diplomacy_ledger,
+            goal_manager=self._goal_manager,
+            simulation_id=simulation_id,
+        )
 
         return {"status": "reported", **_attempt_to_dict(result)}
 
 
+def _treaty_to_dict(treaty: Treaty) -> dict[str, Any]:
+    return {
+        "treaty_id": treaty.treaty_id,
+        "parties": list(treaty.parties),
+        "terms": dict(treaty.terms),
+        "status": treaty.status,
+        "proposer_id": treaty.proposer_id,
+        "proposer_faction_id": treaty.proposer_faction_id,
+        "motivation": treaty.motivation,
+        "created_at": treaty.created_at.isoformat(),
+        "signed_at": treaty.signed_at.isoformat() if treaty.signed_at else None,
+        "broken_at": treaty.broken_at.isoformat() if treaty.broken_at else None,
+        "breaker_id": treaty.breaker_id,
+        "break_reason": treaty.break_reason,
+    }
+
+
+def _diplomacy_failure_response(failure: DiplomacyFailure) -> dict[str, Any]:
+    response: dict[str, Any] = {"status": "error", "reason": failure.reason}
+    if failure.treaty_id is not None:
+        response["treaty_id"] = failure.treaty_id
+    if failure.detail is not None:
+        response["detail"] = failure.detail
+    return response
+
+
+def _log_diplomacy(
+    decision_logger: DecisionLogger | None,
+    *,
+    treaty_id: str | None,
+    parties: list[str],
+    action: str,
+    terms: dict[str, Any] | None = None,
+    breaker_id: str | None = None,
+    defector_id: str | None = None,
+    from_faction: str | None = None,
+    to_faction: str | None = None,
+    motivation: str | None = None,
+    reason: str | None = None,
+    actor_id: str | None = None,
+) -> None:
+    if decision_logger is None:
+        return
+    try:
+        decision_logger.log_diplomacy_event(
+            treaty_id=treaty_id,
+            parties=list(parties or []),
+            action=action,
+            terms=dict(terms or {}),
+            breaker_id=breaker_id,
+            defector_id=defector_id,
+            from_faction=from_faction,
+            to_faction=to_faction,
+            motivation=motivation,
+            reason=reason,
+            actor_id=actor_id,
+        )
+    except Exception:  # pragma: no cover - logger must not break the sim
+        logger.exception(
+            "decision_logger.log_diplomacy_event failed (action=%s treaty=%s)",
+            action,
+            treaty_id,
+        )
+
+
+class ProposeTreatyTool(BaseTool):
+    """Propose a treaty (alliance/non-aggression/etc.) to another faction."""
+
+    ALLOWED_AGENTS = _DIPLOMAT_AGENTS
+
+    name = "propose_treaty"
+    description = (
+        "Offer another faction a treaty: pass the other faction_id and a "
+        "terms object with any of {'non_aggression': true, "
+        "'trade_preference': true, 'mutual_defense': true}. The treaty "
+        "sits in 'proposed' status until a member of the other faction "
+        "signs it. Provide a short motivation so the decision log captures "
+        "why."
+    )
+    parameters = {
+        "other_faction_id": {
+            "type": "string",
+            "description": "Counterparty faction_id (slug from scenario YAML).",
+        },
+        "terms": {
+            "type": "object",
+            "description": (
+                "Treaty terms: any of non_aggression, trade_preference, "
+                "mutual_defense — boolean values."
+            ),
+        },
+        "motivation": {
+            "type": "string",
+            "description": "One short sentence on why this treaty matters now.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: DiplomacyLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "diplomacy_ledger_unavailable"}
+
+        other_faction_id = kwargs.get("other_faction_id")
+        terms = kwargs.get("terms")
+        motivation = kwargs.get("motivation")
+
+        if not isinstance(other_faction_id, str) or not other_faction_id:
+            return {"status": "error", "reason": "other_faction_id is required"}
+        if terms is not None and not isinstance(terms, dict):
+            return {"status": "error", "reason": "terms must be an object"}
+        if motivation is not None and not isinstance(motivation, str):
+            return {"status": "error", "reason": "motivation must be a string"}
+
+        proposer_faction = self._ledger.get_faction_for(self._agent_id)
+        if proposer_faction is None:
+            return {
+                "status": "error",
+                "reason": "agent_not_in_faction",
+                "detail": f"{self._agent_id!r} is not a member of any faction",
+            }
+
+        result = self._ledger.propose(
+            proposer_id=self._agent_id,
+            proposer_faction_id=proposer_faction.faction_id,
+            other_faction_id=other_faction_id,
+            terms=terms if isinstance(terms, dict) else None,
+            motivation=motivation if isinstance(motivation, str) else None,
+        )
+        if isinstance(result, DiplomacyFailure):
+            return _diplomacy_failure_response(result)
+
+        _log_diplomacy(
+            self._decision_logger,
+            treaty_id=result.treaty_id,
+            parties=list(result.parties),
+            action="proposed",
+            terms=dict(result.terms),
+            motivation=result.motivation,
+            actor_id=self._agent_id,
+        )
+        return {**_treaty_to_dict(result), "status": "proposed"}
+
+
+class SignTreatyTool(BaseTool):
+    """Sign a proposed treaty on behalf of your faction."""
+
+    ALLOWED_AGENTS = _DIPLOMAT_AGENTS
+
+    name = "sign_treaty"
+    description = (
+        "Sign a treaty that was proposed to your faction. Treaties activate "
+        "as soon as a counterparty member signs — the proposer faction "
+        "cannot also sign. Returns an error if the treaty is unknown, "
+        "already active, or addressed to a faction you don't belong to."
+    )
+    parameters = {
+        "treaty_id": {
+            "type": "string",
+            "description": "treaty_id from an earlier propose_treaty.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: DiplomacyLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "diplomacy_ledger_unavailable"}
+
+        treaty_id = kwargs.get("treaty_id")
+        if not isinstance(treaty_id, str) or not treaty_id:
+            return {"status": "error", "reason": "treaty_id is required"}
+
+        signer_faction = self._ledger.get_faction_for(self._agent_id)
+        signer_faction_id = signer_faction.faction_id if signer_faction else None
+
+        result = self._ledger.sign(
+            treaty_id,
+            signer_id=self._agent_id,
+            signer_faction_id=signer_faction_id,
+        )
+        if isinstance(result, DiplomacyFailure):
+            return _diplomacy_failure_response(result)
+
+        _log_diplomacy(
+            self._decision_logger,
+            treaty_id=result.treaty_id,
+            parties=list(result.parties),
+            action="signed",
+            terms=dict(result.terms),
+            actor_id=self._agent_id,
+        )
+        return {**_treaty_to_dict(result), "status": "signed"}
+
+
+class BreakTreatyTool(BaseTool):
+    """Withdraw from an active treaty."""
+
+    ALLOWED_AGENTS = _DIPLOMAT_AGENTS
+
+    name = "break_treaty"
+    description = (
+        "Break an active treaty by treaty_id. Other parties take a trust "
+        "hit toward your faction and the treaty is recorded as broken. "
+        "Provide a short reason so the decision log captures why."
+    )
+    parameters = {
+        "treaty_id": {
+            "type": "string",
+            "description": "treaty_id of the active treaty to break.",
+        },
+        "reason": {
+            "type": "string",
+            "description": "Short reason for breaking the treaty.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: DiplomacyLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "diplomacy_ledger_unavailable"}
+
+        treaty_id = kwargs.get("treaty_id")
+        reason = kwargs.get("reason")
+        if not isinstance(treaty_id, str) or not treaty_id:
+            return {"status": "error", "reason": "treaty_id is required"}
+        if not isinstance(reason, str) or not reason.strip():
+            return {"status": "error", "reason": "reason is required"}
+
+        result = self._ledger.break_(
+            treaty_id, breaker_id=self._agent_id, reason=reason.strip()
+        )
+        if isinstance(result, DiplomacyFailure):
+            return _diplomacy_failure_response(result)
+
+        _log_diplomacy(
+            self._decision_logger,
+            treaty_id=result.treaty_id,
+            parties=list(result.parties),
+            action="broken",
+            terms=dict(result.terms),
+            breaker_id=self._agent_id,
+            reason=reason.strip(),
+            actor_id=self._agent_id,
+        )
+
+        # Apply the breaker trust hit to every member of every other
+        # treaty party — those members see their faction's word betrayed.
+        if self._decision_logger is not None:
+            breaker_faction = self._ledger.get_faction_for(self._agent_id)
+            breaker_faction_id = (
+                breaker_faction.faction_id if breaker_faction else None
+            )
+            for party_id in result.parties:
+                if party_id == breaker_faction_id:
+                    continue
+                party = self._ledger.get_faction(party_id)
+                if party is None:
+                    continue
+                for member_id in sorted(party.members):
+                    if member_id == self._agent_id:
+                        continue
+                    try:
+                        self._decision_logger.log_relationship_delta(
+                            a=member_id,
+                            b=self._agent_id,
+                            before={"trust": _DEFAULT_TRUST},
+                            after={"trust": _DEFAULT_TRUST - _BREAKER_TRUST_HIT},
+                            reason="treaty_broken",
+                        )
+                    except Exception:  # pragma: no cover
+                        logger.exception(
+                            "decision_logger.log_relationship_delta failed (treaty break)"
+                        )
+
+        return {**_treaty_to_dict(result), "status": "broken"}
+
+
+class DefectFactionTool(BaseTool):
+    """Leave the calling agent's current faction for another."""
+
+    ALLOWED_AGENTS = _DIPLOMAT_AGENTS
+
+    name = "defect_faction"
+    description = (
+        "Leave your current faction and join another. The target faction "
+        "must exist in the scenario. Provide a short motivation so the "
+        "decision log captures why."
+    )
+    parameters = {
+        "target_faction_id": {
+            "type": "string",
+            "description": "The faction_id you want to join.",
+        },
+        "motivation": {
+            "type": "string",
+            "description": "One short sentence on why you're switching sides.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: DiplomacyLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "diplomacy_ledger_unavailable"}
+
+        target_faction_id = kwargs.get("target_faction_id")
+        motivation = kwargs.get("motivation")
+        if not isinstance(target_faction_id, str) or not target_faction_id:
+            return {"status": "error", "reason": "target_faction_id is required"}
+        if motivation is not None and not isinstance(motivation, str):
+            return {"status": "error", "reason": "motivation must be a string"}
+
+        result = self._ledger.defect(
+            agent_id=self._agent_id,
+            target_faction_id=target_faction_id,
+            motivation=motivation if isinstance(motivation, str) else None,
+        )
+        if isinstance(result, DiplomacyFailure):
+            return _diplomacy_failure_response(result)
+
+        old_faction_id, new_faction_id = result
+        _log_diplomacy(
+            self._decision_logger,
+            treaty_id=None,
+            parties=[],
+            action="defected",
+            defector_id=self._agent_id,
+            from_faction=old_faction_id,
+            to_faction=new_faction_id,
+            motivation=motivation.strip() if isinstance(motivation, str) else None,
+            actor_id=self._agent_id,
+        )
+        return {
+            "status": "defected",
+            "agent_id": self._agent_id,
+            "from_faction_id": old_faction_id,
+            "to_faction_id": new_faction_id,
+            "motivation": motivation.strip() if isinstance(motivation, str) else None,
+        }
+
+
+class ListActiveTreatiesTool(BaseTool):
+    """List active treaties involving the calling agent's faction."""
+
+    ALLOWED_AGENTS = _DIPLOMAT_AGENTS
+
+    name = "list_active_treaties"
+    description = (
+        "List every active treaty your faction is currently a party to. "
+        "Returns an empty list when you're not in a faction or no "
+        "treaties are active."
+    )
+    parameters: dict[str, Any] = {}
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: DiplomacyLedger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "diplomacy_ledger_unavailable"}
+
+        faction = self._ledger.get_faction_for(self._agent_id)
+        faction_id = faction.faction_id if faction else None
+        treaties = self._ledger.list_active_treaties(faction_id)
+        return {
+            "status": "ok",
+            "agent_id": self._agent_id,
+            "faction_id": faction_id,
+            "count": len(treaties),
+            "treaties": [_treaty_to_dict(t) for t in treaties],
+        }
+
+
 __all__ = [
     "AcceptTradeTool",
+    "BreakTreatyTool",
     "ClaimOwnershipTool",
+    "DefectFactionTool",
     "GetOwnershipTool",
+    "ListActiveTreatiesTool",
     "ListMyClaimsTool",
     "ListPendingTradesTool",
     "ProposeTradeTool",
+    "ProposeTreatyTool",
     "RejectTradeTool",
     "ReleaseOwnershipTool",
     "ReportTheftTool",
+    "SignTreatyTool",
     "StealTool",
 ]

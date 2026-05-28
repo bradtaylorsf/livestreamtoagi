@@ -12,14 +12,19 @@ from .build_tools import ProposeBuildTool, ProposeNewBuildingTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .civilization import (
     AcceptTradeTool,
+    BreakTreatyTool,
     ClaimOwnershipTool,
+    DefectFactionTool,
     GetOwnershipTool,
+    ListActiveTreatiesTool,
     ListMyClaimsTool,
     ListPendingTradesTool,
     ProposeTradeTool,
+    ProposeTreatyTool,
     RejectTradeTool,
     ReleaseOwnershipTool,
     ReportTheftTool,
+    SignTreatyTool,
     StealTool,
 )
 from .code_execution import ExecuteCodeTool
@@ -50,9 +55,11 @@ if TYPE_CHECKING:
 
     import docker
     from core.agent_economy import AgentEconomyManager
+    from core.agent_goals import AgentGoalManager
     from core.agent_registry import AgentRegistry
     from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
+    from core.civilization.diplomacy import DiplomacyLedger
     from core.civilization.ownership import OwnershipLedger
     from core.civilization.theft import TheftLedger
     from core.civilization.trade import TradeLedger
@@ -76,18 +83,23 @@ if TYPE_CHECKING:
 __all__ = [
     "AcceptTradeTool",
     "BaseTool",
+    "BreakTreatyTool",
     "CheckEmailResponsesTool",
     "CheckPostPerformanceTool",
     "ClaimOwnershipTool",
     "CreatePollTool",
+    "DefectFactionTool",
     "GetOwnershipTool",
+    "ListActiveTreatiesTool",
     "ListMyClaimsTool",
     "ListPendingTradesTool",
     "ProposeAllianceTool",
     "ProposeTradeTool",
+    "ProposeTreatyTool",
     "RejectTradeTool",
     "ReleaseOwnershipTool",
     "ReportTheftTool",
+    "SignTreatyTool",
     "StealTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
@@ -166,6 +178,8 @@ def get_core_tools(
     ownership_ledger: OwnershipLedger | None = None,
     trade_ledger: TradeLedger | None = None,
     theft_ledger: TheftLedger | None = None,
+    diplomacy_ledger: DiplomacyLedger | None = None,
+    goal_manager: AgentGoalManager | None = None,
     decision_logger: DecisionLogger | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
@@ -376,12 +390,16 @@ def get_core_tools(
     # inventory model, so a successful steal moves materials from the
     # victim's TradeLedger inventory to the thief's. Same per-sim pattern:
     # when no ledger is supplied the tools register but report
-    # theft_ledger_unavailable.
+    # theft_ledger_unavailable. The diplomacy ledger + goal manager (#894)
+    # let detected theft auto-break non_aggression treaties and inject
+    # mutual_defense goals for allied agents.
     tools.append(
         StealTool(
             agent_id=agent_id,
             theft_ledger=theft_ledger,
             decision_logger=decision_logger,
+            diplomacy_ledger=diplomacy_ledger,
+            goal_manager=goal_manager,
         )
     )
     tools.append(
@@ -389,6 +407,46 @@ def get_core_tools(
             agent_id=agent_id,
             theft_ledger=theft_ledger,
             decision_logger=decision_logger,
+            diplomacy_ledger=diplomacy_ledger,
+            goal_manager=goal_manager,
+        )
+    )
+
+    # Civilization diplomacy tools (#894). Backed by a DiplomacyLedger that
+    # tracks factions + treaties; when none is supplied the tools still
+    # register but report diplomacy_ledger_unavailable.
+    tools.append(
+        ProposeTreatyTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SignTreatyTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        BreakTreatyTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        DefectFactionTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ListActiveTreatiesTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
         )
     )
 

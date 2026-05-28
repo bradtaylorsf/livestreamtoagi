@@ -31,6 +31,7 @@ from core.eval.headless_signals import (
 )
 from core.simulation.decision_log_schema import (
     DecisionLogRow,
+    DiplomacyEventRow,
     OwnershipDeltaRow,
     TheftEventRow,
     ToolIntentRow,
@@ -284,6 +285,17 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
                 coordinated_raids += 1
                 break
 
+    # Diplomacy counts (#894). Treaty lifecycle plus faction defections —
+    # ``active_treaties`` reflects signed minus broken so the report shows
+    # the *current* count, while ``treaty_breaks`` and ``faction_defections``
+    # surface the volume of churn.
+    diplomacy_rows = [r for r in rows if isinstance(r, DiplomacyEventRow)]
+    treaty_proposals = sum(1 for r in diplomacy_rows if r.payload.action == "proposed")
+    treaty_signings = sum(1 for r in diplomacy_rows if r.payload.action == "signed")
+    treaty_breaks = sum(1 for r in diplomacy_rows if r.payload.action == "broken")
+    faction_defections = sum(1 for r in diplomacy_rows if r.payload.action == "defected")
+    active_treaties = max(0, treaty_signings - treaty_breaks)
+
     classification, failure_class = _classify(
         shared_objective_chosen=shared_objective,
         distinct_role_count=distinct_role_count,
@@ -332,6 +344,11 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "detection_rate": detection_rate_pct,
             "repeat_thieves": repeat_thieves,
             "coordinated_raids": coordinated_raids,
+            "treaty_proposals": treaty_proposals,
+            "treaty_signings": treaty_signings,
+            "active_treaties": active_treaties,
+            "treaty_breaks": treaty_breaks,
+            "faction_defections": faction_defections,
         },
     )
 

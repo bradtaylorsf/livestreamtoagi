@@ -147,6 +147,27 @@ class TheftEventPayload(BaseModel):
     motivation: str | None = None
 
 
+class DiplomacyEventPayload(BaseModel):
+    """Treaty lifecycle + faction defection (issue #894).
+
+    The same row shape covers proposal, signing, breaking, and defection.
+    ``treaty_id`` is None for defection-only events. ``parties`` lists the
+    faction ids involved (for treaty actions); defection records its
+    movement via ``from_faction`` / ``to_faction``.
+    """
+
+    treaty_id: str | None = None
+    parties: list[str] = Field(default_factory=list)
+    action: Literal["proposed", "signed", "broken", "defected"]
+    terms: dict[str, Any] = Field(default_factory=dict)
+    breaker_id: str | None = None
+    defector_id: str | None = None
+    from_faction: str | None = None
+    to_faction: str | None = None
+    motivation: str | None = None
+    reason: str | None = None
+
+
 # ─── Row types ─────────────────────────────────────────────────────────────
 
 
@@ -223,6 +244,11 @@ class TheftEventRow(_BaseRow):
     payload: TheftEventPayload
 
 
+class DiplomacyEventRow(_BaseRow):
+    event_type: Literal["diplomacy_event"] = "diplomacy_event"
+    payload: DiplomacyEventPayload
+
+
 DecisionLogRow = Annotated[
     UtteranceRow
     | ToolIntentRow
@@ -235,7 +261,8 @@ DecisionLogRow = Annotated[
     | NeedsStateRow
     | OwnershipDeltaRow
     | TradeEventRow
-    | TheftEventRow,
+    | TheftEventRow
+    | DiplomacyEventRow,
     Field(discriminator="event_type"),
 ]
 
@@ -256,6 +283,8 @@ __all__ = [
     "BlackboardMutationRow",
     "DecisionLogRow",
     "DecisionLogRowEnvelope",
+    "DiplomacyEventPayload",
+    "DiplomacyEventRow",
     "DreamPayload",
     "DreamRow",
     "MotivationLink",
