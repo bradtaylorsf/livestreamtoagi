@@ -335,6 +335,7 @@ fi
 
 LLM_MODEL="${LOCAL_LLM_MODEL:-}"
 LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LLM_MODEL}"
+LLM_EMBEDDING_MODEL="${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
 
 if [ "$MODE" = "dry-run" ]; then
     check_node || true
@@ -359,6 +360,7 @@ if [ "$MODE" = "dry-run" ]; then
         info "model:       (LOCAL_LLM_MODEL unset - REQUIRED for a real run;"
         info "             list ids with: pnpm llm:local --list-only)"
     fi
+    info "embedding:   lmstudio/$LLM_EMBEDDING_MODEL"
     info "verbal:      chat_ingame=true, narrate_behavior=true,"
     info "             chat_bot_messages=true, init_message='', speak=false,"
     info "             only_chat_with=[]"
@@ -437,7 +439,7 @@ ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! TEMPLATE_PATH="$COHORT_PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" BOT_NAME="$COHORT_BOT_NAME" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" node --input-type=module <<'NODE'
+if ! TEMPLATE_PATH="$COHORT_PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" BOT_NAME="$COHORT_BOT_NAME" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" EMBEDDING_MODEL="$LLM_EMBEDDING_MODEL" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const templatePath = process.env.TEMPLATE_PATH;
@@ -447,6 +449,7 @@ const codeModel = process.env.CODE_MODEL;
 const botName = process.env.BOT_NAME;
 const llmUrl = process.env.LLM_URL || 'http://localhost:1234/v1';
 const embeddingUrl = process.env.EMBEDDING_URL || llmUrl;
+const embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-nomic-embed-text-v1.5';
 const profile = JSON.parse(readFileSync(templatePath, 'utf8'));
 
 if (
@@ -461,7 +464,7 @@ profile.model = { api: 'lmstudio', model: `lmstudio/${chatModel}`, url: llmUrl }
 profile.code_model = { api: 'lmstudio', model: `lmstudio/${codeModel}`, url: llmUrl };
 profile.embedding = {
     api: 'lmstudio',
-    model: 'lmstudio/text-embedding-nomic-embed-text-v1.5',
+    model: `lmstudio/${embeddingModel}`,
     url: embeddingUrl,
 };
 writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
@@ -473,6 +476,7 @@ fi
 ok "Staged profile -> $DEST_PROFILE"
 info "  model:      lmstudio/${LLM_MODEL}"
 info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
+info "  embedding:  lmstudio/${LLM_EMBEDDING_MODEL}"
 info "  url:        ${LOCAL_LLM_BASE_URL}"
 
 stage_file() {

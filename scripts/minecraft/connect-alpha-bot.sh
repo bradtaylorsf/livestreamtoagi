@@ -362,6 +362,7 @@ fi
 
 LLM_MODEL="${LOCAL_LLM_MODEL:-}"
 LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LLM_MODEL}"
+LLM_EMBEDDING_MODEL="${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
 
 if [ "$MODE" = "dry-run" ]; then
     check_node || true
@@ -396,6 +397,7 @@ if [ "$MODE" = "dry-run" ]; then
         info "model:       (LOCAL_LLM_MODEL unset - REQUIRED for a real run;"
         info "             list ids with: pnpm llm:local --list-only)"
     fi
+    info "embedding:   lmstudio/$LLM_EMBEDDING_MODEL"
     if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
         info "town planner: chat_ingame=true, narrate_behavior=true,"
         info "              chat_bot_messages=true, init_message='', speak=false,"
@@ -505,7 +507,7 @@ ok "Enabled LM Studio timeline telemetry in settings.js"
 
 DEST_PROFILE="$MINDCRAFT_DIR_ABS/${MINDCRAFT_PROFILE#./}"
 mkdir -p "$(dirname -- "$DEST_PROFILE")"
-if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" MC_SIM_ALPHA_TOWN_PLANNER="$MC_SIM_ALPHA_TOWN_PLANNER" MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER="$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" MC_SIM_ALPHA_TOWN_PLANNER_MODEL="$MC_SIM_ALPHA_TOWN_PLANNER_MODEL" node --input-type=module <<'NODE'
+if ! TEMPLATE_PATH="$PROFILE_TEMPLATE" DEST_PATH="$DEST_PROFILE" CHAT_MODEL="$LLM_MODEL" CODE_MODEL="$LLM_MODEL_BUILDING" LLM_URL="$LOCAL_LLM_BASE_URL" EMBEDDING_URL="${LOCAL_LLM_UPSTREAM_URL:-$LOCAL_LLM_BASE_URL}" EMBEDDING_MODEL="$LLM_EMBEDDING_MODEL" MC_SIM_ALPHA_TOWN_PLANNER="$MC_SIM_ALPHA_TOWN_PLANNER" MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER="$MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER" MC_SIM_ALPHA_TOWN_PLANNER_MODEL="$MC_SIM_ALPHA_TOWN_PLANNER_MODEL" node --input-type=module <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const templatePath = process.env.TEMPLATE_PATH;
@@ -514,6 +516,7 @@ const chatModel = process.env.CHAT_MODEL;
 const codeModel = process.env.CODE_MODEL;
 const llmUrl = process.env.LLM_URL || 'http://localhost:1234/v1';
 const embeddingUrl = process.env.EMBEDDING_URL || llmUrl;
+const embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-nomic-embed-text-v1.5';
 const townPlanner = process.env.MC_SIM_ALPHA_TOWN_PLANNER === '1';
 const townPlannerProvider = process.env.MC_SIM_ALPHA_TOWN_PLANNER_PROVIDER || 'local';
 const townPlannerModel = process.env.MC_SIM_ALPHA_TOWN_PLANNER_MODEL || 'google/gemini-3.5-flash';
@@ -594,7 +597,7 @@ if (townPlanner) {
 }
 profile.embedding = {
     api: 'lmstudio',
-    model: 'lmstudio/text-embedding-nomic-embed-text-v1.5',
+    model: `lmstudio/${embeddingModel}`,
     url: embeddingUrl,
 };
 writeFileSync(destPath, `${JSON.stringify(profile, null, 4)}\n`);
@@ -612,10 +615,11 @@ if [ "$MC_SIM_ALPHA_TOWN_PLANNER" = "1" ]; then
         info "  model:      lmstudio/${LLM_MODEL}"
         info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
     fi
-    info "  embedding:  lmstudio/text-embedding-nomic-embed-text-v1.5"
+    info "  embedding:  lmstudio/${LLM_EMBEDDING_MODEL}"
 else
     info "  model:      lmstudio/${LLM_MODEL}"
     info "  code_model: lmstudio/${LLM_MODEL_BUILDING}"
+    info "  embedding:  lmstudio/${LLM_EMBEDDING_MODEL}"
     info "  url:        ${LOCAL_LLM_BASE_URL}"
 fi
 

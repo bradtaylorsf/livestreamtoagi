@@ -32,10 +32,13 @@
 #   LOCAL_LLM_MODEL=<model-id-from-LM-Studio>
 #   LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 #   EMBEDDING_PROVIDER=deterministic
+#   # The model triple above is resolved at LAUNCH from .env, not regenerated.
+#   # .env always wins over a stale parent-shell `export LOCAL_LLM_MODEL=...`.
 #   CONVERSATION_MODE=embodied          # or director_v2 for Director V2 prompt gating
 #   MINECRAFT_BRIDGE_TOKEN=<same secret the backend reads>
 #
 # Optional in .env:
+#   LOCAL_LLM_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5  # staged embedding id
 #   MC_SIM_MANAGEMENT_POLICY=off      # off, shadow, enforce
 #   MC_SIM_DISABLE_MANAGEMENT=1       # deprecated alias for policy=off
 #   MC_SIM_INCLUDE_BRIDGE_BOT=0
@@ -139,11 +142,18 @@ load_env_file() {
                 ;;
         esac
 
-        # The management policy must be bidirectional for hermetic sim tests:
-        # a stale parent-shell value should not override an explicit .env value.
+        # The management policy and the local-model triple must be bidirectional
+        # for hermetic sim tests and trustworthy model swaps: a stale parent-shell
+        # value (e.g. a LOCAL_LLM_MODEL left exported from a prior run) must not
+        # silently override an explicit .env value, which is the single source of
+        # truth for the local-dev path. Every other key keeps the
+        # set-only-if-unset rule so real parent-shell overrides still win.
         if [ "$key" = "MC_SIM_DISABLE_MANAGEMENT" ] \
            || [ "$key" = "MC_SIM_MANAGEMENT_POLICY" ] \
            || [ "$key" = "MINECRAFT_MANAGEMENT_REVIEW_MODE" ] \
+           || [ "$key" = "LOCAL_LLM_MODEL" ] \
+           || [ "$key" = "LOCAL_LLM_MODEL_BUILDING" ] \
+           || [ "$key" = "LOCAL_LLM_EMBEDDING_MODEL" ] \
            || [ -z "${!key+x}" ]; then
             case "$value" in
                 \"*\")
@@ -249,7 +259,8 @@ export PATH
 
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-}}"
-export LOCAL_LLM_BASE_URL LOCAL_LLM_MODEL_BUILDING
+LOCAL_LLM_EMBEDDING_MODEL="${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
+export LOCAL_LLM_BASE_URL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_EMBEDDING_MODEL
 MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
 MC_SIM_BUILDER_PROVIDER="${MC_SIM_BUILDER_PROVIDER:-local}"
 MC_SIM_BUILDER_FALLBACK="${MC_SIM_BUILDER_FALLBACK:-fail}"
@@ -540,6 +551,7 @@ info "mode: ${mode}"
 info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
+info "embedding model: ${LOCAL_LLM_EMBEDDING_MODEL}"
 info "conversation mode: ${CONVERSATION_MODE}"
 info "Director V2 gate: ${DIRECTOR_V2_GATE}"
 info "soak profile: ${SOAK_PROFILE}"
