@@ -16,6 +16,10 @@ tools:
   - execute_code
   - generate_tilemap
   - dispatch_alpha
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
 
 topic_relevance:
   code: 0.7

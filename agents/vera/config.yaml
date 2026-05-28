@@ -27,6 +27,10 @@ tools:
   - release_ownership
   - get_ownership
   - list_my_claims
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
 
 topic_relevance:
   code: 0.4

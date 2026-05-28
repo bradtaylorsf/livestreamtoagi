@@ -1354,6 +1354,7 @@ class TestToolSupport:
             embodiment_executor=None,
             sim_folder=None,
             ownership_ledger=None,
+            trade_ledger=None,
             decision_logger=None,
         )
 

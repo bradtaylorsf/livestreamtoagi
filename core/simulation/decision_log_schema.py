@@ -115,6 +115,20 @@ class OwnershipDeltaPayload(BaseModel):
     motivation: str | None = None
 
 
+class TradeEventPayload(BaseModel):
+    """Trade offer / acceptance / rejection / expiry (issue #892)."""
+
+    offer_id: str
+    proposer_id: str
+    recipient_id: str
+    give: dict[str, int] = Field(default_factory=dict)
+    want: dict[str, int] = Field(default_factory=dict)
+    motivation: str | None = None
+    action: Literal["proposed", "accepted", "rejected", "expired"]
+    reject_reason: str | None = None
+    price_observation: dict[str, Any] | None = None
+
+
 # ─── Row types ─────────────────────────────────────────────────────────────
 
 
@@ -181,6 +195,11 @@ class OwnershipDeltaRow(_BaseRow):
     payload: OwnershipDeltaPayload
 
 
+class TradeEventRow(_BaseRow):
+    event_type: Literal["trade_event"] = "trade_event"
+    payload: TradeEventPayload
+
+
 DecisionLogRow = Annotated[
     UtteranceRow
     | ToolIntentRow
@@ -191,7 +210,8 @@ DecisionLogRow = Annotated[
     | BlackboardMutationRow
     | WorldEventRow
     | NeedsStateRow
-    | OwnershipDeltaRow,
+    | OwnershipDeltaRow
+    | TradeEventRow,
     Field(discriminator="event_type"),
 ]
 
@@ -225,6 +245,8 @@ __all__ = [
     "RelationshipDeltaRow",
     "ToolIntentPayload",
     "ToolIntentRow",
+    "TradeEventPayload",
+    "TradeEventRow",
     "UtterancePayload",
     "UtteranceRow",
     "WorldEventPayload",

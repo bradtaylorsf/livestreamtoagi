@@ -20,6 +20,10 @@ tools:
   - create_poll
   - draft_social_post
   - draft_email
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
 
 topic_relevance:
   code: 0.2

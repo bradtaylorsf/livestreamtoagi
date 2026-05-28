@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from core.bootstrap import Services
     from core.civilization.ownership import OwnershipLedger
+    from core.civilization.trade import TradeLedger
     from core.simulation.decision_logger import DecisionLogger
     from core.simulation.embodiment import EmbodimentExecutor
     from tools.base import BaseTool
@@ -35,6 +36,7 @@ def build_agent_tools(
     embodiment_executor: EmbodimentExecutor | None = None,
     sim_folder: Any | None = None,
     ownership_ledger: OwnershipLedger | None = None,
+    trade_ledger: TradeLedger | None = None,
     decision_logger: DecisionLogger | None = None,
 ) -> dict[str, BaseTool]:
     """Build a tool registry for a specific agent, returning {name: tool_instance}.
@@ -71,6 +73,7 @@ def build_agent_tools(
         refinement_loop=getattr(services, "refinement_loop", None),
         sim_folder=sim_folder,
         ownership_ledger=ownership_ledger,
+        trade_ledger=trade_ledger,
         decision_logger=decision_logger,
     )
     for tool in core_tools:

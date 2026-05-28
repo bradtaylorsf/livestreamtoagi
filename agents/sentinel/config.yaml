@@ -18,6 +18,10 @@ tools:
   - dispatch_alpha
   - send_chat_message
   - get_revenue_status
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
 
 topic_relevance:
   code: 0.3

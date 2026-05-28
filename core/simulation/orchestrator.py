@@ -592,6 +592,9 @@ class SimulationOrchestrator:
         # sim_folder is known so tools can persist to
         # <sim>/ownership_log.jsonl and mirror events into the decision log.
         self._ownership_ledger: Any | None = None
+        # Per-sim trade ledger (#892) — same pattern, persists to
+        # <sim>/trade_log.jsonl via the trade tools.
+        self._trade_ledger: Any | None = None
         # Event-bus callbacks the orchestrator registers to mirror live
         # events into the decision log (issue #859). Stored so _finalize can
         # unsubscribe cleanly.
@@ -952,6 +955,7 @@ class SimulationOrchestrator:
             embodiment_executor=self._executor,
             sim_folder=getattr(self, "_sim_folder", None),
             ownership_ledger=getattr(self, "_ownership_ledger", None),
+            trade_ledger=getattr(self, "_trade_ledger", None),
             decision_logger=self._decision_logger,
         )
 

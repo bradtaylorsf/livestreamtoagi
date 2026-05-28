@@ -117,6 +117,9 @@ class ConversationOptions:
     # civilization claim/release/get/list tools persist to
     # <sim>/ownership_log.jsonl and mirror deltas into the decision log.
     ownership_ledger: Any | None = None
+    # Per-simulation trade ledger (#892) — same pattern, persists to
+    # <sim>/trade_log.jsonl and mirrors trade events into the decision log.
+    trade_ledger: Any | None = None
     decision_logger: Any | None = None
 
 
