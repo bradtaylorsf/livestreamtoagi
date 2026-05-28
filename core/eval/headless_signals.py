@@ -26,6 +26,7 @@ from core.eval.build_quality_signals import score_build_quality
 from core.simulation.decision_log_schema import (
     AllianceDeltaRow,
     BlackboardMutationRow,
+    ConflictEventRow,
     DecisionLogRow,
     DiplomacyEventRow,
     DreamRow,
@@ -617,6 +618,76 @@ def score_ownership(rows: list[DecisionLogRow]) -> dict[str, Any]:
     }
 
 
+def score_conflict(rows: list[DecisionLogRow]) -> dict[str, Any]:
+    """Score dispute + war activity from ``conflict_event`` rows (issue #895).
+
+    A run that opens, judges, and resolves disputes scores higher than one
+    that just lets disputes accumulate. War declarations contribute but
+    don't dominate — the dramatic interest is in resolution.
+    """
+    conflict_rows: list[ConflictEventRow] = [
+        r for r in rows if isinstance(r, ConflictEventRow)
+    ]
+    dispute_open_actions = {"opened"}
+    dispute_resolve_actions = {"resolved"}
+    dispute_escalate_actions = {"escalated"}
+    war_active_actions = {"war_activated"}
+    surrender_actions = {"surrendered"}
+
+    dispute_count = sum(
+        1 for r in conflict_rows if r.payload.action in dispute_open_actions
+    )
+    resolved_count = sum(
+        1 for r in conflict_rows if r.payload.action in dispute_resolve_actions
+    )
+    escalated_count = sum(
+        1 for r in conflict_rows if r.payload.action in dispute_escalate_actions
+    )
+    war_events = sum(
+        1 for r in conflict_rows if r.payload.action in war_active_actions
+    )
+    surrender_count = sum(
+        1 for r in conflict_rows if r.payload.action in surrender_actions
+    )
+
+    resolution_rate = (resolved_count / dispute_count) if dispute_count else 0.0
+
+    score = _clamp(
+        resolution_rate * 60.0
+        + min(20.0, dispute_count * 6.0)
+        + min(20.0, war_events * 8.0 + surrender_count * 4.0)
+    )
+
+    return {
+        "score": score,
+        "reasoning": (
+            f"{dispute_count} dispute(s) opened, {resolved_count} resolved "
+            f"({resolution_rate * 100:.0f}%), {escalated_count} escalated; "
+            f"{war_events} war activation(s), {surrender_count} surrender(s)."
+        ),
+        "evidence": [
+            _evidence_ref(
+                r,
+                {
+                    "dispute_id": r.payload.dispute_id,
+                    "war_id": r.payload.war_id,
+                    "action": r.payload.action,
+                    "dispute_type": r.payload.dispute_type,
+                },
+            )
+            for r in conflict_rows[:20]
+        ],
+        "sub_scores": {
+            "dispute_count": float(dispute_count),
+            "resolution_rate": resolution_rate,
+            "war_events": float(war_events),
+            "surrender_count": float(surrender_count),
+            "escalation_count": float(escalated_count),
+        },
+        "confidence": 0.85 if conflict_rows else 0.4,
+    }
+
+
 # ─── Helpers used by the scorer ───────────────────────────────────────
 
 
@@ -647,6 +718,7 @@ DETERMINISTIC_SIGNALS: dict[str, Any] = {
     "safety": score_safety,
     "build_quality": score_build_quality,
     "ownership": score_ownership,
+    "conflict": score_conflict,
 }
 
 # Signals that need the sim folder for filesystem lookups (build artifacts,
@@ -663,6 +735,7 @@ __all__ = [
     "collect_world_events",
     "score_agency",
     "score_build_quality",
+    "score_conflict",
     "score_economic_behavior",
     "score_errors",
     "score_internal_state",

@@ -168,6 +168,52 @@ class DiplomacyEventPayload(BaseModel):
     reason: str | None = None
 
 
+class ConflictEventPayload(BaseModel):
+    """Dispute + war lifecycle (issue #895).
+
+    A single row shape covers the full conflict lifecycle:
+
+    * Dispute actions — ``opened``, ``evidence_submitted``, ``judged``,
+      ``resolved``, ``escalated``.
+    * War actions — ``war_declared``, ``war_seconded``, ``war_activated``,
+      ``surrendered`` (the surrender row sets ``dispute_id`` *or* ``war_id``
+      depending on what was being surrendered).
+
+    ``outcome`` captures the per-resolution side-effects (winner/loser ids,
+    judgement string, applied consequences) so downstream consumers can
+    rebuild the timeline without re-replaying every sibling ledger.
+    """
+
+    dispute_id: str | None = None
+    war_id: str | None = None
+    initiator_id: str | None = None
+    respondent_id: str | None = None
+    dispute_type: Literal[
+        "territorial", "theft", "trade_breach", "treaty_violation", "personal"
+    ] | None = None
+    action: Literal[
+        "opened",
+        "evidence_submitted",
+        "judged",
+        "resolved",
+        "escalated",
+        "war_declared",
+        "war_seconded",
+        "war_activated",
+        "surrendered",
+    ]
+    outcome: dict[str, Any] | None = None
+    judgement: str | None = None
+    terms: dict[str, Any] | None = None
+    motivation: str | None = None
+    reason: str | None = None
+    casus_belli: str | None = None
+    target_faction_id: str | None = None
+    initiator_faction_id: str | None = None
+    seconders: list[str] = Field(default_factory=list)
+    required_quorum: int | None = None
+
+
 # ─── Row types ─────────────────────────────────────────────────────────────
 
 
@@ -249,6 +295,11 @@ class DiplomacyEventRow(_BaseRow):
     payload: DiplomacyEventPayload
 
 
+class ConflictEventRow(_BaseRow):
+    event_type: Literal["conflict_event"] = "conflict_event"
+    payload: ConflictEventPayload
+
+
 DecisionLogRow = Annotated[
     UtteranceRow
     | ToolIntentRow
@@ -262,7 +313,8 @@ DecisionLogRow = Annotated[
     | OwnershipDeltaRow
     | TradeEventRow
     | TheftEventRow
-    | DiplomacyEventRow,
+    | DiplomacyEventRow
+    | ConflictEventRow,
     Field(discriminator="event_type"),
 ]
 
@@ -281,6 +333,8 @@ __all__ = [
     "AllianceDeltaRow",
     "BlackboardMutationPayload",
     "BlackboardMutationRow",
+    "ConflictEventPayload",
+    "ConflictEventRow",
     "DecisionLogRow",
     "DecisionLogRowEnvelope",
     "DiplomacyEventPayload",

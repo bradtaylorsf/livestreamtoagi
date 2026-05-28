@@ -215,6 +215,9 @@ class ConversationEngine:
         # Civilization diplomacy ledger (#894) — tracks factions + treaties,
         # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
         self._diplomacy_ledger = options.diplomacy_ledger
+        # Civilization conflict ledger (#895) — disputes + war intents,
+        # persists to <sim>/conflict_log.jsonl via the conflict tools.
+        self._conflict_ledger = options.conflict_ledger
         self._decision_logger = options.decision_logger
 
         # Conversation progression tracking (#248)
@@ -1150,6 +1153,7 @@ class ConversationEngine:
                 trade_ledger=self._trade_ledger,
                 theft_ledger=self._theft_ledger,
                 diplomacy_ledger=self._diplomacy_ledger,
+                conflict_ledger=self._conflict_ledger,
                 decision_logger=self._decision_logger,
             )
             logger.debug(

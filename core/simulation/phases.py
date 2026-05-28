@@ -184,6 +184,7 @@ class PhaseRunner:
         trade_ledger: Any | None = None,
         theft_ledger: Any | None = None,
         diplomacy_ledger: Any | None = None,
+        conflict_ledger: Any | None = None,
         decision_logger: Any | None = None,
     ) -> None:
         self._config_loader = config_loader
@@ -216,6 +217,7 @@ class PhaseRunner:
         self._trade_ledger = trade_ledger
         self._theft_ledger = theft_ledger
         self._diplomacy_ledger = diplomacy_ledger
+        self._conflict_ledger = conflict_ledger
         self._decision_logger = decision_logger
 
         # Cross-phase conversation context to prevent repetition (#271)
@@ -715,6 +717,7 @@ class PhaseRunner:
                     trade_ledger=self._trade_ledger,
                     theft_ledger=self._theft_ledger,
                     diplomacy_ledger=self._diplomacy_ledger,
+                    conflict_ledger=self._conflict_ledger,
                     decision_logger=self._decision_logger,
                 ),
                 management=self._management,

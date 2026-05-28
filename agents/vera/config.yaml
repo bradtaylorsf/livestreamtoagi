@@ -36,6 +36,13 @@ tools:
   - break_treaty
   - defect_faction
   - list_active_treaties
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.4

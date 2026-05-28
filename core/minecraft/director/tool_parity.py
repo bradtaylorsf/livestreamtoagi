@@ -460,6 +460,84 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         rationale="Read-only introspection over the diplomacy ledger.",
         linked_issue="#894",
     ),
+    "open_dispute": ToolParityEntry(
+        name="open_dispute",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "File a formal dispute against another agent backed by evidence "
+            "refs from prior civilization logs; the conflict ledger persists "
+            "per sim and routes consequences to the right subsystem."
+        ),
+        linked_issue="#895",
+    ),
+    "submit_evidence": ToolParityEntry(
+        name="submit_evidence",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Attach an additional evidence ref to an open dispute. Pure "
+            "ledger mutation with an audit row."
+        ),
+        linked_issue="#895",
+    ),
+    "request_judgement": ToolParityEntry(
+        name="request_judgement",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Deterministic auto-judgement weighted by cross-referenced "
+            "evidence; same seed + evidence → same ruling."
+        ),
+        linked_issue="#895",
+    ),
+    "accept_judgement": ToolParityEntry(
+        name="accept_judgement",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Losing party either accepts the judgement (consequences apply) "
+            "or escalates to war. Pure local ledger transitions."
+        ),
+        linked_issue="#895",
+    ),
+    "declare_war": ToolParityEntry(
+        name="declare_war",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Open a war declaration; activates only after majority faction "
+            "quorum is reached via second_war."
+        ),
+        linked_issue="#895",
+    ),
+    "second_war": ToolParityEntry(
+        name="second_war",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Faction member seconds a pending war; activates it once the "
+            "quorum is reached."
+        ),
+        linked_issue="#895",
+    ),
+    "surrender": ToolParityEntry(
+        name="surrender",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "End a war or judged dispute by recording surrender terms. "
+            "Local-only side effects."
+        ),
+        linked_issue="#895",
+    ),
 }
 
 

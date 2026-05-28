@@ -23,6 +23,13 @@ tools:
   - release_ownership
   - get_ownership
   - list_my_claims
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.1

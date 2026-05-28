@@ -26,6 +26,8 @@ from core.simulation.decision_log_schema import (
     AllianceDeltaRow,
     BlackboardMutationPayload,
     BlackboardMutationRow,
+    ConflictEventPayload,
+    ConflictEventRow,
     DecisionLogRow,
     DiplomacyEventPayload,
     DiplomacyEventRow,
@@ -426,6 +428,55 @@ class DecisionLogger:
                     to_faction=to_faction,
                     motivation=motivation,
                     reason=reason,
+                ),
+            )
+        )
+
+    def log_conflict_event(
+        self,
+        *,
+        action: str,
+        dispute_id: str | None = None,
+        war_id: str | None = None,
+        initiator_id: str | None = None,
+        respondent_id: str | None = None,
+        dispute_type: str | None = None,
+        outcome: dict[str, Any] | None = None,
+        judgement: str | None = None,
+        terms: dict[str, Any] | None = None,
+        motivation: str | None = None,
+        reason: str | None = None,
+        casus_belli: str | None = None,
+        target_faction_id: str | None = None,
+        initiator_faction_id: str | None = None,
+        seconders: list[str] | None = None,
+        required_quorum: int | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            ConflictEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id,
+                payload=ConflictEventPayload(
+                    action=action,  # type: ignore[arg-type]
+                    dispute_id=dispute_id,
+                    war_id=war_id,
+                    initiator_id=initiator_id,
+                    respondent_id=respondent_id,
+                    dispute_type=dispute_type,  # type: ignore[arg-type]
+                    outcome=outcome,
+                    judgement=judgement,
+                    terms=terms,
+                    motivation=motivation,
+                    reason=reason,
+                    casus_belli=casus_belli,
+                    target_faction_id=target_faction_id,
+                    initiator_faction_id=initiator_faction_id,
+                    seconders=list(seconders or []),
+                    required_quorum=required_quorum,
                 ),
             )
         )

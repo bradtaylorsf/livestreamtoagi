@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from core.bootstrap import Services
+    from core.civilization.conflict import ConflictLedger
     from core.civilization.diplomacy import DiplomacyLedger
     from core.civilization.ownership import OwnershipLedger
     from core.civilization.theft import TheftLedger
@@ -41,6 +42,7 @@ def build_agent_tools(
     trade_ledger: TradeLedger | None = None,
     theft_ledger: TheftLedger | None = None,
     diplomacy_ledger: DiplomacyLedger | None = None,
+    conflict_ledger: ConflictLedger | None = None,
     decision_logger: DecisionLogger | None = None,
 ) -> dict[str, BaseTool]:
     """Build a tool registry for a specific agent, returning {name: tool_instance}.
@@ -80,6 +82,7 @@ def build_agent_tools(
         trade_ledger=trade_ledger,
         theft_ledger=theft_ledger,
         diplomacy_ledger=diplomacy_ledger,
+        conflict_ledger=conflict_ledger,
         goal_manager=services.goal_manager,
         decision_logger=decision_logger,
     )

@@ -129,6 +129,7 @@ def test_conversation_engine_passes_executor_to_build_agent_tools() -> None:
             trade_ledger=None,
             theft_ledger=None,
             diplomacy_ledger=None,
+            conflict_ledger=None,
             decision_logger=None,
         )
 

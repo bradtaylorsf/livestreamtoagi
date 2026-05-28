@@ -11,21 +11,28 @@ from .base import BaseTool
 from .build_tools import ProposeBuildTool, ProposeNewBuildingTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .civilization import (
+    AcceptJudgementTool,
     AcceptTradeTool,
     BreakTreatyTool,
     ClaimOwnershipTool,
+    DeclareWarTool,
     DefectFactionTool,
     GetOwnershipTool,
     ListActiveTreatiesTool,
     ListMyClaimsTool,
     ListPendingTradesTool,
+    OpenDisputeTool,
     ProposeTradeTool,
     ProposeTreatyTool,
     RejectTradeTool,
     ReleaseOwnershipTool,
     ReportTheftTool,
+    RequestJudgementTool,
+    SecondWarTool,
     SignTreatyTool,
     StealTool,
+    SubmitEvidenceTool,
+    SurrenderTool,
 )
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
@@ -59,6 +66,7 @@ if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
     from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
+    from core.civilization.conflict import ConflictLedger
     from core.civilization.diplomacy import DiplomacyLedger
     from core.civilization.ownership import OwnershipLedger
     from core.civilization.theft import TheftLedger
@@ -81,6 +89,7 @@ if TYPE_CHECKING:
     from core.social.alliances import AllianceManager
 
 __all__ = [
+    "AcceptJudgementTool",
     "AcceptTradeTool",
     "BaseTool",
     "BreakTreatyTool",
@@ -88,19 +97,25 @@ __all__ = [
     "CheckPostPerformanceTool",
     "ClaimOwnershipTool",
     "CreatePollTool",
+    "DeclareWarTool",
     "DefectFactionTool",
     "GetOwnershipTool",
     "ListActiveTreatiesTool",
     "ListMyClaimsTool",
     "ListPendingTradesTool",
+    "OpenDisputeTool",
     "ProposeAllianceTool",
     "ProposeTradeTool",
     "ProposeTreatyTool",
     "RejectTradeTool",
     "ReleaseOwnershipTool",
     "ReportTheftTool",
+    "RequestJudgementTool",
+    "SecondWarTool",
     "SignTreatyTool",
     "StealTool",
+    "SubmitEvidenceTool",
+    "SurrenderTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
     "DispatchAlphaTool",
@@ -179,6 +194,7 @@ def get_core_tools(
     trade_ledger: TradeLedger | None = None,
     theft_ledger: TheftLedger | None = None,
     diplomacy_ledger: DiplomacyLedger | None = None,
+    conflict_ledger: ConflictLedger | None = None,
     goal_manager: AgentGoalManager | None = None,
     decision_logger: DecisionLogger | None = None,
 ) -> list[BaseTool]:
@@ -447,6 +463,61 @@ def get_core_tools(
         ListActiveTreatiesTool(
             agent_id=agent_id,
             ledger=diplomacy_ledger,
+        )
+    )
+
+    # Civilization conflict tools (#895). Backed by a ConflictLedger that
+    # references the prior civilization ledgers (ownership/trade/theft/
+    # diplomacy) so consequences flow to the correct subsystem when
+    # disputes resolve. When no ledger is supplied the tools register but
+    # report conflict_ledger_unavailable.
+    tools.append(
+        OpenDisputeTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SubmitEvidenceTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        RequestJudgementTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        AcceptJudgementTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        DeclareWarTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SecondWarTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SurrenderTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
         )
     )
 

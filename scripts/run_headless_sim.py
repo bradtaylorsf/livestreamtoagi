@@ -272,6 +272,19 @@ async def run_headless(args: argparse.Namespace) -> None:
         simulation_id=args.sim_id or name,
         factions=sim_config.factions,
     )
+    # Per-sim conflict ledger (#895) — disputes + wars; references the
+    # prior civilization ledgers so consequence routing lands in the
+    # right subsystem.
+    from core.civilization.conflict import ConflictLedger
+
+    orchestrator._conflict_ledger = ConflictLedger(
+        sim_folder,
+        simulation_id=args.sim_id or name,
+        diplomacy_ledger=orchestrator._diplomacy_ledger,
+        ownership_ledger=orchestrator._ownership_ledger,
+        trade_ledger=orchestrator._trade_ledger,
+        theft_ledger=orchestrator._theft_ledger,
+    )
 
     loop = asyncio.get_running_loop()
 
