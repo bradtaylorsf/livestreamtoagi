@@ -766,6 +766,40 @@ verify_static() {
         problems=1
     }
 
+    # E21 keystone wiring: the settlement objective seed must be invoked before
+    # the launch_bot loop, gated to settlement mode, and share one exported
+    # LTAG_SIMULATION_ID with the bots. Markers are split with '' so these checks
+    # never match their own source lines.
+    [ -s "$SCRIPT_DIR/seed_settlement_objectives.py" ] || {
+        fail "missing settlement objective seed script: $SCRIPT_DIR/seed_settlement_objectives.py"
+        problems=1
+    }
+    local seed_marker loop_marker gate_marker export_marker seed_line loop_line
+    seed_marker='seed_settlement''_objectives.py'
+    loop_marker='launch_bot ''"$bot" "$BOT_INDEX"'
+    gate_marker='settlement-mode only: seed shared ''objective board'
+    export_marker='export LTAG_''SIMULATION_ID'
+    seed_line="$(grep -nF -m1 "$seed_marker" "$SCRIPT_DIR/soak.sh" | cut -d: -f1 || true)"
+    loop_line="$(grep -nF -m1 "$loop_marker" "$SCRIPT_DIR/soak.sh" | cut -d: -f1 || true)"
+    if [ -n "$seed_line" ] && [ -n "$loop_line" ] && [ "$seed_line" -lt "$loop_line" ]; then
+        ok "settlement objective seed runs before bot launch ($seed_line < $loop_line)"
+    else
+        fail "settlement objective seed must be invoked before the launch_bot loop"
+        problems=1
+    fi
+    if grep -qF "$gate_marker" "$SCRIPT_DIR/soak.sh"; then
+        ok "settlement objective seed is gated to settlement mode"
+    else
+        fail "settlement objective seed settlement-mode gate missing"
+        problems=1
+    fi
+    if grep -qF "$export_marker" "$SCRIPT_DIR/soak.sh"; then
+        ok "LTAG_SIMULATION_ID is exported for the seed and bots"
+    else
+        fail "LTAG_SIMULATION_ID export missing"
+        problems=1
+    fi
+
     if [ "$problems" -eq 0 ]; then
         ok "Static soak verify passed: all launchers/profiles/docs are present"
     fi
@@ -1477,6 +1511,16 @@ if [ ! -d "$MINDCRAFT_BASE_ABS/node_modules" ]; then
 fi
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
+# One explicit simulation scope shared by the objective seed step and every bot.
+# python_bridge.js / memory_context.js resolve their Redis scope from
+# LTAG_SIMULATION_ID (falling back to the all-zero default), so the seed and the
+# bots MUST agree on a single UUID or the seed writes to a scope no bot reads.
+if [ -z "${LTAG_SIMULATION_ID:-}" ]; then
+    LTAG_SIMULATION_ID="$("${PYTHON:-python3}" -c \
+        'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, "ltag-soak/" + sys.argv[1]))' \
+        "$RUN_ID")"
+fi
+export LTAG_SIMULATION_ID
 mkdir -p "$SOAK_LOG_ROOT"
 SOAK_LOG_ROOT="$(cd -- "$SOAK_LOG_ROOT" && pwd)"
 RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
@@ -1515,6 +1559,7 @@ run_checked() {
 write_metadata() {
     {
         echo "run_id=$RUN_ID"
+        echo "ltag_simulation_id=$LTAG_SIMULATION_ID"
         echo "start_utc=$SOAK_START_ISO"
         echo "planned_end_utc=$SOAK_PLANNED_END_ISO"
         echo "duration_hours=$SOAK_DURATION_HOURS"
@@ -1954,6 +1999,7 @@ launch_bot() {
         export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
         export LTAG_RUN_ID="${LTAG_RUN_ID:-$RUN_ID}"
+        export LTAG_SIMULATION_ID="${LTAG_SIMULATION_ID:-}"
         export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
@@ -2572,6 +2618,14 @@ fi
 run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS "$BACKEND_HEALTH_URL"
 
 start_log_capture
+
+# settlement-mode only: seed shared objective board the bots read (E21 keystone).
+# Emergent mode seeds nothing (owned by E21-7c). Runs after the docker-services
+# preflight (Redis confirmed up) and before any bot launches.
+if [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
+    run_checked "seed settlement objectives" "$RUN_DIR/preflight/seed-settlement-objectives.txt" \
+        env MC_RUN_DIR="$RUN_DIR" "${PYTHON:-python3}" "$SCRIPT_DIR/seed_settlement_objectives.py"
+fi
 
 BOT_INDEX=0
 for bot in $SOAK_BOTS; do

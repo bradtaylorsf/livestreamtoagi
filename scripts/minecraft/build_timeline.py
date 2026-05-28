@@ -76,6 +76,7 @@ EVENT_TYPES = frozenset(
         "build_plan.generation.skipped",
         "build_plan.execution.started",
         "build_plan.execution.completed",
+        "settlement_objective.seeded",
         "director.gate.decision",
         "director.scene.opened",
         "director.scene.closed",
