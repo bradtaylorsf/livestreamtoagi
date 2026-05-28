@@ -123,6 +123,9 @@ def test_conversation_engine_passes_executor_to_build_agent_tools() -> None:
             services,
             simulation_mode=False,
             embodiment_executor=executor,
+            sim_folder=None,
+            ownership_ledger=None,
+            decision_logger=None,
         )
 
 

@@ -1352,6 +1352,9 @@ class TestToolSupport:
             mock_services,
             simulation_mode=False,
             embodiment_executor=None,
+            sim_folder=None,
+            ownership_ledger=None,
+            decision_logger=None,
         )
 
 

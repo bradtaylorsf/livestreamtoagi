@@ -28,6 +28,7 @@ This inventory mirrors `TOOL_PARITY` in
 | Tool | Module | Category | Classification | Linked issue | Minecraft replacement | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
 | `check_email_responses` | `tools.revenue_tools` | email | `callable_now` | N/A | N/A | Email response lookup is read-only and does not send external communication. |
+| `claim_ownership` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | First-claim-wins ownership ledger is internal civilization state; Director V2 can route claims through the same backend ledger without external publication. |
 | `check_post_performance` | `tools.revenue_tools` | social | `callable_now` | N/A | N/A | Engagement lookup is read-only and does not publish external content. |
 | `create_poll` | `tools.audience_tools` | audience | `approval_gated` | N/A | N/A | Audience polls are public interaction requests and need explicit approval in Director V2. |
 | `dispatch_alpha` | `tools.alpha_dispatch` | alpha | `callable_now` | N/A | N/A | Alpha errands already route through the backend bridge, kill switch, and LLM client. |
@@ -36,12 +37,14 @@ This inventory mirrors `TOOL_PARITY` in
 | `execute_code` | `tools.code_execution` | code | `deferred` | #560 | N/A | Embodied code execution needs the dedicated bridge and sandbox exposure work. |
 | `fetch_url` | `tools.web_tools` | web | `callable_now` | N/A | N/A | URL fetch remains a typed backend tool with SSRF checks and cost tracking. |
 | `generate_journal_image` | `tools.journal_image_tool` | journal_image | `deferred` | #583 | N/A | Journal illustration generation remains valid but is owned by the journal-image preservation work. |
+| `get_ownership` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | Read-only ownership lookup for prompt context. |
 | `generate_tilemap` | `tools.tilemap_gen` | tilemap | `retired` | #619 | Minecraft build macros and planner scheduling. | Phaser tilemap generation is superseded by Minecraft build planning and removal work. |
 | `get_audience_status` | `tools.audience` | audience | `callable_now` | N/A | N/A | Read-only audience snapshot remains useful context for Minecraft scenes. |
 | `get_poll_results` | `tools.audience_tools` | audience | `callable_now` | N/A | N/A | Poll result reads are internal context and do not publish anything. |
 | `get_revenue_status` | `tools.revenue_tools` | revenue | `callable_now` | N/A | N/A | Read-only financial health context remains valid for Sentinel and Vera. |
 | `get_world_state` | `tools.world_state` | world_state | `replaced_by_minecraft` | #712 | Minecraft perception snapshot plus shared world/task blackboard. | The old Redis world snapshot is superseded by Minecraft perception and shared scene state. |
 | `leave_alliance` | `tools.social_tools` | alliance | `callable_now` | N/A | N/A | Leaving an alliance is internal state managed by the existing alliance manager. |
+| `list_my_claims` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | Read-only introspection over the caller's own claims. |
 | `manage_task` | `tools.task_management` | task | `callable_now` | #712 | N/A | The shared task board remains useful until the Minecraft blackboard is expanded. |
 | `propose_alliance` | `tools.social_tools` | alliance | `callable_now` | N/A | N/A | Alliance proposals are internal social governance and use the existing manager. |
 | `propose_build` | `tools.build_tools` | world_state | `callable_now` | #855 | N/A | Structured BuildIntent submission is the first-class signal for building; Director V2 routes it to the build macro scheduler. |
@@ -49,6 +52,7 @@ This inventory mirrors `TOOL_PARITY` in
 | `propose_new_building` | `tools.build_tools` | world_state | `callable_now` | #861 | N/A | Dream-up build proposal: agents describe a brand-new building structurally; the refinement loop generates an image, decomposes it, builds it, and iterates against a vision comparison until the screenshot matches the source image. |
 | `propose_self_modification` | `tools.self_modification` | self_mod | `approval_gated` | N/A | N/A | Self-modification only creates a human-review proposal and must not auto-apply changes. |
 | `recall_memory` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 2 recall is still a backend memory read and keeps the three-tier memory boundary. |
+| `release_ownership` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | Releases mutate the same internal ownership ledger and never touch external systems. |
 | `retrieve_transcript` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 3 transcript lookup remains a read-only backend memory operation. |
 | `send_chat_message` | `tools.audience_tools` | audience | `approval_gated` | N/A | N/A | Public chat output must not bypass Management or the human approval policy. |
 | `send_message` | `tools.messaging` | messaging | `callable_now` | N/A | N/A | Internal agent messaging is not public external communication and remains event-bus backed. |

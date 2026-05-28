@@ -10,6 +10,12 @@ from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageT
 from .base import BaseTool
 from .build_tools import ProposeBuildTool, ProposeNewBuildingTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
+from .civilization import (
+    ClaimOwnershipTool,
+    GetOwnershipTool,
+    ListMyClaimsTool,
+    ReleaseOwnershipTool,
+)
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
@@ -41,6 +47,7 @@ if TYPE_CHECKING:
     from core.agent_registry import AgentRegistry
     from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
+    from core.civilization.ownership import OwnershipLedger
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
     from core.management import Management
@@ -54,6 +61,7 @@ if TYPE_CHECKING:
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
     from core.shared_state import SharedWorkingState
+    from core.simulation.decision_logger import DecisionLogger
     from core.simulation.embodiment import EmbodimentExecutor
     from core.social.alliances import AllianceManager
 
@@ -61,8 +69,12 @@ __all__ = [
     "BaseTool",
     "CheckEmailResponsesTool",
     "CheckPostPerformanceTool",
+    "ClaimOwnershipTool",
     "CreatePollTool",
+    "GetOwnershipTool",
+    "ListMyClaimsTool",
     "ProposeAllianceTool",
+    "ReleaseOwnershipTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
     "DispatchAlphaTool",
@@ -137,6 +149,8 @@ def get_core_tools(
     embodiment_executor: EmbodimentExecutor | None = None,
     refinement_loop: RefinementLoop | None = None,
     sim_folder: Path | None = None,
+    ownership_ledger: OwnershipLedger | None = None,
+    decision_logger: DecisionLogger | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -276,6 +290,36 @@ def get_core_tools(
             embodiment_executor=embodiment_executor,
             refinement_loop=refinement_loop,
             sim_folder=sim_folder,
+        )
+    )
+
+    # Civilization ownership tools (#891). The ledger is per-sim; when no
+    # ledger is supplied the tools still register but report
+    # ownership_ledger_unavailable so callers see a clear error.
+    tools.append(
+        ClaimOwnershipTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ReleaseOwnershipTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        GetOwnershipTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+        )
+    )
+    tools.append(
+        ListMyClaimsTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
         )
     )
 
