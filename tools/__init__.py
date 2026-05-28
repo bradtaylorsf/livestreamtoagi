@@ -19,6 +19,8 @@ from .civilization import (
     ProposeTradeTool,
     RejectTradeTool,
     ReleaseOwnershipTool,
+    ReportTheftTool,
+    StealTool,
 )
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
     from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
     from core.civilization.ownership import OwnershipLedger
+    from core.civilization.theft import TheftLedger
     from core.civilization.trade import TradeLedger
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
@@ -84,6 +87,8 @@ __all__ = [
     "ProposeTradeTool",
     "RejectTradeTool",
     "ReleaseOwnershipTool",
+    "ReportTheftTool",
+    "StealTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
     "DispatchAlphaTool",
@@ -160,6 +165,7 @@ def get_core_tools(
     sim_folder: Path | None = None,
     ownership_ledger: OwnershipLedger | None = None,
     trade_ledger: TradeLedger | None = None,
+    theft_ledger: TheftLedger | None = None,
     decision_logger: DecisionLogger | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
@@ -363,6 +369,26 @@ def get_core_tools(
         ListPendingTradesTool(
             agent_id=agent_id,
             ledger=trade_ledger,
+        )
+    )
+
+    # Civilization theft tools (#893). The theft ledger shares the trade
+    # inventory model, so a successful steal moves materials from the
+    # victim's TradeLedger inventory to the thief's. Same per-sim pattern:
+    # when no ledger is supplied the tools register but report
+    # theft_ledger_unavailable.
+    tools.append(
+        StealTool(
+            agent_id=agent_id,
+            theft_ledger=theft_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ReportTheftTool(
+            agent_id=agent_id,
+            theft_ledger=theft_ledger,
+            decision_logger=decision_logger,
         )
     )
 

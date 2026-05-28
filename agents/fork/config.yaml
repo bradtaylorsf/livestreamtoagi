@@ -20,6 +20,8 @@ tools:
   - accept_trade
   - reject_trade
   - list_pending_trades
+  - steal
+  - report_theft
 
 topic_relevance:
   code: 0.7

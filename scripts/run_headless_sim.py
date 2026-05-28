@@ -253,6 +253,16 @@ async def run_headless(args: argparse.Namespace) -> None:
     orchestrator._ownership_ledger = OwnershipLedger(sim_folder)
     # Per-sim trade ledger (#892) — replays <sim>/trade_log.jsonl.
     orchestrator._trade_ledger = TradeLedger(sim_folder)
+    # Per-sim theft ledger (#893) — shares the trade inventory model and
+    # replays <sim>/theft_log.jsonl.
+    from core.civilization.theft import TheftLedger
+
+    orchestrator._theft_ledger = TheftLedger(
+        sim_folder,
+        trade_ledger=orchestrator._trade_ledger,
+        ownership_ledger=orchestrator._ownership_ledger,
+        simulation_id=args.sim_id or name,
+    )
 
     loop = asyncio.get_running_loop()
 

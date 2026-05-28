@@ -182,6 +182,7 @@ class PhaseRunner:
         sim_folder: Any | None = None,
         ownership_ledger: Any | None = None,
         trade_ledger: Any | None = None,
+        theft_ledger: Any | None = None,
         decision_logger: Any | None = None,
     ) -> None:
         self._config_loader = config_loader
@@ -212,6 +213,7 @@ class PhaseRunner:
         self._sim_folder = sim_folder
         self._ownership_ledger = ownership_ledger
         self._trade_ledger = trade_ledger
+        self._theft_ledger = theft_ledger
         self._decision_logger = decision_logger
 
         # Cross-phase conversation context to prevent repetition (#271)
@@ -709,6 +711,7 @@ class PhaseRunner:
                     sim_folder=self._sim_folder,
                     ownership_ledger=self._ownership_ledger,
                     trade_ledger=self._trade_ledger,
+                    theft_ledger=self._theft_ledger,
                     decision_logger=self._decision_logger,
                 ),
                 management=self._management,

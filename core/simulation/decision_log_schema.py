@@ -129,6 +129,24 @@ class TradeEventPayload(BaseModel):
     price_observation: dict[str, Any] | None = None
 
 
+class TheftEventPayload(BaseModel):
+    """Theft attempt + outcome (issue #893).
+
+    ``detected`` reflects the detection roll at attempt time; a witness
+    that later reports the theft re-emits a row with ``detected=True`` so
+    consequence logic can fire from the report alone.
+    """
+
+    attempt_id: str
+    thief_id: str
+    victim_id: str
+    container_ref: dict[str, Any] = Field(default_factory=dict)
+    items: dict[str, int] = Field(default_factory=dict)
+    detected: bool
+    witnesses: list[str] = Field(default_factory=list)
+    motivation: str | None = None
+
+
 # ─── Row types ─────────────────────────────────────────────────────────────
 
 
@@ -200,6 +218,11 @@ class TradeEventRow(_BaseRow):
     payload: TradeEventPayload
 
 
+class TheftEventRow(_BaseRow):
+    event_type: Literal["theft_event"] = "theft_event"
+    payload: TheftEventPayload
+
+
 DecisionLogRow = Annotated[
     UtteranceRow
     | ToolIntentRow
@@ -211,7 +234,8 @@ DecisionLogRow = Annotated[
     | WorldEventRow
     | NeedsStateRow
     | OwnershipDeltaRow
-    | TradeEventRow,
+    | TradeEventRow
+    | TheftEventRow,
     Field(discriminator="event_type"),
 ]
 
@@ -243,6 +267,8 @@ __all__ = [
     "OwnershipDeltaRow",
     "RelationshipDeltaPayload",
     "RelationshipDeltaRow",
+    "TheftEventPayload",
+    "TheftEventRow",
     "ToolIntentPayload",
     "ToolIntentRow",
     "TradeEventPayload",

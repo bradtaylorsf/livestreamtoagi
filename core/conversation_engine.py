@@ -209,6 +209,9 @@ class ConversationEngine:
         # Civilization trade ledger (#892) — persists pending/accepted
         # trades to <sim>/trade_log.jsonl via the trade tools.
         self._trade_ledger = options.trade_ledger
+        # Civilization theft ledger (#893) — shares the trade inventory
+        # model, persists to <sim>/theft_log.jsonl via the steal tools.
+        self._theft_ledger = options.theft_ledger
         self._decision_logger = options.decision_logger
 
         # Conversation progression tracking (#248)
@@ -1142,6 +1145,7 @@ class ConversationEngine:
                 sim_folder=self._sim_folder,
                 ownership_ledger=self._ownership_ledger,
                 trade_ledger=self._trade_ledger,
+                theft_ledger=self._theft_ledger,
                 decision_logger=self._decision_logger,
             )
             logger.debug(

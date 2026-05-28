@@ -32,6 +32,7 @@ from core.eval.headless_signals import (
 from core.simulation.decision_log_schema import (
     DecisionLogRow,
     OwnershipDeltaRow,
+    TheftEventRow,
     ToolIntentRow,
     TradeEventRow,
     UtteranceRow,
@@ -248,6 +249,41 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
         if r.payload.action == "accepted"
     }
 
+    # Theft counts (#893). Group by attempt_id so a witness-report row that
+    # promotes an undetected attempt doesn't double-count.
+    theft_rows = [r for r in rows if isinstance(r, TheftEventRow)]
+    theft_by_attempt: dict[str, TheftEventRow] = {}
+    for r in theft_rows:
+        prev = theft_by_attempt.get(r.payload.attempt_id)
+        if prev is None or (r.payload.detected and not prev.payload.detected):
+            theft_by_attempt[r.payload.attempt_id] = r
+    unique_theft = list(theft_by_attempt.values())
+    theft_events_count = len(unique_theft)
+    detected_count = sum(1 for ev in unique_theft if ev.payload.detected)
+    detection_rate_pct = int(
+        round((detected_count / theft_events_count) * 100)
+    ) if theft_events_count else 0
+    thief_attempts: dict[str, int] = defaultdict(int)
+    for ev in unique_theft:
+        thief_attempts[ev.payload.thief_id] += 1
+    repeat_thieves = sum(1 for n in thief_attempts.values() if n >= 2)
+    # Coordinated raid: ≥2 distinct thieves hit the same victim within 30 ticks.
+    coordinated_raids = 0
+    by_victim: dict[str, list[TheftEventRow]] = defaultdict(list)
+    for ev in unique_theft:
+        by_victim[ev.payload.victim_id].append(ev)
+    for events in by_victim.values():
+        events.sort(key=lambda e: e.tick)
+        for i, ev in enumerate(events):
+            window_thieves = {ev.payload.thief_id}
+            for other in events[i + 1 :]:
+                if other.tick - ev.tick > 30:
+                    break
+                window_thieves.add(other.payload.thief_id)
+            if len(window_thieves) >= 2:
+                coordinated_raids += 1
+                break
+
     classification, failure_class = _classify(
         shared_objective_chosen=shared_objective,
         distinct_role_count=distinct_role_count,
@@ -292,6 +328,10 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "distinct_owners": len(distinct_owner_ids),
             "trade_events": trade_events,
             "distinct_trading_pairs": len(distinct_trading_pairs),
+            "theft_events": theft_events_count,
+            "detection_rate": detection_rate_pct,
+            "repeat_thieves": repeat_thieves,
+            "coordinated_raids": coordinated_raids,
         },
     )
 

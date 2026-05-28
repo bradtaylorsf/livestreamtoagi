@@ -38,6 +38,8 @@ from core.simulation.decision_log_schema import (
     OwnershipDeltaRow,
     RelationshipDeltaPayload,
     RelationshipDeltaRow,
+    TheftEventPayload,
+    TheftEventRow,
     ToolIntentPayload,
     ToolIntentRow,
     TradeEventPayload,
@@ -352,6 +354,39 @@ class DecisionLogger:
                     action=action,  # type: ignore[arg-type]
                     reject_reason=reject_reason,
                     price_observation=price_observation,
+                ),
+            )
+        )
+
+    def log_theft_event(
+        self,
+        *,
+        attempt_id: str,
+        thief_id: str,
+        victim_id: str,
+        container_ref: dict[str, Any],
+        items: dict[str, int] | None = None,
+        detected: bool,
+        witnesses: list[str] | None = None,
+        motivation: str | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            TheftEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id or thief_id,
+                payload=TheftEventPayload(
+                    attempt_id=attempt_id,
+                    thief_id=thief_id,
+                    victim_id=victim_id,
+                    container_ref=dict(container_ref or {}),
+                    items=dict(items or {}),
+                    detected=detected,
+                    witnesses=list(witnesses or []),
+                    motivation=motivation,
                 ),
             )
         )

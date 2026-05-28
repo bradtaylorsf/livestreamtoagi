@@ -120,6 +120,9 @@ class ConversationOptions:
     # Per-simulation trade ledger (#892) — same pattern, persists to
     # <sim>/trade_log.jsonl and mirrors trade events into the decision log.
     trade_ledger: Any | None = None
+    # Per-simulation theft ledger (#893) — shares the trade ledger's
+    # inventory model; persists to <sim>/theft_log.jsonl.
+    theft_ledger: Any | None = None
     decision_logger: Any | None = None
 
 
