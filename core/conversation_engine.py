@@ -201,6 +201,12 @@ class ConversationEngine:
         # propose_build (and any future executor-aware tool) records intents
         # to the active sim folder and routes to Director V2 in embodied runs.
         self._embodiment_executor = options.embodiment_executor
+        self._sim_folder = options.sim_folder
+        # Civilization ownership ledger + decision logger (#891). Both flow
+        # through to build_agent_tools so the claim/release tools can
+        # persist to <sim>/ownership_log.jsonl and the decision log.
+        self._ownership_ledger = options.ownership_ledger
+        self._decision_logger = options.decision_logger
 
         # Conversation progression tracking (#248)
         self._dialogue_only_streak: int = 0
@@ -1130,6 +1136,9 @@ class ConversationEngine:
                 self._services,
                 simulation_mode=self._simulation_mode,
                 embodiment_executor=self._embodiment_executor,
+                sim_folder=self._sim_folder,
+                ownership_ledger=self._ownership_ledger,
+                decision_logger=self._decision_logger,
             )
             logger.debug(
                 "Built %d tools for agent %s",

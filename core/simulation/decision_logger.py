@@ -34,6 +34,8 @@ from core.simulation.decision_log_schema import (
     NeedsStateRow,
     NewGoalPayload,
     NewGoalRow,
+    OwnershipDeltaPayload,
+    OwnershipDeltaRow,
     RelationshipDeltaPayload,
     RelationshipDeltaRow,
     ToolIntentPayload,
@@ -284,6 +286,35 @@ class DecisionLogger:
                     trigger=trigger,
                     severity=severity,
                     details=details or {},
+                ),
+            )
+        )
+
+    def log_ownership_delta(
+        self,
+        *,
+        claim_id: str,
+        owner_agent_id: str,
+        target_type: str,
+        target_ref: dict[str, Any],
+        action: str,
+        motivation: str | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            OwnershipDeltaRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id or owner_agent_id,
+                payload=OwnershipDeltaPayload(
+                    claim_id=claim_id,
+                    owner_agent_id=owner_agent_id,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_ref=target_ref or {},
+                    action=action,  # type: ignore[arg-type]
+                    motivation=motivation,
                 ),
             )
         )

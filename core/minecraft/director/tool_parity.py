@@ -19,6 +19,7 @@ ToolCategory = Literal[
     "alliance",
     "audience",
     "character",
+    "civilization",
     "code",
     "economy",
     "email",
@@ -299,6 +300,45 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
             "comparison until the screenshot matches the source image."
         ),
         linked_issue="#861",
+    ),
+    "claim_ownership": ToolParityEntry(
+        name="claim_ownership",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "First-claim-wins ownership ledger is internal civilization "
+            "state; Director V2 can route claims through the same backend "
+            "ledger without external publication."
+        ),
+        linked_issue="#891",
+    ),
+    "release_ownership": ToolParityEntry(
+        name="release_ownership",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Releases mutate the same internal ownership ledger and never "
+            "touch external systems."
+        ),
+        linked_issue="#891",
+    ),
+    "get_ownership": ToolParityEntry(
+        name="get_ownership",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only ownership lookup for prompt context.",
+        linked_issue="#891",
+    ),
+    "list_my_claims": ToolParityEntry(
+        name="list_my_claims",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only introspection over the caller's own claims.",
+        linked_issue="#891",
     ),
 }
 

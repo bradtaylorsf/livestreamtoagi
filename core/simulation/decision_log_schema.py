@@ -99,6 +99,22 @@ class NeedsStatePayload(BaseModel):
     other: dict[str, float] = Field(default_factory=dict)
 
 
+class OwnershipDeltaPayload(BaseModel):
+    """Ownership claim/release/conflict (issue #891).
+
+    ``action='conflict'`` rows record an *attempted* claim that lost to an
+    earlier owner — ``owner_agent_id`` is the would-be claimant and
+    ``claim_id`` is the existing winning claim's id.
+    """
+
+    claim_id: str
+    owner_agent_id: str
+    target_type: Literal["region", "structure", "container"]
+    target_ref: dict[str, Any] = Field(default_factory=dict)
+    action: Literal["claim", "release", "conflict"]
+    motivation: str | None = None
+
+
 # ─── Row types ─────────────────────────────────────────────────────────────
 
 
@@ -160,6 +176,11 @@ class NeedsStateRow(_BaseRow):
     payload: NeedsStatePayload
 
 
+class OwnershipDeltaRow(_BaseRow):
+    event_type: Literal["ownership_delta"] = "ownership_delta"
+    payload: OwnershipDeltaPayload
+
+
 DecisionLogRow = Annotated[
     UtteranceRow
     | ToolIntentRow
@@ -169,7 +190,8 @@ DecisionLogRow = Annotated[
     | NewGoalRow
     | BlackboardMutationRow
     | WorldEventRow
-    | NeedsStateRow,
+    | NeedsStateRow
+    | OwnershipDeltaRow,
     Field(discriminator="event_type"),
 ]
 
@@ -197,6 +219,8 @@ __all__ = [
     "NeedsStateRow",
     "NewGoalPayload",
     "NewGoalRow",
+    "OwnershipDeltaPayload",
+    "OwnershipDeltaRow",
     "RelationshipDeltaPayload",
     "RelationshipDeltaRow",
     "ToolIntentPayload",

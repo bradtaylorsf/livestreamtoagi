@@ -31,6 +31,7 @@ from core.eval.headless_signals import (
 )
 from core.simulation.decision_log_schema import (
     DecisionLogRow,
+    OwnershipDeltaRow,
     ToolIntentRow,
     UtteranceRow,
 )
@@ -230,6 +231,14 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     executed_count = sum(1 for i in intents if i.payload.status in {"executed", "simulated"})
     delegation_events = sum(1 for u in utterances if _ROLE_HINT_RE.search(u.payload.text or ""))
 
+    ownership_deltas = [r for r in rows if isinstance(r, OwnershipDeltaRow)]
+    ownership_events = len(ownership_deltas)
+    distinct_owner_ids = {
+        r.payload.owner_agent_id
+        for r in ownership_deltas
+        if r.payload.action == "claim"
+    }
+
     classification, failure_class = _classify(
         shared_objective_chosen=shared_objective,
         distinct_role_count=distinct_role_count,
@@ -270,6 +279,8 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "world_events": len(world_events),
             "world_changing_intents": len(world_changing_intents),
             "delegation_events": delegation_events,
+            "ownership_events": ownership_events,
+            "distinct_owners": len(distinct_owner_ids),
         },
     )
 

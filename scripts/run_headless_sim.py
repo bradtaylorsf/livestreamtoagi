@@ -245,6 +245,11 @@ async def run_headless(args: argparse.Namespace) -> None:
 
     orchestrator._sim_folder = sim_folder
     orchestrator._decision_logger = DecisionLogger(sim_folder)
+    # Per-sim ownership ledger (#891) — replays existing
+    # <sim>/ownership_log.jsonl so resumed runs inherit prior claims.
+    from core.civilization.ownership import OwnershipLedger
+
+    orchestrator._ownership_ledger = OwnershipLedger(sim_folder)
 
     loop = asyncio.get_running_loop()
 

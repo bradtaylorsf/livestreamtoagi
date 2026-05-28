@@ -30,6 +30,7 @@ from core.simulation.decision_log_schema import (
     DreamRow,
     NeedsStateRow,
     NewGoalRow,
+    OwnershipDeltaRow,
     RelationshipDeltaRow,
     ToolIntentRow,
     UtteranceRow,
@@ -406,6 +407,80 @@ def score_safety(rows: list[DecisionLogRow]) -> dict[str, Any]:
     }
 
 
+def score_ownership(rows: list[DecisionLogRow]) -> dict[str, Any]:
+    """Score ownership activity from ``ownership_delta`` rows (issue #891).
+
+    Three sub-signals fold in:
+
+    * ``distinct_things_owned`` — count of distinct active targets (claims
+      minus releases). More owned-by-someone targets = more meaningful
+      "mine vs yours" structure for downstream mechanics.
+    * ``ownership_diversity`` — unique owner agents / unique targets,
+      clamped to [0, 1]. A run where one agent owns everything scores low.
+    * ``conflict_count`` — first-claim-wins collisions are healthy social
+      signal up to a point; we cap the bonus so a run that's nothing but
+      conflicts doesn't dominate.
+    """
+    deltas: list[OwnershipDeltaRow] = [r for r in rows if isinstance(r, OwnershipDeltaRow)]
+
+    claim_count = sum(1 for r in deltas if r.payload.action == "claim")
+    release_count = sum(1 for r in deltas if r.payload.action == "release")
+    conflict_count = sum(1 for r in deltas if r.payload.action == "conflict")
+
+    active_target_owners: dict[str, str] = {}
+    for r in deltas:
+        target_key = f"{r.payload.target_type}::{r.payload.target_ref!r}"
+        if r.payload.action == "claim":
+            active_target_owners[target_key] = r.payload.owner_agent_id
+        elif r.payload.action == "release":
+            active_target_owners.pop(target_key, None)
+
+    distinct_things_owned = len(active_target_owners)
+    distinct_owners = len(set(active_target_owners.values()))
+    diversity = (
+        distinct_owners / distinct_things_owned if distinct_things_owned else 0.0
+    )
+
+    owned_score = min(60.0, distinct_things_owned * 12.0)
+    diversity_score = min(25.0, diversity * 25.0)
+    conflict_score = min(15.0, conflict_count * 5.0)
+    claim_release_ratio = (
+        (release_count / claim_count) if claim_count else 0.0
+    )
+    score = _clamp(owned_score + diversity_score + conflict_score)
+
+    return {
+        "score": score,
+        "reasoning": (
+            f"{distinct_things_owned} active claims across {distinct_owners} "
+            f"owners (diversity={diversity:.2f}); "
+            f"{conflict_count} conflict(s); "
+            f"{claim_count} claim(s), {release_count} release(s)."
+        ),
+        "evidence": [
+            _evidence_ref(
+                r,
+                {
+                    "action": r.payload.action,
+                    "owner_agent_id": r.payload.owner_agent_id,
+                    "target_type": r.payload.target_type,
+                },
+            )
+            for r in deltas[:20]
+        ],
+        "sub_scores": {
+            "distinct_things_owned": float(distinct_things_owned),
+            "distinct_owners": float(distinct_owners),
+            "ownership_diversity": diversity,
+            "claim_count": float(claim_count),
+            "release_count": float(release_count),
+            "conflict_count": float(conflict_count),
+            "claim_release_ratio": claim_release_ratio,
+        },
+        "confidence": 0.85 if deltas else 0.4,
+    }
+
+
 # ─── Helpers used by the scorer ───────────────────────────────────────
 
 
@@ -435,6 +510,7 @@ DETERMINISTIC_SIGNALS: dict[str, Any] = {
     "internal_state": score_internal_state,
     "safety": score_safety,
     "build_quality": score_build_quality,
+    "ownership": score_ownership,
 }
 
 # Signals that need the sim folder for filesystem lookups (build artifacts,
@@ -454,6 +530,7 @@ __all__ = [
     "score_economic_behavior",
     "score_errors",
     "score_internal_state",
+    "score_ownership",
     "score_productivity",
     "score_safety",
     "score_social_dynamics",
