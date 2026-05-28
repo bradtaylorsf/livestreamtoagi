@@ -241,9 +241,16 @@ class SharedWorkingState:
             await self.update_task_status(task_id, "in_progress", owner=agent_id)
             return {"status": "ok", "owner": agent_id}
 
-        # Lost the race: re-read to learn who won.
-        raw_after = await self._redis.hget(TASK_KEY, task_id)
-        winner = _loads(raw_after).get("owner") if raw_after else None
+        # Lost the race: the marker value IS the winner's id, written atomically
+        # by their SET NX. Read it directly rather than the task hash, whose
+        # owner field the winner may not have written yet (the owner write
+        # happens after SET NX, so a task re-read can briefly still show None).
+        winner = await self._redis.get(f"{TASK_CLAIM_KEY}:{task_id}")
+        if winner is None:
+            # Defensive fallback: marker vanished (e.g. cleared on release) —
+            # fall back to the persisted owner.
+            raw_after = await self._redis.hget(TASK_KEY, task_id)
+            winner = _loads(raw_after).get("owner") if raw_after else None
         return {"status": "already_claimed", "owner": winner}
 
     async def get_tasks(self) -> list[SharedTask]:

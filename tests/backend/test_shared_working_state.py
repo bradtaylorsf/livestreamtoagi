@@ -576,6 +576,26 @@ async def test_claim_task_concurrent_race_has_exactly_one_winner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_claim_task_loser_learns_winner_from_marker_before_owner_write() -> None:
+    """The loser reads the winner from the atomic marker, not the task hash.
+
+    Under true concurrent Redis I/O the winner writes the owner field *after*
+    its SET NX succeeds, so a task re-read can briefly still show owner=None.
+    Simulate that window by pre-setting the marker (the winner's id) while the
+    task hash is still open/unowned, then claim as a different agent.
+    """
+    redis = _MemoryRedis()
+    state, _, sim_id = _state(redis)
+    await state.add_task(SharedTask(id="t1", title="Lead the settlement"))
+    # Winner has set the marker but not yet written owner to the task hash.
+    await ScopedRedis(redis, sim_id).set("shared:task_claim:t1", "rex", nx=True)
+
+    result = await state.claim_task("t1", "aurora")
+
+    assert result == {"status": "already_claimed", "owner": "rex"}
+
+
+@pytest.mark.asyncio
 async def test_claim_task_rejects_completed_task() -> None:
     state, _, _ = _state()
     await state.add_task(SharedTask(id="t1", title="Already built", owner="rex", status="done"))
