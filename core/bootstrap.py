@@ -123,6 +123,9 @@ class ConversationOptions:
     # Per-simulation theft ledger (#893) — shares the trade ledger's
     # inventory model; persists to <sim>/theft_log.jsonl.
     theft_ledger: Any | None = None
+    # Per-simulation diplomacy ledger (#894) — tracks factions + treaties;
+    # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
+    diplomacy_ledger: Any | None = None
     decision_logger: Any | None = None
 
 
