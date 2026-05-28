@@ -121,6 +121,8 @@ async def run_headless(args: argparse.Namespace) -> None:
     from core.conversation.triggers import TriggerSystem
     from core.event_bus import event_bus
     from core.memory.reflection import ReflectionManager
+    from core.minecraft.build_plan_catalog import build_plan_catalog_resolver
+    from core.minecraft.build_plan_compiler import BuildPlanCompiler
     from core.models import RunMode
     from core.repos.conversation_repo import ConversationRepo
     from core.repos.simulation_repo import SimulationRepo
@@ -207,6 +209,13 @@ async def run_headless(args: argparse.Namespace) -> None:
 
     display = SimulationDisplay(verbose=args.verbose, agent_registry=svc.agent_registry)
 
+    # Wire the BuildPlanCompiler + static catalog resolver so `propose_build`
+    # writes a compiled BuildScript per intent (issue #888). Without this
+    # the executor's _maybe_write_build_script early-returns and the
+    # live-RCON hook stays dormant in headless mode.
+    build_plan_compiler = BuildPlanCompiler()
+    build_plan_resolver = build_plan_catalog_resolver()
+
     orchestrator = SimulationOrchestrator(
         config=sim_config,
         db=svc.db,
@@ -230,6 +239,8 @@ async def run_headless(args: argparse.Namespace) -> None:
         services=svc,
         clock=sim_clock,
         relationship_repo=svc.relationship_repo,
+        build_plan_compiler=build_plan_compiler,
+        build_plan_resolver=build_plan_resolver,
     )
 
     orchestrator._sim_folder = sim_folder
@@ -257,7 +268,9 @@ async def run_headless(args: argparse.Namespace) -> None:
         except Exception:  # pragma: no cover
             pass
         metadata["completed_at"] = datetime.utcnow().isoformat() + "Z"
-        metadata["simulation_id"] = str(orchestrator.simulation_id) if orchestrator.simulation_id else None
+        metadata["simulation_id"] = (
+            str(orchestrator.simulation_id) if orchestrator.simulation_id else None
+        )
         _write_metadata(sim_folder, metadata)
 
         if not args.skip_eval:

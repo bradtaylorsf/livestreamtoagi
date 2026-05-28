@@ -22,6 +22,7 @@ from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
+from core.eval.build_quality_signals import score_build_quality
 from core.simulation.decision_log_schema import (
     AllianceDeltaRow,
     BlackboardMutationRow,
@@ -433,16 +434,23 @@ DETERMINISTIC_SIGNALS: dict[str, Any] = {
     "economic_behavior": score_economic_behavior,
     "internal_state": score_internal_state,
     "safety": score_safety,
+    "build_quality": score_build_quality,
 }
+
+# Signals that need the sim folder for filesystem lookups (build artifacts,
+# etc.) — the scorer routes these through a wider signature.
+SIM_FOLDER_AWARE_SIGNALS: frozenset[str] = frozenset({"build_quality"})
 
 
 __all__ = [
     "DETERMINISTIC_SIGNALS",
+    "SIM_FOLDER_AWARE_SIGNALS",
     "collect_blackboard",
     "collect_tool_intents",
     "collect_utterances",
     "collect_world_events",
     "score_agency",
+    "score_build_quality",
     "score_economic_behavior",
     "score_errors",
     "score_internal_state",

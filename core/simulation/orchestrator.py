@@ -533,6 +533,8 @@ class SimulationOrchestrator:
         services: Services | None = None,
         clock: SimulationClock | None = None,
         relationship_repo: RelationshipRepo | None = None,
+        build_plan_compiler: Any | None = None,
+        build_plan_resolver: Any | None = None,
     ) -> None:
         self._config = config
         self._db = db
@@ -580,7 +582,11 @@ class SimulationOrchestrator:
         # Single switch point for embodiment behavior — everything else in the
         # orchestrator (and the conversation engine, dreams, relationships,
         # alliances, blackboard) is shared across modes.
-        self._executor: EmbodimentExecutor = select_executor(self._config.run_mode)
+        self._executor: EmbodimentExecutor = select_executor(
+            self._config.run_mode,
+            build_plan_compiler=build_plan_compiler,
+            build_plan_resolver=build_plan_resolver,
+        )
         self._decision_logger: Any | None = None
         # Event-bus callbacks the orchestrator registers to mirror live
         # events into the decision log (issue #859). Stored so _finalize can
@@ -621,6 +627,7 @@ class SimulationOrchestrator:
                     text=str(data.get("content") or ""),
                     channel=str(data.get("channel") or "chat"),
                     model=data.get("model"),
+                    runtime_model=data.get("runtime_model"),
                     tokens=data.get("tokens"),
                     cost=str(data["cost"]) if data.get("cost") is not None else None,
                 )
@@ -661,6 +668,11 @@ class SimulationOrchestrator:
         self._decision_log_callbacks.append((EventType.AGENT_SPEAK.value, on_agent_speak))
         self._event_bus.on(EventType.TOOL_EXECUTED.value, on_tool_executed)
         self._decision_log_callbacks.append((EventType.TOOL_EXECUTED.value, on_tool_executed))
+        # BaseTool.run emits ARTIFACT_CREATED (not TOOL_EXECUTED) when any tool
+        # invocation completes. Mirror it into the decision log so the headless
+        # classifier's tool_intent count reflects real tool activity.
+        self._event_bus.on(EventType.ARTIFACT_CREATED.value, on_tool_executed)
+        self._decision_log_callbacks.append((EventType.ARTIFACT_CREATED.value, on_tool_executed))
         self._event_bus.on(EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)
         self._decision_log_callbacks.append(
             (EventType.MANAGEMENT_INTERVENTION.value, on_management_intervention)

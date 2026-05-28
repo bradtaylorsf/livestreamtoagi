@@ -1617,6 +1617,7 @@ class ConversationEngine:
                 # Save token/cost metadata
                 self._last_llm_meta = {
                     "model": response.model,
+                    "runtime_model": response.runtime_model,
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens,
                     "cost": total_cost,

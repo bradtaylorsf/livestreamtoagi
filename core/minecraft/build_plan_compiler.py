@@ -90,7 +90,7 @@ class BuildPlanCompiler:
         materials = _materials_lookup(plan)
 
         recipe = _recipe_for(plan.structure_type)
-        commands = recipe(plan=plan, origin=origin, materials=materials, seed=seed)
+        commands, invoked_cards = recipe(plan=plan, origin=origin, materials=materials, seed=seed)
 
         manifest = _materials_manifest(commands)
         total_blocks = sum(manifest.values())
@@ -108,6 +108,7 @@ class BuildPlanCompiler:
             estimated_seconds=estimated,
             source_plan_hash=source_hash,
             compiler_version=self._compiler_version,
+            skill_cards_invoked=list(dict.fromkeys(invoked_cards)),
         )
 
     def dry_run(
@@ -142,7 +143,7 @@ def _size_enum(value: SizeClass | str) -> SizeClass:
     return value if isinstance(value, SizeClass) else SizeClass(value)
 
 
-RecipeFn = Callable[..., list[BuildCommand]]
+RecipeFn = Callable[..., tuple[list[BuildCommand], list[str]]]
 
 
 def _recipe_for(structure_type: StructureType | str) -> RecipeFn:
@@ -227,7 +228,7 @@ def _recipe_generic(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     commands: list[BuildCommand] = []
     bbox = _bbox_for_level(plan)
     floor_material = _pick(materials, _FLOOR_REGION_KEYS)
@@ -236,6 +237,8 @@ def _recipe_generic(
     frame_material = _pick(materials, _FRAME_REGION_KEYS)
 
     levels = _sorted_levels(plan)
+
+    # 1. Floors for every level.
     for level in levels:
         floor_y = origin.y + _floor_y_for_level(plan, level)
         commands.extend(
@@ -246,19 +249,42 @@ def _recipe_generic(
                 material=level.floor_material or floor_material,
             )
         )
-        # Walls rise from one block above the floor up through the level
-        # height so the floor slab is visible inside the room.
+
+    # 2. Roof above the top level. Emitted before walls so wall fills are
+    #    the last writes on the perimeter, letting openings (step 4) carve
+    #    air last without a wall re-fill resealing the doorway.
+    if levels:
+        top_level = levels[-1]
+        roof_base_y = (
+            origin.y + _floor_y_for_level(plan, top_level) + max(1, top_level.height_blocks) + 1
+        )
+        commands.extend(
+            roof_pitched(
+                bbox=bbox,
+                origin=origin,
+                base_y=roof_base_y,
+                material=roof_material,
+            )
+        )
+
+    # 3. Walls (hollow outline via wall_segment's four-side perimeter fills)
+    #    and interior room partitions. Every level gets its own ring so
+    #    upper floors are not left floating above the level below.
+    top_wall_y = origin.y
+    for level in levels:
+        floor_y = origin.y + _floor_y_for_level(plan, level)
+        base_y = floor_y + 1
+        height = max(1, level.height_blocks)
         commands.extend(
             wall_segment(
                 bbox=bbox,
                 origin=origin,
-                base_y=floor_y + 1,
-                height=max(1, level.height_blocks),
+                base_y=base_y,
+                height=height,
                 material=wall_material,
             )
         )
-
-        # Interior partitions for any rooms recorded against this level.
+        top_wall_y = base_y + height - 1
         for room in _sorted_rooms(plan):
             if room.level_index != level.index:
                 continue
@@ -270,13 +296,33 @@ def _recipe_generic(
                         y=origin.y,
                         z=origin.z + bbox.y,
                     ),
-                    base_y=floor_y + 1,
-                    height=max(1, level.height_blocks),
+                    base_y=base_y,
+                    height=height,
                     material=wall_material,
                 )
             )
 
-    # Openings (doors / windows) — carve after walls so the air-fill wins.
+    # 3b. Cap strip: today the per-level walls always butt up against
+    #     `roof_base_y - 1` because the roof and wall math share the same
+    #     accumulated offset. Guard against future drift (e.g. a recipe
+    #     that picks a custom roof base) by filling any residual gap with
+    #     the walls material so upper floors never end up floating below
+    #     a roof.
+    if levels:
+        gap_start = top_wall_y + 1
+        gap_end = roof_base_y - 1
+        if gap_start <= gap_end:
+            commands.extend(
+                wall_segment(
+                    bbox=bbox,
+                    origin=origin,
+                    base_y=gap_start,
+                    height=gap_end - gap_start + 1,
+                    material=wall_material,
+                )
+            )
+
+    # 4. Openings (doors / windows) — carve AFTER walls so the air-fill wins.
     for opening in sorted(
         plan.openings, key=lambda o: (o.level_index, o.position.x, o.position.y, o.position.z)
     ):
@@ -293,23 +339,10 @@ def _recipe_generic(
             )
         )
 
-    # Roof on the top level.
-    if levels:
-        top_level = levels[-1]
-        roof_base_y = (
-            origin.y + _floor_y_for_level(plan, top_level) + max(1, top_level.height_blocks) + 1
-        )
-        commands.extend(
-            roof_pitched(
-                bbox=bbox,
-                origin=origin,
-                base_y=roof_base_y,
-                material=roof_material,
-            )
-        )
-
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    # 5. Ornamentation last so nothing overwrites the carved openings.
+    extra_cmds, extra_invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, extra_invoked
 
 
 def _emit_key_features(
@@ -317,11 +350,14 @@ def _emit_key_features(
     *,
     origin: Position3D,
     materials: dict[str, str],
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     commands: list[BuildCommand] = []
+    invoked: list[str] = []
     column_material = _pick(materials, _COLUMN_REGION_KEYS)
     capital_material = materials.get(_CAPITAL_REGION_KEYS[0])
     arch_material = _pick(materials, _WALL_REGION_KEYS)
+    roof_material = _pick(materials, _ROOF_REGION_KEYS)
+    trim_material = _pick(materials, _FRAME_REGION_KEYS)
 
     for feature in sorted(
         plan.key_features,
@@ -342,6 +378,7 @@ def _emit_key_features(
                     capital_material=capital_material,
                 )
             )
+            invoked.append("column_doric")
         elif feature.kind == "arch":
             commands.extend(
                 arch_round(
@@ -351,15 +388,39 @@ def _emit_key_features(
                     material=arch_material,
                 )
             )
-        # roof / ornament / other key features have no extra primitive; the
-        # main roof recipe already covers the structural roof.
-    return commands
+            invoked.append("arch_round")
+        elif feature.kind == "roof":
+            w = max(1, int(size.get("w", size.get("span", 3))))
+            d = max(1, int(size.get("d", size.get("depth", 3))))
+            commands.extend(
+                roof_pitched(
+                    bbox=BoundingBox(x=0, y=0, w=w, h=d),
+                    origin=base,
+                    base_y=base.y,
+                    material=roof_material,
+                )
+            )
+            invoked.append("roof_pitched")
+        else:  # "ornament" or "other" — single-row trim ring
+            w = max(1, int(size.get("w", size.get("span", 1))))
+            d = max(1, int(size.get("d", size.get("depth", 1))))
+            commands.extend(
+                wall_segment(
+                    bbox=BoundingBox(x=0, y=0, w=w, h=d),
+                    origin=base,
+                    base_y=base.y,
+                    height=1,
+                    material=trim_material,
+                )
+            )
+            invoked.append("wall_segment")
+    return commands, invoked
 
 
 # ─── Per-structure recipes ─────────────────────────────────────────────
 
 
-def _recipe_cabin(**kwargs) -> list[BuildCommand]:
+def _recipe_cabin(**kwargs) -> tuple[list[BuildCommand], list[str]]:
     return _recipe_generic(**kwargs)
 
 
@@ -369,7 +430,7 @@ def _recipe_farm(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # A farm is a low fence ringing a tilled field. We model it as a thin
     # perimeter wall (the fence) + a floor slab (the field).
     commands: list[BuildCommand] = []
@@ -390,8 +451,9 @@ def _recipe_farm(
             material=fence_material,
         )
     )
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 def _recipe_wall(
@@ -400,7 +462,7 @@ def _recipe_wall(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # A defensive wall: a tall perimeter rectangle, no roof.
     commands: list[BuildCommand] = []
     bbox = _bbox_for_level(plan)
@@ -417,8 +479,9 @@ def _recipe_wall(
             material=wall_material,
         )
     )
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 def _recipe_watchtower(
@@ -427,9 +490,10 @@ def _recipe_watchtower(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
-    # Tall and narrow — generic recipe handles stacked levels + roof; we
-    # just delegate to it so the per-level walls fire.
+) -> tuple[list[BuildCommand], list[str]]:
+    # Tall and narrow — the generic recipe emits a wall ring for every
+    # level plus a cap strip up to the roof base, so upper floors never
+    # float above the level below.
     return _recipe_generic(plan=plan, origin=origin, materials=materials, seed=seed)
 
 
@@ -439,7 +503,7 @@ def _recipe_coliseum(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # Outer wall + tiered seating modelled as concentric perimeters
     # shrinking inward, plus columns/arches from key_features.
     commands: list[BuildCommand] = []
@@ -491,8 +555,9 @@ def _recipe_coliseum(
             )
         )
 
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 def _recipe_market(
@@ -501,7 +566,7 @@ def _recipe_market(
     origin: Position3D,
     materials: dict[str, str],
     seed: int,
-) -> list[BuildCommand]:
+) -> tuple[list[BuildCommand], list[str]]:
     # Open plaza ringed by stalls. We treat each ``rooms`` entry as a stall
     # bounded by short walls. Falls back to a generic single-building if
     # no rooms were decomposed.
@@ -533,8 +598,9 @@ def _recipe_market(
             )
         )
 
-    commands.extend(_emit_key_features(plan, origin=origin, materials=materials))
-    return commands
+    extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
+    commands.extend(extra_cmds)
+    return commands, invoked
 
 
 _STRUCTURE_RECIPES: dict[StructureType, RecipeFn] = {

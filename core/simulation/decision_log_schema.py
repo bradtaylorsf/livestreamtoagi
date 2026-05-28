@@ -34,6 +34,7 @@ class UtterancePayload(BaseModel):
     text: str
     channel: str = "chat"
     model: str | None = None
+    runtime_model: str | None = None
     tokens: int | None = None
     cost: str | None = None
 

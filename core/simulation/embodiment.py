@@ -370,18 +370,49 @@ async def _maybe_write_build_script(
     except Exception:  # pragma: no cover - filesystem errors must not break sim
         logger.exception("failed to write build script %s", intent_id)
 
+    # Live execution: if RCON env vars are set, also stream the BuildScript to
+    # the running Minecraft server so blocks appear in real time during the
+    # headless sim. Failure to reach RCON must never break the sim — the
+    # JSONL + script.json are still on disk for offline replay.
+    try:
+        from core.minecraft.build_executors import rcon_executor_from_env
 
-def select_executor(run_mode: RunMode | str | None) -> EmbodimentExecutor:
+        rcon_executor = rcon_executor_from_env()
+        if rcon_executor is not None:
+            await rcon_executor(script)
+    except Exception:  # pragma: no cover - live RCON errors must not break sim
+        logger.exception("live RCON execution failed for intent %s", intent_id)
+
+
+def select_executor(
+    run_mode: RunMode | str | None,
+    *,
+    build_plan_compiler: Any | None = None,
+    build_plan_resolver: Any | None = None,
+) -> EmbodimentExecutor:
     """Return the executor for ``run_mode``.
 
     This is the **only** intentional ``RunMode`` switch in the embodiment
     layer; downstream code should call ``executor.requires_minecraft_world``
     or other contract methods rather than re-inspecting the mode.
+
+    ``build_plan_compiler`` and ``build_plan_resolver`` are threaded into
+    both executors so ``propose_build`` can persist a compiled
+    ``BuildScript`` (issue #888). When either is ``None`` the executor
+    falls back to recording the intent without producing a script —
+    matching the original behavior so callers that don't care about
+    compiled scripts keep working unchanged.
     """
     mode = run_mode if isinstance(run_mode, RunMode) else RunMode(run_mode) if run_mode else None
     if mode == RunMode.headless:
-        return HeadlessExecutor()
-    return EmbodiedExecutor()
+        return HeadlessExecutor(
+            build_plan_compiler=build_plan_compiler,
+            build_plan_resolver=build_plan_resolver,
+        )
+    return EmbodiedExecutor(
+        build_plan_compiler=build_plan_compiler,
+        build_plan_resolver=build_plan_resolver,
+    )
 
 
 __all__ = [
