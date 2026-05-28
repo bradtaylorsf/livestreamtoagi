@@ -98,11 +98,12 @@ async def test_director_adapter_invokes_task_tool_and_writes_shared_state() -> N
 
     assert result["status"] == "ok"
     assert result["title"] == "Build a safe bridge"
-    assert result["owner"] == "rex"
+    # Default create_task posts an open, unowned proposal others can claim.
+    assert result["owner"] is None
     shared_state.add_task.assert_awaited_once()
     task = shared_state.add_task.call_args.args[0]
     assert task.title == "Build a safe bridge"
-    assert task.owner == "rex"
+    assert task.owner is None
 
 
 async def test_director_adapter_invokes_internal_send_message_tool() -> None:
