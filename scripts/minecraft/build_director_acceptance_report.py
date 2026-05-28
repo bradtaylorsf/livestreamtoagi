@@ -28,7 +28,7 @@ MEMORY_EVENTS = {
     "director.memory.compaction",
     "memory_context.fetched",
 }
-MACRO_EVENT_PREFIXES = ("build_plan.",)
+MACRO_EVENT_PREFIXES = ("build_plan.", "settlement_objective.")
 DISTRESS_EVENTS = {
     "distress_reported",
     "distress.reported",
