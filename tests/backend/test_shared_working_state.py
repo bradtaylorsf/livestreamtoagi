@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,6 +21,7 @@ from core.shared_state import (
     NextStep,
     ResourceEntry,
     SettlementObjective,
+    SharedTask,
     SharedWorkingState,
     VerifiedAction,
 )
@@ -516,3 +518,115 @@ async def test_bridge_can_fall_back_to_injected_shared_state() -> None:
 
     assert response.ok is True
     assert response.payload["goal"]["text"] == "Fallback goal"  # type: ignore[index]
+
+
+async def _get_task(state: SharedWorkingState, task_id: str) -> SharedTask:
+    tasks = {t.id: t for t in await state.get_tasks()}
+    return tasks[task_id]
+
+
+@pytest.mark.asyncio
+async def test_claim_task_happy_path_claims_open_task() -> None:
+    state, _, _ = _state()
+    await state.add_task(SharedTask(id="t1", title="Build a well"))  # open, unowned
+
+    result = await state.claim_task("t1", "rex")
+
+    assert result == {"status": "ok", "owner": "rex"}
+    task = await _get_task(state, "t1")
+    assert task.owner == "rex"
+    assert task.status == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_claim_task_double_claim_informs_loser_of_winner() -> None:
+    state, _, _ = _state()
+    await state.add_task(SharedTask(id="t1", title="Build a well"))
+
+    first = await state.claim_task("t1", "rex")
+    second = await state.claim_task("t1", "aurora")
+
+    assert first == {"status": "ok", "owner": "rex"}
+    assert second == {"status": "already_claimed", "owner": "rex"}
+    # Owner unchanged by the losing claim.
+    task = await _get_task(state, "t1")
+    assert task.owner == "rex"
+
+
+@pytest.mark.asyncio
+async def test_claim_task_concurrent_race_has_exactly_one_winner() -> None:
+    state, _, _ = _state()
+    await state.add_task(SharedTask(id="t1", title="Lead the settlement"))
+
+    results = await asyncio.gather(
+        state.claim_task("t1", "rex"),
+        state.claim_task("t1", "aurora"),
+    )
+
+    winners = [r for r in results if r["status"] == "ok"]
+    losers = [r for r in results if r["status"] == "already_claimed"]
+    assert len(winners) == 1
+    assert len(losers) == 1
+    winner_id = winners[0]["owner"]
+    # The loser was told who won, and the persisted owner matches.
+    assert losers[0]["owner"] == winner_id
+    task = await _get_task(state, "t1")
+    assert task.owner == winner_id
+    assert task.status == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_claim_task_loser_learns_winner_from_marker_before_owner_write() -> None:
+    """The loser reads the winner from the atomic marker, not the task hash.
+
+    Under true concurrent Redis I/O the winner writes the owner field *after*
+    its SET NX succeeds, so a task re-read can briefly still show owner=None.
+    Simulate that window by pre-setting the marker (the winner's id) while the
+    task hash is still open/unowned, then claim as a different agent.
+    """
+    redis = _MemoryRedis()
+    state, _, sim_id = _state(redis)
+    await state.add_task(SharedTask(id="t1", title="Lead the settlement"))
+    # Winner has set the marker but not yet written owner to the task hash.
+    await ScopedRedis(redis, sim_id).set("shared:task_claim:t1", "rex", nx=True)
+
+    result = await state.claim_task("t1", "aurora")
+
+    assert result == {"status": "already_claimed", "owner": "rex"}
+
+
+@pytest.mark.asyncio
+async def test_claim_task_rejects_completed_task() -> None:
+    state, _, _ = _state()
+    await state.add_task(SharedTask(id="t1", title="Already built", owner="rex", status="done"))
+
+    result = await state.claim_task("t1", "aurora")
+
+    assert result["status"] == "already_claimed"
+    assert result["owner"] == "rex"
+    task = await _get_task(state, "t1")
+    assert task.owner == "rex"
+    assert task.status == "done"
+
+
+@pytest.mark.asyncio
+async def test_claim_task_idempotent_for_current_owner() -> None:
+    state, _, _ = _state()
+    await state.add_task(SharedTask(id="t1", title="Build a well"))
+    await state.claim_task("t1", "rex")
+
+    again = await state.claim_task("t1", "rex")
+
+    assert again == {"status": "ok", "owner": "rex"}
+    task = await _get_task(state, "t1")
+    assert task.owner == "rex"
+    assert task.status == "in_progress"
+
+
+@pytest.mark.asyncio
+async def test_claim_task_missing_task_returns_not_found() -> None:
+    state, _, _ = _state()
+
+    result = await state.claim_task("nope", "rex")
+
+    assert result == {"status": "not_found"}

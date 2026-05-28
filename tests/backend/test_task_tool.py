@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.shared_state import SharedTask, SharedWorkingState
+from core.shared_state import SharedWorkingState
 from tools.task_management import ManageTaskTool
 
 
@@ -53,13 +52,30 @@ async def test_create_task():
 
     result = await tool.execute(action="create_task", title="Build revenue dashboard")
     assert result["status"] == "ok"
-    assert result["owner"] == "vera"
+    # Default create_task posts an open, unowned proposal others can claim.
+    assert result["owner"] is None
     assert "task_id" in result
 
     # Verify task appears in list
     list_result = await tool.execute(action="list_tasks")
     assert len(list_result["tasks"]) == 1
     assert list_result["tasks"][0]["title"] == "Build revenue dashboard"
+    assert list_result["tasks"][0]["owner"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_task_claim_true_self_owned():
+    redis = _make_mock_redis()
+    state = SharedWorkingState(redis)
+    tool = ManageTaskTool(shared_state=state, agent_id="vera")
+
+    result = await tool.execute(action="create_task", title="Lead the build", claim=True)
+    assert result["status"] == "ok"
+    assert result["owner"] == "vera"
+
+    list_result = await tool.execute(action="list_tasks")
+    assert list_result["tasks"][0]["owner"] == "vera"
+    assert list_result["tasks"][0]["status"] == "in_progress"
 
 
 @pytest.mark.asyncio
