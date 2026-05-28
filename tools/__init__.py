@@ -11,9 +11,13 @@ from .base import BaseTool
 from .build_tools import ProposeBuildTool, ProposeNewBuildingTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
 from .civilization import (
+    AcceptTradeTool,
     ClaimOwnershipTool,
     GetOwnershipTool,
     ListMyClaimsTool,
+    ListPendingTradesTool,
+    ProposeTradeTool,
+    RejectTradeTool,
     ReleaseOwnershipTool,
 )
 from .code_execution import ExecuteCodeTool
@@ -48,6 +52,7 @@ if TYPE_CHECKING:
     from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
     from core.civilization.ownership import OwnershipLedger
+    from core.civilization.trade import TradeLedger
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
     from core.management import Management
@@ -66,6 +71,7 @@ if TYPE_CHECKING:
     from core.social.alliances import AllianceManager
 
 __all__ = [
+    "AcceptTradeTool",
     "BaseTool",
     "CheckEmailResponsesTool",
     "CheckPostPerformanceTool",
@@ -73,7 +79,10 @@ __all__ = [
     "CreatePollTool",
     "GetOwnershipTool",
     "ListMyClaimsTool",
+    "ListPendingTradesTool",
     "ProposeAllianceTool",
+    "ProposeTradeTool",
+    "RejectTradeTool",
     "ReleaseOwnershipTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
@@ -150,6 +159,7 @@ def get_core_tools(
     refinement_loop: RefinementLoop | None = None,
     sim_folder: Path | None = None,
     ownership_ledger: OwnershipLedger | None = None,
+    trade_ledger: TradeLedger | None = None,
     decision_logger: DecisionLogger | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
@@ -320,6 +330,39 @@ def get_core_tools(
         ListMyClaimsTool(
             agent_id=agent_id,
             ledger=ownership_ledger,
+        )
+    )
+
+    # Civilization trade tools (#892). The trade ledger is per-sim; when no
+    # ledger is supplied the tools still register but report
+    # trade_ledger_unavailable. Accept/reject also take the ownership ledger
+    # so container target_refs inside a trade transfer claims atomically.
+    tools.append(
+        ProposeTradeTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        AcceptTradeTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+            ownership_ledger=ownership_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        RejectTradeTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ListPendingTradesTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
         )
     )
 

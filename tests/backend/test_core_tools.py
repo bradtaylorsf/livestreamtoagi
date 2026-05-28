@@ -278,6 +278,7 @@ class TestToolRegistry:
 
         names = registry.names()
         assert sorted(names) == [
+            "accept_trade",
             "claim_ownership",
             "execute_code",
             "get_audience_status",
@@ -286,10 +287,13 @@ class TestToolRegistry:
             "get_world_state",
             "leave_alliance",
             "list_my_claims",
+            "list_pending_trades",
             "propose_alliance",
             "propose_build",
             "propose_character",
             "propose_new_building",
+            "propose_trade",
+            "reject_trade",
             "release_ownership",
             "send_message",
             "view_alliances",
@@ -308,7 +312,7 @@ class TestToolRegistry:
             character_spawner=MagicMock(),
             voting_manager=MagicMock(),
         )
-        assert len(tools) == 21
+        assert len(tools) == 25
 
         tool_names = {t.name for t in tools}
         assert tool_names == {
@@ -333,6 +337,10 @@ class TestToolRegistry:
             "release_ownership",
             "get_ownership",
             "list_my_claims",
+            "propose_trade",
+            "accept_trade",
+            "reject_trade",
+            "list_pending_trades",
         }
 
         for tool in tools:

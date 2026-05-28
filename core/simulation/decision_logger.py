@@ -40,6 +40,8 @@ from core.simulation.decision_log_schema import (
     RelationshipDeltaRow,
     ToolIntentPayload,
     ToolIntentRow,
+    TradeEventPayload,
+    TradeEventRow,
     UtterancePayload,
     UtteranceRow,
     WorldEventPayload,
@@ -315,6 +317,41 @@ class DecisionLogger:
                     target_ref=target_ref or {},
                     action=action,  # type: ignore[arg-type]
                     motivation=motivation,
+                ),
+            )
+        )
+
+    def log_trade_event(
+        self,
+        *,
+        offer_id: str,
+        proposer_id: str,
+        recipient_id: str,
+        give: dict[str, int] | None = None,
+        want: dict[str, int] | None = None,
+        action: str,
+        motivation: str | None = None,
+        reject_reason: str | None = None,
+        price_observation: dict[str, Any] | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            TradeEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id or proposer_id,
+                payload=TradeEventPayload(
+                    offer_id=offer_id,
+                    proposer_id=proposer_id,
+                    recipient_id=recipient_id,
+                    give=dict(give or {}),
+                    want=dict(want or {}),
+                    motivation=motivation,
+                    action=action,  # type: ignore[arg-type]
+                    reject_reason=reject_reason,
+                    price_observation=price_observation,
                 ),
             )
         )

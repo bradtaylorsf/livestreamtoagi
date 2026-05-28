@@ -33,6 +33,7 @@ from core.simulation.decision_log_schema import (
     DecisionLogRow,
     OwnershipDeltaRow,
     ToolIntentRow,
+    TradeEventRow,
     UtteranceRow,
 )
 from core.simulation.decision_logger import DecisionLogReader
@@ -239,6 +240,14 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
         if r.payload.action == "claim"
     }
 
+    trade_rows = [r for r in rows if isinstance(r, TradeEventRow)]
+    trade_events = len(trade_rows)
+    distinct_trading_pairs = {
+        tuple(sorted((r.payload.proposer_id, r.payload.recipient_id)))
+        for r in trade_rows
+        if r.payload.action == "accepted"
+    }
+
     classification, failure_class = _classify(
         shared_objective_chosen=shared_objective,
         distinct_role_count=distinct_role_count,
@@ -281,6 +290,8 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "delegation_events": delegation_events,
             "ownership_events": ownership_events,
             "distinct_owners": len(distinct_owner_ids),
+            "trade_events": trade_events,
+            "distinct_trading_pairs": len(distinct_trading_pairs),
         },
     )
 

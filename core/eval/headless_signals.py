@@ -33,6 +33,7 @@ from core.simulation.decision_log_schema import (
     OwnershipDeltaRow,
     RelationshipDeltaRow,
     ToolIntentRow,
+    TradeEventRow,
     UtteranceRow,
     WorldEventRow,
 )
@@ -273,31 +274,87 @@ _ECONOMIC_TOOL_HINTS = (
 
 
 def score_economic_behavior(rows: list[DecisionLogRow]) -> dict[str, Any]:
-    """Economic activity ~ count of currency/transaction tool calls."""
+    """Economic activity ~ count of currency/transaction tool calls + trades (#892)."""
     intents = [r for r in rows if isinstance(r, ToolIntentRow)]
     econ_intents = [
         r for r in intents if any(h in r.payload.tool_name.lower() for h in _ECONOMIC_TOOL_HINTS)
     ]
     distinct_actors = len({r.actor_id or "" for r in econ_intents})
 
-    count_score = min(75.0, len(econ_intents) * 8.0)
-    spread_score = min(25.0, distinct_actors * 8.0)
-    score = _clamp(count_score + spread_score)
+    trade_events: list[TradeEventRow] = [r for r in rows if isinstance(r, TradeEventRow)]
+    accepted_trades = [t for t in trade_events if t.payload.action == "accepted"]
+    trade_pairs = {
+        tuple(sorted((t.payload.proposer_id, t.payload.recipient_id)))
+        for t in accepted_trades
+    }
+    price_index = _aggregate_price_index(accepted_trades)
+
+    count_score = min(60.0, len(econ_intents) * 8.0)
+    spread_score = min(20.0, distinct_actors * 8.0)
+    trade_score = min(20.0, len(accepted_trades) * 10.0 + len(trade_pairs) * 5.0)
+    score = _clamp(count_score + spread_score + trade_score)
 
     return {
         "score": score,
         "reasoning": (
-            f"{len(econ_intents)} economic/currency tool calls across {distinct_actors} agents."
+            f"{len(econ_intents)} economic/currency tool calls across "
+            f"{distinct_actors} agents; "
+            f"{len(accepted_trades)} accepted trade(s) across "
+            f"{len(trade_pairs)} trading pair(s)."
         ),
         "evidence": [
             _evidence_ref(r, {"tool_name": r.payload.tool_name}) for r in econ_intents[:20]
+        ]
+        + [
+            _evidence_ref(
+                t,
+                {
+                    "proposer_id": t.payload.proposer_id,
+                    "recipient_id": t.payload.recipient_id,
+                    "give": t.payload.give,
+                    "want": t.payload.want,
+                },
+            )
+            for t in accepted_trades[:10]
         ],
         "sub_scores": {
             "economic_intent_count": float(len(econ_intents)),
             "distinct_actors": float(distinct_actors),
+            "trade_event_count": float(len(trade_events)),
+            "accepted_trade_count": float(len(accepted_trades)),
+            "distinct_trading_pairs": float(len(trade_pairs)),
         },
-        "confidence": 0.75 if econ_intents else 0.4,
+        "trade": {
+            "trade_event_count": len(trade_events),
+            "accepted_trade_count": len(accepted_trades),
+            "distinct_trading_pairs": len(trade_pairs),
+            "trading_pairs": [list(p) for p in sorted(trade_pairs)],
+            "price_index": price_index,
+        },
+        "confidence": 0.75 if (econ_intents or trade_events) else 0.4,
     }
+
+
+def _aggregate_price_index(
+    accepted_trades: list[TradeEventRow],
+) -> dict[str, dict[str, float]]:
+    """Per (give_material, want_material) pair → average qty ratio."""
+    totals: dict[tuple[str, str], tuple[float, int]] = {}
+    for trade in accepted_trades:
+        give = trade.payload.give or {}
+        want = trade.payload.want or {}
+        for give_mat, give_qty in give.items():
+            for want_mat, want_qty in want.items():
+                if give_qty <= 0 or want_qty <= 0:
+                    continue
+                ratio = give_qty / want_qty
+                key = (give_mat, want_mat)
+                prev_total, prev_count = totals.get(key, (0.0, 0))
+                totals[key] = (prev_total + ratio, prev_count + 1)
+    index: dict[str, dict[str, float]] = {}
+    for (give_mat, want_mat), (total, count) in totals.items():
+        index.setdefault(give_mat, {})[want_mat] = total / count
+    return index
 
 
 def score_internal_state(rows: list[DecisionLogRow]) -> dict[str, Any]:

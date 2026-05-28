@@ -340,6 +340,49 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         rationale="Read-only introspection over the caller's own claims.",
         linked_issue="#891",
     ),
+    "propose_trade": ToolParityEntry(
+        name="propose_trade",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Pairwise trade proposal: writes a pending offer to the internal "
+            "trade ledger and emits a decision-log event. Never publishes "
+            "externally."
+        ),
+        linked_issue="#892",
+    ),
+    "accept_trade": ToolParityEntry(
+        name="accept_trade",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Recipient acceptance atomically swaps two inventories and "
+            "(when included) transfers container ownership through the "
+            "shared ownership ledger."
+        ),
+        linked_issue="#892",
+    ),
+    "reject_trade": ToolParityEntry(
+        name="reject_trade",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Recipient rejection records the reason on the offer; no "
+            "external publication."
+        ),
+        linked_issue="#892",
+    ),
+    "list_pending_trades": ToolParityEntry(
+        name="list_pending_trades",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only introspection over offers awaiting this agent's reply.",
+        linked_issue="#892",
+    ),
 }
 
 

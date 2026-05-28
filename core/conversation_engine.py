@@ -206,6 +206,9 @@ class ConversationEngine:
         # through to build_agent_tools so the claim/release tools can
         # persist to <sim>/ownership_log.jsonl and the decision log.
         self._ownership_ledger = options.ownership_ledger
+        # Civilization trade ledger (#892) — persists pending/accepted
+        # trades to <sim>/trade_log.jsonl via the trade tools.
+        self._trade_ledger = options.trade_ledger
         self._decision_logger = options.decision_logger
 
         # Conversation progression tracking (#248)
@@ -1138,6 +1141,7 @@ class ConversationEngine:
                 embodiment_executor=self._embodiment_executor,
                 sim_folder=self._sim_folder,
                 ownership_ledger=self._ownership_ledger,
+                trade_ledger=self._trade_ledger,
                 decision_logger=self._decision_logger,
             )
             logger.debug(

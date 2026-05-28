@@ -248,8 +248,11 @@ async def run_headless(args: argparse.Namespace) -> None:
     # Per-sim ownership ledger (#891) — replays existing
     # <sim>/ownership_log.jsonl so resumed runs inherit prior claims.
     from core.civilization.ownership import OwnershipLedger
+    from core.civilization.trade import TradeLedger
 
     orchestrator._ownership_ledger = OwnershipLedger(sim_folder)
+    # Per-sim trade ledger (#892) — replays <sim>/trade_log.jsonl.
+    orchestrator._trade_ledger = TradeLedger(sim_folder)
 
     loop = asyncio.get_running_loop()
 

@@ -27,6 +27,7 @@ This inventory mirrors `TOOL_PARITY` in
 
 | Tool | Module | Category | Classification | Linked issue | Minecraft replacement | Rationale |
 | --- | --- | --- | --- | --- | --- | --- |
+| `accept_trade` | `tools.civilization` | civilization | `callable_now` | #892 | N/A | Recipient acceptance atomically swaps two inventories and (when included) transfers container ownership through the shared ownership ledger. |
 | `check_email_responses` | `tools.revenue_tools` | email | `callable_now` | N/A | N/A | Email response lookup is read-only and does not send external communication. |
 | `claim_ownership` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | First-claim-wins ownership ledger is internal civilization state; Director V2 can route claims through the same backend ledger without external publication. |
 | `check_post_performance` | `tools.revenue_tools` | social | `callable_now` | N/A | N/A | Engagement lookup is read-only and does not publish external content. |
@@ -45,12 +46,15 @@ This inventory mirrors `TOOL_PARITY` in
 | `get_world_state` | `tools.world_state` | world_state | `replaced_by_minecraft` | #712 | Minecraft perception snapshot plus shared world/task blackboard. | The old Redis world snapshot is superseded by Minecraft perception and shared scene state. |
 | `leave_alliance` | `tools.social_tools` | alliance | `callable_now` | N/A | N/A | Leaving an alliance is internal state managed by the existing alliance manager. |
 | `list_my_claims` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | Read-only introspection over the caller's own claims. |
+| `list_pending_trades` | `tools.civilization` | civilization | `callable_now` | #892 | N/A | Read-only introspection over offers awaiting this agent's reply. |
 | `manage_task` | `tools.task_management` | task | `callable_now` | #712 | N/A | The shared task board remains useful until the Minecraft blackboard is expanded. |
 | `propose_alliance` | `tools.social_tools` | alliance | `callable_now` | N/A | N/A | Alliance proposals are internal social governance and use the existing manager. |
 | `propose_build` | `tools.build_tools` | world_state | `callable_now` | #855 | N/A | Structured BuildIntent submission is the first-class signal for building; Director V2 routes it to the build macro scheduler. |
 | `propose_character` | `tools.character_tools` | character | `callable_now` | N/A | N/A | Character applications stay internal and still flow through the existing voting lifecycle. |
 | `propose_new_building` | `tools.build_tools` | world_state | `callable_now` | #861 | N/A | Dream-up build proposal: agents describe a brand-new building structurally; the refinement loop generates an image, decomposes it, builds it, and iterates against a vision comparison until the screenshot matches the source image. |
 | `propose_self_modification` | `tools.self_modification` | self_mod | `approval_gated` | N/A | N/A | Self-modification only creates a human-review proposal and must not auto-apply changes. |
+| `propose_trade` | `tools.civilization` | civilization | `callable_now` | #892 | N/A | Pairwise trade proposal: writes a pending offer to the internal trade ledger and emits a decision-log event. Never publishes externally. |
+| `reject_trade` | `tools.civilization` | civilization | `callable_now` | #892 | N/A | Recipient rejection records the reason on the offer; no external publication. |
 | `recall_memory` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 2 recall is still a backend memory read and keeps the three-tier memory boundary. |
 | `release_ownership` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | Releases mutate the same internal ownership ledger and never touch external systems. |
 | `retrieve_transcript` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 3 transcript lookup remains a read-only backend memory operation. |
