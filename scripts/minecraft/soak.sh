@@ -29,6 +29,9 @@
 #
 # Optional:
 #   LOCAL_LLM_MODEL_BUILDING    LM Studio building/code-tier model id.
+#   LOCAL_LLM_EMBEDDING_MODEL   LM Studio embedding model id staged into each
+#                               bot profile. Default:
+#                               text-embedding-nomic-embed-text-v1.5.
 #   LOCAL_LLM_BASE_URL          Effective OpenAI-compatible local endpoint.
 #                               Defaults to the LM queue proxy when enabled.
 #   LOCAL_LLM_UPSTREAM_URL      Actual LM Studio upstream used by the queue
@@ -661,7 +664,7 @@ iso_from_epoch() {
 }
 
 verify_static() {
-    local problems=0 bot script profile
+    local problems=0 bot script profile profile_path
 
     [ -d "$SCRIPT_DIR" ] || { fail "missing scripts dir: $SCRIPT_DIR"; problems=1; }
 
@@ -674,12 +677,29 @@ verify_static() {
     done
 
     for profile in bridge alpha vera rex aurora pixel fork sentinel grok; do
-        if [ ! -s "$SCRIPT_DIR/profiles/${profile}-bot.json" ]; then
-            fail "profile missing or empty: $SCRIPT_DIR/profiles/${profile}-bot.json"
+        profile_path="$SCRIPT_DIR/profiles/${profile}-bot.json"
+        if [ ! -s "$profile_path" ]; then
+            fail "profile missing or empty: $profile_path"
             problems=1
-        elif grep -qi 'openrouter' "$SCRIPT_DIR/profiles/${profile}-bot.json"; then
-            fail "profile is not local-only: $SCRIPT_DIR/profiles/${profile}-bot.json"
+        elif grep -qi 'openrouter' "$profile_path"; then
+            fail "profile is not local-only: $profile_path"
             problems=1
+        else
+            # Committed profiles are launch-time templates: connect-cohort-bot.sh
+            # (and the alpha/bridge launchers) substitute these literal
+            # placeholders from $LOCAL_LLM_MODEL / $LOCAL_LLM_MODEL_BUILDING at
+            # launch. A hand-edited profile that lost a placeholder (e.g. a
+            # resolved model id committed by mistake) would pin the wrong model
+            # and trip the per-bot throw mid-launch, so fail the static gate here
+            # before any bot starts. Mirrors connect-cohort-bot.sh:285-286.
+            grep -q '"model": "lmstudio/__LOCAL_LLM_MODEL__"' "$profile_path" || {
+                fail "profile model placeholder drifted (expected \"lmstudio/__LOCAL_LLM_MODEL__\"): $profile_path"
+                problems=1
+            }
+            grep -q '"code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"' "$profile_path" || {
+                fail "profile code_model placeholder drifted (expected \"lmstudio/__LOCAL_LLM_MODEL_BUILDING__\"): $profile_path"
+                problems=1
+            }
         fi
     done
 
@@ -822,6 +842,7 @@ print_plan() {
     fi
     info "chat model:     ${LOCAL_LLM_MODEL:-<unset>}"
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
+    info "embedding model: ${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
     info "builder route:  provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
     info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
     info "plan builders:  ${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-<unrestricted>}"
@@ -1464,6 +1485,13 @@ if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
     exit 1
 fi
 export LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LOCAL_LLM_MODEL}"
+export LOCAL_LLM_EMBEDDING_MODEL="${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
+# Profiles are committed templates; the per-bot launchers resolve the
+# __LOCAL_LLM_MODEL__ / __LOCAL_LLM_MODEL_BUILDING__ placeholders at launch from
+# these values (we never regenerate them via gen_profiles.py). Emit one
+# authoritative line so operators and tests can confirm which model the staged
+# bots will actually serve for this run.
+info "Bot profiles refreshed for LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL}"
 preflight_builder_routing || exit $?
 
 if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
@@ -1579,6 +1607,7 @@ write_metadata() {
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
         echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"
+        echo "local_llm_embedding_model=${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
         echo "llm_smoke_timeout_seconds=$SOAK_LLM_SMOKE_TIMEOUT_SECONDS"
         echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
@@ -1988,7 +2017,7 @@ launch_bot() {
         cd "$REPO_ROOT"
         export MINDCRAFT_DIR="$worktree"
         export MINDSERVER_PORT="$mindserver_port"
-        export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL
+        export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_EMBEDDING_MODEL LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL
         export MINECRAFT_LLM_QUEUE_PROXY MINECRAFT_LLM_CONCURRENCY
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
         export MC_RUN_DIR="$RUN_DIR"

@@ -89,6 +89,48 @@ For local soaks, `LTAG_MODEL_*` controls logical role selection while
 `LOCAL_LLM_MODEL` and `LOCAL_LLM_MODEL_BUILDING` control the actual LM Studio
 runtime model IDs.
 
+### Swapping the local model (resolved at launch, not regenerated)
+
+The committed `scripts/minecraft/profiles/<bot>-bot.json` files are **launch-time
+templates**: they carry the literal placeholders
+`"model": "lmstudio/__LOCAL_LLM_MODEL__"` and
+`"code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"`. Each per-bot launcher
+substitutes those placeholders from `$LOCAL_LLM_MODEL` /
+`$LOCAL_LLM_MODEL_BUILDING` **at launch**. You do **not** need to run
+`pnpm mc:gen-profiles` before a soak — that generator is a dev-only tool that
+writes *resolved* ids and would strip the placeholders the launchers rely on.
+To swap the model, just edit `.env` and relaunch; the staged profiles pick up
+the new value on the next run.
+
+`.env` is the single source of truth for the local-dev path. The
+`pnpm mc:sim*` wrapper (`scripts/minecraft/run-local-sim.sh`) now **always
+overrides** the local-model triple — `LOCAL_LLM_MODEL`,
+`LOCAL_LLM_MODEL_BUILDING`, and `LOCAL_LLM_EMBEDDING_MODEL` — from `.env`, even
+when one of those variables is already exported in your shell. This prevents a
+stale `export LOCAL_LLM_MODEL=...` left over from a prior run from silently
+pinning the old model while you think you are testing a new one. If you invoke
+`scripts/minecraft/soak.sh` directly (without the wrapper) and want `.env` to
+win, clear any leftover export first:
+
+```bash
+unset LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_EMBEDDING_MODEL
+```
+
+Confirm the resolved model in the launch plan (`chat model:` / `build model:`)
+and in the one-line `Bot profiles refreshed for LOCAL_LLM_MODEL=<id>` log a real
+run emits after preflight. The run metadata file also records the full
+`local_llm_model`, `local_llm_model_building`, and `local_llm_embedding_model`
+triple.
+
+`verify_static` (`soak.sh --verify` / `pnpm verify:minecraft-soak`) fails fast if
+any committed profile has lost a placeholder (for example, a resolved id
+committed by mistake), so drift is caught before any bot launches rather than as
+a late per-bot throw.
+
+`LOCAL_LLM_EMBEDDING_MODEL` overrides the embedding model staged into each bot
+profile; leave it unset to keep the `text-embedding-nomic-embed-text-v1.5`
+default.
+
 ## Live Soak Command
 
 Use local models only:
