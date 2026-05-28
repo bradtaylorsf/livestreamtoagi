@@ -72,6 +72,7 @@
     "mc:sim:soak": "scripts/minecraft/run-local-sim.sh soak",
     "mc:sim:smoke:director": "scripts/minecraft/run-local-sim.sh smoke-director",
     "mc:sim:soak:director": "scripts/minecraft/run-local-sim.sh soak-director",
+    "mc:overnight": "scripts/minecraft/run_overnight_local.sh",
     "mc:run-errand-smoke": ".venv/bin/pytest tests/backend/test_minecraft_alpha_errand_execution.py -v",
     "verify:mindcraft-alpha": ".venv/bin/pytest tests/backend/test_minecraft_alpha_profile.py -v",
     "verify:alpha-errand": ".venv/bin/pytest tests/backend/test_minecraft_alpha_errand_execution.py tests/backend/test_bridge_errand.py -v",
