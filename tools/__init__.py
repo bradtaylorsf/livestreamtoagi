@@ -412,9 +412,7 @@ def get_core_tools(
     # The tick_provider reads decision_logger.tick so the deterministic
     # detection roll varies across steals — without it, every steal by the
     # same thief hashes to the same outcome.
-    _theft_tick_provider = (
-        (lambda: decision_logger.tick) if decision_logger is not None else None
-    )
+    _theft_tick_provider = (lambda: decision_logger.tick) if decision_logger is not None else None
     tools.append(
         StealTool(
             agent_id=agent_id,

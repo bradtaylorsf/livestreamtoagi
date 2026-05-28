@@ -841,11 +841,7 @@ def _emit_theft_consequences(
                 reason="theft_witnessed",
             )
 
-        if (
-            diplomacy_ledger is not None
-            and victim_faction is not None
-            and goal_manager is not None
-        ):
+        if diplomacy_ledger is not None and victim_faction is not None and goal_manager is not None:
             _inject_defense_goals(
                 diplomacy_ledger=diplomacy_ledger,
                 goal_manager=goal_manager,
@@ -902,14 +898,10 @@ def _inject_defense_goals(
                     source="treaty_mutual_defense",
                 )
             except Exception:  # pragma: no cover
-                logger.exception(
-                    "goal_manager.add_goal failed for defender=%s", defender_id
-                )
+                logger.exception("goal_manager.add_goal failed for defender=%s", defender_id)
                 continue
         except Exception:  # pragma: no cover
-            logger.exception(
-                "goal_manager.add_goal failed for defender=%s", defender_id
-            )
+            logger.exception("goal_manager.add_goal failed for defender=%s", defender_id)
             continue
         if asyncio.iscoroutine(coro):
             try:
@@ -1417,9 +1409,7 @@ class BreakTreatyTool(BaseTool):
         if not isinstance(reason, str) or not reason.strip():
             return {"status": "error", "reason": "reason is required"}
 
-        result = self._ledger.break_(
-            treaty_id, breaker_id=self._agent_id, reason=reason.strip()
-        )
+        result = self._ledger.break_(treaty_id, breaker_id=self._agent_id, reason=reason.strip())
         if isinstance(result, DiplomacyFailure):
             return _diplomacy_failure_response(result)
 
@@ -1438,9 +1428,7 @@ class BreakTreatyTool(BaseTool):
         # treaty party — those members see their faction's word betrayed.
         if self._decision_logger is not None:
             breaker_faction = self._ledger.get_faction_for(self._agent_id)
-            breaker_faction_id = (
-                breaker_faction.faction_id if breaker_faction else None
-            )
+            breaker_faction_id = breaker_faction.faction_id if breaker_faction else None
             for party_id in result.parties:
                 if party_id == breaker_faction_id:
                     continue
@@ -1676,9 +1664,7 @@ def _log_conflict(
             actor_id=actor_id,
         )
     except Exception:  # pragma: no cover - logger must not break the sim
-        logger.exception(
-            "decision_logger.log_conflict_event failed (action=%s)", action
-        )
+        logger.exception("decision_logger.log_conflict_event failed (action=%s)", action)
 
 
 def _emit_conflict_consequences(
@@ -1780,9 +1766,7 @@ class OpenDisputeTool(BaseTool):
         },
         "evidence_refs": {
             "type": "array",
-            "description": (
-                "List of evidence entries: each is {ref_type, ref_id, narrative?}."
-            ),
+            "description": ("List of evidence entries: each is {ref_type, ref_id, narrative?}."),
         },
         "motivation": {
             "type": "string",

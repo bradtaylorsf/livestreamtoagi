@@ -111,9 +111,7 @@ def _normalize_terms(terms: dict[str, Any] | None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in terms.items():
         if not isinstance(key, str) or key not in _VALID_TERMS:
-            raise ValueError(
-                f"unknown treaty term {key!r}; allowed: {sorted(_VALID_TERMS)}"
-            )
+            raise ValueError(f"unknown treaty term {key!r}; allowed: {sorted(_VALID_TERMS)}")
         out[key] = bool(value) if isinstance(value, bool) else value
     return out
 
@@ -128,9 +126,7 @@ class DiplomacyLedger:
         simulation_id: str | uuid.UUID | None = None,
         factions: Iterable[Any] | None = None,
     ) -> None:
-        self._sim_folder: Path | None = (
-            Path(sim_folder) if sim_folder is not None else None
-        )
+        self._sim_folder: Path | None = Path(sim_folder) if sim_folder is not None else None
         self._path: Path | None = None
         if self._sim_folder is not None:
             self._sim_folder.mkdir(parents=True, exist_ok=True)
@@ -177,9 +173,7 @@ class DiplomacyLedger:
         return [
             t
             for t in self._treaties.values()
-            if t.status == "active"
-            and faction_a in t.parties
-            and faction_b in t.parties
+            if t.status == "active" and faction_a in t.parties and faction_b in t.parties
         ]
 
     def has_non_aggression(self, faction_a: str, faction_b: str) -> bool:
@@ -245,10 +239,7 @@ class DiplomacyLedger:
         if proposer_id not in self._factions[proposer_faction_id].members:
             return DiplomacyFailure(
                 reason="agent_not_in_faction",
-                detail=(
-                    f"{proposer_id!r} is not a member of "
-                    f"{proposer_faction_id!r}"
-                ),
+                detail=(f"{proposer_id!r} is not a member of {proposer_faction_id!r}"),
             )
         try:
             terms_norm = _normalize_terms(terms)
@@ -317,9 +308,7 @@ class DiplomacyLedger:
             return DiplomacyFailure(
                 reason="not_a_party",
                 treaty_id=treaty_id,
-                detail=(
-                    f"faction {signer_faction_id!r} is not a party to this treaty"
-                ),
+                detail=(f"faction {signer_faction_id!r} is not a party to this treaty"),
             )
         if signer_faction_id == treaty.proposer_faction_id:
             return DiplomacyFailure(
@@ -329,9 +318,7 @@ class DiplomacyLedger:
             )
 
         signed_at = datetime.now(UTC)
-        signed = treaty.model_copy(
-            update={"status": "active", "signed_at": signed_at}
-        )
+        signed = treaty.model_copy(update={"status": "active", "signed_at": signed_at})
         self._treaties[treaty_id] = signed
         for fid in signed.parties:
             faction = self._factions.get(fid)
@@ -422,9 +409,7 @@ class DiplomacyLedger:
                 "defector_id": agent_id,
                 "from_faction": old_id,
                 "to_faction": target_faction_id,
-                "motivation": (
-                    motivation.strip() if isinstance(motivation, str) else None
-                ),
+                "motivation": (motivation.strip() if isinstance(motivation, str) else None),
                 "wall_time": when.isoformat(),
             }
         )
@@ -433,18 +418,12 @@ class DiplomacyLedger:
     # ─── Internal helpers ──────────────────────────────────────────────
 
     def _seed_faction(self, fc: Any) -> None:
-        name = getattr(fc, "name", None) or (
-            fc.get("name") if isinstance(fc, dict) else None
-        )
+        name = getattr(fc, "name", None) or (fc.get("name") if isinstance(fc, dict) else None)
         members_iter = getattr(fc, "members", None) or (
             fc.get("members") if isinstance(fc, dict) else []
         )
-        goal = getattr(fc, "goal", None) or (
-            fc.get("goal") if isinstance(fc, dict) else ""
-        )
-        stance = getattr(fc, "stance", None) or (
-            fc.get("stance") if isinstance(fc, dict) else None
-        )
+        goal = getattr(fc, "goal", None) or (fc.get("goal") if isinstance(fc, dict) else "")
+        stance = getattr(fc, "stance", None) or (fc.get("stance") if isinstance(fc, dict) else None)
         if not isinstance(name, str) or not name:
             return
         faction_id = _slugify(name)
@@ -486,9 +465,7 @@ class DiplomacyLedger:
                     try:
                         record = json.loads(stripped)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "diplomacy_log: skipping malformed line %d", line_no
-                        )
+                        logger.warning("diplomacy_log: skipping malformed line %d", line_no)
                         continue
                     self._apply_replay(record)
         except OSError:  # pragma: no cover

@@ -74,9 +74,7 @@ def normalize_region_ref(ref: dict[str, Any]) -> dict[str, Any]:
         x2 = int(ref["x2"])
         z2 = int(ref["z2"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(
-            "region target_ref requires integer x1, z1, x2, z2 keys"
-        ) from exc
+        raise ValueError("region target_ref requires integer x1, z1, x2, z2 keys") from exc
     lo_x, hi_x = min(x1, x2), max(x1, x2)
     lo_z, hi_z = min(z1, z2), max(z1, z2)
     out: dict[str, Any] = {"x1": lo_x, "z1": lo_z, "x2": hi_x, "z2": hi_z}
@@ -112,9 +110,7 @@ def canonical_target_ref(target_type: TargetType, ref: dict[str, Any]) -> dict[s
             y = int(ref["y"])
             z = int(ref["z"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(
-                "container target_ref requires integer x, y, z keys"
-            ) from exc
+            raise ValueError("container target_ref requires integer x, y, z keys") from exc
         dim = ref.get("dim")
         return {
             "x": x,
@@ -134,10 +130,7 @@ def _ref_key(target_type: TargetType, ref: dict[str, Any]) -> str:
     if target_type == "container":
         return f"container::{ref['dim']}::{ref['x']},{ref['y']},{ref['z']}"
     # Region falls back to canonical bbox-as-string but lookups use overlap.
-    return (
-        f"region::{ref['dim']}::"
-        f"{ref['x1']},{ref['z1']}::{ref['x2']},{ref['z2']}"
-    )
+    return f"region::{ref['dim']}::{ref['x1']},{ref['z1']}::{ref['x2']},{ref['z2']}"
 
 
 class OwnershipLedger:
@@ -261,11 +254,7 @@ class OwnershipLedger:
 
     def list_owned_by(self, agent_id: str) -> list[OwnershipClaim]:
         """Return all active claims held by an agent (creation order)."""
-        return [
-            c
-            for c in self._active.values()
-            if c.owner_agent_id == agent_id
-        ]
+        return [c for c in self._active.values() if c.owner_agent_id == agent_id]
 
     def all_active(self) -> list[OwnershipClaim]:
         return list(self._active.values())
@@ -293,9 +282,7 @@ class OwnershipLedger:
     def _deindex_active(self, claim: OwnershipClaim) -> None:
         self._active.pop(_ref_key(claim.target_type, claim.target_ref), None)
         if claim.target_type == "region":
-            self._active_regions = [
-                r for r in self._active_regions if r.claim_id != claim.claim_id
-            ]
+            self._active_regions = [r for r in self._active_regions if r.claim_id != claim.claim_id]
 
     def _append_event(
         self,
@@ -336,9 +323,7 @@ class OwnershipLedger:
                     try:
                         record = json.loads(stripped)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "ownership_log: skipping malformed line %d", line_no
-                        )
+                        logger.warning("ownership_log: skipping malformed line %d", line_no)
                         continue
                     self._apply_replay(record)
         except OSError:  # pragma: no cover

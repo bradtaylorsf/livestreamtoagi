@@ -319,8 +319,7 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         category="civilization",
         classification="callable_now",
         rationale=(
-            "Releases mutate the same internal ownership ledger and never "
-            "touch external systems."
+            "Releases mutate the same internal ownership ledger and never touch external systems."
         ),
         linked_issue="#891",
     ),
@@ -369,10 +368,7 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         module="tools.civilization",
         category="civilization",
         classification="callable_now",
-        rationale=(
-            "Recipient rejection records the reason on the offer; no "
-            "external publication."
-        ),
+        rationale=("Recipient rejection records the reason on the offer; no external publication."),
         linked_issue="#892",
     ),
     "list_pending_trades": ToolParityEntry(
@@ -522,8 +518,7 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         category="civilization",
         classification="callable_now",
         rationale=(
-            "Faction member seconds a pending war; activates it once the "
-            "quorum is reached."
+            "Faction member seconds a pending war; activates it once the quorum is reached."
         ),
         linked_issue="#895",
     ),
@@ -533,8 +528,7 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         category="civilization",
         classification="callable_now",
         rationale=(
-            "End a war or judged dispute by recording surrender terms. "
-            "Local-only side effects."
+            "End a war or judged dispute by recording surrender terms. Local-only side effects."
         ),
         linked_issue="#895",
     ),

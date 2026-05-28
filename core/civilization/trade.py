@@ -101,13 +101,9 @@ def _normalize_bundle(bundle: dict[str, Any] | None, *, label: str) -> dict[str,
         try:
             qty_int = int(qty)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"{label} quantity for {material!r} must be an integer"
-            ) from exc
+            raise ValueError(f"{label} quantity for {material!r} must be an integer") from exc
         if qty_int <= 0:
-            raise ValueError(
-                f"{label} quantity for {material!r} must be positive (got {qty_int})"
-            )
+            raise ValueError(f"{label} quantity for {material!r} must be positive (got {qty_int})")
         normalized[material] = qty_int
     return normalized
 
@@ -131,9 +127,7 @@ def _normalize_containers(
             y = int(ref["y"])
             z = int(ref["z"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(
-                f"{label} entries require integer 'x', 'y', 'z' keys"
-            ) from exc
+            raise ValueError(f"{label} entries require integer 'x', 'y', 'z' keys") from exc
         dim = ref.get("dim")
         normalized.append(
             {
@@ -180,9 +174,7 @@ class TradeLedger:
     """
 
     def __init__(self, sim_folder: str | Path | None) -> None:
-        self._sim_folder: Path | None = (
-            Path(sim_folder) if sim_folder is not None else None
-        )
+        self._sim_folder: Path | None = Path(sim_folder) if sim_folder is not None else None
         self._path: Path | None = None
         if self._sim_folder is not None:
             self._sim_folder.mkdir(parents=True, exist_ok=True)
@@ -251,12 +243,8 @@ class TradeLedger:
         try:
             give_norm = _normalize_bundle(give, label="give")
             want_norm = _normalize_bundle(want, label="want")
-            give_container_refs = _normalize_containers(
-                give_containers, label="give_containers"
-            )
-            want_container_refs = _normalize_containers(
-                want_containers, label="want_containers"
-            )
+            give_container_refs = _normalize_containers(give_containers, label="give_containers")
+            want_container_refs = _normalize_containers(want_containers, label="want_containers")
         except ValueError as exc:
             return TradeFailure(reason="empty_trade", detail=str(exc))
 
@@ -347,9 +335,7 @@ class TradeLedger:
         container_transfers = self._apply_container_transfers(offer, ownership_ledger)
 
         resolved_at = datetime.now(UTC)
-        accepted = offer.model_copy(
-            update={"status": "accepted", "resolved_at": resolved_at}
-        )
+        accepted = offer.model_copy(update={"status": "accepted", "resolved_at": resolved_at})
         self._offers[offer_id] = accepted
 
         price_observation = self._record_price_observation(accepted)
@@ -421,9 +407,7 @@ class TradeLedger:
     def list_pending(self, agent_id: str) -> list[TradeOffer]:
         """Pending offers awaiting *this* agent's response (creation order)."""
         return [
-            o
-            for o in self._offers.values()
-            if o.status == "pending" and o.recipient_id == agent_id
+            o for o in self._offers.values() if o.status == "pending" and o.recipient_id == agent_id
         ]
 
     def get(self, offer_id: str) -> TradeOffer | None:
@@ -541,9 +525,7 @@ class TradeLedger:
                     try:
                         record = json.loads(stripped)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "trade_log: skipping malformed line %d", line_no
-                        )
+                        logger.warning("trade_log: skipping malformed line %d", line_no)
                         continue
                     self._apply_replay(record)
         except OSError:  # pragma: no cover

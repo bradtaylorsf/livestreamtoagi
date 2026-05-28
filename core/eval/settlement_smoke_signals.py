@@ -238,9 +238,7 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     ownership_deltas = [r for r in rows if isinstance(r, OwnershipDeltaRow)]
     ownership_events = len(ownership_deltas)
     distinct_owner_ids = {
-        r.payload.owner_agent_id
-        for r in ownership_deltas
-        if r.payload.action == "claim"
+        r.payload.owner_agent_id for r in ownership_deltas if r.payload.action == "claim"
     }
 
     trade_rows = [r for r in rows if isinstance(r, TradeEventRow)]
@@ -262,9 +260,9 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     unique_theft = list(theft_by_attempt.values())
     theft_events_count = len(unique_theft)
     detected_count = sum(1 for ev in unique_theft if ev.payload.detected)
-    detection_rate_pct = int(
-        round((detected_count / theft_events_count) * 100)
-    ) if theft_events_count else 0
+    detection_rate_pct = (
+        int(round((detected_count / theft_events_count) * 100)) if theft_events_count else 0
+    )
     thief_attempts: dict[str, int] = defaultdict(int)
     for ev in unique_theft:
         thief_attempts[ev.payload.thief_id] += 1
@@ -301,24 +299,12 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     # ``disputes_opened``/``disputes_resolved`` cover the resolution rate;
     # ``wars_declared``/``surrenders`` cover the escalation path.
     conflict_rows = [r for r in rows if isinstance(r, ConflictEventRow)]
-    disputes_opened = sum(
-        1 for r in conflict_rows if r.payload.action == "opened"
-    )
-    disputes_resolved = sum(
-        1 for r in conflict_rows if r.payload.action == "resolved"
-    )
-    disputes_escalated = sum(
-        1 for r in conflict_rows if r.payload.action == "escalated"
-    )
-    wars_declared = sum(
-        1 for r in conflict_rows if r.payload.action == "war_declared"
-    )
-    wars_activated = sum(
-        1 for r in conflict_rows if r.payload.action == "war_activated"
-    )
-    surrenders = sum(
-        1 for r in conflict_rows if r.payload.action == "surrendered"
-    )
+    disputes_opened = sum(1 for r in conflict_rows if r.payload.action == "opened")
+    disputes_resolved = sum(1 for r in conflict_rows if r.payload.action == "resolved")
+    disputes_escalated = sum(1 for r in conflict_rows if r.payload.action == "escalated")
+    wars_declared = sum(1 for r in conflict_rows if r.payload.action == "war_declared")
+    wars_activated = sum(1 for r in conflict_rows if r.payload.action == "war_activated")
+    surrenders = sum(1 for r in conflict_rows if r.payload.action == "surrendered")
 
     classification, failure_class = _classify(
         shared_objective_chosen=shared_objective,

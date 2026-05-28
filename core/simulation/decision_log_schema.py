@@ -188,9 +188,9 @@ class ConflictEventPayload(BaseModel):
     war_id: str | None = None
     initiator_id: str | None = None
     respondent_id: str | None = None
-    dispute_type: Literal[
-        "territorial", "theft", "trade_breach", "treaty_violation", "personal"
-    ] | None = None
+    dispute_type: (
+        Literal["territorial", "theft", "trade_breach", "treaty_violation", "personal"] | None
+    ) = None
     action: Literal[
         "opened",
         "evidence_submitted",

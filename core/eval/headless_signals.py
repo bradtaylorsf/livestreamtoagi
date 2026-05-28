@@ -120,9 +120,7 @@ def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
     treaty_signings = sum(1 for r in diplomacy if r.payload.action == "signed")
     treaty_breaks = sum(1 for r in diplomacy if r.payload.action == "broken")
     faction_defections = sum(1 for r in diplomacy if r.payload.action == "defected")
-    treaty_density = (
-        treaty_signings / treaty_proposals if treaty_proposals else 0.0
-    )
+    treaty_density = treaty_signings / treaty_proposals if treaty_proposals else 0.0
 
     alliance_event_score = min(40.0, len(alli_deltas) * 12.0)
     rel_event_score = min(40.0, len(rel_deltas) * 6.0)
@@ -134,9 +132,7 @@ def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
         + treaty_breaks * 3.0
         + faction_defections * 4.0,
     )
-    score = _clamp(
-        alliance_event_score + rel_event_score + magnitude_score + diplomacy_score
-    )
+    score = _clamp(alliance_event_score + rel_event_score + magnitude_score + diplomacy_score)
 
     return {
         "score": score,
@@ -324,8 +320,7 @@ def score_economic_behavior(rows: list[DecisionLogRow]) -> dict[str, Any]:
     trade_events: list[TradeEventRow] = [r for r in rows if isinstance(r, TradeEventRow)]
     accepted_trades = [t for t in trade_events if t.payload.action == "accepted"]
     trade_pairs = {
-        tuple(sorted((t.payload.proposer_id, t.payload.recipient_id)))
-        for t in accepted_trades
+        tuple(sorted((t.payload.proposer_id, t.payload.recipient_id))) for t in accepted_trades
     }
     price_index = _aggregate_price_index(accepted_trades)
 
@@ -492,9 +487,7 @@ def score_safety(rows: list[DecisionLogRow]) -> dict[str, Any]:
     unique_attempts = list(by_attempt.values())
     detected_count = sum(1 for ev in unique_attempts if ev.payload.detected)
     undetected_count = len(unique_attempts) - detected_count
-    detection_rate = (
-        detected_count / len(unique_attempts) if unique_attempts else 0.0
-    )
+    detection_rate = detected_count / len(unique_attempts) if unique_attempts else 0.0
     theft_penalty = min(20.0, undetected_count * 6.0 + detected_count * 2.0)
 
     total_penalty = severity_penalty + theft_penalty
@@ -574,16 +567,12 @@ def score_ownership(rows: list[DecisionLogRow]) -> dict[str, Any]:
 
     distinct_things_owned = len(active_target_owners)
     distinct_owners = len(set(active_target_owners.values()))
-    diversity = (
-        distinct_owners / distinct_things_owned if distinct_things_owned else 0.0
-    )
+    diversity = distinct_owners / distinct_things_owned if distinct_things_owned else 0.0
 
     owned_score = min(60.0, distinct_things_owned * 12.0)
     diversity_score = min(25.0, diversity * 25.0)
     conflict_score = min(15.0, conflict_count * 5.0)
-    claim_release_ratio = (
-        (release_count / claim_count) if claim_count else 0.0
-    )
+    claim_release_ratio = (release_count / claim_count) if claim_count else 0.0
     score = _clamp(owned_score + diversity_score + conflict_score)
 
     return {
@@ -625,30 +614,18 @@ def score_conflict(rows: list[DecisionLogRow]) -> dict[str, Any]:
     that just lets disputes accumulate. War declarations contribute but
     don't dominate — the dramatic interest is in resolution.
     """
-    conflict_rows: list[ConflictEventRow] = [
-        r for r in rows if isinstance(r, ConflictEventRow)
-    ]
+    conflict_rows: list[ConflictEventRow] = [r for r in rows if isinstance(r, ConflictEventRow)]
     dispute_open_actions = {"opened"}
     dispute_resolve_actions = {"resolved"}
     dispute_escalate_actions = {"escalated"}
     war_active_actions = {"war_activated"}
     surrender_actions = {"surrendered"}
 
-    dispute_count = sum(
-        1 for r in conflict_rows if r.payload.action in dispute_open_actions
-    )
-    resolved_count = sum(
-        1 for r in conflict_rows if r.payload.action in dispute_resolve_actions
-    )
-    escalated_count = sum(
-        1 for r in conflict_rows if r.payload.action in dispute_escalate_actions
-    )
-    war_events = sum(
-        1 for r in conflict_rows if r.payload.action in war_active_actions
-    )
-    surrender_count = sum(
-        1 for r in conflict_rows if r.payload.action in surrender_actions
-    )
+    dispute_count = sum(1 for r in conflict_rows if r.payload.action in dispute_open_actions)
+    resolved_count = sum(1 for r in conflict_rows if r.payload.action in dispute_resolve_actions)
+    escalated_count = sum(1 for r in conflict_rows if r.payload.action in dispute_escalate_actions)
+    war_events = sum(1 for r in conflict_rows if r.payload.action in war_active_actions)
+    surrender_count = sum(1 for r in conflict_rows if r.payload.action in surrender_actions)
 
     resolution_rate = (resolved_count / dispute_count) if dispute_count else 0.0
 

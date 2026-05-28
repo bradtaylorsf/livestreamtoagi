@@ -175,8 +175,7 @@ def _normalize_evidence(
             "utterance",
         }:
             raise ValueError(
-                "evidence ref_type must be one of "
-                "theft/trade/ownership/diplomacy/utterance"
+                "evidence ref_type must be one of theft/trade/ownership/diplomacy/utterance"
             )
         if not isinstance(ref_id, str) or not ref_id:
             raise ValueError("evidence ref_id must be a non-empty string")
@@ -185,9 +184,7 @@ def _normalize_evidence(
                 ref_type=ref_type,  # type: ignore[arg-type]
                 ref_id=ref_id,
                 narrative=(
-                    narrative.strip()
-                    if isinstance(narrative, str) and narrative.strip()
-                    else None
+                    narrative.strip() if isinstance(narrative, str) and narrative.strip() else None
                 ),
                 submitter_id=submitter_id,
             )
@@ -237,9 +234,7 @@ class ConflictLedger:
         trade_ledger: Any | None = None,
         theft_ledger: Any | None = None,
     ) -> None:
-        self._sim_folder: Path | None = (
-            Path(sim_folder) if sim_folder is not None else None
-        )
+        self._sim_folder: Path | None = Path(sim_folder) if sim_folder is not None else None
         self._path: Path | None = None
         if self._sim_folder is not None:
             self._sim_folder.mkdir(parents=True, exist_ok=True)
@@ -412,9 +407,7 @@ class ConflictLedger:
 
         winner_id, judgement = self._auto_judge(dispute)
         loser_id = (
-            dispute.respondent_id
-            if winner_id == dispute.initiator_id
-            else dispute.initiator_id
+            dispute.respondent_id if winner_id == dispute.initiator_id else dispute.initiator_id
         )
         outcome: dict[str, Any] = {
             "winner_id": winner_id,
@@ -475,9 +468,7 @@ class ConflictLedger:
             return ConflictFailure(
                 reason="not_a_party",
                 dispute_id=dispute_id,
-                detail=(
-                    f"only the losing party ({loser_id!r}) may accept or escalate"
-                ),
+                detail=(f"only the losing party ({loser_id!r}) may accept or escalate"),
             )
 
         resolved_at = datetime.now(UTC)
@@ -572,9 +563,7 @@ class ConflictLedger:
             created_at=datetime.now(UTC),
         )
         if len(war.seconders) >= required_quorum:
-            war = war.model_copy(
-                update={"status": "active", "activated_at": war.created_at}
-            )
+            war = war.model_copy(update={"status": "active", "activated_at": war.created_at})
         self._wars[war.war_id] = war
         self._append_event(
             {
@@ -620,17 +609,11 @@ class ConflictLedger:
             )
         if self._diplomacy_ledger is not None:
             seconder_faction = self._diplomacy_ledger.get_faction_for(seconder_id)
-            if (
-                seconder_faction is None
-                or seconder_faction.faction_id != war.initiator_faction_id
-            ):
+            if seconder_faction is None or seconder_faction.faction_id != war.initiator_faction_id:
                 return ConflictFailure(
                     reason="not_a_party",
                     war_id=war_id,
-                    detail=(
-                        f"{seconder_id!r} is not a member of "
-                        f"{war.initiator_faction_id!r}"
-                    ),
+                    detail=(f"{seconder_id!r} is not a member of {war.initiator_faction_id!r}"),
                 )
         new_seconders = set(war.seconders)
         new_seconders.add(seconder_id)
@@ -647,9 +630,7 @@ class ConflictLedger:
             }
         )
         if len(new_seconders) >= war.required_quorum:
-            updated = updated.model_copy(
-                update={"status": "active", "activated_at": when}
-            )
+            updated = updated.model_copy(update={"status": "active", "activated_at": when})
             self._append_event(
                 {
                     "action": "war_activated",
@@ -793,13 +774,10 @@ class ConflictLedger:
             winner = dispute.respondent_id
         else:
             # Deterministic tiebreak from the simulation seed + dispute id.
-            roll = _deterministic_score(
-                self._simulation_id, dispute.dispute_id, "tiebreak"
-            )
+            roll = _deterministic_score(self._simulation_id, dispute.dispute_id, "tiebreak")
             winner = dispute.initiator_id if roll < 0.5 else dispute.respondent_id
         judgement = (
-            f"{winner} prevails: evidence weight "
-            f"{initiator_score:.1f} vs {respondent_score:.1f}"
+            f"{winner} prevails: evidence weight {initiator_score:.1f} vs {respondent_score:.1f}"
         )
         return winner, judgement
 
@@ -845,21 +823,15 @@ class ConflictLedger:
 
         if dispute.dispute_type == "territorial":
             consequences.extend(
-                self._apply_territorial_transfer(
-                    dispute, winner_id=winner_id, loser_id=loser_id
-                )
+                self._apply_territorial_transfer(dispute, winner_id=winner_id, loser_id=loser_id)
             )
         elif dispute.dispute_type == "theft":
             consequences.extend(
-                self._apply_theft_restitution(
-                    dispute, winner_id=winner_id, loser_id=loser_id
-                )
+                self._apply_theft_restitution(dispute, winner_id=winner_id, loser_id=loser_id)
             )
         elif dispute.dispute_type == "treaty_violation":
             consequences.extend(
-                self._apply_treaty_break(
-                    dispute, winner_id=winner_id, loser_id=loser_id
-                )
+                self._apply_treaty_break(dispute, winner_id=winner_id, loser_id=loser_id)
             )
         elif dispute.dispute_type == "trade_breach":
             consequences.append(
@@ -1076,9 +1048,7 @@ class ConflictLedger:
                     try:
                         record = json.loads(stripped)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "conflict_log: skipping malformed line %d", line_no
-                        )
+                        logger.warning("conflict_log: skipping malformed line %d", line_no)
                         continue
                     self._apply_replay(record)
         except OSError:  # pragma: no cover
@@ -1102,9 +1072,7 @@ class ConflictLedger:
                 return
             try:
                 evidence_raw = record.get("evidence") or []
-                evidence = [
-                    EvidenceRef(**e) for e in evidence_raw if isinstance(e, dict)
-                ]
+                evidence = [EvidenceRef(**e) for e in evidence_raw if isinstance(e, dict)]
                 dispute = Dispute(
                     dispute_id=dispute_id,
                     initiator_id=str(record.get("initiator_id") or ""),
@@ -1122,9 +1090,7 @@ class ConflictLedger:
 
         if action == "evidence_submitted":
             dispute_id = record.get("dispute_id")
-            existing = (
-                self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
-            )
+            existing = self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
             if existing is None or existing.status != "open":
                 return
             entry_raw = record.get("evidence_entry")
@@ -1141,9 +1107,7 @@ class ConflictLedger:
 
         if action == "judged":
             dispute_id = record.get("dispute_id")
-            existing = (
-                self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
-            )
+            existing = self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
             if existing is None or existing.status != "open":
                 return
             self._disputes[dispute_id] = existing.model_copy(
@@ -1158,9 +1122,7 @@ class ConflictLedger:
 
         if action == "resolved":
             dispute_id = record.get("dispute_id")
-            existing = (
-                self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
-            )
+            existing = self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
             if existing is None:
                 return
             self._disputes[dispute_id] = existing.model_copy(
@@ -1174,9 +1136,7 @@ class ConflictLedger:
 
         if action == "escalated":
             dispute_id = record.get("dispute_id")
-            existing = (
-                self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
-            )
+            existing = self._disputes.get(dispute_id) if isinstance(dispute_id, str) else None
             if existing is None or existing.status != "judged":
                 return
             self._disputes[dispute_id] = existing.model_copy(
@@ -1219,9 +1179,7 @@ class ConflictLedger:
             seconder_id = record.get("seconder_id")
             if isinstance(seconder_id, str):
                 new_seconders.add(seconder_id)
-            self._wars[war_id] = existing.model_copy(
-                update={"seconders": new_seconders}
-            )
+            self._wars[war_id] = existing.model_copy(update={"seconders": new_seconders})
             return
 
         if action == "war_activated":
