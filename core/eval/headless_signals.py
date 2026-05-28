@@ -27,6 +27,7 @@ from core.simulation.decision_log_schema import (
     AllianceDeltaRow,
     BlackboardMutationRow,
     DecisionLogRow,
+    DiplomacyEventRow,
     DreamRow,
     NeedsStateRow,
     NewGoalRow,
@@ -98,9 +99,10 @@ def score_world_evolution(rows: list[DecisionLogRow]) -> dict[str, Any]:
 
 
 def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
-    """Mix relationship deltas + alliance deltas + (small) faction-flavored utterances."""
+    """Mix relationship deltas + alliance deltas + diplomacy events (#894)."""
     rel_deltas = [r for r in rows if isinstance(r, RelationshipDeltaRow)]
     alli_deltas = [r for r in rows if isinstance(r, AllianceDeltaRow)]
+    diplomacy = [r for r in rows if isinstance(r, DiplomacyEventRow)]
 
     # Magnitude — sum of |trust deltas| across rel updates.
     trust_magnitude = 0.0
@@ -113,17 +115,36 @@ def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
 
+    treaty_proposals = sum(1 for r in diplomacy if r.payload.action == "proposed")
+    treaty_signings = sum(1 for r in diplomacy if r.payload.action == "signed")
+    treaty_breaks = sum(1 for r in diplomacy if r.payload.action == "broken")
+    faction_defections = sum(1 for r in diplomacy if r.payload.action == "defected")
+    treaty_density = (
+        treaty_signings / treaty_proposals if treaty_proposals else 0.0
+    )
+
     alliance_event_score = min(40.0, len(alli_deltas) * 12.0)
     rel_event_score = min(40.0, len(rel_deltas) * 6.0)
     magnitude_score = min(20.0, trust_magnitude * 30.0)
-    score = _clamp(alliance_event_score + rel_event_score + magnitude_score)
+    diplomacy_score = min(
+        20.0,
+        treaty_signings * 6.0
+        + treaty_proposals * 2.0
+        + treaty_breaks * 3.0
+        + faction_defections * 4.0,
+    )
+    score = _clamp(
+        alliance_event_score + rel_event_score + magnitude_score + diplomacy_score
+    )
 
     return {
         "score": score,
         "reasoning": (
             f"{len(rel_deltas)} relationship deltas, "
             f"{len(alli_deltas)} alliance events, "
-            f"trust magnitude {trust_magnitude:.2f}."
+            f"trust magnitude {trust_magnitude:.2f}; "
+            f"{treaty_proposals} treaty proposal(s), {treaty_signings} signing(s), "
+            f"{treaty_breaks} break(s), {faction_defections} defection(s)."
         ),
         "evidence": [
             _evidence_ref(
@@ -146,13 +167,30 @@ def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
                 },
             )
             for r in alli_deltas[:15]
+        ]
+        + [
+            _evidence_ref(
+                r,
+                {
+                    "treaty_id": r.payload.treaty_id,
+                    "parties": list(r.payload.parties),
+                    "action": r.payload.action,
+                    "terms": dict(r.payload.terms),
+                },
+            )
+            for r in diplomacy[:15]
         ],
         "sub_scores": {
             "relationship_delta_count": float(len(rel_deltas)),
             "alliance_delta_count": float(len(alli_deltas)),
             "trust_magnitude": trust_magnitude,
+            "treaty_proposals": float(treaty_proposals),
+            "treaty_signings": float(treaty_signings),
+            "treaty_breaks": float(treaty_breaks),
+            "faction_defections": float(faction_defections),
+            "treaty_density": treaty_density,
         },
-        "confidence": 0.85 if (rel_deltas or alli_deltas) else 0.4,
+        "confidence": 0.85 if (rel_deltas or alli_deltas or diplomacy) else 0.4,
     }
 
 

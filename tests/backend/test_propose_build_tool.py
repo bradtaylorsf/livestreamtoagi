@@ -45,6 +45,7 @@ def _services_for_inventory(agent_tools: list[str]) -> SimpleNamespace:
         core_memory=MagicMock(),
         recall_memory=MagicMock(),
         archival_memory=MagicMock(),
+        goal_manager=MagicMock(),
     )
 
 
@@ -127,6 +128,7 @@ def test_conversation_engine_passes_executor_to_build_agent_tools() -> None:
             ownership_ledger=None,
             trade_ledger=None,
             theft_ledger=None,
+            diplomacy_ledger=None,
             decision_logger=None,
         )
 

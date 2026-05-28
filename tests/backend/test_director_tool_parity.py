@@ -53,6 +53,7 @@ def _services_for_tool_inventory() -> SimpleNamespace:
         core_memory=MagicMock(),
         recall_memory=MagicMock(),
         archival_memory=MagicMock(),
+        goal_manager=MagicMock(),
     )
 
 

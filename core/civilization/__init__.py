@@ -2,13 +2,20 @@
 
 First mechanic landed: :mod:`core.civilization.ownership` (issue #891).
 Second mechanic: :mod:`core.civilization.trade` (issue #892).
-Third mechanic: :mod:`core.civilization.theft` (issue #893). All ledgers
-share the same per-sim JSONL pattern so the decision log + headless
-scorer stay coherent. Other mechanics arrive in sibling tickets (#894–#895).
+Third mechanic: :mod:`core.civilization.theft` (issue #893).
+Fourth mechanic: :mod:`core.civilization.diplomacy` (issue #894). All
+ledgers share the same per-sim JSONL pattern so the decision log + headless
+scorer stay coherent. The remaining mechanic arrives in #895.
 """
 
 from __future__ import annotations
 
+from core.civilization.diplomacy import (
+    DiplomacyFailure,
+    DiplomacyLedger,
+    Faction,
+    Treaty,
+)
 from core.civilization.ownership import (
     OwnershipClaim,
     OwnershipConflict,
@@ -28,6 +35,9 @@ from core.civilization.trade import (
 )
 
 __all__ = [
+    "DiplomacyFailure",
+    "DiplomacyLedger",
+    "Faction",
     "OwnershipClaim",
     "OwnershipConflict",
     "OwnershipLedger",
@@ -37,6 +47,7 @@ __all__ = [
     "TradeFailure",
     "TradeLedger",
     "TradeOffer",
+    "Treaty",
     "canonical_target_ref",
     "normalize_region_ref",
 ]

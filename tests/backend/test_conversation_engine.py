@@ -1356,6 +1356,7 @@ class TestToolSupport:
             ownership_ledger=None,
             trade_ledger=None,
             theft_ledger=None,
+            diplomacy_ledger=None,
             decision_logger=None,
         )
 

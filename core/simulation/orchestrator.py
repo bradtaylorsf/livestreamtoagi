@@ -598,6 +598,9 @@ class SimulationOrchestrator:
         # Per-sim theft ledger (#893) — shares the trade ledger's inventory
         # model; persists to <sim>/theft_log.jsonl via the steal tools.
         self._theft_ledger: Any | None = None
+        # Per-sim diplomacy ledger (#894) — tracks factions + treaties;
+        # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
+        self._diplomacy_ledger: Any | None = None
         # Event-bus callbacks the orchestrator registers to mirror live
         # events into the decision log (issue #859). Stored so _finalize can
         # unsubscribe cleanly.
@@ -960,6 +963,7 @@ class SimulationOrchestrator:
             ownership_ledger=getattr(self, "_ownership_ledger", None),
             trade_ledger=getattr(self, "_trade_ledger", None),
             theft_ledger=getattr(self, "_theft_ledger", None),
+            diplomacy_ledger=getattr(self, "_diplomacy_ledger", None),
             decision_logger=self._decision_logger,
         )
 

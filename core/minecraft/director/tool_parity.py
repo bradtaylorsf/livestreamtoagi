@@ -408,6 +408,58 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         ),
         linked_issue="#893",
     ),
+    "propose_treaty": ToolParityEntry(
+        name="propose_treaty",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Open a treaty between the proposer's faction and another. "
+            "The diplomacy ledger persists per sim; no external publish."
+        ),
+        linked_issue="#894",
+    ),
+    "sign_treaty": ToolParityEntry(
+        name="sign_treaty",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Counterparty member activates a proposed treaty; pure local "
+            "ledger mutation with an audit row."
+        ),
+        linked_issue="#894",
+    ),
+    "break_treaty": ToolParityEntry(
+        name="break_treaty",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Withdraw from an active treaty; emits relationship-delta "
+            "trust hits for every other party's members."
+        ),
+        linked_issue="#894",
+    ),
+    "defect_faction": ToolParityEntry(
+        name="defect_faction",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Move an agent between scenario factions in the diplomacy "
+            "ledger and emit the audit row."
+        ),
+        linked_issue="#894",
+    ),
+    "list_active_treaties": ToolParityEntry(
+        name="list_active_treaties",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only introspection over the diplomacy ledger.",
+        linked_issue="#894",
+    ),
 }
 
 
