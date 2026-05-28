@@ -768,32 +768,28 @@ verify_static() {
 
     # E21 keystone wiring: the settlement objective seed must be invoked before
     # the launch_bot loop, gated to settlement mode, and share one exported
-    # LTAG_SIMULATION_ID with the bots. Markers are split with '' so these checks
-    # never match their own source lines.
+    # LTAG_SIMULATION_ID with the bots. Patterns are anchored to the real wiring
+    # lines so they do not match these verification lines.
     [ -s "$SCRIPT_DIR/seed_settlement_objectives.py" ] || {
         fail "missing settlement objective seed script: $SCRIPT_DIR/seed_settlement_objectives.py"
         problems=1
     }
-    local seed_marker loop_marker gate_marker export_marker seed_line loop_line
-    seed_marker='seed_settlement''_objectives.py'
-    loop_marker='launch_bot ''"$bot" "$BOT_INDEX"'
-    gate_marker='settlement-mode only: seed shared ''objective board'
-    export_marker='export LTAG_''SIMULATION_ID'
-    seed_line="$(grep -nF -m1 "$seed_marker" "$SCRIPT_DIR/soak.sh" | cut -d: -f1 || true)"
-    loop_line="$(grep -nF -m1 "$loop_marker" "$SCRIPT_DIR/soak.sh" | cut -d: -f1 || true)"
+    local soak_self="$SCRIPT_DIR/soak.sh" seed_line loop_line
+    seed_line="$(grep -nE '^[[:space:]]*run_checked "seed settlement objectives"' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    loop_line="$(grep -nE '^[[:space:]]*launch_bot ' "$soak_self" | head -n1 | cut -d: -f1 || true)"
     if [ -n "$seed_line" ] && [ -n "$loop_line" ] && [ "$seed_line" -lt "$loop_line" ]; then
         ok "settlement objective seed runs before bot launch ($seed_line < $loop_line)"
     else
         fail "settlement objective seed must be invoked before the launch_bot loop"
         problems=1
     fi
-    if grep -qF "$gate_marker" "$SCRIPT_DIR/soak.sh"; then
+    if grep -qF 'seed shared objective board' "$soak_self"; then
         ok "settlement objective seed is gated to settlement mode"
     else
         fail "settlement objective seed settlement-mode gate missing"
         problems=1
     fi
-    if grep -qF "$export_marker" "$SCRIPT_DIR/soak.sh"; then
+    if grep -qE '^[[:space:]]*export LTAG_SIMULATION_ID' "$soak_self"; then
         ok "LTAG_SIMULATION_ID is exported for the seed and bots"
     else
         fail "LTAG_SIMULATION_ID export missing"
