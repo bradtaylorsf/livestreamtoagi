@@ -383,6 +383,31 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
         rationale="Read-only introspection over offers awaiting this agent's reply.",
         linked_issue="#892",
     ),
+    "steal": ToolParityEntry(
+        name="steal",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Attempt to take items from another agent's container. The "
+            "theft ledger rolls a deterministic detection check and, on "
+            "detection, emits relationship-delta consequences for the "
+            "victim and any in-range witnesses. Never publishes externally."
+        ),
+        linked_issue="#893",
+    ),
+    "report_theft": ToolParityEntry(
+        name="report_theft",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Witness-driven promotion of a prior undetected theft attempt "
+            "to detected; fires the same consequence path as a detected "
+            "attempt at roll time."
+        ),
+        linked_issue="#893",
+    ),
 }
 
 

@@ -57,9 +57,11 @@ This inventory mirrors `TOOL_PARITY` in
 | `reject_trade` | `tools.civilization` | civilization | `callable_now` | #892 | N/A | Recipient rejection records the reason on the offer; no external publication. |
 | `recall_memory` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 2 recall is still a backend memory read and keeps the three-tier memory boundary. |
 | `release_ownership` | `tools.civilization` | civilization | `callable_now` | #891 | N/A | Releases mutate the same internal ownership ledger and never touch external systems. |
+| `report_theft` | `tools.civilization` | civilization | `callable_now` | #893 | N/A | Witness-driven promotion of a prior undetected theft attempt to detected; fires the same consequence path as a detected attempt at roll time. |
 | `retrieve_transcript` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 3 transcript lookup remains a read-only backend memory operation. |
 | `send_chat_message` | `tools.audience_tools` | audience | `approval_gated` | N/A | N/A | Public chat output must not bypass Management or the human approval policy. |
 | `send_message` | `tools.messaging` | messaging | `callable_now` | N/A | N/A | Internal agent messaging is not public external communication and remains event-bus backed. |
+| `steal` | `tools.civilization` | civilization | `callable_now` | #893 | N/A | Attempt to take items from another agent's container. The theft ledger rolls a deterministic detection check and, on detection, emits relationship-delta consequences for the victim and any in-range witnesses. Never publishes externally. |
 | `transfer_budget` | `tools.economy_tools` | economy | `callable_now` | N/A | N/A | Internal agent-to-agent budget transfers preserve the existing economy manager boundary. |
 | `update_core_memory` | `tools.memory_tools` | memory | `callable_now` | #551/#552/#708 | N/A | Tier 1 core writes preserve existing section and cross-agent writer checks. |
 | `view_account` | `tools.economy_tools` | economy | `callable_now` | N/A | N/A | Account balance reads are internal context for budgeting scenes. |

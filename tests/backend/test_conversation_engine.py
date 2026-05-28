@@ -1355,6 +1355,7 @@ class TestToolSupport:
             sim_folder=None,
             ownership_ledger=None,
             trade_ledger=None,
+            theft_ledger=None,
             decision_logger=None,
         )
 

@@ -17,6 +17,8 @@ tools:
   - fetch_url
   - dispatch_alpha
   - draft_social_post
+  - steal
+  - report_theft
 
 topic_relevance:
   code: 0.3

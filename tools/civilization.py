@@ -1,4 +1,4 @@
-"""Civilization tools (issues #891 ownership, #892 trade).
+"""Civilization tools (issues #891 ownership, #892 trade, #893 theft).
 
 Ownership tools (#891) backed by an :class:`OwnershipLedger`:
 
@@ -14,17 +14,24 @@ Trade tools (#892) backed by a :class:`TradeLedger`:
 * :class:`RejectTradeTool` — recipient declines with a reason.
 * :class:`ListPendingTradesTool` — recipient sees offers awaiting reply.
 
-The mutating tools write an ``ownership_delta`` / ``trade_event`` row to the
-decision logger directly when one is injected — the ARTIFACT_CREATED event
-emitted by :meth:`BaseTool.run` only carries the tool name, not its args
-or result, so we cannot reconstruct the delta from that event alone. The
-``ARTIFACT_CREATED`` event still fires (via ``BaseTool.run``) so the
-existing tool_intent capture path keeps recording these as tool calls.
+Theft tools (#893) backed by a :class:`TheftLedger`:
+
+* :class:`StealTool` — attempt to take items from another agent's container.
+* :class:`ReportTheftTool` — witness promotes an undetected attempt.
+
+The mutating tools write an ``ownership_delta`` / ``trade_event`` /
+``theft_event`` row to the decision logger directly when one is injected —
+the ARTIFACT_CREATED event emitted by :meth:`BaseTool.run` only carries the
+tool name, not its args or result, so we cannot reconstruct the delta from
+that event alone. The ``ARTIFACT_CREATED`` event still fires (via
+``BaseTool.run``) so the existing tool_intent capture path keeps recording
+these as tool calls.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from core.civilization.ownership import (
@@ -32,6 +39,7 @@ from core.civilization.ownership import (
     OwnershipConflict,
     OwnershipLedger,
 )
+from core.civilization.theft import TheftAttempt, TheftFailure, TheftLedger
 from core.civilization.trade import TradeFailure, TradeLedger, TradeOffer
 
 from .base import BaseTool
@@ -44,6 +52,14 @@ logger = logging.getLogger(__name__)
 _TARGET_TYPES = ("region", "structure", "container")
 _BUILDER_AGENTS = frozenset({"vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"})
 _TRADER_AGENTS = frozenset({"vera", "rex", "pixel", "sentinel", "fork"})
+_THIEF_AGENTS = frozenset({"grok", "fork", "pixel"})
+
+# Magnitude of trust hit per consequence (per spec):
+#   detected theft → victim trust toward thief drops 0.5
+#   detected theft → each witness trust toward thief drops 0.2
+_VICTIM_TRUST_HIT = 0.5
+_WITNESS_TRUST_HIT = 0.2
+_DEFAULT_TRUST = 0.5
 
 
 def _claim_to_dict(claim: OwnershipClaim) -> dict[str, Any]:
@@ -680,6 +696,259 @@ class ListPendingTradesTool(BaseTool):
         }
 
 
+def _attempt_to_dict(attempt: TheftAttempt) -> dict[str, Any]:
+    return {
+        "attempt_id": attempt.attempt_id,
+        "thief_id": attempt.thief_id,
+        "victim_id": attempt.victim_id,
+        "container_ref": attempt.target_container,
+        "items": dict(attempt.items),
+        "detected": attempt.detected,
+        "witnesses": list(attempt.witnesses),
+        "motivation": attempt.motivation,
+        "created_at": attempt.created_at.isoformat(),
+    }
+
+
+def _log_theft(
+    decision_logger: DecisionLogger | None,
+    *,
+    attempt: TheftAttempt,
+    actor_id: str | None = None,
+) -> None:
+    if decision_logger is None:
+        return
+    try:
+        decision_logger.log_theft_event(
+            attempt_id=attempt.attempt_id,
+            thief_id=attempt.thief_id,
+            victim_id=attempt.victim_id,
+            container_ref=attempt.target_container,
+            items=dict(attempt.items),
+            detected=attempt.detected,
+            witnesses=list(attempt.witnesses),
+            motivation=attempt.motivation,
+            actor_id=actor_id or attempt.thief_id,
+        )
+    except Exception:  # pragma: no cover - logger must not break the sim
+        logger.exception(
+            "decision_logger.log_theft_event failed (attempt=%s)",
+            attempt.attempt_id,
+        )
+
+
+def _emit_theft_consequences(
+    decision_logger: DecisionLogger | None,
+    *,
+    attempt: TheftAttempt,
+) -> None:
+    """Apply victim + witness trust hits as relationship_delta rows."""
+    if decision_logger is None or not attempt.detected:
+        return
+    try:
+        decision_logger.log_relationship_delta(
+            a=attempt.victim_id,
+            b=attempt.thief_id,
+            before={"trust": _DEFAULT_TRUST},
+            after={"trust": _DEFAULT_TRUST - _VICTIM_TRUST_HIT},
+            reason="theft_detected",
+        )
+        for witness in attempt.witnesses:
+            if witness == attempt.victim_id or witness == attempt.thief_id:
+                continue
+            decision_logger.log_relationship_delta(
+                a=witness,
+                b=attempt.thief_id,
+                before={"trust": _DEFAULT_TRUST},
+                after={"trust": _DEFAULT_TRUST - _WITNESS_TRUST_HIT},
+                reason="theft_witnessed",
+            )
+    except Exception:  # pragma: no cover
+        logger.exception(
+            "decision_logger.log_relationship_delta failed (theft attempt=%s)",
+            attempt.attempt_id,
+        )
+
+
+def _theft_failure_response(failure: TheftFailure) -> dict[str, Any]:
+    response: dict[str, Any] = {"status": "error", "reason": failure.reason}
+    if failure.detail is not None:
+        response["detail"] = failure.detail
+    return response
+
+
+class StealTool(BaseTool):
+    """Attempt to steal items from another agent's container."""
+
+    ALLOWED_AGENTS = _THIEF_AGENTS
+
+    name = "steal"
+    description = (
+        "Attempt to take items from another agent's container. The ledger "
+        "rolls a deterministic detection check; on detection the victim and "
+        "any witnesses within proximity see the event and their trust in "
+        "you drops. Items move atomically: if the container holds less than "
+        "you asked for, you take only what's there. Provide a short "
+        "motivation so the decision log captures *why* you stole."
+    )
+    parameters = {
+        "victim_id": {
+            "type": "string",
+            "description": "Agent you're stealing from (e.g. 'rex').",
+        },
+        "container_ref": {
+            "type": "object",
+            "description": ("Container coords {x, y, z, dim?} — the chest you're taking from."),
+        },
+        "items": {
+            "type": "object",
+            "description": (
+                "What you want to take: dict of material → positive integer "
+                "quantity. Quantities above what the container holds are "
+                "capped to available."
+            ),
+        },
+        "motivation": {
+            "type": "string",
+            "description": "One short sentence on why you're risking it.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        theft_ledger: TheftLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+        tick_provider: Callable[[], int] | None = None,
+        victim_online_provider: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = theft_ledger
+        self._decision_logger = decision_logger
+        self._tick_provider = tick_provider
+        self._victim_online_provider = victim_online_provider
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "theft_ledger_unavailable"}
+
+        victim_id = kwargs.get("victim_id")
+        container_ref = kwargs.get("container_ref")
+        items = kwargs.get("items")
+        motivation = kwargs.get("motivation")
+
+        if not isinstance(victim_id, str) or not victim_id:
+            return {"status": "error", "reason": "victim_id is required"}
+        if not isinstance(container_ref, dict) or not container_ref:
+            return {
+                "status": "error",
+                "reason": "container_ref must be a non-empty object",
+            }
+        if items is not None and not isinstance(items, dict):
+            return {"status": "error", "reason": "items must be an object"}
+        if motivation is not None and not isinstance(motivation, str):
+            return {"status": "error", "reason": "motivation must be a string"}
+
+        tick = 0
+        if self._tick_provider is not None:
+            try:
+                tick = int(self._tick_provider())
+            except Exception:
+                tick = 0
+        victim_online = False
+        if self._victim_online_provider is not None:
+            try:
+                victim_online = bool(self._victim_online_provider(victim_id))
+            except Exception:
+                victim_online = False
+
+        result = self._ledger.attempt(
+            thief_id=self._agent_id,
+            victim_id=victim_id,
+            container_ref=container_ref,
+            items=items if isinstance(items, dict) else None,
+            motivation=motivation if isinstance(motivation, str) else None,
+            tick=tick,
+            victim_online=victim_online,
+        )
+        if isinstance(result, TheftFailure):
+            return _theft_failure_response(result)
+
+        _log_theft(self._decision_logger, attempt=result, actor_id=self._agent_id)
+        _emit_theft_consequences(self._decision_logger, attempt=result)
+
+        return {"status": "stolen", **_attempt_to_dict(result)}
+
+
+class ReportTheftTool(BaseTool):
+    """Witness reports a theft they observed; promotes undetected → detected."""
+
+    ALLOWED_AGENTS = _BUILDER_AGENTS
+
+    name = "report_theft"
+    description = (
+        "Report a theft you witnessed. If the ledger has a matching "
+        "undetected attempt by this thief on this container, the report "
+        "promotes it to detected — victim + witnesses see consequences "
+        "applied even though the original roll missed."
+    )
+    parameters = {
+        "thief_id": {
+            "type": "string",
+            "description": "The agent you saw stealing (e.g. 'grok').",
+        },
+        "container_ref": {
+            "type": "object",
+            "description": "Container coords {x, y, z, dim?} that was robbed.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        theft_ledger: TheftLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = theft_ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "theft_ledger_unavailable"}
+
+        thief_id = kwargs.get("thief_id")
+        container_ref = kwargs.get("container_ref")
+        if not isinstance(thief_id, str) or not thief_id:
+            return {"status": "error", "reason": "thief_id is required"}
+        if not isinstance(container_ref, dict) or not container_ref:
+            return {
+                "status": "error",
+                "reason": "container_ref must be a non-empty object",
+            }
+
+        result = self._ledger.report_theft(
+            witness_id=self._agent_id,
+            thief_id=thief_id,
+            container_ref=container_ref,
+        )
+        if isinstance(result, TheftFailure):
+            return _theft_failure_response(result)
+
+        _log_theft(self._decision_logger, attempt=result, actor_id=self._agent_id)
+        _emit_theft_consequences(self._decision_logger, attempt=result)
+
+        return {"status": "reported", **_attempt_to_dict(result)}
+
+
 __all__ = [
     "AcceptTradeTool",
     "ClaimOwnershipTool",
@@ -689,4 +958,6 @@ __all__ = [
     "ProposeTradeTool",
     "RejectTradeTool",
     "ReleaseOwnershipTool",
+    "ReportTheftTool",
+    "StealTool",
 ]

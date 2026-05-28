@@ -295,6 +295,7 @@ class TestToolRegistry:
             "propose_trade",
             "reject_trade",
             "release_ownership",
+            "report_theft",
             "send_message",
             "view_alliances",
             "vote_alliance",
@@ -312,7 +313,7 @@ class TestToolRegistry:
             character_spawner=MagicMock(),
             voting_manager=MagicMock(),
         )
-        assert len(tools) == 25
+        assert len(tools) == 26
 
         tool_names = {t.name for t in tools}
         assert tool_names == {
@@ -341,6 +342,7 @@ class TestToolRegistry:
             "accept_trade",
             "reject_trade",
             "list_pending_trades",
+            "report_theft",
         }
 
         for tool in tools:

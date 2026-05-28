@@ -126,6 +126,7 @@ def test_conversation_engine_passes_executor_to_build_agent_tools() -> None:
             sim_folder=None,
             ownership_ledger=None,
             trade_ledger=None,
+            theft_ledger=None,
             decision_logger=None,
         )
 
