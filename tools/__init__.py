@@ -409,6 +409,12 @@ def get_core_tools(
     # theft_ledger_unavailable. The diplomacy ledger + goal manager (#894)
     # let detected theft auto-break non_aggression treaties and inject
     # mutual_defense goals for allied agents.
+    # The tick_provider reads decision_logger.tick so the deterministic
+    # detection roll varies across steals — without it, every steal by the
+    # same thief hashes to the same outcome.
+    _theft_tick_provider = (
+        (lambda: decision_logger.tick) if decision_logger is not None else None
+    )
     tools.append(
         StealTool(
             agent_id=agent_id,
@@ -416,6 +422,7 @@ def get_core_tools(
             decision_logger=decision_logger,
             diplomacy_ledger=diplomacy_ledger,
             goal_manager=goal_manager,
+            tick_provider=_theft_tick_provider,
         )
     )
     tools.append(
