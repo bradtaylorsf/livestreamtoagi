@@ -43,6 +43,12 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from core.civilization.conflict import (
+    ConflictFailure,
+    ConflictLedger,
+    Dispute,
+    WarIntent,
+)
 from core.civilization.diplomacy import (
     DiplomacyFailure,
     DiplomacyLedger,
@@ -1577,20 +1583,756 @@ class ListActiveTreatiesTool(BaseTool):
         }
 
 
+_CONFLICT_AGENTS = _BUILDER_AGENTS
+
+
+def _dispute_to_dict(dispute: Dispute) -> dict[str, Any]:
+    return {
+        "dispute_id": dispute.dispute_id,
+        "initiator_id": dispute.initiator_id,
+        "respondent_id": dispute.respondent_id,
+        "dispute_type": dispute.dispute_type,
+        "evidence": [e.model_dump() for e in dispute.evidence],
+        "status": dispute.status,
+        "motivation": dispute.motivation,
+        "judgement": dispute.judgement,
+        "outcome": dict(dispute.outcome or {}),
+        "created_at": dispute.created_at.isoformat(),
+        "judged_at": dispute.judged_at.isoformat() if dispute.judged_at else None,
+        "resolved_at": dispute.resolved_at.isoformat() if dispute.resolved_at else None,
+    }
+
+
+def _war_to_dict(war: WarIntent) -> dict[str, Any]:
+    return {
+        "war_id": war.war_id,
+        "initiator_id": war.initiator_id,
+        "initiator_faction_id": war.initiator_faction_id,
+        "target_faction_id": war.target_faction_id,
+        "casus_belli": war.casus_belli,
+        "motivation": war.motivation,
+        "seconders": sorted(war.seconders),
+        "required_quorum": war.required_quorum,
+        "status": war.status,
+        "created_at": war.created_at.isoformat(),
+        "activated_at": war.activated_at.isoformat() if war.activated_at else None,
+        "resolved_at": war.resolved_at.isoformat() if war.resolved_at else None,
+        "surrender_terms": dict(war.surrender_terms or {}),
+    }
+
+
+def _conflict_failure_response(failure: ConflictFailure) -> dict[str, Any]:
+    response: dict[str, Any] = {"status": "error", "reason": failure.reason}
+    if failure.dispute_id is not None:
+        response["dispute_id"] = failure.dispute_id
+    if failure.war_id is not None:
+        response["war_id"] = failure.war_id
+    if failure.detail is not None:
+        response["detail"] = failure.detail
+    return response
+
+
+def _log_conflict(
+    decision_logger: DecisionLogger | None,
+    *,
+    action: str,
+    dispute_id: str | None = None,
+    war_id: str | None = None,
+    initiator_id: str | None = None,
+    respondent_id: str | None = None,
+    dispute_type: str | None = None,
+    outcome: dict[str, Any] | None = None,
+    judgement: str | None = None,
+    terms: dict[str, Any] | None = None,
+    motivation: str | None = None,
+    reason: str | None = None,
+    casus_belli: str | None = None,
+    target_faction_id: str | None = None,
+    initiator_faction_id: str | None = None,
+    seconders: list[str] | None = None,
+    required_quorum: int | None = None,
+    actor_id: str | None = None,
+) -> None:
+    if decision_logger is None:
+        return
+    try:
+        decision_logger.log_conflict_event(
+            action=action,
+            dispute_id=dispute_id,
+            war_id=war_id,
+            initiator_id=initiator_id,
+            respondent_id=respondent_id,
+            dispute_type=dispute_type,
+            outcome=outcome,
+            judgement=judgement,
+            terms=terms,
+            motivation=motivation,
+            reason=reason,
+            casus_belli=casus_belli,
+            target_faction_id=target_faction_id,
+            initiator_faction_id=initiator_faction_id,
+            seconders=seconders,
+            required_quorum=required_quorum,
+            actor_id=actor_id,
+        )
+    except Exception:  # pragma: no cover - logger must not break the sim
+        logger.exception(
+            "decision_logger.log_conflict_event failed (action=%s)", action
+        )
+
+
+def _emit_conflict_consequences(
+    decision_logger: DecisionLogger | None,
+    *,
+    consequences: list[dict[str, Any]],
+    actor_id: str | None = None,
+) -> None:
+    """Mirror the ledger's consequence summaries into the decision log."""
+    if decision_logger is None:
+        return
+    for c in consequences:
+        kind = c.get("kind")
+        try:
+            if kind == "relationship_delta":
+                decision_logger.log_relationship_delta(
+                    a=str(c.get("a") or ""),
+                    b=str(c.get("b") or ""),
+                    before=dict(c.get("before") or {}),
+                    after=dict(c.get("after") or {}),
+                    reason=c.get("reason"),
+                )
+            elif kind == "ownership_transfer":
+                target_type = c.get("target_type")
+                target_ref = c.get("target_ref") or {}
+                if c.get("released_claim_id"):
+                    decision_logger.log_ownership_delta(
+                        claim_id=c["released_claim_id"],
+                        owner_agent_id=str(c.get("from_agent") or ""),
+                        target_type=str(target_type or "structure"),
+                        target_ref=dict(target_ref),
+                        action="release",
+                        motivation="dispute_resolution",
+                        actor_id=actor_id,
+                    )
+                if c.get("new_claim_id"):
+                    decision_logger.log_ownership_delta(
+                        claim_id=c["new_claim_id"],
+                        owner_agent_id=str(c.get("to_agent") or ""),
+                        target_type=str(target_type or "structure"),
+                        target_ref=dict(target_ref),
+                        action="claim",
+                        motivation="dispute_resolution",
+                        actor_id=actor_id,
+                    )
+            elif kind == "restitution_offer":
+                decision_logger.log_trade_event(
+                    offer_id=str(c.get("offer_id") or ""),
+                    proposer_id=str(c.get("from_agent") or ""),
+                    recipient_id=str(c.get("to_agent") or ""),
+                    give=dict(c.get("items") or {}),
+                    want={},
+                    action="proposed",
+                    motivation="restitution",
+                    actor_id=actor_id,
+                )
+            elif kind == "treaty_break":
+                decision_logger.log_diplomacy_event(
+                    treaty_id=str(c.get("treaty_id") or ""),
+                    parties=list(c.get("parties") or []),
+                    action="broken",
+                    breaker_id=c.get("breaker_id"),
+                    reason=c.get("reason"),
+                    actor_id=actor_id,
+                )
+        except Exception:  # pragma: no cover
+            logger.exception("conflict consequence logging failed (kind=%s)", kind)
+
+
+class OpenDisputeTool(BaseTool):
+    """File a dispute against another agent (#895)."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "open_dispute"
+    description = (
+        "Open a formal dispute against another agent. Pick a dispute_type "
+        "(territorial / theft / trade_breach / treaty_violation / personal) "
+        "and pass evidence_refs as a list of {ref_type, ref_id, narrative?} "
+        "pointing at prior theft, trade, ownership, diplomacy, or utterance "
+        "events. The dispute sits in 'open' status until someone requests "
+        "judgement."
+    )
+    parameters = {
+        "respondent_id": {
+            "type": "string",
+            "description": "The agent you're filing the dispute against.",
+        },
+        "dispute_type": {
+            "type": "string",
+            "description": "One of territorial/theft/trade_breach/treaty_violation/personal.",
+            "enum": [
+                "territorial",
+                "theft",
+                "trade_breach",
+                "treaty_violation",
+                "personal",
+            ],
+        },
+        "evidence_refs": {
+            "type": "array",
+            "description": (
+                "List of evidence entries: each is {ref_type, ref_id, narrative?}."
+            ),
+        },
+        "motivation": {
+            "type": "string",
+            "description": "One short sentence on why this dispute matters now.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        respondent_id = kwargs.get("respondent_id")
+        dispute_type = kwargs.get("dispute_type")
+        evidence_refs = kwargs.get("evidence_refs")
+        motivation = kwargs.get("motivation")
+
+        if not isinstance(respondent_id, str) or not respondent_id:
+            return {"status": "error", "reason": "respondent_id is required"}
+        if not isinstance(dispute_type, str):
+            return {"status": "error", "reason": "dispute_type is required"}
+        if evidence_refs is not None and not isinstance(evidence_refs, list):
+            return {"status": "error", "reason": "evidence_refs must be a list"}
+        if motivation is not None and not isinstance(motivation, str):
+            return {"status": "error", "reason": "motivation must be a string"}
+
+        result = self._ledger.open_dispute(
+            initiator_id=self._agent_id,
+            respondent_id=respondent_id,
+            dispute_type=dispute_type,
+            evidence_refs=evidence_refs if isinstance(evidence_refs, list) else None,
+            motivation=motivation if isinstance(motivation, str) else None,
+        )
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        _log_conflict(
+            self._decision_logger,
+            action="opened",
+            dispute_id=result.dispute_id,
+            initiator_id=result.initiator_id,
+            respondent_id=result.respondent_id,
+            dispute_type=result.dispute_type,
+            motivation=result.motivation,
+            actor_id=self._agent_id,
+        )
+        return {**_dispute_to_dict(result), "status": "opened"}
+
+
+class SubmitEvidenceTool(BaseTool):
+    """Add an evidence ref to an open dispute (#895)."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "submit_evidence"
+    description = (
+        "Attach an additional evidence ref to an open dispute you're a "
+        "party to. Pass evidence_ref={ref_type, ref_id} plus an optional "
+        "narrative. Duplicate (ref_type, ref_id) pairs are rejected."
+    )
+    parameters = {
+        "dispute_id": {
+            "type": "string",
+            "description": "The dispute_id from open_dispute.",
+        },
+        "evidence_ref": {
+            "type": "object",
+            "description": "{ref_type, ref_id} pointing to a prior log entry.",
+        },
+        "narrative": {
+            "type": "string",
+            "description": "Short narrative tying the evidence to the dispute.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        dispute_id = kwargs.get("dispute_id")
+        evidence_ref = kwargs.get("evidence_ref")
+        narrative = kwargs.get("narrative")
+
+        if not isinstance(dispute_id, str) or not dispute_id:
+            return {"status": "error", "reason": "dispute_id is required"}
+        if not isinstance(evidence_ref, dict) or not evidence_ref:
+            return {"status": "error", "reason": "evidence_ref must be an object"}
+
+        result = self._ledger.submit_evidence(
+            dispute_id,
+            submitter_id=self._agent_id,
+            evidence_ref=evidence_ref,
+            narrative=narrative if isinstance(narrative, str) else None,
+        )
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        _log_conflict(
+            self._decision_logger,
+            action="evidence_submitted",
+            dispute_id=result.dispute_id,
+            initiator_id=result.initiator_id,
+            respondent_id=result.respondent_id,
+            dispute_type=result.dispute_type,
+            actor_id=self._agent_id,
+        )
+        return {**_dispute_to_dict(result), "status": "evidence_submitted"}
+
+
+class RequestJudgementTool(BaseTool):
+    """Ask a neutral judge (or majority vote) to rule on a dispute (#895)."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "request_judgement"
+    description = (
+        "Request judgement on an open dispute. The ledger auto-judges "
+        "deterministically: same seed + same evidence → same ruling. The "
+        "judge_id is optional metadata so the decision log captures who "
+        "arbitrated. Returns the dispute with judgement + outcome."
+    )
+    parameters = {
+        "dispute_id": {
+            "type": "string",
+            "description": "The dispute_id to rule on.",
+        },
+        "judge_id": {
+            "type": "string",
+            "description": "Optional id of the agent acting as judge.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        dispute_id = kwargs.get("dispute_id")
+        judge_id = kwargs.get("judge_id")
+        if not isinstance(dispute_id, str) or not dispute_id:
+            return {"status": "error", "reason": "dispute_id is required"}
+
+        result = self._ledger.request_judgement(
+            dispute_id,
+            judge_id=judge_id if isinstance(judge_id, str) and judge_id else None,
+        )
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        _log_conflict(
+            self._decision_logger,
+            action="judged",
+            dispute_id=result.dispute_id,
+            initiator_id=result.initiator_id,
+            respondent_id=result.respondent_id,
+            dispute_type=result.dispute_type,
+            judgement=result.judgement,
+            outcome=dict(result.outcome or {}),
+            actor_id=self._agent_id,
+        )
+        return {**_dispute_to_dict(result), "status": "judged"}
+
+
+class AcceptJudgementTool(BaseTool):
+    """Losing party accepts a judgement (or escalates to war) (#895)."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "accept_judgement"
+    description = (
+        "Only the losing party of a judged dispute can call this. Pass "
+        "accept=true to resolve the dispute (consequences apply per "
+        "dispute_type — ownership transfer, restitution, treaty break, or "
+        "relationship hit). Pass accept=false to escalate, marking the "
+        "dispute escalated so callers can issue a declare_war if desired."
+    )
+    parameters = {
+        "dispute_id": {
+            "type": "string",
+            "description": "The dispute_id under judgement.",
+        },
+        "accept": {
+            "type": "boolean",
+            "description": "true to accept and resolve, false to escalate.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        dispute_id = kwargs.get("dispute_id")
+        accept = kwargs.get("accept")
+        if not isinstance(dispute_id, str) or not dispute_id:
+            return {"status": "error", "reason": "dispute_id is required"}
+        if not isinstance(accept, bool):
+            return {"status": "error", "reason": "accept must be boolean"}
+
+        result = self._ledger.accept_judgement(
+            dispute_id,
+            accepting_agent_id=self._agent_id,
+            accept=accept,
+        )
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        updated, consequences = result
+        action = "resolved" if accept else "escalated"
+        _log_conflict(
+            self._decision_logger,
+            action=action,
+            dispute_id=updated.dispute_id,
+            initiator_id=updated.initiator_id,
+            respondent_id=updated.respondent_id,
+            dispute_type=updated.dispute_type,
+            judgement=updated.judgement,
+            outcome=dict(updated.outcome or {}),
+            actor_id=self._agent_id,
+        )
+        if accept:
+            _emit_conflict_consequences(
+                self._decision_logger,
+                consequences=consequences,
+                actor_id=self._agent_id,
+            )
+        return {
+            **_dispute_to_dict(updated),
+            "status": action,
+            "consequences": consequences,
+        }
+
+
+class DeclareWarTool(BaseTool):
+    """Declare war on another faction (#895). Requires faction quorum."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "declare_war"
+    description = (
+        "Declare war on another faction. The war is 'pending' until a "
+        "majority of your faction members second the call via second_war "
+        "(your declaration counts as the first second). Provide a "
+        "casus_belli describing what justifies it."
+    )
+    parameters = {
+        "target_faction_id": {
+            "type": "string",
+            "description": "The faction_id you're declaring war on.",
+        },
+        "casus_belli": {
+            "type": "string",
+            "description": "Short justification for the war.",
+        },
+        "motivation": {
+            "type": "string",
+            "description": "Optional one-line motivation for the decision log.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        target_faction_id = kwargs.get("target_faction_id")
+        casus_belli = kwargs.get("casus_belli")
+        motivation = kwargs.get("motivation")
+        if not isinstance(target_faction_id, str) or not target_faction_id:
+            return {"status": "error", "reason": "target_faction_id is required"}
+        if not isinstance(casus_belli, str) or not casus_belli.strip():
+            return {"status": "error", "reason": "casus_belli is required"}
+
+        result = self._ledger.declare_war(
+            initiator_id=self._agent_id,
+            target_faction_id=target_faction_id,
+            casus_belli=casus_belli,
+            motivation=motivation if isinstance(motivation, str) else None,
+        )
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        _log_conflict(
+            self._decision_logger,
+            action="war_declared",
+            war_id=result.war_id,
+            initiator_id=result.initiator_id,
+            initiator_faction_id=result.initiator_faction_id,
+            target_faction_id=result.target_faction_id,
+            casus_belli=result.casus_belli,
+            motivation=result.motivation,
+            seconders=sorted(result.seconders),
+            required_quorum=result.required_quorum,
+            actor_id=self._agent_id,
+        )
+        if result.status == "active":
+            _log_conflict(
+                self._decision_logger,
+                action="war_activated",
+                war_id=result.war_id,
+                initiator_faction_id=result.initiator_faction_id,
+                target_faction_id=result.target_faction_id,
+                actor_id=self._agent_id,
+            )
+        return {**_war_to_dict(result), "status": result.status}
+
+
+class SecondWarTool(BaseTool):
+    """Second a pending war declaration to push toward quorum (#895)."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "second_war"
+    description = (
+        "Second a pending war declaration to help reach faction quorum. "
+        "You must be a member of the declaring faction. Returns the war "
+        "with updated seconders list; activates automatically once "
+        "majority is reached."
+    )
+    parameters = {
+        "war_id": {
+            "type": "string",
+            "description": "The war_id you want to second.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        war_id = kwargs.get("war_id")
+        if not isinstance(war_id, str) or not war_id:
+            return {"status": "error", "reason": "war_id is required"}
+
+        prev_status = None
+        existing = self._ledger.get_war(war_id)
+        if existing is not None:
+            prev_status = existing.status
+
+        result = self._ledger.second_war(war_id, seconder_id=self._agent_id)
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        _log_conflict(
+            self._decision_logger,
+            action="war_seconded",
+            war_id=result.war_id,
+            initiator_id=result.initiator_id,
+            initiator_faction_id=result.initiator_faction_id,
+            target_faction_id=result.target_faction_id,
+            seconders=sorted(result.seconders),
+            required_quorum=result.required_quorum,
+            actor_id=self._agent_id,
+        )
+        if result.status == "active" and prev_status != "active":
+            _log_conflict(
+                self._decision_logger,
+                action="war_activated",
+                war_id=result.war_id,
+                initiator_faction_id=result.initiator_faction_id,
+                target_faction_id=result.target_faction_id,
+                actor_id=self._agent_id,
+            )
+        return {**_war_to_dict(result), "status": result.status}
+
+
+class SurrenderTool(BaseTool):
+    """Surrender a war or open/judged dispute with concessions (#895)."""
+
+    ALLOWED_AGENTS = _CONFLICT_AGENTS
+
+    name = "surrender"
+    description = (
+        "Yield concessions to end a conflict. Pass either a war_id or a "
+        "dispute_id under 'target_id' (the tool accepts both). 'terms' is "
+        "a free-form object describing the concessions — they are "
+        "recorded on the resolution but the ledger does not auto-apply "
+        "them; the surrendering side is responsible for honouring them "
+        "via subsequent tool calls."
+    )
+    parameters = {
+        "target_id": {
+            "type": "string",
+            "description": "A war_id or dispute_id to surrender.",
+        },
+        "terms": {
+            "type": "object",
+            "description": "Concessions offered to end the conflict.",
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        agent_id: str = "unknown",
+        ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
+    ) -> None:
+        self._agent_id = agent_id
+        self._ledger = ledger
+        self._decision_logger = decision_logger
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.pop("simulation_id", None)
+        kwargs.pop("conversation_id", None)
+
+        if self._ledger is None:
+            return {"status": "error", "reason": "conflict_ledger_unavailable"}
+
+        target_id = kwargs.get("target_id")
+        terms = kwargs.get("terms")
+        if not isinstance(target_id, str) or not target_id:
+            return {"status": "error", "reason": "target_id is required"}
+        if terms is not None and not isinstance(terms, dict):
+            return {"status": "error", "reason": "terms must be an object"}
+
+        result = self._ledger.surrender(
+            target_id,
+            surrendering_agent_id=self._agent_id,
+            terms=terms if isinstance(terms, dict) else None,
+        )
+        if isinstance(result, ConflictFailure):
+            return _conflict_failure_response(result)
+
+        if isinstance(result, WarIntent):
+            _log_conflict(
+                self._decision_logger,
+                action="surrendered",
+                war_id=result.war_id,
+                initiator_faction_id=result.initiator_faction_id,
+                target_faction_id=result.target_faction_id,
+                terms=dict(result.surrender_terms or {}),
+                actor_id=self._agent_id,
+            )
+            return {**_war_to_dict(result), "status": "surrendered"}
+
+        _log_conflict(
+            self._decision_logger,
+            action="surrendered",
+            dispute_id=result.dispute_id,
+            initiator_id=result.initiator_id,
+            respondent_id=result.respondent_id,
+            dispute_type=result.dispute_type,
+            terms=dict((result.outcome or {}).get("terms") or {}),
+            actor_id=self._agent_id,
+        )
+        return {**_dispute_to_dict(result), "status": "surrendered"}
+
+
 __all__ = [
+    "AcceptJudgementTool",
     "AcceptTradeTool",
     "BreakTreatyTool",
     "ClaimOwnershipTool",
+    "DeclareWarTool",
     "DefectFactionTool",
     "GetOwnershipTool",
     "ListActiveTreatiesTool",
     "ListMyClaimsTool",
     "ListPendingTradesTool",
+    "OpenDisputeTool",
     "ProposeTradeTool",
     "ProposeTreatyTool",
     "RejectTradeTool",
     "ReleaseOwnershipTool",
     "ReportTheftTool",
+    "RequestJudgementTool",
+    "SecondWarTool",
     "SignTreatyTool",
     "StealTool",
+    "SubmitEvidenceTool",
+    "SurrenderTool",
 ]

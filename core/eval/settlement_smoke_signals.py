@@ -30,6 +30,7 @@ from core.eval.headless_signals import (
     collect_world_events,
 )
 from core.simulation.decision_log_schema import (
+    ConflictEventRow,
     DecisionLogRow,
     DiplomacyEventRow,
     OwnershipDeltaRow,
@@ -296,6 +297,29 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     faction_defections = sum(1 for r in diplomacy_rows if r.payload.action == "defected")
     active_treaties = max(0, treaty_signings - treaty_breaks)
 
+    # Conflict counts (#895). Dispute lifecycle plus war declarations.
+    # ``disputes_opened``/``disputes_resolved`` cover the resolution rate;
+    # ``wars_declared``/``surrenders`` cover the escalation path.
+    conflict_rows = [r for r in rows if isinstance(r, ConflictEventRow)]
+    disputes_opened = sum(
+        1 for r in conflict_rows if r.payload.action == "opened"
+    )
+    disputes_resolved = sum(
+        1 for r in conflict_rows if r.payload.action == "resolved"
+    )
+    disputes_escalated = sum(
+        1 for r in conflict_rows if r.payload.action == "escalated"
+    )
+    wars_declared = sum(
+        1 for r in conflict_rows if r.payload.action == "war_declared"
+    )
+    wars_activated = sum(
+        1 for r in conflict_rows if r.payload.action == "war_activated"
+    )
+    surrenders = sum(
+        1 for r in conflict_rows if r.payload.action == "surrendered"
+    )
+
     classification, failure_class = _classify(
         shared_objective_chosen=shared_objective,
         distinct_role_count=distinct_role_count,
@@ -349,6 +373,12 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "active_treaties": active_treaties,
             "treaty_breaks": treaty_breaks,
             "faction_defections": faction_defections,
+            "disputes_opened": disputes_opened,
+            "disputes_resolved": disputes_resolved,
+            "disputes_escalated": disputes_escalated,
+            "wars_declared": wars_declared,
+            "wars_activated": wars_activated,
+            "surrenders": surrenders,
         },
     )
 

@@ -126,6 +126,9 @@ class ConversationOptions:
     # Per-simulation diplomacy ledger (#894) — tracks factions + treaties;
     # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
     diplomacy_ledger: Any | None = None
+    # Per-simulation conflict ledger (#895) — disputes + war intents;
+    # persists to <sim>/conflict_log.jsonl via the conflict tools.
+    conflict_ledger: Any | None = None
     decision_logger: Any | None = None
 
 
