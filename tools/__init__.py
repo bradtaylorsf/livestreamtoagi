@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from .alpha_dispatch import DispatchAlphaTool
@@ -167,6 +168,13 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return list(self._tools.keys())
+
+
+def _env_enabled(value: str | None, *, default: bool = False) -> bool:
+    """Parse a truthy/falsy env flag, falling back to ``default`` when unset."""
+    if value is None or value == "":
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
 
 
 def get_core_tools(
@@ -413,6 +421,16 @@ def get_core_tools(
     # detection roll varies across steals — without it, every steal by the
     # same thief hashes to the same outcome.
     _theft_tick_provider = (lambda: decision_logger.tick) if decision_logger is not None else None
+    # victim_online feeds the theft detection roll: a present victim raises the
+    # detection threshold. A headless sim has no live presence model, so the
+    # value is operator-tunable via MC_SIM_THEFT_VICTIM_ONLINE. It defaults to
+    # False so wiring the provider does NOT change the current detection
+    # severity (this issue is wiring only). The provider stays None on a
+    # no-ledger run so StealTool's None-safe default is preserved.
+    _theft_victim_online = _env_enabled(os.environ.get("MC_SIM_THEFT_VICTIM_ONLINE"))
+    _theft_victim_online_provider = (
+        (lambda _victim_id: _theft_victim_online) if theft_ledger is not None else None
+    )
     tools.append(
         StealTool(
             agent_id=agent_id,
@@ -421,6 +439,7 @@ def get_core_tools(
             diplomacy_ledger=diplomacy_ledger,
             goal_manager=goal_manager,
             tick_provider=_theft_tick_provider,
+            victim_online_provider=_theft_victim_online_provider,
         )
     )
     tools.append(
