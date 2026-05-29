@@ -18,6 +18,9 @@ const DEFAULT_TOOLS = Object.freeze([
     '!inventory',
     '!searchForBlock',
     '!rescue',
+    // E21-7g: the shared task board (create/claim/complete/list) is a safe bridge
+    // op every selected agent may use, so it must be granted by the director gate.
+    '!manageTask',
 ]);
 const LOCAL_SAFE_TOOLS = new Set([
     '!move',
@@ -28,6 +31,7 @@ const LOCAL_SAFE_TOOLS = new Set([
     '!craftable',
     '!getCraftingPlan',
     '!rescue',
+    '!manageTask', // E21-7g shared task board (safe, no world mutation)
 ]);
 const GATHER_TOOLS = new Set(['!collectBlocks', '!collectAllBlocks']);
 const STANDALONE_BUILD_TOOLS = new Set(['!placeHere', '!place', '!break', '!buildFromPlan']);
