@@ -1,0 +1,10 @@
+type: step
+step: implement
+eval_method: pending
+status: needs-annotation
+source: auto-captured
+captured_from:
+  issue: 909
+  session: session/epic-820-epic-e21-autonomous-minecraft-civilization-readiness
+  date: 2026-05-29
+checks: []

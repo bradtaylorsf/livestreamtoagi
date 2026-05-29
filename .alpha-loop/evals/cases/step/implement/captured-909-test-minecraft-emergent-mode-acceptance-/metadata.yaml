@@ -1,0 +1,9 @@
+id: captured-909-test-minecraft-emergent-mode-acceptance-
+description: "test(minecraft): emergent-mode acceptance + settlement regression
+  for overnight readiness (E21-7e)"
+tags: []
+source: auto-captured
+captured_from:
+  issue: 909
+  session: session/epic-820-epic-e21-autonomous-minecraft-civilization-readiness
+  date: 2026-05-29
