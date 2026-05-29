@@ -349,6 +349,17 @@ MC_SIM_BUILDER_MAX_USD_PER_RUN="${MC_SIM_BUILDER_MAX_USD_PER_RUN:-}"
 MC_SIM_BUILDER_USD_PER_1K_INPUT="${MC_SIM_BUILDER_USD_PER_1K_INPUT:-}"
 MC_SIM_BUILDER_USD_PER_1K_OUTPUT="${MC_SIM_BUILDER_USD_PER_1K_OUTPUT:-}"
 MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
+# Mirror run-local-sim.sh's authoritative enum. Direct soak.sh callers still
+# default to single; the operator (emergent) default lives in run-local-sim.sh.
+# Settlement-only plumbing below stays inert under emergent (it gates on
+# = "settlement").
+case "$MC_SIM_BUILD_MODE" in
+    single|plan|settlement|emergent) ;;
+    *)
+        echo "x MC_SIM_BUILD_MODE must be single, plan, settlement, or emergent." >&2
+        exit 2
+        ;;
+esac
 MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"

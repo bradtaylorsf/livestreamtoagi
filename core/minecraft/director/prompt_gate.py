@@ -792,6 +792,18 @@ def _suppressed_scheduler_decision(
     )
 
 
+def _is_emergent_build_mode() -> bool:
+    """Whether the run is in emergent (task-board) build mode (E21-7c).
+
+    Emergent mode has no env-assigned build owner and no settlement phase
+    machine: build authorization comes from a claimed in_progress task on the
+    shared board. The single-owner forcing overrides below must therefore
+    no-op so they cannot short-circuit task-based authorization.
+    """
+
+    return os.environ.get("MC_SIM_BUILD_MODE") == "emergent"
+
+
 def _apply_explicit_build_owner(
     scheduler_decision: SchedulerDecision,
     *,
@@ -799,6 +811,10 @@ def _apply_explicit_build_owner(
     event_text: str,
     scene_event_type: SceneEventType,
 ) -> SchedulerDecision:
+    # Emergent mode never forces a single explicit build owner: ownership is
+    # mediated by the shared task board, not by phrases in the event text.
+    if _is_emergent_build_mode():
+        return scheduler_decision
     if scene_event_type != SceneEventType.BUILD_ACTION:
         return scheduler_decision
     owner = _explicit_build_owner(event_text, candidates)
@@ -839,6 +855,10 @@ def _apply_settlement_phase_owner(
     calling_agent: str | None = None,
     now_ms: int,
 ) -> SchedulerDecision:
+    # Belt-and-braces: even if a stray objective payload reaches the gate under
+    # emergent mode, never reintroduce single-owner settlement forcing.
+    if _is_emergent_build_mode():
+        return scheduler_decision
     if active_objective is None:
         return scheduler_decision
     if (
