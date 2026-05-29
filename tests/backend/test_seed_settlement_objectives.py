@@ -139,6 +139,24 @@ def test_non_settlement_mode_is_noop(settlement_env, monkeypatch):
     assert not (settlement_env / "timeline-raw" / seed.SEED_TIMELINE_FILENAME).exists()
 
 
+def test_emergent_mode_seeds_zero_objectives(settlement_env, monkeypatch):
+    """Emergent mode (#909 regression) must leave settlement_objective_count at 0.
+
+    The overnight default is MC_SIM_BUILD_MODE=emergent; the seed step is gated to
+    settlement, so the scope the bots read must hold no settlement objectives.
+    """
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "emergent")
+    fake = _use_fake_redis(monkeypatch)
+
+    assert seed.main() == 0
+
+    sim_uuid = uuid.UUID(SIM_ID)
+    expected_key = f"sim:{sim_uuid}:{SETTLEMENT_OBJECTIVES_KEY}"
+    assert expected_key not in fake.store
+    state = SharedWorkingState(ScopedRedis(fake, sim_uuid))
+    assert asyncio.run(state.get_settlement_objectives()) == []
+
+
 def test_shared_state_disabled_is_noop(settlement_env, monkeypatch):
     monkeypatch.setenv("MC_SIM_SHARED_STATE_ENABLED", "0")
     fake = _use_fake_redis(monkeypatch)
@@ -222,9 +240,7 @@ def test_build_objectives_without_descriptions_is_empty(monkeypatch):
 def test_should_seed_requires_settlement_and_shared_state():
     assert seed.should_seed({"MC_SIM_BUILD_MODE": "settlement"}) is True
     assert (
-        seed.should_seed(
-            {"MC_SIM_BUILD_MODE": "settlement", "MC_SIM_SHARED_STATE_ENABLED": "0"}
-        )
+        seed.should_seed({"MC_SIM_BUILD_MODE": "settlement", "MC_SIM_SHARED_STATE_ENABLED": "0"})
         is False
     )
     assert seed.should_seed({"MC_SIM_BUILD_MODE": "emergent"}) is False

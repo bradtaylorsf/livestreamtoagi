@@ -534,6 +534,11 @@ if [ "${MC_SIM_PRINT_ENV:-0}" = "1" ]; then
     printf 'MC_SIM_SETTLEMENT_OWNER_ORDER=%s\n' "${MC_SIM_SETTLEMENT_OWNER_ORDER:-}"
     printf 'MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST=%s\n' "${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-}"
     printf 'MC_SIM_BUILD_COOLDOWN_SEC=%s\n' "${MC_SIM_BUILD_COOLDOWN_SEC:-}"
+    # Resolved local-model triple — proves the .env value won over any stale
+    # exported parent-shell LOCAL_LLM_MODEL (the precedence fix above, #903) so
+    # the boot-profile criterion is testable without a live LM Studio stack.
+    printf 'LOCAL_LLM_MODEL=%s\n' "${LOCAL_LLM_MODEL:-}"
+    printf 'LOCAL_LLM_MODEL_BUILDING=%s\n' "${LOCAL_LLM_MODEL_BUILDING:-}"
     exit 0
 fi
 

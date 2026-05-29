@@ -230,6 +230,12 @@
 #   SOAK_REQUIRE_DIRECTOR_ACCEPTANCE
 #                               Exit nonzero when director_v2 acceptance fails.
 #                               Default: 1.
+#   SOAK_REQUIRE_EMERGENT_ACCEPTANCE
+#                               Exit nonzero when the emergent-mode acceptance
+#                               gate fails (MC_SIM_BUILD_MODE=emergent only).
+#                               Default: 0 (non-fatal; writes artifacts).
+#   emergent-acceptance.json/.md Emergent-mode acceptance gate verdict + criteria
+#                               under the run directory (emergent mode only).
 #   director-decisions.ndjson    Director V2 scene/open/close and gate decision
 #                               evidence under the run directory.
 #   tool-parity.ndjson          Director tool calls and documented no-tool
@@ -404,6 +410,11 @@ SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD="${SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD:-
 SOAK_ACCEPTANCE_WARMUP_SECONDS="${SOAK_ACCEPTANCE_WARMUP_SECONDS:-300}"
 SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO="${SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO:-0.5}"
 SOAK_REQUIRE_DIRECTOR_ACCEPTANCE="${SOAK_REQUIRE_DIRECTOR_ACCEPTANCE:-1}"
+# Emergent-mode acceptance gate (E21-7e, #909). Non-fatal by default so the
+# overnight path produces emergent-acceptance.{json,md} artifacts without
+# failing the run while the emergent telemetry substrate matures. Set to 1 to
+# make the gate a hard requirement once decision_log.jsonl capture is proven.
+SOAK_REQUIRE_EMERGENT_ACCEPTANCE="${SOAK_REQUIRE_EMERGENT_ACCEPTANCE:-0}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 MC_HEARTBEAT_ENABLED="${MC_HEARTBEAT_ENABLED:-1}"
 MC_HEARTBEAT_TICK_MS="${MC_HEARTBEAT_TICK_MS:-5000}"
@@ -824,6 +835,20 @@ verify_static() {
         ok "LTAG_SIMULATION_ID is exported for the seed and bots"
     else
         fail "LTAG_SIMULATION_ID export missing"
+        problems=1
+    fi
+
+    # E21-7e emergent acceptance gate: must invoke the report builder with the
+    # emergent flag and only fire under emergent mode so the settlement
+    # regression path stays untouched. Anchored to the call-site guard + status
+    # capture so this verification block does not self-match.
+    local emergent_flag_line emergent_guard_line
+    emergent_flag_line="$(grep -nE '^[[:space:]]+--mode emergent ' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    emergent_guard_line="$(grep -n '^[[:space:]]*run_emergent_acceptance_report ||' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    if [ -n "$emergent_flag_line" ] && [ -n "$emergent_guard_line" ]; then
+        ok "emergent acceptance gate invokes --mode emergent under an emergent-mode guard"
+    else
+        fail "emergent acceptance gate (--mode emergent, emergent-mode guarded) is missing"
         problems=1
     fi
 
@@ -2632,6 +2657,39 @@ append_director_acceptance_summary() {
     } >> "$RUN_DIR/summary.txt"
 }
 
+run_emergent_acceptance_report() {
+    # Emergent-mode acceptance gate (E21-7e, #909). Gated to emergent mode so the
+    # settlement regression harness path is untouched. Reuses the Director V2
+    # report + the settlement smoke classifier over decision_log.jsonl under the
+    # run dir; emits emergent-acceptance.{json,md} alongside the soak artifacts.
+    [ "$MC_SIM_BUILD_MODE" = "emergent" ] || return 0
+    "${PYTHON:-python3}" "$SCRIPT_DIR/build_director_acceptance_report.py" \
+        --mode emergent \
+        --run-dir "$RUN_DIR" \
+        --sim-folder "$RUN_DIR" \
+        --queue-threshold "$SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD" \
+        --warmup-seconds "$SOAK_ACCEPTANCE_WARMUP_SECONDS" \
+        --max-selected-agent-ratio "$SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"
+}
+
+append_emergent_acceptance_summary() {
+    local status="$1" status_label
+    [ "$MC_SIM_BUILD_MODE" = "emergent" ] || return 0
+    if [ "$status" -eq 0 ]; then
+        status_label="pass"
+    else
+        status_label="fail"
+    fi
+    {
+        echo
+        echo "Emergent mode acceptance"
+        echo "status: $status_label"
+        echo "report_json: $RUN_DIR/emergent-acceptance.json"
+        echo "report_md: $RUN_DIR/emergent-acceptance.md"
+        echo "require_emergent_acceptance: $SOAK_REQUIRE_EMERGENT_ACCEPTANCE"
+    } >> "$RUN_DIR/summary.txt"
+}
+
 start_lm_queue_proxy
 print_plan
 write_metadata
@@ -2702,6 +2760,11 @@ if [ "$SOAK_PROFILE" = "director_v2" ]; then
     run_director_acceptance_report || ACCEPTANCE_STATUS=$?
     append_director_acceptance_summary "$ACCEPTANCE_STATUS"
 fi
+EMERGENT_ACCEPTANCE_STATUS=0
+if [ "$MC_SIM_BUILD_MODE" = "emergent" ]; then
+    run_emergent_acceptance_report || EMERGENT_ACCEPTANCE_STATUS=$?
+    append_emergent_acceptance_summary "$EMERGENT_ACCEPTANCE_STATUS"
+fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
@@ -2727,6 +2790,10 @@ if [ "$SOAK_REQUIRE_BEHAVIOR_GATE" = "1" ] && [ "$BEHAVIOR_GATE_STATUS" != "pass
 fi
 if [ "$SOAK_PROFILE" = "director_v2" ] && [ "$SOAK_REQUIRE_DIRECTOR_ACCEPTANCE" = "1" ] && [ "$ACCEPTANCE_STATUS" -ne 0 ]; then
     fail "Director V2 acceptance failed. See $RUN_DIR/acceptance-report.md"
+    exit 1
+fi
+if [ "$MC_SIM_BUILD_MODE" = "emergent" ] && [ "$SOAK_REQUIRE_EMERGENT_ACCEPTANCE" = "1" ] && [ "$EMERGENT_ACCEPTANCE_STATUS" -ne 0 ]; then
+    fail "Emergent mode acceptance failed. See $RUN_DIR/emergent-acceptance.md"
     exit 1
 fi
 if [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then
