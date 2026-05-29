@@ -113,6 +113,11 @@ class BuildMacroScheduler:
     _scene_state: dict[str, _ScenePlanState] = field(default_factory=dict)
     _active_agent_goals: dict[tuple[str, str], str] = field(default_factory=dict)
     _pending_objective_seen_ms: dict[str, int] = field(default_factory=dict)
+    # E21-7h: emergent claim-based build grants (agent_id -> granted_at_ms). A
+    # selected agent that holds an in_progress claimed task may run !planAndBuild
+    # even though emergent mode has no rotating planner_owner. Grants are capped
+    # for cost (see select_emergent_build_owners).
+    _emergent_builds: dict[str, int] = field(default_factory=dict)
 
     def try_acquire_plan(
         self,
@@ -355,6 +360,52 @@ class BuildMacroScheduler:
         if fallback and allowed(fallback):
             return fallback, "settlement_phase_owner_assigned"
         return None, "plan_build_no_eligible_agent"
+
+    def select_emergent_build_owners(
+        self,
+        *,
+        scene_id: str,
+        claim_holders: Sequence[Any],
+        now_ms: int | None = None,
+    ) -> frozenset[str]:
+        """Grant emergent !planAndBuild rights to selected claim-holders (E21-7h).
+
+        In emergent mode there is no rotating ``planner_owner``: any selected
+        agent that holds an in_progress claimed task on the shared board may run
+        one ``!planAndBuild`` for it. To stop N agents from firing OpenRouter
+        build-plan calls at once, grants are capped at
+        ``MC_SIM_MAX_CONCURRENT_BUILDS`` active at a time; each grant is held for
+        ``MC_SIM_BUILD_COOLDOWN_SEC`` (the per-agent re-grant window) before its
+        concurrency slot frees. Re-grants to an already-active agent are
+        idempotent and refresh that agent's window so it keeps building.
+        """
+
+        del scene_id  # cap is global across scenes (OpenRouter cost, not per-scene)
+        now = now_ms if now_ms is not None else _now_ms()
+        window_ms = _emergent_build_window_ms()
+        # Expire stale grants so their concurrency slots free up for new builders.
+        self._emergent_builds = {
+            agent_id: started
+            for agent_id, started in self._emergent_builds.items()
+            if now - started < window_ms
+        }
+        holders = [agent_id for agent_id in (_agent_id(item) for item in claim_holders) if agent_id]
+        granted: set[str] = set()
+        # Re-grant agents that already hold an active build slot (idempotent).
+        for agent_id in holders:
+            if agent_id in self._emergent_builds:
+                self._emergent_builds[agent_id] = now
+                granted.add(agent_id)
+        # Fill the remaining concurrency slots with new claim-holders.
+        cap = _max_concurrent_emergent_builds()
+        for agent_id in holders:
+            if agent_id in granted:
+                continue
+            if len(self._emergent_builds) >= cap:
+                break
+            self._emergent_builds[agent_id] = now
+            granted.add(agent_id)
+        return frozenset(granted)
 
     def mark_started(self, scene_id: str, plan_id: str, *, now_ms: int | None = None) -> bool:
         """Mark a reserved scene plan as executing."""
@@ -623,6 +674,26 @@ def _pending_owner_grace_ms() -> int:
         return max(0, int(raw))
     except (TypeError, ValueError):
         return 600_000
+
+
+def _max_concurrent_emergent_builds() -> int:
+    raw = os.environ.get("MC_SIM_MAX_CONCURRENT_BUILDS")
+    if raw is None or not str(raw).strip():
+        return 2
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _emergent_build_window_ms() -> int:
+    raw = os.environ.get("MC_SIM_BUILD_COOLDOWN_SEC")
+    if raw is None or not str(raw).strip():
+        return 300_000
+    try:
+        return max(0, int(raw)) * 1000
+    except (TypeError, ValueError):
+        return 300_000
 
 
 def _plan_build_allowed_agents(

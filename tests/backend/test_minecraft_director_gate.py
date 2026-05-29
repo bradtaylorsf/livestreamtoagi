@@ -35,6 +35,8 @@ from core.minecraft.director.turn_scheduler import (
     SchedulerDecision,
     SchedulerTurn,
 )
+from core.redis_keys import ScopedRedis
+from core.shared_state import SharedTask, SharedWorkingState
 
 AGENTS = ["alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"]
 
@@ -766,6 +768,145 @@ async def test_emergent_mode_gate_does_not_force_explicit_build_owner(
     for decision in decisions:
         if decision.build_macro is not None:
             assert decision.build_macro.reason != "explicit_build_owner"
+
+
+# ─── E21-7h: emergent claim-driven build authorization ─────────────────────
+
+
+class _InMemoryRedis:
+    """Minimal async Redis backing SharedWorkingState.add_task / claim_task."""
+
+    def __init__(self) -> None:
+        self.hashes: dict[str, dict[str, str]] = {}
+        self.strings: dict[str, str] = {}
+
+    async def hset(self, key: str, field: str, value: str) -> int:
+        self.hashes.setdefault(key, {})[field] = value
+        return 1
+
+    async def hget(self, key: str, field: str) -> str | None:
+        return self.hashes.get(key, {}).get(field)
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return dict(self.hashes.get(key, {}))
+
+    async def hdel(self, key: str, *fields: str) -> int:
+        bucket = self.hashes.get(key, {})
+        return sum(1 for field in fields if bucket.pop(field, None) is not None)
+
+    async def set(self, key: str, value: str, *, ex: int | None = None, nx: bool = False) -> bool:
+        if nx and key in self.strings:
+            return False
+        self.strings[key] = value
+        return True
+
+    async def get(self, key: str) -> str | None:
+        return self.strings.get(key)
+
+
+async def _state_with_claimed_tasks(owners: list[str]) -> SharedWorkingState:
+    import uuid
+
+    state = SharedWorkingState(ScopedRedis(_InMemoryRedis(), uuid.uuid4()))
+    for idx, owner in enumerate(owners):
+        task_id = f"task-{idx}"
+        await state.add_task(SharedTask(id=task_id, title=f"build {owner} outpost", owner=None))
+        await state.claim_task(task_id, owner)
+    return state
+
+
+async def test_emergent_claim_holder_is_granted_plan_and_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "emergent")
+    gate = _gate()
+    # A non-build event: no build_macro is created, so any !planAndBuild grant
+    # comes purely from claim-driven authorization.
+    event = _event(source_agent="system", claimed_task_owners=AGENTS)
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+    selected = [decision for decision in decisions if decision.selected]
+
+    assert len(selected) >= 1
+    assert all(decision.build_macro is None for decision in decisions)
+    granted = [decision for decision in selected if "!planAndBuild" in decision.available_tools]
+    assert granted
+    assert all(decision.selected for decision in granted)
+
+
+async def test_emergent_without_claim_is_not_granted_plan_and_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "emergent")
+    gate = _gate()
+    event = _event(source_agent="system", claimed_task_owners=[])
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert any(decision.selected for decision in decisions)
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
+async def test_settlement_mode_ignores_claimed_task_owners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Claim-driven authorization is emergent-only. In settlement mode a claimed
+    # task must not grant !planAndBuild — the rotating planner_owner is unchanged.
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "settlement")
+    gate = _gate()
+    event = _event(source_agent="system", claimed_task_owners=AGENTS)
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert all("!planAndBuild" not in decision.available_tools for decision in decisions)
+
+
+async def test_handler_grants_plan_and_build_to_emergent_claim_holders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # End-to-end through the bridge handler: shared-board claims are threaded into
+    # the gate and a selected claim-holder is granted !planAndBuild, bounded by
+    # the concurrency cap.
+    monkeypatch.setenv("CONVERSATION_MODE", "director_v2")
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "emergent")
+    monkeypatch.setenv("MC_SIM_MAX_CONCURRENT_BUILDS", "2")
+    state = await _state_with_claimed_tasks(AGENTS)
+    services = SimpleNamespace(redis=None, shared_working_state=state)
+
+    responses = [
+        await handle_director_gate(
+            _bridge_request(_event(agent_id=agent_id, source_agent="system")),
+            services=services,
+        )
+        for agent_id in AGENTS
+    ]
+
+    selected = [response for response in responses if response["selected"]]
+    assert selected
+    granted = [response for response in selected if "!planAndBuild" in response["granted_tools"]]
+    assert granted
+    assert len(granted) <= 2
+
+
+async def test_handler_skips_claimed_tasks_outside_emergent_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Outside emergent mode the handler must not consult the shared board for
+    # build authorization, so a claimed task grants no !planAndBuild.
+    monkeypatch.setenv("CONVERSATION_MODE", "director_v2")
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "settlement")
+    state = await _state_with_claimed_tasks(AGENTS)
+    services = SimpleNamespace(redis=None, shared_working_state=state)
+
+    responses = [
+        await handle_director_gate(
+            _bridge_request(_event(agent_id=agent_id, source_agent="system")),
+            services=services,
+        )
+        for agent_id in AGENTS
+    ]
+
+    assert all("!planAndBuild" not in response["granted_tools"] for response in responses)
 
 
 async def test_pending_settlement_owner_default_grace_blocks_early_claim(

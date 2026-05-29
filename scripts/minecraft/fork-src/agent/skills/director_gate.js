@@ -364,6 +364,11 @@ function filteredGrantedTools(verdict) {
             return true;
         });
     }
+    // E21-7h: emergent build authorization is claim-driven on the Python side —
+    // a selected agent holding an in_progress claimed task is granted
+    // !planAndBuild, not only the rotating planner_owner. Trust that grant
+    // verbatim instead of re-stripping !planAndBuild down to a single owner.
+    if (process.env.MC_SIM_BUILD_MODE === 'emergent') return tools;
     if (!macro) return tools;
     if (macro.role === 'planner_owner' && macro.granted === true) return tools;
     return tools.filter((tool) => tool !== '!planAndBuild');
@@ -377,6 +382,18 @@ function commandPolicy(verdict) {
         const danger = String(activeRescue.danger_id || '').replace(/"/g, '');
         return `Command policy: Active rescue task. Use exactly one concise !rescue("${target}", "${danger}") command before any settlement, build, or gathering action. Do not use !collectBlocks, plan/build commands, standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments.`;
     }
+    if (process.env.MC_SIM_BUILD_MODE === 'emergent') {
+        // E21-7h: a selected agent that holds a claimed build task is granted
+        // !planAndBuild by the Director gate (claim-driven authorization). Tell it
+        // to execute that task as one real structure rather than placeHere lines.
+        const grantsBuild =
+            Array.isArray(verdict.granted_tools) && verdict.granted_tools.includes('!planAndBuild');
+        if (grantsBuild) {
+            return 'Command policy: You hold a claimed build task. Execute it with exactly one concise !planAndBuild("<structure>") request for a real, coherent structure (not a line of single blocks), then let buildFromPlan finish and announce !manageTask("complete","<id>") when verified. Do not use !place, !break, !observe, !navigate, !executeCode, standalone single-block placement lines, or JSON/object command arguments in local smoke.';
+        }
+        // E21-7g: otherwise steer the shared task-board loop instead of placeHere lines.
+        return 'Command policy: run the shared task-board loop — !manageTask("list") to read the board, !manageTask("create","<task>") to propose work, !manageTask("claim","<id>") to take a task, !manageTask("complete","<id>") when done — and coordinate in public chat. Build real coherent structures, not lines of single blocks; use !placeHere only for a single quick marker, and !inventory/!nearbyBlocks/!searchForBlock for information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
+    }
     if (process.env.MC_SIM_BUILD_MODE === 'plan' || macro) {
         if (macro?.role === 'planner_owner' && macro.granted === true) {
             return 'Command policy: You are the build owner for this planner turn. Include exactly one concise !planAndBuild("...") command in this response for the active structure, then let buildFromPlan finish. Do not use standalone placement, breaking, observation, navigation, execute-code, or JSON/object command arguments in local smoke.';
@@ -385,12 +402,6 @@ function commandPolicy(verdict) {
     }
     if (String(verdict.scene_digest || '').toLowerCase().includes('distress')) {
         return 'Command policy: Distress response. If !rescue is available and another agent is endangered, use one concise !rescue request. Otherwise use ordinary chat, !inventory, or !nearbyBlocks.';
-    }
-    if (process.env.MC_SIM_BUILD_MODE === 'emergent') {
-        // E21-7g: steer emergent turns to the shared task board instead of lines
-        // of single !placeHere blocks. (Broad claim-based planAndBuild rights are
-        // tracked in E21-7h; the rotating build owner already gets planAndBuild.)
-        return 'Command policy: run the shared task-board loop — !manageTask("list") to read the board, !manageTask("create","<task>") to propose work, !manageTask("claim","<id>") to take a task, !manageTask("complete","<id>") when done — and coordinate in public chat. Build real coherent structures, not lines of single blocks; use !placeHere only for a single quick marker, and !inventory/!nearbyBlocks/!searchForBlock for information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
     }
     return 'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
 }
