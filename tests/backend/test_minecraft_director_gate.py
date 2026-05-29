@@ -17,9 +17,24 @@ from core.bridge.handlers.director import handle_director_gate
 from core.bridge.server import build_bridge_response_with_services
 from core.event_bus import EventBus
 from core.event_bus import event_bus as global_event_bus
-from core.minecraft.director.prompt_gate import DirectorPromptGate, reset_prompt_gates
+from core.minecraft.director.build_macro_scheduler import (
+    BuildMacroScheduler,
+    SettlementObjectiveContext,
+)
+from core.minecraft.director.prompt_gate import (
+    DirectorPromptGate,
+    _apply_explicit_build_owner,
+    _apply_settlement_phase_owner,
+    reset_prompt_gates,
+)
+from core.minecraft.director.scene_inbox import SceneEventType
 from core.minecraft.director.timeline import ensure_soak_run_dir_from_run_id
-from core.minecraft.director.turn_scheduler import SchedulerConfig
+from core.minecraft.director.turn_scheduler import (
+    SchedulerCandidate,
+    SchedulerConfig,
+    SchedulerDecision,
+    SchedulerTurn,
+)
 
 AGENTS = ["alpha", "vera", "rex", "aurora", "pixel", "fork", "sentinel", "grok"]
 
@@ -607,6 +622,150 @@ async def test_expired_pending_settlement_owner_can_be_claimed_by_calling_agent(
     assert decision.build_macro.owner == "sentinel"
     assert decision.build_macro.reason == "settlement_phase_owner_assigned"
     assert "!planAndBuild" in decision.available_tools
+
+
+def _override_candidate(agent_id: str, role: str) -> SchedulerCandidate:
+    return SchedulerCandidate(
+        agent_id=agent_id,
+        is_participant=True,
+        is_observer=False,
+        chattiness=0.5,
+        role=role,
+        topic_relevance=0.8,
+        seconds_since_spoke=60.0,
+        turns_since_spoke=2,
+        recent_turn_count=0,
+        role_fit=0.8,
+    )
+
+
+def _baseline_planner_decision() -> SchedulerDecision:
+    # A natural builder-role planner selection that the single-owner overrides
+    # would normally rewrite when an explicit owner / active objective is present.
+    return SchedulerDecision(
+        scene_id="sim-test",
+        selected=[
+            SchedulerTurn(
+                agent_id="rex",
+                kind="planner",
+                score=0.9,
+                reason="builder_role_weight",
+                factor_breakdown={"role_fit": 0.9},
+            )
+        ],
+        suppressed_agents=["aurora", "vera"],
+        suppression_reason="builder_role_weight",
+        was_urgent=False,
+        seed=7,
+    )
+
+
+@pytest.mark.parametrize(
+    ("build_mode", "expect_rewrite"),
+    [("settlement", True), ("emergent", False)],
+)
+def test_emergent_mode_disables_explicit_build_owner_rewrite(
+    monkeypatch: pytest.MonkeyPatch, build_mode: str, expect_rewrite: bool
+) -> None:
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", build_mode)
+    candidates = [
+        _override_candidate("rex", "builder"),
+        _override_candidate("vera", "host facilitator"),
+        _override_candidate("aurora", "creative director"),
+    ]
+    baseline = _baseline_planner_decision()
+
+    result = _apply_explicit_build_owner(
+        baseline,
+        candidates=candidates,
+        event_text=(
+            "Vera is the build owner. Build one small coherent starter cabin. "
+            "Rex and Aurora should support only by observing and reporting."
+        ),
+        scene_event_type=SceneEventType.BUILD_ACTION,
+    )
+
+    if expect_rewrite:
+        # Settlement (non-emergent) still forces the named explicit owner.
+        assert result is not baseline
+        assert result.selected_planner_agent_id == "vera"
+        assert result.selected[0].reason == "explicit_build_owner"
+    else:
+        # Emergent leaves the natural builder-role planner untouched.
+        assert result is baseline
+        assert result.selected_planner_agent_id == "rex"
+        assert all(turn.reason != "explicit_build_owner" for turn in result.selected)
+
+
+@pytest.mark.parametrize(
+    ("build_mode", "expect_rewrite"),
+    [("settlement", True), ("emergent", False)],
+)
+def test_emergent_mode_disables_settlement_phase_owner_rewrite(
+    monkeypatch: pytest.MonkeyPatch, build_mode: str, expect_rewrite: bool
+) -> None:
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", build_mode)
+    # Keep the default (large) pending-owner grace so the settlement branch
+    # deterministically keeps the named owner rather than reassigning.
+    monkeypatch.delenv("MC_SIM_SETTLEMENT_PENDING_OWNER_GRACE_MS", raising=False)
+    monkeypatch.delenv("MINECRAFT_SETTLEMENT_PENDING_OWNER_GRACE_MS", raising=False)
+    scheduler = BuildMacroScheduler(cooldown_ms=10_000)
+    candidates = [
+        _override_candidate("rex", "builder"),
+        _override_candidate("fork", "architect engineer"),
+        _override_candidate("vera", "host facilitator"),
+    ]
+    baseline = _baseline_planner_decision()
+    active_objective = SettlementObjectiveContext(
+        objective_id="phase-workshop",
+        phase_index=2,
+        description="workshop station",
+        owner_agent_id="vera",
+        status="pending",
+    )
+
+    result = _apply_settlement_phase_owner(
+        scheduler,
+        baseline,
+        active_objective=active_objective,
+        plan_build_agent_allowlist=["vera", "rex", "fork"],
+        candidates=candidates,
+        scene_event_type=SceneEventType.BUILD_ACTION,
+        now_ms=2_000,
+    )
+
+    if expect_rewrite:
+        # Settlement (non-emergent) forces the objective owner as planner.
+        assert result is not baseline
+        assert result.selected_planner_agent_id == "vera"
+        assert result.selected[0].factor_breakdown == {"settlement_phase_owner": 1.0}
+    else:
+        # Emergent is a no-op even with a non-None SettlementObjectiveContext.
+        assert result is baseline
+        assert result.selected_planner_agent_id == "rex"
+
+
+async def test_emergent_mode_gate_does_not_force_explicit_build_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Behavioral guard: the emergent no-op is actually reached on the gate path,
+    # not just when calling the override helper directly.
+    monkeypatch.setenv("MC_SIM_BUILD_MODE", "emergent")
+    gate = _gate()
+    event = _build_event(
+        source_agent="system",
+        event_text=(
+            "Vera is the build owner. Build one small coherent starter cabin. "
+            "Rex and Aurora should support only by observing and reporting constraints."
+        ),
+    )
+
+    decisions = [await gate.evaluate("sim-test", agent_id, event) for agent_id in AGENTS]
+
+    assert all(decision.reason != "explicit_build_owner" for decision in decisions)
+    for decision in decisions:
+        if decision.build_macro is not None:
+            assert decision.build_macro.reason != "explicit_build_owner"
 
 
 async def test_pending_settlement_owner_default_grace_blocks_early_claim(
