@@ -216,6 +216,64 @@ def _task_board_collaborative_events() -> list[tuple[str, dict]]:
     ]
 
 
+def _task_lifecycle_no_build_events() -> list[tuple[str, dict]]:
+    """Task-lifecycle collaboration with TWO creators, TWO claimers, one done —
+    and zero world-changing builds (#909).
+
+    The chat is a neutral greeting that matches no objective/role/review regex, so
+    the only route to ``collaborative`` is the new task-lifecycle branch. Without
+    it the chat heuristics would file this as ``partial``.
+    """
+    return [
+        ("utterance", {"actor_id": "vera", "text": "Morning, team."}),
+        (
+            "tool_intent",
+            {
+                "actor_id": "vera",
+                "tool_name": "manage_task",
+                "args": {"action": "create_task", "title": "Storage hall"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "rex",
+                "tool_name": "manage_task",
+                "args": {"action": "create_task", "title": "Watch post"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "aurora",
+                "tool_name": "manage_task",
+                "args": {"action": "claim_task", "task_id": "task-1"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "pixel",
+                "tool_name": "manage_task",
+                "args": {"action": "claim_task", "task_id": "task-2"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "aurora",
+                "tool_name": "manage_task",
+                "args": {"action": "update_status", "task_id": "task-1", "status": "done"},
+                "status": "executed",
+            },
+        ),
+    ]
+
+
 def _task_board_partial_events() -> list[tuple[str, dict]]:
     """Board-organized collaboration with no embodied build → ``partial`` (#908)."""
     return [
@@ -319,6 +377,23 @@ def test_classify_task_board_collaborative(tmp_path: Path) -> None:
     assert outcome.sub_counts["task_create_events"] == 1
     assert outcome.sub_counts["task_claim_events"] == 2
     assert outcome.sub_counts["task_completion_events"] == 1
+
+
+def test_classify_task_lifecycle_collaborative_without_build(tmp_path: Path) -> None:
+    """Two creators + two claimers + one done classifies collaborative via the
+    new task-lifecycle path even with zero world-changing actions (#909)."""
+    folder = _build_log(tmp_path, _task_lifecycle_no_build_events())
+    outcome = classify_sim_folder(folder)
+    assert outcome.classification == "collaborative"
+    assert outcome.failure_class is None
+    assert outcome.world_changing_action_count == 0
+    # New sub_counts keys surfaced by the task-lifecycle summary.
+    assert outcome.sub_counts["distinct_task_creators"] == 2
+    assert outcome.sub_counts["created_task_count"] == 2
+    assert outcome.sub_counts["distinct_task_claimers"] == 2
+    assert outcome.sub_counts["claimed_task_count"] == 2
+    assert outcome.sub_counts["completed_task_count"] == 1
+    assert outcome.sub_counts["claim_then_build"] == 0
 
 
 def test_classify_task_board_partial_without_embodied_action(tmp_path: Path) -> None:

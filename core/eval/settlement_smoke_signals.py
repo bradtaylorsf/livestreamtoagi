@@ -94,6 +94,23 @@ _REVIEW_HINT_RE = re.compile(
 
 _COMMAND_LOOP_THRESHOLD = 4  # same agent + same tool + same args + blocked
 
+# Tick window for the ``claim_then_build`` heuristic: a world-changing intent by
+# the same agent within this many logged events AFTER a ``claim_task`` is read as
+# "this build fired FROM the claim", not a first-shouter race. The DecisionLogger
+# tick is a global per-event counter, so the window spans interleaved turns from
+# other agents — kept generous so a real claim→build is not missed (#909).
+_CLAIM_THEN_BUILD_WINDOW_TICKS = 50
+
+# Bare tool-name aliases for the task-board lifecycle, accepted alongside the
+# canonical ``manage_task`` (action-in-args) surface for forward-compat if the
+# tool is ever split into discrete create/claim/update tools.
+_TASK_ACTION_ALIASES: dict[str, str] = {
+    "createtask": "create_task",
+    "claimtask": "claim_task",
+    "updatestatus": "update_status",
+    "listtasks": "list_tasks",
+}
+
 
 @dataclass(frozen=True)
 class EvidenceRef:
@@ -101,6 +118,32 @@ class EvidenceRef:
     actor_id: str | None
     event_type: str
     note: str = ""
+
+
+@dataclass(frozen=True)
+class TaskLifecycleSummary:
+    """Task-board lifecycle counts derived from ``manage_task`` tool intents.
+
+    Emergent collaboration (#907/#908/#909) is mediated by the shared task board,
+    not by chat: agents ``create_task`` to post work, ``claim_task`` to take it
+    (first-claim-wins), and ``update_status -> done`` to finish. Surfacing this
+    lifecycle as a first-class signal lets the classifier read a healthy emergent
+    run as ``collaborative`` instead of misfiling it as ``idle_chat`` or
+    ``scattered`` just because no build-ish tool or chat regex fired.
+
+    ``claim_then_build`` counts claims followed by a world-changing intent from
+    the same agent within :data:`_CLAIM_THEN_BUILD_WINDOW_TICKS` ticks — evidence
+    that a build fired FROM a claim rather than from a first-shouter race.
+    """
+
+    created_task_count: int = 0
+    distinct_task_creators: int = 0
+    claimed_task_count: int = 0
+    distinct_task_claimers: int = 0
+    completed_task_count: int = 0
+    claim_then_build: int = 0
+    creator_ids: tuple[str, ...] = ()
+    claimer_ids: tuple[str, ...] = ()
 
 
 @dataclass
@@ -185,6 +228,67 @@ def _task_board_completion_events(intents: list[ToolIntentRow]) -> int:
     return count
 
 
+def _task_lifecycle_action(intent: ToolIntentRow) -> str | None:
+    """The task-board lifecycle action for a successful tool intent, or None.
+
+    Recognizes both the canonical ``manage_task`` tool (action carried in
+    ``args["action"]``) and bare-named aliases (``create_task`` etc.) for
+    forward-compat. Returns None for non-task or unsuccessful intents.
+    """
+    if intent.payload.status not in {"executed", "simulated"}:
+        return None
+    if _is_manage_task(intent):
+        return _manage_task_action(intent)
+    name = intent.payload.tool_name.lower().replace("-", "").replace("!", "").replace("_", "")
+    return _TASK_ACTION_ALIASES.get(name)
+
+
+def collect_task_events(rows: Iterable[DecisionLogRow]) -> TaskLifecycleSummary:
+    """Summarize the ``manage_task`` lifecycle over a sequence of decision rows.
+
+    Pure function — no LLM, no DB. Buckets successful task-board intents by
+    action and computes the distinct-actor counts plus the ``claim_then_build``
+    coupling used by the emergent-mode acceptance gate (#909).
+    """
+    intents = [r for r in rows if isinstance(r, ToolIntentRow)]
+    world_changing = [(i.tick, i.actor_id) for i in intents if _is_world_changing(i)]
+
+    creators: set[str] = set()
+    claimers: set[str] = set()
+    created = claimed = completed = claim_then_build = 0
+    for intent in intents:
+        action = _task_lifecycle_action(intent)
+        if action == "create_task":
+            created += 1
+            if intent.actor_id:
+                creators.add(intent.actor_id)
+        elif action == "claim_task":
+            claimed += 1
+            if intent.actor_id:
+                claimers.add(intent.actor_id)
+                if any(
+                    actor == intent.actor_id
+                    and intent.tick <= tick <= intent.tick + _CLAIM_THEN_BUILD_WINDOW_TICKS
+                    for tick, actor in world_changing
+                ):
+                    claim_then_build += 1
+        elif action == "update_status":
+            status = (intent.payload.args or {}).get("status")
+            if isinstance(status, str) and status.lower() == "done":
+                completed += 1
+
+    return TaskLifecycleSummary(
+        created_task_count=created,
+        distinct_task_creators=len(creators),
+        claimed_task_count=claimed,
+        distinct_task_claimers=len(claimers),
+        completed_task_count=completed,
+        claim_then_build=claim_then_build,
+        creator_ids=tuple(sorted(creators)),
+        claimer_ids=tuple(sorted(claimers)),
+    )
+
+
 def _count_objective_signals(utterances: list[UtteranceRow]) -> EvidenceRef | None:
     for u in utterances:
         text = u.payload.text or ""
@@ -231,9 +335,22 @@ def _classify(
     command_loops: list[str],
     executed_tool_intent_count: int,
     discussion_turns: int,
+    task_summary: TaskLifecycleSummary,
 ) -> tuple[Classification, str | None]:
     if command_loops:
         return "command_loop_churn", "repeated_blocked_tool_intents"
+    # Task-lifecycle collaboration path (#909). A run where >= 2 distinct agents
+    # post work, >= 2 distinct agents claim it, and >= 1 task reaches done is
+    # genuine emergent collaboration even with zero world-changing tools and no
+    # objective/role chat regex match. Placed before the collaborative/partial
+    # chat heuristics so a no-build task run upgrades from partial to
+    # collaborative; it never downgrades an existing classification.
+    if (
+        task_summary.distinct_task_creators >= 2
+        and task_summary.distinct_task_claimers >= 2
+        and task_summary.completed_task_count >= 1
+    ):
+        return "collaborative", None
     if (
         shared_objective_chosen
         and distinct_role_count >= 2
@@ -276,7 +393,10 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     distinct_role_count = len(role_actor_set)
     role_actors = sorted(role_actor_set)
 
+    task_summary = collect_task_events(rows)
+
     world_changing_intents = [i for i in intents if _is_world_changing(i)]
+    distinct_world_changing_actors = len({i.actor_id for i in world_changing_intents if i.actor_id})
     world_changing_count = len(world_changing_intents) + len(world_events)
     first_events = [
         EvidenceRef(
@@ -373,6 +493,7 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
         command_loops=command_loops,
         executed_tool_intent_count=executed_count,
         discussion_turns=len(utterances),
+        task_summary=task_summary,
     )
 
     summary = (
@@ -404,6 +525,7 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "executed_or_simulated_intents": executed_count,
             "world_events": len(world_events),
             "world_changing_intents": len(world_changing_intents),
+            "distinct_world_changing_actors": distinct_world_changing_actors,
             "task_board_intents": len(manage_task_intents),
             "task_create_events": sum(
                 1 for i in manage_task_intents if _manage_task_action(i) == "create_task"
@@ -412,6 +534,13 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
                 1 for i in manage_task_intents if _manage_task_action(i) == "claim_task"
             ),
             "task_completion_events": task_completion_events,
+            # Task-lifecycle summary (#909) — the keys the emergent gate reads.
+            "created_task_count": task_summary.created_task_count,
+            "distinct_task_creators": task_summary.distinct_task_creators,
+            "claimed_task_count": task_summary.claimed_task_count,
+            "distinct_task_claimers": task_summary.distinct_task_claimers,
+            "completed_task_count": task_summary.completed_task_count,
+            "claim_then_build": task_summary.claim_then_build,
             "delegation_events": delegation_events,
             "ownership_events": ownership_events,
             "distinct_owners": len(distinct_owner_ids),
@@ -446,6 +575,8 @@ __all__ = [
     "Classification",
     "EvidenceRef",
     "SettlementSmokeOutcome",
+    "TaskLifecycleSummary",
     "classify_rows",
     "classify_sim_folder",
+    "collect_task_events",
 ]
