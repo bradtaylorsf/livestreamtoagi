@@ -153,6 +153,13 @@ def test_director_tool_adapter_threads_executor_to_tool_builder() -> None:
         adapter._services,
         False,
         embodiment_executor=executor,
+        sim_folder=None,
+        ownership_ledger=None,
+        trade_ledger=None,
+        theft_ledger=None,
+        diplomacy_ledger=None,
+        conflict_ledger=None,
+        decision_logger=None,
     )
 
 
