@@ -13,6 +13,7 @@ eavesdrop_tendency: 0.7
 closing_weight: 0.05
 
 tools:
+  - manage_task
   - web_search
   - fetch_url
   - dispatch_alpha

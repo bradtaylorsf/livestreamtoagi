@@ -158,6 +158,98 @@ def _command_loop_events() -> list[tuple[str, dict]]:
     return base + repeats
 
 
+def _task_board_collaborative_events() -> list[tuple[str, dict]]:
+    """Collaboration expressed purely through the ``manage_task`` lifecycle (#908).
+
+    No chat phrase declares an objective, a role, or a review — the board does:
+    Vera creates a task, Rex and Aurora claim work, Rex ships a build and reports
+    it done. This must classify as ``collaborative``, not ``idle_chat``.
+    """
+    return [
+        # A neutral greeting — does NOT match the objective/role/review regexes.
+        ("utterance", {"actor_id": "vera", "text": "Morning, everyone."}),
+        (
+            "tool_intent",
+            {
+                "actor_id": "vera",
+                "tool_name": "manage_task",
+                "args": {"action": "create_task", "title": "Storage hall"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "rex",
+                "tool_name": "manage_task",
+                "args": {"action": "claim_task", "task_id": "task-1"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "aurora",
+                "tool_name": "manage_task",
+                "args": {"action": "claim_task", "task_id": "task-2"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "rex",
+                "tool_name": "buildFromPlan",
+                "args": {"name": "storage_hall"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "rex",
+                "tool_name": "manage_task",
+                "args": {"action": "update_status", "task_id": "task-1", "status": "done"},
+                "status": "executed",
+            },
+        ),
+    ]
+
+
+def _task_board_partial_events() -> list[tuple[str, dict]]:
+    """Board-organized collaboration with no embodied build → ``partial`` (#908)."""
+    return [
+        ("utterance", {"actor_id": "vera", "text": "Morning, everyone."}),
+        (
+            "tool_intent",
+            {
+                "actor_id": "vera",
+                "tool_name": "manage_task",
+                "args": {"action": "create_task", "title": "Storage hall"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "rex",
+                "tool_name": "manage_task",
+                "args": {"action": "claim_task", "task_id": "task-1"},
+                "status": "executed",
+            },
+        ),
+        (
+            "tool_intent",
+            {
+                "actor_id": "aurora",
+                "tool_name": "manage_task",
+                "args": {"action": "claim_task", "task_id": "task-2"},
+                "status": "executed",
+            },
+        ),
+    ]
+
+
 # ─── Classifier behavior ──────────────────────────────────────────────────
 
 
@@ -207,6 +299,37 @@ def test_classify_command_loop_churn(tmp_path: Path) -> None:
     assert outcome.classification == "command_loop_churn"
     assert outcome.command_loop_signatures
     assert outcome.failure_class == "repeated_blocked_tool_intents"
+
+
+def test_classify_task_board_collaborative(tmp_path: Path) -> None:
+    """A run organized purely via the manage_task board still reads collaborative (#908)."""
+    folder = _build_log(tmp_path, _task_board_collaborative_events())
+    outcome = classify_sim_folder(folder)
+    assert outcome.classification == "collaborative"
+    # Objective came from create_task, not a chat phrase.
+    assert outcome.shared_objective_chosen is True
+    assert outcome.shared_objective_evidence is not None
+    assert outcome.shared_objective_evidence.note == "manage_task:create_task"
+    # Roles came from distinct create/claim actors (vera, rex, aurora).
+    assert outcome.distinct_role_count >= 2
+    assert outcome.world_changing_action_count >= 1
+    # update_status done counted as a completion/review signal.
+    assert outcome.review_repair_events >= 1
+    assert outcome.failure_class is None
+    assert outcome.sub_counts["task_create_events"] == 1
+    assert outcome.sub_counts["task_claim_events"] == 2
+    assert outcome.sub_counts["task_completion_events"] == 1
+
+
+def test_classify_task_board_partial_without_embodied_action(tmp_path: Path) -> None:
+    """Board coordination with no world-changing build is partial, never idle_chat (#908)."""
+    folder = _build_log(tmp_path, _task_board_partial_events())
+    outcome = classify_sim_folder(folder)
+    assert outcome.classification == "partial"
+    assert outcome.shared_objective_chosen is True
+    assert outcome.distinct_role_count >= 2
+    assert outcome.world_changing_action_count == 0
+    assert outcome.failure_class == "no_world_changing_action"
 
 
 def test_classify_rows_pure() -> None:
