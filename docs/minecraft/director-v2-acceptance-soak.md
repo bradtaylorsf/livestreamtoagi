@@ -264,6 +264,38 @@ summary.
 | No unresolved distress remains. | `distress-evidence.ndjson` and `behavior-totals.env`; `total_unresolved_distress` must be zero. |
 | Evidence unblocks #511, #512, and #514 or documents blockers. | `acceptance-report.json.residual_gaps` and `downstream_epics` explicitly name #511, #512, and #514. |
 
+## Emergent Mode Acceptance
+
+`MC_SIM_BUILD_MODE=emergent` is the overnight operator default (E21-7c). It boots
+the bots with an empty task board and lets them self-organize via `manage_task`
+and the civilization ledgers instead of a seeded settlement objective list. The
+settlement acceptance report above only rewards build-ish, phase-ordered macros,
+so it is blind to the task lifecycle that defines emergent collaboration. The
+**emergent acceptance gate** is the missing check.
+
+When `MC_SIM_BUILD_MODE=emergent`, the soak runs the gate after the ordinary
+report:
+
+```bash
+scripts/minecraft/build_director_acceptance_report.py \
+  --mode emergent --run-dir logs/soak/<ts> --sim-folder logs/soak/<ts>
+```
+
+It reuses this report's `multi_turn_collaboration_scene_ids` and
+`settlement_objective_count` (which must be `0` — no seed) plus the settlement
+smoke classifier over `decision_log.jsonl`, and writes:
+
+- `emergent-acceptance.json` — `overall_status`, `classification`, per-criterion
+  pass/fail, and emergent metrics.
+- `emergent-acceptance.md` — the human-readable table appended to the run.
+
+The gate is non-fatal by default (`SOAK_REQUIRE_EMERGENT_ACCEPTANCE=0`) so the
+overnight path still produces artifacts; set it to `1` to make it a hard gate.
+The full operator walkthrough — the 30-minute smoke command, how to read the
+artifacts, the `localhost:25566` BlueMap structure check, and how to fall back
+to the settlement regression harness — is in
+[emergent-mode.md](emergent-mode.md).
+
 ## Residual Gaps
 
 The report is the source of truth after a run:

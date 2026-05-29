@@ -903,6 +903,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--run-dir", required=True, type=Path, help="Soak evidence directory")
     parser.add_argument(
+        "--mode",
+        choices=("settlement", "emergent"),
+        default="settlement",
+        help=(
+            "Acceptance mode. settlement (default) writes acceptance-report.{json,md}; "
+            "emergent writes emergent-acceptance.{json,md} using the task-lifecycle gate."
+        ),
+    )
+    parser.add_argument(
+        "--sim-folder",
+        type=Path,
+        default=None,
+        help=(
+            "emergent mode only: folder holding decision_log.jsonl for the "
+            "task-lifecycle classifier. Defaults to --run-dir."
+        ),
+    )
+    parser.add_argument(
         "--queue-threshold",
         type=int,
         default=int(
@@ -933,8 +951,34 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _run_emergent(args: argparse.Namespace) -> int:
+    """Write the emergent-mode acceptance artifacts and return the exit code."""
+    import emergent_acceptance
+
+    sim_folder = args.sim_folder or args.run_dir
+    try:
+        result = emergent_acceptance.evaluate_emergent_acceptance(
+            args.run_dir,
+            sim_folder,
+            queue_threshold=max(1, args.queue_threshold),
+            warmup_seconds=max(0, args.warmup_seconds),
+            max_selected_agent_ratio=max(0.01, args.max_selected_agent_ratio),
+        )
+    except Exception as exc:  # noqa: BLE001 - gate generation should fail closed
+        print(f"emergent acceptance gate failed: {exc}", file=sys.stderr)
+        return 2
+
+    json_path, _ = emergent_acceptance.write_artifacts(
+        result, run_dir=args.run_dir, sim_folder=sim_folder
+    )
+    print(f"ok emergent acceptance {result.overall_status}; see {json_path}")
+    return 0 if result.passed else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.mode == "emergent":
+        return _run_emergent(args)
     try:
         report = build_report(
             args.run_dir,

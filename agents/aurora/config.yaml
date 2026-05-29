@@ -13,6 +13,7 @@ eavesdrop_tendency: 0.5
 closing_weight: 0.10
 
 tools:
+  - manage_task
   - web_search
   - dispatch_alpha
   - draft_social_post

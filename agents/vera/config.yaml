@@ -15,6 +15,7 @@ role_priority_bonus: 0.5
 cross_agent_writer: true
 
 tools:
+  - manage_task
   - web_search
   - dispatch_alpha
   - send_chat_message

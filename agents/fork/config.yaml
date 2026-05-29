@@ -13,6 +13,7 @@ eavesdrop_tendency: 0.4
 closing_weight: 0.05
 
 tools:
+  - manage_task
   - execute_code
   - generate_tilemap
   - dispatch_alpha
