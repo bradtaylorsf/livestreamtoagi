@@ -99,6 +99,8 @@ class _CachedVerdict:
     trace_id: str | None
     created_ms: int
     accounted_selected: set[str] = field(default_factory=set)
+    claimed_task_owners: list[str] = field(default_factory=list)
+    emergent_authorized: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -228,6 +230,7 @@ class DirectorPromptGate:
         available_tools = _tool_list(event.get("available_tools"))
         build_macro_intent = _is_build_macro_intent(event_text, available_tools)
         plan_build_agent_allowlist = _agent_list(event.get("plan_build_agent_allowlist"))
+        claimed_task_owners = _agent_list(event.get("claimed_task_owners"))
         active_objective = _settlement_objective_context(event)
         raw_event = {
             "event_id": f"director-gate-{event_key[:16]}",
@@ -309,6 +312,16 @@ class DirectorPromptGate:
             scheduler_decision=scheduler_decision,
             candidates=candidates,
         )
+        emergent_authorized: frozenset[str] = frozenset()
+        if _is_emergent_build_mode():
+            selected_ids = {turn.agent_id for turn in scheduler_decision.selected}
+            claim_holders = [agent for agent in claimed_task_owners if agent in selected_ids]
+            if claim_holders:
+                emergent_authorized = state.build_scheduler.select_emergent_build_owners(
+                    scene_id=scene.scene_id,
+                    claim_holders=claim_holders,
+                    now_ms=now_ms,
+                )
         build_macros = (
             {}
             if active_rescue is not None
@@ -342,6 +355,8 @@ class DirectorPromptGate:
             estimated_usd=_float_or_none(event.get("estimated_usd")),
             trace_id=_text(event.get("trace_id") or event.get("traceId")),
             created_ms=now_ms,
+            claimed_task_owners=claimed_task_owners,
+            emergent_authorized=emergent_authorized,
         )
 
     def _build_candidates(
@@ -497,6 +512,7 @@ class DirectorPromptGate:
             else len(self._state.decisions)
         )
         build_macro = cached.build_macros.get(agent_id)
+        emergent_authorized = agent_id in cached.emergent_authorized
         decision = PromptDecision(
             selected=selected,
             turn_kind=turn_kind,
@@ -510,6 +526,7 @@ class DirectorPromptGate:
                 cached.available_tools,
                 selected=selected,
                 build_macro=build_macro,
+                emergent_authorized=emergent_authorized,
             ),
             build_macro=build_macro,
             suppressed_agents=suppressed_agents,
@@ -1207,11 +1224,19 @@ def _available_tools_for_agent(
     *,
     selected: bool,
     build_macro: BuildMacroAssignment | None,
+    emergent_authorized: bool = False,
 ) -> list[str]:
     if not selected:
         return []
     tools = [tool for tool in available_tools if tool != "!planAndBuild"]
-    if build_macro is not None and build_macro.role == "planner_owner" and build_macro.granted:
+    is_planner_owner = (
+        build_macro is not None and build_macro.role == "planner_owner" and build_macro.granted
+    )
+    # E21-7h: in emergent mode a selected agent holding an in_progress claimed
+    # task is authorized to build, alongside (not only) the rotating
+    # planner_owner used by settlement/plan mode. emergent_authorized is only
+    # ever set in emergent mode (see DirectorPromptGate._build_verdict).
+    if is_planner_owner or emergent_authorized:
         tools.append("!planAndBuild")
     return sorted(set(tools))
 
